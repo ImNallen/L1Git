@@ -96,6 +96,14 @@ pub enum DiffBase {
     FirstParent,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum FilePatch {
+    Text { patch: String },
+    Binary,
+    TooLarge { bytes: u64 },
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ErrorKind {
@@ -106,6 +114,7 @@ pub enum ErrorKind {
     GitFailed,
     InvalidRef,
     InvalidOid,
+    UnchangedPath,
     UnsupportedPath,
 }
 

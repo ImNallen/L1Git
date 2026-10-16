@@ -91,6 +91,9 @@ commit("feat(inspector): show commit message and changed paths", {
   "src/inspector/files/tree.ts":
     "export const flattenEmptyDirectories = true;\n",
   "src/inspector/panel.ts": "export const inspectorWidth = 320;\n",
+  "assets/icon.png": Buffer.from([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00,
+  ]),
   "history.ts": [
     "export const historyLimit = 200;",
     'export const historyOrder = "first parent";',

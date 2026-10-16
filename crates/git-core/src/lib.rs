@@ -4,4 +4,4 @@ mod remotes;
 mod repository;
 
 pub use model::*;
-pub use repository::{HISTORY_LIMIT, commit_detail, snapshot};
+pub use repository::{HISTORY_LIMIT, PATCH_LIMIT, commit_detail, file_patch, snapshot};

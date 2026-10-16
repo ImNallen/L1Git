@@ -1,5 +1,6 @@
 use l1_git_core::{
-    Branch, ChangeStatus, DiffBase, ErrorKind, HISTORY_LIMIT, Head, commit_detail, snapshot,
+    Branch, ChangeStatus, DiffBase, ErrorKind, FilePatch, HISTORY_LIMIT, Head, commit_detail,
+    file_patch, snapshot,
 };
 use std::{
     fs,
@@ -258,6 +259,94 @@ fn detail_reports_added_deleted_modified_and_type_changed_paths() {
             ("removed".to_owned(), ChangeStatus::Deleted),
         ]
     );
+}
+
+#[test]
+fn file_patch_reads_text_against_the_first_parent_and_the_empty_tree() {
+    let fixture = Fixture::new();
+    let root = fixture.commit("notes.txt", "one\ntwo\n", "initial");
+    let second = fixture.commit("notes.txt", "one\n2\n", "edit");
+    assert_eq!(
+        file_patch(fixture.path(), &root, "notes.txt").unwrap(),
+        FilePatch::Text {
+            patch: "diff --git a/notes.txt b/notes.txt\nnew file mode 100644\nindex 0000000..814f4a4\n--- /dev/null\n+++ b/notes.txt\n@@ -0,0 +1,2 @@\n+one\n+two\n".into()
+        }
+    );
+    assert_eq!(
+        file_patch(fixture.path(), &second, "notes.txt").unwrap(),
+        FilePatch::Text {
+            patch: "diff --git a/notes.txt b/notes.txt\nindex 814f4a4..99b356d 100644\n--- a/notes.txt\n+++ b/notes.txt\n@@ -1,2 +1,2 @@\n one\n-two\n+2\n".into()
+        }
+    );
+}
+
+#[test]
+fn file_patch_reports_binary_and_oversized_files_without_patch_text() {
+    let fixture = Fixture::new();
+    fs::write(
+        fixture.repo.join("logo.png"),
+        [0x89, b'P', b'N', b'G', 0, 1, 2],
+    )
+    .unwrap();
+    let large = "0123456789abcde\n".repeat(70_000);
+    fs::write(fixture.repo.join("large.txt"), &large).unwrap();
+    git(&fixture.repo, &["add", "logo.png", "large.txt"]);
+    git(&fixture.repo, &["commit", "-m", "assets"]);
+    let oid = git(&fixture.repo, &["rev-parse", "HEAD"]);
+    assert_eq!(
+        file_patch(fixture.path(), &oid, "logo.png").unwrap(),
+        FilePatch::Binary
+    );
+    assert_eq!(
+        file_patch(fixture.path(), &oid, "large.txt").unwrap(),
+        FilePatch::TooLarge { bytes: 1_190_129 }
+    );
+}
+
+#[test]
+fn file_patch_rejects_paths_the_commit_did_not_change() {
+    let fixture = Fixture::new();
+    fixture.commit("kept.txt", "kept", "initial");
+    fs::create_dir(fixture.repo.join("dir")).unwrap();
+    let oid = fixture.commit("dir/changed.txt", "changed", "second");
+    for path in ["kept.txt", "dir", "missing.txt", ""] {
+        assert!(
+            matches!(
+                file_patch(fixture.path(), &oid, path).unwrap_err().kind,
+                ErrorKind::UnchangedPath
+            ),
+            "{path:?}"
+        );
+    }
+    assert!(matches!(
+        file_patch(fixture.path(), "HEAD", "dir/changed.txt")
+            .unwrap_err()
+            .kind,
+        ErrorKind::InvalidOid
+    ));
+}
+
+#[test]
+fn file_patch_treats_pathspec_magic_as_a_literal_path() {
+    let fixture = Fixture::new();
+    fixture.commit("a.txt", "a", "initial");
+    fs::write(fixture.repo.join("a.txt"), "b").unwrap();
+    fs::write(fixture.repo.join("*"), "star").unwrap();
+    git(&fixture.repo, &["add", "--", "a.txt", ":(literal)*"]);
+    git(&fixture.repo, &["commit", "-m", "glob-looking path"]);
+    let oid = git(&fixture.repo, &["rev-parse", "HEAD"]);
+    assert_eq!(
+        file_patch(fixture.path(), &oid, "*").unwrap(),
+        FilePatch::Text {
+            patch: "diff --git a/* b/*\nnew file mode 100644\nindex 0000000..ce7b819\n--- /dev/null\n+++ b/*\n@@ -0,0 +1 @@\n+star\n\\ No newline at end of file\n".into()
+        }
+    );
+    assert!(matches!(
+        file_patch(fixture.path(), &oid, ":(glob)*")
+            .unwrap_err()
+            .kind,
+        ErrorKind::UnchangedPath
+    ));
 }
 
 #[test]

@@ -1,5 +1,5 @@
 use crate::{
-    Branch, ChangeStatus, ChangedFile, Commit, CommitDetail, DiffBase, ErrorKind, Head,
+    Branch, ChangeStatus, ChangedFile, Commit, CommitDetail, DiffBase, ErrorKind, FilePatch, Head,
     RepositoryError, RepositorySnapshot, git, remotes,
 };
 use std::{
@@ -8,6 +8,7 @@ use std::{
 };
 
 pub const HISTORY_LIMIT: usize = 200;
+pub const PATCH_LIMIT: usize = 1024 * 1024;
 const COMMIT_FORMAT: &str = "--format=%H%x00%P%x00%s%x00%an%x00%ae%x00%at";
 
 fn root(path: &str) -> Result<PathBuf, RepositoryError> {
@@ -235,7 +236,7 @@ pub fn snapshot(
     })
 }
 
-pub fn commit_detail(path: &str, oid: &str) -> Result<CommitDetail, RepositoryError> {
+fn open_commit(path: &str, oid: &str) -> Result<(PathBuf, Commit), RepositoryError> {
     if !matches!(oid.len(), 40 | 64) || !oid.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return Err(RepositoryError::new(
             ErrorKind::InvalidOid,
@@ -258,11 +259,24 @@ pub fn commit_detail(path: &str, oid: &str) -> Result<CommitDetail, RepositoryEr
         .into_iter()
         .next()
         .ok_or_else(git::malformed)?;
+    Ok((root, commit))
+}
+
+fn diff_base(commit: &Commit) -> (DiffBase, &str) {
+    match commit.parents.first() {
+        Some(parent) => (DiffBase::FirstParent, parent),
+        None => (DiffBase::EmptyTree, "--root"),
+    }
+}
+
+pub fn commit_detail(path: &str, oid: &str) -> Result<CommitDetail, RepositoryError> {
+    let (root, commit) = open_commit(path, oid)?;
     let message = git::line(&git::read(
         &root,
         &["show", "--no-patch", "--format=%B", oid, "--"],
     )?);
-    let mut args = vec![
+    let (diff_base, base) = diff_base(&commit);
+    let args = [
         "diff-tree",
         "--no-commit-id",
         "--name-status",
@@ -271,15 +285,10 @@ pub fn commit_detail(path: &str, oid: &str) -> Result<CommitDetail, RepositoryEr
         "--no-renames",
         "--no-ext-diff",
         "--no-textconv",
+        base,
+        oid,
+        "--",
     ];
-    let diff_base = if let Some(parent) = commit.parents.first() {
-        args.push(parent);
-        DiffBase::FirstParent
-    } else {
-        args.push("--root");
-        DiffBase::EmptyTree
-    };
-    args.extend([oid, "--"]);
     let output = git::read(&root, &args)?;
     let mut files = Vec::new();
     if !output.is_empty() {
@@ -315,4 +324,60 @@ pub fn commit_detail(path: &str, oid: &str) -> Result<CommitDetail, RepositoryEr
         files,
         diff_base,
     })
+}
+
+pub fn file_patch(path: &str, oid: &str, file: &str) -> Result<FilePatch, RepositoryError> {
+    let (root, commit) = open_commit(path, oid)?;
+    if file.is_empty() {
+        return Err(unchanged_path());
+    }
+    let (_, base) = diff_base(&commit);
+    let args = |format| {
+        [
+            "--literal-pathspecs",
+            "diff-tree",
+            "--no-commit-id",
+            "-r",
+            "-z",
+            format,
+            "--no-renames",
+            "--no-ext-diff",
+            "--no-textconv",
+            base,
+            oid,
+            "--",
+            file,
+        ]
+    };
+    let numstat = git::read(&root, &args("--numstat"))?;
+    let (added, deleted) = numstat
+        .split(|byte| *byte == 0)
+        .find_map(|record| {
+            let mut fields = record.splitn(3, |byte| *byte == b'\t');
+            match (fields.next(), fields.next(), fields.next()) {
+                (Some(added), Some(deleted), Some(changed)) if changed == file.as_bytes() => {
+                    Some((added, deleted))
+                }
+                _ => None,
+            }
+        })
+        .ok_or_else(unchanged_path)?;
+    if added == b"-" && deleted == b"-" {
+        return Ok(FilePatch::Binary);
+    }
+    Ok(
+        match git::read_capped(&root, &args("--patch"), PATCH_LIMIT)? {
+            git::Capped::Within(patch) => FilePatch::Text {
+                patch: git::text(&patch),
+            },
+            git::Capped::Over(bytes) => FilePatch::TooLarge { bytes },
+        },
+    )
+}
+
+fn unchanged_path() -> RepositoryError {
+    RepositoryError::new(
+        ErrorKind::UnchangedPath,
+        "This file did not change in the selected commit. Choose one of its changed paths.",
+    )
 }
