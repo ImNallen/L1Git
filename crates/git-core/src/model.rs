@@ -62,10 +62,22 @@ pub struct RepositorySnapshot {
     pub observed_at: u64,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ChangeStatus {
+    #[serde(rename = "A")]
+    Added,
+    #[serde(rename = "D")]
+    Deleted,
+    #[serde(rename = "M")]
+    Modified,
+    #[serde(rename = "T")]
+    TypeChanged,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChangedFile {
     pub path: String,
-    pub status: String,
+    pub status: ChangeStatus,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

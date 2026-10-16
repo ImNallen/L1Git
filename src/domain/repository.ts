@@ -61,10 +61,11 @@ export const snapshotSchema = z.object({
   historyTruncated: z.boolean(),
   observedAt: z.number().int().nonnegative(),
 });
+export const changeStatusSchema = z.enum(["A", "D", "M", "T"]);
 export const detailSchema = z.object({
   commit: commitSchema,
   message: z.string(),
-  files: z.array(z.object({ path: z.string(), status: z.string() })),
+  files: z.array(z.object({ path: z.string(), status: changeStatusSchema })),
   diffBase: z.enum(["emptyTree", "firstParent"]),
 });
 export const repositoryErrorSchema = z.object({
@@ -88,7 +89,9 @@ export type Head = z.infer<typeof headSchema>;
 export type Branch = z.infer<typeof branchSchema>;
 export type Commit = z.infer<typeof commitSchema>;
 export type RepositorySnapshot = z.infer<typeof snapshotSchema>;
+export type ChangeStatus = z.infer<typeof changeStatusSchema>;
 export type CommitDetail = z.infer<typeof detailSchema>;
+export type ChangedFile = CommitDetail["files"][number];
 export type Problem =
   | z.infer<typeof repositoryErrorSchema>
   | { kind: "transport" | "persistence"; message: string };

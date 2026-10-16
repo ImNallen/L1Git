@@ -119,6 +119,25 @@ describe("real Rust transport contract", () => {
       "feat(inspector): show commit message and changed paths",
     );
     expect(remote.head).toEqual(snapshot.head);
+    const inspector = remote.commits[0];
+    if (!inspector) throw new Error("Fixture remote commit is missing");
+    const inspectorDetail = z
+      .object({ ok: z.literal(true), data: detailSchema })
+      .parse(
+        await (
+          await post("commit-detail", {
+            path: fixture.repository,
+            oid: inspector.oid,
+          })
+        ).json(),
+      ).data;
+    expect(inspectorDetail.files).toEqual([
+      { path: "graph.ts", status: "D" },
+      { path: "history.ts", status: "M" },
+      { path: "inspector.ts", status: "A" },
+      { path: "src/inspector/files/tree.ts", status: "A" },
+      { path: "src/inspector/panel.ts", status: "A" },
+    ]);
     const merge = snapshot.commits.find(
       (commit) => commit.parents.length === 2,
     );

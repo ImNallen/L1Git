@@ -1,6 +1,6 @@
 use crate::{
-    Branch, ChangedFile, Commit, CommitDetail, DiffBase, ErrorKind, Head, RepositoryError,
-    RepositorySnapshot, git, remotes,
+    Branch, ChangeStatus, ChangedFile, Commit, CommitDetail, DiffBase, ErrorKind, Head,
+    RepositoryError, RepositorySnapshot, git, remotes,
 };
 use std::{
     path::{Path, PathBuf},
@@ -293,9 +293,16 @@ pub fn commit_detail(path: &str, oid: &str) -> Result<CommitDetail, RepositoryEr
             let [status, path] = row else {
                 return Err(git::malformed());
             };
+            let status = match *status {
+                b"A" => ChangeStatus::Added,
+                b"D" => ChangeStatus::Deleted,
+                b"M" => ChangeStatus::Modified,
+                b"T" => ChangeStatus::TypeChanged,
+                _ => return Err(git::malformed()),
+            };
             files.push(ChangedFile {
                 path: git::text(path),
-                status: git::text(status),
+                status,
             });
         }
         if !records.remainder().is_empty() {

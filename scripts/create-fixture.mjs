@@ -1,7 +1,13 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 const root = process.argv[2]
   ? resolve(process.argv[2])
@@ -33,9 +39,17 @@ function git(path, ...args) {
   if (result.status !== 0) throw new Error(result.stderr || "Git failed");
   return result.stdout.trim();
 }
-function commit(file, contents, message) {
-  writeFileSync(join(repository, file), contents);
-  git(repository, "add", "--", file);
+function commit(message, files) {
+  for (const [file, contents] of Object.entries(files)) {
+    const path = join(repository, file);
+    if (contents === null) {
+      rmSync(path);
+    } else {
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, contents);
+    }
+  }
+  git(repository, "add", "--all", "--", ...Object.keys(files));
   git(repository, "commit", "-m", message);
 }
 mkdirSync(repository);
@@ -44,24 +58,23 @@ mkdirSync(unborn);
 git(remote, "init", "--bare", "--initial-branch=main");
 git(repository, "init", "--initial-branch=main");
 git(repository, "config", "core.hooksPath", "/dev/null");
-commit("README.md", "# L1 demo\n", "docs: start the local Git fixture");
+commit("docs: start the local Git fixture", { "README.md": "# L1 demo\n" });
 git(repository, "checkout", "-b", "feat/history");
-commit(
-  "history.ts",
-  "export const historyLimit = 200;\n",
-  "feat(history): add bounded repository history",
-);
-commit(
-  "graph.ts",
-  "export const graphUsesParentIds = true;\n",
-  "feat(graph): connect commits to their actual parents",
-);
+commit("feat(history): add bounded repository history", {
+  "history.ts": [
+    "export const historyLimit = 200;",
+    'export const historyOrder = "topological";',
+    "export const historyIncludesRemotes = true;",
+    "",
+  ].join("\n"),
+});
+commit("feat(graph): connect commits to their actual parents", {
+  "graph.ts": "export const graphUsesParentIds = true;\n",
+});
 git(repository, "checkout", "main");
-commit(
-  "theme.css",
-  ":root { color-scheme: dark; }\n",
-  "feat(theme): add the L1 dark canvas",
-);
+commit("feat(theme): add the L1 dark canvas", {
+  "theme.css": ":root { color-scheme: dark; }\n",
+});
 git(
   repository,
   "merge",
@@ -73,11 +86,19 @@ git(
 git(repository, "remote", "add", "origin", remote);
 git(repository, "push", "origin", "main", "feat/history");
 git(repository, "checkout", "-b", "feat/remote-inspector");
-commit(
-  "inspector.ts",
-  'export const diffBase = "first parent";\n',
-  "feat(inspector): show commit message and changed paths",
-);
+commit("feat(inspector): show commit message and changed paths", {
+  "inspector.ts": 'export const diffBase = "first parent";\n',
+  "src/inspector/files/tree.ts":
+    "export const flattenEmptyDirectories = true;\n",
+  "src/inspector/panel.ts": "export const inspectorWidth = 320;\n",
+  "history.ts": [
+    "export const historyLimit = 200;",
+    'export const historyOrder = "first parent";',
+    "export const historyIncludesRemotes = true;",
+    "",
+  ].join("\n"),
+  "graph.ts": null,
+});
 git(repository, "push", "origin", "feat/remote-inspector");
 git(repository, "checkout", "main");
 git(repository, "branch", "-D", "feat/remote-inspector");
