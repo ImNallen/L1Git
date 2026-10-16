@@ -1,4 +1,6 @@
-use l1_git_core::{Branch, DiffBase, ErrorKind, HISTORY_LIMIT, Head, commit_detail, snapshot};
+use l1_git_core::{
+    Branch, ChangeStatus, DiffBase, ErrorKind, HISTORY_LIMIT, Head, commit_detail, snapshot,
+};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -201,7 +203,7 @@ fn detail_preserves_message_paths_and_first_parent_merge_policy() {
     assert_eq!(initial.message, "initial\n\nFull body.\n");
     assert!(matches!(initial.diff_base, DiffBase::EmptyTree));
     assert_eq!(initial.files[0].path, "first");
-    assert_eq!(initial.files[0].status, "A");
+    assert_eq!(initial.files[0].status, ChangeStatus::Added);
     git(&fixture.repo, &["checkout", "-b", "feature"]);
     let feature = fixture.commit("a\tfile\n.txt", "feature", "feature");
     git(&fixture.repo, &["checkout", "main"]);
@@ -216,7 +218,46 @@ fn detail_preserves_message_paths_and_first_parent_merge_policy() {
     assert!(matches!(detail.diff_base, DiffBase::FirstParent));
     assert_eq!(detail.files.len(), 1);
     assert_eq!(detail.files[0].path, "a\tfile\n.txt");
-    assert_eq!(detail.files[0].status, "A");
+    assert_eq!(detail.files[0].status, ChangeStatus::Added);
+}
+
+#[test]
+fn detail_reports_added_deleted_modified_and_type_changed_paths() {
+    let fixture = Fixture::new();
+    fixture.commit("edited", "one", "initial");
+    fixture.commit("removed", "gone", "second");
+    fixture.commit("kind", "regular file", "third");
+    fs::write(fixture.repo.join("edited"), "two").unwrap();
+    fs::create_dir_all(fixture.repo.join("nested/dir")).unwrap();
+    fs::write(fixture.repo.join("nested/dir/added"), "new").unwrap();
+    git(&fixture.repo, &["add", "edited", "nested/dir/added"]);
+    git(&fixture.repo, &["rm", "--quiet", "removed"]);
+    let blob = git(&fixture.repo, &["rev-parse", "HEAD:edited"]);
+    git(
+        &fixture.repo,
+        &[
+            "update-index",
+            "--cacheinfo",
+            &format!("120000,{blob},kind"),
+        ],
+    );
+    git(&fixture.repo, &["commit", "-m", "every status"]);
+    let oid = git(&fixture.repo, &["rev-parse", "HEAD"]);
+    let files = commit_detail(fixture.path(), &oid)
+        .unwrap()
+        .files
+        .into_iter()
+        .map(|file| (file.path, file.status))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        files,
+        [
+            ("edited".to_owned(), ChangeStatus::Modified),
+            ("kind".to_owned(), ChangeStatus::TypeChanged),
+            ("nested/dir/added".to_owned(), ChangeStatus::Added),
+            ("removed".to_owned(), ChangeStatus::Deleted),
+        ]
+    );
 }
 
 #[test]
