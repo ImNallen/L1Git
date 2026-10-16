@@ -21,7 +21,7 @@ Click **Add repository** or press **Cmd/Ctrl+O**. Enter a path or use **Browse**
 
 Click a local or remote branch to browse its history. The checked-out HEAD remains in the top toolbar. **Refresh** rereads local state. Remote branches reflect refs already on disk, usually from your last fetch.
 
-The history contains at most 200 commits for all refs or the selected branch. Search covers the loaded subjects, authors, emails, and commit IDs. Graph connections use actual parent IDs. Connections are hidden during search because filtered rows omit intermediate commits. Dashed edges lead to parents beyond the loaded history.
+The history contains at most 200 commits for local and remote branches plus HEAD, or for the selected branch. Internal refs and stashes are excluded. Search covers the loaded subjects, authors, emails, and commit IDs. Graph connections use actual parent IDs. Connections are hidden during search because filtered rows omit intermediate commits. Dashed edges lead to parents beyond the loaded history.
 
 Select a commit to inspect its message, author, date, parents, and changed paths. Merge changes are compared with the first parent. Root commits use the empty tree. Renames appear as a deletion and an addition. Parent links can open details outside the loaded history. Partial clones report a read error when required objects are missing locally. L1 Git never fetches them implicitly.
 

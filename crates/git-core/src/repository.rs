@@ -198,7 +198,7 @@ pub fn snapshot(
     if let Some(reference) = reference {
         args.push(reference);
     } else {
-        args.push("--all");
+        args.extend(["--branches", "--remotes"]);
         if !matches!(head, Head::Unborn { .. }) {
             args.push("HEAD");
         }

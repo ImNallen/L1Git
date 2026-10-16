@@ -220,6 +220,29 @@ fn detail_preserves_message_paths_and_first_parent_merge_policy() {
 }
 
 #[test]
+fn all_branches_excludes_private_and_stash_only_commits() {
+    let fixture = Fixture::new();
+    fixture.commit("first", "one", "initial");
+    let tree = git(&fixture.repo, &["rev-parse", "HEAD^{tree}"]);
+    for (reference, subject) in [
+        ("refs/remotes/origin/remote-work", "remote work"),
+        ("refs/t3/checkpoints/latest", "private checkpoint"),
+        ("refs/stash", "stash only"),
+    ] {
+        let oid = git(&fixture.repo, &["commit-tree", &tree, "-m", subject]);
+        git(&fixture.repo, &["update-ref", reference, &oid]);
+    }
+    let mut subjects = snapshot(fixture.path(), None)
+        .unwrap()
+        .commits
+        .into_iter()
+        .map(|commit| commit.subject)
+        .collect::<Vec<_>>();
+    subjects.sort();
+    assert_eq!(subjects, ["initial", "remote work"]);
+}
+
+#[test]
 fn partial_clone_details_never_fetch_missing_objects() {
     let fixture = Fixture::new();
     let oid = fixture.commit("first", "one", "initial");

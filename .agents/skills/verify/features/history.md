@@ -6,7 +6,7 @@ Local and remote branch sections, branch filtering, bounded history, parent grap
 
 ## How to get to it (user POV)
 
-Add the fixture's `repository` path. Expand **Local branches** and **Remote branches** in the sidebar. The default history reads all refs and HEAD.
+Add the fixture's `repository` path. Expand **Local branches** and **Remote branches** in the sidebar. The default history reads local and remote branches plus HEAD. Internal refs and stashes are excluded.
 
 ## Driving it with T3 preview
 
