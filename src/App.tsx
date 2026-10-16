@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import {
   FolderGit2,
   GitBranch,
@@ -58,6 +59,7 @@ export function App() {
         searchRef.current
       ) {
         event.preventDefault();
+        if (fileOpen) flushSync(closeFile);
         searchRef.current.focus();
       }
       if (!adding && event.key === "Escape") {

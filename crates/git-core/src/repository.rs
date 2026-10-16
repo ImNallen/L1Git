@@ -361,7 +361,16 @@ pub fn file_patch(path: &str, oid: &str, file: &str) -> Result<FilePatch, Reposi
                 _ => None,
             }
         })
-        .ok_or_else(unchanged_path)?;
+        .ok_or_else(|| {
+            if file.contains(char::REPLACEMENT_CHARACTER) {
+                RepositoryError::new(
+                    ErrorKind::UnsupportedPath,
+                    "L1 Git cannot open diffs for file names that are not valid UTF-8.",
+                )
+            } else {
+                unchanged_path()
+            }
+        })?;
     if added == b"-" && deleted == b"-" {
         return Ok(FilePatch::Binary);
     }

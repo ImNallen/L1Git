@@ -350,6 +350,34 @@ fn file_patch_treats_pathspec_magic_as_a_literal_path() {
 }
 
 #[test]
+fn file_patch_reports_non_utf8_file_names_as_unsupported() {
+    use std::os::unix::ffi::OsStrExt;
+    let fixture = Fixture::new();
+    fixture.commit("a.txt", "a", "initial");
+    let blob = git(&fixture.repo, &["hash-object", "-w", "a.txt"]);
+    let mut cacheinfo = format!("100644,{blob},").into_bytes();
+    cacheinfo.extend(b"bad\xff.txt");
+    let status = Command::new("git")
+        .arg("-C")
+        .arg(&fixture.repo)
+        .args(["update-index", "--add", "--cacheinfo"])
+        .arg(std::ffi::OsStr::from_bytes(&cacheinfo))
+        .status()
+        .unwrap();
+    assert!(status.success());
+    git(&fixture.repo, &["commit", "-m", "non-UTF-8 name"]);
+    let oid = git(&fixture.repo, &["rev-parse", "HEAD"]);
+    let detail = commit_detail(fixture.path(), &oid).unwrap();
+    assert_eq!(detail.files[0].path, "bad\u{FFFD}.txt");
+    assert!(matches!(
+        file_patch(fixture.path(), &oid, &detail.files[0].path)
+            .unwrap_err()
+            .kind,
+        ErrorKind::UnsupportedPath
+    ));
+}
+
+#[test]
 fn all_branches_excludes_private_and_stash_only_commits() {
     let fixture = Fixture::new();
     fixture.commit("first", "one", "initial");
