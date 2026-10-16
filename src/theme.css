@@ -1,0 +1,82 @@
+@import "./styles/sidebar.css";
+@import "./styles/layout.css";
+@import "./styles/history.css";
+@import "./styles/inspector.css";
+@import "./styles/dialog.css";
+
+:root {
+  font-family: "Inter Variable", Inter, sans-serif;
+  font-size: 13px;
+  color: #d3d3d8;
+  background: #0a0a0a;
+  color-scheme: dark;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  --canvas: #0a0a0a;
+  --sidebar: #030303;
+  --border: #181818;
+  --muted: #77777e;
+  --blue: #60a5fa;
+  --mono: "JetBrains Mono Variable", monospace;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  overflow: hidden;
+}
+button,
+input,
+select {
+  font: inherit;
+}
+button {
+  color: inherit;
+  cursor: pointer;
+}
+button,
+input,
+select {
+  -webkit-app-region: no-drag;
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+button {
+  border: 0;
+  background: none;
+}
+input {
+  color: #d8d8dc;
+  outline: none;
+}
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+[role="separator"]:focus-visible {
+  outline: 2px solid #538fdd;
+  outline-offset: -2px;
+}
+button:hover:not(:disabled) {
+  color: #f0f0f2;
+}
+::selection {
+  background: #24476f;
+  color: #eee;
+}
+code,
+kbd {
+  font-family: var(--mono);
+}
+.app {
+  display: flex;
+  width: 100vw;
+  height: 100dvh;
+  min-width: 640px;
+}
+.muted {
+  color: var(--muted);
+}

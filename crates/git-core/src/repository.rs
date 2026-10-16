@@ -92,7 +92,7 @@ fn branches(path: &Path, remote_names: &[&str]) -> Result<Vec<Branch>, Repositor
         let [reference, oid, upstream, symbolic] = fields.as_slice() else {
             return Err(git::malformed());
         };
-        if !symbolic.is_empty() {
+        if reference.starts_with(b"refs/remotes/") && !symbolic.is_empty() {
             continue;
         }
         let reference = git::text(reference);

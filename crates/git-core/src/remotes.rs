@@ -23,34 +23,37 @@ pub(crate) fn read(path: &Path) -> Result<Vec<Remote>, RepositoryError> {
 }
 
 pub(crate) fn display_url(raw: &str) -> (String, Option<GitHubRepository>) {
+    if !raw.contains("://") {
+        if let Some((host, path)) = raw.split_once(':') {
+            let hostname = host.rsplit('@').next().unwrap_or(host);
+            if !hostname.is_empty()
+                && hostname
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b".-_".contains(&b))
+            {
+                let github = if hostname == "github.com" {
+                    github_path(path)
+                } else {
+                    None
+                };
+                return (format!("{hostname}:{path}"), github);
+            }
+        }
+        return ("Local or unrecognized remote".into(), None);
+    }
     if let Ok(mut url) = Url::parse(raw) {
-        let github = if matches!(url.scheme(), "https" | "ssh")
-            && url.host_str() == Some("github.com")
-            && url.port().is_none()
-        {
+        let recognized = url.scheme() == "https" && url.port().is_none()
+            || url.scheme() == "ssh" && matches!(url.port(), None | Some(22));
+        let github = if recognized && url.host_str() == Some("github.com") {
             github_path(url.path())
         } else {
             None
         };
-        if url.cannot_be_a_base() {
-            return ("Local or unrecognized remote".into(), None);
-        }
         let _ = url.set_username("");
         let _ = url.set_password(None);
         url.set_query(None);
         url.set_fragment(None);
         return (url.to_string(), github);
-    }
-    if let Some((host, path)) = raw.split_once(':') {
-        let hostname = host.rsplit('@').next().unwrap_or(host);
-        if !hostname.contains('/') && !hostname.is_empty() {
-            let github = if hostname == "github.com" {
-                github_path(path)
-            } else {
-                None
-            };
-            return (format!("{hostname}:{path}"), github);
-        }
     }
     ("Local or unrecognized remote".into(), None)
 }
@@ -61,10 +64,8 @@ fn github_path(path: &str) -> Option<GitHubRepository> {
         .trim_end_matches('/')
         .split('/');
     let owner = parts.next()?;
-    let repo = parts
-        .next()?
-        .strip_suffix(".git")
-        .unwrap_or_else(|| path.trim_end_matches('/').rsplit('/').next().unwrap_or(""));
+    let repo = parts.next()?;
+    let repo = repo.strip_suffix(".git").unwrap_or(repo);
     let valid = |part: &str| {
         !part.is_empty()
             && part != "."
@@ -91,6 +92,8 @@ mod tests {
         for raw in [
             "https://token:secret@github.com/alice/project.git?token=secret",
             "ssh://git@github.com/alice/project.git",
+            "ssh://git@github.com:22/alice/project.git",
+            "github.com:alice/project.git",
             "git@github.com:alice/project.git",
         ] {
             let (display, github) = display_url(raw);

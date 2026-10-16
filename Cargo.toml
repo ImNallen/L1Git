@@ -1,7 +1,7 @@
 [workspace]
 resolver = "3"
-members = ["crates/git-core"]
-default-members = ["crates/git-core"]
+members = ["crates/git-core", "crates/dev-bridge", "src-tauri"]
+default-members = ["crates/git-core", "crates/dev-bridge"]
 
 [workspace.package]
 edition = "2024"

@@ -1,0 +1,13 @@
+[package]
+name = "l1-git"
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+l1-git-core = { path = "../crates/git-core" }
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
