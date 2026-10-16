@@ -40,8 +40,9 @@ build.on("exit", (code) => {
       process.exitCode = 1;
     });
     child.on("exit", (exitCode) => {
+      if (stopping) return;
+      process.exitCode = exitCode ?? 1;
       stop();
-      process.exitCode = exitCode ?? 0;
     });
   }
 });
