@@ -181,6 +181,7 @@ describe("real Rust transport contract", () => {
       success.parse(await patch(inspector.oid, "history.ts")).data,
     ).toEqual({
       kind: "text",
+      lossy: false,
       patch: [
         "diff --git a/history.ts b/history.ts",
         "index 86fb985..ee9ebd3 100644",
@@ -199,6 +200,7 @@ describe("real Rust transport contract", () => {
     ).toEqual({ kind: "binary" });
     expect(success.parse(await patch(root.oid, "README.md")).data).toEqual({
       kind: "text",
+      lossy: false,
       patch: [
         "diff --git a/README.md b/README.md",
         "new file mode 100644",

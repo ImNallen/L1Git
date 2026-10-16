@@ -377,6 +377,7 @@ pub fn file_patch(path: &str, oid: &str, file: &str) -> Result<FilePatch, Reposi
     Ok(
         match git::read_capped(&root, &args("--patch"), PATCH_LIMIT)? {
             git::Capped::Within(patch) => FilePatch::Text {
+                lossy: std::str::from_utf8(&patch).is_err(),
                 patch: git::text(&patch),
             },
             git::Capped::Over(bytes) => FilePatch::TooLarge { bytes },

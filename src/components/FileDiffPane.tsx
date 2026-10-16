@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { ArrowLeft, FileX2, LoaderCircle } from "lucide-react";
+import { ArrowLeft, FileX2, LoaderCircle, TriangleAlert } from "lucide-react";
 import { parsePatchFiles } from "@pierre/diffs";
 import { FileDiff, Virtualizer } from "@pierre/diffs/react";
 import type { FileDiffState } from "../useWorkspace";
@@ -60,7 +60,18 @@ export function FileDiffPane({
           </button>
         </div>
       ) : state.patch.kind === "text" ? (
-        <Patch patch={state.patch.patch} diffStyle={diffStyle} />
+        <>
+          {state.patch.lossy && (
+            <div className="notice error-notice" role="status">
+              <TriangleAlert size={14} />
+              <span>
+                This file is not valid UTF-8. Bytes that are not UTF-8 appear as
+                �, so some changed lines can look identical.
+              </span>
+            </div>
+          )}
+          <Patch patch={state.patch.patch} diffStyle={diffStyle} />
+        </>
       ) : (
         <div className="file-diff-empty">
           <FileX2 size={28} />

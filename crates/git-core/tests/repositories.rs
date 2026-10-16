@@ -269,15 +269,32 @@ fn file_patch_reads_text_against_the_first_parent_and_the_empty_tree() {
     assert_eq!(
         file_patch(fixture.path(), &root, "notes.txt").unwrap(),
         FilePatch::Text {
-            patch: "diff --git a/notes.txt b/notes.txt\nnew file mode 100644\nindex 0000000..814f4a4\n--- /dev/null\n+++ b/notes.txt\n@@ -0,0 +1,2 @@\n+one\n+two\n".into()
+            patch: "diff --git a/notes.txt b/notes.txt\nnew file mode 100644\nindex 0000000..814f4a4\n--- /dev/null\n+++ b/notes.txt\n@@ -0,0 +1,2 @@\n+one\n+two\n".into(),
+            lossy: false,
         }
     );
     assert_eq!(
         file_patch(fixture.path(), &second, "notes.txt").unwrap(),
         FilePatch::Text {
-            patch: "diff --git a/notes.txt b/notes.txt\nindex 814f4a4..99b356d 100644\n--- a/notes.txt\n+++ b/notes.txt\n@@ -1,2 +1,2 @@\n one\n-two\n+2\n".into()
+            patch: "diff --git a/notes.txt b/notes.txt\nindex 814f4a4..99b356d 100644\n--- a/notes.txt\n+++ b/notes.txt\n@@ -1,2 +1,2 @@\n one\n-two\n+2\n".into(),
+            lossy: false,
         }
     );
+}
+
+#[test]
+fn file_patch_flags_text_that_is_not_valid_utf8() {
+    let fixture = Fixture::new();
+    fixture.commit("latin1.txt", "caf\n", "initial");
+    fs::write(fixture.repo.join("latin1.txt"), b"caf\xe9\n").unwrap();
+    git(&fixture.repo, &["commit", "-am", "latin-1"]);
+    let oid = git(&fixture.repo, &["rev-parse", "HEAD"]);
+    let FilePatch::Text { patch, lossy } = file_patch(fixture.path(), &oid, "latin1.txt").unwrap()
+    else {
+        panic!("expected a text patch");
+    };
+    assert!(lossy);
+    assert!(patch.ends_with("-caf\n+caf\u{FFFD}\n"), "{patch:?}");
 }
 
 #[test]
@@ -338,7 +355,8 @@ fn file_patch_treats_pathspec_magic_as_a_literal_path() {
     assert_eq!(
         file_patch(fixture.path(), &oid, "*").unwrap(),
         FilePatch::Text {
-            patch: "diff --git a/* b/*\nnew file mode 100644\nindex 0000000..ce7b819\n--- /dev/null\n+++ b/*\n@@ -0,0 +1 @@\n+star\n\\ No newline at end of file\n".into()
+            patch: "diff --git a/* b/*\nnew file mode 100644\nindex 0000000..ce7b819\n--- /dev/null\n+++ b/*\n@@ -0,0 +1 @@\n+star\n\\ No newline at end of file\n".into(),
+            lossy: false,
         }
     );
     assert!(matches!(

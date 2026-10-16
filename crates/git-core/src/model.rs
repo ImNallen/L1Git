@@ -99,7 +99,7 @@ pub enum DiffBase {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum FilePatch {
-    Text { patch: String },
+    Text { patch: String, lossy: bool },
     Binary,
     TooLarge { bytes: u64 },
 }

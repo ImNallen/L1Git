@@ -69,7 +69,11 @@ export const detailSchema = z.object({
   diffBase: z.enum(["emptyTree", "firstParent"]),
 });
 export const filePatchSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("text"), patch: z.string() }),
+  z.object({
+    kind: z.literal("text"),
+    patch: z.string(),
+    lossy: z.boolean(),
+  }),
   z.object({ kind: z.literal("binary") }),
   z.object({ kind: z.literal("tooLarge"), bytes: z.number().int().positive() }),
 ]);
