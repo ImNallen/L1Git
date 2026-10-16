@@ -6,6 +6,9 @@
   flex-direction: column;
   position: relative;
 }
+.history[hidden] {
+  display: none;
+}
 .history-tools {
   padding: 10px 14px 8px;
   display: flex;

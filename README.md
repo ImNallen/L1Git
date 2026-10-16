@@ -23,7 +23,7 @@ Click a local or remote branch to browse its history. The checked-out HEAD remai
 
 The history contains at most 200 commits for local and remote branches plus HEAD, or for the selected branch. Internal refs and stashes are excluded. Search covers the loaded subjects, authors, emails, and commit IDs. Graph connections use actual parent IDs. Connections are hidden during search because filtered rows omit intermediate commits. Dashed edges lead to parents beyond the loaded history.
 
-Select a commit to inspect its message, author, date, parents, and changed paths. Changed paths appear as a file tree with added, modified, and deleted markers. Directories start open, and single-child directory chains collapse into one row. Merge changes are compared with the first parent. Root commits use the empty tree. Renames appear as a deletion and an addition. Parent links can open details outside the loaded history. Partial clones report a read error when required objects are missing locally. L1 Git never fetches them implicitly.
+Select a commit to inspect its message, author, date, parents, and changed paths. Changed paths appear as a file tree with added, modified, and deleted markers. Directories start open, and single-child directory chains collapse into one row. Select a file to replace the history with its diff against the same base. Use **Unified** or **Split** to change the layout. Click **Back to history** or press Escape to return. Selecting another commit closes the diff. Binary files and patches larger than 1 MiB show a notice instead of a diff. Merge changes are compared with the first parent. Root commits use the empty tree. Renames appear as a deletion and an addition. Parent links can open details outside the loaded history. Partial clones report a read error when required objects are missing locally. L1 Git never fetches them implicitly.
 
 The repository list and last active repository survive reloads and restarts in versioned local storage. Remove a repository with the row's **Remove from recents** button. This removes only the saved entry. It never deletes repository files.
 
@@ -49,7 +49,7 @@ Recents belong to each browser origin or the native WebView. The native app and 
 pnpm fixture
 ```
 
-The command prints a temporary fixture directory and working-copy paths. Add the printed `repository` path to the app. It has two local branches, three remote branches, a merge commit, and GitHub metadata. Its `detached` and `unborn` paths cover those HEAD states. Its `remote` path is a local bare repository for the unsupported-path journey.
+The command prints a temporary fixture directory and working-copy paths. Add the printed `repository` path to the app. It has two local branches, three remote branches, a merge commit, a commit with nested, modified, deleted, and binary paths, and GitHub metadata. Its `detached` and `unborn` paths cover those HEAD states. Its `remote` path is a local bare repository for the unsupported-path journey.
 
 Fixture creation pushes and fetches only against its temporary local bare repository. It never writes to GitHub. The configured GitHub remote is display metadata only.
 

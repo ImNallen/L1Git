@@ -15,10 +15,11 @@ export const changeStatuses = {
 
 type Props = {
   files: readonly ChangedFile[];
-  onSelectFile?: (path: string) => void;
+  selectedPath: string | null;
+  onSelectFile: (path: string) => void;
 };
 
-export function ChangedFileTree({ files, onSelectFile }: Props) {
+export function ChangedFileTree({ files, selectedPath, onSelectFile }: Props) {
   const onSelectFileRef = useRef(onSelectFile);
   useEffect(() => {
     onSelectFileRef.current = onSelectFile;
@@ -38,8 +39,13 @@ export function ChangedFileTree({ files, onSelectFile }: Props) {
         rest.length === 0 &&
         files.some((file) => file.path === path)
       )
-        onSelectFileRef.current?.(path);
+        onSelectFileRef.current(path);
     },
   });
+  useEffect(() => {
+    if (selectedPath === null)
+      for (const path of model.getSelectedPaths())
+        model.getItem(path)?.deselect();
+  }, [model, selectedPath]);
   return <FileTree model={model} className="changed-file-tree" />;
 }

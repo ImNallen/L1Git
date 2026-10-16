@@ -20,7 +20,8 @@ type Props = {
   selectedOid: Oid | null;
   snapshot: RepositorySnapshot;
   onSelect: (oid: Oid) => void;
-  onSelectFile?: (path: string) => void;
+  selectedFile: string | null;
+  onSelectFile: (path: string) => void;
   onClose: () => void;
   onRetry: () => void;
 };
@@ -31,6 +32,7 @@ export function CommitInspector({
   selectedOid,
   snapshot,
   onSelect,
+  selectedFile,
   onSelectFile,
   onClose,
   onRetry,
@@ -166,6 +168,7 @@ export function CommitInspector({
             <ChangedFileTree
               key={detail.commit.oid}
               files={detail.files}
+              selectedPath={selectedFile}
               onSelectFile={onSelectFile}
             />
           )}

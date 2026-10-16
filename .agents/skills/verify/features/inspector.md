@@ -12,7 +12,7 @@ Open the fixture repository and select **All branches**. Use **Toggle commit ins
 
 1. Select the description whose accessible name begins `Merge branch feat/history`. Confirm the inspector shows its full SHA, author `N Allen`, two parent links, and changed paths `graph.ts` and `history.ts`.
 2. Confirm the comparison says **Compared with the first parent**. Click either parent hash. Confirm the inspector changes to that exact parent SHA.
-3. Select `feat(inspector): show commit message and changed paths`. Confirm the summary `3 added · 1 deleted · 1 modified` and a tree whose first row is the flattened `src / inspector` directory, open by default, with `files/tree.ts` and `panel.ts` beneath it. Confirm `graph.ts` has a `D` marker, `history.ts` an `M` marker, and the added paths `A` markers. Click `panel.ts` and confirm the row becomes selected.
+3. Select `feat(inspector): show commit message and changed paths`. Confirm the summary `4 added · 1 deleted · 1 modified` and a tree with open `assets` and flattened `src / inspector` directories, with `icon.png`, `files/tree.ts`, and `panel.ts` beneath them. Confirm `graph.ts` has a `D` marker, `history.ts` an `M` marker, and the added paths `A` markers. Clicking a file opens its diff, covered in [Read a file diff](diff.md).
 4. Select `docs: start the local Git fixture`. Confirm **Root commit**, an empty-tree comparison, and the added `README.md` path.
 5. Click **Copy commit SHA**. Confirm the copied status and clipboard content when the driver has clipboard access.
 6. Drag **Resize commit inspector**, or focus the separator and use arrow keys. Confirm a width change. Hide and reopen the inspector with its controls.

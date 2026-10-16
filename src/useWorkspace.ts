@@ -11,6 +11,7 @@ import type { Catalog } from "./domain/recents";
 import { problemFrom } from "./domain/repository";
 import type {
   CommitDetail,
+  FilePatch,
   FullRef,
   Oid,
   Problem,
@@ -39,6 +40,12 @@ export type DetailState =
   | { kind: "loading"; root: RepositoryRoot; oid: Oid }
   | { kind: "ready"; root: RepositoryRoot; oid: Oid; detail: CommitDetail }
   | { kind: "error"; root: RepositoryRoot; oid: Oid; error: Problem };
+type FileKey = { root: RepositoryRoot; oid: Oid; path: string };
+export type FileDiffState =
+  | { kind: "closed" }
+  | ({ kind: "loading" } & FileKey)
+  | ({ kind: "ready"; patch: FilePatch } & FileKey)
+  | ({ kind: "error"; error: Problem } & FileKey);
 
 export function useWorkspace() {
   const [saved] = useState(() => {
@@ -59,6 +66,7 @@ export function useWorkspace() {
   const [selectedOid, setSelectedOid] = useState<Oid | null>(null);
   const [detail, setDetail] = useState<DetailState>({ kind: "empty" });
   const [detailAttempt, setDetailAttempt] = useState(0);
+  const [fileDiff, setFileDiff] = useState<FileDiffState>({ kind: "closed" });
   const requestId = useRef(0);
   const current =
     workspace.kind === "ready"
@@ -200,6 +208,35 @@ export function useWorkspace() {
     };
   }, [root, selectedOid, detailAttempt]);
 
+  useEffect(() => {
+    setFileDiff({ kind: "closed" });
+  }, [root, selectedOid]);
+
+  const closeFile = useCallback(() => setFileDiff({ kind: "closed" }), []);
+
+  const openFile = (path: string) => {
+    if (root === null || selectedOid === null) return;
+    const key: FileKey = { root, oid: selectedOid, path };
+    const pending = (state: FileDiffState) =>
+      state.kind === "loading" &&
+      state.root === key.root &&
+      state.oid === key.oid &&
+      state.path === key.path;
+    setFileDiff({ kind: "loading", ...key });
+    void repositories.filePatch(key.root, key.oid, key.path).then(
+      (patch) =>
+        setFileDiff((state) =>
+          pending(state) ? { kind: "ready", ...key, patch } : state,
+        ),
+      (error: unknown) =>
+        setFileDiff((state) =>
+          pending(state)
+            ? { kind: "error", ...key, error: problemFrom(error) }
+            : state,
+        ),
+    );
+  };
+
   return {
     workspace,
     current,
@@ -209,6 +246,9 @@ export function useWorkspace() {
     setSelectedOid,
     detail,
     retryDetail: () => setDetailAttempt((attempt) => attempt + 1),
+    fileDiff,
+    openFile,
+    closeFile,
     selectRepository,
     addRepository,
     removeRepository,
