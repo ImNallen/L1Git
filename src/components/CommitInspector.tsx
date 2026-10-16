@@ -12,6 +12,7 @@ import type {
   RepositorySnapshot,
 } from "../domain/repository";
 import type { DetailState } from "../useWorkspace";
+import { ChangedFileTree, changeStatuses } from "./ChangedFileTree";
 
 type Props = {
   state: DetailState;
@@ -19,6 +20,7 @@ type Props = {
   selectedOid: Oid | null;
   snapshot: RepositorySnapshot;
   onSelect: (oid: Oid) => void;
+  onSelectFile?: (path: string) => void;
   onClose: () => void;
   onRetry: () => void;
 };
@@ -29,6 +31,7 @@ export function CommitInspector({
   selectedOid,
   snapshot,
   onSelect,
+  onSelectFile,
   onClose,
   onRetry,
 }: Props) {
@@ -142,6 +145,16 @@ export function CommitInspector({
               {detail.files.length}{" "}
               {detail.files.length === 1 ? "file" : "files"} changed
             </span>
+            <span className="change-summary">
+              {Object.entries(changeStatuses)
+                .flatMap(([status, { label }]) => {
+                  const count = detail.files.filter(
+                    (file) => file.status === status,
+                  ).length;
+                  return count === 0 ? [] : [`${count} ${label}`];
+                })
+                .join(" · ")}
+            </span>
           </div>
           <p className="diff-policy">
             {detail.diffBase === "emptyTree"
@@ -149,25 +162,13 @@ export function CommitInspector({
               : "Compared with the first parent"}
             . Renames appear as added and deleted paths.
           </p>
-          <ul className="changed-files">
-            {detail.files.map((file) => (
-              <li key={file.path}>
-                <span
-                  className={`file-status status-${file.status}`}
-                  title={
-                    file.status === "A"
-                      ? "Added"
-                      : file.status === "D"
-                        ? "Deleted"
-                        : "Modified"
-                  }
-                >
-                  {file.status}
-                </span>
-                <span title={file.path}>{file.path}</span>
-              </li>
-            ))}
-          </ul>
+          {detail.files.length > 0 && (
+            <ChangedFileTree
+              key={detail.commit.oid}
+              files={detail.files}
+              onSelectFile={onSelectFile}
+            />
+          )}
           {detail.files.length === 0 && (
             <p className="muted">No paths changed against this base.</p>
           )}

@@ -23,7 +23,7 @@ Click a local or remote branch to browse its history. The checked-out HEAD remai
 
 The history contains at most 200 commits for local and remote branches plus HEAD, or for the selected branch. Internal refs and stashes are excluded. Search covers the loaded subjects, authors, emails, and commit IDs. Graph connections use actual parent IDs. Connections are hidden during search because filtered rows omit intermediate commits. Dashed edges lead to parents beyond the loaded history.
 
-Select a commit to inspect its message, author, date, parents, and changed paths. Merge changes are compared with the first parent. Root commits use the empty tree. Renames appear as a deletion and an addition. Parent links can open details outside the loaded history. Partial clones report a read error when required objects are missing locally. L1 Git never fetches them implicitly.
+Select a commit to inspect its message, author, date, parents, and changed paths. Changed paths appear as a file tree with added, modified, and deleted markers. Directories start open, and single-child directory chains collapse into one row. Merge changes are compared with the first parent. Root commits use the empty tree. Renames appear as a deletion and an addition. Parent links can open details outside the loaded history. Partial clones report a read error when required objects are missing locally. L1 Git never fetches them implicitly.
 
 The repository list and last active repository survive reloads and restarts in versioned local storage. Remove a repository with the row's **Remove from recents** button. This removes only the saved entry. It never deletes repository files.
 
