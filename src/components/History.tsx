@@ -173,13 +173,6 @@ export function History({
       </div>
       <div className="history-scroll">
         <table className="history-table" style={{ minWidth: graphWidth + 552 }}>
-          <colgroup>
-            <col style={{ width: graphWidth }} />
-            <col />
-            <col className="author-col" style={{ width: 128 }} />
-            <col style={{ width: 84 }} />
-            <col style={{ width: 80 }} />
-          </colgroup>
           <thead>
             <tr style={{ gridTemplateColumns: columns }}>
               <th scope="col">Graph</th>

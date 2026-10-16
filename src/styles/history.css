@@ -88,10 +88,15 @@
   scrollbar-color: #38383e #101012;
 }
 .history-table {
+  display: block;
   border-spacing: 0;
   width: 100%;
   table-layout: fixed;
   font-size: 12px;
+}
+.history-table thead,
+.history-table tbody {
+  display: block;
 }
 .history-table thead {
   position: sticky;
