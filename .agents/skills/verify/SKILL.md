@@ -23,15 +23,15 @@ If the Add dialog says the reader is unavailable, check the bridge log and both 
 
 ## Drive
 
-Follow the mapped journeys with accessible names from live snapshots. Start with [Add and restore repositories](features/repositories.md), then [Browse history](features/history.md), then [Inspect a commit](features/inspector.md). The separate [reader contract](features/reader.md) has automated coverage.
+Follow the mapped journeys with accessible names from live snapshots. Start with [Add and restore repositories](features/repositories.md), then [Browse history](features/history.md), then [Inspect a commit](features/inspector.md), then [Read a file diff](features/diff.md). The separate [reader contract](features/reader.md) has automated coverage.
 
-Use **Cmd/Ctrl+O** to add a repository, **Escape** to cancel, and **Cmd/Ctrl+F** to focus loaded-history search. The native dialog traps focus. Pane separators support pointer dragging and arrow keys. At narrow widths the inspector starts hidden; **Toggle commit inspector** opens it as an overlay.
+Use **Cmd/Ctrl+O** to add a repository, **Escape** to cancel, and **Cmd/Ctrl+F** to focus loaded-history search. Escape also closes an open file diff. The native dialog traps focus. Pane separators support pointer dragging and arrow keys. At narrow widths the inspector starts hidden; **Toggle commit inspector** opens it as an overlay.
 
 Run `cargo test --locked`, `pnpm test`, `pnpm build`, `pnpm format:check`, and `cargo fmt --all --check` after code changes. No network account is required.
 
 ## Evidence
 
-Save screenshots and an action transcript outside the repository, such as `/tmp/l1git-verification-<run-id>/`. Record the checkout SHA, fixture paths, viewport, selected branch, and before/after HEAD. Capture empty and loaded screens, a browsed remote branch, the merge inspector, and a failed Add dialog. For persistence, capture the list before and after reload. For read-only behavior, compare `git -C <fixture-repository> symbolic-ref HEAD`, `rev-parse HEAD`, and `status --porcelain` before and after the journeys.
+Save screenshots and an action transcript outside the repository, such as `/tmp/l1git-verification-<run-id>/`. Record the checkout SHA, fixture paths, viewport, selected branch, and before/after HEAD. Capture empty and loaded screens, a browsed remote branch, the merge inspector, unified and split file diffs, the binary notice, and a failed Add dialog. For persistence, capture the list before and after reload. For read-only behavior, compare `git -C <fixture-repository> symbolic-ref HEAD`, `rev-parse HEAD`, and `status --porcelain` before and after the journeys.
 
 Report browser, reader, build, and native results separately. A successful bundle does not prove the native picker or window dragging. The implementation baseline passes reader tests and builds. The browser journeys and native interactions require a live drive and must not be reported as previously verified.
 

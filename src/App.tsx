@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import {
   FolderGit2,
   GitBranch,
@@ -11,6 +12,8 @@ import {
 } from "lucide-react";
 import { AddRepositoryDialog } from "./components/AddRepositoryDialog";
 import { CommitInspector } from "./components/CommitInspector";
+import { FileDiffPane } from "./components/FileDiffPane";
+import type { DiffStyle } from "./components/FileDiffPane";
 import { History } from "./components/History";
 import { PaneDivider } from "./components/PaneDivider";
 import { RepositoryTree } from "./components/RepositoryTree";
@@ -28,8 +31,10 @@ export function App() {
   const [sidebarWidth, setSidebarWidth] = useState(260);
   const [inspectorWidth, setInspectorWidth] = useState(320);
   const [query, setQuery] = useState("");
+  const [diffStyle, setDiffStyle] = useState<DiffStyle>("unified");
   const searchRef = useRef<HTMLInputElement>(null);
-  const { workspace, current } = app;
+  const { workspace, current, fileDiff, closeFile } = app;
+  const fileOpen = fileDiff.kind !== "closed";
   const busy = workspace.kind === "loading";
   const snapshot = current?.snapshot ?? null;
   const activePath =
@@ -54,16 +59,21 @@ export function App() {
         searchRef.current
       ) {
         event.preventDefault();
+        if (fileOpen) flushSync(closeFile);
         searchRef.current.focus();
       }
       if (!adding && event.key === "Escape") {
-        setQuery("");
-        searchRef.current?.blur();
+        if (fileOpen) {
+          closeFile();
+        } else {
+          setQuery("");
+          searchRef.current?.blur();
+        }
       }
     }
     window.addEventListener("keydown", keyboard);
     return () => window.removeEventListener("keydown", keyboard);
-  }, [adding]);
+  }, [adding, fileOpen, closeFile]);
   useEffect(() => {
     const media = window.matchMedia("(max-width: 1099px)");
     const narrow = () => {
@@ -217,7 +227,17 @@ export function App() {
                 onBrowse={(reference) => void app.browse(reference)}
                 searchRef={searchRef}
                 busy={busy}
+                hidden={fileOpen}
               />
+              {fileDiff.kind !== "closed" && (
+                <FileDiffPane
+                  state={fileDiff}
+                  diffStyle={diffStyle}
+                  onDiffStyle={setDiffStyle}
+                  onBack={closeFile}
+                  onRetry={() => app.openFile(fileDiff.path)}
+                />
+              )}
               {inspectorOpen && (
                 <>
                   <PaneDivider
@@ -238,6 +258,8 @@ export function App() {
                       selectedOid={app.selectedOid}
                       snapshot={snapshot}
                       onSelect={app.setSelectedOid}
+                      selectedFile={fileOpen ? fileDiff.path : null}
+                      onSelectFile={app.openFile}
                       onClose={() => setInspectorOpen(false)}
                       onRetry={app.retryDetail}
                     />

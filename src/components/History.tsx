@@ -76,6 +76,7 @@ type Props = {
   onBrowse: (reference: FullRef | null) => void;
   searchRef: RefObject<HTMLInputElement | null>;
   busy: boolean;
+  hidden: boolean;
 };
 
 export function History({
@@ -88,6 +89,7 @@ export function History({
   onBrowse,
   searchRef,
   busy,
+  hidden,
 }: Props) {
   const graph = useMemo(() => buildGraph(snapshot.commits), [snapshot.commits]);
   const known = useMemo(
@@ -110,7 +112,12 @@ export function History({
   const columns = `${graphWidth}px minmax(260px, 1fr) 128px 84px 80px`;
 
   return (
-    <section className="history" aria-label="Commit history" aria-busy={busy}>
+    <section
+      className="history"
+      aria-label="Commit history"
+      aria-busy={busy}
+      hidden={hidden}
+    >
       <div className="history-tools">
         <label className="branch-select">
           <GitBranch size={14} />

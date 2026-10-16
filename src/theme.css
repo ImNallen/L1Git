@@ -2,6 +2,7 @@
 @import "./styles/layout.css";
 @import "./styles/history.css";
 @import "./styles/inspector.css";
+@import "./styles/diff.css";
 @import "./styles/dialog.css";
 
 :root {

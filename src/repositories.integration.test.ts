@@ -8,6 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
   detailSchema,
+  filePatchSchema,
   repositoryErrorSchema,
   snapshotSchema,
 } from "./domain/repository";
@@ -132,6 +133,7 @@ describe("real Rust transport contract", () => {
         ).json(),
       ).data;
     expect(inspectorDetail.files).toEqual([
+      { path: "assets/icon.png", status: "A" },
       { path: "graph.ts", status: "D" },
       { path: "history.ts", status: "M" },
       { path: "inspector.ts", status: "A" },
@@ -156,6 +158,68 @@ describe("real Rust transport contract", () => {
       "graph.ts",
       "history.ts",
     ]);
+  });
+
+  it("reads text, binary, and root file patches and rejects unchanged paths", async () => {
+    const commits = snapshotEnvelope.parse(
+      await (
+        await post("snapshot", {
+          path: fixture.repository,
+          reference: "refs/remotes/origin/feat/remote-inspector",
+        })
+      ).json(),
+    ).data.commits;
+    const [inspector] = commits;
+    const root = commits.at(-1);
+    if (!inspector || !root) throw new Error("Fixture commits are missing");
+    const patch = async (oid: string, file: string) =>
+      (
+        await post("file-patch", { path: fixture.repository, oid, file })
+      ).json();
+    const success = z.object({ ok: z.literal(true), data: filePatchSchema });
+    expect(
+      success.parse(await patch(inspector.oid, "history.ts")).data,
+    ).toEqual({
+      kind: "text",
+      lossy: false,
+      patch: [
+        "diff --git a/history.ts b/history.ts",
+        "index 86fb985..ee9ebd3 100644",
+        "--- a/history.ts",
+        "+++ b/history.ts",
+        "@@ -1,3 +1,3 @@",
+        " export const historyLimit = 200;",
+        '-export const historyOrder = "topological";',
+        '+export const historyOrder = "first parent";',
+        " export const historyIncludesRemotes = true;",
+        "",
+      ].join("\n"),
+    });
+    expect(
+      success.parse(await patch(inspector.oid, "assets/icon.png")).data,
+    ).toEqual({ kind: "binary" });
+    expect(success.parse(await patch(root.oid, "README.md")).data).toEqual({
+      kind: "text",
+      lossy: false,
+      patch: [
+        "diff --git a/README.md b/README.md",
+        "new file mode 100644",
+        "index 0000000..a82fc92",
+        "--- /dev/null",
+        "+++ b/README.md",
+        "@@ -0,0 +1 @@",
+        "+# L1 demo",
+        "",
+      ].join("\n"),
+    });
+    const failure = z.object({
+      ok: z.literal(false),
+      error: repositoryErrorSchema,
+    });
+    for (const file of ["README.md", "src", ":(glob)*"])
+      expect(failure.parse(await patch(inspector.oid, file)).error.kind).toBe(
+        "unchangedPath",
+      );
   });
 
   it("reports empty, detached, bare, and missing states through the same contract", async () => {

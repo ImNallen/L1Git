@@ -1,4 +1,4 @@
-use l1_git_core::{CommitDetail, ErrorKind, RepositoryError, RepositorySnapshot};
+use l1_git_core::{CommitDetail, ErrorKind, FilePatch, RepositoryError, RepositorySnapshot};
 
 fn worker_error() -> RepositoryError {
     RepositoryError {
@@ -27,12 +27,24 @@ async fn repository_commit_detail(
         .map_err(|_| worker_error())?
 }
 
+#[tauri::command]
+async fn repository_file_patch(
+    path: String,
+    oid: String,
+    file: String,
+) -> Result<FilePatch, RepositoryError> {
+    tauri::async_runtime::spawn_blocking(move || l1_git_core::file_patch(&path, &oid, &file))
+        .await
+        .map_err(|_| worker_error())?
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             repository_snapshot,
-            repository_commit_detail
+            repository_commit_detail,
+            repository_file_patch
         ])
         .run(tauri::generate_context!())
         .expect("L1 Git could not start");

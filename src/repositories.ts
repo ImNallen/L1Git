@@ -3,6 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { z } from "zod";
 import {
   detailSchema,
+  filePatchSchema,
   repositoryErrorSchema,
   snapshotSchema,
 } from "./domain/repository";
@@ -58,6 +59,15 @@ export function commitDetail(path: string, oid: Oid) {
     "/api/commit-detail",
     { path, oid },
     detailSchema,
+  );
+}
+
+export function filePatch(path: string, oid: Oid, file: string) {
+  return read(
+    "repository_file_patch",
+    "/api/file-patch",
+    { path, oid, file },
+    filePatchSchema,
   );
 }
 

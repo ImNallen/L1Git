@@ -1,4 +1,4 @@
-use l1_git_core::{commit_detail, snapshot};
+use l1_git_core::{commit_detail, file_patch, snapshot};
 use serde::Deserialize;
 use serde_json::json;
 use std::io::Read;
@@ -16,6 +16,14 @@ struct SnapshotRequest {
 struct DetailRequest {
     path: String,
     oid: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FilePatchRequest {
+    path: String,
+    oid: String,
+    file: String,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -79,6 +87,8 @@ fn handle(mut request: Request, origins: &[String]) {
             .map(|input| snapshot(&input.path, input.reference.as_deref()).map(|data| json!(data))),
         "/api/commit-detail" => serde_json::from_slice::<DetailRequest>(&bytes)
             .map(|input| commit_detail(&input.path, &input.oid).map(|data| json!(data))),
+        "/api/file-patch" => serde_json::from_slice::<FilePatchRequest>(&bytes)
+            .map(|input| file_patch(&input.path, &input.oid, &input.file).map(|data| json!(data))),
         _ => {
             respond(request, 404, json!({"error": "Unknown read operation."}));
             return;

@@ -68,6 +68,15 @@ export const detailSchema = z.object({
   files: z.array(z.object({ path: z.string(), status: changeStatusSchema })),
   diffBase: z.enum(["emptyTree", "firstParent"]),
 });
+export const filePatchSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("text"),
+    patch: z.string(),
+    lossy: z.boolean(),
+  }),
+  z.object({ kind: z.literal("binary") }),
+  z.object({ kind: z.literal("tooLarge"), bytes: z.number().int().positive() }),
+]);
 export const repositoryErrorSchema = z.object({
   kind: z.enum([
     "missingPath",
@@ -77,6 +86,7 @@ export const repositoryErrorSchema = z.object({
     "gitFailed",
     "invalidRef",
     "invalidOid",
+    "unchangedPath",
     "unsupportedPath",
   ]),
   message: z.string(),
@@ -92,6 +102,7 @@ export type RepositorySnapshot = z.infer<typeof snapshotSchema>;
 export type ChangeStatus = z.infer<typeof changeStatusSchema>;
 export type CommitDetail = z.infer<typeof detailSchema>;
 export type ChangedFile = CommitDetail["files"][number];
+export type FilePatch = z.infer<typeof filePatchSchema>;
 export type Problem =
   | z.infer<typeof repositoryErrorSchema>
   | { kind: "transport" | "persistence"; message: string };
