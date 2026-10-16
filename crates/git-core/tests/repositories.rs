@@ -220,6 +220,40 @@ fn detail_preserves_message_paths_and_first_parent_merge_policy() {
 }
 
 #[test]
+fn partial_clone_details_never_fetch_missing_objects() {
+    let fixture = Fixture::new();
+    let oid = fixture.commit("first", "one", "initial");
+    git(&fixture.repo, &["config", "uploadpack.allowFilter", "true"]);
+    let source = url::Url::from_file_path(fixture.repo.canonicalize().unwrap()).unwrap();
+    let clone = fixture._directory.path().join("partial-clone");
+    git(
+        fixture._directory.path(),
+        &[
+            "clone",
+            "--no-checkout",
+            "--filter=tree:0",
+            source.as_str(),
+            clone.to_str().unwrap(),
+        ],
+    );
+    let packs = || {
+        let mut names = fs::read_dir(clone.join(".git/objects/pack"))
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect::<Vec<_>>();
+        names.sort();
+        names
+    };
+    let before = packs();
+    let result = commit_detail(clone.to_str().unwrap(), &oid)
+        .map(|_| "detail loaded".to_owned())
+        .unwrap_or_else(|error| format!("{:?}", error.kind));
+    assert_eq!(result, "GitFailed");
+    assert_eq!(packs(), before);
+    assert_eq!(git(&clone, &["rev-parse", "HEAD"]), oid);
+}
+
+#[test]
 fn rejects_missing_invalid_and_bare_repositories_and_invalid_oids() {
     let fixture = Fixture::new();
     assert!(matches!(

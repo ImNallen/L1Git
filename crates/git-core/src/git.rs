@@ -13,6 +13,7 @@ pub(crate) fn run(path: &Path, args: &[&str]) -> Result<Output, RepositoryError>
     }
     command
         .args([
+            "--no-lazy-fetch",
             "--no-pager",
             "-c",
             "color.ui=false",
@@ -26,7 +27,7 @@ pub(crate) fn run(path: &Path, args: &[&str]) -> Result<Output, RepositoryError>
         .env("GIT_OPTIONAL_LOCKS", "0")
         .env("GIT_NO_REPLACE_OBJECTS", "1")
         .env("LC_ALL", "C");
-    command.output().map_err(|error| {
+    let output = command.output().map_err(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {
             RepositoryError::new(
                 ErrorKind::GitMissing,
@@ -35,16 +36,24 @@ pub(crate) fn run(path: &Path, args: &[&str]) -> Result<Output, RepositoryError>
         } else {
             RepositoryError::new(ErrorKind::GitFailed, format!("Could not run Git: {error}"))
         }
-    })
+    })?;
+    if output.status.code() == Some(129)
+        && String::from_utf8_lossy(&output.stderr).contains("no-lazy-fetch")
+    {
+        return Err(RepositoryError::new(
+            ErrorKind::GitFailed,
+            "L1 Git requires Git 2.45 or later. Update Git and try again.",
+        ));
+    }
+    Ok(output)
 }
 
 pub(crate) fn read(path: &Path, args: &[&str]) -> Result<Vec<u8>, RepositoryError> {
     let output = run(path, args)?;
     if !output.status.success() {
-        // Git errors can echo credential-bearing remote URLs. Keep IPC errors free of stderr.
         return Err(RepositoryError::new(
             ErrorKind::GitFailed,
-            "Git could not read this repository. Check its permissions and object database, then refresh.",
+            "Git could not read this repository. Check its permissions and missing objects. For a partial clone, fetch the required objects with Git, then refresh.",
         ));
     }
     Ok(output.stdout)

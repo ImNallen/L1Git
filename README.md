@@ -4,7 +4,7 @@ L1 Git is a desktop Git client in the L1 family, built with Tauri 2, React, and 
 
 ## Run the desktop app
 
-Install Git, Node.js 26, pnpm 10.32.1, Rust 1.93 or later, and the native Tauri build dependencies. On macOS, install Xcode and its command-line tools.
+Install Git 2.45 or later, Node.js 26, pnpm 10.32.1, Rust 1.93 or later, and the native Tauri build dependencies. On macOS, install Xcode and its command-line tools.
 
 ```sh
 pnpm install --frozen-lockfile
@@ -23,7 +23,7 @@ Click a local or remote branch to browse its history. The checked-out HEAD remai
 
 The history contains at most 200 commits for all refs or the selected branch. Search covers the loaded subjects, authors, emails, and commit IDs. Graph connections use actual parent IDs. Connections are hidden during search because filtered rows omit intermediate commits. Dashed edges lead to parents beyond the loaded history.
 
-Select a commit to inspect its message, author, date, parents, and changed paths. Merge changes are compared with the first parent. Root commits use the empty tree. Renames appear as a deletion and an addition. Parent links can open details outside the loaded history.
+Select a commit to inspect its message, author, date, parents, and changed paths. Merge changes are compared with the first parent. Root commits use the empty tree. Renames appear as a deletion and an addition. Parent links can open details outside the loaded history. Partial clones report a read error when required objects are missing locally. L1 Git never fetches them implicitly.
 
 The repository list and last active repository survive reloads and restarts in versioned local storage. Remove a repository with the row's **Remove from recents** button. This removes only the saved entry. It never deletes repository files.
 
