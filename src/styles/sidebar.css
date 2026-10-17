@@ -98,18 +98,6 @@ input::placeholder {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.repo-monogram {
-  display: grid;
-  place-items: center;
-  flex-shrink: 0;
-  width: 20px;
-  height: 20px;
-  font-size: 9px;
-  font-weight: 650;
-  background: var(--avatar-bg);
-  color: var(--avatar-text);
-  border-radius: 4px;
-}
 .remove-repository {
   opacity: 0;
   margin-right: 3px;

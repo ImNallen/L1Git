@@ -140,12 +140,6 @@ export function RepositoryTree({
                   ) : (
                     <ChevronRight size={13} />
                   )}
-                  <span className="repo-monogram">
-                    {entry.name
-                      .replace(/^l1[- ]?/i, "")
-                      .slice(0, 2)
-                      .toUpperCase() || "G"}
-                  </span>
                   <span>{entry.name}</span>
                 </button>
                 <button

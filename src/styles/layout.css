@@ -218,29 +218,6 @@ kbd {
   display: flex;
   gap: 8px;
 }
-.workspace-status {
-  height: 29px;
-  min-height: 29px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  padding: 0 15px;
-  border-top: 1px solid var(--border);
-  color: var(--text-faint);
-  font-size: 9px;
-  white-space: nowrap;
-}
-.workspace-status > span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.workspace-status > span:first-child {
-  font-family: var(--mono);
-}
-.workspace-status > span:last-child {
-  flex-shrink: 0;
-}
 .spin {
   animation: spin 1s linear infinite;
 }
@@ -262,16 +239,13 @@ kbd {
     width: 30px;
     padding: 0;
   }
-  .workspace-status > span:last-child {
-    max-width: 55%;
-  }
 }
 @media (max-width: 1099px) {
   .inspector-container {
     position: absolute;
     top: 58px;
     right: 0;
-    bottom: 29px;
+    bottom: 0;
     z-index: 5;
     max-width: 50%;
     border-left: 1px solid var(--border-strong);
@@ -301,9 +275,6 @@ kbd {
   }
   .branch-select {
     width: 135px;
-  }
-  .workspace-status > span:last-child {
-    display: none;
   }
   .toolbar-actions .button span {
     display: none;

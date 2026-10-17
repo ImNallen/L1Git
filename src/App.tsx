@@ -379,27 +379,6 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
               </div>
             )}
           </div>
-          <footer className="workspace-status">
-            {snapshot ? (
-              <>
-                <span title={snapshot.root}>{snapshot.root}</span>
-                <span>
-                  Read locally at{" "}
-                  {new Date(snapshot.observedAt * 1000).toLocaleTimeString(
-                    undefined,
-                    { hour: "2-digit", minute: "2-digit" },
-                  )}
-                  <span className="summary-separator">·</span>Remote refs
-                  reflect your last fetch
-                </span>
-              </>
-            ) : (
-              <>
-                <span>Local Git, in focus</span>
-                <span>No network required</span>
-              </>
-            )}
-          </footer>
         </div>
         {screen === "settings" && (
           <>
