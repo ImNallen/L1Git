@@ -33,6 +33,7 @@ export function App() {
   const [query, setQuery] = useState("");
   const [diffStyle, setDiffStyle] = useState<DiffStyle>("unified");
   const searchRef = useRef<HTMLInputElement>(null);
+  const sidebarToggleRef = useRef<HTMLButtonElement>(null);
   const { workspace, current, fileDiff, closeFile } = app;
   const fileOpen = fileDiff.kind !== "closed";
   const busy = workspace.kind === "loading";
@@ -42,16 +43,19 @@ export function App() {
     (workspace.kind === "loading" || workspace.kind === "error"
       ? workspace.path
       : null);
-  const inspectorToggle = (
+  const sidebarToggle = (
     <button
-      className={`icon-button ${inspectorOpen ? "toggled" : ""}`}
-      disabled={!snapshot}
-      aria-label="Toggle commit inspector"
-      title="Toggle commit inspector"
-      aria-pressed={inspectorOpen}
-      onClick={() => setInspectorOpen((open) => !open)}
+      ref={sidebarToggleRef}
+      className={`icon-button ${sidebarOpen ? "toggled" : ""}`}
+      aria-label="Toggle repository sidebar"
+      title="Toggle repository sidebar"
+      aria-pressed={sidebarOpen}
+      onClick={() => {
+        flushSync(() => setSidebarOpen((open) => !open));
+        sidebarToggleRef.current?.focus();
+      }}
     >
-      <PanelRight size={16} />
+      <PanelLeft size={16} />
     </button>
   );
 
@@ -110,7 +114,7 @@ export function App() {
               <span className="brand-icon" data-tauri-drag-region>
                 L1
               </span>
-              {inspectorToggle}
+              {sidebarToggle}
               <span data-tauri-drag-region>
                 L1{" "}
                 <span className="muted" data-tauri-drag-region>
@@ -142,15 +146,7 @@ export function App() {
       )}
       <main className="workspace">
         <header className="toolbar" data-tauri-drag-region>
-          <button
-            className={`icon-button ${sidebarOpen ? "toggled" : ""}`}
-            onClick={() => setSidebarOpen(!sidebarOpen)}
-            title="Toggle repository sidebar"
-            aria-label="Toggle repository sidebar"
-            aria-pressed={sidebarOpen}
-          >
-            <PanelLeft size={16} />
-          </button>
+          {!sidebarOpen && sidebarToggle}
           <div className="breadcrumb" data-tauri-drag-region>
             {snapshot ? (
               <>
@@ -197,12 +193,17 @@ export function App() {
                 <span>Refresh</span>
               </button>
             )}
-            {!sidebarOpen && (
-              <>
-                <span className="toolbar-separator" />
-                {inspectorToggle}
-              </>
-            )}
+            <span className="toolbar-separator" />
+            <button
+              className={`icon-button ${inspectorOpen ? "toggled" : ""}`}
+              disabled={!snapshot}
+              aria-label="Toggle commit inspector"
+              title="Toggle commit inspector"
+              aria-pressed={inspectorOpen}
+              onClick={() => setInspectorOpen((open) => !open)}
+            >
+              <PanelRight size={16} />
+            </button>
           </div>
         </header>
         {app.persistenceError && (
