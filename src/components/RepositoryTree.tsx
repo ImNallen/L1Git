@@ -118,10 +118,6 @@ export function RepositoryTree({
           <Plus size={18} />
         </button>
       </div>
-      <div className="sidebar-section-label">
-        <span>Repositories</span>
-        <span>{entries.length}</span>
-      </div>
       <nav className="repository-tree" aria-label="Repositories and branches">
         {entriesShown.map((entry) => {
           const active = entry.root === activePath;

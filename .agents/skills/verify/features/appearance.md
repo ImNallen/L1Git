@@ -17,7 +17,7 @@ Click **Settings** at the bottom of the repository sidebar. The sidebar shows **
 5. Reload with each preference. Reopen Settings and confirm the saved choice. System must resolve against the current emulated system appearance. Restore the preview's appearance override to System after the check.
 6. With a loaded repository, set both search fields, collapse a branch section, and open a file diff. Enter Settings, change the theme, then click Back. Confirm the searches, collapsed section, selected commit, open diff, diff layout, and pane sizes survive.
 7. Enter Settings again and press Escape. Confirm the repository returns, the open diff remains open, and focus returns to Settings. Cmd/Ctrl+F in Settings must not focus hidden history.
-8. Hide and reopen the sidebar. Confirm Settings remains reachable. At a narrow viewport, confirm the Theme choices fit and the main settings content can scroll.
+8. Hide the sidebar. Confirm the main toolbar has a sidebar toggle and no Settings button. Reopen the sidebar and use its footer Settings button. At a narrow viewport, confirm the Theme choices fit and the main settings content can scroll.
 
 ## Native checks
 

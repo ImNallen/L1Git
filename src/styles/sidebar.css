@@ -73,16 +73,6 @@ input::placeholder {
 .icon-button.toggled {
   color: var(--text-secondary);
 }
-.sidebar-section-label {
-  display: flex;
-  justify-content: space-between;
-  padding: 0 18px 12px 22px;
-  font-size: 10px;
-  letter-spacing: 0.8px;
-  text-transform: uppercase;
-  color: var(--text-dim);
-  font-weight: 550;
-}
 .repository-tree {
   flex: 1;
   overflow: auto;

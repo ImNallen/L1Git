@@ -45,11 +45,10 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
   const searchRef = useRef<HTMLInputElement>(null);
   const sidebarToggleRef = useRef<HTMLButtonElement>(null);
   const settingsRef = useRef<HTMLButtonElement>(null);
-  const toolbarSettingsRef = useRef<HTMLButtonElement>(null);
   const sidebarVisible = sidebarOpen || screen === "settings";
   const returnToRepository = useCallback(() => {
     flushSync(() => setScreen("repository"));
-    (sidebarOpen ? settingsRef : toolbarSettingsRef).current?.focus();
+    (sidebarOpen ? settingsRef : sidebarToggleRef).current?.focus();
   }, [sidebarOpen]);
   const { workspace, current, fileDiff, closeFile } = app;
   const fileOpen = fileDiff.kind !== "closed";
@@ -199,20 +198,7 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
       <main className="workspace">
         <div className="repository-workspace" hidden={screen !== "repository"}>
           <header className="toolbar" data-tauri-drag-region>
-            {!sidebarOpen && (
-              <>
-                {sidebarToggle}
-                <button
-                  ref={toolbarSettingsRef}
-                  className="icon-button"
-                  aria-label="Settings"
-                  title="Settings"
-                  onClick={() => setScreen("settings")}
-                >
-                  <Settings size={16} />
-                </button>
-              </>
-            )}
+            {!sidebarOpen && sidebarToggle}
             <div className="breadcrumb" data-tauri-drag-region>
               {snapshot ? (
                 <>
