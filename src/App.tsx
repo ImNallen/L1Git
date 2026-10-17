@@ -45,7 +45,6 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
   const searchRef = useRef<HTMLInputElement>(null);
   const sidebarToggleRef = useRef<HTMLButtonElement>(null);
   const settingsRef = useRef<HTMLButtonElement>(null);
-  const sidebarVisible = sidebarOpen || screen === "settings";
   const returnToRepository = useCallback(() => {
     flushSync(() => setScreen("repository"));
     (sidebarOpen ? settingsRef : sidebarToggleRef).current?.focus();
@@ -63,8 +62,8 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
     <button
       ref={sidebarToggleRef}
       className={`icon-button ${sidebarOpen ? "toggled" : ""}`}
-      aria-label="Toggle repository sidebar"
-      title="Toggle repository sidebar"
+      aria-label="Toggle sidebar"
+      title="Toggle sidebar"
       aria-pressed={sidebarOpen}
       onClick={() => {
         flushSync(() => setSidebarOpen((open) => !open));
@@ -124,10 +123,10 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
 
   return (
     <div
-      className={`app ${macNative ? "native-mac" : ""} ${sidebarVisible ? "" : "sidebar-hidden"}`}
+      className={`app ${macNative ? "native-mac" : ""} ${sidebarOpen ? "" : "sidebar-hidden"}`}
     >
       <aside
-        hidden={!sidebarVisible}
+        hidden={!sidebarOpen}
         className="sidebar"
         style={{ width: sidebarWidth }}
         aria-label={
@@ -135,7 +134,7 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
         }
       >
         <div className="brand" data-tauri-drag-region>
-          {screen === "repository" && sidebarOpen && sidebarToggle}
+          {sidebarOpen && sidebarToggle}
           <span data-tauri-drag-region>
             L1{" "}
             <span className="muted" data-tauri-drag-region>
@@ -182,7 +181,7 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
           )}
         </footer>
       </aside>
-      {sidebarVisible && (
+      {sidebarOpen && (
         <PaneDivider
           label="Resize repository sidebar"
           width={sidebarWidth}
@@ -195,7 +194,7 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
       <main className="workspace">
         <div className="repository-workspace" hidden={screen !== "repository"}>
           <header className="toolbar" data-tauri-drag-region>
-            {!sidebarOpen && sidebarToggle}
+            {screen === "repository" && !sidebarOpen && sidebarToggle}
             <div className="breadcrumb" data-tauri-drag-region>
               {snapshot ? (
                 <>
@@ -405,7 +404,7 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
         {screen === "settings" && (
           <>
             <header className="toolbar settings-toolbar" data-tauri-drag-region>
-              <PanelLeft size={16} aria-hidden="true" />
+              {!sidebarOpen && sidebarToggle}
               <nav
                 className="breadcrumb"
                 aria-label="Breadcrumb"

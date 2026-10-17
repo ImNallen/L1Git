@@ -18,6 +18,7 @@ Click **Settings** at the bottom of the repository sidebar. The sidebar shows **
 6. With a loaded repository, set both search fields, collapse a branch section, and open a file diff. Enter Settings, change the theme, then click Back. Confirm the searches, collapsed section, selected commit, open diff, diff layout, and pane sizes survive.
 7. Enter Settings again and press Escape. Confirm the repository returns, the open diff remains open, and focus returns to Settings. Cmd/Ctrl+F in Settings must not focus hidden history.
 8. Hide the sidebar. Confirm the main toolbar has a sidebar toggle and no Settings button. Reopen the sidebar and use its footer Settings button. At a narrow viewport, confirm the Theme choices fit and the main settings content can scroll.
+9. In Settings, confirm **Toggle sidebar** sits beside the brand in the sidebar header. Hide the sidebar and confirm the toggle moves to the settings toolbar and can reopen it. Hover Back and confirm its row background changes. With the settings sidebar hidden, press Escape and confirm the repository returns with focus on its toolbar toggle.
 
 ## Native checks
 
