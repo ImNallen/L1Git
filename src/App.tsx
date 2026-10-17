@@ -174,19 +174,15 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
               <ArrowLeft size={15} /> Back
             </button>
           ) : (
-            <>
-              <button
-                ref={settingsRef}
-                className="icon-button"
-                aria-label="Settings"
-                title="Settings"
-                onClick={() => setScreen("settings")}
-              >
-                <Settings size={16} />
-              </button>
-              <span className="status-dot" />
-              <span>Local repositories</span>
-            </>
+            <button
+              ref={settingsRef}
+              className="icon-button"
+              aria-label="Settings"
+              title="Settings"
+              onClick={() => setScreen("settings")}
+            >
+              <Settings size={16} />
+            </button>
           )}
         </footer>
       </aside>
