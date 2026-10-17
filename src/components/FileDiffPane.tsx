@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { ArrowLeft, FileX2, LoaderCircle, TriangleAlert } from "lucide-react";
 import { parsePatchFiles } from "@pierre/diffs";
 import { FileDiff, Virtualizer } from "@pierre/diffs/react";
+import type { ResolvedTheme } from "../appearance";
 import type { FileDiffState } from "../useWorkspace";
 
 export type DiffStyle = "unified" | "split";
@@ -9,6 +10,7 @@ export type DiffStyle = "unified" | "split";
 type Props = {
   state: Exclude<FileDiffState, { kind: "closed" }>;
   diffStyle: DiffStyle;
+  theme: ResolvedTheme;
   onDiffStyle: (style: DiffStyle) => void;
   onBack: () => void;
   onRetry: () => void;
@@ -17,6 +19,7 @@ type Props = {
 export function FileDiffPane({
   state,
   diffStyle,
+  theme,
   onDiffStyle,
   onBack,
   onRetry,
@@ -70,7 +73,11 @@ export function FileDiffPane({
               </span>
             </div>
           )}
-          <Patch patch={state.patch.patch} diffStyle={diffStyle} />
+          <Patch
+            patch={state.patch.patch}
+            diffStyle={diffStyle}
+            theme={theme}
+          />
         </>
       ) : (
         <div className="file-diff-empty">
@@ -86,7 +93,15 @@ export function FileDiffPane({
   );
 }
 
-function Patch({ patch, diffStyle }: { patch: string; diffStyle: DiffStyle }) {
+function Patch({
+  patch,
+  diffStyle,
+  theme,
+}: {
+  patch: string;
+  diffStyle: DiffStyle;
+  theme: ResolvedTheme;
+}) {
   const files = useMemo(
     () => parsePatchFiles(patch).flatMap((parsed) => parsed.files),
     [patch],
@@ -94,12 +109,12 @@ function Patch({ patch, diffStyle }: { patch: string; diffStyle: DiffStyle }) {
   const options = useMemo(
     () =>
       ({
-        theme: "pierre-dark",
-        themeType: "dark",
+        theme: theme === "dark" ? "pierre-dark" : "pierre-light",
+        themeType: theme,
         diffStyle,
         disableFileHeader: true,
       }) as const,
-    [diffStyle],
+    [diffStyle, theme],
   );
   if (files.every((file) => file.hunks.length === 0))
     return (

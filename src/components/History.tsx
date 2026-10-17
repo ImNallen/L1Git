@@ -6,15 +6,7 @@ import type { GraphRow } from "../domain/graph";
 import type { FullRef, Oid, RepositorySnapshot } from "../domain/repository";
 import { shortDate } from "../domain/time";
 
-const colors = [
-  "#60a5fa",
-  "#a78bfa",
-  "#fbbf24",
-  "#34d399",
-  "#f472b6",
-  "#22d3ee",
-];
-const color = (lane: number) => colors[lane % colors.length] ?? "#60a5fa";
+const color = (lane: number) => `var(--graph-lane-${(lane % 6) + 1})`;
 const x = (lane: number) => 16 + lane * 15;
 
 function GraphCell({

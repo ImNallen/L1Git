@@ -287,10 +287,6 @@ export function RepositoryTree({
           <p className="tree-hint">No repositories or branches match.</p>
         )}
       </nav>
-      <div className="sidebar-bottom">
-        <span className="status-dot" />
-        Local repositories<span className="shortcut">⌘/Ctrl O</span>
-      </div>
     </>
   );
 }
