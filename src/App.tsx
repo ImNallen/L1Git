@@ -135,9 +135,6 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
         }
       >
         <div className="brand" data-tauri-drag-region>
-          <span className="brand-icon" data-tauri-drag-region>
-            L1
-          </span>
           {screen === "repository" && sidebarOpen && sidebarToggle}
           <span data-tauri-drag-region>
             L1{" "}
@@ -202,9 +199,6 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
             <div className="breadcrumb" data-tauri-drag-region>
               {snapshot ? (
                 <>
-                  <span className="toolbar-monogram">
-                    {snapshot.name.slice(0, 2).toUpperCase()}
-                  </span>
                   <span className="repository-name" title={snapshot.root}>
                     {snapshot.name}
                   </span>
@@ -245,7 +239,6 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
                   <span>Refresh</span>
                 </button>
               )}
-              <span className="toolbar-separator" />
               <button
                 className={`icon-button ${inspectorOpen ? "toggled" : ""}`}
                 disabled={!snapshot}

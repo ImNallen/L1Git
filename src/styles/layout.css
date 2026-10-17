@@ -30,7 +30,6 @@
   align-items: center;
   gap: 12px;
   padding: 0 15px;
-  border-bottom: 1px solid var(--border);
   user-select: none;
 }
 .breadcrumb {
@@ -42,18 +41,6 @@
 }
 .breadcrumb > svg {
   color: var(--muted);
-  flex-shrink: 0;
-}
-.toolbar-monogram {
-  width: 20px;
-  height: 20px;
-  background: var(--avatar-bg);
-  color: var(--avatar-text);
-  border-radius: 4px;
-  font-size: 8px;
-  display: grid;
-  place-items: center;
-  font-weight: 650;
   flex-shrink: 0;
 }
 .repository-name {
@@ -83,12 +70,6 @@
   align-items: center;
   gap: 7px;
   flex-shrink: 0;
-}
-.toolbar-separator {
-  height: 20px;
-  width: 1px;
-  background: var(--separator);
-  margin: 0 4px;
 }
 .button {
   display: inline-flex;
@@ -305,7 +286,6 @@ kbd {
 }
 @media (max-width: 800px) {
   .repository-name,
-  .toolbar-monogram,
   .breadcrumb-slash {
     display: none;
   }

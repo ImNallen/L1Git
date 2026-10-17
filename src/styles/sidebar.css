@@ -16,23 +16,9 @@
   font-weight: 550;
   user-select: none;
 }
-.brand-icon {
-  font-size: 10px;
-  color: var(--brand-text);
-  background: var(--brand-bg);
-  border-radius: 4px;
-  width: 23px;
-  height: 23px;
-  display: grid;
-  place-items: center;
-  letter-spacing: -0.7px;
-}
 .native-mac .brand {
   padding-left: 100px;
   gap: 8px;
-}
-.native-mac .brand-icon {
-  display: none;
 }
 .native-mac.sidebar-hidden .toolbar {
   padding-left: 100px;
