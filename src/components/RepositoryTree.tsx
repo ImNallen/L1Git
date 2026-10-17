@@ -105,7 +105,7 @@ export function RepositoryTree({
         <Search size={15} />
         <input
           aria-label="Filter repositories and branches"
-          placeholder="Find a repository or branch"
+          placeholder="Search"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
