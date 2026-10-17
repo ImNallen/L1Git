@@ -44,6 +44,7 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
   const [diffStyle, setDiffStyle] = useState<DiffStyle>("unified");
   const searchRef = useRef<HTMLInputElement>(null);
   const sidebarToggleRef = useRef<HTMLButtonElement>(null);
+  const inspectorToggleRef = useRef<HTMLButtonElement>(null);
   const settingsRef = useRef<HTMLButtonElement>(null);
   const returnToRepository = useCallback(() => {
     flushSync(() => setScreen("repository"));
@@ -53,6 +54,7 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
   const fileOpen = fileDiff.kind !== "closed";
   const busy = workspace.kind === "loading";
   const snapshot = current?.snapshot ?? null;
+  const inspectorVisible = Boolean(snapshot && current && inspectorOpen);
   const activePath =
     snapshot?.root ??
     (workspace.kind === "loading" || workspace.kind === "error"
@@ -71,6 +73,22 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
       }}
     >
       <PanelLeft size={16} />
+    </button>
+  );
+  const inspectorToggle = (
+    <button
+      ref={inspectorToggleRef}
+      className={`icon-button ${inspectorVisible ? "toggled" : ""}`}
+      disabled={!snapshot}
+      aria-label="Toggle commit inspector"
+      title="Toggle commit inspector"
+      aria-pressed={inspectorVisible}
+      onClick={() => {
+        flushSync(() => setInspectorOpen((open) => !open));
+        inspectorToggleRef.current?.focus();
+      }}
+    >
+      <PanelRight size={16} />
     </button>
   );
 
@@ -239,16 +257,7 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
                     <span>Refresh</span>
                   </button>
                 )}
-                <button
-                  className={`icon-button ${inspectorOpen ? "toggled" : ""}`}
-                  disabled={!snapshot}
-                  aria-label="Toggle commit inspector"
-                  title="Toggle commit inspector"
-                  aria-pressed={inspectorOpen}
-                  onClick={() => setInspectorOpen((open) => !open)}
-                >
-                  <PanelRight size={16} />
-                </button>
+                {!inspectorVisible && inspectorToggle}
               </div>
             </header>
             {app.persistenceError && (
@@ -353,7 +362,7 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
               )}
             </div>
           </div>
-          {snapshot && current && inspectorOpen && (
+          {snapshot && current && inspectorVisible && (
             <>
               <PaneDivider
                 label="Resize commit inspector"
@@ -375,7 +384,7 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
                   onSelect={app.setSelectedOid}
                   selectedFile={fileOpen ? fileDiff.path : null}
                   onSelectFile={app.openFile}
-                  onClose={() => setInspectorOpen(false)}
+                  toggleButton={inspectorToggle}
                   onRetry={app.retryDetail}
                 />
               </div>
