@@ -17,17 +17,17 @@
 .branch-select {
   display: flex;
   align-items: center;
-  border: 1px solid #29292e;
-  background: #121214;
+  border: 1px solid var(--border-control);
+  background: var(--row-hover);
   border-radius: 6px;
   padding-left: 9px;
-  color: #898993;
+  color: var(--text-icon);
   width: 174px;
   flex-shrink: 0;
 }
 .branch-select select {
   border: 0;
-  color: #c0c0c8;
+  color: var(--text-secondary);
   outline: none;
   background: transparent;
   height: 30px;
@@ -38,12 +38,12 @@
   text-overflow: ellipsis;
 }
 .branch-select option {
-  background: #161619;
+  background: var(--option-surface);
 }
 .history-search {
   height: 32px;
-  border: 1px solid #29292e;
-  background: #111113;
+  border: 1px solid var(--border-control);
+  background: var(--control);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -52,7 +52,7 @@
   flex: 1;
   min-width: 100px;
   max-width: 500px;
-  color: #74747e;
+  color: var(--muted);
 }
 .history-search input {
   background: none;
@@ -66,7 +66,7 @@
   height: 27px;
   min-height: 27px;
   padding: 0 15px;
-  color: #71717b;
+  color: var(--muted);
   font-size: 10px;
   display: flex;
   justify-content: space-between;
@@ -75,20 +75,20 @@
   white-space: nowrap;
 }
 .history-summary > span:last-child {
-  color: #565660;
+  color: var(--text-faint);
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .summary-separator {
   padding: 0 7px;
-  color: #44444d;
+  color: var(--text-faint);
 }
 .history-scroll {
   flex: 1;
   min-height: 0;
   overflow: auto;
   scrollbar-width: thin;
-  scrollbar-color: #38383e #101012;
+  scrollbar-color: var(--scrollbar) var(--panel-raised);
 }
 .history-table {
   display: block;
@@ -105,7 +105,7 @@
   position: sticky;
   top: 0;
   z-index: 2;
-  background: #0c0c0d;
+  background: var(--panel-header);
 }
 .history-table tr {
   display: grid;
@@ -114,7 +114,7 @@
   text-align: left;
   font-weight: 450;
   font-size: 11px;
-  color: #797982;
+  color: var(--muted);
   height: 29px;
   display: flex;
   align-items: center;
@@ -130,7 +130,7 @@
   min-width: 0;
   display: flex;
   align-items: center;
-  color: #85858e;
+  color: var(--text-icon);
   padding-right: 8px;
   overflow: hidden;
 }
@@ -142,10 +142,10 @@
   padding: 0 10px 0 0;
 }
 .history-table tr:hover td {
-  background: #121214;
+  background: var(--row-hover);
 }
 .history-table tr.selected td {
-  background: #1a1a1e;
+  background: var(--row-selected);
 }
 .commit-description {
   min-width: 0;
@@ -161,7 +161,7 @@
   white-space: nowrap;
   text-overflow: ellipsis;
   overflow: hidden;
-  color: #c6c6ce;
+  color: var(--text);
   flex: 1;
   min-width: 40px;
 }
@@ -180,8 +180,8 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  color: #79b7ff;
-  background: #16324b;
+  color: var(--ref-text);
+  background: var(--ref-bg);
   border-radius: 4px;
   padding: 3px 6px;
   font-size: 10px;
@@ -196,14 +196,14 @@
   flex-shrink: 0;
 }
 .ref-badge.remote {
-  color: #92929c;
-  background: #101012;
-  border: 1px solid #29292f;
+  color: var(--text-icon);
+  background: var(--panel-raised);
+  border: 1px solid var(--border-control);
   padding: 2px 5px;
   font-weight: 400;
 }
 .more-refs {
-  color: #6c6c77;
+  color: var(--text-dim);
   font-size: 9px;
   flex-shrink: 0;
 }
@@ -211,8 +211,8 @@
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  background: #10242e;
-  color: #5e9bb8;
+  background: var(--avatar-bg);
+  color: var(--avatar-text);
   font-size: 7px;
   font-weight: 650;
   display: inline-grid;
@@ -239,11 +239,11 @@
 }
 .history-empty {
   text-align: center;
-  color: #62626c;
+  color: var(--text-dim);
   padding: 75px 30px;
 }
 .history-empty h2 {
-  color: #a3a3ad;
+  color: var(--text-body);
   font-size: 14px;
   font-weight: 500;
   margin-top: 18px;
@@ -258,12 +258,12 @@
   position: absolute;
   z-index: 4;
   inset: 104px 0 0;
-  background: #0a0a0ae8;
+  background: var(--loading-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 10px;
-  color: #a1a1ac;
+  color: var(--text-body);
   font-size: 12px;
 }
 .loading-dot {

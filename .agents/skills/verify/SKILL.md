@@ -23,7 +23,7 @@ If the Add dialog says the reader is unavailable, check the bridge log and both 
 
 ## Drive
 
-Follow the mapped journeys with accessible names from live snapshots. Start with [Add and restore repositories](features/repositories.md), then [Browse history](features/history.md), then [Inspect a commit](features/inspector.md), then [Read a file diff](features/diff.md). The separate [reader contract](features/reader.md) has automated coverage.
+Follow the mapped journeys with accessible names from live snapshots. Start with [Add and restore repositories](features/repositories.md), then [Browse history](features/history.md), then [Inspect a commit](features/inspector.md), then [Read a file diff](features/diff.md), then [Change appearance](features/appearance.md). The separate [reader contract](features/reader.md) has automated coverage.
 
 Use **Cmd/Ctrl+O** to add a repository, **Escape** to cancel, and **Cmd/Ctrl+F** to focus loaded-history search. Escape also closes an open file diff. The native dialog traps focus. Pane separators support pointer dragging and arrow keys. At narrow widths the inspector starts hidden; **Toggle commit inspector** opens it as an overlay.
 

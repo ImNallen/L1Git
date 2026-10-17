@@ -6,18 +6,18 @@
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: #0b0b0c;
+  background: var(--canvas);
 }
 .inspector-heading {
   height: 40px;
   min-height: 40px;
-  border-bottom: 1px solid #151518;
+  border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0 15px 0 20px;
   font-size: 10px;
-  color: #61616c;
+  color: var(--text-dim);
 }
 .inspector-content {
   flex: 1;
@@ -26,7 +26,7 @@
   padding: 22px 21px 30px;
   overflow: auto;
   scrollbar-width: thin;
-  scrollbar-color: #38383e #101012;
+  scrollbar-color: var(--scrollbar) var(--panel-raised);
 }
 .inspector-sha {
   display: flex;
@@ -35,7 +35,7 @@
 }
 .inspector-sha code {
   font-size: 10px;
-  color: #7d7d88;
+  color: var(--muted);
   overflow-wrap: anywhere;
   user-select: all;
   line-height: 1.7;
@@ -48,7 +48,7 @@
   font-size: 15px;
   line-height: 1.55;
   font-weight: 600;
-  color: #dddde2;
+  color: var(--text-heading);
   overflow-wrap: anywhere;
 }
 .commit-message {
@@ -56,7 +56,7 @@
   line-height: 1.8;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  color: #a4a4af;
+  color: var(--text-body);
   margin: 0 0 17px;
 }
 .commit-message:empty {
@@ -86,16 +86,16 @@
   margin: 0;
 }
 .commit-metadata dt {
-  color: #777781;
+  color: var(--muted);
 }
 .commit-metadata dd {
   margin: 0;
-  color: #b9b9c4;
+  color: var(--text-secondary);
   overflow-wrap: anywhere;
 }
 .author-email {
   display: block;
-  color: #666672;
+  color: var(--text-dim);
   font-size: 10px;
 }
 .parent-link {
@@ -103,7 +103,7 @@
   font-size: 10px;
   padding: 0;
   margin-right: 10px;
-  color: #87aaf1;
+  color: var(--link);
 }
 .parent-link:hover {
   text-decoration: underline;
@@ -115,48 +115,48 @@
   border-top: 1px solid var(--border);
   padding-top: 22px;
   margin-top: 26px;
-  color: #9797a3;
+  color: var(--text-body);
   font-size: 11px;
 }
 .change-summary {
-  color: #5b5b67;
+  color: var(--text-faint);
   text-align: right;
 }
 .diff-policy {
   font-size: 10px;
-  color: #5b5b67;
+  color: var(--text-faint);
   line-height: 1.7;
   margin: 9px 0 15px;
 }
 .changed-file-tree {
   flex: 1 0 240px;
   margin: 0 -21px -30px;
-  --trees-bg-override: #0b0b0c;
-  --trees-bg-muted-override: #151518;
-  --trees-fg-override: #aaaab6;
+  --trees-bg-override: var(--canvas);
+  --trees-bg-muted-override: var(--border);
+  --trees-fg-override: var(--text-body);
   --trees-fg-muted-override: var(--muted);
   --trees-accent-override: var(--blue);
-  --trees-selected-bg-override: #172338;
-  --trees-selected-fg-override: #e6e6ea;
-  --trees-focus-ring-color-override: #538fdd;
+  --trees-selected-bg-override: var(--nav-selected-bg);
+  --trees-selected-fg-override: var(--text-strong);
+  --trees-focus-ring-color-override: var(--focus);
   --trees-border-color-override: var(--border);
-  --trees-indent-guide-bg-override: #1d1d22;
-  --trees-scrollbar-thumb-override: #38383e;
+  --trees-indent-guide-bg-override: var(--separator);
+  --trees-scrollbar-thumb-override: var(--scrollbar);
   --trees-font-family-override: "Inter Variable", Inter, sans-serif;
   --trees-font-size-override: 11px;
   --trees-padding-inline-override: 13px;
-  --trees-status-added-override: #34bc90;
-  --trees-status-deleted-override: #e3727e;
-  --trees-status-modified-override: #e4b75b;
+  --trees-status-added-override: var(--success);
+  --trees-status-deleted-override: var(--deleted);
+  --trees-status-modified-override: var(--warning);
 }
 .copy-status,
 .copy-error {
   font-size: 10px;
   margin: 4px 0;
-  color: #71b6a0;
+  color: var(--success-muted);
 }
 .copy-error {
-  color: #d6998c;
+  color: var(--error-text);
 }
 .inspector-empty {
   flex: 1;
@@ -165,7 +165,7 @@
   align-items: center;
   justify-content: center;
   padding: 30px;
-  color: #60606c;
+  color: var(--text-dim);
   text-align: center;
   line-height: 1.7;
   font-size: 12px;

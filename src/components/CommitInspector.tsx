@@ -1,11 +1,6 @@
 import { useEffect, useState } from "react";
-import {
-  Check,
-  Copy,
-  GitCommitHorizontal,
-  LoaderCircle,
-  X,
-} from "lucide-react";
+import type { ReactNode } from "react";
+import { Check, Copy, GitCommitHorizontal, LoaderCircle } from "lucide-react";
 import type {
   Oid,
   RepositoryRoot,
@@ -22,7 +17,7 @@ type Props = {
   onSelect: (oid: Oid) => void;
   selectedFile: string | null;
   onSelectFile: (path: string) => void;
-  onClose: () => void;
+  toggleButton: ReactNode;
   onRetry: () => void;
 };
 
@@ -34,7 +29,7 @@ export function CommitInspector({
   onSelect,
   selectedFile,
   onSelectFile,
-  onClose,
+  toggleButton,
   onRetry,
 }: Props) {
   const [copy, setCopy] = useState<"idle" | "copied" | "failed">("idle");
@@ -63,14 +58,7 @@ export function CommitInspector({
     <aside className="inspector" aria-label="Commit inspector">
       <div className="inspector-heading">
         <span>Commit details</span>
-        <button
-          className="icon-button"
-          aria-label="Hide inspector"
-          title="Hide inspector"
-          onClick={onClose}
-        >
-          <X size={15} />
-        </button>
+        {toggleButton}
       </div>
       {detail ? (
         <div className="inspector-content">

@@ -20,7 +20,7 @@
   min-width: 0;
   font-family: var(--mono);
   font-size: 11px;
-  color: #b9b9c4;
+  color: var(--text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -28,27 +28,27 @@
 .diff-style {
   display: flex;
   padding: 2px;
-  border: 1px solid #27272c;
+  border: 1px solid var(--border-control);
   border-radius: 6px;
-  background: #111113;
+  background: var(--control);
 }
 .diff-style button {
   height: 26px;
   padding: 0 10px;
   border-radius: 4px;
   font-size: 11px;
-  color: #8a8a95;
+  color: var(--text-icon);
 }
 .diff-style button[aria-pressed="true"] {
-  background: #1f2633;
-  color: #e6e6ea;
+  background: var(--segment-selected);
+  color: var(--text-strong);
 }
 .file-diff-scroll {
   flex: 1;
   min-height: 0;
   overflow: auto;
   scrollbar-width: thin;
-  scrollbar-color: #38383e #101012;
+  scrollbar-color: var(--scrollbar) var(--panel-raised);
 }
 .file-diff-empty {
   flex: 1;
@@ -58,7 +58,7 @@
   justify-content: center;
   gap: 4px;
   padding: 30px;
-  color: #60606c;
+  color: var(--text-dim);
   text-align: center;
   line-height: 1.7;
   font-size: 12px;

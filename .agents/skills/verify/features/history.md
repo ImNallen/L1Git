@@ -16,7 +16,7 @@ Add the fixture's `repository` path. Expand **Local branches** and **Remote bran
 4. Select **All branches**. Confirm the merge has two graph edges to real parents and the graph rejoins their ancestor.
 5. Focus **Search loaded history**. Search `graph`, then a known short SHA, then a nonexistent subject. Confirm matching rows, an explicit loaded-history label, and the empty result. Connections are hidden while filtering.
 6. Clear search with **Clear history search** or Escape. Use **Filter repositories and branches** to find `remote-inspector`, then clear the filter.
-7. Create an additional commit only in the fixture with Git. Click **Refresh**. Confirm it appears and that the footer describes a local read, not a fetch.
+7. Create an additional commit only in the fixture with Git. Click **Refresh**. Confirm it appears while the checked-out branch remains unchanged.
 8. Switch rapidly between saved repositories. Confirm the final view belongs to the last selected root.
 
 ## Gotchas

@@ -27,6 +27,8 @@ Select a commit to inspect its message, author, date, parents, and changed paths
 
 The repository list and last active repository survive reloads and restarts in versioned local storage. Remove a repository with the row's **Remove from recents** button. This removes only the saved entry. It never deletes repository files.
 
+Click **Settings** at the bottom of the sidebar to open **Appearance**. Choose **System**, **Light**, or **Dark**. System follows your operating system appearance. The app saves your choice on this device. Click **Back** or press Escape to return to your repository with its filters, selected commit, and open diff preserved.
+
 ## Run the browser preview
 
 ```sh

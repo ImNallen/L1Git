@@ -105,7 +105,7 @@ export function RepositoryTree({
         <Search size={15} />
         <input
           aria-label="Filter repositories and branches"
-          placeholder="Find a repository or branch"
+          placeholder="Search"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
@@ -117,10 +117,6 @@ export function RepositoryTree({
         >
           <Plus size={18} />
         </button>
-      </div>
-      <div className="sidebar-section-label">
-        <span>Repositories</span>
-        <span>{entries.length}</span>
       </div>
       <nav className="repository-tree" aria-label="Repositories and branches">
         {entriesShown.map((entry) => {
@@ -144,12 +140,6 @@ export function RepositoryTree({
                   ) : (
                     <ChevronRight size={13} />
                   )}
-                  <span className="repo-monogram">
-                    {entry.name
-                      .replace(/^l1[- ]?/i, "")
-                      .slice(0, 2)
-                      .toUpperCase() || "G"}
-                  </span>
                   <span>{entry.name}</span>
                 </button>
                 <button
@@ -287,10 +277,6 @@ export function RepositoryTree({
           <p className="tree-hint">No repositories or branches match.</p>
         )}
       </nav>
-      <div className="sidebar-bottom">
-        <span className="status-dot" />
-        Local repositories<span className="shortcut">⌘/Ctrl O</span>
-      </div>
     </>
   );
 }
