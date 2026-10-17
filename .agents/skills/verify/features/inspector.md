@@ -15,8 +15,8 @@ Open the fixture repository and select **All branches**. Use **Toggle commit ins
 3. Select `feat(inspector): show commit message and changed paths`. Confirm the summary `4 added · 1 deleted · 1 modified` and a tree with open `assets` and flattened `src / inspector` directories, with `icon.png`, `files/tree.ts`, and `panel.ts` beneath them. Confirm `graph.ts` has a `D` marker, `history.ts` an `M` marker, and the added paths `A` markers. Clicking a file opens its diff, covered in [Read a file diff](diff.md).
 4. Select `docs: start the local Git fixture`. Confirm **Root commit**, an empty-tree comparison, and the added `README.md` path.
 5. Click **Copy commit SHA**. Confirm the copied status and clipboard content when the driver has clipboard access.
-6. Drag **Resize commit inspector**, or focus the separator and use arrow keys. Confirm a width change. Hide and reopen the inspector with its controls.
-7. Resize below 1100 pixels. Confirm the inspector hides and its toggle reopens it as an overlay. Confirm horizontal history scrolling remains usable.
+6. At a width of at least 1100 pixels, confirm the inspector and its separator span the full workspace height, aligned with the left sidebar at the top and bottom. Confirm the repository toolbar sits beside the inspector. Drag **Resize commit inspector**, or focus the separator and use arrow keys. Confirm a width change. Hide and reopen the inspector with its controls.
+7. Resize below 1100 pixels. Confirm the inspector hides and its toggle reopens it as an overlay from the workspace top to the bottom. Confirm the resize separator is hidden. Close the overlay with **Hide inspector**, then reopen it with **Toggle commit inspector**. Confirm horizontal history scrolling remains usable.
 
 ## Gotchas
 

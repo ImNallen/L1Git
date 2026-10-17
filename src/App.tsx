@@ -193,192 +193,194 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
       )}
       <main className="workspace">
         <div className="repository-workspace" hidden={screen !== "repository"}>
-          <header className="toolbar" data-tauri-drag-region>
-            {screen === "repository" && !sidebarOpen && sidebarToggle}
-            <div className="breadcrumb" data-tauri-drag-region>
-              {snapshot ? (
-                <>
-                  <span className="repository-name" title={snapshot.root}>
-                    {snapshot.name}
-                  </span>
-                  <span className="breadcrumb-slash">/</span>
-                  <GitBranch size={15} />
-                  <span
-                    className={
-                      snapshot.head.kind === "detached"
-                        ? "detached-head"
-                        : "head-name"
-                    }
-                    title="Checked-out HEAD. Selecting a branch browses history without checkout."
-                  >
-                    {headLabel(snapshot.head)}
-                  </span>
-                </>
-              ) : (
-                <span className="muted">Workspace</span>
-              )}
-            </div>
-            <div className="toolbar-actions">
-              <button
-                className="button secondary add-toolbar"
-                onClick={() => setAdding(true)}
-                title="Add repository (⌘/Ctrl O)"
-              >
-                <Plus size={15} />
-                <span>Add repository</span>
-              </button>
-              {current && (
-                <button
-                  className="button secondary"
-                  disabled={busy}
-                  onClick={() => void app.browse(current.reference)}
-                  title="Reread local Git state. Does not fetch remote data."
-                >
-                  <RefreshCw size={14} className={busy ? "spin" : ""} />
-                  <span>Refresh</span>
-                </button>
-              )}
-              <button
-                className={`icon-button ${inspectorOpen ? "toggled" : ""}`}
-                disabled={!snapshot}
-                aria-label="Toggle commit inspector"
-                title="Toggle commit inspector"
-                aria-pressed={inspectorOpen}
-                onClick={() => setInspectorOpen((open) => !open)}
-              >
-                <PanelRight size={16} />
-              </button>
-            </div>
-          </header>
-          {app.persistenceError && (
-            <div className="notice error-notice" role="alert">
-              <TriangleAlert size={14} />
-              <span>{app.persistenceError}</span>
-            </div>
-          )}
-          {current?.error && (
-            <div className="notice error-notice" role="alert">
-              <TriangleAlert size={14} />
-              <span>
-                {current.error.message} The last successful view is retained.
-              </span>
-              <button onClick={() => void app.browse(null)}>
-                Read all branches
-              </button>
-            </div>
-          )}
-          <div className="workspace-panes">
-            {snapshot && current ? (
-              <>
-                <History
-                  snapshot={snapshot}
-                  reference={current.reference}
-                  selectedOid={app.selectedOid}
-                  query={query}
-                  onQuery={setQuery}
-                  onSelect={app.setSelectedOid}
-                  onBrowse={(reference) => void app.browse(reference)}
-                  searchRef={searchRef}
-                  busy={busy}
-                  hidden={fileOpen}
-                />
-                {fileDiff.kind !== "closed" && (
-                  <FileDiffPane
-                    state={fileDiff}
-                    diffStyle={diffStyle}
-                    theme={appearance.resolvedTheme}
-                    onDiffStyle={setDiffStyle}
-                    onBack={closeFile}
-                    onRetry={() => app.openFile(fileDiff.path)}
-                  />
-                )}
-                {inspectorOpen && (
+          <div className="repository-content">
+            <header className="toolbar" data-tauri-drag-region>
+              {screen === "repository" && !sidebarOpen && sidebarToggle}
+              <div className="breadcrumb" data-tauri-drag-region>
+                {snapshot ? (
                   <>
-                    <PaneDivider
-                      label="Resize commit inspector"
-                      width={inspectorWidth}
-                      min={280}
-                      max={500}
-                      direction={-1}
-                      onResize={setInspectorWidth}
-                    />
-                    <div
-                      className="inspector-container"
-                      style={{ width: inspectorWidth }}
+                    <span className="repository-name" title={snapshot.root}>
+                      {snapshot.name}
+                    </span>
+                    <span className="breadcrumb-slash">/</span>
+                    <GitBranch size={15} />
+                    <span
+                      className={
+                        snapshot.head.kind === "detached"
+                          ? "detached-head"
+                          : "head-name"
+                      }
+                      title="Checked-out HEAD. Selecting a branch browses history without checkout."
                     >
-                      <CommitInspector
-                        state={app.detail}
-                        root={snapshot.root}
-                        selectedOid={app.selectedOid}
-                        snapshot={snapshot}
-                        onSelect={app.setSelectedOid}
-                        selectedFile={fileOpen ? fileDiff.path : null}
-                        onSelectFile={app.openFile}
-                        onClose={() => setInspectorOpen(false)}
-                        onRetry={app.retryDetail}
-                      />
-                    </div>
+                      {headLabel(snapshot.head)}
+                    </span>
                   </>
+                ) : (
+                  <span className="muted">Workspace</span>
                 )}
-              </>
-            ) : workspace.kind === "loading" ? (
-              <div className="workspace-empty" role="status">
-                <LoaderCircle size={28} className="spin" />
-                <h1>Opening repository</h1>
-                <p className="path-label">{workspace.path}</p>
               </div>
-            ) : workspace.kind === "error" ? (
-              <div className="workspace-empty">
-                <div className="empty-icon error-icon">
-                  <TriangleAlert size={32} />
-                </div>
-                <h1>Could not open this repository</h1>
-                <p className="path-label">{workspace.path}</p>
-                <p role="alert">{workspace.error.message}</p>
-                <div className="empty-actions">
+              <div className="toolbar-actions">
+                <button
+                  className="button secondary add-toolbar"
+                  onClick={() => setAdding(true)}
+                  title="Add repository (⌘/Ctrl O)"
+                >
+                  <Plus size={15} />
+                  <span>Add repository</span>
+                </button>
+                {current && (
                   <button
                     className="button secondary"
-                    onClick={() => void app.selectRepository(workspace.path)}
+                    disabled={busy}
+                    onClick={() => void app.browse(current.reference)}
+                    title="Reread local Git state. Does not fetch remote data."
                   >
-                    Try again
+                    <RefreshCw size={14} className={busy ? "spin" : ""} />
+                    <span>Refresh</span>
                   </button>
+                )}
+                <button
+                  className={`icon-button ${inspectorOpen ? "toggled" : ""}`}
+                  disabled={!snapshot}
+                  aria-label="Toggle commit inspector"
+                  title="Toggle commit inspector"
+                  aria-pressed={inspectorOpen}
+                  onClick={() => setInspectorOpen((open) => !open)}
+                >
+                  <PanelRight size={16} />
+                </button>
+              </div>
+            </header>
+            {app.persistenceError && (
+              <div className="notice error-notice" role="alert">
+                <TriangleAlert size={14} />
+                <span>{app.persistenceError}</span>
+              </div>
+            )}
+            {current?.error && (
+              <div className="notice error-notice" role="alert">
+                <TriangleAlert size={14} />
+                <span>
+                  {current.error.message} The last successful view is retained.
+                </span>
+                <button onClick={() => void app.browse(null)}>
+                  Read all branches
+                </button>
+              </div>
+            )}
+            <div className="workspace-panes">
+              {snapshot && current ? (
+                <>
+                  <History
+                    snapshot={snapshot}
+                    reference={current.reference}
+                    selectedOid={app.selectedOid}
+                    query={query}
+                    onQuery={setQuery}
+                    onSelect={app.setSelectedOid}
+                    onBrowse={(reference) => void app.browse(reference)}
+                    searchRef={searchRef}
+                    busy={busy}
+                    hidden={fileOpen}
+                  />
+                  {fileDiff.kind !== "closed" && (
+                    <FileDiffPane
+                      state={fileDiff}
+                      diffStyle={diffStyle}
+                      theme={appearance.resolvedTheme}
+                      onDiffStyle={setDiffStyle}
+                      onBack={closeFile}
+                      onRetry={() => app.openFile(fileDiff.path)}
+                    />
+                  )}
+                </>
+              ) : workspace.kind === "loading" ? (
+                <div className="workspace-empty" role="status">
+                  <LoaderCircle size={28} className="spin" />
+                  <h1>Opening repository</h1>
+                  <p className="path-label">{workspace.path}</p>
+                </div>
+              ) : workspace.kind === "error" ? (
+                <div className="workspace-empty">
+                  <div className="empty-icon error-icon">
+                    <TriangleAlert size={32} />
+                  </div>
+                  <h1>Could not open this repository</h1>
+                  <p className="path-label">{workspace.path}</p>
+                  <p role="alert">{workspace.error.message}</p>
+                  <div className="empty-actions">
+                    <button
+                      className="button secondary"
+                      onClick={() => void app.selectRepository(workspace.path)}
+                    >
+                      Try again
+                    </button>
+                    <button
+                      className="button primary"
+                      onClick={() => setAdding(true)}
+                    >
+                      Choose another folder
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="workspace-empty starter">
+                  <div className="empty-icon">
+                    <FolderGit2 size={34} strokeWidth={1.3} />
+                  </div>
+                  <span className="eyebrow">L1 Git</span>
+                  <h1>Open your first repository</h1>
+                  <p>
+                    Browse your branches, follow the commit graph,
+                    <br />
+                    and see the story behind each change.
+                  </p>
                   <button
                     className="button primary"
                     onClick={() => setAdding(true)}
                   >
-                    Choose another folder
+                    <Plus size={16} />
+                    Add repository
                   </button>
+                  <span className="empty-shortcut">
+                    or press <kbd>⌘ / Ctrl</kbd> <kbd>O</kbd>
+                  </span>
+                  <div className="empty-scope">
+                    <span className="status-dot" />
+                    Reads local Git data. Your working copy stays yours.
+                  </div>
                 </div>
-              </div>
-            ) : (
-              <div className="workspace-empty starter">
-                <div className="empty-icon">
-                  <FolderGit2 size={34} strokeWidth={1.3} />
-                </div>
-                <span className="eyebrow">L1 Git</span>
-                <h1>Open your first repository</h1>
-                <p>
-                  Browse your branches, follow the commit graph,
-                  <br />
-                  and see the story behind each change.
-                </p>
-                <button
-                  className="button primary"
-                  onClick={() => setAdding(true)}
-                >
-                  <Plus size={16} />
-                  Add repository
-                </button>
-                <span className="empty-shortcut">
-                  or press <kbd>⌘ / Ctrl</kbd> <kbd>O</kbd>
-                </span>
-                <div className="empty-scope">
-                  <span className="status-dot" />
-                  Reads local Git data. Your working copy stays yours.
-                </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
+          {snapshot && current && inspectorOpen && (
+            <>
+              <PaneDivider
+                label="Resize commit inspector"
+                width={inspectorWidth}
+                min={280}
+                max={500}
+                direction={-1}
+                onResize={setInspectorWidth}
+              />
+              <div
+                className="inspector-container"
+                style={{ width: inspectorWidth }}
+              >
+                <CommitInspector
+                  state={app.detail}
+                  root={snapshot.root}
+                  selectedOid={app.selectedOid}
+                  snapshot={snapshot}
+                  onSelect={app.setSelectedOid}
+                  selectedFile={fileOpen ? fileDiff.path : null}
+                  onSelectFile={app.openFile}
+                  onClose={() => setInspectorOpen(false)}
+                  onRetry={app.retryDetail}
+                />
+              </div>
+            </>
+          )}
         </div>
         {screen === "settings" && (
           <>

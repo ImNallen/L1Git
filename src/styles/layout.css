@@ -243,7 +243,7 @@ kbd {
 @media (max-width: 1099px) {
   .inspector-container {
     position: absolute;
-    top: 58px;
+    top: 0;
     right: 0;
     bottom: 0;
     z-index: 5;
@@ -251,7 +251,7 @@ kbd {
     border-left: 1px solid var(--border-strong);
     box-shadow: -12px 0 40px var(--shadow-pane);
   }
-  .workspace-panes > .pane-divider {
+  .repository-workspace > .pane-divider {
     display: none;
   }
   .history-summary > span:last-child {
@@ -292,6 +292,14 @@ kbd {
 }
 
 .repository-workspace {
+  position: relative;
+  display: flex;
+  flex-direction: row;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+.repository-content {
   display: flex;
   flex-direction: column;
   flex: 1;
