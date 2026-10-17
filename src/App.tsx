@@ -42,6 +42,18 @@ export function App() {
     (workspace.kind === "loading" || workspace.kind === "error"
       ? workspace.path
       : null);
+  const inspectorToggle = (
+    <button
+      className={`icon-button ${inspectorOpen ? "toggled" : ""}`}
+      disabled={!snapshot}
+      aria-label="Toggle commit inspector"
+      title="Toggle commit inspector"
+      aria-pressed={inspectorOpen}
+      onClick={() => setInspectorOpen((open) => !open)}
+    >
+      <PanelRight size={16} />
+    </button>
+  );
 
   useEffect(() => {
     setQuery("");
@@ -98,6 +110,7 @@ export function App() {
               <span className="brand-icon" data-tauri-drag-region>
                 L1
               </span>
+              {inspectorToggle}
               <span data-tauri-drag-region>
                 L1{" "}
                 <span className="muted" data-tauri-drag-region>
@@ -184,17 +197,12 @@ export function App() {
                 <span>Refresh</span>
               </button>
             )}
-            <span className="toolbar-separator" />
-            <button
-              className={`icon-button ${inspectorOpen ? "toggled" : ""}`}
-              disabled={!snapshot}
-              aria-label="Toggle commit inspector"
-              title="Toggle commit inspector"
-              aria-pressed={inspectorOpen}
-              onClick={() => setInspectorOpen(!inspectorOpen)}
-            >
-              <PanelRight size={16} />
-            </button>
+            {!sidebarOpen && (
+              <>
+                <span className="toolbar-separator" />
+                {inspectorToggle}
+              </>
+            )}
           </div>
         </header>
         {app.persistenceError && (
