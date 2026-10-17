@@ -6,7 +6,7 @@
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: var(--panel);
+  background: var(--canvas);
 }
 .inspector-heading {
   height: 40px;
@@ -131,7 +131,7 @@
 .changed-file-tree {
   flex: 1 0 240px;
   margin: 0 -21px -30px;
-  --trees-bg-override: var(--panel);
+  --trees-bg-override: var(--canvas);
   --trees-bg-muted-override: var(--border);
   --trees-fg-override: var(--text-body);
   --trees-fg-muted-override: var(--muted);
