@@ -5,8 +5,6 @@ use crate::{
 };
 use std::{collections::HashSet, path::Path, time::Duration};
 
-/// Fetches every remote in turn, like `git fetch --all`, so one dead remote
-/// cannot hide fresh data from the others.
 pub(super) fn fetch_all(root: &Path, deadline: Duration) -> Result<FetchSummary, RepositoryError> {
     let before = tips(root)?;
     let names = git::read(root, &["remote"])?;

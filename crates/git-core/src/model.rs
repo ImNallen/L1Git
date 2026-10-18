@@ -354,8 +354,7 @@ pub enum AdvanceOutcome {
 pub enum SkipReason {
     /// The branch or its upstream no longer matches the request.
     Changed,
-    /// `from` is not an ancestor of `to`.
-    NotFastForward,
+    NotBehind,
     Dirty {
         worktree: String,
     },

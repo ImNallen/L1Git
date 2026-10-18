@@ -121,8 +121,6 @@ git(
 git(repository, "worktree", "add", "--detach", detached, "feat/history");
 git(unborn, "init", "--initial-branch=main");
 
-// A separate world for fetch and fast-forward, so the reader fixture above
-// keeps its exact branch counts.
 const sync = {
   repository: join(root, "sync-demo"),
   remote: join(root, "sync-remote.git"),

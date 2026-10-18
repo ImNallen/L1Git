@@ -127,14 +127,10 @@ pub(crate) fn malformed() -> RepositoryError {
     )
 }
 
-/// The complete list of Git commands that contact a remote or move a ref. Nothing
-/// here can create a merge commit, rebase, push, reset, or check out.
 pub(crate) enum Mutation<'a> {
     Fetch {
         remote: &'a str,
     },
-    /// Writes nothing. Git's refusals report a branch checked out in any worktree,
-    /// including one hidden by a rebase or bisect, which `%(worktreepath)` misses.
     ProbeFastForward {
         branch: &'a BranchRef,
         to: &'a Oid,
@@ -195,12 +191,9 @@ pub(crate) enum Finished {
 
 const STDERR_CAP: u64 = 64 * 1024;
 const POLL: Duration = Duration::from_millis(10);
-const STDERR_GRACE: Duration = Duration::from_secs(1);
+const INHERITED_STDERR_WAIT: Duration = Duration::from_secs(1);
 const TERMINATE_GRACE: Duration = Duration::from_secs(2);
 
-/// Runs a mutation with no stdin, no prompts, and a deadline. At the deadline the
-/// whole process group dies, so an ssh or credential helper started by Git cannot
-/// outlive it.
 pub(crate) fn mutate(
     path: &Path,
     mutation: Mutation<'_>,
@@ -237,8 +230,9 @@ pub(crate) fn mutate(
         if let Some(status) = child.try_wait().map_err(|error| {
             RepositoryError::new(ErrorKind::GitFailed, format!("Could not run Git: {error}"))
         })? {
-            // A daemon that inherited stderr must not hold the caller past exit.
-            let stderr = receiver.recv_timeout(STDERR_GRACE).unwrap_or_default();
+            let stderr = receiver
+                .recv_timeout(INHERITED_STDERR_WAIT)
+                .unwrap_or_default();
             return Ok(if status.success() {
                 Finished::Succeeded
             } else {

@@ -76,7 +76,7 @@ export const overviewSchema = z.object({
 });
 const skipReasonSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("changed") }),
-  z.object({ kind: z.literal("notFastForward") }),
+  z.object({ kind: z.literal("notBehind") }),
   z.object({ kind: z.literal("dirty"), worktree: rootSchema }),
   z.object({ kind: z.literal("inUse"), worktree: rootSchema }),
   z.object({ kind: z.literal("failed"), message: z.string() }),
@@ -110,8 +110,6 @@ export type FastForwardReport = z.infer<typeof fastForwardReportSchema>;
 export type FetchMode = "local" | "remote";
 export type Advance = { reference: BranchRef; from: Oid; to: Oid };
 
-/** The exact pairs the user sees as ready. Rust decides readiness; a `behind`
- * row with no blocker is the only kind that qualifies. */
 export function readyAdvances(overview: RepositoryOverview): Advance[] {
   return overview.branches.flatMap((branch) =>
     branch.state.kind === "behind" && branch.state.blocker === null

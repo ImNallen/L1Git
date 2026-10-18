@@ -27,7 +27,6 @@ const OPERATION_STATE: [&str; 7] = [
 
 pub(super) struct Repository {
     pub root: PathBuf,
-    /// Canonical, so every worktree of one repository maps to the same gate.
     pub common_dir: PathBuf,
 }
 
@@ -269,8 +268,6 @@ enum Track {
     Counts { ahead: u32, behind: u32 },
 }
 
-/// `%(upstream:track,nobracket)` is empty, `gone`, `ahead N`, `behind N`, or
-/// `ahead N, behind M`.
 fn parse_track(track: &str) -> Option<Track> {
     if track == "gone" {
         return Some(Track::Gone);
@@ -315,7 +312,6 @@ fn state(upstream: &str, track: Track, target: Option<Oid>) -> BranchState {
     }
 }
 
-/// `branches` are (name, upstream ref) pairs; `remote_heads` are (remote, target).
 fn roles(branches: &[(&str, &str)], remote_heads: &[(&str, &str)]) -> Vec<BranchRole> {
     let remote_head = remote_heads
         .iter()
@@ -411,7 +407,6 @@ struct Occupant {
     dirty: bool,
 }
 
-/// Facts about a worktree. A fact Git cannot report counts against moving the branch.
 fn occupant(worktree: &str) -> Result<Occupant, RepositoryError> {
     let path = Path::new(worktree);
     let head = git::run(path, &["symbolic-ref", "--quiet", "HEAD"])?;
@@ -435,8 +430,8 @@ fn occupant(worktree: &str) -> Result<Occupant, RepositoryError> {
     })
 }
 
-/// The one safety rule. Untracked files never block, because Git refuses the
-/// merge itself when it would overwrite one.
+/// Untracked files never block, because Git refuses the merge itself when it
+/// would overwrite one.
 fn blocker_for(branch: &BranchRef, occupant: &Occupant) -> Option<Blocker> {
     let worktree = occupant.worktree.clone();
     if occupant.head.as_deref() != Some(branch.as_str()) || occupant.mid_operation {

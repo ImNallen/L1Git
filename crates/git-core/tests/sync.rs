@@ -44,7 +44,6 @@ fn git(path: &Path, args: &[&str]) -> String {
         .to_owned()
 }
 
-/// A working copy, its bare `origin`, and a colleague's clone that pushes to it.
 struct World {
     directory: TempDir,
     remote: PathBuf,
@@ -353,10 +352,7 @@ fn reports_divergence_and_refuses_a_forged_fast_forward() {
     let report = coordinator
         .fast_forward(world.path(), &[advance("feat", &ours, &theirs)])
         .unwrap();
-    assert_eq!(
-        report.outcomes,
-        [skipped("feat", SkipReason::NotFastForward)]
-    );
+    assert_eq!(report.outcomes, [skipped("feat", SkipReason::NotBehind)]);
     assert_eq!(git(&world.work, &["rev-parse", "feat"]), ours);
 }
 

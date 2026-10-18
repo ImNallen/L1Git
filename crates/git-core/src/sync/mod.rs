@@ -67,8 +67,7 @@ impl Coordinator {
 
     /// The local branches of the repository containing `path`. With
     /// `FetchMode::Remote`, fetch its remotes first, unless a fetch of the same
-    /// repository finished after this call started. Errors only when `path`
-    /// cannot be opened; fetch failures are reported per remote.
+    /// repository finished after this call started.
     pub fn overview(
         &self,
         path: &str,
@@ -81,7 +80,7 @@ impl Coordinator {
             return read::read(&repository, None, deadline);
         }
         let gate = self.gate(&repository.common_dir);
-        let mut gate = lock(&gate);
+        let mut gate = lock_ignoring_poison(&gate);
         let summary = match &gate.last_fetch {
             Some((finished, summary)) if *finished > requested => FetchSummary {
                 coalesced: true,
@@ -111,7 +110,7 @@ impl Coordinator {
         let repository = read::open(path)?;
         let deadline = self.limits.local_deadline;
         let gate = self.gate(&repository.common_dir);
-        let _gate = lock(&gate);
+        let _gate = lock_ignoring_poison(&gate);
         let outcomes = advances
             .iter()
             .map(|request| {
@@ -132,12 +131,15 @@ impl Coordinator {
     }
 
     fn gate(&self, common_dir: &Path) -> Arc<Mutex<Gate>> {
-        Arc::clone(lock(&self.gates).entry(common_dir.to_owned()).or_default())
+        Arc::clone(
+            lock_ignoring_poison(&self.gates)
+                .entry(common_dir.to_owned())
+                .or_default(),
+        )
     }
 }
 
-/// A panicking holder leaves no half-written state behind these locks.
-fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+fn lock_ignoring_poison<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
@@ -159,7 +161,7 @@ impl Semaphore {
     fn acquire(&self) -> Permit<'_> {
         let mut free = self
             .released
-            .wait_while(lock(&self.free), |free| *free == 0)
+            .wait_while(lock_ignoring_poison(&self.free), |free| *free == 0)
             .unwrap_or_else(PoisonError::into_inner);
         *free -= 1;
         Permit(self)
@@ -168,7 +170,7 @@ impl Semaphore {
 
 impl Drop for Permit<'_> {
     fn drop(&mut self) {
-        *lock(&self.0.free) += 1;
+        *lock_ignoring_poison(&self.0.free) += 1;
         self.0.released.notify_one();
     }
 }

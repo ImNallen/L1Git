@@ -3,8 +3,6 @@ use crate::{FetchFailure, remotes::display_url};
 const SUMMARY_LINES: usize = 2;
 const SUMMARY_CHARS: usize = 300;
 
-/// Sorts a failed fetch by what the user can do about it. Git writes these
-/// messages in English because every command runs with `LC_ALL=C`.
 pub(super) fn classify(stderr: &str) -> FetchFailure {
     let has = |needles: &[&str]| needles.iter().any(|needle| stderr.contains(needle));
     if has(&["cannot lock ref", ".lock': File exists", "Unable to create"]) {
@@ -38,7 +36,6 @@ pub(super) fn classify(stderr: &str) -> FetchFailure {
     }
 }
 
-/// The first lines of Git's message, with credentials removed from any URL.
 pub(super) fn summarize(stderr: &str) -> String {
     let summary = stderr
         .lines()

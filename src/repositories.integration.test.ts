@@ -430,7 +430,7 @@ describe("real Rust fetch and fast-forward contract", () => {
       {
         kind: "skipped",
         reference: "refs/heads/feat/diverged",
-        reason: { kind: "notFastForward" },
+        reason: { kind: "notBehind" },
       },
     ]);
     expect(state(updated.overview, "main")).toEqual({

@@ -12,12 +12,8 @@ use std::{path::Path, time::Duration};
 enum Plan<'a> {
     Done,
     Skip(SkipReason),
-    /// The branch is not checked out anywhere, so a compare-and-swap moves it.
     Move,
-    /// The branch is checked out in a clean worktree, so a merge there moves it.
-    Merge {
-        worktree: &'a str,
-    },
+    Merge { worktree: &'a str },
 }
 
 fn plan<'a>(advance: &Advance, current: Option<&'a Local>) -> Plan<'a> {
@@ -47,7 +43,7 @@ fn plan<'a>(advance: &Advance, current: Option<&'a Local>) -> Plan<'a> {
             (None, None) => Plan::Move,
         },
         BranchState::Behind { .. } => Plan::Skip(SkipReason::Changed),
-        _ => Plan::Skip(SkipReason::NotFastForward),
+        _ => Plan::Skip(SkipReason::NotBehind),
     }
 }
 
@@ -256,7 +252,7 @@ mod tests {
         );
         assert_eq!(
             plan(&request, Some(&diverged)),
-            Plan::Skip(SkipReason::NotFastForward)
+            Plan::Skip(SkipReason::NotBehind)
         );
     }
 }
