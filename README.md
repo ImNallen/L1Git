@@ -1,6 +1,6 @@
 # L1 Git
 
-L1 Git is a desktop Git client in the L1 family, built with Tauri 2, React, and TypeScript. This first slice browses real local repositories. It reads branches, commit history, and commit details without changing your working copy or contacting a remote.
+L1 Git is a desktop Git client in the L1 family, built with Tauri 2, React, and TypeScript. This slice browses real local repositories. It reads branches, commit history, and commit details. Its Rust core can also fetch remotes and fast-forward local branches that are strictly behind their upstream. It never merges, rebases, commits, pushes, or moves a checked-out branch whose tracked files have uncommitted changes.
 
 ## Run the desktop app
 
@@ -35,9 +35,9 @@ Click **Settings** at the bottom of the sidebar to open **Appearance**. Choose *
 pnpm dev
 ```
 
-Open <http://127.0.0.1:1422>. The browser uses the same Rust reader through a development-only loopback bridge on port 9417. The Add dialog accepts a local absolute path. The native directory picker is available in the desktop app.
+Open <http://127.0.0.1:1422>. The browser uses the same Rust core through a development-only loopback bridge on port 9417. The Add dialog accepts a local absolute path. The native directory picker is available in the desktop app.
 
-The bridge accepts JSON POST requests only from the development origin and exposes no Git write commands. It is not included in the native app. To run another isolated instance, choose both ports:
+The bridge accepts JSON POST requests only from the development origin. It exposes the same reads, fetch, and fast-forward as the app, and no other Git writes. It is not included in the native app. To run another isolated instance, choose both ports:
 
 ```sh
 L1GIT_DEV_PORT=1423 L1GIT_BRIDGE_PORT=9418 pnpm dev
@@ -53,7 +53,9 @@ pnpm fixture
 
 The command prints a temporary fixture directory and working-copy paths. Add the printed `repository` path to the app. It has two local branches, three remote branches, a merge commit, a commit with nested, modified, deleted, and binary paths, and GitHub metadata. Its `detached` and `unborn` paths cover those HEAD states. Its `remote` path is a local bare repository for the unsupported-path journey.
 
-Fixture creation pushes and fetches only against its temporary local bare repository. It never writes to GitHub. The configured GitHub remote is display metadata only.
+The `sync` paths are a second repository for fetch and fast-forward. After a fetch, `main` in `sync.repository` is one commit behind and ready to fast-forward. `develop` is behind but checked out in `sync.dirty` with an uncommitted edit. `feat/diverged` has diverged from its upstream. A `sync.colleague` clone made those remote commits.
+
+Fixture creation pushes and fetches only against its temporary local bare repositories. It never writes to GitHub. The configured GitHub remotes are display metadata only. In the sync repository, the `github` remote sets `remote.github.skipFetchAll`, so a fetch skips it.
 
 ## Check and build
 
@@ -68,6 +70,19 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer pnpm tauri build --debu
 
 The default Rust workspace members are the lightweight core and bridge. `pnpm test` builds the bridge, checks its real HTTP responses against the frontend schemas, and tests graph lanes and saved repositories. The macOS command builds an app in `target/debug/bundle/macos/L1 Git.app`.
 
-Rust owns `RepositorySnapshot`, exhaustive HEAD and branch variants, and Git parsing in `crates/git-core`. Thin Tauri commands and the bridge call that same reader. Runtime schemas in `src/domain/repository.ts` validate every frontend IPC response. The real-bridge integration tests check that contract against deterministic repositories.
+Rust owns `RepositorySnapshot`, `RepositoryOverview`, exhaustive HEAD, branch, and upstream variants, and Git parsing in `crates/git-core`. Rust also decides whether each branch can fast-forward. Thin Tauri commands and the bridge call that same core. Runtime schemas in `src/domain/repository.ts` and `src/domain/overview.ts` validate every frontend IPC response. The real-bridge integration tests check that contract against deterministic repositories.
 
-The app has no fetch, pull, push, checkout, or other Git write actions. GitHub owner/repository labels come only from recognized HTTPS or SSH URLs. Displayed remote URLs omit credentials. Authentication and other hosting providers are outside this slice.
+## What L1 Git changes
+
+The app does not show fetch or fast-forward controls yet. The Rust core runs exactly four Git commands that contact a remote or change a repository:
+
+- `git fetch <remote>` for each remote that does not set `skipFetchAll` or `skipDefaultUpdate`. It follows your `fetch.prune` setting and does not write `FETCH_HEAD`.
+- A dry-run `git fetch . <commit>:<branch>` that asks Git whether a branch is checked out in any worktree. It writes nothing. It runs only when some worktree has a detached HEAD, as a rebase or bisect leaves it. L1 Git does not move a branch when this check cannot answer.
+- `git update-ref` to move a branch that is not checked out. The branch moves only from the commit you saw to the upstream commit you saw.
+- `git merge --ff-only` inside the worktree of a checked-out branch. It runs only when that worktree has no uncommitted changes to tracked files and no merge, rebase, am, cherry-pick, revert, or bisect in progress. Git refuses it when the update would overwrite an untracked file.
+
+L1 Git runs at most one fetch or fast-forward at a time per repository, and at most four fetches at once. It never creates merge commits, rebases, commits, pushes, resets, or checks out.
+
+Fetch uses your SSH agent, credential helpers, and `core.sshCommand`. It ignores `GIT_SSH_COMMAND` and other `GIT_*` environment variables. L1 Git never prompts for a password, passphrase, or host key, so a remote that needs one reports an authentication failure. A fetch from one remote that takes longer than 5 minutes stops and reports a timeout. Error messages omit credentials from URLs.
+
+GitHub owner/repository labels come only from recognized HTTPS or SSH URLs. Displayed remote URLs omit credentials. Other hosting providers are outside this slice.
