@@ -1688,6 +1688,7 @@ dependencies = [
 name = "l1-git-core"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "serde",
  "tempfile",
  "url",

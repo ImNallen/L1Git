@@ -1,20 +1,25 @@
-use crate::{ErrorKind, RepositoryError};
+use crate::{BranchRef, ErrorKind, Oid, RepositoryError};
 use std::{
     io::{self, Read},
     path::Path,
-    process::{Command, Output, Stdio},
+    process::{Child, Command, Output, Stdio},
+    sync::mpsc,
+    thread,
+    time::{Duration, Instant},
 };
 
-fn command(path: &Path, args: &[&str]) -> Command {
+fn base(path: &Path, lazy_fetch: bool) -> Command {
     let mut command = Command::new("git");
     for (key, _) in std::env::vars_os() {
         if key.to_string_lossy().starts_with("GIT_") {
             command.env_remove(key);
         }
     }
+    if !lazy_fetch {
+        command.arg("--no-lazy-fetch");
+    }
     command
         .args([
-            "--no-lazy-fetch",
             "--no-pager",
             "-c",
             "color.ui=false",
@@ -23,11 +28,16 @@ fn command(path: &Path, args: &[&str]) -> Command {
             "-C",
         ])
         .arg(path)
-        .args(args)
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_OPTIONAL_LOCKS", "0")
         .env("GIT_NO_REPLACE_OBJECTS", "1")
         .env("LC_ALL", "C");
+    command
+}
+
+fn command(path: &Path, args: &[&str]) -> Command {
+    let mut command = base(path, false);
+    command.args(args);
     command
 }
 
@@ -115,4 +125,144 @@ pub(crate) fn malformed() -> RepositoryError {
         ErrorKind::GitFailed,
         "Git returned an unreadable record. Check the repository and your Git version.",
     )
+}
+
+/// The complete list of Git commands that contact a remote or move a ref. Nothing
+/// here can create a merge commit, rebase, push, reset, or check out.
+pub(crate) enum Mutation<'a> {
+    Fetch {
+        remote: &'a str,
+    },
+    /// Writes nothing. Git's refusals report a branch checked out in any worktree,
+    /// including one hidden by a rebase or bisect, which `%(worktreepath)` misses.
+    ProbeFastForward {
+        branch: &'a BranchRef,
+        to: &'a Oid,
+    },
+}
+
+impl Mutation<'_> {
+    fn args(&self) -> Vec<String> {
+        let owned = |args: &[&str]| args.iter().map(|arg| (*arg).to_owned()).collect();
+        match self {
+            Self::Fetch { remote } => owned(&[
+                "fetch",
+                "--no-write-fetch-head",
+                "--no-auto-maintenance",
+                "--recurse-submodules=no",
+                "--",
+                remote,
+            ]),
+            // The probe reads only this repository, so a ban on the file
+            // transport does not apply to it.
+            Self::ProbeFastForward { branch, to } => owned(&[
+                "-c",
+                "protocol.file.allow=always",
+                "fetch",
+                "--dry-run",
+                "--no-write-fetch-head",
+                "--no-auto-maintenance",
+                "--recurse-submodules=no",
+                ".",
+                &format!("{}:{}", to.as_str(), branch.as_str()),
+            ]),
+        }
+    }
+}
+
+pub(crate) enum Finished {
+    Succeeded,
+    Failed { stderr: String },
+    TimedOut,
+}
+
+const STDERR_CAP: u64 = 64 * 1024;
+const POLL: Duration = Duration::from_millis(10);
+const STDERR_GRACE: Duration = Duration::from_secs(1);
+const TERMINATE_GRACE: Duration = Duration::from_secs(2);
+
+/// Runs a mutation with no stdin, no prompts, and a deadline. At the deadline the
+/// whole process group dies, so an ssh or credential helper started by Git cannot
+/// outlive it.
+pub(crate) fn mutate(
+    path: &Path,
+    mutation: Mutation<'_>,
+    deadline: Duration,
+) -> Result<Finished, RepositoryError> {
+    let mut command = base(path, false);
+    command
+        .args(mutation.args())
+        .env("SSH_ASKPASS", "/usr/bin/false")
+        .env("SSH_ASKPASS_REQUIRE", "force")
+        .env("GCM_INTERACTIVE", "never")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut command, 0);
+    let started = Instant::now();
+    let mut child = command.spawn().map_err(spawn_error)?;
+    let (sender, receiver) = mpsc::channel();
+    if let Some(mut stderr) = child.stderr.take() {
+        thread::spawn(move || {
+            let mut kept = Vec::new();
+            let _ = (&mut stderr).take(STDERR_CAP).read_to_end(&mut kept);
+            let _ = io::copy(&mut stderr, &mut io::sink());
+            let _ = sender.send(kept);
+        });
+    }
+    loop {
+        if let Some(status) = child.try_wait().map_err(|error| {
+            RepositoryError::new(ErrorKind::GitFailed, format!("Could not run Git: {error}"))
+        })? {
+            // A daemon that inherited stderr must not hold the caller past exit.
+            let stderr = receiver.recv_timeout(STDERR_GRACE).unwrap_or_default();
+            return Ok(if status.success() {
+                Finished::Succeeded
+            } else {
+                Finished::Failed {
+                    stderr: text(&stderr),
+                }
+            });
+        }
+        if started.elapsed() >= deadline {
+            stop(&mut child);
+            return Ok(Finished::TimedOut);
+        }
+        thread::sleep(POLL);
+    }
+}
+
+/// Git deletes its lock files on SIGTERM but cannot on SIGKILL.
+#[cfg(unix)]
+fn stop(child: &mut Child) {
+    signal_group(child, libc::SIGTERM);
+    let asked = Instant::now();
+    while asked.elapsed() < TERMINATE_GRACE {
+        if !matches!(child.try_wait(), Ok(None)) {
+            return;
+        }
+        thread::sleep(POLL);
+    }
+    signal_group(child, libc::SIGKILL);
+    let _ = child.wait();
+}
+
+#[cfg(unix)]
+fn signal_group(child: &mut Child, signal: libc::c_int) {
+    let Ok(group) = i32::try_from(child.id()) else {
+        let _ = child.kill();
+        return;
+    };
+    // SAFETY: kill(2) takes no pointers. The group id is the pid of a child we have
+    // not reaped yet, so it cannot name another process group.
+    unsafe {
+        libc::kill(-group, signal);
+    }
+}
+
+#[cfg(not(unix))]
+fn stop(child: &mut Child) {
+    let _ = child.kill();
+    let _ = child.wait();
 }
