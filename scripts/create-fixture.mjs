@@ -118,6 +118,7 @@ git(
   "github",
   "git@github.com:l1-family/l1-git.git",
 );
+git(repository, "config", "remote.github.skipFetchAll", "true");
 git(repository, "worktree", "add", "--detach", detached, "feat/history");
 git(unborn, "init", "--initial-branch=main");
 

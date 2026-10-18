@@ -444,6 +444,18 @@ describe("real Rust fetch and fast-forward contract", () => {
     expect(git(dirty, "status", "--porcelain")).toBe("M README.md");
   });
 
+  it("fetches the reader fixture without contacting GitHub", async () => {
+    const fetched = overviewEnvelope.parse(
+      await (
+        await post("overview", { path: fixture.repository, mode: "remote" })
+      ).json(),
+    ).data;
+    expect(fetched.fetch?.remotes).toEqual([
+      { remote: "github", outcome: { kind: "skipped" } },
+      { remote: "origin", outcome: { kind: "fetched" } },
+    ]);
+  });
+
   it("rejects other origins and unexpected fields on both new routes", async () => {
     const bodies = {
       overview: { path: fixture.sync.repository, mode: "local" },

@@ -55,7 +55,7 @@ The command prints a temporary fixture directory and working-copy paths. Add the
 
 The `sync` paths are a second repository for fetch and fast-forward. After a fetch, `main` in `sync.repository` is one commit behind and ready to fast-forward. `develop` is behind but checked out in `sync.dirty` with an uncommitted edit. `feat/diverged` has diverged from its upstream. A `sync.colleague` clone made those remote commits.
 
-Fixture creation pushes and fetches only against its temporary local bare repositories. It never writes to GitHub. The configured GitHub remotes are display metadata only. In the sync repository, the `github` remote sets `remote.github.skipFetchAll`, so a fetch skips it.
+Fixture creation pushes and fetches only against its temporary local bare repositories. It never writes to GitHub. The configured GitHub remotes are display metadata only. Each sets `remote.github.skipFetchAll`, so a fetch skips it.
 
 ## Check and build
 
@@ -76,7 +76,7 @@ Rust owns `RepositorySnapshot`, `RepositoryOverview`, exhaustive HEAD, branch, a
 
 The app does not show fetch or fast-forward controls yet. The Rust core runs exactly four Git commands that contact a remote or change a repository:
 
-- `git fetch <remote>` for each remote that does not set `skipFetchAll` or `skipDefaultUpdate`. It follows your `fetch.prune` setting and does not write `FETCH_HEAD`.
+- `git fetch <remote>` for each remote that does not set `skipFetchAll` or `skipDefaultUpdate`. It updates only remote-tracking refs under `refs/remotes/`. Git 2.48 and later can also create `refs/remotes/<remote>/HEAD`. It follows your `fetch.prune` setting and does not write `FETCH_HEAD`.
 - A dry-run `git fetch . <commit>:<branch>` that asks Git whether a branch is checked out in any worktree. It writes nothing. It runs only when some worktree has a detached HEAD, as a rebase or bisect leaves it. L1 Git does not move a branch when this check cannot answer.
 - `git update-ref` to move a branch that is not checked out. The branch moves only from the commit you saw to the upstream commit you saw.
 - `git merge --ff-only` inside the worktree of a checked-out branch. It runs only when that worktree has no uncommitted changes to tracked files and no merge, rebase, am, cherry-pick, revert, or bisect in progress. Git refuses it when the update would overwrite an untracked file.
