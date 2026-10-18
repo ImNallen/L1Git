@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import {
   ArrowLeft,
+  CloudDownload,
   FolderGit2,
   GitBranch,
   LoaderCircle,
@@ -17,6 +18,7 @@ import { useAppearance } from "./appearance";
 import type { ThemePreference } from "./appearance";
 import { AppearanceSettings } from "./components/AppearanceSettings";
 import { AddRepositoryDialog } from "./components/AddRepositoryDialog";
+import { FetchSettings } from "./components/FetchSettings";
 import { CommitInspector } from "./components/CommitInspector";
 import { FileDiffPane } from "./components/FileDiffPane";
 import type { DiffStyle } from "./components/FileDiffPane";
@@ -24,14 +26,23 @@ import { History } from "./components/History";
 import { PaneDivider } from "./components/PaneDivider";
 import { RepositoryTree } from "./components/RepositoryTree";
 import { headLabel } from "./domain/repository";
+import { useFetchSettings } from "./fetchSettings";
 import { macNative } from "./repositories";
 import { useWorkspace } from "./useWorkspace";
 
 type AppScreen = "repository" | "settings";
+type SettingsSection = "appearance" | "fetching";
+const settingsSections = [
+  { section: "appearance", label: "Appearance", Icon: Palette },
+  { section: "fetching", label: "Fetching", Icon: CloudDownload },
+] as const;
 
 export function App({ initialTheme }: { initialTheme: ThemePreference }) {
   const appearance = useAppearance(initialTheme);
   const [screen, setScreen] = useState<AppScreen>("repository");
+  const [settingsSection, setSettingsSection] =
+    useState<SettingsSection>("appearance");
+  const fetchSettings = useFetchSettings();
   const app = useWorkspace();
   const [adding, setAdding] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -175,10 +186,17 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
         </div>
         {screen === "settings" && (
           <nav className="settings-navigation" aria-label="Settings">
-            <button className="settings-nav-item" aria-current="page">
-              <Palette size={16} />
-              Appearance
-            </button>
+            {settingsSections.map(({ section, label, Icon }) => (
+              <button
+                key={section}
+                className="settings-nav-item"
+                aria-current={settingsSection === section ? "page" : undefined}
+                onClick={() => setSettingsSection(section)}
+              >
+                <Icon size={16} />
+                {label}
+              </button>
+            ))}
           </nav>
         )}
         <footer className="sidebar-bottom">
@@ -407,16 +425,28 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
                   /
                 </span>
                 <span aria-current="page" data-tauri-drag-region>
-                  Appearance
+                  {
+                    settingsSections.find(
+                      ({ section }) => section === settingsSection,
+                    )?.label
+                  }
                 </span>
               </nav>
             </header>
-            <AppearanceSettings
-              preference={appearance.preference}
-              onPreferenceChange={appearance.setPreference}
-              persistenceError={appearance.persistenceError}
-              nativeError={appearance.nativeError}
-            />
+            {settingsSection === "appearance" ? (
+              <AppearanceSettings
+                preference={appearance.preference}
+                onPreferenceChange={appearance.setPreference}
+                persistenceError={appearance.persistenceError}
+                nativeError={appearance.nativeError}
+              />
+            ) : (
+              <FetchSettings
+                intervalMinutes={fetchSettings.intervalMinutes}
+                onIntervalChange={fetchSettings.setIntervalMinutes}
+                persistenceError={fetchSettings.persistenceError}
+              />
+            )}
           </>
         )}
       </main>
