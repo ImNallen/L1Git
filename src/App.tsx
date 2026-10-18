@@ -5,6 +5,7 @@ import {
   CloudDownload,
   FolderGit2,
   GitBranch,
+  LayoutList,
   LoaderCircle,
   PanelLeft,
   PanelRight,
@@ -21,16 +22,18 @@ import { AddRepositoryDialog } from "./components/AddRepositoryDialog";
 import { FetchSettings } from "./components/FetchSettings";
 import { CommitInspector } from "./components/CommitInspector";
 import { FileDiffPane } from "./components/FileDiffPane";
+import { Overview } from "./components/Overview";
 import type { DiffStyle } from "./components/FileDiffPane";
 import { History } from "./components/History";
 import { PaneDivider } from "./components/PaneDivider";
 import { RepositoryTree } from "./components/RepositoryTree";
 import { headLabel } from "./domain/repository";
 import { useFetchSettings } from "./fetchSettings";
+import { useOverview } from "./overview";
 import { macNative } from "./repositories";
 import { useWorkspace } from "./useWorkspace";
 
-type AppScreen = "repository" | "settings";
+type AppScreen = "overview" | "repository" | "settings";
 type SettingsSection = "appearance" | "fetching";
 const settingsSections = [
   { section: "appearance", label: "Appearance", Icon: Palette },
@@ -39,11 +42,19 @@ const settingsSections = [
 
 export function App({ initialTheme }: { initialTheme: ThemePreference }) {
   const appearance = useAppearance(initialTheme);
-  const [screen, setScreen] = useState<AppScreen>("repository");
+  const app = useWorkspace();
+  const [screen, setScreen] = useState<AppScreen>(() =>
+    app.catalog.entries.length > 0 ? "overview" : "repository",
+  );
+  const [settingsReturn, setSettingsReturn] =
+    useState<Exclude<AppScreen, "settings">>("repository");
   const [settingsSection, setSettingsSection] =
     useState<SettingsSection>("appearance");
   const fetchSettings = useFetchSettings();
-  const app = useWorkspace();
+  const { view: overview, store: overviewStore } = useOverview(
+    app.catalog.entries.map((entry) => entry.root),
+    fetchSettings.intervalMinutes,
+  );
   const [adding, setAdding] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [inspectorOpen, setInspectorOpen] = useState(
@@ -57,10 +68,10 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
   const sidebarToggleRef = useRef<HTMLButtonElement>(null);
   const inspectorToggleRef = useRef<HTMLButtonElement>(null);
   const settingsRef = useRef<HTMLButtonElement>(null);
-  const returnToRepository = useCallback(() => {
-    flushSync(() => setScreen("repository"));
+  const leaveSettings = useCallback(() => {
+    flushSync(() => setScreen(settingsReturn));
     (sidebarOpen ? settingsRef : sidebarToggleRef).current?.focus();
-  }, [sidebarOpen]);
+  }, [sidebarOpen, settingsReturn]);
   const { workspace, current, fileDiff, closeFile } = app;
   const fileOpen = fileDiff.kind !== "closed";
   const busy = workspace.kind === "loading";
@@ -71,6 +82,31 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
     (workspace.kind === "loading" || workspace.kind === "error"
       ? workspace.path
       : null);
+  const openRoot = snapshot?.root ?? null;
+  const openRootState = openRoot === null ? null : overview.roots.get(openRoot);
+  const openRepository =
+    openRootState?.kind === "open"
+      ? (overview.repositories.find(
+          (repository) => repository.commonDir === openRootState.commonDir,
+        ) ?? null)
+      : null;
+  const openFetching = openRepository?.activity.kind === "fetching";
+  const refreshRef = useRef(app.refresh);
+  useEffect(() => {
+    refreshRef.current = app.refresh;
+  });
+  useEffect(
+    () =>
+      overviewStore.onRefsChanged((roots) => {
+        if (openRoot !== null && roots.includes(openRoot))
+          void refreshRef.current();
+      }),
+    [overviewStore, openRoot],
+  );
+  function showRepository(path: string) {
+    setScreen("repository");
+    if (path !== snapshot?.root) void app.selectRepository(path);
+  }
   const sidebarToggle = (
     <button
       ref={sidebarToggleRef}
@@ -111,7 +147,7 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
       if (screen === "settings") {
         if (event.key === "Escape") {
           event.preventDefault();
-          returnToRepository();
+          leaveSettings();
         }
         return;
       }
@@ -119,6 +155,7 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
         event.preventDefault();
         setAdding(true);
       }
+      if (screen !== "repository") return;
       if (
         !adding &&
         (event.metaKey || event.ctrlKey) &&
@@ -140,7 +177,7 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
     }
     window.addEventListener("keydown", keyboard);
     return () => window.removeEventListener("keydown", keyboard);
-  }, [adding, fileOpen, closeFile, screen, returnToRepository]);
+  }, [adding, fileOpen, closeFile, screen, leaveSettings]);
   useEffect(() => {
     const media = window.matchMedia("(max-width: 1099px)");
     const narrow = () => {
@@ -171,15 +208,40 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
             </span>
           </span>
         </div>
-        <div className="repository-navigation" hidden={screen !== "repository"}>
+        <div className="repository-navigation" hidden={screen === "settings"}>
+          <button
+            className="sidebar-nav-item"
+            aria-current={screen === "overview" ? "page" : undefined}
+            onClick={() => setScreen("overview")}
+          >
+            <LayoutList size={15} />
+            <span>Overview</span>
+            {overview.readyCount > 0 && (
+              <span
+                className="nav-badge"
+                title={
+                  overview.readyCount === 1
+                    ? "1 branch ready to fast-forward"
+                    : `${overview.readyCount} branches ready to fast-forward`
+                }
+              >
+                {overview.readyCount}
+              </span>
+            )}
+          </button>
           <RepositoryTree
             entries={app.catalog.entries}
             snapshot={snapshot}
-            activePath={activePath}
+            activePath={screen === "repository" ? activePath : null}
             reference={current?.reference ?? null}
             busy={busy}
-            onSelect={(path) => void app.selectRepository(path)}
-            onBrowse={(reference) => void app.browse(reference)}
+            browsing={screen === "repository"}
+            behind={overview.behindByRoot}
+            onSelect={showRepository}
+            onBrowse={(reference) => {
+              setScreen("repository");
+              void app.browse(reference);
+            }}
             onRemove={app.removeRepository}
             onAdd={() => setAdding(true)}
           />
@@ -201,7 +263,7 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
         )}
         <footer className="sidebar-bottom">
           {screen === "settings" ? (
-            <button className="settings-back" onClick={returnToRepository}>
+            <button className="settings-back" onClick={leaveSettings}>
               <ArrowLeft size={15} /> Back
             </button>
           ) : (
@@ -210,7 +272,12 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
               className="icon-button"
               aria-label="Settings"
               title="Settings"
-              onClick={() => setScreen("settings")}
+              onClick={() => {
+                setSettingsReturn(
+                  screen === "overview" ? "overview" : "repository",
+                );
+                setScreen("settings");
+              }}
             >
               <Settings size={16} />
             </button>
@@ -268,11 +335,28 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
                   <button
                     className="button secondary"
                     disabled={busy}
-                    onClick={() => void app.browse(current.reference)}
-                    title="Reread local Git state. Does not fetch remote data."
+                    onClick={() => void app.refresh()}
+                    title="Reread local Git state. Fetch downloads new commits from remotes."
                   >
                     <RefreshCw size={14} className={busy ? "spin" : ""} />
                     <span>Refresh</span>
+                  </button>
+                )}
+                {openRepository && (
+                  <button
+                    className="button secondary"
+                    disabled={openFetching}
+                    onClick={() =>
+                      void overviewStore.fetch(openRepository.commonDir)
+                    }
+                    title="Download new commits from this repository's remotes."
+                  >
+                    {openFetching ? (
+                      <LoaderCircle size={14} className="spin" />
+                    ) : (
+                      <CloudDownload size={14} />
+                    )}
+                    <span>Fetch</span>
                   </button>
                 )}
                 {!inspectorVisible && inspectorToggle}
@@ -374,7 +458,8 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
                   </span>
                   <div className="empty-scope">
                     <span className="status-dot" />
-                    Reads local Git data. Your working copy stays yours.
+                    Fetches remotes and fast-forwards only clean branches that
+                    are behind.
                   </div>
                 </div>
               )}
@@ -409,6 +494,20 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
             </>
           )}
         </div>
+        {screen === "overview" && (
+          <Overview
+            view={overview}
+            entries={app.catalog.entries}
+            sidebarToggle={!sidebarOpen && sidebarToggle}
+            onFetch={() => void overviewStore.fetch()}
+            onUpdateAll={() => void overviewStore.updateAll()}
+            onFastForward={(commonDir, branch) =>
+              void overviewStore.fastForward(commonDir, branch)
+            }
+            onOpen={showRepository}
+            onAdd={() => setAdding(true)}
+          />
+        )}
         {screen === "settings" && (
           <>
             <header className="toolbar settings-toolbar" data-tauri-drag-region>
