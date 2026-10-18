@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { overviewSchema, readyAdvances } from "./overview";
+import {
+  attentionRows,
+  overviewSchema,
+  readyAdvances,
+  repositoryRank,
+} from "./overview";
 
 const a = "a".repeat(40);
 const b = "b".repeat(40);
@@ -126,5 +131,36 @@ describe("launch overview", () => {
       0,
       "reference",
     ]);
+  });
+
+  it("shows default and mainline rows first, then rows that need attention", () => {
+    const { rows, hiddenUpToDate } = attentionRows(overview);
+    expect(rows.map((branch) => branch.name)).toEqual([
+      "main",
+      "develop",
+      "trunk",
+      "feat/hidden",
+      "feat/stale",
+      "feat/split",
+      "feat/gone",
+      "feat/ahead",
+    ]);
+    expect(hiddenUpToDate).toBe(1);
+  });
+
+  it("ranks repositories by how urgently they need attention", () => {
+    const only = (...names: string[]) => ({
+      ...overview,
+      branches: overview.branches.filter((branch) =>
+        names.includes(branch.name),
+      ),
+    });
+    expect(repositoryRank(only("main", "feat/done"), true)).toBe(0);
+    expect(repositoryRank(only("trunk", "feat/split"), true)).toBe(1);
+    expect(repositoryRank(only("trunk", "feat/split"), false)).toBe(2);
+    expect(repositoryRank(only("trunk", "feat/stale"), false)).toBe(2);
+    expect(
+      repositoryRank(only("trunk", "feat/done", "feat/local"), false),
+    ).toBe(3);
   });
 });
