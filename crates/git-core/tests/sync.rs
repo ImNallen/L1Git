@@ -472,6 +472,34 @@ fn fast_forwards_a_linked_worktree_inside_that_worktree() {
     assert_eq!(git(&world.work, &["status", "--porcelain"]), "");
 }
 
+#[cfg(unix)]
+#[test]
+fn a_worktree_path_with_a_newline_keeps_its_row_whole() {
+    let world = World::new();
+    let coordinator = coordinator();
+    git(&world.work, &["branch", "develop"]);
+    world.publish("develop");
+    let linked = world.worktree("wt\ndevelop", "develop");
+    let target = world.colleague_pushes("develop", "d", "develop\n");
+
+    let fetched = coordinator
+        .overview(world.path(), FetchMode::Remote)
+        .unwrap();
+    assert_eq!(names(&fetched), ["develop", "main"]);
+    let develop = branch(&fetched, "develop");
+    assert_eq!(develop.checked_out_at, Some(path(&linked)));
+    assert_eq!(develop.state, behind("develop", &target, 1, None));
+
+    let report = coordinator
+        .fast_forward(world.path(), &[advance("develop", &world.initial, &target)])
+        .unwrap();
+    assert_eq!(
+        report.outcomes,
+        [advanced("develop", &world.initial, &target)]
+    );
+    assert_eq!(git(&linked, &["rev-parse", "HEAD"]), target);
+}
+
 #[test]
 fn fetches_of_one_repository_never_overlap_and_concurrent_requests_share_one() {
     let world = World::new();

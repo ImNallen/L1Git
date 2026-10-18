@@ -45,6 +45,19 @@ pub(super) fn open(path: &str) -> Result<Repository, RepositoryError> {
     Ok(Repository { root, common_dir })
 }
 
+/// A worktree path can contain a newline, so each record ends with NUL and
+/// newline. No field starts with a newline: paths are absolute and refs start
+/// with `refs/`.
+fn records(output: &[u8]) -> impl Iterator<Item = &[u8]> {
+    let mut rest = output;
+    std::iter::from_fn(move || {
+        let end = rest.windows(2).position(|pair| pair == b"\0\n")?;
+        let record = &rest[..end];
+        rest = &rest[end + 2..];
+        Some(record)
+    })
+}
+
 struct Row {
     reference: String,
     oid: String,
@@ -58,13 +71,11 @@ fn rows(root: &Path, patterns: &[&str]) -> Result<Vec<Row>, RepositoryError> {
     let mut args = vec![
         "for-each-ref",
         "--sort=refname",
-        "--format=%(refname)%00%(objectname)%00%(upstream)%00%(upstream:track,nobracket)%00%(worktreepath)%00%(symref)",
+        "--format=%(refname)%00%(objectname)%00%(upstream)%00%(upstream:track,nobracket)%00%(worktreepath)%00%(symref)%00",
     ];
     args.extend(patterns);
     let output = git::read(root, &args)?;
-    output
-        .split(|byte| *byte == b'\n')
-        .filter(|row| !row.is_empty())
+    records(&output)
         .filter_map(|row| {
             let fields: Vec<_> = row.split(|byte| *byte == 0).collect();
             let Ok([reference, oid, upstream, track, worktree, symref]) =
