@@ -14,14 +14,14 @@ use std::{
 };
 use tempfile::TempDir;
 
-fn git(path: &Path, args: &[&str]) -> String {
+fn git_command(path: &Path, args: &[&str]) -> Command {
     let mut command = Command::new("git");
     for (key, _) in std::env::vars_os() {
         if key.to_string_lossy().starts_with("GIT_") {
             command.env_remove(key);
         }
     }
-    let output = command
+    command
         .arg("-C")
         .arg(path)
         .args(args)
@@ -30,9 +30,12 @@ fn git(path: &Path, args: &[&str]) -> String {
         .env("GIT_COMMITTER_NAME", "Ada")
         .env("GIT_COMMITTER_EMAIL", "ada@example.test")
         .env("GIT_AUTHOR_DATE", "1700000000 +0000")
-        .env("GIT_COMMITTER_DATE", "1700000000 +0000")
-        .output()
-        .unwrap();
+        .env("GIT_COMMITTER_DATE", "1700000000 +0000");
+    command
+}
+
+fn git(path: &Path, args: &[&str]) -> String {
+    let output = git_command(path, args).output().unwrap();
     assert!(
         output.status.success(),
         "git {args:?}: {}",
@@ -794,10 +797,7 @@ fn a_stopped_am_or_a_started_bisect_keeps_an_attached_branch_in_use() {
 
     let patch = world.file("edit.patch");
     fs::write(&patch, UNAPPLICABLE_PATCH).unwrap();
-    let am = Command::new("git")
-        .arg("-C")
-        .arg(&world.work)
-        .args(["am", patch.to_str().unwrap()])
+    let am = git_command(&world.work, &["am", patch.to_str().unwrap()])
         .output()
         .unwrap();
     assert!(!am.status.success());
