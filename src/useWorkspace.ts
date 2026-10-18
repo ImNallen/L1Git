@@ -75,6 +75,7 @@ export function useWorkspace() {
         ? workspace.previous
         : null;
   const root = current?.snapshot.root ?? null;
+  const activeRoot = workspace.kind === "loading" ? workspace.path : root;
 
   const save = useCallback((next: Catalog) => {
     catalogRef.current = next;
@@ -169,6 +170,10 @@ export function useWorkspace() {
   };
 
   const refresh = async () => {
+    if (workspace.kind === "loading" && workspace.previous === null) {
+      await selectRepository(workspace.path);
+      return;
+    }
     if (!current) return;
     const path = current.snapshot.root;
     const reference =
@@ -280,5 +285,6 @@ export function useWorkspace() {
     removeRepository,
     browse,
     refresh,
+    activeRoot,
   };
 }

@@ -98,10 +98,10 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
   useEffect(
     () =>
       overviewStore.onRefsChanged((roots) => {
-        if (openRoot !== null && roots.includes(openRoot))
+        if (roots.some((root) => root === app.activeRoot))
           void refreshRef.current();
       }),
-    [overviewStore, openRoot],
+    [overviewStore, app.activeRoot],
   );
   function showRepository(path: string) {
     setScreen("repository");

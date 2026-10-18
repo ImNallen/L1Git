@@ -88,7 +88,7 @@ export function Overview({
           </button>
           <button
             className="button primary"
-            disabled={view.readyCount === 0}
+            disabled={view.readyCount === 0 || view.fetching}
             onClick={onUpdateAll}
             title="Fast-forward every branch that is ready."
           >
