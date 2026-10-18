@@ -139,6 +139,14 @@ pub(crate) enum Mutation<'a> {
         branch: &'a BranchRef,
         to: &'a Oid,
     },
+    MoveRef {
+        branch: &'a BranchRef,
+        from: &'a Oid,
+        to: &'a Oid,
+    },
+    MergeFastForward {
+        to: &'a Oid,
+    },
 }
 
 impl Mutation<'_> {
@@ -166,6 +174,15 @@ impl Mutation<'_> {
                 ".",
                 &format!("{}:{}", to.as_str(), branch.as_str()),
             ]),
+            Self::MoveRef { branch, from, to } => owned(&[
+                "update-ref",
+                "-m",
+                "l1git: fast-forward",
+                branch.as_str(),
+                to.as_str(),
+                from.as_str(),
+            ]),
+            Self::MergeFastForward { to } => owned(&["merge", "--ff-only", to.as_str()]),
         }
     }
 }
@@ -189,7 +206,12 @@ pub(crate) fn mutate(
     mutation: Mutation<'_>,
     deadline: Duration,
 ) -> Result<Finished, RepositoryError> {
-    let mut command = base(path, false);
+    // A partial clone must download the blobs of the tree it checks out.
+    let merge = matches!(mutation, Mutation::MergeFastForward { .. });
+    let mut command = base(path, merge);
+    if merge {
+        command.env("GIT_REFLOG_ACTION", "l1git fast-forward");
+    }
     command
         .args(mutation.args())
         .env("SSH_ASKPASS", "/usr/bin/false")

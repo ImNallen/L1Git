@@ -151,6 +151,23 @@ pub(super) fn read(
     })
 }
 
+pub(super) fn branch(
+    root: &Path,
+    reference: &BranchRef,
+    deadline: Duration,
+) -> Result<Option<Local>, RepositoryError> {
+    let rows = rows(root, &[reference.as_str()])?;
+    let Some((reference, row)) = rows
+        .iter()
+        .filter_map(local_ref)
+        .find(|(found, _)| found == reference)
+    else {
+        return Ok(None);
+    };
+    let detached = has_detached_worktree(root)?;
+    local(root, &reference, row, &HashMap::new(), detached, deadline).map(Some)
+}
+
 /// A symbolic `refs/heads/*` is skipped because `update-ref` would move the
 /// branch it points to.
 fn local_ref(row: &Row) -> Option<(BranchRef, &Row)> {

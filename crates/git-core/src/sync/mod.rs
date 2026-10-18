@@ -1,8 +1,12 @@
+mod advance;
 mod fetch;
 mod read;
 mod stderr;
 
-use crate::{FetchMode, FetchSummary, RepositoryError, RepositoryOverview};
+use crate::{
+    Advance, AdvanceOutcome, FastForwardReport, FetchMode, FetchSummary, RepositoryError,
+    RepositoryOverview, SkipReason,
+};
 use std::{
     collections::HashMap,
     num::NonZeroUsize,
@@ -93,6 +97,38 @@ impl Coordinator {
             }
         };
         read::read(&repository, Some(summary), deadline)
+    }
+
+    /// Fast-forwards each requested branch in order, then rereads the repository
+    /// before another fetch or fast-forward can start. A branch already at `to`
+    /// counts as advanced, so a retry is harmless. An error moving one branch is
+    /// reported as that branch's outcome.
+    pub fn fast_forward(
+        &self,
+        path: &str,
+        advances: &[Advance],
+    ) -> Result<FastForwardReport, RepositoryError> {
+        let repository = read::open(path)?;
+        let deadline = self.limits.local_deadline;
+        let gate = self.gate(&repository.common_dir);
+        let _gate = lock(&gate);
+        let outcomes = advances
+            .iter()
+            .map(|request| {
+                advance::advance(&repository.root, request, deadline).unwrap_or_else(|error| {
+                    AdvanceOutcome::Skipped {
+                        reference: request.reference.clone(),
+                        reason: SkipReason::Failed {
+                            message: error.message,
+                        },
+                    }
+                })
+            })
+            .collect();
+        Ok(FastForwardReport {
+            outcomes,
+            overview: read::read(&repository, None, deadline)?,
+        })
     }
 
     fn gate(&self, common_dir: &Path) -> Arc<Mutex<Gate>> {
