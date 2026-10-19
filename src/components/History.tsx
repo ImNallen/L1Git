@@ -295,6 +295,9 @@ export function History({
     setHovered(null);
   };
   useEffect(() => () => window.clearTimeout(hoverTimer.current), []);
+  // A refresh can move or drop the hovered tip without unmounting its badge
+  // under a still pointer, so no mouseleave arrives to clear it.
+  useLayoutEffect(unhover, [snapshot]);
   const commitsRef = useRef(commits);
   const scrollRef = useRef<HTMLDivElement>(null);
   const headRef = useRef<HTMLTableSectionElement>(null);
