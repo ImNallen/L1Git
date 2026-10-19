@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  attentionRows,
   branchStateSchema,
   divergence,
   overviewSchema,
@@ -133,21 +132,6 @@ describe("launch overview", () => {
       0,
       "reference",
     ]);
-  });
-
-  it("shows default and mainline rows first, then rows that need attention", () => {
-    const { rows, hiddenUpToDate } = attentionRows(overview);
-    expect(rows.map((branch) => branch.name)).toEqual([
-      "main",
-      "develop",
-      "trunk",
-      "feat/hidden",
-      "feat/stale",
-      "feat/split",
-      "feat/gone",
-      "feat/ahead",
-    ]);
-    expect(hiddenUpToDate).toBe(1);
   });
 
   it("ranks repositories by how urgently they need attention", () => {

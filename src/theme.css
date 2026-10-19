@@ -4,7 +4,6 @@
 @import "./styles/inspector.css";
 @import "./styles/diff.css";
 @import "./styles/dialog.css";
-@import "./styles/overview.css";
 
 :root {
   font-family: "Inter Variable", Inter, sans-serif;
@@ -28,7 +27,6 @@
   --control: #111113;
   --control-inset: #09090a;
   --control-hover: #1b1b1f;
-  --option-surface: #161619;
   --row-hover: #121214;
   --row-selected: #1a1a1e;
   --segment-selected: #1f2633;
@@ -103,7 +101,6 @@
   --control: #ffffff;
   --control-inset: #f6f6f7;
   --control-hover: #e9e9ec;
-  --option-surface: #ffffff;
   --row-hover: #ededf0;
   --row-selected: #e3e7ed;
   --segment-selected: #e3e6ec;

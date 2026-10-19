@@ -112,7 +112,7 @@ afterAll(async () => {
 });
 
 describe("real Rust transport contract", () => {
-  it("parses a real repository, browses a remote ref, and reads first-parent merge details", async () => {
+  it("parses a real repository with every branch's history and reads first-parent merge details", async () => {
     const response = await post("snapshot", { path: fixture.repository });
     const snapshot = snapshotEnvelope.parse(await response.json()).data;
     expect(snapshot.name).toBe("l1-demo");
@@ -129,19 +129,16 @@ describe("real Rust transport contract", () => {
     expect(
       snapshot.remotes.find((remote) => remote.name === "github")?.github,
     ).toEqual({ owner: "l1-family", repo: "l1-git" });
-    const remote = snapshotEnvelope.parse(
-      await (
-        await post("snapshot", {
-          path: fixture.repository,
-          reference: "refs/remotes/origin/feat/remote-inspector",
-        })
-      ).json(),
-    ).data;
-    expect(remote.commits[0]?.subject).toBe(
+    const remoteTip = snapshot.branches.find(
+      (branch) =>
+        branch.reference === "refs/remotes/origin/feat/remote-inspector",
+    );
+    const inspector = snapshot.commits.find(
+      (commit) => commit.oid === remoteTip?.oid,
+    );
+    expect(inspector?.subject).toBe(
       "feat(inspector): show commit message and changed paths",
     );
-    expect(remote.head).toEqual(snapshot.head);
-    const inspector = remote.commits[0];
     if (!inspector) throw new Error("Fixture remote commit is missing");
     const inspectorDetail = z
       .object({ ok: z.literal(true), data: detailSchema })
@@ -182,16 +179,15 @@ describe("real Rust transport contract", () => {
   });
 
   it("reads text, binary, and root file patches and rejects unchanged paths", async () => {
-    const commits = snapshotEnvelope.parse(
-      await (
-        await post("snapshot", {
-          path: fixture.repository,
-          reference: "refs/remotes/origin/feat/remote-inspector",
-        })
-      ).json(),
-    ).data.commits;
-    const [inspector] = commits;
-    const root = commits.at(-1);
+    const { branches, commits } = snapshotEnvelope.parse(
+      await (await post("snapshot", { path: fixture.repository })).json(),
+    ).data;
+    const remoteTip = branches.find(
+      (branch) =>
+        branch.reference === "refs/remotes/origin/feat/remote-inspector",
+    );
+    const inspector = commits.find((commit) => commit.oid === remoteTip?.oid);
+    const root = commits.find((commit) => commit.parents.length === 0);
     if (!inspector || !root) throw new Error("Fixture commits are missing");
     const patch = async (oid: string, file: string) =>
       (

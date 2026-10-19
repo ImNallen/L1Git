@@ -10,7 +10,6 @@ const BODY_LIMIT: u64 = 64 * 1024;
 #[serde(deny_unknown_fields)]
 struct SnapshotRequest {
     path: String,
-    reference: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -102,7 +101,7 @@ fn handle(mut request: Request, origins: &[String], coordinator: &Coordinator) {
     }
     let result = match request.url() {
         "/api/snapshot" => serde_json::from_slice::<SnapshotRequest>(&bytes)
-            .map(|input| snapshot(&input.path, input.reference.as_deref()).map(|data| json!(data))),
+            .map(|input| snapshot(&input.path).map(|data| json!(data))),
         "/api/commit-detail" => serde_json::from_slice::<DetailRequest>(&bytes)
             .map(|input| commit_detail(&input.path, &input.oid).map(|data| json!(data))),
         "/api/file-patch" => serde_json::from_slice::<FilePatchRequest>(&bytes)

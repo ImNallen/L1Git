@@ -9,9 +9,9 @@ import type {
   FastForwardReport,
   RepositoryOverview,
 } from "./domain/overview";
-import { rootSchema } from "./domain/repository";
+import { oidSchema, rootSchema } from "./domain/repository";
 import type { RepositoryRoot } from "./domain/repository";
-import { createOverviewStore } from "./overview";
+import { createOverviewStore, repositoryWarnings } from "./overview";
 import type { OverviewDeps } from "./overview";
 
 const a = "a".repeat(40);
@@ -334,7 +334,6 @@ describe("overview store", () => {
         mode === "remote" ? { changed: false } : null,
       );
     });
-    expect(h.store.getSnapshot().readyCount).toBe(3);
     void h.store.updateAll();
     expect(h.pendingLabels()).toEqual([
       "fastForward /code/app",
@@ -346,6 +345,25 @@ describe("overview store", () => {
         { reference: "refs/heads/main", from: a, to: c },
         { reference: "refs/heads/feat", from: a, to: b },
       ],
+    ]);
+  });
+
+  it("updates one repository's ready pairs when scoped to it", async () => {
+    const h = harness();
+    h.store.track([app, api]);
+    await h.answer((label) => {
+      const [mode, path] = label.split(" ");
+      return overview(
+        path!,
+        `${path}/.git`,
+        [behind("main", path === app ? b : c)],
+        mode === "remote" ? { changed: false } : null,
+      );
+    });
+    void h.store.updateAll(root("/code/api/.git"));
+    expect(h.pendingLabels()).toEqual(["fastForward /code/api"]);
+    expect(h.advances).toEqual([
+      [{ reference: "refs/heads/main", from: a, to: c }],
     ]);
   });
 
@@ -379,8 +397,6 @@ describe("overview store", () => {
       "beta",
       "delta",
     ]);
-    expect(view.oldestFetchAt).toBe(60_000);
-    expect(view.fetching).toBe(false);
   });
 
   it("reports each worktree's checked-out branch and every tracking branch", async () => {
@@ -450,5 +466,64 @@ describe("overview store", () => {
     });
     void h.store.fetch();
     expect(h.pendingLabels()).toEqual(["local /code/app"]);
+  });
+});
+
+describe("repository warnings", () => {
+  it("describes fetch failures and skipped fast-forwards", () => {
+    expect(
+      repositoryWarnings({
+        fetch: {
+          kind: "fetched",
+          at: 0,
+          remotes: [
+            { remote: "origin", outcome: { kind: "fetched" } },
+            {
+              remote: "archive",
+              outcome: {
+                kind: "failed",
+                failure: "network",
+                message: "Could not resolve host.",
+              },
+            },
+          ],
+        },
+        outcomes: new Map([
+          [
+            ref("main"),
+            {
+              kind: "advanced",
+              reference: ref("main"),
+              from: oidSchema.parse(a),
+              to: oidSchema.parse(b),
+            },
+          ],
+          [
+            ref("develop"),
+            {
+              kind: "skipped",
+              reference: ref("develop"),
+              reason: { kind: "dirty", worktree: root("/code/app-develop") },
+            },
+          ],
+        ]),
+      }),
+    ).toEqual([
+      "archive: Network error. Could not resolve host.",
+      "Did not fast-forward develop. Uncommitted changes in app-develop. Commit or stash first.",
+    ]);
+  });
+
+  it("reports a fetch that failed outright", () => {
+    expect(
+      repositoryWarnings({
+        fetch: {
+          kind: "failed",
+          at: 0,
+          problem: { kind: "gitFailed", message: "Git exited with status 1." },
+        },
+        outcomes: new Map(),
+      }),
+    ).toEqual(["Could not fetch. Git exited with status 1."]);
   });
 });

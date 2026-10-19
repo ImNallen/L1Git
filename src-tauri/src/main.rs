@@ -12,11 +12,8 @@ fn worker_error() -> RepositoryError {
 }
 
 #[tauri::command]
-async fn repository_snapshot(
-    path: String,
-    reference: Option<String>,
-) -> Result<RepositorySnapshot, RepositoryError> {
-    tauri::async_runtime::spawn_blocking(move || l1_git_core::snapshot(&path, reference.as_deref()))
+async fn repository_snapshot(path: String) -> Result<RepositorySnapshot, RepositoryError> {
+    tauri::async_runtime::spawn_blocking(move || l1_git_core::snapshot(&path))
         .await
         .map_err(|_| worker_error())?
 }

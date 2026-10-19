@@ -3,9 +3,10 @@ import { flushSync } from "react-dom";
 import {
   ArrowLeft,
   CloudDownload,
+  FastForward,
   FolderGit2,
   GitBranch,
-  LayoutList,
+  Info,
   LoaderCircle,
   PanelLeft,
   PanelRight,
@@ -22,18 +23,19 @@ import { AddRepositoryDialog } from "./components/AddRepositoryDialog";
 import { FetchSettings } from "./components/FetchSettings";
 import { CommitInspector } from "./components/CommitInspector";
 import { FileDiffPane } from "./components/FileDiffPane";
-import { Overview } from "./components/Overview";
 import type { DiffStyle } from "./components/FileDiffPane";
 import { History } from "./components/History";
 import { PaneDivider } from "./components/PaneDivider";
 import { RepositoryTree } from "./components/RepositoryTree";
+import { readyAdvances } from "./domain/overview";
 import { headLabel } from "./domain/repository";
+import type { Branch, FullRef } from "./domain/repository";
 import { useFetchSettings } from "./fetchSettings";
-import { useOverview } from "./overview";
+import { repositoryWarnings, useOverview } from "./overview";
 import { macNative } from "./repositories";
 import { useWorkspace } from "./useWorkspace";
 
-type AppScreen = "overview" | "repository" | "settings";
+type AppScreen = "repository" | "settings";
 type SettingsSection = "appearance" | "fetching";
 const settingsSections = [
   { section: "appearance", label: "Appearance", Icon: Palette },
@@ -43,11 +45,7 @@ const settingsSections = [
 export function App({ initialTheme }: { initialTheme: ThemePreference }) {
   const appearance = useAppearance(initialTheme);
   const app = useWorkspace();
-  const [screen, setScreen] = useState<AppScreen>(() =>
-    app.catalog.entries.length > 0 ? "overview" : "repository",
-  );
-  const [settingsReturn, setSettingsReturn] =
-    useState<Exclude<AppScreen, "settings">>("repository");
+  const [screen, setScreen] = useState<AppScreen>("repository");
   const [settingsSection, setSettingsSection] =
     useState<SettingsSection>("appearance");
   const fetchSettings = useFetchSettings();
@@ -64,14 +62,17 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
   const [inspectorWidth, setInspectorWidth] = useState(320);
   const [query, setQuery] = useState("");
   const [diffStyle, setDiffStyle] = useState<DiffStyle>("unified");
+  const [jump, setJump] = useState<{ reference: FullRef; seq: number } | null>(
+    null,
+  );
   const searchRef = useRef<HTMLInputElement>(null);
   const sidebarToggleRef = useRef<HTMLButtonElement>(null);
   const inspectorToggleRef = useRef<HTMLButtonElement>(null);
   const settingsRef = useRef<HTMLButtonElement>(null);
   const leaveSettings = useCallback(() => {
-    flushSync(() => setScreen(settingsReturn));
+    flushSync(() => setScreen("repository"));
     (sidebarOpen ? settingsRef : sidebarToggleRef).current?.focus();
-  }, [sidebarOpen, settingsReturn]);
+  }, [sidebarOpen]);
   const { workspace, current, fileDiff, closeFile } = app;
   const fileOpen = fileDiff.kind !== "closed";
   const busy = workspace.kind === "loading";
@@ -91,6 +92,18 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
         ) ?? null)
       : null;
   const openFetching = openRepository?.activity.kind === "fetching";
+  const openReady = openRepository
+    ? readyAdvances(openRepository.overview).length
+    : 0;
+  const jumped = jump
+    ? (snapshot?.branches.find(
+        (branch) => branch.reference === jump.reference,
+      ) ?? null)
+    : null;
+  const jumpedUnloaded =
+    jumped !== null &&
+    snapshot !== null &&
+    !snapshot.commits.some((commit) => commit.oid === jumped.oid);
   const refreshRef = useRef(app.refresh);
   useEffect(() => {
     refreshRef.current = app.refresh;
@@ -106,6 +119,16 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
   function showRepository(path: string) {
     setScreen("repository");
     if (path !== snapshot?.root) void app.selectRepository(path);
+  }
+  function jumpTo(branch: Branch) {
+    setQuery("");
+    closeFile();
+    if (snapshot?.commits.some((commit) => commit.oid === branch.oid))
+      app.setSelectedOid(branch.oid);
+    setJump((previous) => ({
+      reference: branch.reference,
+      seq: (previous?.seq ?? 0) + 1,
+    }));
   }
   const sidebarToggle = (
     <button
@@ -141,6 +164,7 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
 
   useEffect(() => {
     setQuery("");
+    setJump(null);
   }, [snapshot?.root]);
   useEffect(() => {
     function keyboard(event: KeyboardEvent) {
@@ -209,39 +233,19 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
           </span>
         </div>
         <div className="repository-navigation" hidden={screen === "settings"}>
-          <button
-            className="sidebar-nav-item"
-            aria-current={screen === "overview" ? "page" : undefined}
-            onClick={() => setScreen("overview")}
-          >
-            <LayoutList size={15} />
-            <span>Overview</span>
-            {overview.readyCount > 0 && (
-              <span
-                className="nav-badge"
-                title={
-                  overview.readyCount === 1
-                    ? "1 branch ready to fast-forward"
-                    : `${overview.readyCount} branches ready to fast-forward`
-                }
-              >
-                {overview.readyCount}
-              </span>
-            )}
-          </button>
           <RepositoryTree
             entries={app.catalog.entries}
             snapshot={snapshot}
             activePath={screen === "repository" ? activePath : null}
-            reference={current?.reference ?? null}
-            busy={busy}
+            highlighted={
+              jumped !== null && jumped.oid === app.selectedOid
+                ? jumped.reference
+                : null
+            }
             browsing={screen === "repository"}
             sync={overview.syncByRoot}
             onSelect={showRepository}
-            onBrowse={(reference) => {
-              setScreen("repository");
-              void app.browse(reference);
-            }}
+            onJump={jumpTo}
             onRemove={app.removeRepository}
             onAdd={() => setAdding(true)}
           />
@@ -272,12 +276,7 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
               className="icon-button"
               aria-label="Settings"
               title="Settings"
-              onClick={() => {
-                setSettingsReturn(
-                  screen === "overview" ? "overview" : "repository",
-                );
-                setScreen("settings");
-              }}
+              onClick={() => setScreen("settings")}
             >
               <Settings size={16} />
             </button>
@@ -313,7 +312,7 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
                           ? "detached-head"
                           : "head-name"
                       }
-                      title="Checked-out HEAD. Selecting a branch browses history without checkout."
+                      title="Checked-out HEAD. Selecting a branch shows it in the graph without checkout."
                     >
                       {headLabel(snapshot.head)}
                     </span>
@@ -359,6 +358,23 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
                     <span>Fetch</span>
                   </button>
                 )}
+                {openRepository && openReady > 0 && (
+                  <button
+                    className="button secondary"
+                    disabled={openRepository.activity.kind !== "idle"}
+                    onClick={() =>
+                      void overviewStore.updateAll(openRepository.commonDir)
+                    }
+                    title={`Fast-forward ${openReady === 1 ? "1 branch that is" : `${openReady} branches that are`} behind and clean. Never merges or rebases.`}
+                  >
+                    {openRepository.activity.kind === "updating" ? (
+                      <LoaderCircle size={14} className="spin" />
+                    ) : (
+                      <FastForward size={14} />
+                    )}
+                    <span>Fast-forward ({openReady})</span>
+                  </button>
+                )}
                 {!inspectorVisible && inspectorToggle}
               </div>
             </header>
@@ -374,9 +390,23 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
                 <span>
                   {current.error.message} The last successful view is retained.
                 </span>
-                <button onClick={() => void app.browse(null)}>
-                  Read all branches
-                </button>
+                <button onClick={() => void app.refresh()}>Try again</button>
+              </div>
+            )}
+            {openRepository &&
+              repositoryWarnings(openRepository).map((warning) => (
+                <div className="notice error-notice" role="alert" key={warning}>
+                  <TriangleAlert size={14} />
+                  <span>{warning}</span>
+                </div>
+              ))}
+            {jumped && jumpedUnloaded && snapshot && (
+              <div className="notice info-notice" role="status">
+                <Info size={14} />
+                <span>
+                  {jumped.name} is older than the newest{" "}
+                  {snapshot.commits.length.toLocaleString()} loaded commits.
+                </span>
               </div>
             )}
             <div className="workspace-panes">
@@ -384,12 +414,11 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
                 <>
                   <History
                     snapshot={snapshot}
-                    reference={current.reference}
                     selectedOid={app.selectedOid}
+                    revealSeq={jump?.seq ?? 0}
                     query={query}
                     onQuery={setQuery}
                     onSelect={app.setSelectedOid}
-                    onBrowse={(reference) => void app.browse(reference)}
                     searchRef={searchRef}
                     busy={busy}
                     hidden={fileOpen}
@@ -494,20 +523,6 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
             </>
           )}
         </div>
-        {screen === "overview" && (
-          <Overview
-            view={overview}
-            entries={app.catalog.entries}
-            sidebarToggle={!sidebarOpen && sidebarToggle}
-            onFetch={() => void overviewStore.fetch()}
-            onUpdateAll={() => void overviewStore.updateAll()}
-            onFastForward={(commonDir, branch) =>
-              void overviewStore.fastForward(commonDir, branch)
-            }
-            onOpen={showRepository}
-            onAdd={() => setAdding(true)}
-          />
-        )}
         {screen === "settings" && (
           <>
             <header className="toolbar settings-toolbar" data-tauri-drag-region>

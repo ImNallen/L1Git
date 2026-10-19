@@ -120,6 +120,11 @@
   color: var(--error-text);
   border-bottom: 1px solid var(--error-border);
 }
+.info-notice {
+  background: var(--panel-raised);
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border);
+}
 .notice button {
   margin-left: auto;
   white-space: nowrap;
@@ -272,9 +277,6 @@ kbd {
     gap: 6px;
     padding-left: 9px;
     padding-right: 9px;
-  }
-  .branch-select {
-    width: 135px;
   }
   .toolbar-actions .button span {
     display: none;

@@ -126,8 +126,7 @@ input::placeholder {
   color: var(--text-dim);
   font-size: 11px;
 }
-.branch-row,
-.all-branches {
+.branch-row {
   width: 100%;
   height: 32px;
   display: flex;
@@ -138,8 +137,7 @@ input::placeholder {
   border-radius: 5px;
   color: var(--text-secondary);
 }
-.branch-row > svg,
-.all-branches > svg {
+.branch-row > svg {
   flex-shrink: 0;
   color: var(--muted);
 }
@@ -151,17 +149,14 @@ input::placeholder {
   font-family: var(--mono);
   font-size: 11px;
 }
-.branch-row:hover:not(:disabled),
-.all-branches:hover:not(:disabled) {
+.branch-row:hover:not(:disabled) {
   background: var(--row-hover);
 }
-.branch-row.selected,
-.all-branches.selected {
+.branch-row.selected {
   background: var(--nav-selected-bg);
   color: var(--nav-selected-text);
 }
 .branch-row.selected > svg,
-.all-branches.selected > svg,
 .branch-row > .head-icon {
   color: var(--blue);
 }
@@ -169,10 +164,6 @@ input::placeholder {
   font-size: 8px;
   letter-spacing: 0.5px;
   color: var(--accent-muted);
-}
-.all-branches {
-  font-size: 12px;
-  margin: 3px 0;
 }
 .unborn {
   color: var(--text-icon);
@@ -274,47 +265,6 @@ input::placeholder {
 .settings-nav-item[aria-current="page"]:hover:not(:disabled) {
   background: var(--nav-selected-bg);
   color: var(--nav-selected-text);
-}
-.sidebar-nav-item {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  height: 34px;
-  margin: 0 8px 4px;
-  padding: 0 10px;
-  border-radius: 6px;
-  text-align: left;
-  font-weight: 550;
-  color: var(--text-secondary);
-}
-.sidebar-nav-item > svg {
-  flex-shrink: 0;
-  color: var(--muted);
-}
-.sidebar-nav-item:hover:not(:disabled) {
-  background: var(--row-hover);
-}
-.sidebar-nav-item[aria-current="page"],
-.sidebar-nav-item[aria-current="page"]:hover:not(:disabled) {
-  background: var(--nav-selected-bg);
-  color: var(--nav-selected-text);
-}
-.sidebar-nav-item[aria-current="page"] > svg {
-  color: var(--blue);
-}
-.nav-badge {
-  margin-left: auto;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 5px;
-  display: inline-grid;
-  place-items: center;
-  border-radius: 9px;
-  background: var(--primary-bg);
-  color: var(--primary-text);
-  font-size: 10px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
 }
 .sync-counts {
   display: inline-flex;

@@ -1,11 +1,13 @@
-import { useMemo } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { RefObject } from "react";
 import { Cloud, GitBranch, Search, X } from "lucide-react";
 import { buildGraph } from "../domain/graph";
 import type { GraphRow } from "../domain/graph";
-import type { FullRef, Oid, RepositorySnapshot } from "../domain/repository";
+import type { Oid, RepositorySnapshot } from "../domain/repository";
 import { shortDate } from "../domain/time";
 
+const ROW_HEIGHT = 36;
+const OVERSCAN = 10;
 const color = (lane: number) => `var(--graph-lane-${(lane % 6) + 1})`;
 const x = (lane: number) => 16 + lane * 15;
 
@@ -23,7 +25,12 @@ function GraphCell({
   const curve = (from: number, to: number, start: number, end: number) =>
     `M ${x(from)} ${start} C ${x(from)} ${(start + end) / 2}, ${x(to)} ${(start + end) / 2}, ${x(to)} ${end}`;
   return (
-    <svg className="graph-cell" width={width} height={36} aria-hidden="true">
+    <svg
+      className="graph-cell"
+      width={width}
+      height={ROW_HEIGHT}
+      aria-hidden="true"
+    >
       {!filtered && (
         <>
           {row.continuations.map((edge) => (
@@ -60,12 +67,11 @@ function GraphCell({
 
 type Props = {
   snapshot: RepositorySnapshot;
-  reference: FullRef | null;
   selectedOid: Oid | null;
+  revealSeq: number;
   query: string;
   onQuery: (query: string) => void;
   onSelect: (oid: Oid) => void;
-  onBrowse: (reference: FullRef | null) => void;
   searchRef: RefObject<HTMLInputElement | null>;
   busy: boolean;
   hidden: boolean;
@@ -73,12 +79,11 @@ type Props = {
 
 export function History({
   snapshot,
-  reference,
   selectedOid,
+  revealSeq,
   query,
   onQuery,
   onSelect,
-  onBrowse,
   searchRef,
   busy,
   hidden,
@@ -95,10 +100,65 @@ export function History({
     return byOid;
   }, [snapshot.branches]);
   const search = query.trim().toLocaleLowerCase();
-  const commits = snapshot.commits.filter((commit) =>
-    [commit.subject, commit.author, commit.email, commit.oid].some((value) =>
-      value.toLocaleLowerCase().includes(search),
-    ),
+  const commits = useMemo(
+    () =>
+      snapshot.commits.filter((commit) =>
+        [commit.subject, commit.author, commit.email, commit.oid].some(
+          (value) => value.toLocaleLowerCase().includes(search),
+        ),
+      ),
+    [snapshot.commits, search],
+  );
+  const commitsRef = useRef(commits);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const headRef = useRef<HTMLTableSectionElement>(null);
+  const [viewport, setViewport] = useState({ top: 0, height: 0 });
+
+  useLayoutEffect(() => {
+    const scroller = scrollRef.current;
+    if (!scroller) return;
+    const measure = () =>
+      setViewport({ top: scroller.scrollTop, height: scroller.clientHeight });
+    measure();
+    scroller.addEventListener("scroll", measure, { passive: true });
+    const observer = new ResizeObserver(measure);
+    observer.observe(scroller);
+    return () => {
+      scroller.removeEventListener("scroll", measure);
+      observer.disconnect();
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    commitsRef.current = commits;
+  });
+
+  useLayoutEffect(() => {
+    const scroller = scrollRef.current;
+    if (hidden || !scroller || selectedOid === null) return;
+    const index = commitsRef.current.findIndex(
+      (commit) => commit.oid === selectedOid,
+    );
+    if (index < 0) return;
+    const header = headRef.current?.offsetHeight ?? 0;
+    const rows = scroller.clientHeight - header;
+    const rowTop = index * ROW_HEIGHT;
+    if (
+      rowTop + ROW_HEIGHT > scroller.scrollTop &&
+      rowTop < scroller.scrollTop + rows
+    )
+      return;
+    scroller.scrollTop = rowTop + ROW_HEIGHT / 2 - rows / 2;
+    setViewport({ top: scroller.scrollTop, height: scroller.clientHeight });
+  }, [selectedOid, revealSeq, hidden]);
+
+  const first = Math.min(
+    commits.length,
+    Math.max(0, Math.floor(viewport.top / ROW_HEIGHT) - OVERSCAN),
+  );
+  const last = Math.min(
+    commits.length,
+    Math.ceil((viewport.top + viewport.height) / ROW_HEIGHT) + OVERSCAN,
   );
   const graphWidth = Math.max(66, graph.lanes * 15 + 18);
   const columns = `${graphWidth}px minmax(260px, 1fr) 128px 84px 80px`;
@@ -111,27 +171,6 @@ export function History({
       hidden={hidden}
     >
       <div className="history-tools">
-        <label className="branch-select">
-          <GitBranch size={14} />
-          <select
-            aria-label="Browse branch history"
-            value={reference ?? ""}
-            disabled={busy}
-            onChange={(event) => {
-              const branch = snapshot.branches.find(
-                (branch) => branch.reference === event.target.value,
-              );
-              onBrowse(branch?.reference ?? null);
-            }}
-          >
-            <option value="">All branches</option>
-            {snapshot.branches.map((branch) => (
-              <option key={branch.reference} value={branch.reference}>
-                {branch.name}
-              </option>
-            ))}
-          </select>
-        </label>
         <div className="history-search">
           <Search size={14} />
           <input
@@ -154,8 +193,8 @@ export function History({
       </div>
       <div className="history-summary">
         <span>
-          {search ? `${commits.length} matching / ` : ""}
-          {snapshot.commits.length}
+          {search ? `${commits.length.toLocaleString()} matching / ` : ""}
+          {snapshot.commits.length.toLocaleString()}
           {snapshot.historyTruncated ? "+" : ""} loaded commits
           <span className="summary-separator">·</span>
           {snapshot.branches.length} branches
@@ -164,16 +203,18 @@ export function History({
           {search
             ? "Graph connections hidden while filtering"
             : snapshot.historyTruncated
-              ? "Newest 200 · refine by branch"
-              : reference
-                ? "Browsing branch · HEAD unchanged"
-                : "Local history"}
+              ? `Newest ${snapshot.commits.length.toLocaleString()} commits`
+              : "All branches"}
         </span>
       </div>
-      <div className="history-scroll">
-        <table className="history-table" style={{ minWidth: graphWidth + 552 }}>
-          <thead>
-            <tr style={{ gridTemplateColumns: columns }}>
+      <div className="history-scroll" ref={scrollRef}>
+        <table
+          className="history-table"
+          style={{ minWidth: graphWidth + 552 }}
+          aria-rowcount={commits.length + 1}
+        >
+          <thead ref={headRef}>
+            <tr style={{ gridTemplateColumns: columns }} aria-rowindex={1}>
               <th scope="col">Graph</th>
               <th scope="col">Description</th>
               <th scope="col">Author</th>
@@ -182,7 +223,10 @@ export function History({
             </tr>
           </thead>
           <tbody>
-            {commits.map((commit) => {
+            {first > 0 && (
+              <tr aria-hidden="true" style={{ height: first * ROW_HEIGHT }} />
+            )}
+            {commits.slice(first, last).map((commit, offset) => {
               const row = graph.rows.get(commit.oid);
               const labels = branches.get(commit.oid) ?? [];
               return (
@@ -190,6 +234,7 @@ export function History({
                   key={commit.oid}
                   className={selectedOid === commit.oid ? "selected" : ""}
                   style={{ gridTemplateColumns: columns }}
+                  aria-rowindex={first + offset + 2}
                 >
                   <td>
                     {row && (
@@ -259,6 +304,12 @@ export function History({
                 </tr>
               );
             })}
+            {last < commits.length && (
+              <tr
+                aria-hidden="true"
+                style={{ height: (commits.length - last) * ROW_HEIGHT }}
+              />
+            )}
           </tbody>
         </table>
         {commits.length === 0 && (

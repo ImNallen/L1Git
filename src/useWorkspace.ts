@@ -12,7 +12,6 @@ import { problemFrom } from "./domain/repository";
 import type {
   CommitDetail,
   FilePatch,
-  FullRef,
   Oid,
   Problem,
   RepositoryRoot,
@@ -22,7 +21,6 @@ import type {
 type ReadyWorkspace = {
   kind: "ready";
   snapshot: RepositorySnapshot;
-  reference: FullRef | null;
   error: Problem | null;
 };
 export type Workspace =
@@ -30,7 +28,6 @@ export type Workspace =
   | {
       kind: "loading";
       path: string;
-      reference: FullRef | null;
       previous: ReadyWorkspace | null;
     }
   | { kind: "error"; path: string; error: Problem }
@@ -90,12 +87,8 @@ export function useWorkspace() {
   }, []);
 
   const accept = useCallback(
-    (
-      snapshot: RepositorySnapshot,
-      reference: FullRef | null,
-      rememberRepository: boolean,
-    ) => {
-      setWorkspace({ kind: "ready", snapshot, reference, error: null });
+    (snapshot: RepositorySnapshot, rememberRepository: boolean) => {
+      setWorkspace({ kind: "ready", snapshot, error: null });
       setSelectedOid((selected) =>
         snapshot.commits.some((commit) => commit.oid === selected)
           ? selected
@@ -109,11 +102,11 @@ export function useWorkspace() {
   const selectRepository = useCallback(
     async (path: string) => {
       const id = ++requestId.current;
-      setWorkspace({ kind: "loading", path, reference: null, previous: null });
+      setWorkspace({ kind: "loading", path, previous: null });
       setSelectedOid(null);
       try {
         const snapshot = await repositories.snapshot(path);
-        if (id === requestId.current) accept(snapshot, null, true);
+        if (id === requestId.current) accept(snapshot, true);
       } catch (error) {
         if (id === requestId.current)
           setWorkspace({ kind: "error", path, error: problemFrom(error) });
@@ -139,33 +132,11 @@ export function useWorkspace() {
       const snapshot = await repositories.snapshot(path);
       if (id === requestId.current && !signal.aborted) {
         requestId.current++;
-        accept(snapshot, null, true);
+        accept(snapshot, true);
       }
       return null;
     } catch (error) {
       return problemFrom(error);
-    }
-  };
-
-  const browse = async (reference: FullRef | null) => {
-    if (!current || workspace.kind === "loading") return;
-    const id = ++requestId.current;
-    const previous = current;
-    setWorkspace({
-      kind: "loading",
-      path: current.snapshot.root,
-      reference,
-      previous,
-    });
-    try {
-      const snapshot = await repositories.snapshot(
-        current.snapshot.root,
-        reference,
-      );
-      if (id === requestId.current) accept(snapshot, reference, false);
-    } catch (error) {
-      if (id === requestId.current)
-        setWorkspace({ ...previous, error: problemFrom(error) });
     }
   };
 
@@ -176,23 +147,12 @@ export function useWorkspace() {
     }
     if (!current) return;
     const path = current.snapshot.root;
-    const reference =
-      workspace.kind === "loading" ? workspace.reference : current.reference;
     const id = ++requestId.current;
     const previous = current;
-    setWorkspace({ kind: "loading", path, reference, previous });
+    setWorkspace({ kind: "loading", path, previous });
     try {
-      let snapshot: RepositorySnapshot;
-      let shown = reference;
-      try {
-        snapshot = await repositories.snapshot(path, reference);
-      } catch (error) {
-        if (reference === null || problemFrom(error).kind !== "invalidRef")
-          throw error;
-        shown = null;
-        snapshot = await repositories.snapshot(path, null);
-      }
-      if (id === requestId.current) accept(snapshot, shown, false);
+      const snapshot = await repositories.snapshot(path);
+      if (id === requestId.current) accept(snapshot, false);
     } catch (error) {
       if (id === requestId.current)
         setWorkspace({ ...previous, error: problemFrom(error) });
@@ -283,7 +243,6 @@ export function useWorkspace() {
     selectRepository,
     addRepository,
     removeRepository,
-    browse,
     refresh,
     activeRoot,
   };

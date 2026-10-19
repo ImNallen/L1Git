@@ -14,32 +14,6 @@
   display: flex;
   gap: 9px;
 }
-.branch-select {
-  display: flex;
-  align-items: center;
-  border: 1px solid var(--border-control);
-  background: var(--row-hover);
-  border-radius: 6px;
-  padding-left: 9px;
-  color: var(--text-icon);
-  width: 174px;
-  flex-shrink: 0;
-}
-.branch-select select {
-  border: 0;
-  color: var(--text-secondary);
-  outline: none;
-  background: transparent;
-  height: 30px;
-  min-width: 0;
-  width: 100%;
-  padding: 0 8px;
-  font-size: 12px;
-  text-overflow: ellipsis;
-}
-.branch-select option {
-  background: var(--option-surface);
-}
 .history-search {
   height: 32px;
   border: 1px solid var(--border-control);

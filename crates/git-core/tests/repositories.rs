@@ -4,8 +4,9 @@ use l1_git_core::{
 };
 use std::{
     fs,
+    io::Write,
     path::{Path, PathBuf},
-    process::Command,
+    process::{Command, Stdio},
 };
 use tempfile::TempDir;
 
@@ -15,13 +16,17 @@ struct Fixture {
 }
 
 fn git(path: &Path, args: &[&str]) -> String {
+    git_with_input(path, args, b"")
+}
+
+fn git_with_input(path: &Path, args: &[&str], input: &[u8]) -> String {
     let mut command = Command::new("git");
     for (key, _) in std::env::vars_os() {
         if key.to_string_lossy().starts_with("GIT_") {
             command.env_remove(key);
         }
     }
-    let output = command
+    let mut child = command
         .arg("-C")
         .arg(path)
         .args(args)
@@ -31,8 +36,13 @@ fn git(path: &Path, args: &[&str]) -> String {
         .env("GIT_COMMITTER_EMAIL", "ada@example.test")
         .env("GIT_AUTHOR_DATE", "1700000000 +0000")
         .env("GIT_COMMITTER_DATE", "1700000000 +0000")
-        .output()
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .unwrap();
+    child.stdin.take().unwrap().write_all(input).unwrap();
+    let output = child.wait_with_output().unwrap();
     assert!(
         output.status.success(),
         "git {args:?}: {}",
@@ -73,9 +83,9 @@ fn normalizes_subfolders_and_symlinks_but_keeps_worktrees_distinct() {
     fixture.commit("first", "one", "initial");
     let child = fixture.repo.join("subfolder");
     fs::create_dir(&child).unwrap();
-    let original = snapshot(fixture.path(), None).unwrap();
+    let original = snapshot(fixture.path()).unwrap();
     assert_eq!(
-        snapshot(child.to_str().unwrap(), None).unwrap().root,
+        snapshot(child.to_str().unwrap()).unwrap().root,
         original.root
     );
     #[cfg(unix)]
@@ -83,7 +93,7 @@ fn normalizes_subfolders_and_symlinks_but_keeps_worktrees_distinct() {
         let alias = fixture._directory.path().join("alias");
         std::os::unix::fs::symlink(&fixture.repo, &alias).unwrap();
         assert_eq!(
-            snapshot(alias.to_str().unwrap(), None).unwrap().root,
+            snapshot(alias.to_str().unwrap()).unwrap().root,
             original.root
         );
     }
@@ -92,7 +102,7 @@ fn normalizes_subfolders_and_symlinks_but_keeps_worktrees_distinct() {
         &fixture.repo,
         &["worktree", "add", "-b", "linked", linked.to_str().unwrap()],
     );
-    let linked = snapshot(linked.to_str().unwrap(), None).unwrap();
+    let linked = snapshot(linked.to_str().unwrap()).unwrap();
     assert_ne!(linked.root, original.root);
     assert!(
         matches!(linked.head, Head::Attached { reference, .. } if reference == "refs/heads/linked")
@@ -120,7 +130,7 @@ fn reads_local_remote_and_tracking_refs_and_skips_symbolic_remote_head() {
         &fixture.repo,
         &["remote", "set-head", "team/origin", "main"],
     );
-    let result = snapshot(fixture.path(), None).unwrap();
+    let result = snapshot(fixture.path()).unwrap();
     assert_eq!(result.branches.len(), 4);
     assert!(matches!(result.head, Head::Attached { oid: head, .. } if head == oid));
     assert!(result.branches.iter().any(|b| matches!(b, Branch::Local { reference, upstream: Some(upstream), .. } if reference == "refs/heads/main" && upstream == "refs/remotes/team/origin/main")));
@@ -130,7 +140,7 @@ fn reads_local_remote_and_tracking_refs_and_skips_symbolic_remote_head() {
 #[test]
 fn distinguishes_unborn_and_detached_and_includes_unreferenced_head() {
     let fixture = Fixture::new();
-    let result = snapshot(fixture.path(), None).unwrap();
+    let result = snapshot(fixture.path()).unwrap();
     assert_eq!(
         result.head,
         Head::Unborn {
@@ -141,7 +151,7 @@ fn distinguishes_unborn_and_detached_and_includes_unreferenced_head() {
     let oid = fixture.commit("first", "one", "initial");
     git(&fixture.repo, &["checkout", "--detach"]);
     let detached = fixture.commit("second", "two", "detached commit");
-    let result = snapshot(fixture.path(), None).unwrap();
+    let result = snapshot(fixture.path()).unwrap();
     assert_eq!(
         result.head,
         Head::Detached {
@@ -153,44 +163,38 @@ fn distinguishes_unborn_and_detached_and_includes_unreferenced_head() {
 }
 
 #[test]
-fn branch_selection_has_its_own_bounded_history_without_checkout() {
+fn history_keeps_the_newest_commits_across_branches_and_flags_truncation() {
     let fixture = Fixture::new();
     let initial = fixture.commit("first", "one", "initial");
     git(&fixture.repo, &["branch", "old"]);
-    let tree = git(&fixture.repo, &["rev-parse", "HEAD^{tree}"]);
-    let mut parent = initial.clone();
-    for index in 0..=HISTORY_LIMIT {
-        parent = git(
-            &fixture.repo,
-            &[
-                "commit-tree",
-                &tree,
-                "-p",
-                &parent,
-                "-m",
-                &format!("commit {index}"),
-            ],
-        );
+    let mut stream = String::new();
+    for index in 0..HISTORY_LIMIT {
+        let message = format!("commit {index}");
+        stream.push_str(&format!(
+            "commit refs/heads/main\ncommitter Ada <ada@example.test> 1700000000 +0000\ndata {}\n{message}\n",
+            message.len()
+        ));
+        if index == 0 {
+            stream.push_str(&format!("from {initial}\n"));
+        }
     }
-    git(&fixture.repo, &["update-ref", "refs/heads/main", &parent]);
-    let all = snapshot(fixture.path(), None).unwrap();
-    assert_eq!(all.commits.len(), HISTORY_LIMIT);
-    assert!(all.history_truncated);
-    assert!(!all.commits.iter().any(|c| c.oid == initial));
-    let selected = snapshot(fixture.path(), Some("refs/heads/old")).unwrap();
-    assert_eq!(selected.commits.len(), 1);
-    assert_eq!(selected.commits[0].oid, initial);
-    assert!(!selected.history_truncated);
+    git_with_input(
+        &fixture.repo,
+        &["fast-import", "--quiet"],
+        stream.as_bytes(),
+    );
+    let result = snapshot(fixture.path()).unwrap();
+    assert_eq!(result.commits.len(), HISTORY_LIMIT);
+    assert!(result.history_truncated);
+    assert!(!result.commits.iter().any(|c| c.oid == initial));
+    assert!(result.branches.iter().any(|branch| matches!(
+        branch,
+        Branch::Local { name, oid, .. } if name == "old" && *oid == initial
+    )));
     assert_eq!(
         git(&fixture.repo, &["symbolic-ref", "HEAD"]),
         "refs/heads/main"
     );
-    for reference in ["main", "--all", "refs/heads/missing", "refs/heads/main~1"] {
-        assert!(matches!(
-            snapshot(fixture.path(), Some(reference)).unwrap_err().kind,
-            ErrorKind::InvalidRef
-        ));
-    }
 }
 
 #[test]
@@ -408,7 +412,7 @@ fn all_branches_excludes_private_and_stash_only_commits() {
         let oid = git(&fixture.repo, &["commit-tree", &tree, "-m", subject]);
         git(&fixture.repo, &["update-ref", reference, &oid]);
     }
-    let mut subjects = snapshot(fixture.path(), None)
+    let mut subjects = snapshot(fixture.path())
         .unwrap()
         .commits
         .into_iter()
@@ -456,11 +460,11 @@ fn partial_clone_details_never_fetch_missing_objects() {
 fn rejects_missing_invalid_and_bare_repositories_and_invalid_oids() {
     let fixture = Fixture::new();
     assert!(matches!(
-        snapshot("/not/a/real/l1git/path", None).unwrap_err().kind,
+        snapshot("/not/a/real/l1git/path").unwrap_err().kind,
         ErrorKind::MissingPath
     ));
     assert!(matches!(
-        snapshot(fixture._directory.path().to_str().unwrap(), None)
+        snapshot(fixture._directory.path().to_str().unwrap())
             .unwrap_err()
             .kind,
         ErrorKind::NotRepository
@@ -469,7 +473,7 @@ fn rejects_missing_invalid_and_bare_repositories_and_invalid_oids() {
     fs::create_dir(&bare).unwrap();
     git(&bare, &["init", "--bare"]);
     assert!(matches!(
-        snapshot(bare.to_str().unwrap(), None).unwrap_err().kind,
+        snapshot(bare.to_str().unwrap()).unwrap_err().kind,
         ErrorKind::BareRepository
     ));
     for oid in [
