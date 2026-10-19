@@ -241,3 +241,50 @@ it.each([
     error: `${entry} is missing from the extension.`,
   });
 });
+
+it("refuses an extension whose JSON entries add up to more than 16 MB or 200 files", async () => {
+  const error = "Night holds too many theme files to import.";
+  const pad = strToU8(`{ "pad": "${" ".repeat(3.5 * 1024 * 1024)}" }`);
+  const heavy = Object.fromEntries(
+    [1, 2, 3, 4, 5].map((n) => [`extension/pad${n}.json`, pad]),
+  );
+  serve({ [ext.download]: () => new Response(themeVsix(heavy)) });
+  expect(await fetchExtensionThemes(ext)).toEqual({ ok: false, error });
+  const many = Object.fromEntries(
+    Array.from({ length: 200 }, (_, n) => [
+      `extension/t${n}.json`,
+      strToU8("{}"),
+    ]),
+  );
+  serve({ [ext.download]: () => new Response(themeVsix(many)) });
+  expect(await fetchExtensionThemes(ext)).toEqual({ ok: false, error });
+});
+
+it("reports include cycles and include chains deeper than five", async () => {
+  const theme = (include: string) =>
+    strToU8(JSON.stringify({ include, colors: {} }));
+  serve({
+    [ext.download]: () =>
+      new Response(
+        themeVsix({
+          "extension/theme.json": theme("./base.json"),
+          "extension/base.json": theme("./theme.json"),
+        }),
+      ),
+  });
+  expect(await fetchExtensionThemes(ext)).toEqual({
+    ok: false,
+    error: "extension/theme.json includes itself.",
+  });
+  const chain = Object.fromEntries(
+    [0, 1, 2, 3, 4, 5, 6].map((n) => [
+      `extension/${n === 0 ? "theme" : `l${n}`}.json`,
+      theme(`./l${n + 1}.json`),
+    ]),
+  );
+  serve({ [ext.download]: () => new Response(themeVsix(chain)) });
+  expect(await fetchExtensionThemes(ext)).toEqual({
+    ok: false,
+    error: "extension/theme.json nests more than 5 includes.",
+  });
+});
