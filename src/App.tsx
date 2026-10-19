@@ -236,7 +236,7 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
             reference={current?.reference ?? null}
             busy={busy}
             browsing={screen === "repository"}
-            behind={overview.behindByRoot}
+            sync={overview.syncByRoot}
             onSelect={showRepository}
             onBrowse={(reference) => {
               setScreen("repository");

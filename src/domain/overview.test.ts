@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   attentionRows,
+  branchStateSchema,
+  divergence,
   overviewSchema,
   readyAdvances,
   repositoryRank,
@@ -162,5 +164,37 @@ describe("launch overview", () => {
     expect(
       repositoryRank(only("trunk", "feat/done", "feat/local"), false),
     ).toBe(3);
+  });
+});
+
+describe("divergence", () => {
+  const upstream = "refs/remotes/origin/main";
+  const of = (state: Record<string, unknown>) =>
+    divergence(branchStateSchema.parse(state));
+
+  it("counts commits to pull and push for every tracked state", () => {
+    expect(of({ kind: "upToDate", upstream })).toEqual({
+      upstream,
+      ahead: 0,
+      behind: 0,
+    });
+    expect(of({ kind: "ahead", upstream, ahead: 2 })).toEqual({
+      upstream,
+      ahead: 2,
+      behind: 0,
+    });
+    expect(
+      of({ kind: "behind", upstream, target: b, behind: 3, blocker: null }),
+    ).toEqual({ upstream, ahead: 0, behind: 3 });
+    expect(of({ kind: "diverged", upstream, ahead: 1, behind: 4 })).toEqual({
+      upstream,
+      ahead: 1,
+      behind: 4,
+    });
+  });
+
+  it("has nothing to compare without a live upstream", () => {
+    expect(of({ kind: "untracked" })).toBeNull();
+    expect(of({ kind: "gone", upstream })).toBeNull();
   });
 });

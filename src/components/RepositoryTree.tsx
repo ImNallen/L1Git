@@ -1,6 +1,7 @@
 import { useState } from "react";
 import {
   ArrowDown,
+  ArrowUp,
   ChevronDown,
   ChevronRight,
   CircleCheck,
@@ -12,6 +13,8 @@ import {
   Search,
   X,
 } from "lucide-react";
+import { upstreamName } from "../domain/overview";
+import type { Divergence } from "../domain/overview";
 import type { RecentRepository } from "../domain/recents";
 import type {
   Branch,
@@ -19,6 +22,7 @@ import type {
   RepositoryRoot,
   RepositorySnapshot,
 } from "../domain/repository";
+import type { RootSync } from "../overview";
 
 type Props = {
   entries: RecentRepository[];
@@ -27,7 +31,7 @@ type Props = {
   reference: FullRef | null;
   busy: boolean;
   browsing: boolean;
-  behind: ReadonlyMap<RepositoryRoot, number>;
+  sync: ReadonlyMap<RepositoryRoot, RootSync>;
   onSelect: (path: string) => void;
   onBrowse: (reference: FullRef | null) => void;
   onRemove: (root: RepositoryRoot) => void;
@@ -41,7 +45,7 @@ export function RepositoryTree({
   reference,
   busy,
   browsing,
-  behind,
+  sync,
   onSelect,
   onBrowse,
   onRemove,
@@ -79,6 +83,10 @@ export function RepositoryTree({
     const checkedOut =
       snapshot?.head.kind === "attached" &&
       snapshot.head.reference === branch.reference;
+    const counts =
+      branch.kind === "local" && snapshot
+        ? sync.get(snapshot.root)?.branches.get(branch.reference)
+        : undefined;
     const BranchIcon = checkedOut
       ? CircleCheck
       : branch.kind === "remote"
@@ -100,6 +108,7 @@ export function RepositoryTree({
             HEAD
           </span>
         )}
+        {counts && <SyncCounts divergence={counts} />}
       </button>
     );
   }
@@ -126,7 +135,7 @@ export function RepositoryTree({
       <nav className="repository-tree" aria-label="Repositories and branches">
         {entriesShown.map((entry) => {
           const active = entry.root === activePath;
-          const behindCount = behind.get(entry.root) ?? 0;
+          const head = sync.get(entry.root)?.head;
           const expanded =
             browsing &&
             entry.root === snapshot?.root &&
@@ -151,18 +160,8 @@ export function RepositoryTree({
                   )}
                   <span>{entry.name}</span>
                 </button>
-                {behindCount > 0 && (
-                  <span
-                    className="repository-behind"
-                    title={
-                      behindCount === 1
-                        ? "1 branch behind its upstream"
-                        : `${behindCount} branches behind their upstream`
-                    }
-                  >
-                    <ArrowDown size={11} />
-                    {behindCount}
-                  </span>
+                {head && (
+                  <SyncCounts divergence={head.divergence} branch={head.name} />
                 )}
                 <button
                   className="icon-button remove-repository"
@@ -300,5 +299,53 @@ export function RepositoryTree({
         )}
       </nav>
     </>
+  );
+}
+
+function SyncCounts({
+  divergence: { upstream, ahead, behind },
+  branch,
+}: {
+  divergence: Divergence;
+  branch?: string;
+}) {
+  if (ahead === 0 && behind === 0) return null;
+  const commits = (count: number) =>
+    count === 1 ? "1 commit" : `${count} commits`;
+  const label: string[] = [];
+  const title: string[] = [];
+  if (behind > 0) {
+    label.push(`${behind} to pull`);
+    title.push(`${commits(behind)} to pull from ${upstreamName(upstream)}`);
+  }
+  if (ahead > 0) {
+    label.push(`${ahead} to push`);
+    title.push(
+      behind > 0
+        ? `${commits(ahead)} to push`
+        : `${commits(ahead)} to push to ${upstreamName(upstream)}`,
+    );
+  }
+  const prefix = branch === undefined ? "" : `${branch}: `;
+  return (
+    <span
+      className="sync-counts"
+      role="img"
+      aria-label={prefix + label.join(", ")}
+      title={prefix + title.join(" · ")}
+    >
+      {behind > 0 && (
+        <span className="incoming">
+          <ArrowDown size={11} />
+          {behind}
+        </span>
+      )}
+      {ahead > 0 && (
+        <span className="outgoing">
+          <ArrowUp size={11} />
+          {ahead}
+        </span>
+      )}
+    </span>
   );
 }

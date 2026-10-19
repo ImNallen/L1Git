@@ -383,6 +383,57 @@ describe("overview store", () => {
     expect(view.fetching).toBe(false);
   });
 
+  it("reports each worktree's checked-out branch and every tracking branch", async () => {
+    const dir = "/code/app/.git";
+    const branches = [
+      {
+        ...behind("main", b),
+        checkedOutAt: app,
+        state: { ...behind("main", b).state, behind: 2 },
+      },
+      {
+        ...upToDate("feature"),
+        checkedOutAt: appWorktree,
+        state: {
+          kind: "diverged",
+          upstream: "refs/remotes/origin/feature",
+          ahead: 1,
+          behind: 3,
+        },
+      },
+      { ...upToDate("scratch"), state: { kind: "untracked" } },
+    ];
+    const h = harness();
+    h.store.track([app, appWorktree]);
+    await h.answer((label) => overview(label.split(" ")[1]!, dir, branches));
+    const main = {
+      upstream: "refs/remotes/origin/main",
+      ahead: 0,
+      behind: 2,
+    };
+    const feature = {
+      upstream: "refs/remotes/origin/feature",
+      ahead: 1,
+      behind: 3,
+    };
+    const tracking = new Map([
+      ["refs/heads/main", main],
+      ["refs/heads/feature", feature],
+    ]);
+    expect(h.store.getSnapshot().syncByRoot).toEqual(
+      new Map([
+        [app, { head: { name: "main", divergence: main }, branches: tracking }],
+        [
+          appWorktree,
+          {
+            head: { name: "feature", divergence: feature },
+            branches: tracking,
+          },
+        ],
+      ]),
+    );
+  });
+
   it("keeps an unreadable root visible and retries it on Fetch", async () => {
     const h = harness();
     h.store.track([app]);

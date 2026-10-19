@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { oidSchema, refSchema, rootSchema } from "./repository";
-import type { Oid } from "./repository";
+import type { FullRef, Oid } from "./repository";
 
 export const branchRefSchema = z
   .string()
@@ -109,6 +109,35 @@ export type AdvanceOutcome = z.infer<typeof advanceOutcomeSchema>;
 export type FastForwardReport = z.infer<typeof fastForwardReportSchema>;
 export type FetchMode = "local" | "remote";
 export type Advance = { reference: BranchRef; from: Oid; to: Oid };
+export type Divergence = { upstream: FullRef; ahead: number; behind: number };
+
+export function divergence(state: BranchState): Divergence | null {
+  switch (state.kind) {
+    case "untracked":
+    case "gone":
+      return null;
+    case "upToDate":
+      return { upstream: state.upstream, ahead: 0, behind: 0 };
+    case "ahead":
+      return { upstream: state.upstream, ahead: state.ahead, behind: 0 };
+    case "behind":
+      return { upstream: state.upstream, ahead: 0, behind: state.behind };
+    case "diverged":
+      return {
+        upstream: state.upstream,
+        ahead: state.ahead,
+        behind: state.behind,
+      };
+    default: {
+      const exhaustive: never = state;
+      return exhaustive;
+    }
+  }
+}
+
+export function upstreamName(upstream: string): string {
+  return upstream.replace(/^refs\/remotes\//, "");
+}
 
 export function readyAdvances(overview: RepositoryOverview): Advance[] {
   return overview.branches.flatMap((branch) =>
