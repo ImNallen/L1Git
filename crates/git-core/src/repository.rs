@@ -1,6 +1,6 @@
 use crate::{
     Branch, ChangeStatus, ChangedFile, Commit, CommitDetail, DiffBase, ErrorKind, FilePatch, Head,
-    RepositoryError, RepositorySnapshot, git, remotes,
+    RepositoryError, RepositorySnapshot, Tag, Worktree, git, remotes,
 };
 use std::{
     path::{Path, PathBuf},
@@ -130,6 +130,94 @@ fn branches(path: &Path, remote_names: &[&str]) -> Result<Vec<Branch>, Repositor
     Ok(branches)
 }
 
+fn tags(path: &Path) -> Result<Vec<Tag>, RepositoryError> {
+    let output = git::read(
+        path,
+        &[
+            "for-each-ref",
+            "--sort=refname",
+            "--format=%(refname)%00%(objectname)%00%(objecttype)%00%(*objectname)%00%(*objecttype)",
+            "refs/tags/",
+        ],
+    )?;
+    let mut tags = Vec::new();
+    for row in output
+        .split(|byte| *byte == b'\n')
+        .filter(|row| !row.is_empty())
+    {
+        let fields: Vec<_> = row.split(|byte| *byte == 0).collect();
+        let [reference, oid, kind, peeled, peeled_kind] = fields.as_slice() else {
+            return Err(git::malformed());
+        };
+        let (oid, kind) = if peeled.is_empty() {
+            (oid, kind)
+        } else {
+            (peeled, peeled_kind)
+        };
+        if *kind != b"commit" {
+            continue;
+        }
+        let reference = git::text(reference);
+        let Some(name) = reference.strip_prefix("refs/tags/") else {
+            return Err(git::malformed());
+        };
+        tags.push(Tag {
+            name: name.into(),
+            oid: git::text(oid),
+            reference,
+        });
+    }
+    Ok(tags)
+}
+
+fn worktrees(root: &Path) -> Result<Vec<Worktree>, RepositoryError> {
+    let output = git::read(root, &["worktree", "list", "--porcelain", "-z"])?;
+    let fields: Vec<_> = output.split(|byte| *byte == 0).collect();
+    let mut worktrees = Vec::new();
+    for record in fields
+        .split(|field| field.is_empty())
+        .filter(|record| !record.is_empty())
+    {
+        let (mut path, mut oid, mut reference) = (None, None, None);
+        let mut listed = true;
+        for field in record {
+            if let Some(value) = field.strip_prefix(b"worktree ") {
+                path = Some(git::text(value));
+            } else if let Some(value) = field.strip_prefix(b"HEAD ") {
+                oid = Some(git::text(value));
+            } else if let Some(value) = field.strip_prefix(b"branch ") {
+                reference = Some(git::text(value));
+            } else if *field == b"bare" || field.starts_with(b"prunable") {
+                listed = false;
+            }
+        }
+        if !listed {
+            continue;
+        }
+        let (Some(path), Some(oid)) = (path, oid) else {
+            return Err(git::malformed());
+        };
+        let Ok(path) = Path::new(&path).canonicalize() else {
+            continue;
+        };
+        let head = match reference {
+            Some(reference) if oid.bytes().all(|byte| byte == b'0') => Head::Unborn { reference },
+            Some(reference) => Head::Attached { reference, oid },
+            None => Head::Detached { oid },
+        };
+        worktrees.push(Worktree {
+            name: path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            current: path == root,
+            root: path.to_string_lossy().into_owned(),
+            head,
+        });
+    }
+    Ok(worktrees)
+}
+
 fn parse_commits(output: &[u8]) -> Result<Vec<Commit>, RepositoryError> {
     let output = output.strip_suffix(&[0]).unwrap_or(output);
     if output.is_empty() {
@@ -173,6 +261,8 @@ pub fn snapshot(path: &str) -> Result<RepositorySnapshot, RepositoryError> {
             .map(|remote| remote.name.as_str())
             .collect::<Vec<_>>(),
     )?;
+    let tags = tags(&root)?;
+    let worktrees = worktrees(&root)?;
     let limit = format!("--max-count={}", HISTORY_LIMIT + 1);
     let mut args = vec![
         "log",
@@ -182,6 +272,7 @@ pub fn snapshot(path: &str) -> Result<RepositorySnapshot, RepositoryError> {
         &limit,
         "--branches",
         "--remotes",
+        "--tags",
     ];
     if !matches!(head, Head::Unborn { .. }) {
         args.push("HEAD");
@@ -208,6 +299,8 @@ pub fn snapshot(path: &str) -> Result<RepositorySnapshot, RepositoryError> {
         name,
         head,
         branches,
+        tags,
+        worktrees,
         remotes,
         commits,
         history_truncated,

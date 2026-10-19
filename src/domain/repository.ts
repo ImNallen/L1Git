@@ -37,6 +37,17 @@ export const branchSchema = z.discriminatedUnion("kind", [
     remote: z.string(),
   }),
 ]);
+export const tagSchema = z.object({
+  reference: refSchema,
+  name: z.string(),
+  oid: oidSchema,
+});
+export const worktreeSchema = z.object({
+  root: rootSchema,
+  name: z.string(),
+  head: headSchema,
+  current: z.boolean(),
+});
 export const commitSchema = z.object({
   oid: oidSchema,
   parents: z.array(oidSchema),
@@ -50,6 +61,8 @@ export const snapshotSchema = z.object({
   name: z.string(),
   head: headSchema,
   branches: z.array(branchSchema),
+  tags: z.array(tagSchema),
+  worktrees: z.array(worktreeSchema),
   remotes: z.array(
     z.object({
       name: z.string(),
@@ -97,6 +110,8 @@ export type Oid = z.infer<typeof oidSchema>;
 export type FullRef = z.infer<typeof refSchema>;
 export type Head = z.infer<typeof headSchema>;
 export type Branch = z.infer<typeof branchSchema>;
+export type Tag = z.infer<typeof tagSchema>;
+export type Worktree = z.infer<typeof worktreeSchema>;
 export type Commit = z.infer<typeof commitSchema>;
 export type RepositorySnapshot = z.infer<typeof snapshotSchema>;
 export type ChangeStatus = z.infer<typeof changeStatusSchema>;

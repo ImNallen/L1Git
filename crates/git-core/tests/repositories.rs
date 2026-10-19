@@ -1,6 +1,6 @@
 use l1_git_core::{
-    Branch, ChangeStatus, DiffBase, ErrorKind, FilePatch, HISTORY_LIMIT, Head, commit_detail,
-    file_patch, snapshot,
+    Branch, ChangeStatus, DiffBase, ErrorKind, FilePatch, HISTORY_LIMIT, Head, Tag, Worktree,
+    commit_detail, file_patch, snapshot,
 };
 use std::{
     fs,
@@ -160,6 +160,104 @@ fn distinguishes_unborn_and_detached_and_includes_unreferenced_head() {
     );
     assert_eq!(result.commits[0].oid, detached);
     assert_eq!(result.commits[0].parents, [oid]);
+}
+
+#[test]
+fn reads_tags_at_their_peeled_commits_and_includes_tag_only_history() {
+    let fixture = Fixture::new();
+    let initial = fixture.commit("first", "one", "initial");
+    let tree = git(&fixture.repo, &["rev-parse", "HEAD^{tree}"]);
+    let tagged = git(
+        &fixture.repo,
+        &["commit-tree", &tree, "-p", &initial, "-m", "tag only"],
+    );
+    git(
+        &fixture.repo,
+        &["tag", "-a", "-m", "release", "v1.0", &initial],
+    );
+    git(&fixture.repo, &["tag", "light", &tagged]);
+    git(&fixture.repo, &["tag", "tree", &tree]);
+    git(
+        &fixture.repo,
+        &["tag", "-a", "-m", "tree", "tree-annotated", &tree],
+    );
+    let result = snapshot(fixture.path()).unwrap();
+    assert_eq!(
+        result.tags,
+        [
+            Tag {
+                reference: "refs/tags/light".into(),
+                name: "light".into(),
+                oid: tagged.clone(),
+            },
+            Tag {
+                reference: "refs/tags/v1.0".into(),
+                name: "v1.0".into(),
+                oid: initial.clone(),
+            },
+        ]
+    );
+    assert_eq!(
+        result
+            .commits
+            .iter()
+            .map(|commit| commit.oid.as_str())
+            .collect::<Vec<_>>(),
+        [tagged.as_str(), initial.as_str()]
+    );
+}
+
+#[test]
+fn reads_linked_and_detached_worktrees_and_marks_the_opened_root() {
+    let fixture = Fixture::new();
+    let oid = fixture.commit("first", "one", "initial");
+    let linked = fixture._directory.path().join("linked");
+    let detached = fixture._directory.path().join("detached");
+    git(
+        &fixture.repo,
+        &["worktree", "add", "-b", "feature", linked.to_str().unwrap()],
+    );
+    git(
+        &fixture.repo,
+        &["worktree", "add", "--detach", detached.to_str().unwrap()],
+    );
+    let worktree = |path: &Path, name: &str, head: Head, current: bool| Worktree {
+        root: fs::canonicalize(path).unwrap().to_str().unwrap().into(),
+        name: name.into(),
+        head,
+        current,
+    };
+    let attached = |reference: &str| Head::Attached {
+        reference: reference.into(),
+        oid: oid.clone(),
+    };
+    let detached_head = Head::Detached { oid: oid.clone() };
+    assert_eq!(
+        snapshot(fixture.path()).unwrap().worktrees,
+        [
+            worktree(
+                &fixture.repo,
+                "repo with spaces",
+                attached("refs/heads/main"),
+                true
+            ),
+            worktree(&detached, "detached", detached_head.clone(), false),
+            worktree(&linked, "linked", attached("refs/heads/feature"), false),
+        ]
+    );
+    assert_eq!(
+        snapshot(linked.to_str().unwrap()).unwrap().worktrees,
+        [
+            worktree(
+                &fixture.repo,
+                "repo with spaces",
+                attached("refs/heads/main"),
+                false
+            ),
+            worktree(&detached, "detached", detached_head, false),
+            worktree(&linked, "linked", attached("refs/heads/feature"), true),
+        ]
+    );
 }
 
 #[test]

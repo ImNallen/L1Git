@@ -126,6 +126,22 @@ describe("real Rust transport contract", () => {
     expect(
       snapshot.branches.some((branch) => branch.name === "origin/HEAD"),
     ).toBe(false);
+    const theme = snapshot.commits.find(
+      (commit) => commit.subject === "feat(theme): add the L1 dark canvas",
+    );
+    expect(snapshot.tags).toEqual([
+      { reference: "refs/tags/v0.1.0", name: "v0.1.0", oid: theme?.oid },
+    ]);
+    expect(
+      snapshot.worktrees.map(({ name, head, current }) => [
+        name,
+        head.kind,
+        current,
+      ]),
+    ).toEqual([
+      ["l1-demo", "attached", true],
+      ["detached-worktree", "detached", false],
+    ]);
     expect(
       snapshot.remotes.find((remote) => remote.name === "github")?.github,
     ).toEqual({ owner: "l1-family", repo: "l1-git" });

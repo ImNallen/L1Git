@@ -2,7 +2,7 @@
 
 ## Sub-features
 
-Canonical roots, linked worktrees, exhaustive HEAD states, local and remote refs, bounded history, commit details, file patches, branch overviews, fetch, fast-forward, and transport validation.
+Canonical roots, linked worktrees, exhaustive HEAD states, local and remote refs, tags, worktree heads, bounded history, commit details, file patches, branch overviews, fetch, fast-forward, and transport validation.
 
 ## How to get to it (user POV)
 
@@ -10,9 +10,9 @@ Every Add, Refresh, and commit selection reaches the shared Rust Git core. Launc
 
 ## Driving it with the terminal
 
-Run `cargo test --locked` to build temporary repositories and check normalization, distinct linked worktrees, fetched remote refs, unborn and detached HEAD, the newest-50,000 history window, invalid input, first-parent merge details, and file patches for text, binary, oversized, root, unchanged, and pathspec-magic paths. The `sync` tests check branch roles and upstream states, fast-forwards of free, checked-out, linked, and partial-clone branches, and skips for moved, diverged, dirty, and mid-rebase branches. They also check per-remote auth failures and timeouts through fake ssh commands, and that two fetches of one repository never overlap. No external remote is contacted.
+Run `cargo test --locked` to build temporary repositories and check normalization, distinct linked worktrees, fetched remote refs, tags peeled to their commits with non-commit tags skipped, history that reaches tag-only commits, attached and detached linked worktrees with only the opened root marked current, unborn and detached HEAD, the newest-50,000 history window, invalid input, first-parent merge details, and file patches for text, binary, oversized, root, unchanged, and pathspec-magic paths. The `sync` tests check branch roles and upstream states, fast-forwards of free, checked-out, linked, and partial-clone branches, and skips for moved, diverged, dirty, and mid-rebase branches. They also check per-remote auth failures and timeouts through fake ssh commands, and that two fetches of one repository never overlap. No external remote is contacted.
 
-Run `pnpm test` to start a real isolated Rust bridge, create the deterministic fixture, parse HTTP responses with the frontend schemas, find a remote branch tip in the full history, read merge details, and read text, binary, and root file patches. Against the `sync` fixture, they read local refs, fetch, fast-forward the ready branch, and receive skips for the dirty and diverged branches. A snapshot must answer while a slow fetch is in flight. The tests reject other origins, missing origins, malformed requests, and nonexistent commands. Graph and recents tests run in the same command.
+Run `pnpm test` to start a real isolated Rust bridge, create the deterministic fixture, parse HTTP responses with the frontend schemas, find a remote branch tip in the full history, read the fixture's tag and worktrees, read merge details, and read text, binary, and root file patches. Against the `sync` fixture, they read local refs, fetch, fast-forward the ready branch, and receive skips for the dirty and diverged branches. A snapshot must answer while a slow fetch is in flight. The tests reject other origins, missing origins, malformed requests, and nonexistent commands. Graph and recents tests run in the same command.
 
 Run `pnpm build` and `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer pnpm tauri build --debug` for the frontend and native packaging checks.
 
