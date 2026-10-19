@@ -120,6 +120,7 @@ git(
 );
 git(repository, "config", "remote.github.skipFetchAll", "true");
 git(repository, "worktree", "add", "--detach", detached, "feat/history");
+git(repository, "tag", "-a", "-m", "First fixture release", "v0.1.0", "main~1");
 git(unborn, "init", "--initial-branch=main");
 
 const sync = {

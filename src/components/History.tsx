@@ -1,29 +1,55 @@
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { RefObject } from "react";
-import { Cloud, GitBranch, Search, X } from "lucide-react";
+import {
+  CircleCheck,
+  Cloud,
+  FolderGit2,
+  GitBranch,
+  GitCommitHorizontal,
+  Search,
+  Tag,
+  X,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { buildGraph } from "../domain/graph";
 import type { GraphRow } from "../domain/graph";
-import type { Oid, RepositorySnapshot } from "../domain/repository";
-import { shortDate } from "../domain/time";
+import { refLabels } from "../domain/refs";
+import type { RefLabel } from "../domain/refs";
+import type { Commit, Oid, RepositorySnapshot } from "../domain/repository";
 
 const ROW_HEIGHT = 36;
 const OVERSCAN = 10;
 const color = (lane: number) => `var(--graph-lane-${(lane % 6) + 1})`;
-const x = (lane: number) => 16 + lane * 15;
+const x = (lane: number) => 14 + lane * 24;
+
+const initials = (author: string) =>
+  author
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase();
 
 function GraphCell({
   row,
+  commit,
+  selected,
   width,
   filtered,
   known,
 }: {
   row: GraphRow;
+  commit: Commit;
+  selected: boolean;
   width: number;
   filtered: boolean;
   known: Set<Oid>;
 }) {
   const curve = (from: number, to: number, start: number, end: number) =>
     `M ${x(from)} ${start} C ${x(from)} ${(start + end) / 2}, ${x(to)} ${(start + end) / 2}, ${x(to)} ${end}`;
+  const merge = row.parents.length > 1;
+  const radius = merge ? 5 : 10;
   return (
     <svg
       className="graph-cell"
@@ -53,15 +79,98 @@ function GraphCell({
           ))}
         </>
       )}
-      <circle
-        cx={x(row.lane)}
-        cy={18}
-        r={4}
-        fill={row.parents.length > 1 ? "var(--canvas)" : color(row.lane)}
-        stroke={color(row.lane)}
-        strokeWidth={2}
-      />
+      <g className="graph-node">
+        <title>{`${commit.author} <${commit.email}>`}</title>
+        {selected && (
+          <circle
+            cx={x(row.lane)}
+            cy={18}
+            r={radius + 2}
+            fill="none"
+            stroke="var(--text)"
+            strokeWidth={2}
+          />
+        )}
+        {merge ? (
+          <circle
+            cx={x(row.lane)}
+            cy={18}
+            r={radius}
+            fill="var(--canvas)"
+            stroke={color(row.lane)}
+            strokeWidth={2}
+          />
+        ) : (
+          <>
+            <circle
+              cx={x(row.lane)}
+              cy={18}
+              r={radius}
+              fill={color(row.lane)}
+            />
+            <text
+              x={x(row.lane)}
+              y={18}
+              textAnchor="middle"
+              dominantBaseline="central"
+              fill="#fff"
+              fontSize={8.5}
+              fontWeight={600}
+            >
+              {initials(commit.author)}
+            </text>
+          </>
+        )}
+      </g>
     </svg>
+  );
+}
+
+function labelName(label: RefLabel): string {
+  return label.kind === "head" ? "HEAD" : label.name;
+}
+
+function badge(label: RefLabel): { Icon: LucideIcon; title: string } {
+  switch (label.kind) {
+    case "local":
+      return {
+        Icon: label.head ? CircleCheck : GitBranch,
+        title: label.reference,
+      };
+    case "remote":
+      return { Icon: Cloud, title: label.reference };
+    case "tag":
+      return { Icon: Tag, title: label.reference };
+    case "worktree":
+      return { Icon: FolderGit2, title: `Detached worktree at ${label.root}` };
+    case "head":
+      return { Icon: GitCommitHorizontal, title: "Detached HEAD" };
+    default: {
+      const exhaustive: never = label;
+      return exhaustive;
+    }
+  }
+}
+
+function RefBadge({ label, lane }: { label: RefLabel; lane: number }) {
+  const { Icon, title } = badge(label);
+  return (
+    <span
+      className={`ref-badge ${label.kind}`}
+      style={{ borderLeftColor: color(lane) }}
+      title={title}
+    >
+      <Icon size={11} />
+      <span className="ref-name">{labelName(label)}</span>
+      {label.kind === "local" && label.worktree !== null && (
+        <span
+          className="ref-worktree"
+          title={`Checked out in ${label.worktree}`}
+        >
+          <FolderGit2 size={10} />
+        </span>
+      )}
+    </span>
   );
 }
 
@@ -93,12 +202,7 @@ export function History({
     () => new Set(snapshot.commits.map((commit) => commit.oid)),
     [snapshot.commits],
   );
-  const branches = useMemo(() => {
-    const byOid = new Map<Oid, typeof snapshot.branches>();
-    for (const branch of snapshot.branches)
-      byOid.set(branch.oid, [...(byOid.get(branch.oid) ?? []), branch]);
-    return byOid;
-  }, [snapshot.branches]);
+  const labels = useMemo(() => refLabels(snapshot), [snapshot]);
   const search = query.trim().toLocaleLowerCase();
   const commits = useMemo(
     () =>
@@ -160,8 +264,8 @@ export function History({
     commits.length,
     Math.ceil((viewport.top + viewport.height) / ROW_HEIGHT) + OVERSCAN,
   );
-  const graphWidth = Math.max(66, graph.lanes * 15 + 18);
-  const columns = `${graphWidth}px minmax(260px, 1fr) 128px 84px 80px`;
+  const graphWidth = Math.max(48, graph.lanes * 24 + 10);
+  const columns = `200px ${graphWidth}px minmax(260px, 1fr)`;
 
   return (
     <section
@@ -210,16 +314,14 @@ export function History({
       <div className="history-scroll" ref={scrollRef}>
         <table
           className="history-table"
-          style={{ minWidth: graphWidth + 552 }}
+          style={{ minWidth: graphWidth + 460 }}
           aria-rowcount={commits.length + 1}
         >
           <thead ref={headRef}>
             <tr style={{ gridTemplateColumns: columns }} aria-rowindex={1}>
+              <th scope="col">Branch / Tag</th>
               <th scope="col">Graph</th>
-              <th scope="col">Description</th>
-              <th scope="col">Author</th>
-              <th scope="col">Date</th>
-              <th scope="col">Commit</th>
+              <th scope="col">Commit message</th>
             </tr>
           </thead>
           <tbody>
@@ -228,18 +330,33 @@ export function History({
             )}
             {commits.slice(first, last).map((commit, offset) => {
               const row = graph.rows.get(commit.oid);
-              const labels = branches.get(commit.oid) ?? [];
+              const [label, ...more] = labels.get(commit.oid) ?? [];
+              const selected = selectedOid === commit.oid;
               return (
                 <tr
                   key={commit.oid}
-                  className={selectedOid === commit.oid ? "selected" : ""}
+                  className={selected ? "selected" : ""}
                   style={{ gridTemplateColumns: columns }}
                   aria-rowindex={first + offset + 2}
+                  onClick={() => onSelect(commit.oid)}
                 >
+                  <td className="ref-cell">
+                    {label && <RefBadge label={label} lane={row?.lane ?? 0} />}
+                    {more.length > 0 && (
+                      <span
+                        className="more-refs"
+                        title={more.map(labelName).join(", ")}
+                      >
+                        +{more.length}
+                      </span>
+                    )}
+                  </td>
                   <td>
                     {row && (
                       <GraphCell
                         row={row}
+                        commit={commit}
+                        selected={selected}
                         width={graphWidth}
                         filtered={search.length > 0}
                         known={known}
@@ -249,58 +366,14 @@ export function History({
                   <td>
                     <button
                       className="commit-description"
-                      aria-label={`${commit.subject}, ${commit.oid.slice(0, 7)}`}
-                      aria-pressed={selectedOid === commit.oid}
-                      onClick={() => onSelect(commit.oid)}
+                      aria-label={`${commit.subject}, ${commit.author}, ${commit.oid.slice(0, 7)}`}
+                      aria-pressed={selected}
                     >
-                      <span className="ref-badges">
-                        {labels.slice(0, 2).map((branch) => (
-                          <span
-                            className={`ref-badge ${branch.kind}`}
-                            key={branch.reference}
-                            title={branch.reference}
-                          >
-                            {branch.kind === "remote" ? (
-                              <Cloud size={11} />
-                            ) : (
-                              <GitBranch size={11} />
-                            )}
-                            {branch.name}
-                          </span>
-                        ))}
-                        {labels.length > 2 && (
-                          <span
-                            className="more-refs"
-                            title={labels
-                              .slice(2)
-                              .map((branch) => branch.name)
-                              .join(", ")}
-                          >
-                            +{labels.length - 2}
-                          </span>
-                        )}
-                      </span>
                       <span className="commit-subject" title={commit.subject}>
                         {commit.subject || "(no subject)"}
                       </span>
                     </button>
                   </td>
-                  <td title={`${commit.author} <${commit.email}>`}>
-                    <span className="author-avatar">
-                      {commit.author
-                        .split(/\s+/)
-                        .map((part) => part[0])
-                        .slice(0, 2)
-                        .join("")}
-                    </span>
-                    <span className="author-name">{commit.author}</span>
-                  </td>
-                  <td
-                    title={new Date(commit.timestamp * 1000).toLocaleString()}
-                  >
-                    {shortDate(commit.timestamp)}
-                  </td>
-                  <td className="commit-hash">{commit.oid.slice(0, 7)}</td>
                 </tr>
               );
             })}

@@ -25,6 +25,25 @@ pub enum Branch {
     },
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Tag {
+    pub reference: String,
+    pub name: String,
+    /// The commit the tag points at, through any annotated tag objects.
+    pub oid: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Worktree {
+    pub root: String,
+    pub name: String,
+    pub head: Head,
+    /// This worktree is the snapshot's root.
+    pub current: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GitHubRepository {
     pub owner: String,
@@ -56,6 +75,10 @@ pub struct RepositorySnapshot {
     pub name: String,
     pub head: Head,
     pub branches: Vec<Branch>,
+    /// Tags that point at commits, sorted by ref name.
+    pub tags: Vec<Tag>,
+    /// Every worktree of the repository except bare and prunable entries.
+    pub worktrees: Vec<Worktree>,
     pub remotes: Vec<Remote>,
     pub commits: Vec<Commit>,
     pub history_truncated: bool,
