@@ -6,7 +6,7 @@ Opening a changed file from the inspector tree, unified and split layouts, binar
 
 ## How to get to it (user POV)
 
-Open the fixture repository and select **All branches**. Select a commit in the history. In the inspector's changed-file tree, click a file row. The history pane shows that file's diff until you go back.
+Open the fixture repository. Select a commit in the history. In the inspector's changed-file tree, click a file row. The history pane shows that file's diff until you go back.
 
 ## Driving it with T3 preview
 
