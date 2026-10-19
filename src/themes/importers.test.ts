@@ -73,10 +73,34 @@ it("maps a VS Code theme onto L1 Git tokens, flattening translucent surfaces ont
             graphLane3: "#f1fa8c",
             graphLane4: "#50fa7b",
             graphLane6: "#8be9fd",
+            syntaxKeyword: "#ff79c6",
+            syntaxString: "#f1fa8c",
+            syntaxComment: "#6272a4",
           },
         },
       ],
     },
+  });
+});
+
+it("reads syntax colours from the last TextMate rule naming each scope, flattening alpha onto the background", () => {
+  const theme = asVsCodeTheme({
+    colors: { "editor.background": "#000000" },
+    tokenColors: [
+      { scope: "keyword, storage.type", settings: { foreground: "#ff0000" } },
+      { scope: "keyword.control", settings: { foreground: "#00ff00" } },
+      { scope: ["keyword"], settings: { foreground: "#0000ff" } },
+      { scope: "comment", settings: { fontStyle: "italic" } },
+      { scope: "comment", settings: { foreground: "#ffffff80" } },
+      { scope: "constant.numeric", settings: { foreground: "#ffb86c" } },
+    ],
+  });
+  expect(theme && vsCodeThemeToDraft(theme, "x").colors).toEqual({
+    background: "#000000",
+    accent: "#3979ce",
+    syntaxKeyword: "#0000ff",
+    syntaxConstant: "#ffb86c",
+    syntaxComment: "#808080",
   });
 });
 
@@ -159,7 +183,7 @@ it("skips a fully transparent colour, which VS Code themes use to hide an elemen
   });
 });
 
-it("lets an including theme override the colours it includes", () => {
+it("lets an including theme override the colours and syntax rules it includes", () => {
   const parent = asVsCodeTheme({
     name: "Base",
     colors: {
@@ -167,11 +191,16 @@ it("lets an including theme override the colours it includes", () => {
       "button.background": "#ff0000",
       "terminal.ansiGreen": "#00cc00",
     },
+    tokenColors: [
+      { scope: "keyword", settings: { foreground: "#cc00cc" } },
+      { scope: "string", settings: { foreground: "#ffff00" } },
+    ],
   });
   const child = asVsCodeTheme({
     name: "Child",
     include: "./base.json",
     colors: { "button.background": "#00ff00" },
+    tokenColors: [{ scope: "string", settings: { foreground: "#00ffff" } }],
   });
   const merged =
     parent &&
@@ -185,6 +214,8 @@ it("lets an including theme override the colours it includes", () => {
       accent: "#00ff00",
       success: "#00cc00",
       graphLane4: "#00cc00",
+      syntaxKeyword: "#cc00cc",
+      syntaxString: "#00ffff",
     },
   });
 });

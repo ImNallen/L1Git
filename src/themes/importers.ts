@@ -83,7 +83,9 @@ export type VsCodeTheme = {
   type?: string;
   include?: string;
   colors: Record<string, string>;
+  tokenColors: TokenRule[];
 };
+type TokenRule = { scopes: string[]; foreground: string };
 
 export function asVsCodeTheme(raw: unknown): VsCodeTheme | null {
   if (
@@ -100,12 +102,36 @@ export function asVsCodeTheme(raw: unknown): VsCodeTheme | null {
     isObject(raw.colors) ? raw.colors : {},
   ))
     if (typeof value === "string") colors[key] = value;
+  const tokenColors = (
+    Array.isArray(raw.tokenColors) ? raw.tokenColors : []
+  ).flatMap((rule): TokenRule[] => {
+    if (
+      !isObject(rule) ||
+      !isObject(rule.settings) ||
+      typeof rule.settings.foreground !== "string"
+    )
+      return [];
+    const { scope } = rule;
+    const scopes =
+      typeof scope === "string"
+        ? scope.split(",")
+        : Array.isArray(scope)
+          ? scope.filter((s): s is string => typeof s === "string")
+          : [];
+    return [
+      {
+        scopes: scopes.map((s) => s.trim()),
+        foreground: rule.settings.foreground,
+      },
+    ];
+  });
   const text = (v: unknown) => (typeof v === "string" ? v : undefined);
   return {
     name: text(raw.name),
     type: text(raw.type),
     include: text(raw.include),
     colors,
+    tokenColors,
   };
 }
 
@@ -117,14 +143,19 @@ export function mergeVsCodeThemes(
     name: child.name ?? parent.name,
     type: child.type ?? parent.type,
     colors: { ...parent.colors, ...child.colors },
+    tokenColors: [...parent.tokenColors, ...child.tokenColors],
   };
 }
 
-type Source = { keys: readonly string[]; pick?: "colorful" | "neutral" };
+type Source = {
+  keys: readonly string[];
+  scopes?: readonly string[];
+  pick?: "colorful" | "neutral";
+};
 
-// The first workbench colour a theme sets wins. `colorful` prefers a coloured candidate over a grey one;
-// `neutral` takes greys only, so loud borders fall back to derived ones. L1 Git has no syntax tokens,
-// so a theme's TextMate rules are not read.
+// The first colour a theme sets wins; `scopes` are TextMate scopes tried before workbench `keys`, each taken from
+// the last rule that names it, as VS Code lets a later rule win. `colorful` prefers a coloured candidate over a grey
+// one; `neutral` takes greys only, so loud borders fall back to derived ones.
 const VS_CODE_SOURCES: Partial<Record<Token, Source>> = {
   background: { keys: ["editor.background"] },
   foreground: { keys: ["editor.foreground", "foreground"] },
@@ -183,15 +214,36 @@ const VS_CODE_SOURCES: Partial<Record<Token, Source>> = {
   graphLane4: { keys: ["terminal.ansiGreen"] },
   graphLane5: { keys: ["terminal.ansiBrightMagenta", "terminal.ansiRed"] },
   graphLane6: { keys: ["terminal.ansiCyan"] },
+  syntaxKeyword: { scopes: ["keyword", "storage.type", "storage"], keys: [] },
+  syntaxFunction: {
+    scopes: ["entity.name.function", "support.function", "meta.function-call"],
+    keys: [],
+  },
+  syntaxString: { scopes: ["string"], keys: [] },
+  syntaxStringExpression: {
+    scopes: ["string.template", "string.regexp", "entity.name.tag"],
+    keys: [],
+  },
+  syntaxConstant: {
+    scopes: ["constant.numeric", "constant.language", "constant"],
+    keys: [],
+  },
+  syntaxParameter: { scopes: ["variable.parameter"], keys: [] },
+  syntaxPunctuation: { scopes: ["punctuation"], keys: [] },
+  syntaxComment: { scopes: ["comment"], keys: [] },
 };
 
 const isColorful = (hex: string) => chroma(hex) >= 0.1;
 
 // A fully transparent colour is how a VS Code theme turns an element off, so it never stands in for a token.
 function candidates(theme: VsCodeTheme, source: Source): string[] {
-  return source.keys
-    .flatMap((k) => theme.colors[k] ?? [])
-    .filter((c) => (parseHex(c)?.a ?? 0) > 0);
+  const scoped = (source.scopes ?? []).flatMap(
+    (scope) =>
+      theme.tokenColors.findLast((r) => r.scopes.includes(scope))?.foreground ??
+      [],
+  );
+  const keyed = source.keys.flatMap((k) => theme.colors[k] ?? []);
+  return [...scoped, ...keyed].filter((c) => (parseHex(c)?.a ?? 0) > 0);
 }
 
 const UI_THEME_APPEARANCE = new Map<string | undefined, Appearance>([
