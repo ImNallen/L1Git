@@ -72,6 +72,10 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
   const [inspectorWidth, setInspectorWidth] = useState(320);
   const [diffStyle, setDiffStyle] = useState<DiffStyle>("unified");
   const [jump, setJump] = useState<Jump | null>(null);
+  // The branch last selected in each repository, so it stays highlighted after a round trip.
+  const [lastBranch, setLastBranch] = useState<
+    ReadonlyMap<RepositoryRoot, FullRef>
+  >(new Map());
   const sidebarToggleRef = useRef<HTMLButtonElement>(null);
   const inspectorToggleRef = useRef<HTMLButtonElement>(null);
   const settingsRef = useRef<HTMLButtonElement>(null);
@@ -113,10 +117,14 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
     () => (snapshot ? trunkTips(snapshot.branches, statuses ?? []) : []),
     [snapshot, statuses],
   );
+  const jumpedReference =
+    snapshot && !(jump?.pending && jump.root === snapshot.root)
+      ? lastBranch.get(snapshot.root)
+      : undefined;
   const jumped =
-    jump && !jump.pending && jump.root === snapshot?.root
+    snapshot && jumpedReference
       ? (snapshot.branches.find(
-          (branch) => branch.reference === jump.reference,
+          (branch) => branch.reference === jumpedReference,
         ) ?? null)
       : null;
   const jumpedUnloaded =
@@ -164,6 +172,7 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
     if (pending) showRepository(root);
     else if (snapshot.commits.some((commit) => commit.oid === branch.oid))
       setSelectedOid(branch.oid);
+    setLastBranch((previous) => new Map(previous).set(root, branch.reference));
     setJump((previous) => ({
       root,
       reference: branch.reference,
@@ -292,6 +301,11 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
             onRemove={(root) => {
               app.removeRepository(root);
               expansion.setExpanded(root, false);
+              setLastBranch((previous) => {
+                const next = new Map(previous);
+                next.delete(root);
+                return next;
+              });
             }}
             onAdd={() => setAdding(true)}
           />
