@@ -114,7 +114,7 @@ function GraphCell({
               y={18}
               textAnchor="middle"
               dominantBaseline="central"
-              fill="#fff"
+              fill="var(--on-lane)"
               fontSize={8.5}
               fontWeight={600}
             >

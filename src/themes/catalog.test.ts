@@ -121,6 +121,21 @@ it("duplicates a variant as its seeds plus only the colours they don't derive", 
   });
 });
 
+it("duplicates a variant without the colours its own lanes derive", () => {
+  const paleLanes = customVariant({
+    id: "custom-paper",
+    name: "Paper",
+    appearance: "light",
+    colors: { background: "#ffffff", accent: "#346bf1", graphLane3: "#f1fa8c" },
+  });
+  expect(paleLanes.palette.onLane).toBe("#323232");
+  expect(draftOf(paleLanes, "Paper copy").colors).toEqual({
+    background: "#ffffff",
+    accent: "#346bf1",
+    graphLane3: "#f1fa8c",
+  });
+});
+
 const variant = (
   id: string,
   name: string,

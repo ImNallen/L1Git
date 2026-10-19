@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import { BUILT_IN_FAMILIES, L1_VARIANTS } from "./catalog";
 import { contrast, distance, parseHex } from "./color";
 import {
+  completePalette,
   derivePalette,
+  LANES,
   MAX_FIT_DISTANCE,
   TOKENS,
   type Appearance,
@@ -119,4 +121,66 @@ it("puts dark text on a pale accent and white text on a deep one", () => {
   expect(derivePalette("light", "#ffffff", "#346bf1").accentForeground).toBe(
     "#ffffff",
   );
+});
+
+const variantPalette = (id: string) =>
+  derived.find((v) => v.id === id)?.palette ?? {};
+
+it("turns the graph lanes with the accent, so each family's first lane is its accent hue", () => {
+  expect(LANES.map((lane) => variantPalette("grove-dark")[lane])).toEqual([
+    "#40c083",
+    "#00bbbf",
+    "#ffafd7",
+    "#f8a236",
+    "#66acff",
+    "#bbc95d",
+  ]);
+  expect(variantPalette("ember-light").graphLane1).toBe("#b04d20");
+  expect(variantPalette("iris-dark").graphLane1).toBe("#9b97fb");
+});
+
+const L1_INITIALS_CONTRAST =
+  Math.floor(
+    Math.min(
+      ...(["light", "dark"] as const).flatMap((a) =>
+        LANES.map((lane) =>
+          ratio(stylesheet[a]["--on-lane"], stylesheet[a][TOKENS[lane]]),
+        ),
+      ),
+    ) * 100,
+  ) / 100;
+
+it.each(derived.map((v) => [v.id, v.palette] as const))(
+  "keeps %s lanes at 3:1 on the canvas, with initials as readable as L1's",
+  (_, p) => {
+    for (const lane of LANES) {
+      expect(ratio(p[lane], p.background)).toBeGreaterThanOrEqual(3);
+      expect(ratio(p.onLane, p[lane])).toBeGreaterThanOrEqual(
+        L1_INITIALS_CONTRAST,
+      );
+      expect(ratio(p.refOnLane, p[lane])).toBeGreaterThanOrEqual(3);
+    }
+  },
+);
+
+it("switches initials to dark ink on a dark theme whose lanes leave white too faint", () => {
+  expect(variantPalette("grove-dark").onLane).toBe("#ffffff");
+  expect(variantPalette("rose-dark").onLane).toBe("#150d11");
+});
+
+it("puts dark ink on pale lanes a theme brings, and keeps white on deep ones", () => {
+  const pale = Object.fromEntries(LANES.map((lane) => [lane, "#f1fa8c"]));
+  const light = completePalette("light", {
+    background: "#ffffff",
+    accent: "#346bf1",
+    ...pale,
+  });
+  expect([light.onLane, light.refOnLane]).toEqual(["#323232", "#323232"]);
+  const deep = Object.fromEntries(LANES.map((lane) => [lane, "#1d4ed8"]));
+  const dark = completePalette("dark", {
+    background: "#0a0a0a",
+    accent: "#346bf1",
+    ...deep,
+  });
+  expect([dark.onLane, dark.refOnLane]).toEqual(["#ffffff", "#ffffff"]);
 });

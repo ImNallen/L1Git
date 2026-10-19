@@ -51,17 +51,50 @@ function toOklab({ r, g, b }: Rgba): Lab {
   };
 }
 
-function fromOklab({ L, a, b }: Lab, alpha: number): Rgba {
+function linearRgb({ L, a, b }: Lab): [number, number, number] {
   const l = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3;
   const m = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3;
   const s = (L - 0.0894841775 * a - 1.291485548 * b) ** 3;
+  return [
+    4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+    -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+    -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s,
+  ];
+}
+
+function fromOklab(lab: Lab, alpha: number): Rgba {
+  const [r, g, b] = linearRgb(lab);
   const clamp = (v: number) => Math.min(1, Math.max(0, fromLinear(v)));
-  return {
-    r: clamp(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s),
-    g: clamp(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s),
-    b: clamp(-0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s),
-    a: alpha,
-  };
+  return { r: clamp(r), g: clamp(g), b: clamp(b), a: alpha };
+}
+
+/** OKLab in polar form: lightness, chroma, and hue in degrees. */
+export type Lch = { L: number; C: number; h: number };
+
+export function toOklch(color: Rgba): Lch {
+  const { L, a, b } = toOklab(color);
+  const h = (Math.atan2(b, a) * 180) / Math.PI;
+  return { L, C: Math.hypot(a, b), h: h < 0 ? h + 360 : h };
+}
+
+const inGamut = (lab: Lab) =>
+  linearRgb(lab).every((v) => v >= -1e-4 && v <= 1 + 1e-4);
+
+/** The opaque colour at `lch`, with chroma lowered until it fits sRGB so the hue and lightness hold. */
+export function fromOklch({ L, C, h }: Lch): Rgba {
+  const at = (c: number): Lab => ({
+    L,
+    a: c * Math.cos((h * Math.PI) / 180),
+    b: c * Math.sin((h * Math.PI) / 180),
+  });
+  if (inGamut(at(C))) return fromOklab(at(C), 1);
+  let [lo, hi] = [0, C];
+  for (let i = 0; i < 24; i++) {
+    const mid = (lo + hi) / 2;
+    if (inGamut(at(mid))) lo = mid;
+    else hi = mid;
+  }
+  return fromOklab(at(lo), 1);
 }
 
 /** Moves `from` a fraction `t` of the way toward `to`, in OKLab so steps look even. */

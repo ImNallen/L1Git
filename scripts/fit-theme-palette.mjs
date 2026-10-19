@@ -15,9 +15,9 @@ registerHooks({
   },
 });
 
-const { distance, formatHex, mix, parseHex } =
+const { contrast, distance, formatHex, mix, parseHex, toOklch } =
   await import("../src/themes/color.ts");
-const { MAX_FIT_DISTANCE, RATIO_RECIPES, TOKENS, TRANSLUCENT, onAccent } =
+const { LANES, MAX_FIT_DISTANCE, RATIO_RECIPES, TOKENS, TRANSLUCENT, recipe } =
   await import("../src/themes/palette.ts");
 const { stylesheetPalettes } = await import("../src/themes/stylesheet.ts");
 
@@ -46,13 +46,6 @@ const PINNED = new Set([
   "warningIcon",
   "warningBg",
   "warningBorder",
-  "refOnLane",
-  "graphLane1",
-  "graphLane2",
-  "graphLane3",
-  "graphLane4",
-  "graphLane5",
-  "graphLane6",
 ]);
 // Kinds in order of preference: a neutral surface stays neutral unless an accent kind fits clearly better.
 const KINDS = ["ink", "shade", "tint", "lift", "glow", "glaze"];
@@ -90,55 +83,112 @@ function fitTowards(from, to, target) {
   return best;
 }
 
+const round = (v, places) => Math.round(v * 10 ** places) / 10 ** places;
+
+// The lane's own lightness, chroma, and hue as seen from the seeds, so L1's seeds give back L1's lane.
+function fitHue(seeds, target) {
+  const [lane, accent] = [toOklch(target), toOklch(seeds.accent)];
+  const [bg, fg] = [toOklch(seeds.background).L, toOklch(seeds.foreground).L];
+  const offset = ((lane.h - accent.h + 540) % 360) - 180;
+  return [
+    "hue",
+    round(offset, 1),
+    round((lane.L - bg) / (fg - bg), 3),
+    round(lane.C, 4),
+  ];
+}
+
+function fitLaneInk(seeds, minWhite, target, get) {
+  let best = { spec: ["laneInk", minWhite, 0], d: Infinity };
+  for (let i = 0; i <= STEPS; i++) {
+    const spec = ["laneInk", minWhite, i / STEPS];
+    const d = distance(rounded(recipe(spec)(seeds, get)), target);
+    if (d < best.d - 1e-9) best = { spec, d };
+  }
+  return best.spec;
+}
+
+const WHITE = parseHex("#ffffff");
+
+const fits = Object.fromEntries(
+  ["dark", "light"].map((appearance) => {
+    const values = palettes[appearance];
+    const color = (name) => {
+      const parsed = parseHex(values[name] ?? "");
+      if (!parsed)
+        throw new Error(`theme.css has no hex ${name} for ${appearance}`);
+      return parsed;
+    };
+    const seeds = {
+      background: color(SEEDS.background),
+      accent: color(SEEDS.accent),
+      foreground: color(SEEDS.foreground),
+    };
+    const table = {};
+    // A recipe that reads another token reads what that token derives, as the app does.
+    const get = (token) =>
+      table[token]
+        ? rounded(recipe(table[token])(seeds, get))
+        : color(TOKENS[token]);
+    for (const lane of LANES) table[lane] = fitHue(seeds, color(TOKENS[lane]));
+    return [appearance, { values, color, seeds, table, get }];
+  }),
+);
+
+// Ref names need 3:1 on a lane. Initials keep white down to the contrast L1's own initials have on its palest lane,
+// to two places so rounding a derived lane can't flip L1's.
+const LANE_INK_MINIMUM = {
+  refOnLane: 3,
+  onLane:
+    Math.floor(
+      Math.min(
+        ...Object.values(fits).flatMap(({ get }) =>
+          LANES.map((lane) => contrast(WHITE, get(lane))),
+        ),
+      ) * 100,
+    ) / 100,
+};
+
 const recipes = {};
 const foregroundMix = {};
 const report = [];
-for (const appearance of ["dark", "light"]) {
-  const values = palettes[appearance];
-  const color = (name) => {
-    const parsed = parseHex(values[name] ?? "");
-    if (!parsed)
-      throw new Error(`theme.css has no hex ${name} for ${appearance}`);
-    return parsed;
-  };
-  const seeds = {
-    background: color(SEEDS.background),
-    accent: color(SEEDS.accent),
-    foreground: color(SEEDS.foreground),
-  };
-  const toward =
-    appearance === "dark" ? parseHex("#ffffff") : parseHex("#000000");
+for (const [appearance, { values, color, seeds, table, get }] of Object.entries(
+  fits,
+)) {
+  const toward = appearance === "dark" ? WHITE : parseHex("#000000");
   const foreground = fitTowards(seeds.background, toward, seeds.foreground);
   foregroundMix[appearance] = foreground.t;
   report.push(
     `${appearance} foreground: ${foreground.t} at ${foreground.d.toFixed(4)}`,
   );
 
-  const table = {};
+  const ordered = {};
   let worst = { token: "", d: 0 };
   for (const [token, name] of Object.entries(TOKENS)) {
     const target = color(name);
-    let d = 0;
     if (Object.hasOwn(SEEDS, token)) table[token] = ["seed", token];
-    else if (token === "accentForeground") {
-      table[token] = ["onAccent"];
-      d = distance(rounded(onAccent(seeds)), target);
-    } else if (PINNED.has(token)) table[token] = ["fixed", values[name]];
-    else {
+    else if (token === "accentForeground") table[token] = ["onAccent"];
+    else if (Object.hasOwn(LANE_INK_MINIMUM, token))
+      table[token] = fitLaneInk(seeds, LANE_INK_MINIMUM[token], target, get);
+    else if (PINNED.has(token)) table[token] = ["fixed", values[name]];
+    else if (!LANES.includes(token)) {
       const best = fit(seeds, target);
-      if (best.d > MAX_FIT_DISTANCE) {
-        table[token] = ["fixed", values[name]];
+      table[token] =
+        best.d > MAX_FIT_DISTANCE
+          ? ["fixed", values[name]]
+          : [best.kind, best.t];
+      if (best.d > MAX_FIT_DISTANCE)
         report.push(
           `${appearance} ${token}: no recipe within ${MAX_FIT_DISTANCE} (best ${best.kind}(${best.t}) at ${best.d.toFixed(4)}), fixed`,
         );
-      } else {
-        table[token] = [best.kind, best.t];
-        d = best.d;
-      }
     }
+    ordered[token] = table[token];
+    const d = distance(get(token), target);
+    if (d > MAX_FIT_DISTANCE)
+      throw new Error(`${appearance} ${token} misses theme.css by ${d}`);
     if (d > worst.d) worst = { token, d };
   }
-  recipes[appearance] = table;
+  recipes[appearance] = ordered;
   report.push(`${appearance} worst: ${worst.token} at ${worst.d.toFixed(4)}`);
 }
 
