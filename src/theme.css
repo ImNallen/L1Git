@@ -4,6 +4,7 @@
 @import "./styles/inspector.css";
 @import "./styles/diff.css";
 @import "./styles/dialog.css";
+@import "./styles/overview.css";
 
 :root {
   font-family: "Inter Variable", Inter, sans-serif;

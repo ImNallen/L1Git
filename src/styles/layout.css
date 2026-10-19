@@ -309,7 +309,7 @@ kbd {
 .repository-workspace[hidden] {
   display: none;
 }
-.appearance-settings {
+.settings-page {
   flex: 1;
   min-height: 0;
   overflow: auto;
@@ -318,7 +318,7 @@ kbd {
 .settings-content {
   max-width: 900px;
 }
-.appearance-settings h1 {
+.settings-page h1 {
   font-size: 21px;
   font-weight: 550;
   letter-spacing: -0.4px;
@@ -339,7 +339,7 @@ kbd {
   text-transform: uppercase;
   color: var(--muted);
 }
-.theme-row {
+.settings-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -349,30 +349,30 @@ kbd {
   border: 1px solid var(--border);
   border-radius: 7px;
 }
-.theme-row h3 {
+.settings-row h3 {
   margin: 0 0 5px;
   color: var(--text);
   font-size: 13px;
   font-weight: 500;
 }
-.theme-row p {
+.settings-row p {
   margin: 0;
   color: var(--muted);
   font-size: 12px;
   line-height: 1.5;
 }
-.theme-options {
+.settings-options {
   display: flex;
   padding: 3px;
   border: 1px solid var(--border-control);
   border-radius: 6px;
   background: var(--control);
 }
-.theme-options label {
+.settings-options label {
   position: relative;
   cursor: pointer;
 }
-.theme-options input {
+.settings-options input {
   position: absolute;
   opacity: 0;
   width: 100%;
@@ -380,7 +380,7 @@ kbd {
   margin: 0;
   cursor: pointer;
 }
-.theme-options span {
+.settings-options span {
   display: block;
   min-width: 62px;
   padding: 7px 12px;
@@ -389,11 +389,11 @@ kbd {
   font-size: 12px;
   color: var(--text-icon);
 }
-.theme-options input:checked + span {
+.settings-options input:checked + span {
   background: var(--segment-selected);
   color: var(--text-strong);
 }
-.theme-options input:focus-visible + span {
+.settings-options input:focus-visible + span {
   outline: 2px solid var(--focus);
   outline-offset: -2px;
 }
@@ -403,7 +403,7 @@ kbd {
   line-height: 1.6;
 }
 @media (max-width: 900px) {
-  .appearance-settings {
+  .settings-page {
     padding: 36px 28px;
   }
 }

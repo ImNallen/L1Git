@@ -75,6 +75,7 @@ export function useWorkspace() {
         ? workspace.previous
         : null;
   const root = current?.snapshot.root ?? null;
+  const activeRoot = workspace.kind === "loading" ? workspace.path : root;
 
   const save = useCallback((next: Catalog) => {
     catalogRef.current = next;
@@ -168,6 +169,36 @@ export function useWorkspace() {
     }
   };
 
+  const refresh = async () => {
+    if (workspace.kind === "loading" && workspace.previous === null) {
+      await selectRepository(workspace.path);
+      return;
+    }
+    if (!current) return;
+    const path = current.snapshot.root;
+    const reference =
+      workspace.kind === "loading" ? workspace.reference : current.reference;
+    const id = ++requestId.current;
+    const previous = current;
+    setWorkspace({ kind: "loading", path, reference, previous });
+    try {
+      let snapshot: RepositorySnapshot;
+      let shown = reference;
+      try {
+        snapshot = await repositories.snapshot(path, reference);
+      } catch (error) {
+        if (reference === null || problemFrom(error).kind !== "invalidRef")
+          throw error;
+        shown = null;
+        snapshot = await repositories.snapshot(path, null);
+      }
+      if (id === requestId.current) accept(snapshot, shown, false);
+    } catch (error) {
+      if (id === requestId.current)
+        setWorkspace({ ...previous, error: problemFrom(error) });
+    }
+  };
+
   const removeRepository = (removed: RepositoryRoot) => {
     save(forget(catalogRef.current, removed));
     if (
@@ -253,5 +284,7 @@ export function useWorkspace() {
     addRepository,
     removeRepository,
     browse,
+    refresh,
+    activeRoot,
   };
 }

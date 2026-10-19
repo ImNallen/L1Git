@@ -18,17 +18,14 @@ export function AppearanceSettings({
   useEffect(() => heading.current?.focus(), []);
 
   return (
-    <section
-      className="appearance-settings"
-      aria-labelledby="appearance-heading"
-    >
+    <section className="settings-page" aria-labelledby="appearance-heading">
       <div className="settings-content">
         <h1 id="appearance-heading" tabIndex={-1} ref={heading}>
           Appearance
         </h1>
         <p className="settings-description">How L1 Git looks on this device.</p>
         <h2 className="settings-section-title">Theme</h2>
-        <div className="theme-row">
+        <div className="settings-row">
           <div>
             <h3 id="theme-label">Theme</h3>
             <p id="theme-description">
@@ -36,7 +33,7 @@ export function AppearanceSettings({
             </p>
           </div>
           <div
-            className="theme-options"
+            className="settings-options"
             role="radiogroup"
             aria-labelledby="theme-label"
             aria-describedby="theme-description"

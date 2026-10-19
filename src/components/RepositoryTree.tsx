@@ -1,5 +1,6 @@
 import { useState } from "react";
 import {
+  ArrowDown,
   ChevronDown,
   ChevronRight,
   CircleCheck,
@@ -25,6 +26,8 @@ type Props = {
   activePath: string | null;
   reference: FullRef | null;
   busy: boolean;
+  browsing: boolean;
+  behind: ReadonlyMap<RepositoryRoot, number>;
   onSelect: (path: string) => void;
   onBrowse: (reference: FullRef | null) => void;
   onRemove: (root: RepositoryRoot) => void;
@@ -37,6 +40,8 @@ export function RepositoryTree({
   activePath,
   reference,
   busy,
+  browsing,
+  behind,
   onSelect,
   onBrowse,
   onRemove,
@@ -121,8 +126,11 @@ export function RepositoryTree({
       <nav className="repository-tree" aria-label="Repositories and branches">
         {entriesShown.map((entry) => {
           const active = entry.root === activePath;
+          const behindCount = behind.get(entry.root) ?? 0;
           const expanded =
-            entry.root === snapshot?.root && !collapsed.has(entry.root);
+            browsing &&
+            entry.root === snapshot?.root &&
+            !collapsed.has(entry.root);
           return (
             <div className="repository-group" key={entry.root}>
               <div className={`repository-row ${active ? "active" : ""}`}>
@@ -130,7 +138,8 @@ export function RepositoryTree({
                   className="repository-open"
                   title={entry.root}
                   onClick={() => {
-                    if (entry.root === snapshot?.root) toggle(entry.root);
+                    if (browsing && entry.root === snapshot?.root)
+                      toggle(entry.root);
                     else onSelect(entry.root);
                   }}
                   aria-expanded={expanded}
@@ -142,6 +151,19 @@ export function RepositoryTree({
                   )}
                   <span>{entry.name}</span>
                 </button>
+                {behindCount > 0 && (
+                  <span
+                    className="repository-behind"
+                    title={
+                      behindCount === 1
+                        ? "1 branch behind its upstream"
+                        : `${behindCount} branches behind their upstream`
+                    }
+                  >
+                    <ArrowDown size={11} />
+                    {behindCount}
+                  </span>
+                )}
                 <button
                   className="icon-button remove-repository"
                   onClick={() => onRemove(entry.root)}

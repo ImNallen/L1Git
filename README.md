@@ -19,7 +19,9 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer pnpm tauri dev
 
 Click **Add repository** or press **Cmd/Ctrl+O**. Enter a path or use **Browse** to choose a directory. You can open a subfolder or symlink. L1 Git saves the canonical working-copy root and keeps linked worktrees as separate repositories. Bare repositories return an explicit unsupported error.
 
-Click a local or remote branch to browse its history. The checked-out HEAD remains in the top toolbar. **Refresh** rereads local state. Remote branches reflect refs already on disk, usually from your last fetch.
+When you have saved repositories, L1 Git opens on **Overview** and fetches each one. Linked worktrees of one repository share a card and one fetch. Each card lists the default branch, long-lived branches such as `develop`, and every branch that is behind, diverged, gone, or ahead of its upstream. Click **Fast-forward** on a ready branch, or **Update all** to move every ready branch. A branch checked out in a worktree with uncommitted changes, or in a worktree in the middle of a merge or rebase, shows the reason instead of a button. A diverged branch never gets a button. After a fast-forward, a skipped branch says why, for example when it moved since your last fetch. A failed remote shows its error on the card, and the other remotes still fetch. Click **Fetch** in the Overview header, or in the repository toolbar for one repository, to fetch on demand. In the sidebar, **Overview** shows how many branches are ready, and each repository shows how many branches are behind. Click **Open** on a card or a repository in the sidebar to browse it.
+
+Click a local or remote branch to browse its history. The checked-out HEAD remains in the top toolbar. **Refresh** rereads local state. The open history also refreshes after a fetch or fast-forward moves its refs. Remote branches reflect refs already on disk, usually from your last fetch.
 
 The history contains at most 200 commits for local and remote branches plus HEAD, or for the selected branch. Internal refs and stashes are excluded. Search covers the loaded subjects, authors, emails, and commit IDs. Graph connections use actual parent IDs. Connections are hidden during search because filtered rows omit intermediate commits. Dashed edges lead to parents beyond the loaded history.
 
@@ -27,7 +29,7 @@ Select a commit to inspect its message, author, date, parents, and changed paths
 
 The repository list and last active repository survive reloads and restarts in versioned local storage. Remove a repository with the row's **Remove from recents** button. This removes only the saved entry. It never deletes repository files.
 
-Click **Settings** at the bottom of the sidebar to open **Appearance**. Choose **System**, **Light**, or **Dark**. System follows your operating system appearance. The app saves your choice on this device. Click **Back** or press Escape to return to your repository with its filters, selected commit, and open diff preserved.
+Click **Settings** at the bottom of the sidebar to open **Appearance**. Choose **System**, **Light**, or **Dark**. System follows your operating system appearance. Open **Fetching** to choose how often L1 Git fetches in the background: **Off**, 5, 15, 30, or 60 minutes. The default is 15 minutes. Background fetches wait while the window is hidden and catch up when you return. L1 Git always fetches at launch and when you click **Fetch**, even when the schedule is Off. The app saves both choices on this device. Click **Back** or press Escape to return to Overview or your repository, with filters, the selected commit, and the open diff preserved.
 
 ## Run the browser preview
 
@@ -74,7 +76,7 @@ Rust owns `RepositorySnapshot`, `RepositoryOverview`, exhaustive HEAD, branch, a
 
 ## What L1 Git changes
 
-The app does not show fetch or fast-forward controls yet. The Rust core runs exactly four Git commands that contact a remote or change a repository:
+The Rust core runs exactly four Git commands that contact a remote or change a repository:
 
 - `git fetch <remote>` for each remote that does not set `skipFetchAll` or `skipDefaultUpdate`. It updates only remote-tracking refs under `refs/remotes/`. Git 2.48 and later can also create `refs/remotes/<remote>/HEAD`. It follows your `fetch.prune` setting and does not write `FETCH_HEAD`.
 - A dry-run `git fetch . <commit>:<branch>` that asks Git whether a branch is checked out in any worktree. It writes nothing. It runs only when some worktree has a detached HEAD, as a rebase or bisect leaves it. L1 Git does not move a branch when this check cannot answer.

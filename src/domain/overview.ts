@@ -123,3 +123,55 @@ export function readyAdvances(overview: RepositoryOverview): Advance[] {
       : [],
   );
 }
+
+const attentionOrder: Record<BranchState["kind"], number> = {
+  behind: 0,
+  diverged: 1,
+  gone: 2,
+  ahead: 3,
+  upToDate: 4,
+  untracked: 4,
+};
+const roleOrder: Record<BranchRole, number> = {
+  default: 0,
+  mainline: 1,
+  other: 2,
+};
+
+function needsAttention(branch: BranchStatus): boolean {
+  return attentionOrder[branch.state.kind] < attentionOrder.upToDate;
+}
+
+export function attentionRows(overview: RepositoryOverview): {
+  rows: BranchStatus[];
+  hiddenUpToDate: number;
+} {
+  const shown = (branch: BranchStatus) =>
+    branch.role !== "other" || needsAttention(branch);
+  const rows = overview.branches
+    .filter(shown)
+    .sort(
+      (a, b) =>
+        roleOrder[a.role] - roleOrder[b.role] ||
+        attentionOrder[a.state.kind] - attentionOrder[b.state.kind],
+    );
+  const hiddenUpToDate = overview.branches.filter(
+    (branch) => !shown(branch) && branch.state.kind === "upToDate",
+  ).length;
+  return { rows, hiddenUpToDate };
+}
+
+export function repositoryRank(
+  overview: RepositoryOverview,
+  fetchFailed: boolean,
+): number {
+  if (
+    overview.branches.some(
+      (branch) => branch.role !== "other" && branch.state.kind === "behind",
+    )
+  )
+    return 0;
+  if (fetchFailed) return 1;
+  if (overview.branches.some(needsAttention)) return 2;
+  return 3;
+}
