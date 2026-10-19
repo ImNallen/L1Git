@@ -176,6 +176,10 @@ fn reads_tags_at_their_peeled_commits_and_includes_tag_only_history() {
         &["tag", "-a", "-m", "release", "v1.0", &initial],
     );
     git(&fixture.repo, &["tag", "light", &tagged]);
+    git(
+        &fixture.repo,
+        &["tag", "-a", "-m", "nested", "nested", "v1.0"],
+    );
     git(&fixture.repo, &["tag", "tree", &tree]);
     git(
         &fixture.repo,
@@ -189,6 +193,11 @@ fn reads_tags_at_their_peeled_commits_and_includes_tag_only_history() {
                 reference: "refs/tags/light".into(),
                 name: "light".into(),
                 oid: tagged.clone(),
+            },
+            Tag {
+                reference: "refs/tags/nested".into(),
+                name: "nested".into(),
+                oid: initial.clone(),
             },
             Tag {
                 reference: "refs/tags/v1.0".into(),
@@ -257,6 +266,32 @@ fn reads_linked_and_detached_worktrees_and_marks_the_opened_root() {
             worktree(&detached, "detached", detached_head, false),
             worktree(&linked, "linked", attached("refs/heads/feature"), true),
         ]
+    );
+}
+
+#[test]
+fn history_includes_commits_only_a_detached_worktree_reaches() {
+    let fixture = Fixture::new();
+    let initial = fixture.commit("first", "one", "initial");
+    let detached = fixture._directory.path().join("detached");
+    git(
+        &fixture.repo,
+        &["worktree", "add", "--detach", detached.to_str().unwrap()],
+    );
+    let detached = detached.to_str().unwrap();
+    git(
+        Path::new(detached),
+        &["commit", "--allow-empty", "-m", "detached only"],
+    );
+    let tip = git(Path::new(detached), &["rev-parse", "HEAD"]);
+    assert_eq!(
+        snapshot(fixture.path())
+            .unwrap()
+            .commits
+            .iter()
+            .map(|commit| commit.oid.as_str())
+            .collect::<Vec<_>>(),
+        [tip.as_str(), initial.as_str()]
     );
 }
 

@@ -154,20 +154,40 @@ fn tags(path: &Path) -> Result<Vec<Tag>, RepositoryError> {
         } else {
             (peeled, peeled_kind)
         };
-        if *kind != b"commit" {
-            continue;
-        }
         let reference = git::text(reference);
+        let oid = match *kind {
+            b"commit" => git::text(oid),
+            b"tag" => match peel_to_commit(path, &reference)? {
+                Some(oid) => oid,
+                None => continue,
+            },
+            _ => continue,
+        };
         let Some(name) = reference.strip_prefix("refs/tags/") else {
             return Err(git::malformed());
         };
         tags.push(Tag {
             name: name.into(),
-            oid: git::text(oid),
+            oid,
             reference,
         });
     }
     Ok(tags)
+}
+
+/// Older Git dereferences `%(*objectname)` only once, so a tag of a tag can
+/// still name a tag object.
+fn peel_to_commit(path: &Path, reference: &str) -> Result<Option<String>, RepositoryError> {
+    let output = git::run(
+        path,
+        &[
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("{reference}^{{commit}}"),
+        ],
+    )?;
+    Ok(output.status.success().then(|| git::line(&output.stdout)))
 }
 
 fn worktrees(root: &Path) -> Result<Vec<Worktree>, RepositoryError> {
@@ -277,6 +297,14 @@ pub fn snapshot(path: &str) -> Result<RepositorySnapshot, RepositoryError> {
     if !matches!(head, Head::Unborn { .. }) {
         args.push("HEAD");
     }
+    args.extend(
+        worktrees
+            .iter()
+            .filter_map(|worktree| match &worktree.head {
+                Head::Detached { oid } => Some(oid.as_str()),
+                _ => None,
+            }),
+    );
     args.push("--");
     let mut commits = parse_commits(&git::read(&root, &args)?)?;
     let history_truncated = commits.len() > HISTORY_LIMIT;
