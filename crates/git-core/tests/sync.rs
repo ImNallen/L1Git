@@ -1246,13 +1246,9 @@ fn reports_gone_upstreams_and_resolves_the_default_branch() {
     world.publish("develop");
     world.publish("feat");
     git(&world.remote, &["branch", "--delete", "--force", "feat"]);
-    git(
-        &world.work,
-        &["update-ref", "-d", "refs/remotes/origin/feat"],
-    );
 
     let overview = coordinator
-        .overview(world.path(), FetchMode::Local)
+        .overview(world.path(), FetchMode::Remote)
         .unwrap();
     let feat = branch(&overview, "feat");
     assert_eq!(feat.reference, branch_ref("feat"));
