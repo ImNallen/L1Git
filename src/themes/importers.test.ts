@@ -104,6 +104,29 @@ it("reads syntax colours from the last TextMate rule naming each scope, flatteni
   });
 });
 
+it("reads a syntax colour from a narrower or compound scope when no rule names the scope itself", () => {
+  const theme = asVsCodeTheme({
+    colors: { "editor.background": "#000000" },
+    tokenColors: [
+      { scope: "keyword.control", settings: { foreground: "#ff0000" } },
+      { scope: "keyword.operator", settings: { foreground: "#00ff00" } },
+      { scope: "source.js string", settings: { foreground: "#ffff00" } },
+      { scope: "comment.line", settings: { foreground: "#888888" } },
+      {
+        scope: "punctuation.definition.string",
+        settings: { foreground: "#ff00ff" },
+      },
+    ],
+  });
+  expect(theme && vsCodeThemeToDraft(theme, "x").colors).toEqual({
+    background: "#000000",
+    accent: "#3979ce",
+    syntaxKeyword: "#00ff00",
+    syntaxString: "#ffff00",
+    syntaxComment: "#888888",
+  });
+});
+
 it("takes the appearance from the manifest's uiTheme, then the theme's type, then the background", () => {
   const theme = asVsCodeTheme({ colors: { "editor.background": "#1e1e1e" } });
   expect(

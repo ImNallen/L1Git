@@ -236,11 +236,25 @@ const VS_CODE_SOURCES: Partial<Record<Token, Source>> = {
 const isColorful = (hex: string) => chroma(hex) >= 0.1;
 
 // A fully transparent colour is how a VS Code theme turns an element off, so it never stands in for a token.
+// A rule naming the scope itself wins; failing that, the last rule naming a narrower scope, such as `keyword.control`.
+// A compound selector like `source.js keyword` is matched by its last part. `punctuation.definition.*` colours
+// another construct's delimiters, such as a string's quotes, so it never stands in for punctuation at large.
+function scopeColor(theme: VsCodeTheme, scope: string): string | undefined {
+  const leaves = (r: TokenRule) => r.scopes.map((s) => s.split(/\s+/).at(-1));
+  const exact = theme.tokenColors.findLast((r) => leaves(r).includes(scope));
+  if (exact) return exact.foreground;
+  return theme.tokenColors.findLast((r) =>
+    leaves(r).some(
+      (leaf) =>
+        leaf?.startsWith(`${scope}.`) &&
+        !leaf.startsWith("punctuation.definition."),
+    ),
+  )?.foreground;
+}
+
 function candidates(theme: VsCodeTheme, source: Source): string[] {
   const scoped = (source.scopes ?? []).flatMap(
-    (scope) =>
-      theme.tokenColors.findLast((r) => r.scopes.includes(scope))?.foreground ??
-      [],
+    (scope) => scopeColor(theme, scope) ?? [],
   );
   const keyed = source.keys.flatMap((k) => theme.colors[k] ?? []);
   return [...scoped, ...keyed].filter((c) => (parseHex(c)?.a ?? 0) > 0);
