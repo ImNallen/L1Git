@@ -1283,6 +1283,19 @@ fn reports_gone_upstreams_and_resolves_the_default_branch() {
 }
 
 #[test]
+fn a_fetch_keeps_local_tags_when_the_repository_prunes_tags() {
+    let world = World::new();
+    git(&world.work, &["config", "fetch.pruneTags", "true"]);
+    git(&world.work, &["tag", "local-only"]);
+
+    coordinator()
+        .overview(world.path(), FetchMode::Remote)
+        .unwrap();
+
+    assert_eq!(git(&world.work, &["tag", "--list"]), "local-only");
+}
+
+#[test]
 fn fast_forwards_a_blob_filtered_partial_clone() {
     let world = World::new();
     let coordinator = coordinator();
