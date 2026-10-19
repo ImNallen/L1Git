@@ -28,12 +28,11 @@ type Props = {
   entries: RecentRepository[];
   snapshot: RepositorySnapshot | null;
   activePath: string | null;
-  reference: FullRef | null;
-  busy: boolean;
+  highlighted: FullRef | null;
   browsing: boolean;
   sync: ReadonlyMap<RepositoryRoot, RootSync>;
   onSelect: (path: string) => void;
-  onBrowse: (reference: FullRef | null) => void;
+  onJump: (branch: Branch) => void;
   onRemove: (root: RepositoryRoot) => void;
   onAdd: () => void;
 };
@@ -42,12 +41,11 @@ export function RepositoryTree({
   entries,
   snapshot,
   activePath,
-  reference,
-  busy,
+  highlighted,
   browsing,
   sync,
   onSelect,
-  onBrowse,
+  onJump,
   onRemove,
   onAdd,
 }: Props) {
@@ -92,14 +90,14 @@ export function RepositoryTree({
       : branch.kind === "remote"
         ? Cloud
         : GitBranch;
+    const selected = highlighted === branch.reference;
     return (
       <button
-        className={`branch-row ${reference === branch.reference ? "selected" : ""}`}
+        className={`branch-row ${selected ? "selected" : ""}`}
         key={branch.reference}
-        onClick={() => onBrowse(branch.reference)}
-        disabled={busy}
-        title={`${branch.reference}${branch.kind === "local" && branch.upstream ? ` · Tracks ${branch.upstream}` : ""} · Browse history without checkout`}
-        aria-current={reference === branch.reference ? "true" : undefined}
+        onClick={() => onJump(branch)}
+        title={`${branch.reference}${branch.kind === "local" && branch.upstream ? ` · Tracks ${branch.upstream}` : ""} · Show in graph`}
+        aria-current={selected ? "true" : undefined}
       >
         <BranchIcon size={14} className={checkedOut ? "head-icon" : ""} />
         <span>{branch.name}</span>
@@ -174,14 +172,6 @@ export function RepositoryTree({
               </div>
               {expanded && snapshot && (
                 <div className="repository-branches">
-                  <button
-                    className={`all-branches ${reference === null ? "selected" : ""}`}
-                    disabled={busy}
-                    onClick={() => onBrowse(null)}
-                  >
-                    <GitBranch size={14} />
-                    <span>All branches</span>
-                  </button>
                   <button
                     className="tree-section"
                     aria-expanded={localOpen}

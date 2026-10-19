@@ -9,7 +9,7 @@ import {
   repositoryErrorSchema,
   snapshotSchema,
 } from "./domain/repository";
-import type { FullRef, Oid, RepositoryRoot } from "./domain/repository";
+import type { Oid, RepositoryRoot } from "./domain/repository";
 
 export const native = isTauri();
 export const macNative = native && navigator.userAgent.includes("Mac");
@@ -46,13 +46,8 @@ async function call<T>(
   return parsed.data;
 }
 
-export function snapshot(path: string, reference: FullRef | null = null) {
-  return call(
-    "repository_snapshot",
-    "/api/snapshot",
-    { path, reference },
-    snapshotSchema,
-  );
+export function snapshot(path: string) {
+  return call("repository_snapshot", "/api/snapshot", { path }, snapshotSchema);
 }
 
 export function commitDetail(path: string, oid: Oid) {

@@ -101,7 +101,6 @@ export const fastForwardReportSchema = z.object({
 
 export type BranchRef = z.infer<typeof branchRefSchema>;
 export type BranchState = z.infer<typeof branchStateSchema>;
-export type BranchRole = z.infer<typeof branchRoleSchema>;
 export type BranchStatus = z.infer<typeof branchStatusSchema>;
 export type FetchSummary = z.infer<typeof fetchSummarySchema>;
 export type RepositoryOverview = z.infer<typeof overviewSchema>;
@@ -161,33 +160,9 @@ const attentionOrder: Record<BranchState["kind"], number> = {
   upToDate: 4,
   untracked: 4,
 };
-const roleOrder: Record<BranchRole, number> = {
-  default: 0,
-  mainline: 1,
-  other: 2,
-};
 
 function needsAttention(branch: BranchStatus): boolean {
   return attentionOrder[branch.state.kind] < attentionOrder.upToDate;
-}
-
-export function attentionRows(overview: RepositoryOverview): {
-  rows: BranchStatus[];
-  hiddenUpToDate: number;
-} {
-  const shown = (branch: BranchStatus) =>
-    branch.role !== "other" || needsAttention(branch);
-  const rows = overview.branches
-    .filter(shown)
-    .sort(
-      (a, b) =>
-        roleOrder[a.role] - roleOrder[b.role] ||
-        attentionOrder[a.state.kind] - attentionOrder[b.state.kind],
-    );
-  const hiddenUpToDate = overview.branches.filter(
-    (branch) => !shown(branch) && branch.state.kind === "upToDate",
-  ).length;
-  return { rows, hiddenUpToDate };
 }
 
 export function repositoryRank(

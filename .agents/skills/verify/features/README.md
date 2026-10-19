@@ -3,11 +3,11 @@
 | Journey                                         | User outcome                                                          | Proof                                                                  |
 | ----------------------------------------------- | --------------------------------------------------------------------- | ---------------------------------------------------------------------- |
 | [Add and restore repositories](repositories.md) | Open a working copy and keep it across restarts                       | Visible list, canonical path, unchanged files                          |
-| [Browse branch history](history.md)             | Follow local and remote history without checkout                      | Branch selection, real graph, unchanged HEAD                           |
+| [Browse the commit graph](history.md)           | See every branch in one graph and jump to a branch tip                | Full graph, selected tip, unchanged HEAD                               |
 | [Inspect a commit](inspector.md)                | Read the message, parents, and changed paths                          | Merge and root details, working parent links                           |
 | [Read a file diff](diff.md)                     | Read one changed file's patch in place of the history                 | Unified and split diffs, binary notice, Escape back                    |
 | [Change appearance](appearance.md)              | Choose System, Light, or Dark without losing the repository view      | Saved preference, live system changes, themed workspace and diffs      |
-| [Update behind branches](overview.md)           | Fetch saved repositories and fast-forward ready branches in one click | Moved refs match the outcome, blocked rows stay put, refreshed history |
+| [Update behind branches](overview.md)           | Fetch saved repositories and fast-forward ready branches in one click | Moved refs match the count, blocked branches stay put, refreshed graph |
 | [Read real repository data](reader.md)          | Receive accurate repository states                                    | Automated real Git and HTTP integration tests                          |
 
 Browser and native journeys use real working copies. Reader and build checks passed for the implementation baseline. UI journeys require a live verification pass.

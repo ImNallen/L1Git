@@ -23,7 +23,7 @@ If the Add dialog says the reader is unavailable, check the bridge log and both 
 
 ## Drive
 
-Follow the mapped journeys with accessible names from live snapshots. Start with [Add and restore repositories](features/repositories.md), then [Browse history](features/history.md), then [Inspect a commit](features/inspector.md), then [Read a file diff](features/diff.md), then [Change appearance](features/appearance.md), then [Update behind branches](features/overview.md). The separate [reader contract](features/reader.md) has automated coverage.
+Follow the mapped journeys with accessible names from live snapshots. Start with [Add and restore repositories](features/repositories.md), then [Browse the commit graph](features/history.md), then [Inspect a commit](features/inspector.md), then [Read a file diff](features/diff.md), then [Change appearance](features/appearance.md), then [Update behind branches](features/overview.md). The separate [reader contract](features/reader.md) has automated coverage.
 
 Use **Cmd/Ctrl+O** to add a repository, **Escape** to cancel, and **Cmd/Ctrl+F** to focus loaded-history search. Escape also closes an open file diff. The native dialog traps focus. Pane separators support pointer dragging and arrow keys. At narrow widths the inspector starts hidden; **Toggle commit inspector** opens it as an overlay.
 
@@ -31,7 +31,7 @@ Run `cargo test --locked`, `pnpm test`, `pnpm build`, `pnpm format:check`, and `
 
 ## Evidence
 
-Save screenshots and an action transcript outside the repository, such as `/tmp/l1git-verification-<run-id>/`. Record the checkout SHA, fixture paths, viewport, selected branch, and before/after HEAD. Capture empty and loaded screens, the launch Overview before and after a fast-forward, a browsed remote branch, the merge inspector, unified and split file diffs, the binary notice, and a failed Add dialog. For persistence, capture the list before and after reload. To prove that only the intended refs moved, record `git -C <worktree> for-each-ref refs/heads refs/remotes`, `symbolic-ref HEAD`, and `status --porcelain` for every fixture worktree before and after the journeys. The reader journeys move nothing. A fetch moves only remote-tracking refs, and a fast-forward moves only the branches it reports as advanced.
+Save screenshots and an action transcript outside the repository, such as `/tmp/l1git-verification-<run-id>/`. Record the checkout SHA, fixture paths, viewport, selected branch, and before/after HEAD. Capture empty and loaded screens, the repository toolbar before and after **Fast-forward (N)**, a remote branch tip selected from the sidebar, the merge inspector, unified and split file diffs, the binary notice, and a failed Add dialog. For persistence, capture the list before and after reload. To prove that only the intended refs moved, record `git -C <worktree> for-each-ref refs/heads refs/remotes`, `symbolic-ref HEAD`, and `status --porcelain` for every fixture worktree before and after the journeys. The reader journeys move nothing. A fetch moves only remote-tracking refs, and a fast-forward moves only the branches it reports as advanced.
 
 Report browser, reader, build, and native results separately. A successful bundle does not prove the native picker or window dragging. The implementation baseline passes reader tests and builds. The browser journeys and native interactions require a live drive and must not be reported as previously verified.
 

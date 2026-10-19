@@ -7,7 +7,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-pub const HISTORY_LIMIT: usize = 200;
+pub const HISTORY_LIMIT: usize = 50_000;
 pub const PATCH_LIMIT: usize = 1024 * 1024;
 const COMMIT_FORMAT: &str = "--format=%H%x00%P%x00%s%x00%an%x00%ae%x00%at";
 
@@ -162,10 +162,7 @@ fn parse_commits(output: &[u8]) -> Result<Vec<Commit>, RepositoryError> {
     Ok(commits)
 }
 
-pub fn snapshot(
-    path: &str,
-    reference: Option<&str>,
-) -> Result<RepositorySnapshot, RepositoryError> {
+pub fn snapshot(path: &str) -> Result<RepositorySnapshot, RepositoryError> {
     let root = root(path)?;
     let head = head(&root)?;
     let remotes = remotes::read(&root)?;
@@ -176,33 +173,18 @@ pub fn snapshot(
             .map(|remote| remote.name.as_str())
             .collect::<Vec<_>>(),
     )?;
-    if let Some(reference) = reference {
-        let exists = branches.iter().any(|branch| match branch {
-            Branch::Local {
-                reference: candidate,
-                ..
-            }
-            | Branch::Remote {
-                reference: candidate,
-                ..
-            } => candidate == reference,
-        });
-        if !exists {
-            return Err(RepositoryError::new(
-                ErrorKind::InvalidRef,
-                "That branch is no longer available. Refresh the repository and select a current branch.",
-            ));
-        }
-    }
     let limit = format!("--max-count={}", HISTORY_LIMIT + 1);
-    let mut args = vec!["log", "--topo-order", COMMIT_FORMAT, "-z", &limit];
-    if let Some(reference) = reference {
-        args.push(reference);
-    } else {
-        args.extend(["--branches", "--remotes"]);
-        if !matches!(head, Head::Unborn { .. }) {
-            args.push("HEAD");
-        }
+    let mut args = vec![
+        "log",
+        "--topo-order",
+        COMMIT_FORMAT,
+        "-z",
+        &limit,
+        "--branches",
+        "--remotes",
+    ];
+    if !matches!(head, Head::Unborn { .. }) {
+        args.push("HEAD");
     }
     args.push("--");
     let mut commits = parse_commits(&git::read(&root, &args)?)?;

@@ -6,7 +6,7 @@ Full commit metadata, SHA copy, parent navigation, the changed-file tree, merge 
 
 ## How to get to it (user POV)
 
-Open the fixture repository and select **All branches**. Use **Toggle commit inspector** if the pane is hidden. Select a commit by its description button in the history table.
+Open the fixture repository. Use **Toggle commit inspector** if the pane is hidden. Select a commit by its description button in the history table.
 
 ## Driving it with T3 preview
 

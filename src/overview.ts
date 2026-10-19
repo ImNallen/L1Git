@@ -45,10 +45,7 @@ export type RootSync = {
 export type OverviewView = {
   roots: ReadonlyMap<RepositoryRoot, RootState>;
   repositories: readonly RepositoryState[];
-  readyCount: number;
   syncByRoot: ReadonlyMap<RepositoryRoot, RootSync>;
-  fetching: boolean;
-  oldestFetchAt: number | null;
 };
 
 export type OverviewDeps = {
@@ -66,7 +63,7 @@ export type OverviewStore = {
   track(roots: readonly RepositoryRoot[]): void;
   fetch(commonDir?: RepositoryRoot): Promise<void>;
   fastForward(commonDir: RepositoryRoot, branch: BranchRef): Promise<void>;
-  updateAll(): Promise<void>;
+  updateAll(commonDir?: RepositoryRoot): Promise<void>;
   setInterval(minutes: FetchInterval): void;
   onRefsChanged(listener: (roots: RepositoryRoot[]) => void): () => void;
   dispose(): void;
@@ -151,21 +148,10 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
         });
       }
     }
-    const fetchedAt = states.flatMap(({ fetch }) =>
-      fetch.kind === "fetched" ? [fetch.at] : [],
-    );
     return {
       roots: new Map(roots),
       repositories: states,
-      readyCount: states.reduce(
-        (total, state) => total + readyAdvances(state.overview).length,
-        0,
-      ),
       syncByRoot,
-      fetching:
-        states.some(({ activity }) => activity.kind === "fetching") ||
-        [...roots.values()].some(({ kind }) => kind === "opening"),
-      oldestFetchAt: fetchedAt.length > 0 ? Math.min(...fetchedAt) : null,
     };
   }
 
@@ -357,11 +343,13 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
         ),
       );
     },
-    updateAll() {
+    updateAll(commonDir) {
       return Promise.all(
-        [...repos].map(([commonDir, repo]) =>
-          fastForwardAll(commonDir, readyAdvances(repo.overview)),
-        ),
+        [...repos]
+          .filter(([dir]) => commonDir === undefined || dir === commonDir)
+          .map(([dir, repo]) =>
+            fastForwardAll(dir, readyAdvances(repo.overview)),
+          ),
       ).then(() => {});
     },
     setInterval(minutes) {
@@ -418,4 +406,62 @@ export function useOverview(
   useEffect(() => store.setInterval(intervalMinutes), [store, intervalMinutes]);
   const view = useSyncExternalStore(store.subscribe, store.getSnapshot);
   return { view, store };
+}
+
+const failureLabel = {
+  auth: "Authentication failed",
+  network: "Network error",
+  timedOut: "Timed out",
+  busy: "Repository busy",
+  other: "Fetch failed",
+} as const;
+
+export function repositoryWarnings(
+  repo: Pick<RepositoryState, "fetch" | "outcomes">,
+): string[] {
+  const fetch =
+    repo.fetch.kind === "failed"
+      ? [`Could not fetch. ${repo.fetch.problem.message}`]
+      : repo.fetch.kind === "fetched"
+        ? repo.fetch.remotes.flatMap(({ remote, outcome }) =>
+            outcome.kind === "failed"
+              ? [
+                  `${remote}: ${failureLabel[outcome.failure]}. ${outcome.message}`,
+                ]
+              : [],
+          )
+        : [];
+  const skipped = [...repo.outcomes.values()].flatMap((outcome) =>
+    outcome.kind === "skipped"
+      ? [
+          `Did not fast-forward ${outcome.reference.replace(/^refs\/heads\//, "")}. ${skipText(outcome.reason)}`,
+        ]
+      : [],
+  );
+  return [...fetch, ...skipped];
+}
+
+function skipText(
+  reason: Extract<AdvanceOutcome, { kind: "skipped" }>["reason"],
+): string {
+  switch (reason.kind) {
+    case "changed":
+      return "It moved since the last fetch. Fetch again.";
+    case "notBehind":
+      return "It is no longer behind its upstream. Fetch again.";
+    case "dirty":
+      return `Uncommitted changes in ${baseName(reason.worktree)}. Commit or stash first.`;
+    case "inUse":
+      return `${baseName(reason.worktree)} is in the middle of a merge, rebase, or other operation.`;
+    case "failed":
+      return reason.message;
+    default: {
+      const exhaustive: never = reason;
+      return exhaustive;
+    }
+  }
+}
+
+function baseName(path: string): string {
+  return path.split("/").filter(Boolean).at(-1) ?? path;
 }
