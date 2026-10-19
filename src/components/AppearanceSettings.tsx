@@ -1,14 +1,16 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
-import { Moon, Sun } from "lucide-react";
+import { Copy, Moon, Paintbrush, Sun, Trash2 } from "lucide-react";
 import type { AppearanceState } from "../appearance";
 import {
+  draftOf,
   familyPicks,
   FIXED_APPEARANCE,
   pickedVariant,
   THEME_SLOT,
   themeFamilies,
   type ColorScheme,
+  type ThemeDraft,
   type ThemeFamily,
   type ThemeVariant,
 } from "../themes/catalog";
@@ -18,6 +20,8 @@ import {
   TOKENS,
   type Appearance,
 } from "../themes/palette";
+import { CreateThemePanel } from "./CreateThemePanel";
+import { DeleteThemeDialog } from "./DeleteThemeDialog";
 
 type Props = { appearance: AppearanceState };
 
@@ -130,13 +134,24 @@ function Orb({
 function ThemeCard({
   family,
   picks,
+  appearance,
   onPick,
+  onDuplicate,
+  onDelete,
 }: {
   family: ThemeFamily;
   picks: Record<Appearance, string>;
+  appearance: Appearance;
   onPick: (variants: readonly ThemeVariant[]) => void;
+  onDuplicate: (draft: ThemeDraft, opener: HTMLElement) => void;
+  onDelete: () => void;
 }) {
-  const both = new Set(family.variants.map((v) => v.appearance)).size > 1;
+  const { variants } = family;
+  const both = new Set(variants.map((v) => v.appearance)).size > 1;
+  const shown =
+    variants.find((v) => v.id === picks[appearance]) ??
+    variants.find((v) => v.appearance === appearance) ??
+    variants[0];
   return (
     <div className="theme-card">
       <div className="theme-orbs" data-size={orbSize(family.variants.length)}>
@@ -161,6 +176,31 @@ function ThemeCard({
         >
           {family.name}
         </button>
+        {shown && (
+          <button
+            className="icon-button"
+            aria-label={`Duplicate ${shown.name}`}
+            title="Duplicate into a new theme"
+            onClick={(event) =>
+              onDuplicate(
+                draftOf(shown, `${shown.name} copy`),
+                event.currentTarget,
+              )
+            }
+          >
+            <Copy size={14} />
+          </button>
+        )}
+        {family.custom && (
+          <button
+            className="icon-button"
+            aria-label={`Delete ${family.name}`}
+            title="Delete theme"
+            onClick={onDelete}
+          >
+            <Trash2 size={14} />
+          </button>
+        )}
       </div>
     </div>
   );
@@ -169,7 +209,16 @@ function ThemeCard({
 export function AppearanceSettings({ appearance }: Props) {
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => heading.current?.focus(), []);
-  const { settings, persistenceError, nativeError } = appearance;
+  const { settings, variant, persistenceError, nativeError } = appearance;
+  const [draft, setDraft] = useState<{ key: number; draft: ThemeDraft } | null>(
+    null,
+  );
+  const [deleting, setDeleting] = useState<ThemeFamily | null>(null);
+  const opener = useRef<HTMLElement | null>(null);
+  const edit = (next: ThemeDraft, from: HTMLElement) => {
+    opener.current = from;
+    setDraft((d) => ({ key: (d?.key ?? 0) + 1, draft: next }));
+  };
   const variants = {
     light: pickedVariant(settings, "light"),
     dark: pickedVariant(settings, "dark"),
@@ -216,6 +265,17 @@ export function AppearanceSettings({ appearance }: Props) {
                 Pick one theme for light mode and one for dark.
               </p>
             </div>
+            <div className="settings-group-actions">
+              <button
+                className="button secondary"
+                onClick={(event) =>
+                  edit(draftOf(variant, ""), event.currentTarget)
+                }
+              >
+                <Paintbrush size={14} />
+                Create theme
+              </button>
+            </div>
           </div>
           <div className="theme-grid">
             {themeFamilies(settings.customThemes).map((family) => (
@@ -223,7 +283,10 @@ export function AppearanceSettings({ appearance }: Props) {
                 key={family.id}
                 family={family}
                 picks={picks}
+                appearance={variant.appearance}
                 onPick={appearance.chooseThemes}
+                onDuplicate={edit}
+                onDelete={() => setDeleting(family)}
               />
             ))}
           </div>
@@ -239,6 +302,25 @@ export function AppearanceSettings({ appearance }: Props) {
           </p>
         )}
       </div>
+      {draft && (
+        <CreateThemePanel
+          key={draft.key}
+          initial={draft.draft}
+          onCreate={(family) => appearance.addThemes([family])}
+          onPreview={appearance.preview}
+          onClose={() => {
+            setDraft(null);
+            opener.current?.focus();
+          }}
+        />
+      )}
+      {deleting && (
+        <DeleteThemeDialog
+          name={deleting.name}
+          onDelete={() => appearance.deleteTheme(deleting.id)}
+          onClose={() => setDeleting(null)}
+        />
+      )}
     </section>
   );
 }

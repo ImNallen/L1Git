@@ -235,7 +235,8 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   useEffect(() => {
     function keyboard(event: KeyboardEvent) {
       if (screen === "settings") {
-        if (event.key === "Escape") {
+        // A modal dialog owns Escape, even when its focused control was disabled and dropped focus.
+        if (event.key === "Escape" && !document.querySelector("dialog[open]")) {
           event.preventDefault();
           leaveSettings();
         }

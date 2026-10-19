@@ -85,3 +85,12 @@
   border-radius: 6px;
   margin-top: 15px;
 }
+.button.danger {
+  background: var(--error-bg);
+  border: 1px solid var(--error-border);
+  color: var(--error-text);
+}
+.button.danger:hover:not(:disabled) {
+  border-color: var(--deleted);
+  color: var(--deleted);
+}
