@@ -68,6 +68,14 @@ pub struct Commit {
     pub timestamp: i64,
 }
 
+/// `commit` carries the combined changes of the branch that ends at `tip`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Squash {
+    pub tip: String,
+    pub commit: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepositorySnapshot {
@@ -81,6 +89,7 @@ pub struct RepositorySnapshot {
     pub worktrees: Vec<Worktree>,
     pub remotes: Vec<Remote>,
     pub commits: Vec<Commit>,
+    pub squashes: Vec<Squash>,
     pub history_truncated: bool,
     pub observed_at: u64,
 }

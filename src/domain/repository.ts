@@ -56,6 +56,8 @@ export const commitSchema = z.object({
   email: z.string(),
   timestamp: z.number().int(),
 });
+/** `commit` carries the combined changes of the branch that ends at `tip`. */
+export const squashSchema = z.object({ tip: oidSchema, commit: oidSchema });
 export const snapshotSchema = z.object({
   root: rootSchema,
   name: z.string(),
@@ -71,6 +73,7 @@ export const snapshotSchema = z.object({
     }),
   ),
   commits: z.array(commitSchema),
+  squashes: z.array(squashSchema),
   historyTruncated: z.boolean(),
   observedAt: z.number().int().nonnegative(),
 });
@@ -113,6 +116,7 @@ export type Branch = z.infer<typeof branchSchema>;
 export type Tag = z.infer<typeof tagSchema>;
 export type Worktree = z.infer<typeof worktreeSchema>;
 export type Commit = z.infer<typeof commitSchema>;
+export type Squash = z.infer<typeof squashSchema>;
 export type RepositorySnapshot = z.infer<typeof snapshotSchema>;
 export type ChangeStatus = z.infer<typeof changeStatusSchema>;
 export type CommitDetail = z.infer<typeof detailSchema>;

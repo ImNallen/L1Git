@@ -142,19 +142,34 @@
   min-width: 40px;
 }
 .history-table td.ref-cell {
-  justify-content: flex-end;
+  padding: 0 4px 0 14px;
+}
+.ref-badges {
+  display: flex;
+  align-items: center;
   gap: 4px;
-  padding: 0 4px 0 10px;
+  min-width: 0;
+}
+.ref-cell,
+.commit-description,
+.graph-node,
+.graph-cell path {
+  transition: opacity 120ms ease-out;
+}
+.history-table.highlighting
+  tbody
+  tr:not(.lit)
+  :is(.ref-cell, .commit-description, .graph-node),
+.graph-cell path.dim {
+  opacity: 0.3;
 }
 .ref-badge {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  color: var(--ref-text);
-  background: var(--ref-bg);
-  border-left: 3px solid;
+  color: var(--ref-on-lane);
   border-radius: 4px;
-  padding: 3px 6px 3px 5px;
+  padding: 3px 6px;
   font-size: 10px;
   font-weight: 550;
   white-space: nowrap;
@@ -174,19 +189,26 @@
   flex-shrink: 0;
   opacity: 0.8;
 }
-.ref-badge.remote,
-.ref-badge.tag {
-  color: var(--text-icon);
+.more-refs {
+  flex-shrink: 0;
+}
+.more-refs-popover {
+  position: fixed;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  max-width: 320px;
+  padding: 6px;
   background: var(--panel-raised);
   border: 1px solid var(--border-control);
-  border-left-width: 3px;
-  padding: 2px 5px 2px 4px;
-  font-weight: 400;
+  border-radius: 6px;
+  box-shadow: 0 4px 14px var(--shadow-pane);
+  pointer-events: none;
 }
-.more-refs {
-  color: var(--text-dim);
-  font-size: 9px;
-  flex-shrink: 0;
+.more-refs-popover .ref-badge {
+  max-width: 100%;
 }
 .graph-cell {
   display: block;

@@ -73,6 +73,7 @@ function snapshot(head: Record<string, unknown>) {
     ],
     remotes: [],
     commits: [],
+    squashes: [],
     historyTruncated: false,
     observedAt: 0,
   });

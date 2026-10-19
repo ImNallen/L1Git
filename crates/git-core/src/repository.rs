@@ -1,15 +1,20 @@
 use crate::{
     Branch, ChangeStatus, ChangedFile, Commit, CommitDetail, DiffBase, ErrorKind, FilePatch, Head,
-    RepositoryError, RepositorySnapshot, Tag, Worktree, git, remotes,
+    RepositoryError, RepositorySnapshot, Squash, Tag, Worktree, git, remotes,
 };
 use std::{
+    collections::HashMap,
+    panic,
     path::{Path, PathBuf},
+    thread,
     time::{SystemTime, UNIX_EPOCH},
 };
 
 pub const HISTORY_LIMIT: usize = 50_000;
 pub const PATCH_LIMIT: usize = 1024 * 1024;
 const COMMIT_FORMAT: &str = "--format=%H%x00%P%x00%s%x00%an%x00%ae%x00%at";
+const SQUASH_SCAN_LIMIT: usize = 2000;
+const SQUASH_BRANCH_LIMIT: usize = 1000;
 
 pub(crate) fn root(path: &str) -> Result<PathBuf, RepositoryError> {
     let path = Path::new(path).canonicalize().map_err(|_| {
@@ -309,6 +314,8 @@ pub fn snapshot(path: &str) -> Result<RepositorySnapshot, RepositoryError> {
     let mut commits = parse_commits(&git::read(&root, &args)?)?;
     let history_truncated = commits.len() > HISTORY_LIMIT;
     commits.truncate(HISTORY_LIMIT);
+    // A partial clone lacks the blobs to diff, so it shows no squash merges.
+    let squashes = squashes(&root, &commits).unwrap_or_default();
     let name = root
         .file_name()
         .map(|s| s.to_string_lossy().into_owned())
@@ -331,12 +338,208 @@ pub fn snapshot(path: &str) -> Result<RepositorySnapshot, RepositoryError> {
         worktrees,
         remotes,
         commits,
+        squashes,
         history_truncated,
         observed_at: SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs(),
     })
+}
+
+/// Pairs each branch tip that no loaded commit builds on with a newer commit
+/// whose patch equals the branch's changes since it forked.
+fn squashes(root: &Path, commits: &[Commit]) -> Result<Vec<Squash>, RepositoryError> {
+    let index: HashMap<&str, usize> = commits
+        .iter()
+        .enumerate()
+        .map(|(position, commit)| (commit.oid.as_str(), position))
+        .collect();
+    let mut children = vec![0; commits.len()];
+    for commit in commits {
+        for parent in &commit.parents {
+            if let Some(&position) = index.get(parent.as_str()) {
+                children[position] += 1;
+            }
+        }
+    }
+    let fork = |tip: usize| {
+        let mut at = tip;
+        for _ in 0..SQUASH_BRANCH_LIMIT {
+            let parent = *index.get(commits[at].parents.first()?.as_str())?;
+            if children[parent] > 1 {
+                return Some(parent);
+            }
+            at = parent;
+        }
+        None
+    };
+    let branches: Vec<(usize, usize)> = (0..commits.len())
+        .filter(|&tip| children[tip] == 0)
+        .filter_map(|tip| Some((tip, fork(tip)?)))
+        .collect();
+    // Topological order lists a branch's own commits below its tip, so every
+    // commit above the tip is outside the branch.
+    let mut earliest_tip_below = i64::MAX;
+    let mut tips = branches.iter().rev().peekable();
+    let mut candidates = Vec::new();
+    for position in (0..commits.len()).rev() {
+        let commit = &commits[position];
+        if commit.parents.len() == 1 && commit.timestamp >= earliest_tip_below {
+            candidates.push(position);
+        }
+        if let Some(&&(tip, _)) = tips.peek()
+            && tip == position
+        {
+            earliest_tip_below = earliest_tip_below.min(commit.timestamp);
+            tips.next();
+        }
+    }
+    candidates.reverse();
+    candidates.truncate(SQUASH_SCAN_LIMIT);
+    if candidates.is_empty() {
+        return Ok(Vec::new());
+    }
+    // Diffing every candidate costs far more than listing the paths it
+    // changes, so only commits that change a branch's exact paths get diffed.
+    let (branch_paths, candidate_paths) = in_parallel(
+        || changed_paths(root, ranges(commits, &branches)),
+        || changed_paths(root, singles(commits, &candidates)),
+    );
+    let (branch_paths, candidate_paths) = (branch_paths?, candidate_paths?);
+    let mut by_paths: HashMap<&str, Vec<usize>> = HashMap::new();
+    for &position in &candidates {
+        if let Some(paths) = candidate_paths.get(&commits[position].oid) {
+            by_paths.entry(paths).or_default().push(position);
+        }
+    }
+    let mut pairs = Vec::new();
+    for &(tip, base) in &branches {
+        let Some(matches) = branch_paths
+            .get(&commits[tip].oid)
+            .and_then(|paths| by_paths.get(paths.as_str()))
+        else {
+            continue;
+        };
+        for &position in matches {
+            if position < tip && commits[position].timestamp >= commits[tip].timestamp {
+                pairs.push(((tip, base), position));
+            }
+        }
+    }
+    if pairs.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut paired_branches: Vec<_> = pairs.iter().map(|&(branch, _)| branch).collect();
+    paired_branches.dedup();
+    let mut paired_candidates: Vec<_> = pairs.iter().map(|&(_, position)| position).collect();
+    paired_candidates.sort_unstable();
+    paired_candidates.dedup();
+    let (branch_patches, candidate_patches) = in_parallel(
+        || patch_ids(root, ranges(commits, &paired_branches)),
+        || patch_ids(root, singles(commits, &paired_candidates)),
+    );
+    let (branch_patches, candidate_patches) = (branch_patches?, candidate_patches?);
+    Ok(pairs
+        .into_iter()
+        .filter(|&((tip, _), position)| {
+            branch_patches
+                .get(&commits[tip].oid)
+                .is_some_and(|patch| candidate_patches.get(&commits[position].oid) == Some(patch))
+        })
+        .map(|((tip, _), position)| Squash {
+            tip: commits[tip].oid.clone(),
+            commit: commits[position].oid.clone(),
+        })
+        .collect())
+}
+
+/// `git diff-tree --stdin` diffs `<tip> <base>` from the base to the tip and
+/// labels it with the tip, so a tip that is also another branch's squash
+/// commit needs its range and its own commit read in separate runs.
+fn ranges(commits: &[Commit], branches: &[(usize, usize)]) -> Vec<u8> {
+    branches
+        .iter()
+        .flat_map(|&(tip, base)| {
+            format!("{} {}\n", commits[tip].oid, commits[base].oid).into_bytes()
+        })
+        .collect()
+}
+
+fn singles(commits: &[Commit], positions: &[usize]) -> Vec<u8> {
+    positions
+        .iter()
+        .flat_map(|&position| format!("{}\n", commits[position].oid).into_bytes())
+        .collect()
+}
+
+fn in_parallel<A: Send, B>(a: impl FnOnce() -> A + Send, b: impl FnOnce() -> B) -> (A, B) {
+    thread::scope(|scope| {
+        let a = scope.spawn(a);
+        let b = b();
+        (
+            a.join()
+                .unwrap_or_else(|payload| panic::resume_unwind(payload)),
+            b,
+        )
+    })
+}
+
+/// Maps each commit `git diff-tree --stdin` reports to its changed paths, one
+/// `<status>\t<path>` line each. Empty diffs have no entry.
+fn changed_paths(root: &Path, input: Vec<u8>) -> Result<HashMap<String, String>, RepositoryError> {
+    let output = git::read_with_input(
+        root,
+        &[
+            "diff-tree",
+            "--stdin",
+            "-r",
+            "--name-status",
+            "--no-renames",
+        ],
+        input,
+    )?;
+    let mut changes: HashMap<String, String> = HashMap::new();
+    let mut current = None;
+    for line in git::text(&output).lines() {
+        if line.contains('\t') {
+            let oid = current.as_ref().ok_or_else(git::malformed)?;
+            let paths = changes.entry(String::clone(oid)).or_default();
+            paths.push_str(line);
+            paths.push('\n');
+        } else {
+            current = Some(line.to_owned());
+        }
+    }
+    Ok(changes)
+}
+
+/// Maps each commit `git diff-tree --stdin` reports to the stable patch ID of
+/// its diff. Empty diffs have no entry.
+fn patch_ids(root: &Path, input: Vec<u8>) -> Result<HashMap<String, String>, RepositoryError> {
+    let diff = git::read_with_input(
+        root,
+        &[
+            "diff-tree",
+            "--stdin",
+            "-p",
+            "--no-renames",
+            "--no-ext-diff",
+            "--no-textconv",
+        ],
+        input,
+    )?;
+    git::text(&git::read_with_input(
+        root,
+        &["patch-id", "--stable"],
+        diff,
+    )?)
+    .lines()
+    .map(|line| {
+        let (patch, oid) = line.split_once(' ').ok_or_else(git::malformed)?;
+        Ok((oid.to_owned(), patch.to_owned()))
+    })
+    .collect()
 }
 
 fn open_commit(path: &str, oid: &str) -> Result<(PathBuf, Commit), RepositoryError> {

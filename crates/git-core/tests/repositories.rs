@@ -1,6 +1,6 @@
 use l1_git_core::{
-    Branch, ChangeStatus, DiffBase, ErrorKind, FilePatch, HISTORY_LIMIT, Head, Tag, Worktree,
-    commit_detail, file_patch, snapshot,
+    Branch, ChangeStatus, DiffBase, ErrorKind, FilePatch, HISTORY_LIMIT, Head, Squash, Tag,
+    Worktree, commit_detail, file_patch, snapshot,
 };
 use std::{
     fs,
@@ -20,6 +20,10 @@ fn git(path: &Path, args: &[&str]) -> String {
 }
 
 fn git_with_input(path: &Path, args: &[&str], input: &[u8]) -> String {
+    git_dated(path, args, input, "1700000000 +0000")
+}
+
+fn git_dated(path: &Path, args: &[&str], input: &[u8], date: &str) -> String {
     let mut command = Command::new("git");
     for (key, _) in std::env::vars_os() {
         if key.to_string_lossy().starts_with("GIT_") {
@@ -34,8 +38,8 @@ fn git_with_input(path: &Path, args: &[&str], input: &[u8]) -> String {
         .env("GIT_AUTHOR_EMAIL", "ada@example.test")
         .env("GIT_COMMITTER_NAME", "Ada")
         .env("GIT_COMMITTER_EMAIL", "ada@example.test")
-        .env("GIT_AUTHOR_DATE", "1700000000 +0000")
-        .env("GIT_COMMITTER_DATE", "1700000000 +0000")
+        .env("GIT_AUTHOR_DATE", date)
+        .env("GIT_COMMITTER_DATE", date)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -327,6 +331,46 @@ fn history_keeps_the_newest_commits_across_branches_and_flags_truncation() {
     assert_eq!(
         git(&fixture.repo, &["symbolic-ref", "HEAD"]),
         "refs/heads/main"
+    );
+}
+
+#[test]
+fn pairs_a_squash_merged_branch_with_its_squash_commit_only() {
+    let fixture = Fixture::new();
+    fixture.commit("first", "one", "initial");
+    git(&fixture.repo, &["checkout", "-b", "feat/merged"]);
+    fixture.commit("merged", "merged", "merged work");
+    git(&fixture.repo, &["checkout", "main"]);
+    git(
+        &fixture.repo,
+        &["merge", "--no-ff", "feat/merged", "-m", "merge"],
+    );
+    git(&fixture.repo, &["checkout", "-b", "feat/open"]);
+    fixture.commit("open", "open", "open work");
+    git(&fixture.repo, &["checkout", "-b", "feat/squashed", "main"]);
+    fixture.commit("first", "one\ntwo", "squashed one");
+    let tip = fixture.commit("second", "second", "squashed two");
+    git(&fixture.repo, &["checkout", "main"]);
+    fs::write(fixture.repo.join("open"), "other").unwrap();
+    git(&fixture.repo, &["add", "open"]);
+    git_dated(
+        &fixture.repo,
+        &["commit", "-m", "same path as feat/open, other contents"],
+        b"",
+        "1700000030 +0000",
+    );
+    assert_eq!(snapshot(fixture.path()).unwrap().squashes, []);
+    git(&fixture.repo, &["merge", "--squash", "feat/squashed"]);
+    git_dated(
+        &fixture.repo,
+        &["commit", "-m", "squashed (#1)"],
+        b"",
+        "1700000060 +0000",
+    );
+    let commit = git(&fixture.repo, &["rev-parse", "HEAD"]);
+    assert_eq!(
+        snapshot(fixture.path()).unwrap().squashes,
+        [Squash { tip, commit }]
     );
 }
 

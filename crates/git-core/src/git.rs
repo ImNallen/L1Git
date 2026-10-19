@@ -1,6 +1,6 @@
 use crate::{BranchRef, ErrorKind, Oid, RepositoryError};
 use std::{
-    io::{self, Read},
+    io::{self, Read, Write},
     path::Path,
     process::{Child, Command, Output, Stdio},
     sync::mpsc,
@@ -75,6 +75,28 @@ fn read_failed() -> RepositoryError {
 pub(crate) fn read(path: &Path, args: &[&str]) -> Result<Vec<u8>, RepositoryError> {
     let output = run(path, args)?;
     if !output.status.success() {
+        return Err(read_failed());
+    }
+    Ok(output.stdout)
+}
+
+pub(crate) fn read_with_input(
+    path: &Path,
+    args: &[&str],
+    input: Vec<u8>,
+) -> Result<Vec<u8>, RepositoryError> {
+    let mut child = command(path, args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(spawn_error)?;
+    let mut stdin = child.stdin.take().ok_or_else(read_failed)?;
+    // Writing from another thread keeps a full stdout pipe from blocking Git.
+    let writer = thread::spawn(move || stdin.write_all(&input));
+    let output = child.wait_with_output().map_err(|_| read_failed())?;
+    let written = writer.join().map_err(|_| read_failed())?;
+    if written.is_err() || !output.status.success() {
         return Err(read_failed());
     }
     Ok(output.stdout)
