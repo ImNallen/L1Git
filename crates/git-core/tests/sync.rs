@@ -1246,13 +1246,9 @@ fn reports_gone_upstreams_and_resolves_the_default_branch() {
     world.publish("develop");
     world.publish("feat");
     git(&world.remote, &["branch", "--delete", "--force", "feat"]);
-    git(
-        &world.work,
-        &["update-ref", "-d", "refs/remotes/origin/feat"],
-    );
 
     let overview = coordinator
-        .overview(world.path(), FetchMode::Local)
+        .overview(world.path(), FetchMode::Remote)
         .unwrap();
     let feat = branch(&overview, "feat");
     assert_eq!(feat.reference, branch_ref("feat"));
@@ -1284,6 +1280,19 @@ fn reports_gone_upstreams_and_resolves_the_default_branch() {
         .unwrap();
     assert_eq!(branch(&overview, "develop").role, BranchRole::Default);
     assert_eq!(branch(&overview, "main").role, BranchRole::Mainline);
+}
+
+#[test]
+fn a_fetch_keeps_local_tags_when_the_repository_prunes_tags() {
+    let world = World::new();
+    git(&world.work, &["config", "fetch.pruneTags", "true"]);
+    git(&world.work, &["tag", "local-only"]);
+
+    coordinator()
+        .overview(world.path(), FetchMode::Remote)
+        .unwrap();
+
+    assert_eq!(git(&world.work, &["tag", "--list"]), "local-only");
 }
 
 #[test]
