@@ -336,10 +336,6 @@ input::placeholder {
 .sync-counts .outgoing {
   color: var(--success);
 }
-.branch-row .sync-counts {
-  margin-left: auto;
-  margin-right: 0;
-}
 .settings-back {
   display: flex;
   align-items: center;

@@ -13,6 +13,7 @@ import {
   Search,
   X,
 } from "lucide-react";
+import { upstreamName } from "../domain/overview";
 import type { Divergence } from "../domain/overview";
 import type { RecentRepository } from "../domain/recents";
 import type {
@@ -22,7 +23,6 @@ import type {
   RepositorySnapshot,
 } from "../domain/repository";
 import type { RootSync } from "../overview";
-import { upstreamName } from "./Overview";
 
 type Props = {
   entries: RecentRepository[];

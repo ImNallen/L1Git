@@ -135,6 +135,10 @@ export function divergence(state: BranchState): Divergence | null {
   }
 }
 
+export function upstreamName(upstream: string): string {
+  return upstream.replace(/^refs\/remotes\//, "");
+}
+
 export function readyAdvances(overview: RepositoryOverview): Advance[] {
   return overview.branches.flatMap((branch) =>
     branch.state.kind === "behind" && branch.state.blocker === null

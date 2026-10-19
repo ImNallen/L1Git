@@ -14,7 +14,7 @@ import {
   Plus,
   TriangleAlert,
 } from "lucide-react";
-import { attentionRows } from "../domain/overview";
+import { attentionRows, upstreamName } from "../domain/overview";
 import type {
   AdvanceOutcome,
   BranchRef,
@@ -434,10 +434,6 @@ function outcomeNote(outcome: AdvanceOutcome): {
       return exhaustive;
     }
   }
-}
-
-export function upstreamName(upstream: string): string {
-  return upstream.replace(/^refs\/remotes\//, "");
 }
 
 function baseName(path: string): string {
