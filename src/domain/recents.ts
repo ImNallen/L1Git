@@ -60,12 +60,14 @@ export function remember(
   now = Date.now(),
 ): Catalog {
   const entry = { root: snapshot.root, name: snapshot.name, openedAt: now };
+  const known = catalog.entries.some(({ root }) => root === snapshot.root);
   return {
     version: 1,
-    entries: [
-      entry,
-      ...catalog.entries.filter((entry) => entry.root !== snapshot.root),
-    ].slice(0, 50),
+    entries: known
+      ? catalog.entries.map((existing) =>
+          existing.root === snapshot.root ? entry : existing,
+        )
+      : [...catalog.entries, entry].slice(-50),
     lastRoot: snapshot.root,
   };
 }

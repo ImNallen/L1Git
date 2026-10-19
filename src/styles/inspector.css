@@ -9,13 +9,12 @@
   background: var(--canvas);
 }
 .inspector-heading {
-  height: 40px;
-  min-height: 40px;
-  border-bottom: 1px solid var(--border);
+  height: 58px;
+  min-height: 58px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 15px 0 20px;
+  padding: 0 20px;
   font-size: 10px;
   color: var(--text-dim);
 }
@@ -28,28 +27,45 @@
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar) var(--panel-raised);
 }
-.inspector-sha {
-  display: flex;
+.sha-chip {
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
-}
-.inspector-sha code {
-  font-size: 10px;
+  gap: 6px;
+  height: 24px;
+  margin-left: -6px;
+  padding: 0 6px;
+  border-radius: 5px;
   color: var(--muted);
-  overflow-wrap: anywhere;
-  user-select: all;
-  line-height: 1.7;
 }
-.inspector-sha .icon-button {
-  width: 22px;
+.sha-chip code {
+  font-size: 11px;
+}
+.sha-chip svg {
+  opacity: 0;
+}
+.sha-chip:hover,
+.sha-chip:focus-visible {
+  background: var(--row-hover);
+  color: var(--text-secondary);
+}
+.sha-chip:hover svg,
+.sha-chip:focus-visible svg,
+.sha-chip.copied svg {
+  opacity: 1;
+}
+.sha-chip.copied {
+  color: var(--success);
 }
 .inspector h2 {
-  margin: 17px 0 13px;
+  margin: 0 0 13px;
   font-size: 15px;
   line-height: 1.55;
   font-weight: 600;
   color: var(--text-heading);
   overflow-wrap: anywhere;
+}
+.commit-message-block {
+  margin: 0 0 17px;
 }
 .commit-message {
   font: inherit;
@@ -57,10 +73,24 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   color: var(--text-body);
-  margin: 0 0 17px;
+  margin: 0;
 }
-.commit-message:empty {
-  display: none;
+.commit-message.clipped {
+  max-height: calc(1.8em * 6);
+  overflow: hidden;
+}
+.commit-message.fading {
+  mask-image: linear-gradient(to bottom, #000 60%, transparent);
+}
+.message-toggle {
+  margin-top: 4px;
+  padding: 2px 0;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--link);
+}
+.message-toggle:hover {
+  text-decoration: underline;
 }
 .inspector-refs {
   display: flex;
@@ -77,56 +107,117 @@
   max-width: 100%;
 }
 .commit-metadata {
-  display: grid;
-  grid-template-columns: 54px minmax(0, 1fr);
-  column-gap: 13px;
-  row-gap: 17px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 0;
   font-size: 11px;
-  line-height: 1.7;
+}
+.meta-row dd {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
   margin: 0;
 }
-.commit-metadata dt {
+.meta-icon {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--row-hover);
   color: var(--muted);
 }
-.commit-metadata dd {
-  margin: 0;
-  color: var(--text-secondary);
-  overflow-wrap: anywhere;
+.meta-icon.avatar {
+  background: var(--nav-selected-bg);
+  color: var(--nav-selected-text);
+  font-size: 10px;
+  font-weight: 600;
 }
-.author-email {
-  display: block;
+.meta-lines {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.45;
+}
+.meta-primary {
+  color: var(--text-heading);
+  font-weight: 500;
+}
+.meta-primary.parents {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.meta-primary.parents .sha-chip {
+  height: 16px;
+}
+.meta-secondary {
   color: var(--text-dim);
   font-size: 10px;
-}
-.parent-link {
-  font-family: var(--mono);
-  font-size: 10px;
-  padding: 0;
-  margin-right: 10px;
-  color: var(--link);
-}
-.parent-link:hover {
-  text-decoration: underline;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .changed-files-heading {
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 10px;
-  border-top: 1px solid var(--border);
-  padding-top: 22px;
-  margin-top: 26px;
-  color: var(--text-body);
-  font-size: 11px;
+  width: calc(100% + 27px);
+  height: 30px;
+  margin: 22px -6px 6px -21px;
+  padding: 0 6px 0 3px;
+  border-radius: 5px;
+  text-align: left;
+}
+.changed-files-heading:hover {
+  background: var(--row-hover);
+}
+/* The chevron sits in the content gutter so the title lines up with the text above. */
+.changed-files-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text-heading);
+  font-size: 12px;
+  font-weight: 600;
+}
+.changed-files-title svg {
+  flex-shrink: 0;
+  margin-right: -2px;
+  color: var(--muted);
+}
+.changed-files-title .count {
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--row-hover);
+  color: var(--text-dim);
+  font-size: 10px;
+  font-weight: 500;
 }
 .change-summary {
-  color: var(--text-faint);
-  text-align: right;
+  display: flex;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
 }
-.diff-policy {
-  font-size: 10px;
-  color: var(--text-faint);
-  line-height: 1.7;
-  margin: 9px 0 15px;
+.change-stat.added {
+  color: var(--success);
+}
+.change-stat.modified {
+  color: var(--warning);
+}
+.change-stat.deleted {
+  color: var(--deleted);
+}
+.changed-files {
+  flex: 1 0 240px;
+  display: flex;
+  flex-direction: column;
 }
 .changed-file-tree {
   flex: 1 0 240px;
@@ -149,14 +240,14 @@
   --trees-status-deleted-override: var(--deleted);
   --trees-status-modified-override: var(--warning);
 }
-.copy-status,
 .copy-error {
   font-size: 10px;
-  margin: 4px 0;
-  color: var(--success-muted);
-}
-.copy-error {
+  margin: 0 0 12px;
   color: var(--error-text);
+  overflow-wrap: anywhere;
+}
+.copy-error code {
+  user-select: all;
 }
 .inspector-empty {
   flex: 1;

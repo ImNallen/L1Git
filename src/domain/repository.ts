@@ -77,6 +77,12 @@ export const snapshotSchema = z.object({
   historyTruncated: z.boolean(),
   observedAt: z.number().int().nonnegative(),
 });
+export const refsSchema = snapshotSchema.pick({
+  root: true,
+  name: true,
+  head: true,
+  branches: true,
+});
 export const changeStatusSchema = z.enum(["A", "D", "M", "T"]);
 export const detailSchema = z.object({
   commit: commitSchema,
@@ -118,6 +124,7 @@ export type Worktree = z.infer<typeof worktreeSchema>;
 export type Commit = z.infer<typeof commitSchema>;
 export type Squash = z.infer<typeof squashSchema>;
 export type RepositorySnapshot = z.infer<typeof snapshotSchema>;
+export type RepositoryRefs = z.infer<typeof refsSchema>;
 export type ChangeStatus = z.infer<typeof changeStatusSchema>;
 export type CommitDetail = z.infer<typeof detailSchema>;
 export type ChangedFile = CommitDetail["files"][number];
@@ -136,19 +143,4 @@ export function problemFrom(error: unknown): Problem {
         ? error.message
         : "The repository reader is unavailable. Try again.",
   };
-}
-
-export function headLabel(head: Head): string {
-  switch (head.kind) {
-    case "attached":
-      return head.reference.replace(/^refs\/heads\//, "");
-    case "unborn":
-      return `${head.reference.replace(/^refs\/heads\//, "")} · no commits`;
-    case "detached":
-      return `Detached at ${head.oid.slice(0, 7)}`;
-    default: {
-      const exhaustive: never = head;
-      return exhaustive;
-    }
-  }
 }

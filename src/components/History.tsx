@@ -1,5 +1,4 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { RefObject } from "react";
 import { createPortal } from "react-dom";
 import {
   CircleCheck,
@@ -7,18 +6,22 @@ import {
   FolderGit2,
   GitBranch,
   GitCommitHorizontal,
-  Search,
   Tag,
-  X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { initials } from "../domain/author";
 import { buildGraph } from "../domain/graph";
 import type { GraphRow } from "../domain/graph";
 import { highlightBranch } from "../domain/highlight";
 import type { RowHighlight } from "../domain/highlight";
 import { refLabels } from "../domain/refs";
 import type { RefLabel } from "../domain/refs";
-import type { Commit, Oid, RepositorySnapshot } from "../domain/repository";
+import type {
+  Commit,
+  Oid,
+  RepositoryRoot,
+  RepositorySnapshot,
+} from "../domain/repository";
 
 const ROW_HEIGHT = 36;
 const OVERSCAN = 10;
@@ -26,21 +29,11 @@ const HIGHLIGHT_DELAY = 400;
 const color = (lane: number) => `var(--graph-lane-${(lane % 6) + 1})`;
 const x = (lane: number) => 14 + lane * 24;
 
-const initials = (author: string) =>
-  author
-    .trim()
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((part) => part[0])
-    .join("")
-    .toUpperCase();
-
 function GraphCell({
   row,
   commit,
   selected,
   width,
-  filtered,
   known,
   lit,
 }: {
@@ -48,7 +41,6 @@ function GraphCell({
   commit: Commit;
   selected: boolean;
   width: number;
-  filtered: boolean;
   known: Set<Oid>;
   lit: RowHighlight | undefined;
 }) {
@@ -64,34 +56,30 @@ function GraphCell({
       height={ROW_HEIGHT}
       aria-hidden="true"
     >
-      {!filtered && (
-        <>
-          {row.continuations.map((edge, index) => (
-            <path
-              key={`continue-${edge.from}`}
-              className={dim(lit?.continuations[index])}
-              d={curve(edge.from, edge.to, 0, 36)}
-              stroke={color(edge.from)}
-            />
-          ))}
-          {row.incoming && (
-            <path
-              className={dim(lit?.incoming)}
-              d={`M ${x(row.lane)} 0 V 18`}
-              stroke={color(row.lane)}
-            />
-          )}
-          {row.parents.map((edge, index) => (
-            <path
-              key={edge.oid}
-              className={dim(lit?.parents[index])}
-              d={curve(edge.from, edge.to, 18, 36)}
-              stroke={color(edge.to)}
-              strokeDasharray={known.has(edge.oid) ? undefined : "3 3"}
-            />
-          ))}
-        </>
+      {row.continuations.map((edge, index) => (
+        <path
+          key={`continue-${edge.from}`}
+          className={dim(lit?.continuations[index])}
+          d={curve(edge.from, edge.to, 0, 36)}
+          stroke={color(edge.from)}
+        />
+      ))}
+      {row.incoming && (
+        <path
+          className={dim(lit?.incoming)}
+          d={`M ${x(row.lane)} 0 V 18`}
+          stroke={color(row.lane)}
+        />
       )}
+      {row.parents.map((edge, index) => (
+        <path
+          key={edge.oid}
+          className={dim(lit?.parents[index])}
+          d={curve(edge.from, edge.to, 18, 36)}
+          stroke={color(edge.to)}
+          strokeDasharray={known.has(edge.oid) ? undefined : "3 3"}
+        />
+      ))}
       <g className="graph-node">
         <title>{`${commit.author} <${commit.email}>`}</title>
         {selected && (
@@ -232,10 +220,10 @@ type Props = {
   snapshot: RepositorySnapshot;
   selectedOid: Oid | null;
   revealSeq: number;
-  query: string;
-  onQuery: (query: string) => void;
   onSelect: (oid: Oid) => void;
-  searchRef: RefObject<HTMLInputElement | null>;
+  /** Where the history of `root` was scrolled when it was last shown. */
+  scrollTopOf: (root: RepositoryRoot) => number;
+  onScroll: (root: RepositoryRoot, scrollTop: number) => void;
   busy: boolean;
   hidden: boolean;
   /** Tips of the default branch, which the highlight treats as trunk. */
@@ -246,10 +234,9 @@ export function History({
   snapshot,
   selectedOid,
   revealSeq,
-  query,
-  onQuery,
   onSelect,
-  searchRef,
+  scrollTopOf,
+  onScroll,
   busy,
   hidden,
   trunk,
@@ -263,25 +250,15 @@ export function History({
     [snapshot.commits],
   );
   const labels = useMemo(() => refLabels(snapshot), [snapshot]);
-  const search = query.trim().toLocaleLowerCase();
-  const commits = useMemo(
-    () =>
-      snapshot.commits.filter((commit) =>
-        [commit.subject, commit.author, commit.email, commit.oid].some(
-          (value) => value.toLocaleLowerCase().includes(search),
-        ),
-      ),
-    [snapshot.commits, search],
-  );
+  const commits = snapshot.commits;
   const [hovered, setHovered] = useState<Oid | null>(null);
   const hoverTimer = useRef<number | undefined>(undefined);
-  const highlightTip = search ? null : hovered;
   const highlight = useMemo(
     () =>
-      highlightTip === null
+      hovered === null
         ? null
-        : highlightBranch(snapshot.commits, graph.rows, highlightTip, trunk),
-    [snapshot.commits, graph.rows, highlightTip, trunk],
+        : highlightBranch(snapshot.commits, graph.rows, hovered, trunk),
+    [snapshot.commits, graph.rows, hovered, trunk],
   );
   const hover = (oid: Oid) => {
     window.clearTimeout(hoverTimer.current);
@@ -299,6 +276,12 @@ export function History({
   // under a still pointer, so no mouseleave arrives to clear it.
   useLayoutEffect(unhover, [snapshot]);
   const commitsRef = useRef(commits);
+  const rootRef = useRef(snapshot.root);
+  const revealed = useRef<{
+    root: RepositoryRoot;
+    oid: Oid | null;
+    seq: number;
+  } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const headRef = useRef<HTMLTableSectionElement>(null);
   const [viewport, setViewport] = useState({ top: 0, height: 0 });
@@ -313,6 +296,7 @@ export function History({
       window.clearTimeout(hoverTimer.current);
       setHovered(null);
       measure();
+      onScroll(rootRef.current, scroller.scrollTop);
     };
     measure();
     scroller.addEventListener("scroll", scrolled, { passive: true });
@@ -322,15 +306,34 @@ export function History({
       scroller.removeEventListener("scroll", scrolled);
       observer.disconnect();
     };
-  }, []);
+  }, [onScroll]);
 
   useLayoutEffect(() => {
     commitsRef.current = commits;
+    rootRef.current = snapshot.root;
   });
 
   useLayoutEffect(() => {
     const scroller = scrollRef.current;
-    if (hidden || !scroller || selectedOid === null) return;
+    if (hidden || !scroller) return;
+    const last = revealed.current;
+    revealed.current = {
+      root: snapshot.root,
+      oid: selectedOid,
+      seq: revealSeq,
+    };
+    // A repository reopens where it was left instead of jumping to its
+    // remembered selection. A branch jump reveals with a later `revealSeq`.
+    if (last?.root !== snapshot.root) {
+      scroller.scrollTop = scrollTopOf(snapshot.root);
+      setViewport({ top: scroller.scrollTop, height: scroller.clientHeight });
+      return;
+    }
+    if (
+      selectedOid === null ||
+      (last.oid === selectedOid && last.seq === revealSeq)
+    )
+      return;
     const index = commitsRef.current.findIndex(
       (commit) => commit.oid === selectedOid,
     );
@@ -345,7 +348,7 @@ export function History({
       return;
     scroller.scrollTop = rowTop + ROW_HEIGHT / 2 - rows / 2;
     setViewport({ top: scroller.scrollTop, height: scroller.clientHeight });
-  }, [selectedOid, revealSeq, hidden]);
+  }, [snapshot.root, scrollTopOf, selectedOid, revealSeq, hidden]);
 
   const first = Math.min(
     commits.length,
@@ -365,43 +368,6 @@ export function History({
       aria-busy={busy}
       hidden={hidden}
     >
-      <div className="history-tools">
-        <div className="history-search">
-          <Search size={14} />
-          <input
-            ref={searchRef}
-            aria-label="Search loaded history"
-            placeholder="Search loaded messages, authors, and SHAs"
-            value={query}
-            onChange={(event) => onQuery(event.target.value)}
-          />
-          {query && (
-            <button
-              className="icon-button"
-              aria-label="Clear history search"
-              onClick={() => onQuery("")}
-            >
-              <X size={13} />
-            </button>
-          )}
-        </div>
-      </div>
-      <div className="history-summary">
-        <span>
-          {search ? `${commits.length.toLocaleString()} matching / ` : ""}
-          {snapshot.commits.length.toLocaleString()}
-          {snapshot.historyTruncated ? "+" : ""} loaded commits
-          <span className="summary-separator">·</span>
-          {snapshot.branches.length} branches
-        </span>
-        <span>
-          {search
-            ? "Graph connections hidden while filtering"
-            : snapshot.historyTruncated
-              ? `Newest ${snapshot.commits.length.toLocaleString()} commits`
-              : "All branches"}
-        </span>
-      </div>
       <div className="history-scroll" ref={scrollRef}>
         <table
           className={`history-table${highlight ? " highlighting" : ""}`}
@@ -457,7 +423,6 @@ export function History({
                         commit={commit}
                         selected={selected}
                         width={graphWidth}
-                        filtered={search.length > 0}
                         known={known}
                         lit={highlight?.rows.get(commit.oid)}
                       />
@@ -488,26 +453,27 @@ export function History({
         {commits.length === 0 && (
           <div className="history-empty">
             <GitBranch size={26} />
-            <h2>{search ? "No matching commits" : "No commits yet"}</h2>
+            <h2>No commits yet</h2>
             <p>
-              {search
-                ? "Search covers the loaded messages, authors, emails, and commit IDs."
-                : "This repository has no commit history. Create a commit in Git, then refresh."}
+              This repository has no commit history. Create a commit in Git,
+              then refresh.
             </p>
-            {search && (
-              <button className="button secondary" onClick={() => onQuery("")}>
-                Clear search
-              </button>
-            )}
           </div>
         )}
       </div>
-      {busy && (
-        <div className="history-loading" role="status">
-          <span className="loading-dot" />
-          Reading local Git history…
-        </div>
-      )}
+    </section>
+  );
+}
+
+/** Holds the history pane while a repository opens for the first time. */
+export function HistoryPlaceholder() {
+  return (
+    <section className="history" aria-label="Commit history" aria-busy>
+      <div className="history-pending" aria-hidden="true">
+        {[46, 62, 38, 55, 70, 42, 58, 35].map((width, index) => (
+          <span key={index} style={{ width: `${width}%` }} />
+        ))}
+      </div>
     </section>
   );
 }

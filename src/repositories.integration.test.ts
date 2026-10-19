@@ -16,6 +16,7 @@ import type { RepositoryOverview } from "./domain/overview";
 import {
   detailSchema,
   filePatchSchema,
+  refsSchema,
   repositoryErrorSchema,
   snapshotSchema,
 } from "./domain/repository";
@@ -40,6 +41,10 @@ const origin = "http://127.0.0.1:1422";
 const snapshotEnvelope = z.object({
   ok: z.literal(true),
   data: snapshotSchema,
+});
+const refsEnvelope = z.object({
+  ok: z.literal(true),
+  data: refsSchema.strict(),
 });
 const overviewEnvelope = z.object({
   ok: z.literal(true),
@@ -264,6 +269,41 @@ describe("real Rust transport contract", () => {
       );
   });
 
+  it("reads the same root, name, HEAD, and branches as the snapshot without history", async () => {
+    for (const path of [fixture.repository, fixture.unborn, fixture.detached]) {
+      const snapshot = snapshotEnvelope.parse(
+        await (await post("snapshot", { path })).json(),
+      ).data;
+      const refs = refsEnvelope.parse(
+        await (await post("refs", { path })).json(),
+      ).data;
+      expect(refs).toEqual({
+        root: snapshot.root,
+        name: snapshot.name,
+        head: snapshot.head,
+        branches: snapshot.branches,
+      });
+    }
+    const refs = refsEnvelope.parse(
+      await (await post("refs", { path: fixture.repository })).json(),
+    ).data;
+    expect(refs.name).toBe("l1-demo");
+    expect(refs.branches.map((branch) => branch.reference)).toEqual([
+      "refs/heads/feat/history",
+      "refs/heads/feat/squashed",
+      "refs/heads/main",
+      "refs/remotes/origin/feat/history",
+      "refs/remotes/origin/feat/remote-inspector",
+      "refs/remotes/origin/main",
+    ]);
+    expect(
+      z
+        .object({ ok: z.literal(false), error: repositoryErrorSchema })
+        .parse(await (await post("refs", { path: fixture.remote })).json())
+        .error.kind,
+    ).toBe("bareRepository");
+  });
+
   it("reports empty, detached, bare, and missing states through the same contract", async () => {
     const unborn = snapshotEnvelope.parse(
       await (await post("snapshot", { path: fixture.unborn })).json(),
@@ -297,24 +337,26 @@ describe("real Rust transport contract", () => {
   });
 
   it("rejects other origins, absent origins, unknown commands, and malformed requests", async () => {
-    for (const requestOrigin of [
-      null,
-      "https://example.test",
-      "http://127.0.0.1:9999",
-    ]) {
-      const response = await post(
-        "snapshot",
-        { path: fixture.repository },
-        requestOrigin,
-      );
-      expect(response.status).toBe(403);
-      expect(response.headers.get("access-control-allow-origin")).toBeNull();
-    }
+    for (const operation of ["snapshot", "refs"])
+      for (const requestOrigin of [
+        null,
+        "https://example.test",
+        "http://127.0.0.1:9999",
+      ]) {
+        const response = await post(
+          operation,
+          { path: fixture.repository },
+          requestOrigin,
+        );
+        expect(response.status).toBe(403);
+        expect(response.headers.get("access-control-allow-origin")).toBeNull();
+      }
     expect((await post("checkout", {})).status).toBe(404);
-    expect(
-      (await post("snapshot", { path: fixture.repository, unexpected: true }))
-        .status,
-    ).toBe(400);
+    for (const operation of ["snapshot", "refs"])
+      expect(
+        (await post(operation, { path: fixture.repository, unexpected: true }))
+          .status,
+      ).toBe(400);
   });
 });
 

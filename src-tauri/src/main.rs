@@ -1,6 +1,6 @@
 use l1_git_core::{
     Advance, CommitDetail, Coordinator, ErrorKind, FastForwardReport, FetchMode, FilePatch,
-    RepositoryError, RepositoryOverview, RepositorySnapshot,
+    RepositoryError, RepositoryOverview, RepositoryRefs, RepositorySnapshot,
 };
 use std::sync::Arc;
 
@@ -14,6 +14,13 @@ fn worker_error() -> RepositoryError {
 #[tauri::command]
 async fn repository_snapshot(path: String) -> Result<RepositorySnapshot, RepositoryError> {
     tauri::async_runtime::spawn_blocking(move || l1_git_core::snapshot(&path))
+        .await
+        .map_err(|_| worker_error())?
+}
+
+#[tauri::command]
+async fn repository_refs(path: String) -> Result<RepositoryRefs, RepositoryError> {
+    tauri::async_runtime::spawn_blocking(move || l1_git_core::refs(&path))
         .await
         .map_err(|_| worker_error())?
 }
@@ -69,6 +76,7 @@ fn main() {
         .manage(Arc::new(Coordinator::default()))
         .invoke_handler(tauri::generate_handler![
             repository_snapshot,
+            repository_refs,
             repository_commit_detail,
             repository_file_patch,
             repository_overview,

@@ -78,34 +78,29 @@ input::placeholder {
 .repository-row:hover {
   background: var(--control);
 }
+.repository-toggle {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  width: 27px;
+  height: 36px;
+  padding-left: 6px;
+  color: var(--muted);
+}
 .repository-open {
   display: flex;
   align-items: center;
-  gap: 8px;
   min-width: 0;
   flex: 1;
   height: 36px;
   text-align: left;
-  padding: 0 6px;
+  padding: 0 6px 0 0;
   font-weight: 550;
 }
-.repository-open > svg {
-  color: var(--muted);
-  flex-shrink: 0;
-}
-.repository-open > span:last-child {
+.repository-open > span {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-.remove-repository {
-  opacity: 0;
-  margin-right: 3px;
-  width: 24px;
-}
-.repository-row:hover .remove-repository,
-.repository-row:focus-within .remove-repository {
-  opacity: 1;
 }
 .repository-branches {
   padding-bottom: 9px;
@@ -116,12 +111,17 @@ input::placeholder {
   gap: 8px;
   align-items: center;
   height: 31px;
-  padding: 0 10px 0 25px;
+  padding: 0 10px 0 27px;
+  border-radius: 5px;
   color: var(--text-icon);
   text-align: left;
   font-size: 12px;
 }
-.tree-section .count {
+.tree-section:hover {
+  background: var(--row-hover);
+}
+.tree-section .count,
+.branch-folder .count {
   margin-left: auto;
   color: var(--text-dim);
   font-size: 11px;
@@ -132,10 +132,20 @@ input::placeholder {
   display: flex;
   align-items: center;
   gap: 9px;
-  padding: 0 10px 0 43px;
+  /* Each level steps in by one chevron and its gap. */
+  --indent: calc(48px + var(--depth, 0) * 22px);
+  /* Branches leave the chevron slot empty so their icons align with folder icons. */
+  padding: 0 10px 0 calc(var(--indent) + 22px);
   text-align: left;
   border-radius: 5px;
   color: var(--text-secondary);
+}
+.branch-folder {
+  padding-left: var(--indent);
+}
+/* Search forces folders open, so the toggle is inert but should not look dimmed. */
+.branch-folder:disabled {
+  opacity: 1;
 }
 .branch-row > svg {
   flex-shrink: 0;
@@ -156,9 +166,17 @@ input::placeholder {
   background: var(--nav-selected-bg);
   color: var(--nav-selected-text);
 }
-.branch-row.selected > svg,
-.branch-row > .head-icon {
+.branch-row.selected > svg {
   color: var(--blue);
+}
+.branch-row.head:not(.selected) {
+  background: var(--success-bg);
+}
+.branch-row.head:not(.selected):hover:not(:disabled) {
+  background: var(--success-bg-hover);
+}
+.branch-row.head:not(.selected) > svg {
+  color: var(--success);
 }
 .branch-head {
   font-size: 8px;
@@ -176,32 +194,6 @@ input::placeholder {
   margin: 4px 12px 10px 44px;
   font-size: 11px;
   line-height: 1.6;
-}
-.remote-metadata {
-  border-top: 1px solid var(--row-hover);
-  margin: 12px 12px 0 34px;
-  padding-top: 12px;
-  color: var(--muted);
-  font-size: 10px;
-}
-.remote-metadata > div {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 0;
-}
-.remote-metadata svg {
-  flex-shrink: 0;
-}
-.remote-metadata span {
-  text-overflow: ellipsis;
-  overflow: hidden;
-  white-space: nowrap;
-}
-.remote-metadata small {
-  margin-left: auto;
-  font-size: 9px;
-  color: var(--text-faint);
 }
 .sidebar-empty {
   text-align: center;
@@ -302,4 +294,35 @@ input::placeholder {
 .sidebar[hidden],
 .repository-navigation[hidden] {
   display: none;
+}
+.context-menu {
+  position: fixed;
+  z-index: 20;
+  min-width: 180px;
+  padding: 4px;
+  background: var(--panel-raised);
+  border: 1px solid var(--border-control);
+  border-radius: 6px;
+  box-shadow: 0 4px 14px var(--shadow-pane);
+}
+.context-menu [role="menuitem"] {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-align: left;
+}
+.context-menu [role="menuitem"]:hover,
+.context-menu [role="menuitem"]:focus-visible {
+  background: var(--row-hover);
+  outline: none;
+}
+.context-menu svg {
+  flex-shrink: 0;
+  color: var(--muted);
 }
