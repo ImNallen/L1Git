@@ -47,15 +47,15 @@ const STATUS = [
   "errorText",
   "warningIcon",
 ];
-// A status wash is the background tinted toward one of the status colours.
-const WASHES = [
-  "successBg",
-  "successBgHover",
-  "errorBg",
-  "errorBorder",
-  "warningBg",
-  "warningBorder",
-];
+// A wash only tints toward its own family, so an imported red reaches the error borders.
+const WASHES = {
+  successBg: ["success", "successMuted"],
+  successBgHover: ["success", "successMuted"],
+  errorBg: ["deleted", "errorText"],
+  errorBorder: ["deleted", "errorText"],
+  warningBg: ["warning", "warningIcon"],
+  warningBorder: ["warning", "warningIcon"],
+};
 // Kinds in order of preference: a neutral surface stays neutral unless an accent kind fits clearly better.
 const KINDS = ["ink", "shade", "tint", "lift", "glow", "glaze"];
 // Ink may overshoot either end: a raised surface lighter than the background, or a heading brighter than body text.
@@ -171,9 +171,11 @@ function fitToken(token, { seeds, get }, target) {
       get,
       target,
     );
-  if (WASHES.includes(token))
+  if (Object.hasOwn(WASHES, token))
     return nearest(
-      STATUS.flatMap((status) => steps().map((t) => ["toward", status, t])),
+      WASHES[token].flatMap((status) =>
+        steps().map((t) => ["toward", status, t]),
+      ),
       seeds,
       get,
       target,

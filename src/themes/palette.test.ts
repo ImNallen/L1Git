@@ -238,6 +238,22 @@ it("washes the background toward the status colour a theme brings", () => {
   ]);
 });
 
+it("tints error washes toward the red a theme brings", () => {
+  const p = completePalette("dark", {
+    background: "#282a36",
+    accent: "#bd93f9",
+    deleted: "#ff5555",
+  });
+  expect(p.errorBorder).toBe("#5d3940");
+});
+
+it("turns lanes from L1's blue when the accent is grey", () => {
+  for (const accent of ["#808080", "#7f8081"]) {
+    const p = derivePalette("dark", "#0a0a0a", accent);
+    expect([p.graphLane1, p.graphLane3]).toEqual(["#60a5fa", "#fbbf23"]);
+  }
+});
+
 it.each(derived.map((v) => [v.id, v.palette] as const))(
   "keeps %s code readable on the diff, comments at 3:1 and the rest at 4.5:1",
   (_, p) => {

@@ -182,13 +182,22 @@ export const onAccent: Recipe = (s) => {
   return contrast(WHITE, s.accent) >= 3 ? WHITE : dark;
 };
 
+// A grey accent has no hue to turn lanes from, so they turn from L1's blue instead.
+const GREY_ACCENT_CHROMA = 0.02;
+const GREY_ACCENT_HUE = toOklch(parseHex("#3979ce") ?? BLACK).h;
+
+function accentHue(accent: Rgba): number {
+  const { C, h } = toOklch(accent);
+  return C < GREY_ACCENT_CHROMA ? GREY_ACCENT_HUE : h;
+}
+
 /** Lightness `t` of the way from the background's to the foreground's, so the colour keeps its contrast on any canvas. */
 function lightnessAt(s: Seeds, t: number): number {
   const [bg, fg] = [toOklch(s.background).L, toOklch(s.foreground).L];
   return bg + (fg - bg) * t;
 }
 
-/** White while it keeps `minWhite`:1 on every lane, otherwise whichever of white and a dark ink reads better on the worst lane. */
+// `minWhite` is L1's own worst white-on-lane contrast, so ink only turns dark where white would read worse than it does in L1.
 const laneInk =
   (minWhite: number, t: number): Recipe =>
   (s, get) => {
@@ -220,7 +229,7 @@ export function recipe(spec: RecipeSpec): Recipe {
     case "hue": {
       const [, offset, t, C] = spec;
       return (s) =>
-        fromOklch({ L: lightnessAt(s, t), C, h: toOklch(s.accent).h + offset });
+        fromOklch({ L: lightnessAt(s, t), C, h: accentHue(s.accent) + offset });
     }
     case "status": {
       const [, h, t, C] = spec;
@@ -306,7 +315,6 @@ export function derivePalette(
 
 export type ThemeColors = Palette & { background: string; accent: string };
 
-/** Each colour the theme sets, then each recipe evaluated over the seeds and the theme's own colours. */
 export function completePalette(
   appearance: Appearance,
   colors: ThemeColors,

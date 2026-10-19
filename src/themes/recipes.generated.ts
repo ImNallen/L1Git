@@ -59,7 +59,7 @@ export const RECIPES: Record<
     deleted: ["status", 14.9, 0.748, 0.1405],
     errorText: ["status", 42, 0.862, 0.0679],
     errorBg: ["toward", "deleted", 0.156],
-    errorBorder: ["toward", "warningIcon", 0.263],
+    errorBorder: ["toward", "deleted", 0.259],
     warningIcon: ["status", 52.1, 0.746, 0.0742],
     warningBg: ["toward", "warningIcon", 0.106],
     warningBorder: ["toward", "warningIcon", 0.26],

@@ -1,7 +1,6 @@
 import { createCSSVariablesTheme, registerCustomTheme } from "@pierre/diffs";
 import { SYNTAX_TOKENS, type Appearance, type SyntaxToken } from "./palette";
 
-// The names Shiki's CSS-variable theme reads, each pointed at the palette token that paints it.
 const THEME_VARIABLE: Record<SyntaxToken, string> = {
   syntaxKeyword: "token-keyword",
   syntaxFunction: "token-function",
