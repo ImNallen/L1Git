@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
-import { Copy, Moon, Paintbrush, Sun, Trash2 } from "lucide-react";
+import { Copy, Moon, Paintbrush, Plus, Sun, Trash2 } from "lucide-react";
 import type { AppearanceState } from "../appearance";
 import {
   draftOf,
@@ -20,6 +20,7 @@ import {
   TOKENS,
   type Appearance,
 } from "../themes/palette";
+import { AddThemeDialog } from "./AddThemeDialog";
 import { CreateThemePanel } from "./CreateThemePanel";
 import { DeleteThemeDialog } from "./DeleteThemeDialog";
 
@@ -214,6 +215,7 @@ export function AppearanceSettings({ appearance }: Props) {
     null,
   );
   const [deleting, setDeleting] = useState<ThemeFamily | null>(null);
+  const [adding, setAdding] = useState(false);
   const opener = useRef<HTMLElement | null>(null);
   const edit = (next: ThemeDraft, from: HTMLElement) => {
     opener.current = from;
@@ -275,6 +277,13 @@ export function AppearanceSettings({ appearance }: Props) {
                 <Paintbrush size={14} />
                 Create theme
               </button>
+              <button
+                className="button secondary"
+                onClick={() => setAdding(true)}
+              >
+                <Plus size={14} />
+                Add theme
+              </button>
             </div>
           </div>
           <div className="theme-grid">
@@ -312,6 +321,12 @@ export function AppearanceSettings({ appearance }: Props) {
             setDraft(null);
             opener.current?.focus();
           }}
+        />
+      )}
+      {adding && (
+        <AddThemeDialog
+          onAdd={appearance.addThemes}
+          onClose={() => setAdding(false)}
         />
       )}
       {deleting && (

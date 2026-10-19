@@ -94,3 +94,55 @@
   border-color: var(--deleted);
   color: var(--deleted);
 }
+.add-theme-dialog {
+  width: 560px;
+}
+.theme-drop-zone {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+  padding: 14px 16px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 8px;
+}
+.theme-drop-zone.dragging {
+  border-color: var(--focus);
+  background: var(--row-hover);
+}
+.theme-drop-zone strong {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+}
+.theme-drop-zone span {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.theme-json {
+  display: block;
+  width: 100%;
+  min-height: 112px;
+  resize: vertical;
+  padding: 9px 10px;
+  background: var(--control-inset);
+  border: 1px solid var(--border-control);
+  border-radius: 6px;
+  color: var(--text-input);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.6;
+  outline: none;
+}
+.theme-json:focus-visible {
+  border-color: var(--focus);
+}
+.theme-json::placeholder {
+  color: var(--text-faint);
+}
+.theme-import-errors {
+  margin-bottom: 0;
+  padding-left: 28px;
+}
