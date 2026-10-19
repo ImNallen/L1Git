@@ -1,10 +1,11 @@
 import { useEffect, useSyncExternalStore } from "react";
 import * as repositories from "./repositories";
-import { readyAdvances, repositoryRank } from "./domain/overview";
+import { divergence, readyAdvances, repositoryRank } from "./domain/overview";
 import type {
   Advance,
   AdvanceOutcome,
   BranchRef,
+  Divergence,
   FetchSummary,
   RepositoryOverview,
 } from "./domain/overview";
@@ -36,11 +37,16 @@ export type RepositoryState = {
   outcomes: ReadonlyMap<BranchRef, AdvanceOutcome>;
 };
 
+export type RootSync = {
+  head: { name: string; divergence: Divergence } | null;
+  branches: ReadonlyMap<string, Divergence>;
+};
+
 export type OverviewView = {
   roots: ReadonlyMap<RepositoryRoot, RootState>;
   repositories: readonly RepositoryState[];
   readyCount: number;
-  behindByRoot: ReadonlyMap<RepositoryRoot, number>;
+  syncByRoot: ReadonlyMap<RepositoryRoot, RootSync>;
   fetching: boolean;
   oldestFetchAt: number | null;
 };
@@ -124,12 +130,26 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
           repositoryRank(b.overview, fetchFailed(b)) ||
         a.overview.name.localeCompare(b.overview.name),
     );
-    const behindByRoot = new Map<RepositoryRoot, number>();
+    const syncByRoot = new Map<RepositoryRoot, RootSync>();
     for (const state of states) {
-      const behind = state.overview.branches.filter(
-        (branch) => branch.state.kind === "behind",
-      ).length;
-      for (const root of state.roots) behindByRoot.set(root, behind);
+      const tracking = state.overview.branches.flatMap((branch) => {
+        const sync = divergence(branch.state);
+        return sync === null ? [] : [{ branch, divergence: sync }];
+      });
+      const branches = new Map<string, Divergence>(
+        tracking.map((entry) => [entry.branch.reference, entry.divergence]),
+      );
+      for (const root of state.roots) {
+        const head = tracking.find(
+          ({ branch }) => branch.checkedOutAt === root,
+        );
+        syncByRoot.set(root, {
+          head: head
+            ? { name: head.branch.name, divergence: head.divergence }
+            : null,
+          branches,
+        });
+      }
     }
     const fetchedAt = states.flatMap(({ fetch }) =>
       fetch.kind === "fetched" ? [fetch.at] : [],
@@ -141,7 +161,7 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
         (total, state) => total + readyAdvances(state.overview).length,
         0,
       ),
-      behindByRoot,
+      syncByRoot,
       fetching:
         states.some(({ activity }) => activity.kind === "fetching") ||
         [...roots.values()].some(({ kind }) => kind === "opening"),

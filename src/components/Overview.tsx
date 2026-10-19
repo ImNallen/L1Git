@@ -436,7 +436,7 @@ function outcomeNote(outcome: AdvanceOutcome): {
   }
 }
 
-function upstreamName(upstream: string): string {
+export function upstreamName(upstream: string): string {
   return upstream.replace(/^refs\/remotes\//, "");
 }
 
