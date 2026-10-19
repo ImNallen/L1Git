@@ -154,6 +154,10 @@ export type RecipeSpec =
   | readonly ["fixed", string]
   | readonly ["onAccent"]
   | readonly ["hue", offset: number, t: number, chroma: number]
+  | readonly ["status", hue: number, t: number, chroma: number]
+  | readonly ["tone", t: number, chromaScale: number]
+  | readonly ["toward", token: Token, t: number]
+  | readonly ["shadow", t: number, alpha: number]
   | readonly ["laneInk", minWhite: number, t: number];
 
 export const onAccent: Recipe = (s) => {
@@ -200,6 +204,25 @@ export function recipe(spec: RecipeSpec): Recipe {
       const [, offset, t, C] = spec;
       return (s) =>
         fromOklch({ L: lightnessAt(s, t), C, h: toOklch(s.accent).h + offset });
+    }
+    case "status": {
+      const [, h, t, C] = spec;
+      return (s) => fromOklch({ L: lightnessAt(s, t), C, h });
+    }
+    case "tone": {
+      const [, t, scale] = spec;
+      return (s) => {
+        const { C, h } = toOklch(s.accent);
+        return fromOklch({ L: lightnessAt(s, t), C: C * scale, h });
+      };
+    }
+    case "toward": {
+      const [, token, t] = spec;
+      return (s, get) => mix(s.background, get(token), t);
+    }
+    case "shadow": {
+      const [, t, alpha] = spec;
+      return (s) => ({ ...mix(s.background, BLACK, t), a: alpha });
     }
     case "laneInk":
       return laneInk(spec[1], spec[2]);

@@ -184,3 +184,49 @@ it("puts dark ink on pale lanes a theme brings, and keeps white on deep ones", (
   });
   expect([dark.onLane, dark.refOnLane]).toEqual(["#ffffff", "#ffffff"]);
 });
+
+const STATUS = [
+  "success",
+  "successMuted",
+  "deleted",
+  "errorText",
+  "warning",
+  "warningIcon",
+] as const;
+
+it.each(derived.map((v) => [v.id, v.palette] as const))(
+  "keeps %s status colours at 3:1 on the canvas and selected text readable",
+  (_, p) => {
+    for (const status of STATUS)
+      expect(ratio(p[status], p.background)).toBeGreaterThanOrEqual(3);
+    expect(ratio(p.selectionText, p.selectionBg)).toBeGreaterThanOrEqual(4.5);
+  },
+);
+
+it("tints status washes and shadows with the theme's background", () => {
+  const grove = variantPalette("grove-dark");
+  expect([grove.success, grove.successBg, grove.shadowPane]).toEqual([
+    "#38bf93",
+    "#172e25",
+    "#01010177",
+  ]);
+  const ember = variantPalette("ember-light");
+  expect([ember.errorBg, ember.accentMuted, ember.shadowPane]).toEqual([
+    "#fbefed",
+    "#91624c",
+    "#18171726",
+  ]);
+});
+
+it("washes the background toward the status colour a theme brings", () => {
+  const p = completePalette("dark", {
+    background: "#282a36",
+    accent: "#bd93f9",
+    success: "#50fa7b",
+  });
+  expect([p.success, p.successBg, p.successBgHover]).toEqual([
+    "#50fa7b",
+    "#344d45",
+    "#3a5f4c",
+  ]);
+});

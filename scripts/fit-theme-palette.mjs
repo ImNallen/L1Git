@@ -15,7 +15,7 @@ registerHooks({
   },
 });
 
-const { contrast, distance, formatHex, mix, parseHex, toOklch } =
+const { contrast, distance, formatHex, parseHex, toOklch } =
   await import("../src/themes/color.ts");
 const { LANES, MAX_FIT_DISTANCE, RATIO_RECIPES, TOKENS, TRANSLUCENT, recipe } =
   await import("../src/themes/palette.ts");
@@ -32,37 +32,45 @@ const SEEDS = {
   accent: "--primary-bg",
   foreground: "--text",
 };
-const PINNED = new Set([
-  ...TRANSLUCENT,
+// Status colours keep L1's hue and chroma so green still means added; their lightness follows the theme.
+const STATUS = [
   "warning",
   "success",
   "successMuted",
-  "successBg",
-  "successBgHover",
   "deleted",
   "errorText",
+  "warningIcon",
+];
+// A status wash is the background tinted toward one of the status colours.
+const WASHES = [
+  "successBg",
+  "successBgHover",
   "errorBg",
   "errorBorder",
-  "warningIcon",
   "warningBg",
   "warningBorder",
-]);
+];
 // Kinds in order of preference: a neutral surface stays neutral unless an accent kind fits clearly better.
 const KINDS = ["ink", "shade", "tint", "lift", "glow", "glaze"];
 // Ink may overshoot either end: a raised surface lighter than the background, or a heading brighter than body text.
 const RANGE = { ink: [-0.25, 1.5], glow: [0, 1.5] };
 const PREFER_WITHIN = 0.003;
 const STEPS = 1000;
+const WHITE = parseHex("#ffffff");
 
 const rounded = (rgba) => parseHex(formatHex(rgba));
+const round = (v, places) => Math.round(v * 10 ** places) / 10 ** places;
+const steps = (lo = 0, hi = 1) =>
+  Array.from(
+    { length: Math.round((hi - lo) * STEPS) + 1 },
+    (_, i) => Math.round(lo * STEPS + i) / STEPS,
+  );
 
 function fit(seeds, target) {
   const fits = KINDS.flatMap((kind) => {
     if (kind === "glaze" && target.a === 1) return [];
-    const [lo, hi] = RANGE[kind] ?? [0, 1];
     let best = { kind, t: 0, d: Infinity };
-    for (let i = 0; i <= (hi - lo) * STEPS; i++) {
-      const t = Math.round(lo * STEPS + i) / STEPS;
+    for (const t of steps(...(RANGE[kind] ?? []))) {
       const d = distance(rounded(RATIO_RECIPES[kind](t)(seeds)), target);
       const tie = Math.abs(d - best.d) < 1e-9 && Math.abs(t) < Math.abs(best.t);
       if (d < best.d - 1e-9 || tie) best = { kind, t, d };
@@ -73,42 +81,38 @@ function fit(seeds, target) {
   return fits.find((f) => f.d <= min + PREFER_WITHIN);
 }
 
-function fitTowards(from, to, target) {
-  let best = { t: 0, d: Infinity };
-  for (let i = 0; i <= STEPS; i++) {
-    const t = i / STEPS;
-    const d = distance(rounded(mix(from, to, t)), target);
-    if (d < best.d) best = { t, d };
+/** The spec among `specs` that lands nearest `target`, earliest on a tie. */
+function nearest(specs, seeds, get, target) {
+  let best = { spec: specs[0], d: Infinity };
+  for (const spec of specs) {
+    const d = distance(rounded(recipe(spec)(seeds, get)), target);
+    if (d < best.d - 1e-9) best = { spec, d };
   }
   return best;
 }
 
-const round = (v, places) => Math.round(v * 10 ** places) / 10 ** places;
-
-// The lane's own lightness, chroma, and hue as seen from the seeds, so L1's seeds give back L1's lane.
-function fitHue(seeds, target) {
-  const [lane, accent] = [toOklch(target), toOklch(seeds.accent)];
+// The target's lightness between the seeds' background and text, its chroma, and its hue, so L1's seeds give it back.
+function polar(seeds, target) {
+  const { L, C, h } = toOklch(target);
   const [bg, fg] = [toOklch(seeds.background).L, toOklch(seeds.foreground).L];
-  const offset = ((lane.h - accent.h + 540) % 360) - 180;
-  return [
-    "hue",
-    round(offset, 1),
-    round((lane.L - bg) / (fg - bg), 3),
-    round(lane.C, 4),
-  ];
+  return { t: round((L - bg) / (fg - bg), 3), C, h };
 }
 
-function fitLaneInk(seeds, minWhite, target, get) {
-  let best = { spec: ["laneInk", minWhite, 0], d: Infinity };
-  for (let i = 0; i <= STEPS; i++) {
-    const spec = ["laneInk", minWhite, i / STEPS];
-    const d = distance(rounded(recipe(spec)(seeds, get)), target);
-    if (d < best.d - 1e-9) best = { spec, d };
-  }
-  return best.spec;
+function fitHue(seeds, target) {
+  const { t, C, h } = polar(seeds, target);
+  const offset = ((h - toOklch(seeds.accent).h + 540) % 360) - 180;
+  return ["hue", round(offset, 1), t, round(C, 4)];
 }
 
-const WHITE = parseHex("#ffffff");
+function fitStatus(seeds, target) {
+  const { t, C, h } = polar(seeds, target);
+  return ["status", round(h, 1), t, round(C, 4)];
+}
+
+function fitTone(seeds, target) {
+  const { t, C } = polar(seeds, target);
+  return ["tone", t, round(C / toOklch(seeds.accent).C, 3)];
+}
 
 const fits = Object.fromEntries(
   ["dark", "light"].map((appearance) => {
@@ -131,7 +135,9 @@ const fits = Object.fromEntries(
         ? rounded(recipe(table[token])(seeds, get))
         : color(TOKENS[token]);
     for (const lane of LANES) table[lane] = fitHue(seeds, color(TOKENS[lane]));
-    return [appearance, { values, color, seeds, table, get }];
+    for (const token of STATUS)
+      table[token] = fitStatus(seeds, color(TOKENS[token]));
+    return [appearance, { color, seeds, table, get }];
   }),
 );
 
@@ -149,37 +155,65 @@ const LANE_INK_MINIMUM = {
     ) / 100,
 };
 
+function fitToken(token, { seeds, get }, target) {
+  if (Object.hasOwn(SEEDS, token)) return { spec: ["seed", token] };
+  if (token === "accentForeground") return { spec: ["onAccent"] };
+  if (Object.hasOwn(LANE_INK_MINIMUM, token))
+    return nearest(
+      steps().map((t) => ["laneInk", LANE_INK_MINIMUM[token], t]),
+      seeds,
+      get,
+      target,
+    );
+  if (WASHES.includes(token))
+    return nearest(
+      STATUS.flatMap((status) => steps().map((t) => ["toward", status, t])),
+      seeds,
+      get,
+      target,
+    );
+  if (TRANSLUCENT.has(token))
+    return nearest(
+      steps().map((t) => ["shadow", t, round(target.a, 3)]),
+      seeds,
+      get,
+      target,
+    );
+  const best = fit(seeds, target);
+  if (best.d <= MAX_FIT_DISTANCE) return { spec: [best.kind, best.t] };
+  const tone = nearest([fitTone(seeds, target)], seeds, get, target);
+  const spec =
+    tone.d <= MAX_FIT_DISTANCE ? tone.spec : ["fixed", formatHex(target)];
+  return { spec, note: `best ${best.kind}(${best.t}) at ${best.d.toFixed(4)}` };
+}
+
 const recipes = {};
 const foregroundMix = {};
 const report = [];
-for (const [appearance, { values, color, seeds, table, get }] of Object.entries(
-  fits,
-)) {
+for (const [appearance, fitted] of Object.entries(fits)) {
+  const { color, seeds, table, get } = fitted;
   const toward = appearance === "dark" ? WHITE : parseHex("#000000");
-  const foreground = fitTowards(seeds.background, toward, seeds.foreground);
-  foregroundMix[appearance] = foreground.t;
+  const foreground = nearest(
+    steps().map((t) => ["ink", t]),
+    { ...seeds, foreground: toward },
+    get,
+    seeds.foreground,
+  );
+  foregroundMix[appearance] = foreground.spec[1];
   report.push(
-    `${appearance} foreground: ${foreground.t} at ${foreground.d.toFixed(4)}`,
+    `${appearance} foreground: ${foreground.spec[1]} at ${foreground.d.toFixed(4)}`,
   );
 
   const ordered = {};
   let worst = { token: "", d: 0 };
   for (const [token, name] of Object.entries(TOKENS)) {
     const target = color(name);
-    if (Object.hasOwn(SEEDS, token)) table[token] = ["seed", token];
-    else if (token === "accentForeground") table[token] = ["onAccent"];
-    else if (Object.hasOwn(LANE_INK_MINIMUM, token))
-      table[token] = fitLaneInk(seeds, LANE_INK_MINIMUM[token], target, get);
-    else if (PINNED.has(token)) table[token] = ["fixed", values[name]];
-    else if (!LANES.includes(token)) {
-      const best = fit(seeds, target);
-      table[token] =
-        best.d > MAX_FIT_DISTANCE
-          ? ["fixed", values[name]]
-          : [best.kind, best.t];
-      if (best.d > MAX_FIT_DISTANCE)
+    if (!table[token]) {
+      const { spec, note } = fitToken(token, fitted, target);
+      table[token] = spec;
+      if (note)
         report.push(
-          `${appearance} ${token}: no recipe within ${MAX_FIT_DISTANCE} (best ${best.kind}(${best.t}) at ${best.d.toFixed(4)}), fixed`,
+          `${appearance} ${token}: no ratio recipe within ${MAX_FIT_DISTANCE} (${note}), ${spec[0]}`,
         );
     }
     ordered[token] = table[token];
