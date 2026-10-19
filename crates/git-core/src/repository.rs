@@ -11,7 +11,7 @@ pub const HISTORY_LIMIT: usize = 200;
 pub const PATCH_LIMIT: usize = 1024 * 1024;
 const COMMIT_FORMAT: &str = "--format=%H%x00%P%x00%s%x00%an%x00%ae%x00%at";
 
-fn root(path: &str) -> Result<PathBuf, RepositoryError> {
+pub(crate) fn root(path: &str) -> Result<PathBuf, RepositoryError> {
     let path = Path::new(path).canonicalize().map_err(|_| {
         RepositoryError::new(
             ErrorKind::MissingPath,

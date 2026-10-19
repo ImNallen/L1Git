@@ -1,13 +1,13 @@
 ---
 name: verify
-description: Verify L1 Git through its real browser preview, local Rust reader, and native Tauri app after UI or repository changes.
+description: Verify L1 Git through its real browser preview, local Rust core, and native Tauri app after UI or repository changes.
 ---
 
 # Verify L1 Git
 
 ## Launch
 
-Read the [feature map](features/README.md). From the repository root, run `pnpm install --frozen-lockfile`, then `pnpm fixture`. Save the printed paths. The fixture has six commits, two local branches, three remote branches, a merge, an unborn repository, and a detached linked worktree. It creates and modifies only its own temporary repositories.
+Read the [feature map](features/README.md). From the repository root, run `pnpm install --frozen-lockfile`, then `pnpm fixture`. Save the printed paths. The fixture has six commits, two local branches, three remote branches, a merge, an unborn repository, and a detached linked worktree. Its separate `sync` repository has a branch that falls behind after a fetch, a behind branch checked out in a dirty linked worktree, and a diverged branch. It creates and modifies only its own temporary repositories.
 
 Run `pnpm dev`. Wait for both `L1 Git development bridge on http://127.0.0.1:9417` and Vite's `http://127.0.0.1:1422/` message. Keep the process handle for cleanup. Ports can be isolated with `L1GIT_DEV_PORT=1423 L1GIT_BRIDGE_PORT=9418 pnpm dev`. Use a fresh browser profile or origin for an empty saved list. Never clear the user's existing recents to obtain an empty state.
 
@@ -31,7 +31,7 @@ Run `cargo test --locked`, `pnpm test`, `pnpm build`, `pnpm format:check`, and `
 
 ## Evidence
 
-Save screenshots and an action transcript outside the repository, such as `/tmp/l1git-verification-<run-id>/`. Record the checkout SHA, fixture paths, viewport, selected branch, and before/after HEAD. Capture empty and loaded screens, a browsed remote branch, the merge inspector, unified and split file diffs, the binary notice, and a failed Add dialog. For persistence, capture the list before and after reload. For read-only behavior, compare `git -C <fixture-repository> symbolic-ref HEAD`, `rev-parse HEAD`, and `status --porcelain` before and after the journeys.
+Save screenshots and an action transcript outside the repository, such as `/tmp/l1git-verification-<run-id>/`. Record the checkout SHA, fixture paths, viewport, selected branch, and before/after HEAD. Capture empty and loaded screens, a browsed remote branch, the merge inspector, unified and split file diffs, the binary notice, and a failed Add dialog. For persistence, capture the list before and after reload. To prove that only the intended refs moved, record `git -C <worktree> for-each-ref refs/heads refs/remotes`, `symbolic-ref HEAD`, and `status --porcelain` for every fixture worktree before and after the journeys. The reader journeys move nothing. A fetch moves only remote-tracking refs, and a fast-forward moves only the branches it reports as advanced.
 
 Report browser, reader, build, and native results separately. A successful bundle does not prove the native picker or window dragging. The implementation baseline passes reader tests and builds. The browser journeys and native interactions require a live drive and must not be reported as previously verified.
 

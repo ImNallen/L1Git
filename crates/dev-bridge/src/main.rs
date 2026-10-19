@@ -1,8 +1,10 @@
-use l1_git_core::{commit_detail, file_patch, snapshot};
+use l1_git_core::{Advance, Coordinator, FetchMode, commit_detail, file_patch, snapshot};
 use serde::Deserialize;
 use serde_json::json;
-use std::io::Read;
+use std::{io::Read, sync::Arc, thread};
 use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
+
+const BODY_LIMIT: u64 = 64 * 1024;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -26,6 +28,20 @@ struct FilePatchRequest {
     file: String,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OverviewRequest {
+    path: String,
+    mode: FetchMode,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FastForwardRequest {
+    path: String,
+    advances: Vec<Advance>,
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let port: u16 = std::env::var("L1GIT_BRIDGE_PORT")
         .unwrap_or_else(|_| "9417".into())
@@ -33,19 +49,21 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let dev_port: u16 = std::env::var("L1GIT_DEV_PORT")
         .unwrap_or_else(|_| "1422".into())
         .parse()?;
-    let origins = [
+    let origins: Arc<[String]> = Arc::new([
         format!("http://127.0.0.1:{dev_port}"),
         format!("http://localhost:{dev_port}"),
-    ];
+    ]);
+    let coordinator = Arc::new(Coordinator::default());
     let server = Server::http((std::net::Ipv4Addr::LOCALHOST, port))?;
     eprintln!("L1 Git development bridge on http://127.0.0.1:{port}");
     for request in server.incoming_requests() {
-        handle(request, &origins);
+        let (origins, coordinator) = (Arc::clone(&origins), Arc::clone(&coordinator));
+        thread::spawn(move || handle(request, &origins, &coordinator));
     }
     Ok(())
 }
 
-fn handle(mut request: Request, origins: &[String]) {
+fn handle(mut request: Request, origins: &[String], coordinator: &Coordinator) {
     let origin = request
         .headers()
         .iter()
@@ -70,10 +88,10 @@ fn handle(mut request: Request, origins: &[String]) {
     let mut bytes = Vec::new();
     if request
         .as_reader()
-        .take(16_385)
+        .take(BODY_LIMIT + 1)
         .read_to_end(&mut bytes)
         .is_err()
-        || bytes.len() > 16_384
+        || bytes.len() as u64 > BODY_LIMIT
     {
         respond(
             request,
@@ -89,8 +107,18 @@ fn handle(mut request: Request, origins: &[String]) {
             .map(|input| commit_detail(&input.path, &input.oid).map(|data| json!(data))),
         "/api/file-patch" => serde_json::from_slice::<FilePatchRequest>(&bytes)
             .map(|input| file_patch(&input.path, &input.oid, &input.file).map(|data| json!(data))),
+        "/api/overview" => serde_json::from_slice::<OverviewRequest>(&bytes).map(|input| {
+            coordinator
+                .overview(&input.path, input.mode)
+                .map(|data| json!(data))
+        }),
+        "/api/fast-forward" => serde_json::from_slice::<FastForwardRequest>(&bytes).map(|input| {
+            coordinator
+                .fast_forward(&input.path, &input.advances)
+                .map(|data| json!(data))
+        }),
         _ => {
-            respond(request, 404, json!({"error": "Unknown read operation."}));
+            respond(request, 404, json!({"error": "Unknown operation."}));
             return;
         }
     };

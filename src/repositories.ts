@@ -1,18 +1,20 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { z } from "zod";
+import { fastForwardReportSchema, overviewSchema } from "./domain/overview";
+import type { Advance, FetchMode } from "./domain/overview";
 import {
   detailSchema,
   filePatchSchema,
   repositoryErrorSchema,
   snapshotSchema,
 } from "./domain/repository";
-import type { FullRef, Oid } from "./domain/repository";
+import type { FullRef, Oid, RepositoryRoot } from "./domain/repository";
 
 export const native = isTauri();
 export const macNative = native && navigator.userAgent.includes("Mac");
 
-async function read<T>(
+async function call<T>(
   command: string,
   endpoint: string,
   args: Record<string, unknown>,
@@ -28,12 +30,12 @@ async function read<T>(
     });
   } catch {
     throw new Error(
-      "The development reader is unavailable. Start pnpm dev and try again.",
+      "The development bridge is unavailable. Start pnpm dev and try again.",
     );
   }
   if (!response.ok)
     throw new Error(
-      "The development reader rejected the request. Check that pnpm dev is running on this port.",
+      "The development bridge rejected the request. Check that pnpm dev is running on this port.",
     );
   const envelope = z.discriminatedUnion("ok", [
     z.object({ ok: z.literal(true), data: schema }),
@@ -45,7 +47,7 @@ async function read<T>(
 }
 
 export function snapshot(path: string, reference: FullRef | null = null) {
-  return read(
+  return call(
     "repository_snapshot",
     "/api/snapshot",
     { path, reference },
@@ -54,7 +56,7 @@ export function snapshot(path: string, reference: FullRef | null = null) {
 }
 
 export function commitDetail(path: string, oid: Oid) {
-  return read(
+  return call(
     "repository_commit_detail",
     "/api/commit-detail",
     { path, oid },
@@ -63,11 +65,29 @@ export function commitDetail(path: string, oid: Oid) {
 }
 
 export function filePatch(path: string, oid: Oid, file: string) {
-  return read(
+  return call(
     "repository_file_patch",
     "/api/file-patch",
     { path, oid, file },
     filePatchSchema,
+  );
+}
+
+export function overview(path: RepositoryRoot, mode: FetchMode) {
+  return call(
+    "repository_overview",
+    "/api/overview",
+    { path, mode },
+    overviewSchema,
+  );
+}
+
+export function fastForward(path: RepositoryRoot, advances: Advance[]) {
+  return call(
+    "repository_fast_forward",
+    "/api/fast-forward",
+    { path, advances },
+    fastForwardReportSchema,
   );
 }
 

@@ -1,11 +1,18 @@
 import { execFileSync, spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 import { once } from "node:events";
-import { rmSync } from "node:fs";
+import { chmodSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
+import { join } from "node:path";
 import { setTimeout } from "node:timers/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
+import {
+  fastForwardReportSchema,
+  overviewSchema,
+  readyAdvances,
+} from "./domain/overview";
+import type { RepositoryOverview } from "./domain/overview";
 import {
   detailSchema,
   filePatchSchema,
@@ -19,6 +26,12 @@ const fixtureSchema = z.object({
   remote: z.string(),
   unborn: z.string(),
   detached: z.string(),
+  sync: z.object({
+    repository: z.string(),
+    remote: z.string(),
+    colleague: z.string(),
+    dirty: z.string(),
+  }),
 });
 let fixture: z.infer<typeof fixtureSchema>;
 let bridge: ChildProcess;
@@ -27,6 +40,14 @@ const origin = "http://127.0.0.1:1422";
 const snapshotEnvelope = z.object({
   ok: z.literal(true),
   data: snapshotSchema,
+});
+const overviewEnvelope = z.object({
+  ok: z.literal(true),
+  data: overviewSchema,
+});
+const fastForwardEnvelope = z.object({
+  ok: z.literal(true),
+  data: fastForwardReportSchema,
 });
 
 async function post(
@@ -273,5 +294,226 @@ describe("real Rust transport contract", () => {
       (await post("snapshot", { path: fixture.repository, unexpected: true }))
         .status,
     ).toBe(400);
+  });
+});
+
+describe("real Rust fetch and fast-forward contract", () => {
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")),
+  );
+  const git = (path: string, ...args: string[]) =>
+    execFileSync("git", ["-C", path, ...args], {
+      encoding: "utf8",
+      env,
+    }).trim();
+  const state = (overview: RepositoryOverview, name: string) =>
+    overview.branches.find((branch) => branch.name === name)?.state;
+
+  it("reads local refs, fetches, fast-forwards only the ready branch, and skips the rest", async () => {
+    const { sync } = fixture;
+    const repository = realpathSync(sync.repository);
+    const dirty = realpathSync(sync.dirty);
+    const main = git(repository, "rev-parse", "main");
+    const develop = git(repository, "rev-parse", "develop");
+    const diverged = git(repository, "rev-parse", "feat/diverged");
+    const theirs = (branch: string) =>
+      git(sync.colleague, "rev-parse", `origin/${branch}`);
+
+    const local = overviewEnvelope.parse(
+      await (
+        await post("overview", { path: sync.repository, mode: "local" })
+      ).json(),
+    ).data;
+    expect(local.root).toBe(repository);
+    expect(local.commonDir).toBe(join(repository, ".git"));
+    expect(local.name).toBe("sync-demo");
+    expect(local.fetch).toBeNull();
+    expect(
+      local.branches.map(({ name, role, checkedOutAt, state }) => ({
+        name,
+        role,
+        checkedOutAt,
+        state,
+      })),
+    ).toEqual([
+      {
+        name: "develop",
+        role: "mainline",
+        checkedOutAt: dirty,
+        state: { kind: "upToDate", upstream: "refs/remotes/origin/develop" },
+      },
+      {
+        name: "feat/diverged",
+        role: "other",
+        checkedOutAt: null,
+        state: {
+          kind: "ahead",
+          upstream: "refs/remotes/origin/feat/diverged",
+          ahead: 1,
+        },
+      },
+      {
+        name: "main",
+        role: "default",
+        checkedOutAt: repository,
+        state: { kind: "upToDate", upstream: "refs/remotes/origin/main" },
+      },
+    ]);
+
+    const fetched = overviewEnvelope.parse(
+      await (
+        await post("overview", { path: sync.repository, mode: "remote" })
+      ).json(),
+    ).data;
+    expect(fetched.fetch?.changed).toBe(true);
+    expect(fetched.fetch?.coalesced).toBe(false);
+    expect(fetched.fetch?.remotes).toEqual([
+      { remote: "github", outcome: { kind: "skipped" } },
+      { remote: "origin", outcome: { kind: "fetched" } },
+    ]);
+    expect(state(fetched, "main")).toEqual({
+      kind: "behind",
+      upstream: "refs/remotes/origin/main",
+      target: theirs("main"),
+      behind: 1,
+      blocker: null,
+    });
+    expect(state(fetched, "develop")).toEqual({
+      kind: "behind",
+      upstream: "refs/remotes/origin/develop",
+      target: theirs("develop"),
+      behind: 1,
+      blocker: { kind: "dirty", worktree: dirty },
+    });
+    expect(state(fetched, "feat/diverged")).toEqual({
+      kind: "diverged",
+      upstream: "refs/remotes/origin/feat/diverged",
+      ahead: 1,
+      behind: 1,
+    });
+    expect(readyAdvances(fetched)).toEqual([
+      { reference: "refs/heads/main", from: main, to: theirs("main") },
+    ]);
+
+    const updated = fastForwardEnvelope.parse(
+      await (
+        await post("fast-forward", {
+          path: sync.repository,
+          advances: [
+            ...readyAdvances(fetched),
+            {
+              reference: "refs/heads/develop",
+              from: develop,
+              to: theirs("develop"),
+            },
+            {
+              reference: "refs/heads/feat/diverged",
+              from: diverged,
+              to: theirs("feat/diverged"),
+            },
+          ],
+        })
+      ).json(),
+    ).data;
+    expect(updated.outcomes).toEqual([
+      {
+        kind: "advanced",
+        reference: "refs/heads/main",
+        from: main,
+        to: theirs("main"),
+      },
+      {
+        kind: "skipped",
+        reference: "refs/heads/develop",
+        reason: { kind: "dirty", worktree: dirty },
+      },
+      {
+        kind: "skipped",
+        reference: "refs/heads/feat/diverged",
+        reason: { kind: "notBehind" },
+      },
+    ]);
+    expect(state(updated.overview, "main")).toEqual({
+      kind: "upToDate",
+      upstream: "refs/remotes/origin/main",
+    });
+    expect(git(repository, "rev-parse", "HEAD")).toBe(theirs("main"));
+    expect(git(repository, "status", "--porcelain")).toBe("");
+    expect(git(repository, "rev-parse", "develop")).toBe(develop);
+    expect(git(repository, "rev-parse", "feat/diverged")).toBe(diverged);
+    expect(git(dirty, "status", "--porcelain")).toBe("M README.md");
+  });
+
+  it("fetches the reader fixture without contacting GitHub", async () => {
+    const fetched = overviewEnvelope.parse(
+      await (
+        await post("overview", { path: fixture.repository, mode: "remote" })
+      ).json(),
+    ).data;
+    expect(fetched.fetch?.remotes).toEqual([
+      { remote: "github", outcome: { kind: "skipped" } },
+      { remote: "origin", outcome: { kind: "fetched" } },
+    ]);
+  });
+
+  it("rejects other origins and unexpected fields on both new routes", async () => {
+    const bodies = {
+      overview: { path: fixture.sync.repository, mode: "local" },
+      "fast-forward": { path: fixture.sync.repository, advances: [] },
+    };
+    for (const [operation, body] of Object.entries(bodies)) {
+      const foreign = await post(operation, body, "https://example.test");
+      expect(foreign.status).toBe(403);
+      expect(foreign.headers.get("access-control-allow-origin")).toBeNull();
+      expect(
+        (await post(operation, { ...body, unexpected: true })).status,
+      ).toBe(400);
+    }
+    expect(
+      (
+        await post("fast-forward", {
+          path: fixture.sync.repository,
+          advances: [
+            {
+              reference: "refs/remotes/origin/main",
+              from: "a".repeat(40),
+              to: "b".repeat(40),
+            },
+          ],
+        })
+      ).status,
+    ).toBe(400);
+  });
+
+  it("answers reads while another request waits on a slow fetch", async () => {
+    const slow = join(fixture.root, "sync-slow");
+    git(fixture.root, "clone", "--quiet", fixture.sync.remote, slow);
+    const uploadPack = join(fixture.root, "slow-upload-pack");
+    writeFileSync(
+      uploadPack,
+      '#!/bin/sh\nsleep 2\nexec git upload-pack "$@"\n',
+    );
+    chmodSync(uploadPack, 0o755);
+    git(slow, "config", "remote.origin.uploadpack", uploadPack);
+
+    const started = performance.now();
+    const fetching = post("overview", { path: slow, mode: "remote" }).then(
+      async (response) => ({
+        overview: overviewEnvelope.parse(await response.json()).data,
+        finishedAt: performance.now(),
+      }),
+    );
+    await setTimeout(200);
+    const read = snapshotEnvelope.parse(
+      await (await post("snapshot", { path: fixture.repository })).json(),
+    ).data;
+    const readFinishedAt = performance.now();
+    const fetched = await fetching;
+    expect(read.name).toBe("l1-demo");
+    expect(fetched.overview.fetch?.remotes).toEqual([
+      { remote: "origin", outcome: { kind: "fetched" } },
+    ]);
+    expect(fetched.finishedAt - started).toBeGreaterThanOrEqual(2000);
+    expect(fetched.finishedAt - readFinishedAt).toBeGreaterThan(500);
   });
 });

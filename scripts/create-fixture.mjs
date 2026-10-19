@@ -39,9 +39,9 @@ function git(path, ...args) {
   if (result.status !== 0) throw new Error(result.stderr || "Git failed");
   return result.stdout.trim();
 }
-function commit(message, files) {
+function commitIn(worktree, message, files) {
   for (const [file, contents] of Object.entries(files)) {
-    const path = join(repository, file);
+    const path = join(worktree, file);
     if (contents === null) {
       rmSync(path);
     } else {
@@ -49,8 +49,11 @@ function commit(message, files) {
       writeFileSync(path, contents);
     }
   }
-  git(repository, "add", "--all", "--", ...Object.keys(files));
-  git(repository, "commit", "-m", message);
+  git(worktree, "add", "--all", "--", ...Object.keys(files));
+  git(worktree, "commit", "-m", message);
+}
+function commit(message, files) {
+  commitIn(repository, message, files);
 }
 mkdirSync(repository);
 mkdirSync(remote);
@@ -115,9 +118,68 @@ git(
   "github",
   "git@github.com:l1-family/l1-git.git",
 );
+git(repository, "config", "remote.github.skipFetchAll", "true");
 git(repository, "worktree", "add", "--detach", detached, "feat/history");
 git(unborn, "init", "--initial-branch=main");
-const fixture = { root, repository, remote, unborn, detached };
+
+const sync = {
+  repository: join(root, "sync-demo"),
+  remote: join(root, "sync-remote.git"),
+  colleague: join(root, "sync-colleague"),
+  dirty: join(root, "sync-develop"),
+};
+mkdirSync(sync.repository);
+mkdirSync(sync.remote);
+git(sync.remote, "init", "--bare", "--initial-branch=main");
+git(sync.repository, "init", "--initial-branch=main");
+git(sync.repository, "config", "core.hooksPath", "/dev/null");
+commitIn(sync.repository, "docs: start the sync fixture", {
+  "README.md": "# Sync demo\n",
+});
+git(sync.repository, "branch", "develop");
+git(sync.repository, "branch", "feat/diverged");
+git(sync.repository, "remote", "add", "origin", sync.remote);
+git(
+  sync.repository,
+  "push",
+  "-u",
+  "origin",
+  "main",
+  "develop",
+  "feat/diverged",
+);
+git(root, "clone", sync.remote, sync.colleague);
+git(sync.colleague, "config", "core.hooksPath", "/dev/null");
+commitIn(sync.colleague, "feat: colleague work on main", {
+  "main.txt": "from a colleague\n",
+});
+git(sync.colleague, "push", "origin", "main");
+git(sync.colleague, "switch", "develop");
+commitIn(sync.colleague, "feat: colleague work on develop", {
+  "develop.txt": "from a colleague\n",
+});
+git(sync.colleague, "push", "origin", "develop");
+git(sync.colleague, "switch", "feat/diverged");
+commitIn(sync.colleague, "feat: colleague work on the diverged branch", {
+  "theirs.txt": "from a colleague\n",
+});
+git(sync.colleague, "push", "origin", "feat/diverged");
+git(sync.repository, "switch", "feat/diverged");
+commitIn(sync.repository, "feat: local work on the diverged branch", {
+  "ours.txt": "local\n",
+});
+git(sync.repository, "switch", "main");
+git(sync.repository, "worktree", "add", sync.dirty, "develop");
+writeFileSync(join(sync.dirty, "README.md"), "# Sync demo\n\nUncommitted.\n");
+git(
+  sync.repository,
+  "remote",
+  "add",
+  "github",
+  "git@github.com:l1-family/l1-git.git",
+);
+git(sync.repository, "config", "remote.github.skipFetchAll", "true");
+const fixture = { root, repository, remote, unborn, detached, sync };
 writeFileSync(
   join(root, "fixture.json"),
   `${JSON.stringify(fixture, null, 2)}\n`,

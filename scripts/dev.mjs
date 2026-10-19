@@ -26,7 +26,7 @@ build.on("exit", (code) => {
   }
   const bridge = spawn("./target/debug/l1-git-dev-bridge", [], {
     cwd: root,
-    stdio: "inherit",
+    stdio: ["ignore", "inherit", "inherit"],
   });
   const vite = spawn(process.execPath, ["node_modules/vite/bin/vite.js"], {
     cwd: root,
