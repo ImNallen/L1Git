@@ -108,12 +108,15 @@
   padding-right: 8px;
   overflow: hidden;
 }
-.history-table td:first-child {
+.history-table td:nth-child(2) {
   padding: 0;
   overflow: visible;
 }
-.history-table td:nth-child(2) {
+.history-table td:nth-child(3) {
   padding: 0 10px 0 0;
+}
+.history-table tbody tr {
+  cursor: pointer;
 }
 .history-table tr:hover td {
   background: var(--row-hover);
@@ -127,7 +130,6 @@
   height: 36px;
   display: flex;
   align-items: center;
-  gap: 7px;
   text-align: left;
   padding: 0;
 }
@@ -139,16 +141,10 @@
   flex: 1;
   min-width: 40px;
 }
-.ref-badges {
-  display: flex;
-  gap: 5px;
-  flex-shrink: 1;
-  max-width: 65%;
-  align-items: center;
-  min-width: 0;
-}
-.ref-badges:empty {
-  display: none;
+.history-table td.ref-cell {
+  justify-content: flex-end;
+  gap: 4px;
+  padding: 0 4px 0 10px;
 }
 .ref-badge {
   display: inline-flex;
@@ -156,52 +152,41 @@
   gap: 4px;
   color: var(--ref-text);
   background: var(--ref-bg);
+  border-left: 3px solid;
   border-radius: 4px;
-  padding: 3px 6px;
+  padding: 3px 6px 3px 5px;
   font-size: 10px;
   font-weight: 550;
   white-space: nowrap;
-  text-overflow: ellipsis;
   overflow: hidden;
   min-width: 0;
-  max-width: 235px;
 }
 .ref-badge svg {
   flex-shrink: 0;
 }
-.ref-badge.remote {
+.ref-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.ref-worktree {
+  display: inline-flex;
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+.ref-badge.remote,
+.ref-badge.tag {
   color: var(--text-icon);
   background: var(--panel-raised);
   border: 1px solid var(--border-control);
-  padding: 2px 5px;
+  border-left-width: 3px;
+  padding: 2px 5px 2px 4px;
   font-weight: 400;
 }
 .more-refs {
   color: var(--text-dim);
   font-size: 9px;
   flex-shrink: 0;
-}
-.author-avatar {
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: var(--avatar-bg);
-  color: var(--avatar-text);
-  font-size: 7px;
-  font-weight: 650;
-  display: inline-grid;
-  place-items: center;
-  flex-shrink: 0;
-  margin-right: 7px;
-}
-.author-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.commit-hash {
-  font-family: var(--mono);
-  font-size: 10px;
 }
 .graph-cell {
   display: block;
@@ -210,6 +195,9 @@
 .graph-cell path {
   stroke-width: 1.8px;
   fill: none;
+}
+.graph-node text {
+  pointer-events: none;
 }
 .history-empty {
   text-align: center;
