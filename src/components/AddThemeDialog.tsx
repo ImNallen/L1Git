@@ -3,6 +3,7 @@ import type { DragEvent } from "react";
 import { FileJson, Plus, Upload, X } from "lucide-react";
 import type { ThemeFamilyDraft } from "../themes/catalog";
 import { parseThemeFile, type ImportResult } from "../themes/importers";
+import { ThemeSearch } from "./ThemeSearch";
 
 type Props = {
   onAdd: (families: readonly ThemeFamilyDraft[]) => void;
@@ -93,7 +94,14 @@ export function AddThemeDialog({ onAdd, onClose }: Props) {
         </button>
       </div>
       <h1 id="add-theme-title">Add a theme</h1>
-      <p>Import an L1 theme or a VS Code color theme.</p>
+      <p>Search community themes, or import an L1 or VS Code theme file.</p>
+      <ThemeSearch
+        onImported={(family) => {
+          onAdd([family]);
+          onClose();
+        }}
+      />
+      <div className="theme-import-divider">or import a file</div>
       <div
         className={`theme-drop-zone ${dragging ? "dragging" : ""}`}
         onDragOver={(event) => {

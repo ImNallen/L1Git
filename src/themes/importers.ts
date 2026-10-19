@@ -269,7 +269,7 @@ export function parseThemeFile(text: string, fileName?: string): ImportResult {
   if (theme.include)
     return {
       ok: false,
-      error: `This theme includes ${theme.include}, which can't be read from a single file.`,
+      error: `This theme includes ${theme.include}, which can't be read from a single file. Import its extension from Open VSX instead.`,
     };
   return single(vsCodeThemeToDraft(theme, baseName(fileName)));
 }

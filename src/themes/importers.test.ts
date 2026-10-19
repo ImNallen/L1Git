@@ -283,7 +283,7 @@ it.each([
   ],
   [
     '{ "include": "./base.json", "colors": { "editor.background": "#101010" } }',
-    "This theme includes ./base.json, which can't be read from a single file.",
+    "This theme includes ./base.json, which can't be read from a single file. Import its extension from Open VSX instead.",
   ],
 ])("rejects %s", (text, error) => {
   expect(parseThemeFile(text)).toEqual({ ok: false, error });
