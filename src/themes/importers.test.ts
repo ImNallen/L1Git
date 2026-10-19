@@ -75,6 +75,7 @@ it("maps a VS Code theme onto L1 Git tokens, flattening translucent surfaces ont
             graphLane6: "#8be9fd",
             syntaxKeyword: "#ff79c6",
             syntaxString: "#f1fa8c",
+            syntaxStringExpression: "#f1fa8c",
             syntaxComment: "#6272a4",
           },
         },
@@ -123,6 +124,7 @@ it("reads a syntax colour from a narrower or compound scope when no rule names t
     accent: "#3979ce",
     syntaxKeyword: "#00ff00",
     syntaxString: "#ffff00",
+    syntaxStringExpression: "#ffff00",
     syntaxComment: "#888888",
   });
 });
@@ -146,7 +148,24 @@ it("prefers a rule naming the scope over a later compound or narrower one, as Dr
     background: "#000000",
     accent: "#3979ce",
     syntaxString: "#f1fa8c",
+    syntaxStringExpression: "#f1fa8c",
     syntaxConstant: "#bd93f9",
+  });
+});
+
+it("colours quoted strings, which Shiki paints as string expressions, with the theme's string rule", () => {
+  const theme = asVsCodeTheme({
+    colors: { "editor.background": "#000000" },
+    tokenColors: [
+      { scope: "string", settings: { foreground: "#9ece6a" } },
+      { scope: "string.regexp", settings: { foreground: "#b4f9f8" } },
+    ],
+  });
+  expect(theme && vsCodeThemeToDraft(theme, "x").colors).toEqual({
+    background: "#000000",
+    accent: "#3979ce",
+    syntaxString: "#9ece6a",
+    syntaxStringExpression: "#9ece6a",
   });
 });
 
@@ -262,6 +281,7 @@ it("lets an including theme override the colours and syntax rules it includes", 
       graphLane4: "#00cc00",
       syntaxKeyword: "#cc00cc",
       syntaxString: "#00ffff",
+      syntaxStringExpression: "#00ffff",
     },
   });
 });

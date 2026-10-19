@@ -220,8 +220,15 @@ const VS_CODE_SOURCES: Partial<Record<Token, Source>> = {
     keys: [],
   },
   syntaxString: { scopes: ["string"], keys: [] },
+  // Shiki's CSS-variable theme paints `string.quoted`, the ordinary string, with this slot, not `token-string`.
   syntaxStringExpression: {
-    scopes: ["string.template", "string.regexp", "entity.name.tag"],
+    scopes: [
+      "string.quoted",
+      "string",
+      "string.template",
+      "string.regexp",
+      "entity.name.tag",
+    ],
     keys: [],
   },
   syntaxConstant: {
