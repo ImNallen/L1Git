@@ -27,12 +27,14 @@ describe("history graph", () => {
         { oid: c, from: 0, to: 1 },
       ],
     });
-    expect(graph.rows.get(b)?.continuations).toEqual([{ from: 1, to: 1 }]);
+    expect(graph.rows.get(b)?.continuations).toEqual([
+      { oid: c, from: 1, to: 1 },
+    ]);
     expect(graph.rows.get(c)).toEqual({
       oid: c,
       lane: 1,
       incoming: true,
-      continuations: [{ from: 0, to: 0 }],
+      continuations: [{ oid: d, from: 0, to: 0 }],
       parents: [{ oid: d, from: 1, to: 0 }],
     });
     expect(graph.rows.get(d)?.parents).toEqual([]);
@@ -48,11 +50,48 @@ describe("history graph", () => {
       oid: c,
       lane: 1,
       incoming: false,
-      continuations: [{ from: 0, to: 0 }],
+      continuations: [{ oid: b, from: 0, to: 0 }],
       parents: [],
     });
     expect(graph.rows.get(b)?.parents).toEqual([{ oid: e, from: 0, to: 0 }]);
     expect(graph.rows.has(e)).toBe(false);
     expect(buildGraph([])).toEqual({ rows: new Map(), lanes: 1 });
+  });
+
+  it("runs a squash commit's lane down into the tip of the branch it merged", () => {
+    const graph = buildGraph(
+      [
+        { oid: a, parents: [b] },
+        { oid: c, parents: [d] },
+        { oid: b, parents: [d] },
+        { oid: d, parents: [] },
+      ],
+      [{ tip: c, commit: a }],
+    );
+    expect(graph.lanes).toBe(2);
+    expect(graph.rows.get(a)).toEqual({
+      oid: a,
+      lane: 0,
+      incoming: false,
+      continuations: [],
+      parents: [
+        { oid: b, from: 0, to: 0 },
+        { oid: c, from: 0, to: 1 },
+      ],
+    });
+    expect(graph.rows.get(c)).toEqual({
+      oid: c,
+      lane: 1,
+      incoming: true,
+      continuations: [{ oid: b, from: 0, to: 0 }],
+      parents: [{ oid: d, from: 1, to: 1 }],
+    });
+    expect(graph.rows.get(b)).toEqual({
+      oid: b,
+      lane: 0,
+      incoming: true,
+      continuations: [{ oid: d, from: 1, to: 0 }],
+      parents: [{ oid: d, from: 0, to: 0 }],
+    });
   });
 });

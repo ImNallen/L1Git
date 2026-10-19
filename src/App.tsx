@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import {
   ArrowLeft,
@@ -27,6 +27,7 @@ import type { DiffStyle } from "./components/FileDiffPane";
 import { History } from "./components/History";
 import { PaneDivider } from "./components/PaneDivider";
 import { RepositoryTree } from "./components/RepositoryTree";
+import { trunkTips } from "./domain/highlight";
 import { readyAdvances } from "./domain/overview";
 import { headLabel } from "./domain/repository";
 import type { Branch, FullRef } from "./domain/repository";
@@ -95,6 +96,11 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
   const openReady = openRepository
     ? readyAdvances(openRepository.overview).length
     : 0;
+  const statuses = openRepository?.overview.branches;
+  const trunk = useMemo(
+    () => (snapshot ? trunkTips(snapshot.branches, statuses ?? []) : []),
+    [snapshot, statuses],
+  );
   const jumped = jump
     ? (snapshot?.branches.find(
         (branch) => branch.reference === jump.reference,
@@ -422,6 +428,7 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
                     searchRef={searchRef}
                     busy={busy}
                     hidden={fileOpen}
+                    trunk={trunk}
                   />
                   {fileDiff.kind !== "closed" && (
                     <FileDiffPane

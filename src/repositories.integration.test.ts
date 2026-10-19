@@ -119,7 +119,7 @@ describe("real Rust transport contract", () => {
     expect(snapshot.head.kind).toBe("attached");
     expect(
       snapshot.branches.filter((branch) => branch.kind === "local"),
-    ).toHaveLength(2);
+    ).toHaveLength(3);
     expect(
       snapshot.branches.filter((branch) => branch.kind === "remote"),
     ).toHaveLength(3);
@@ -131,6 +131,15 @@ describe("real Rust transport contract", () => {
     );
     expect(snapshot.tags).toEqual([
       { reference: "refs/tags/v0.1.0", name: "v0.1.0", oid: theme?.oid },
+    ]);
+    const squashed = snapshot.branches.find(
+      (branch) => branch.reference === "refs/heads/feat/squashed",
+    );
+    const squash = snapshot.commits.find(
+      (commit) => commit.subject === "feat(search): search loaded history (#2)",
+    );
+    expect(snapshot.squashes).toEqual([
+      { tip: squashed?.oid, commit: squash?.oid },
     ]);
     expect(
       snapshot.worktrees.map(({ name, head, current }) => [

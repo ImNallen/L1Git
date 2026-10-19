@@ -1,5 +1,6 @@
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { RefObject } from "react";
+import { createPortal } from "react-dom";
 import {
   CircleCheck,
   Cloud,
@@ -13,12 +14,15 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { buildGraph } from "../domain/graph";
 import type { GraphRow } from "../domain/graph";
+import { highlightBranch } from "../domain/highlight";
+import type { RowHighlight } from "../domain/highlight";
 import { refLabels } from "../domain/refs";
 import type { RefLabel } from "../domain/refs";
 import type { Commit, Oid, RepositorySnapshot } from "../domain/repository";
 
 const ROW_HEIGHT = 36;
 const OVERSCAN = 10;
+const HIGHLIGHT_DELAY = 400;
 const color = (lane: number) => `var(--graph-lane-${(lane % 6) + 1})`;
 const x = (lane: number) => 14 + lane * 24;
 
@@ -38,6 +42,7 @@ function GraphCell({
   width,
   filtered,
   known,
+  lit,
 }: {
   row: GraphRow;
   commit: Commit;
@@ -45,10 +50,12 @@ function GraphCell({
   width: number;
   filtered: boolean;
   known: Set<Oid>;
+  lit: RowHighlight | undefined;
 }) {
+  const dim = (on: boolean | undefined) => (lit && !on ? "dim" : undefined);
   const curve = (from: number, to: number, start: number, end: number) =>
     `M ${x(from)} ${start} C ${x(from)} ${(start + end) / 2}, ${x(to)} ${(start + end) / 2}, ${x(to)} ${end}`;
-  const merge = row.parents.length > 1;
+  const merge = commit.parents.length > 1;
   const radius = merge ? 5 : 10;
   return (
     <svg
@@ -59,19 +66,25 @@ function GraphCell({
     >
       {!filtered && (
         <>
-          {row.continuations.map((edge) => (
+          {row.continuations.map((edge, index) => (
             <path
               key={`continue-${edge.from}`}
+              className={dim(lit?.continuations[index])}
               d={curve(edge.from, edge.to, 0, 36)}
               stroke={color(edge.from)}
             />
           ))}
           {row.incoming && (
-            <path d={`M ${x(row.lane)} 0 V 18`} stroke={color(row.lane)} />
+            <path
+              className={dim(lit?.incoming)}
+              d={`M ${x(row.lane)} 0 V 18`}
+              stroke={color(row.lane)}
+            />
           )}
-          {row.parents.map((edge) => (
+          {row.parents.map((edge, index) => (
             <path
               key={edge.oid}
+              className={dim(lit?.parents[index])}
               d={curve(edge.from, edge.to, 18, 36)}
               stroke={color(edge.to)}
               strokeDasharray={known.has(edge.oid) ? undefined : "3 3"}
@@ -157,7 +170,7 @@ function RefBadge({ label, lane }: { label: RefLabel; lane: number }) {
   return (
     <span
       className={`ref-badge ${label.kind}`}
-      style={{ borderLeftColor: color(lane) }}
+      style={{ background: color(lane) }}
       title={title}
     >
       <Icon size={11} />
@@ -174,6 +187,47 @@ function RefBadge({ label, lane }: { label: RefLabel; lane: number }) {
   );
 }
 
+function MoreRefs({ labels, lane }: { labels: RefLabel[]; lane: number }) {
+  const [anchor, setAnchor] = useState<DOMRect | null>(null);
+  useEffect(() => {
+    if (!anchor) return;
+    const close = () => setAnchor(null);
+    window.addEventListener("scroll", close, { capture: true, once: true });
+    return () => window.removeEventListener("scroll", close, { capture: true });
+  }, [anchor]);
+  const open = (event: { currentTarget: HTMLElement }) =>
+    setAnchor(event.currentTarget.getBoundingClientRect());
+  return (
+    <>
+      <span
+        className="ref-badge more-refs"
+        style={{ background: color(lane) }}
+        tabIndex={0}
+        aria-label={`${labels.length} more: ${labels.map(labelName).join(", ")}`}
+        onMouseEnter={open}
+        onFocus={open}
+        onMouseLeave={() => setAnchor(null)}
+        onBlur={() => setAnchor(null)}
+      >
+        +{labels.length}
+      </span>
+      {anchor &&
+        createPortal(
+          <div
+            className="more-refs-popover"
+            role="tooltip"
+            style={{ top: anchor.bottom + 4, left: anchor.left }}
+          >
+            {labels.map((label, index) => (
+              <RefBadge key={index} label={label} lane={lane} />
+            ))}
+          </div>,
+          document.body,
+        )}
+    </>
+  );
+}
+
 type Props = {
   snapshot: RepositorySnapshot;
   selectedOid: Oid | null;
@@ -184,6 +238,8 @@ type Props = {
   searchRef: RefObject<HTMLInputElement | null>;
   busy: boolean;
   hidden: boolean;
+  /** Tips of the default branch, which the highlight treats as trunk. */
+  trunk: Oid[];
 };
 
 export function History({
@@ -196,8 +252,12 @@ export function History({
   searchRef,
   busy,
   hidden,
+  trunk,
 }: Props) {
-  const graph = useMemo(() => buildGraph(snapshot.commits), [snapshot.commits]);
+  const graph = useMemo(
+    () => buildGraph(snapshot.commits, snapshot.squashes),
+    [snapshot.commits, snapshot.squashes],
+  );
   const known = useMemo(
     () => new Set(snapshot.commits.map((commit) => commit.oid)),
     [snapshot.commits],
@@ -213,6 +273,28 @@ export function History({
       ),
     [snapshot.commits, search],
   );
+  const [hovered, setHovered] = useState<Oid | null>(null);
+  const hoverTimer = useRef<number | undefined>(undefined);
+  const highlightTip = search ? null : hovered;
+  const highlight = useMemo(
+    () =>
+      highlightTip === null
+        ? null
+        : highlightBranch(snapshot.commits, graph.rows, highlightTip, trunk),
+    [snapshot.commits, graph.rows, highlightTip, trunk],
+  );
+  const hover = (oid: Oid) => {
+    window.clearTimeout(hoverTimer.current);
+    hoverTimer.current = window.setTimeout(
+      () => setHovered(oid),
+      HIGHLIGHT_DELAY,
+    );
+  };
+  const unhover = () => {
+    window.clearTimeout(hoverTimer.current);
+    setHovered(null);
+  };
+  useEffect(() => () => window.clearTimeout(hoverTimer.current), []);
   const commitsRef = useRef(commits);
   const scrollRef = useRef<HTMLDivElement>(null);
   const headRef = useRef<HTMLTableSectionElement>(null);
@@ -223,12 +305,18 @@ export function History({
     if (!scroller) return;
     const measure = () =>
       setViewport({ top: scroller.scrollTop, height: scroller.clientHeight });
+    // A hovered row can scroll out of the window and unmount without a mouseleave.
+    const scrolled = () => {
+      window.clearTimeout(hoverTimer.current);
+      setHovered(null);
+      measure();
+    };
     measure();
-    scroller.addEventListener("scroll", measure, { passive: true });
+    scroller.addEventListener("scroll", scrolled, { passive: true });
     const observer = new ResizeObserver(measure);
     observer.observe(scroller);
     return () => {
-      scroller.removeEventListener("scroll", measure);
+      scroller.removeEventListener("scroll", scrolled);
       observer.disconnect();
     };
   }, []);
@@ -313,7 +401,7 @@ export function History({
       </div>
       <div className="history-scroll" ref={scrollRef}>
         <table
-          className="history-table"
+          className={`history-table${highlight ? " highlighting" : ""}`}
           style={{ minWidth: graphWidth + 460 }}
           aria-rowcount={commits.length + 1}
         >
@@ -332,22 +420,30 @@ export function History({
               const row = graph.rows.get(commit.oid);
               const [label, ...more] = labels.get(commit.oid) ?? [];
               const selected = selectedOid === commit.oid;
+              const lit = highlight?.commits.has(commit.oid);
               return (
                 <tr
                   key={commit.oid}
-                  className={selected ? "selected" : ""}
+                  className={
+                    [selected && "selected", lit && "lit"]
+                      .filter(Boolean)
+                      .join(" ") || undefined
+                  }
                   style={{ gridTemplateColumns: columns }}
                   aria-rowindex={first + offset + 2}
                   onClick={() => onSelect(commit.oid)}
                 >
                   <td className="ref-cell">
-                    {label && <RefBadge label={label} lane={row?.lane ?? 0} />}
-                    {more.length > 0 && (
+                    {label && (
                       <span
-                        className="more-refs"
-                        title={more.map(labelName).join(", ")}
+                        className="ref-badges"
+                        onMouseEnter={() => hover(commit.oid)}
+                        onMouseLeave={unhover}
                       >
-                        +{more.length}
+                        <RefBadge label={label} lane={row?.lane ?? 0} />
+                        {more.length > 0 && (
+                          <MoreRefs labels={more} lane={row?.lane ?? 0} />
+                        )}
                       </span>
                     )}
                   </td>
@@ -360,6 +456,7 @@ export function History({
                         width={graphWidth}
                         filtered={search.length > 0}
                         known={known}
+                        lit={highlight?.rows.get(commit.oid)}
                       />
                     )}
                   </td>

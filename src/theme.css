@@ -51,8 +51,7 @@
   --selection-text: #eeeeee;
   --nav-selected-bg: #122339;
   --nav-selected-text: #79b3ff;
-  --ref-bg: #16324b;
-  --ref-text: #79b7ff;
+  --ref-on-lane: #0d1117;
   --link: #87aaf1;
   --accent-muted: #6f8eaf;
   --primary-bg: #3979ce;
@@ -123,8 +122,7 @@
   --selection-text: #17385e;
   --nav-selected-bg: #dce9fa;
   --nav-selected-text: #215eaa;
-  --ref-bg: #e2eefb;
-  --ref-text: #235e9c;
+  --ref-on-lane: #ffffff;
   --link: #2f60a4;
   --accent-muted: #527293;
   --primary-bg: #316fc1;

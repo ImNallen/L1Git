@@ -78,6 +78,7 @@ git(repository, "checkout", "main");
 commit("feat(theme): add the L1 dark canvas", {
   "theme.css": ":root { color-scheme: dark; }\n",
 });
+const theme = git(repository, "rev-parse", "HEAD");
 git(
   repository,
   "merge",
@@ -86,9 +87,20 @@ git(
   "-m",
   "Merge branch feat/history",
 );
+const merge = git(repository, "rev-parse", "HEAD");
+git(repository, "checkout", "-b", "feat/squashed");
+commit("feat(search): add a loaded-history search", {
+  "search.ts": "export const searchFields = ['subject', 'author'];\n",
+});
+commit("feat(search): match commit IDs", {
+  "search.ts": "export const searchFields = ['subject', 'author', 'oid'];\n",
+});
+git(repository, "checkout", "main");
+git(repository, "merge", "--squash", "feat/squashed");
+git(repository, "commit", "-m", "feat(search): search loaded history (#2)");
 git(repository, "remote", "add", "origin", remote);
 git(repository, "push", "origin", "main", "feat/history");
-git(repository, "checkout", "-b", "feat/remote-inspector");
+git(repository, "checkout", "-b", "feat/remote-inspector", merge);
 commit("feat(inspector): show commit message and changed paths", {
   "inspector.ts": 'export const diffBase = "first parent";\n',
   "src/inspector/files/tree.ts":
@@ -120,7 +132,7 @@ git(
 );
 git(repository, "config", "remote.github.skipFetchAll", "true");
 git(repository, "worktree", "add", "--detach", detached, "feat/history");
-git(repository, "tag", "-a", "-m", "First fixture release", "v0.1.0", "main~1");
+git(repository, "tag", "-a", "-m", "First fixture release", "v0.1.0", theme);
 git(unborn, "init", "--initial-branch=main");
 
 const sync = {

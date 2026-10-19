@@ -7,7 +7,7 @@ description: Verify L1 Git through its real browser preview, local Rust core, an
 
 ## Launch
 
-Read the [feature map](features/README.md). From the repository root, run `pnpm install --frozen-lockfile`, then `pnpm fixture`. Save the printed paths. The fixture has six commits, two local branches, three remote branches, a merge, an annotated tag `v0.1.0` on the theme commit, an unborn repository, and a detached linked worktree. Its separate `sync` repository has a branch that falls behind after a fetch, a behind branch checked out in a dirty linked worktree, and a diverged branch. It creates and modifies only its own temporary repositories.
+Read the [feature map](features/README.md). From the repository root, run `pnpm install --frozen-lockfile`, then `pnpm fixture`. Save the printed paths. The fixture has nine commits, three local branches, three remote branches, a merge, a squash merge of `feat/squashed`, an annotated tag `v0.1.0` on the theme commit, an unborn repository, and a detached linked worktree. Its separate `sync` repository has a branch that falls behind after a fetch, a behind branch checked out in a dirty linked worktree, and a diverged branch. It creates and modifies only its own temporary repositories.
 
 Run `pnpm dev`. Wait for both `L1 Git development bridge on http://127.0.0.1:9417` and Vite's `http://127.0.0.1:1422/` message. Keep the process handle for cleanup. Ports can be isolated with `L1GIT_DEV_PORT=1423 L1GIT_BRIDGE_PORT=9418 pnpm dev`. Use a fresh browser profile or origin for an empty saved list. Never clear the user's existing recents to obtain an empty state.
 
