@@ -151,6 +151,7 @@ impl Mutation<'_> {
         match self {
             Self::Fetch { remote } => owned(&[
                 "fetch",
+                "--prune",
                 "--no-write-fetch-head",
                 "--no-auto-maintenance",
                 "--recurse-submodules=no",
