@@ -15,7 +15,7 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import { useAppearance } from "./appearance";
-import type { ThemePreference } from "./appearance";
+import type { ThemeSettings } from "./themes/catalog";
 import { AppearanceSettings } from "./components/AppearanceSettings";
 import { AddRepositoryDialog } from "./components/AddRepositoryDialog";
 import { FetchSettings } from "./components/FetchSettings";
@@ -52,7 +52,7 @@ const settingsSections = [
   { section: "fetching", label: "Fetching", Icon: CloudDownload },
 ] as const;
 
-export function App({ initialTheme }: { initialTheme: ThemePreference }) {
+export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   const appearance = useAppearance(initialTheme);
   const app = useWorkspace();
   const [screen, setScreen] = useState<AppScreen>("repository");
@@ -235,7 +235,8 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
   useEffect(() => {
     function keyboard(event: KeyboardEvent) {
       if (screen === "settings") {
-        if (event.key === "Escape") {
+        // A modal dialog owns Escape, even when its focused control was disabled and dropped focus.
+        if (event.key === "Escape" && !document.querySelector("dialog[open]")) {
           event.preventDefault();
           leaveSettings();
         }
@@ -456,7 +457,7 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
                     <FileDiffPane
                       state={fileDiff}
                       diffStyle={diffStyle}
-                      theme={appearance.resolvedTheme}
+                      theme={appearance.variant.appearance}
                       onDiffStyle={setDiffStyle}
                       onBack={closeFile}
                       onRetry={() => app.openFile(fileDiff.path)}
@@ -577,12 +578,7 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
               </nav>
             </header>
             {settingsSection === "appearance" ? (
-              <AppearanceSettings
-                preference={appearance.preference}
-                onPreferenceChange={appearance.setPreference}
-                persistenceError={appearance.persistenceError}
-                nativeError={appearance.nativeError}
-              />
+              <AppearanceSettings appearance={appearance} />
             ) : (
               <FetchSettings
                 intervalMinutes={fetchSettings.intervalMinutes}

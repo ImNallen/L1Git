@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { ArrowLeft, FileX2, LoaderCircle, TriangleAlert } from "lucide-react";
 import { parsePatchFiles } from "@pierre/diffs";
 import { FileDiff, Virtualizer } from "@pierre/diffs/react";
-import type { ResolvedTheme } from "../appearance";
+import type { Appearance } from "../themes/palette";
 import type { FileDiffState } from "../useWorkspace";
 
 export type DiffStyle = "unified" | "split";
@@ -10,7 +10,7 @@ export type DiffStyle = "unified" | "split";
 type Props = {
   state: Exclude<FileDiffState, { kind: "closed" }>;
   diffStyle: DiffStyle;
-  theme: ResolvedTheme;
+  theme: Appearance;
   onDiffStyle: (style: DiffStyle) => void;
   onBack: () => void;
   onRetry: () => void;
@@ -100,7 +100,7 @@ function Patch({
 }: {
   patch: string;
   diffStyle: DiffStyle;
-  theme: ResolvedTheme;
+  theme: Appearance;
 }) {
   const files = useMemo(
     () => parsePatchFiles(patch).flatMap((parsed) => parsed.files),
