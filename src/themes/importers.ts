@@ -235,26 +235,35 @@ const VS_CODE_SOURCES: Partial<Record<Token, Source>> = {
 
 const isColorful = (hex: string) => chroma(hex) >= 0.1;
 
-// A fully transparent colour is how a VS Code theme turns an element off, so it never stands in for a token.
-// A rule naming the scope itself wins; failing that, the last rule naming a narrower scope, such as `keyword.control`.
-// A compound selector like `source.js keyword` is matched by its last part. `punctuation.definition.*` colours
-// another construct's delimiters, such as a string's quotes, so it never stands in for punctuation at large.
-function scopeColor(theme: VsCodeTheme, scope: string): string | undefined {
-  const leaves = (r: TokenRule) => r.scopes.map((s) => s.split(/\s+/).at(-1));
-  const exact = theme.tokenColors.findLast((r) => leaves(r).includes(scope));
-  if (exact) return exact.foreground;
-  return theme.tokenColors.findLast((r) =>
-    leaves(r).some(
-      (leaf) =>
-        leaf?.startsWith(`${scope}.`) &&
-        !leaf.startsWith("punctuation.definition."),
-    ),
-  )?.foreground;
-}
+// A TextMate selector applies to a scope in three tiers, tried across all of a token's scopes before the next:
+// a selector that is the scope itself, then a compound one ending in it (`source.js string`), which only applies in
+// a narrower context, then one naming a narrower scope (`keyword.control`). Within a tier the last rule wins.
+// `punctuation.definition.*` colours another construct's delimiters, such as a string's quotes, so it never stands
+// in for punctuation at large.
+const SELECTOR_TIERS: readonly ((
+  selector: string,
+  scope: string,
+) => boolean)[] = [
+  (selector, scope) => selector === scope,
+  (selector, scope) => selector.split(/\s+/).at(-1) === scope,
+  (selector, scope) => {
+    const leaf = selector.split(/\s+/).at(-1) ?? "";
+    return (
+      leaf.startsWith(`${scope}.`) &&
+      !leaf.startsWith("punctuation.definition.")
+    );
+  },
+];
 
+// A fully transparent colour is how a VS Code theme turns an element off, so it never stands in for a token.
 function candidates(theme: VsCodeTheme, source: Source): string[] {
-  const scoped = (source.scopes ?? []).flatMap(
-    (scope) => scopeColor(theme, scope) ?? [],
+  const scoped = SELECTOR_TIERS.flatMap((applies) =>
+    (source.scopes ?? []).flatMap(
+      (scope) =>
+        theme.tokenColors.findLast((r) =>
+          r.scopes.some((selector) => applies(selector, scope)),
+        )?.foreground ?? [],
+    ),
   );
   const keyed = source.keys.flatMap((k) => theme.colors[k] ?? []);
   return [...scoped, ...keyed].filter((c) => (parseHex(c)?.a ?? 0) > 0);

@@ -127,6 +127,29 @@ it("reads a syntax colour from a narrower or compound scope when no rule names t
   });
 });
 
+it("prefers a rule naming the scope over a later compound or narrower one, as Dracula's resets need", () => {
+  const theme = asVsCodeTheme({
+    colors: { "editor.background": "#000000" },
+    tokenColors: [
+      { scope: "string", settings: { foreground: "#f1fa8c" } },
+      { scope: "constant", settings: { foreground: "#bd93f9" } },
+      {
+        scope: [
+          "meta.scope.for-loop.shell string",
+          "constant.language.empty-list.haskell",
+        ],
+        settings: { foreground: "#f8f8f2" },
+      },
+    ],
+  });
+  expect(theme && vsCodeThemeToDraft(theme, "x").colors).toEqual({
+    background: "#000000",
+    accent: "#3979ce",
+    syntaxString: "#f1fa8c",
+    syntaxConstant: "#bd93f9",
+  });
+});
+
 it("takes the appearance from the manifest's uiTheme, then the theme's type, then the background", () => {
   const theme = asVsCodeTheme({ colors: { "editor.background": "#1e1e1e" } });
   expect(
