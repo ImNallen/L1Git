@@ -1,6 +1,7 @@
 use crate::{
     Branch, ChangeStatus, ChangedFile, Commit, CommitDetail, DiffBase, ErrorKind, FilePatch, Head,
-    RepositoryError, RepositorySnapshot, Squash, Tag, Worktree, git, remotes,
+    Remote, RepositoryError, RepositoryRefs, RepositorySnapshot, Squash, Tag, Worktree, git,
+    remotes,
 };
 use std::{
     collections::HashMap,
@@ -275,17 +276,50 @@ fn parse_commits(output: &[u8]) -> Result<Vec<Commit>, RepositoryError> {
     Ok(commits)
 }
 
-pub fn snapshot(path: &str) -> Result<RepositorySnapshot, RepositoryError> {
-    let root = root(path)?;
-    let head = head(&root)?;
-    let remotes = remotes::read(&root)?;
+fn read_refs(root: &Path, remotes: &[Remote]) -> Result<RepositoryRefs, RepositoryError> {
+    let head = head(root)?;
     let branches = branches(
-        &root,
+        root,
         &remotes
             .iter()
             .map(|remote| remote.name.as_str())
             .collect::<Vec<_>>(),
     )?;
+    let name = root
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "Repository".into());
+    let root = root
+        .to_str()
+        .ok_or_else(|| {
+            RepositoryError::new(
+                ErrorKind::UnsupportedPath,
+                "Repository paths must be valid UTF-8.",
+            )
+        })?
+        .to_owned();
+    Ok(RepositoryRefs {
+        root,
+        name,
+        head,
+        branches,
+    })
+}
+
+pub fn refs(path: &str) -> Result<RepositoryRefs, RepositoryError> {
+    let root = root(path)?;
+    read_refs(&root, &remotes::read(&root)?)
+}
+
+pub fn snapshot(path: &str) -> Result<RepositorySnapshot, RepositoryError> {
+    let root = root(path)?;
+    let remotes = remotes::read(&root)?;
+    let RepositoryRefs {
+        root: root_text,
+        name,
+        head,
+        branches,
+    } = read_refs(&root, &remotes)?;
     let tags = tags(&root)?;
     let worktrees = worktrees(&root)?;
     let limit = format!("--max-count={}", HISTORY_LIMIT + 1);
@@ -316,21 +350,8 @@ pub fn snapshot(path: &str) -> Result<RepositorySnapshot, RepositoryError> {
     commits.truncate(HISTORY_LIMIT);
     // A partial clone lacks the blobs to diff, so it shows no squash merges.
     let squashes = squashes(&root, &commits).unwrap_or_default();
-    let name = root
-        .file_name()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "Repository".into());
-    let root = root
-        .to_str()
-        .ok_or_else(|| {
-            RepositoryError::new(
-                ErrorKind::UnsupportedPath,
-                "Repository paths must be valid UTF-8.",
-            )
-        })?
-        .to_owned();
     Ok(RepositorySnapshot {
-        root,
+        root: root_text,
         name,
         head,
         branches,

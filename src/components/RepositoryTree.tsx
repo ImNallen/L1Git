@@ -1,113 +1,121 @@
-import { useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import type {
+  KeyboardEvent as ReactKeyboardEvent,
+  MouseEvent as ReactMouseEvent,
+  ReactNode,
+} from "react";
+import { createPortal } from "react-dom";
 import {
-  ArrowDown,
-  ArrowUp,
   ChevronDown,
   ChevronRight,
-  CircleCheck,
-  Cloud,
   FolderGit2,
-  GitBranch,
-  Github,
   Plus,
   Search,
-  X,
+  Trash2,
 } from "lucide-react";
-import { upstreamName } from "../domain/overview";
-import type { Divergence } from "../domain/overview";
 import type { RecentRepository } from "../domain/recents";
-import type {
-  Branch,
-  FullRef,
-  RepositoryRoot,
-  RepositorySnapshot,
-} from "../domain/repository";
+import type { Branch, FullRef, RepositoryRoot } from "../domain/repository";
 import type { RootSync } from "../overview";
+import type { RefsState } from "../useRepositoryRefs";
+import { RepositoryBranches } from "./RepositoryBranches";
+import { SyncCounts } from "./SyncCounts";
 
 type Props = {
   entries: RecentRepository[];
-  snapshot: RepositorySnapshot | null;
+  expanded: ReadonlySet<RepositoryRoot>;
+  refs: ReadonlyMap<RepositoryRoot, RefsState>;
   activePath: string | null;
-  highlighted: FullRef | null;
-  browsing: boolean;
+  /** The branch last jumped to in the open repository. */
+  highlighted: { root: RepositoryRoot; reference: FullRef } | null;
   sync: ReadonlyMap<RepositoryRoot, RootSync>;
-  onSelect: (path: string) => void;
-  onJump: (branch: Branch) => void;
+  onSelect: (root: RepositoryRoot) => void;
+  onToggle: (root: RepositoryRoot) => void;
+  onJump: (root: RepositoryRoot, branch: Branch) => void;
   onRemove: (root: RepositoryRoot) => void;
   onAdd: () => void;
 };
 
 export function RepositoryTree({
   entries,
-  snapshot,
+  expanded,
+  refs,
   activePath,
   highlighted,
-  browsing,
   sync,
   onSelect,
+  onToggle,
   onJump,
   onRemove,
   onAdd,
 }: Props) {
   const [query, setQuery] = useState("");
-  const [collapsed, setCollapsed] = useState<Set<RepositoryRoot>>(new Set());
-  const [localOpen, setLocalOpen] = useState(true);
-  const [remoteOpen, setRemoteOpen] = useState(true);
+  const [menu, setMenu] = useState<{
+    entry: RecentRepository;
+    x: number;
+    y: number;
+    trigger: HTMLElement;
+  } | null>(null);
+  // Explicit section and folder toggles. An absent key falls back to the default.
+  const [overrides, setOverrides] = useState<ReadonlyMap<string, boolean>>(
+    new Map(),
+  );
   const search = query.toLocaleLowerCase();
   const matches = (value: string) => value.toLocaleLowerCase().includes(search);
-  const local =
-    snapshot?.branches.filter((branch) => branch.kind === "local") ?? [];
-  const remote =
-    snapshot?.branches.filter((branch) => branch.kind === "remote") ?? [];
-  const activeMatches =
-    snapshot?.branches.some((branch) => matches(branch.name)) ?? false;
+  const loaded = (root: RepositoryRoot) => {
+    const state = expanded.has(root) ? refs.get(root) : undefined;
+    return state?.kind === "ready" ? state.refs : null;
+  };
   const entriesShown = entries.filter(
     (entry) =>
       matches(entry.name) ||
       matches(entry.root) ||
-      (entry.root === snapshot?.root && activeMatches),
+      (loaded(entry.root)?.branches.some((branch) => matches(branch.name)) ??
+        false),
   );
 
-  function toggle(root: RepositoryRoot) {
-    setCollapsed((previous) => {
-      const next = new Set(previous);
-      if (next.has(root)) next.delete(root);
-      else next.add(root);
-      return next;
+  function openMenu(
+    event: ReactMouseEvent<HTMLElement> | ReactKeyboardEvent<HTMLElement>,
+    entry: RecentRepository,
+  ) {
+    event.preventDefault();
+    const trigger = event.currentTarget;
+    const rect = trigger.getBoundingClientRect();
+    // Keyboard-opened menus have no pointer position, so they open below the row.
+    const pointer =
+      "clientX" in event && (event.clientX !== 0 || event.clientY !== 0);
+    setMenu({
+      entry,
+      x: pointer ? event.clientX : rect.left + 24,
+      y: pointer ? event.clientY : rect.bottom,
+      trigger,
     });
   }
 
-  function branchRow(branch: Branch) {
-    const checkedOut =
-      snapshot?.head.kind === "attached" &&
-      snapshot.head.reference === branch.reference;
-    const counts =
-      branch.kind === "local" && snapshot
-        ? sync.get(snapshot.root)?.branches.get(branch.reference)
-        : undefined;
-    const BranchIcon = checkedOut
-      ? CircleCheck
-      : branch.kind === "remote"
-        ? Cloud
-        : GitBranch;
-    const selected = highlighted === branch.reference;
+  function branches(entry: RecentRepository) {
+    const state = refs.get(entry.root);
+    if (state === undefined || state.kind === "loading")
+      return (
+        <p className="tree-hint" role="status">
+          Loading branches…
+        </p>
+      );
+    if (state.kind === "error")
+      return <p className="tree-hint">{state.problem.message}</p>;
     return (
-      <button
-        className={`branch-row ${selected ? "selected" : ""}`}
-        key={branch.reference}
-        onClick={() => onJump(branch)}
-        title={`${branch.reference}${branch.kind === "local" && branch.upstream ? ` · Tracks ${branch.upstream}` : ""} · Show in graph`}
-        aria-current={selected ? "true" : undefined}
-      >
-        <BranchIcon size={14} className={checkedOut ? "head-icon" : ""} />
-        <span>{branch.name}</span>
-        {checkedOut && (
-          <span className="branch-head" aria-label="Checked-out branch">
-            HEAD
-          </span>
-        )}
-        {counts && <SyncCounts divergence={counts} />}
-      </button>
+      <RepositoryBranches
+        refs={state.refs}
+        search={search}
+        repositoryMatches={matches(entry.name)}
+        highlighted={
+          highlighted?.root === entry.root ? highlighted.reference : null
+        }
+        sync={sync.get(entry.root)}
+        overrides={overrides}
+        onOverride={(key, open) =>
+          setOverrides((previous) => new Map(previous).set(key, open))
+        }
+        onJump={(branch) => onJump(entry.root, branch)}
+      />
     );
   }
 
@@ -133,147 +141,48 @@ export function RepositoryTree({
       <nav className="repository-tree" aria-label="Repositories and branches">
         {entriesShown.map((entry) => {
           const active = entry.root === activePath;
+          const open = expanded.has(entry.root);
+          const toggleLabel = `${open ? "Collapse" : "Expand"} ${entry.name}`;
           const head = sync.get(entry.root)?.head;
-          const expanded =
-            browsing &&
-            entry.root === snapshot?.root &&
-            !collapsed.has(entry.root);
           return (
             <div className="repository-group" key={entry.root}>
-              <div className={`repository-row ${active ? "active" : ""}`}>
+              <div
+                className={`repository-row ${active ? "active" : ""}`}
+                onContextMenu={(event) => openMenu(event, entry)}
+                onKeyDown={(event) => {
+                  if (
+                    event.key === "ContextMenu" ||
+                    (event.shiftKey && event.key === "F10")
+                  )
+                    openMenu(event, entry);
+                }}
+              >
                 <button
-                  className="repository-open"
-                  title={entry.root}
-                  onClick={() => {
-                    if (browsing && entry.root === snapshot?.root)
-                      toggle(entry.root);
-                    else onSelect(entry.root);
-                  }}
-                  aria-expanded={expanded}
+                  className="repository-toggle"
+                  aria-expanded={open}
+                  aria-label={toggleLabel}
+                  title={toggleLabel}
+                  onClick={() => onToggle(entry.root)}
                 >
-                  {expanded ? (
+                  {open ? (
                     <ChevronDown size={13} />
                   ) : (
                     <ChevronRight size={13} />
                   )}
+                </button>
+                <button
+                  className="repository-open"
+                  title={entry.root}
+                  aria-current={active ? "true" : undefined}
+                  onClick={() => onSelect(entry.root)}
+                >
                   <span>{entry.name}</span>
                 </button>
                 {head && (
                   <SyncCounts divergence={head.divergence} branch={head.name} />
                 )}
-                <button
-                  className="icon-button remove-repository"
-                  onClick={() => onRemove(entry.root)}
-                  aria-label={`Remove ${entry.name} from recents`}
-                  title="Remove from recents. Repository files stay on disk."
-                >
-                  <X size={13} />
-                </button>
               </div>
-              {expanded && snapshot && (
-                <div className="repository-branches">
-                  <button
-                    className="tree-section"
-                    aria-expanded={localOpen}
-                    onClick={() => setLocalOpen(!localOpen)}
-                  >
-                    {localOpen ? (
-                      <ChevronDown size={13} />
-                    ) : (
-                      <ChevronRight size={13} />
-                    )}
-                    <span>Local branches</span>
-                    <span className="count">{local.length}</span>
-                  </button>
-                  {localOpen && (
-                    <div>
-                      {local
-                        .filter(
-                          (branch) =>
-                            matches(branch.name) || matches(entry.name),
-                        )
-                        .map(branchRow)}
-                      {snapshot.head.kind === "unborn" && (
-                        <div className="branch-row unborn">
-                          <GitBranch size={14} />
-                          <span>
-                            {snapshot.head.reference.replace(
-                              /^refs\/heads\//,
-                              "",
-                            )}
-                          </span>
-                          <small>unborn</small>
-                        </div>
-                      )}
-                      {local.length > 0 &&
-                        !local.some(
-                          (branch) =>
-                            matches(branch.name) || matches(entry.name),
-                        ) && (
-                          <p className="tree-hint">
-                            No matching local branches
-                          </p>
-                        )}
-                    </div>
-                  )}
-                  <button
-                    className="tree-section"
-                    aria-expanded={remoteOpen}
-                    onClick={() => setRemoteOpen(!remoteOpen)}
-                  >
-                    {remoteOpen ? (
-                      <ChevronDown size={13} />
-                    ) : (
-                      <ChevronRight size={13} />
-                    )}
-                    <span>Remote branches</span>
-                    <span className="count">{remote.length}</span>
-                  </button>
-                  {remoteOpen && (
-                    <div>
-                      {remote
-                        .filter(
-                          (branch) =>
-                            matches(branch.name) || matches(entry.name),
-                        )
-                        .map(branchRow)}
-                      {remote.length === 0 && (
-                        <p className="tree-hint">
-                          No remote branches found locally
-                        </p>
-                      )}
-                      {remote.length > 0 &&
-                        !remote.some(
-                          (branch) =>
-                            matches(branch.name) || matches(entry.name),
-                        ) && (
-                          <p className="tree-hint">
-                            No matching remote branches
-                          </p>
-                        )}
-                    </div>
-                  )}
-                  {snapshot.remotes.length > 0 && (
-                    <div className="remote-metadata">
-                      {snapshot.remotes.map((remote) => (
-                        <div key={remote.name} title={remote.url}>
-                          {remote.github ? (
-                            <Github size={13} />
-                          ) : (
-                            <Cloud size={13} />
-                          )}
-                          <span>
-                            {remote.github
-                              ? `${remote.github.owner}/${remote.github.repo}`
-                              : remote.name}
-                          </span>
-                          <small>{remote.name}</small>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
+              {open && branches(entry)}
             </div>
           );
         })}
@@ -288,54 +197,101 @@ export function RepositoryTree({
           <p className="tree-hint">No repositories or branches match.</p>
         )}
       </nav>
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          label={`${menu.entry.name} actions`}
+          onClose={(refocus) => {
+            setMenu(null);
+            if (refocus)
+              menu.trigger
+                .querySelector<HTMLElement>(".repository-open")
+                ?.focus();
+          }}
+        >
+          <button
+            role="menuitem"
+            title="Repository files stay on disk."
+            onClick={() => {
+              setMenu(null);
+              onRemove(menu.entry.root);
+            }}
+          >
+            <Trash2 size={14} />
+            <span>Remove</span>
+          </button>
+        </ContextMenu>
+      )}
     </>
   );
 }
 
-function SyncCounts({
-  divergence: { upstream, ahead, behind },
-  branch,
+function ContextMenu({
+  x,
+  y,
+  label,
+  onClose,
+  children,
 }: {
-  divergence: Divergence;
-  branch?: string;
+  x: number;
+  y: number;
+  label: string;
+  onClose: (refocus: boolean) => void;
+  children: ReactNode;
 }) {
-  if (ahead === 0 && behind === 0) return null;
-  const commits = (count: number) =>
-    count === 1 ? "1 commit" : `${count} commits`;
-  const label: string[] = [];
-  const title: string[] = [];
-  if (behind > 0) {
-    label.push(`${behind} to pull`);
-    title.push(`${commits(behind)} to pull from ${upstreamName(upstream)}`);
-  }
-  if (ahead > 0) {
-    label.push(`${ahead} to push`);
-    title.push(
-      behind > 0
-        ? `${commits(ahead)} to push`
-        : `${commits(ahead)} to push to ${upstreamName(upstream)}`,
-    );
-  }
-  const prefix = branch === undefined ? "" : `${branch}: `;
-  return (
-    <span
-      className="sync-counts"
-      role="img"
-      aria-label={prefix + label.join(", ")}
-      title={prefix + title.join(" · ")}
+  const ref = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState({ top: y, left: x });
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
+  useLayoutEffect(() => {
+    const menu = ref.current;
+    if (!menu) return;
+    setPosition({
+      top: Math.max(4, Math.min(y, window.innerHeight - menu.offsetHeight - 4)),
+      left: Math.max(4, Math.min(x, window.innerWidth - menu.offsetWidth - 4)),
+    });
+    menu.querySelector<HTMLElement>("[role=menuitem]")?.focus();
+  }, [x, y]);
+  useEffect(() => {
+    const close = () => onCloseRef.current(false);
+    const outside = (event: PointerEvent) => {
+      if (!ref.current?.contains(event.target as Node)) close();
+    };
+    // Capture so the app's own Escape handling never sees this keypress.
+    const key = (event: KeyboardEvent) => {
+      if (event.key === "Escape" || event.key === "Tab") {
+        event.preventDefault();
+        event.stopPropagation();
+        onCloseRef.current(true);
+      }
+    };
+    window.addEventListener("pointerdown", outside, true);
+    window.addEventListener("keydown", key, true);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    window.addEventListener("blur", close);
+    return () => {
+      window.removeEventListener("pointerdown", outside, true);
+      window.removeEventListener("keydown", key, true);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+      window.removeEventListener("blur", close);
+    };
+  }, []);
+  return createPortal(
+    <div
+      ref={ref}
+      className="context-menu"
+      role="menu"
+      aria-label={label}
+      style={position}
+      onContextMenu={(event) => event.preventDefault()}
     >
-      {behind > 0 && (
-        <span className="incoming">
-          <ArrowDown size={11} />
-          {behind}
-        </span>
-      )}
-      {ahead > 0 && (
-        <span className="outgoing">
-          <ArrowUp size={11} />
-          {ahead}
-        </span>
-      )}
-    </span>
+      {children}
+    </div>,
+    document.body,
   );
 }

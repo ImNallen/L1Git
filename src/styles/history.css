@@ -9,54 +9,6 @@
 .history[hidden] {
   display: none;
 }
-.history-tools {
-  padding: 10px 14px 8px;
-  display: flex;
-  gap: 9px;
-}
-.history-search {
-  height: 32px;
-  border: 1px solid var(--border-control);
-  background: var(--control);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 9px;
-  border-radius: 6px;
-  flex: 1;
-  min-width: 100px;
-  max-width: 500px;
-  color: var(--muted);
-}
-.history-search input {
-  background: none;
-  border: 0;
-  min-width: 0;
-  height: 30px;
-  flex: 1;
-  font-size: 12px;
-}
-.history-summary {
-  height: 27px;
-  min-height: 27px;
-  padding: 0 15px;
-  color: var(--muted);
-  font-size: 10px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 10px;
-  white-space: nowrap;
-}
-.history-summary > span:last-child {
-  color: var(--text-faint);
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.summary-separator {
-  padding: 0 7px;
-  color: var(--text-faint);
-}
 .history-scroll {
   flex: 1;
   min-height: 0;
@@ -238,22 +190,17 @@
   line-height: 1.7;
   margin: 10px auto 18px;
 }
-.history-loading {
-  position: absolute;
-  z-index: 4;
-  inset: 104px 0 0;
-  background: var(--loading-overlay);
+.history-pending {
+  flex: 1;
+  padding: 43px 0 0 254px;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  color: var(--text-body);
-  font-size: 12px;
+  flex-direction: column;
+  gap: 28px;
+  animation: appear 150ms ease-out 200ms both;
 }
-.loading-dot {
-  height: 5px;
-  width: 5px;
-  background: var(--blue);
-  border-radius: 50%;
-  animation: pulse 1s infinite alternate;
+.history-pending span {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--border-control);
+  opacity: 0.6;
 }

@@ -5,7 +5,6 @@ import {
   CloudDownload,
   FastForward,
   FolderGit2,
-  GitBranch,
   Info,
   LoaderCircle,
   PanelLeft,
@@ -13,7 +12,6 @@ import {
   Palette,
   Settings,
   Plus,
-  RefreshCw,
   TriangleAlert,
 } from "lucide-react";
 import { useAppearance } from "./appearance";
@@ -21,23 +19,34 @@ import type { ThemePreference } from "./appearance";
 import { AppearanceSettings } from "./components/AppearanceSettings";
 import { AddRepositoryDialog } from "./components/AddRepositoryDialog";
 import { FetchSettings } from "./components/FetchSettings";
-import { CommitInspector } from "./components/CommitInspector";
+import { CommitInspector, InspectorFrame } from "./components/CommitInspector";
 import { FileDiffPane } from "./components/FileDiffPane";
 import type { DiffStyle } from "./components/FileDiffPane";
-import { History } from "./components/History";
+import { History, HistoryPlaceholder } from "./components/History";
 import { PaneDivider } from "./components/PaneDivider";
 import { RepositoryTree } from "./components/RepositoryTree";
 import { trunkTips } from "./domain/highlight";
 import { readyAdvances } from "./domain/overview";
-import { headLabel } from "./domain/repository";
-import type { Branch, FullRef } from "./domain/repository";
+import type { Branch, FullRef, RepositoryRoot } from "./domain/repository";
+import { useExpandedRepositories } from "./expandedRepositories";
 import { useFetchSettings } from "./fetchSettings";
 import { repositoryWarnings, useOverview } from "./overview";
 import { macNative } from "./repositories";
+import { useRepositoryRefs } from "./useRepositoryRefs";
 import { useWorkspace } from "./useWorkspace";
 
 type AppScreen = "repository" | "settings";
 type SettingsSection = "appearance" | "fetching";
+/**
+ * A branch jump. `pending` waits for the snapshot of `root` to load, then a
+ * new `seq` reveals the branch after the history restores its scroll.
+ */
+type Jump = {
+  root: RepositoryRoot;
+  reference: FullRef;
+  seq: number;
+  pending: boolean;
+};
 const settingsSections = [
   { section: "appearance", label: "Appearance", Icon: Palette },
   { section: "fetching", label: "Fetching", Icon: CloudDownload },
@@ -61,12 +70,8 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
   );
   const [sidebarWidth, setSidebarWidth] = useState(260);
   const [inspectorWidth, setInspectorWidth] = useState(320);
-  const [query, setQuery] = useState("");
   const [diffStyle, setDiffStyle] = useState<DiffStyle>("unified");
-  const [jump, setJump] = useState<{ reference: FullRef; seq: number } | null>(
-    null,
-  );
-  const searchRef = useRef<HTMLInputElement>(null);
+  const [jump, setJump] = useState<Jump | null>(null);
   const sidebarToggleRef = useRef<HTMLButtonElement>(null);
   const inspectorToggleRef = useRef<HTMLButtonElement>(null);
   const settingsRef = useRef<HTMLButtonElement>(null);
@@ -74,17 +79,24 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
     flushSync(() => setScreen("repository"));
     (sidebarOpen ? settingsRef : sidebarToggleRef).current?.focus();
   }, [sidebarOpen]);
-  const { workspace, current, fileDiff, closeFile } = app;
+  const { workspace, current, fileDiff, closeFile, setSelectedOid } = app;
   const fileOpen = fileDiff.kind !== "closed";
-  const busy = workspace.kind === "loading";
+  const busy = workspace.kind === "loading" || workspace.kind === "opening";
   const snapshot = current?.snapshot ?? null;
-  const inspectorVisible = Boolean(snapshot && current && inspectorOpen);
+  const opening = workspace.kind === "opening" ? workspace : null;
+  const shown = snapshot
+    ? { root: snapshot.root, name: snapshot.name }
+    : opening && { root: opening.path, name: opening.name };
+  const expansion = useExpandedRepositories(app.catalog);
+  const branchRefs = useRepositoryRefs(
+    expansion.expanded,
+    snapshot,
+    overviewStore,
+  );
+  const inspectorVisible = Boolean(shown && inspectorOpen);
   const activePath =
-    snapshot?.root ??
-    (workspace.kind === "loading" || workspace.kind === "error"
-      ? workspace.path
-      : null);
-  const openRoot = snapshot?.root ?? null;
+    shown?.root ?? (workspace.kind === "error" ? workspace.path : null);
+  const openRoot = shown?.root ?? null;
   const openRootState = openRoot === null ? null : overview.roots.get(openRoot);
   const openRepository =
     openRootState?.kind === "open"
@@ -101,19 +113,38 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
     () => (snapshot ? trunkTips(snapshot.branches, statuses ?? []) : []),
     [snapshot, statuses],
   );
-  const jumped = jump
-    ? (snapshot?.branches.find(
-        (branch) => branch.reference === jump.reference,
-      ) ?? null)
-    : null;
+  const jumped =
+    jump && !jump.pending && jump.root === snapshot?.root
+      ? (snapshot.branches.find(
+          (branch) => branch.reference === jump.reference,
+        ) ?? null)
+      : null;
   const jumpedUnloaded =
     jumped !== null &&
     snapshot !== null &&
     !snapshot.commits.some((commit) => commit.oid === jumped.oid);
   const refreshRef = useRef(app.refresh);
+  const reloadRefsRef = useRef(branchRefs.reload);
   useEffect(() => {
     refreshRef.current = app.refresh;
+    reloadRefsRef.current = branchRefs.reload;
   });
+  // Commits and branches made outside L1 Git show up when its window regains focus.
+  useEffect(() => {
+    let last = 0;
+    const reread = () => {
+      if (document.hidden || performance.now() - last < 1000) return;
+      last = performance.now();
+      void refreshRef.current();
+      reloadRefsRef.current();
+    };
+    window.addEventListener("focus", reread);
+    document.addEventListener("visibilitychange", reread);
+    return () => {
+      window.removeEventListener("focus", reread);
+      document.removeEventListener("visibilitychange", reread);
+    };
+  }, []);
   useEffect(
     () =>
       overviewStore.onRefsChanged((roots) => {
@@ -122,19 +153,28 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
       }),
     [overviewStore, app.activeRoot],
   );
-  function showRepository(path: string) {
+  function showRepository(root: RepositoryRoot) {
     setScreen("repository");
-    if (path !== snapshot?.root) void app.selectRepository(path);
+    expansion.setExpanded(root, true);
+    if (root !== snapshot?.root) void app.selectRepository(root);
   }
-  function jumpTo(branch: Branch) {
-    setQuery("");
+  function jumpTo(root: RepositoryRoot, branch: Branch) {
     closeFile();
-    if (snapshot?.commits.some((commit) => commit.oid === branch.oid))
-      app.setSelectedOid(branch.oid);
+    const pending = root !== snapshot?.root;
+    if (pending) showRepository(root);
+    else if (snapshot.commits.some((commit) => commit.oid === branch.oid))
+      setSelectedOid(branch.oid);
     setJump((previous) => ({
+      root,
       reference: branch.reference,
       seq: (previous?.seq ?? 0) + 1,
+      pending,
     }));
+  }
+  async function addRepository(path: string, signal: AbortSignal) {
+    const added = await app.addRepository(path, signal);
+    if (added.kind === "opened") expansion.setExpanded(added.root, true);
+    return added.kind === "failed" ? added.problem : null;
   }
   const sidebarToggle = (
     <button
@@ -155,7 +195,7 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
     <button
       ref={inspectorToggleRef}
       className={`icon-button ${inspectorVisible ? "toggled" : ""}`}
-      disabled={!snapshot}
+      disabled={!shown}
       aria-label="Toggle commit inspector"
       title="Toggle commit inspector"
       aria-pressed={inspectorVisible}
@@ -169,9 +209,20 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
   );
 
   useEffect(() => {
-    setQuery("");
-    setJump(null);
-  }, [snapshot?.root]);
+    if (jump === null) return;
+    if (app.activeRoot !== jump.root) setJump(null);
+    else if (jump.pending && snapshot?.root === jump.root) {
+      const branch = snapshot.branches.find(
+        (branch) => branch.reference === jump.reference,
+      );
+      if (
+        branch &&
+        snapshot.commits.some((commit) => commit.oid === branch.oid)
+      )
+        setSelectedOid(branch.oid);
+      setJump({ ...jump, pending: false, seq: jump.seq + 1 });
+    }
+  }, [jump, snapshot, app.activeRoot, setSelectedOid]);
   useEffect(() => {
     function keyboard(event: KeyboardEvent) {
       if (screen === "settings") {
@@ -186,24 +237,7 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
         setAdding(true);
       }
       if (screen !== "repository") return;
-      if (
-        !adding &&
-        (event.metaKey || event.ctrlKey) &&
-        event.key.toLowerCase() === "f" &&
-        searchRef.current
-      ) {
-        event.preventDefault();
-        if (fileOpen) flushSync(closeFile);
-        searchRef.current.focus();
-      }
-      if (!adding && event.key === "Escape") {
-        if (fileOpen) {
-          closeFile();
-        } else {
-          setQuery("");
-          searchRef.current?.blur();
-        }
-      }
+      if (!adding && fileOpen && event.key === "Escape") closeFile();
     }
     window.addEventListener("keydown", keyboard);
     return () => window.removeEventListener("keydown", keyboard);
@@ -241,18 +275,24 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
         <div className="repository-navigation" hidden={screen === "settings"}>
           <RepositoryTree
             entries={app.catalog.entries}
-            snapshot={snapshot}
+            expanded={expansion.expanded}
+            refs={branchRefs.refs}
             activePath={screen === "repository" ? activePath : null}
             highlighted={
-              jumped !== null && jumped.oid === app.selectedOid
-                ? jumped.reference
+              snapshot && jumped !== null && jumped.oid === app.selectedOid
+                ? { root: snapshot.root, reference: jumped.reference }
                 : null
             }
-            browsing={screen === "repository"}
             sync={overview.syncByRoot}
             onSelect={showRepository}
+            onToggle={(root) =>
+              expansion.setExpanded(root, !expansion.expanded.has(root))
+            }
             onJump={jumpTo}
-            onRemove={app.removeRepository}
+            onRemove={(root) => {
+              app.removeRepository(root);
+              expansion.setExpanded(root, false);
+            }}
             onAdd={() => setAdding(true)}
           />
         </div>
@@ -305,48 +345,15 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
             <header className="toolbar" data-tauri-drag-region>
               {screen === "repository" && !sidebarOpen && sidebarToggle}
               <div className="breadcrumb" data-tauri-drag-region>
-                {snapshot ? (
-                  <>
-                    <span className="repository-name" title={snapshot.root}>
-                      {snapshot.name}
-                    </span>
-                    <span className="breadcrumb-slash">/</span>
-                    <GitBranch size={15} />
-                    <span
-                      className={
-                        snapshot.head.kind === "detached"
-                          ? "detached-head"
-                          : "head-name"
-                      }
-                      title="Checked-out HEAD. Selecting a branch shows it in the graph without checkout."
-                    >
-                      {headLabel(snapshot.head)}
-                    </span>
-                  </>
+                {shown ? (
+                  <span className="repository-name" title={shown.root}>
+                    {shown.name}
+                  </span>
                 ) : (
                   <span className="muted">Workspace</span>
                 )}
               </div>
               <div className="toolbar-actions">
-                <button
-                  className="button secondary add-toolbar"
-                  onClick={() => setAdding(true)}
-                  title="Add repository (⌘/Ctrl O)"
-                >
-                  <Plus size={15} />
-                  <span>Add repository</span>
-                </button>
-                {current && (
-                  <button
-                    className="button secondary"
-                    disabled={busy}
-                    onClick={() => void app.refresh()}
-                    title="Reread local Git state. Fetch downloads new commits from remotes."
-                  >
-                    <RefreshCw size={14} className={busy ? "spin" : ""} />
-                    <span>Refresh</span>
-                  </button>
-                )}
                 {openRepository && (
                   <button
                     className="button secondary"
@@ -384,10 +391,12 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
                 {!inspectorVisible && inspectorToggle}
               </div>
             </header>
-            {app.persistenceError && (
+            {(app.persistenceError ?? expansion.persistenceError) && (
               <div className="notice error-notice" role="alert">
                 <TriangleAlert size={14} />
-                <span>{app.persistenceError}</span>
+                <span>
+                  {app.persistenceError ?? expansion.persistenceError}
+                </span>
               </div>
             )}
             {current?.error && (
@@ -416,16 +425,15 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
               </div>
             )}
             <div className="workspace-panes">
-              {snapshot && current ? (
+              {snapshot ? (
                 <>
                   <History
                     snapshot={snapshot}
                     selectedOid={app.selectedOid}
                     revealSeq={jump?.seq ?? 0}
-                    query={query}
-                    onQuery={setQuery}
                     onSelect={app.setSelectedOid}
-                    searchRef={searchRef}
+                    scrollTopOf={app.scrollTopOf}
+                    onScroll={app.rememberScroll}
                     busy={busy}
                     hidden={fileOpen}
                     trunk={trunk}
@@ -441,12 +449,8 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
                     />
                   )}
                 </>
-              ) : workspace.kind === "loading" ? (
-                <div className="workspace-empty" role="status">
-                  <LoaderCircle size={28} className="spin" />
-                  <h1>Opening repository</h1>
-                  <p className="path-label">{workspace.path}</p>
-                </div>
+              ) : opening ? (
+                <HistoryPlaceholder />
               ) : workspace.kind === "error" ? (
                 <div className="workspace-empty">
                   <div className="empty-icon error-icon">
@@ -501,7 +505,7 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
               )}
             </div>
           </div>
-          {snapshot && current && inspectorVisible && (
+          {inspectorVisible && (
             <>
               <PaneDivider
                 label="Resize commit inspector"
@@ -515,17 +519,21 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
                 className="inspector-container"
                 style={{ width: inspectorWidth }}
               >
-                <CommitInspector
-                  state={app.detail}
-                  root={snapshot.root}
-                  selectedOid={app.selectedOid}
-                  snapshot={snapshot}
-                  onSelect={app.setSelectedOid}
-                  selectedFile={fileOpen ? fileDiff.path : null}
-                  onSelectFile={app.openFile}
-                  toggleButton={inspectorToggle}
-                  onRetry={app.retryDetail}
-                />
+                {snapshot ? (
+                  <CommitInspector
+                    state={app.detail}
+                    root={snapshot.root}
+                    selectedOid={app.selectedOid}
+                    snapshot={snapshot}
+                    onSelect={app.setSelectedOid}
+                    selectedFile={fileOpen ? fileDiff.path : null}
+                    onSelectFile={app.openFile}
+                    toggleButton={inspectorToggle}
+                    onRetry={app.retryDetail}
+                  />
+                ) : (
+                  <InspectorFrame toggleButton={inspectorToggle} />
+                )}
               </div>
             </>
           )}
@@ -573,7 +581,7 @@ export function App({ initialTheme }: { initialTheme: ThemePreference }) {
       </main>
       {adding && (
         <AddRepositoryDialog
-          onAdd={app.addRepository}
+          onAdd={addRepository}
           onClose={() => setAdding(false)}
         />
       )}

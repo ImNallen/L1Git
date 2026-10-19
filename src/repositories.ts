@@ -6,6 +6,7 @@ import type { Advance, FetchMode } from "./domain/overview";
 import {
   detailSchema,
   filePatchSchema,
+  refsSchema,
   repositoryErrorSchema,
   snapshotSchema,
 } from "./domain/repository";
@@ -48,6 +49,10 @@ async function call<T>(
 
 export function snapshot(path: string) {
   return call("repository_snapshot", "/api/snapshot", { path }, snapshotSchema);
+}
+
+export function refs(path: RepositoryRoot) {
+  return call("repository_refs", "/api/refs", { path }, refsSchema);
 }
 
 export function commitDetail(path: string, oid: Oid) {

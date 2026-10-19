@@ -8,7 +8,7 @@ pub enum Head {
     Detached { oid: String },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Branch {
     Local {
@@ -74,6 +74,16 @@ pub struct Commit {
 pub struct Squash {
     pub tip: String,
     pub commit: String,
+}
+
+/// The branch list of a repository without its history, for sidebar rows.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryRefs {
+    pub root: String,
+    pub name: String,
+    pub head: Head,
+    pub branches: Vec<Branch>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

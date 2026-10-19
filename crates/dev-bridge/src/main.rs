@@ -1,4 +1,4 @@
-use l1_git_core::{Advance, Coordinator, FetchMode, commit_detail, file_patch, snapshot};
+use l1_git_core::{Advance, Coordinator, FetchMode, commit_detail, file_patch, refs, snapshot};
 use serde::Deserialize;
 use serde_json::json;
 use std::{io::Read, sync::Arc, thread};
@@ -102,6 +102,8 @@ fn handle(mut request: Request, origins: &[String], coordinator: &Coordinator) {
     let result = match request.url() {
         "/api/snapshot" => serde_json::from_slice::<SnapshotRequest>(&bytes)
             .map(|input| snapshot(&input.path).map(|data| json!(data))),
+        "/api/refs" => serde_json::from_slice::<SnapshotRequest>(&bytes)
+            .map(|input| refs(&input.path).map(|data| json!(data))),
         "/api/commit-detail" => serde_json::from_slice::<DetailRequest>(&bytes)
             .map(|input| commit_detail(&input.path, &input.oid).map(|data| json!(data))),
         "/api/file-patch" => serde_json::from_slice::<FilePatchRequest>(&bytes)

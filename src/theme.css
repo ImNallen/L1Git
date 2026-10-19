@@ -61,6 +61,8 @@
   --warning: #d9ad60;
   --success: #34bc90;
   --success-muted: #71b6a0;
+  --success-bg: #11261f;
+  --success-bg-hover: #17352a;
   --deleted: #e3727e;
   --error-text: #daa692;
   --error-bg: #261917;
@@ -73,7 +75,6 @@
   --empty-icon-border: #222b39;
   --empty-icon-text: #7d9fca;
   --scrollbar: #38383e;
-  --loading-overlay: #0a0a0ae8;
   --shadow-subtle: #0002;
   --shadow-control: #0004;
   --shadow-icon: #0003;
@@ -132,6 +133,8 @@
   --warning: #926318;
   --success: #18805e;
   --success-muted: #347a63;
+  --success-bg: #e2f4ec;
+  --success-bg-hover: #d0ecdf;
   --deleted: #ba394c;
   --error-text: #934c36;
   --error-bg: #fff0eb;
@@ -144,7 +147,6 @@
   --empty-icon-border: #d4deeb;
   --empty-icon-text: #4c729e;
   --scrollbar: #c0c0c8;
-  --loading-overlay: #fafafae8;
   --shadow-subtle: #1515250d;
   --shadow-control: #1515251a;
   --shadow-icon: #15152514;

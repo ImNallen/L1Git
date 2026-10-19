@@ -39,10 +39,6 @@
   min-width: 0;
   flex: 1;
 }
-.breadcrumb > svg {
-  color: var(--muted);
-  flex-shrink: 0;
-}
 .repository-name {
   max-width: 180px;
   color: var(--text-icon);
@@ -52,18 +48,6 @@
 }
 .breadcrumb-slash {
   color: var(--text-faint);
-}
-.head-name,
-.detached-head {
-  min-width: 45px;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  overflow: hidden;
-  font-size: 12px;
-  font-weight: 550;
-}
-.detached-head {
-  color: var(--warning);
 }
 .toolbar-actions {
   display: flex;
@@ -231,18 +215,9 @@ kbd {
     transform: rotate(360deg);
   }
 }
-@keyframes pulse {
-  to {
-    opacity: 0.25;
-  }
-}
-@media (max-width: 1200px) {
-  .add-toolbar span {
-    display: none;
-  }
-  .add-toolbar {
-    width: 30px;
-    padding: 0;
+@keyframes appear {
+  from {
+    opacity: 0;
   }
 }
 @media (max-width: 1099px) {
@@ -259,12 +234,8 @@ kbd {
   .repository-workspace > .pane-divider {
     display: none;
   }
-  .history-summary > span:last-child {
-    display: none;
-  }
 }
 @media (max-width: 800px) {
-  .repository-name,
   .breadcrumb-slash {
     display: none;
   }
@@ -272,11 +243,6 @@ kbd {
     gap: 7px;
     padding-right: 9px;
     padding-left: 9px;
-  }
-  .history-tools {
-    gap: 6px;
-    padding-left: 9px;
-    padding-right: 9px;
   }
   .toolbar-actions .button span {
     display: none;
@@ -287,8 +253,7 @@ kbd {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .spin,
-  .loading-dot {
+  .spin {
     animation: none;
   }
 }
@@ -408,4 +373,12 @@ kbd {
   .settings-page {
     padding: 36px 28px;
   }
+}
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }

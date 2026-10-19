@@ -1,6 +1,6 @@
 use l1_git_core::{
-    Branch, ChangeStatus, DiffBase, ErrorKind, FilePatch, HISTORY_LIMIT, Head, Squash, Tag,
-    Worktree, commit_detail, file_patch, snapshot,
+    Branch, ChangeStatus, DiffBase, ErrorKind, FilePatch, HISTORY_LIMIT, Head, RepositoryRefs,
+    Squash, Tag, Worktree, commit_detail, file_patch, refs, snapshot,
 };
 use std::{
     fs,
@@ -139,6 +139,70 @@ fn reads_local_remote_and_tracking_refs_and_skips_symbolic_remote_head() {
     assert!(matches!(result.head, Head::Attached { oid: head, .. } if head == oid));
     assert!(result.branches.iter().any(|b| matches!(b, Branch::Local { reference, upstream: Some(upstream), .. } if reference == "refs/heads/main" && upstream == "refs/remotes/team/origin/main")));
     assert!(result.branches.iter().any(|b| matches!(b, Branch::Remote { name, remote, .. } if name == "team/origin/feat/with/slashes" && remote == "team/origin")));
+}
+
+#[test]
+fn reads_refs_without_history_matching_the_snapshot() {
+    let fixture = Fixture::new();
+    let oid = fixture.commit("first", "one", "initial");
+    let remote = fixture._directory.path().join("remote.git");
+    fs::create_dir(&remote).unwrap();
+    git(&remote, &["init", "--bare", "--initial-branch=main"]);
+    git(&fixture.repo, &["branch", "feat/x"]);
+    git(
+        &fixture.repo,
+        &["remote", "add", "origin", remote.to_str().unwrap()],
+    );
+    git(&fixture.repo, &["push", "-u", "origin", "main"]);
+    let child = fixture.repo.join("subfolder");
+    fs::create_dir(&child).unwrap();
+    let result = refs(child.to_str().unwrap()).unwrap();
+    let root = fixture.repo.canonicalize().unwrap();
+    assert_eq!(
+        result,
+        RepositoryRefs {
+            root: root.to_str().unwrap().into(),
+            name: "repo with spaces".into(),
+            head: Head::Attached {
+                reference: "refs/heads/main".into(),
+                oid: oid.clone(),
+            },
+            branches: vec![
+                Branch::Local {
+                    reference: "refs/heads/feat/x".into(),
+                    name: "feat/x".into(),
+                    oid: oid.clone(),
+                    upstream: None,
+                },
+                Branch::Local {
+                    reference: "refs/heads/main".into(),
+                    name: "main".into(),
+                    oid: oid.clone(),
+                    upstream: Some("refs/remotes/origin/main".into()),
+                },
+                Branch::Remote {
+                    reference: "refs/remotes/origin/main".into(),
+                    name: "origin/main".into(),
+                    oid: oid.clone(),
+                    remote: "origin".into(),
+                },
+            ],
+        }
+    );
+    let snapshot = snapshot(fixture.path()).unwrap();
+    assert_eq!(
+        (
+            snapshot.root,
+            snapshot.name,
+            snapshot.head,
+            snapshot.branches
+        ),
+        (result.root, result.name, result.head, result.branches)
+    );
+    assert!(matches!(
+        refs(remote.to_str().unwrap()).unwrap_err().kind,
+        ErrorKind::BareRepository
+    ));
 }
 
 #[test]
