@@ -167,18 +167,17 @@ export function customVariant(theme: CustomThemeVariant): ThemeVariant {
 /** A draft that reproduces `variant`, keeping only the colours its seeds don't already derive. */
 export function draftOf(variant: ThemeVariant, name: string): ThemeDraft {
   const { appearance, swatch, palette } = variant;
-  const base = derivePalette(appearance, swatch.background, swatch.accent);
-  const foreground =
-    palette.foreground !== base.foreground ? palette.foreground : undefined;
-  const derived = foreground
-    ? derivePalette(appearance, swatch.background, swatch.accent, foreground)
-    : base;
-  const colors: ThemeColors = { ...swatch };
+  let colors: Palette = { ...palette };
+  // A colour equal to what the rest derive can go: every colour it feeds then derives the same.
   for (const token of TOKEN_NAMES) {
-    const value = palette[token];
-    if (value && value !== derived[token]) colors[token] = value;
+    const value = colors[token];
+    if (!value || token === "background" || token === "accent") continue;
+    const rest = { ...colors };
+    delete rest[token];
+    if (completePalette(appearance, { ...rest, ...swatch })[token] === value)
+      colors = rest;
   }
-  return { name, appearance, colors };
+  return { name, appearance, colors: { ...colors, ...swatch } };
 }
 
 export function customFamily(theme: CustomTheme): ThemeFamily | null {

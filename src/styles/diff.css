@@ -12,6 +12,10 @@
 :root[data-palette] .file-diff diffs-container {
   --diffs-bg: var(--canvas);
   --diffs-fg: var(--text-strong);
+  /* Pierre seeds these from the theme's terminal.ansiGreen and friends, which a CSS-variable theme leaves as near-transparent placeholders. */
+  --diffs-addition-color-override: var(--success);
+  --diffs-deletion-color-override: var(--deleted);
+  --diffs-modified-color-override: var(--warning);
   background-color: var(--diffs-bg);
   color: var(--diffs-fg);
 }

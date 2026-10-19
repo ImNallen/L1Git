@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { ArrowLeft, FileX2, LoaderCircle, TriangleAlert } from "lucide-react";
 import { parsePatchFiles } from "@pierre/diffs";
 import { FileDiff, Virtualizer } from "@pierre/diffs/react";
+import { diffTheme } from "../themes/diffTheme";
 import type { Appearance } from "../themes/palette";
 import type { FileDiffState } from "../useWorkspace";
 
@@ -11,6 +12,8 @@ type Props = {
   state: Exclude<FileDiffState, { kind: "closed" }>;
   diffStyle: DiffStyle;
   theme: Appearance;
+  /** Whether the theme paints its own palette, which L1 does not. */
+  painted: boolean;
   onDiffStyle: (style: DiffStyle) => void;
   onBack: () => void;
   onRetry: () => void;
@@ -20,6 +23,7 @@ export function FileDiffPane({
   state,
   diffStyle,
   theme,
+  painted,
   onDiffStyle,
   onBack,
   onRetry,
@@ -77,6 +81,7 @@ export function FileDiffPane({
             patch={state.patch.patch}
             diffStyle={diffStyle}
             theme={theme}
+            painted={painted}
           />
         </>
       ) : (
@@ -97,10 +102,12 @@ function Patch({
   patch,
   diffStyle,
   theme,
+  painted,
 }: {
   patch: string;
   diffStyle: DiffStyle;
   theme: Appearance;
+  painted: boolean;
 }) {
   const files = useMemo(
     () => parsePatchFiles(patch).flatMap((parsed) => parsed.files),
@@ -109,12 +116,12 @@ function Patch({
   const options = useMemo(
     () =>
       ({
-        theme: theme === "dark" ? "pierre-dark" : "pierre-light",
+        theme: diffTheme(theme, painted),
         themeType: theme,
         diffStyle,
         disableFileHeader: true,
       }) as const,
-    [diffStyle, theme],
+    [diffStyle, theme, painted],
   );
   if (files.every((file) => file.hunks.length === 0))
     return (

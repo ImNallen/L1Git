@@ -73,10 +73,99 @@ it("maps a VS Code theme onto L1 Git tokens, flattening translucent surfaces ont
             graphLane3: "#f1fa8c",
             graphLane4: "#50fa7b",
             graphLane6: "#8be9fd",
+            syntaxKeyword: "#ff79c6",
+            syntaxString: "#f1fa8c",
+            syntaxStringExpression: "#f1fa8c",
+            syntaxComment: "#6272a4",
           },
         },
       ],
     },
+  });
+});
+
+it("reads syntax colours from the last TextMate rule naming each scope, flattening alpha onto the background", () => {
+  const theme = asVsCodeTheme({
+    colors: { "editor.background": "#000000" },
+    tokenColors: [
+      { scope: "keyword, storage.type", settings: { foreground: "#ff0000" } },
+      { scope: "keyword.control", settings: { foreground: "#00ff00" } },
+      { scope: ["keyword"], settings: { foreground: "#0000ff" } },
+      { scope: "comment", settings: { fontStyle: "italic" } },
+      { scope: "comment", settings: { foreground: "#ffffff80" } },
+      { scope: "constant.numeric", settings: { foreground: "#ffb86c" } },
+    ],
+  });
+  expect(theme && vsCodeThemeToDraft(theme, "x").colors).toEqual({
+    background: "#000000",
+    accent: "#3979ce",
+    syntaxKeyword: "#0000ff",
+    syntaxConstant: "#ffb86c",
+    syntaxComment: "#808080",
+  });
+});
+
+it("reads a syntax colour from a narrower or compound scope when no rule names the scope itself", () => {
+  const theme = asVsCodeTheme({
+    colors: { "editor.background": "#000000" },
+    tokenColors: [
+      { scope: "keyword.control", settings: { foreground: "#ff0000" } },
+      { scope: "keyword.operator", settings: { foreground: "#00ff00" } },
+      { scope: "source.js string", settings: { foreground: "#ffff00" } },
+      { scope: "comment.line", settings: { foreground: "#888888" } },
+      {
+        scope: "punctuation.definition.string",
+        settings: { foreground: "#ff00ff" },
+      },
+    ],
+  });
+  expect(theme && vsCodeThemeToDraft(theme, "x").colors).toEqual({
+    background: "#000000",
+    accent: "#3979ce",
+    syntaxKeyword: "#00ff00",
+    syntaxString: "#ffff00",
+    syntaxStringExpression: "#ffff00",
+    syntaxComment: "#888888",
+  });
+});
+
+it("prefers a rule naming the scope over a later compound or narrower one, as Dracula's resets need", () => {
+  const theme = asVsCodeTheme({
+    colors: { "editor.background": "#000000" },
+    tokenColors: [
+      { scope: "string", settings: { foreground: "#f1fa8c" } },
+      { scope: "constant", settings: { foreground: "#bd93f9" } },
+      {
+        scope: [
+          "meta.scope.for-loop.shell string",
+          "constant.language.empty-list.haskell",
+        ],
+        settings: { foreground: "#f8f8f2" },
+      },
+    ],
+  });
+  expect(theme && vsCodeThemeToDraft(theme, "x").colors).toEqual({
+    background: "#000000",
+    accent: "#3979ce",
+    syntaxString: "#f1fa8c",
+    syntaxStringExpression: "#f1fa8c",
+    syntaxConstant: "#bd93f9",
+  });
+});
+
+it("colours quoted strings, which Shiki paints as string expressions, with the theme's string rule", () => {
+  const theme = asVsCodeTheme({
+    colors: { "editor.background": "#000000" },
+    tokenColors: [
+      { scope: "string", settings: { foreground: "#9ece6a" } },
+      { scope: "string.regexp", settings: { foreground: "#b4f9f8" } },
+    ],
+  });
+  expect(theme && vsCodeThemeToDraft(theme, "x").colors).toEqual({
+    background: "#000000",
+    accent: "#3979ce",
+    syntaxString: "#9ece6a",
+    syntaxStringExpression: "#9ece6a",
   });
 });
 
@@ -159,7 +248,7 @@ it("skips a fully transparent colour, which VS Code themes use to hide an elemen
   });
 });
 
-it("lets an including theme override the colours it includes", () => {
+it("lets an including theme override the colours and syntax rules it includes", () => {
   const parent = asVsCodeTheme({
     name: "Base",
     colors: {
@@ -167,11 +256,16 @@ it("lets an including theme override the colours it includes", () => {
       "button.background": "#ff0000",
       "terminal.ansiGreen": "#00cc00",
     },
+    tokenColors: [
+      { scope: "keyword", settings: { foreground: "#cc00cc" } },
+      { scope: "string", settings: { foreground: "#ffff00" } },
+    ],
   });
   const child = asVsCodeTheme({
     name: "Child",
     include: "./base.json",
     colors: { "button.background": "#00ff00" },
+    tokenColors: [{ scope: "string", settings: { foreground: "#00ffff" } }],
   });
   const merged =
     parent &&
@@ -185,6 +279,9 @@ it("lets an including theme override the colours it includes", () => {
       accent: "#00ff00",
       success: "#00cc00",
       graphLane4: "#00cc00",
+      syntaxKeyword: "#cc00cc",
+      syntaxString: "#00ffff",
+      syntaxStringExpression: "#00ffff",
     },
   });
 });
