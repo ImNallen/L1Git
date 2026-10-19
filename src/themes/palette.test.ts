@@ -7,8 +7,11 @@ import {
   derivePalette,
   LANES,
   MAX_FIT_DISTANCE,
+  STYLESHEET_TOKENS,
+  SYNTAX_TOKENS,
   TOKENS,
   type Appearance,
+  type SyntaxToken,
 } from "./palette";
 import { stylesheetPalettes } from "./stylesheet";
 
@@ -20,7 +23,9 @@ describe.each(["light", "dark"] as const)("the %s recipes", (appearance) => {
   const css = stylesheet[appearance];
 
   it("cover every colour theme.css defines", () => {
-    expect(Object.values(TOKENS).sort()).toEqual(Object.keys(css).sort());
+    expect(Object.values(STYLESHEET_TOKENS).sort()).toEqual(
+      Object.keys(css).sort(),
+    );
   });
 
   it("derive theme.css from its own background, accent, and text", () => {
@@ -30,14 +35,16 @@ describe.each(["light", "dark"] as const)("the %s recipes", (appearance) => {
       css["--primary-bg"] ?? "",
       css["--text"] ?? "",
     );
-    const misfits = Object.entries(TOKENS).flatMap(([token, name]) => {
-      const [got, want] = [
-        parseHex(derived[token as keyof typeof TOKENS]),
-        parseHex(css[name] ?? ""),
-      ];
-      const d = got && want ? distance(got, want) : Infinity;
-      return d > MAX_FIT_DISTANCE ? [`${name} ${d.toFixed(4)}`] : [];
-    });
+    const misfits = Object.entries(STYLESHEET_TOKENS).flatMap(
+      ([token, name]) => {
+        const [got, want] = [
+          parseHex(derived[token as keyof typeof TOKENS]),
+          parseHex(css[name] ?? ""),
+        ];
+        const d = got && want ? distance(got, want) : Infinity;
+        return d > MAX_FIT_DISTANCE ? [`${name} ${d.toFixed(4)}`] : [];
+      },
+    );
     expect(
       misfits,
       "theme.css and the recipes disagree; rerun node scripts/fit-theme-palette.mjs",
@@ -229,4 +236,30 @@ it("washes the background toward the status colour a theme brings", () => {
     "#344d45",
     "#3a5f4c",
   ]);
+});
+
+it.each(derived.map((v) => [v.id, v.palette] as const))(
+  "keeps %s code readable on the diff, comments at 3:1 and the rest at 4.5:1",
+  (_, p) => {
+    for (const surface of [p.background, p.panelRaised])
+      for (const token of Object.keys(SYNTAX_TOKENS) as SyntaxToken[])
+        expect(ratio(p[token], surface)).toBeGreaterThanOrEqual(
+          token === "syntaxComment" ? 3 : 4.5,
+        );
+  },
+);
+
+it("colours keywords with the accent and turns the rest of the code with it", () => {
+  const grove = variantPalette("grove-dark");
+  const ember = variantPalette("ember-light");
+  expect([
+    grove.syntaxKeyword,
+    grove.syntaxString,
+    grove.syntaxComment,
+  ]).toEqual(["#57c08e", "#df9d53", "#787d7b"]);
+  expect([
+    ember.syntaxKeyword,
+    ember.syntaxString,
+    ember.syntaxComment,
+  ]).toEqual(["#993e00", "#774990", "#706e6c"]);
 });

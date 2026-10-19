@@ -12,7 +12,8 @@ import { FOREGROUND_MIX, RECIPES } from "./recipes.generated";
 
 export type Appearance = "light" | "dark";
 
-export const TOKENS = {
+/** The colours theme.css defines for L1, which the fit script derives recipes for. */
+export const STYLESHEET_TOKENS = {
   background: "--canvas",
   sidebar: "--sidebar",
   panel: "--panel",
@@ -84,7 +85,23 @@ export const TOKENS = {
   graphLane6: "--graph-lane-6",
 } as const;
 
-export type Token = keyof typeof TOKENS;
+/** Code colours read by the diff's CSS-variable syntax theme. L1 highlights with Pierre's themes, so theme.css has none. */
+export const SYNTAX_TOKENS = {
+  syntaxKeyword: "--syntax-keyword",
+  syntaxFunction: "--syntax-function",
+  syntaxString: "--syntax-string",
+  syntaxStringExpression: "--syntax-string-expression",
+  syntaxConstant: "--syntax-constant",
+  syntaxParameter: "--syntax-parameter",
+  syntaxPunctuation: "--syntax-punctuation",
+  syntaxComment: "--syntax-comment",
+} as const;
+
+export const TOKENS = { ...STYLESHEET_TOKENS, ...SYNTAX_TOKENS };
+
+export type StylesheetToken = keyof typeof STYLESHEET_TOKENS;
+export type SyntaxToken = keyof typeof SYNTAX_TOKENS;
+export type Token = StylesheetToken | SyntaxToken;
 
 // Shadows and the backdrop are painted over other colours, so they keep their alpha; every other token is opaque.
 export const TRANSLUCENT: ReadonlySet<Token> = new Set([
@@ -245,7 +262,33 @@ function mapRecord<K extends string, A, B>(
   return out;
 }
 
-const COMPILED = mapRecord(RECIPES, (table) => mapRecord(table, recipe));
+// Hue offsets follow the lanes', so keywords take the accent and strings sit where lane 4 does.
+const SYNTAX_RECIPES: Record<Appearance, Record<SyntaxToken, RecipeSpec>> = {
+  dark: {
+    syntaxKeyword: ["tone", 0.8, 1],
+    syntaxFunction: ["hue", 37, 0.84, 0.12],
+    syntaxString: ["hue", -93, 0.82, 0.12],
+    syntaxStringExpression: ["hue", -45, 0.86, 0.11],
+    syntaxConstant: ["hue", -172, 0.88, 0.12],
+    syntaxParameter: ["hue", 93, 0.84, 0.11],
+    syntaxPunctuation: ["ink", 0.75],
+    syntaxComment: ["toward", "muted", 1],
+  },
+  light: {
+    syntaxKeyword: ["tone", 0.75, 1],
+    syntaxFunction: ["hue", 37, 0.74, 0.13],
+    syntaxString: ["hue", -93, 0.74, 0.12],
+    syntaxStringExpression: ["hue", -45, 0.76, 0.1],
+    syntaxConstant: ["hue", -172, 0.76, 0.12],
+    syntaxParameter: ["hue", 93, 0.74, 0.13],
+    syntaxPunctuation: ["ink", 0.8],
+    syntaxComment: ["toward", "muted", 1],
+  },
+};
+
+const COMPILED = mapRecord(RECIPES, (table, appearance) =>
+  mapRecord({ ...table, ...SYNTAX_RECIPES[appearance] }, recipe),
+);
 
 /** Callers pass validated hex; an unparsable seed reads as black. */
 export function derivePalette(

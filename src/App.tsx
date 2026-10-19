@@ -458,6 +458,9 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                       state={fileDiff}
                       diffStyle={diffStyle}
                       theme={appearance.variant.appearance}
+                      painted={
+                        Object.keys(appearance.variant.palette).length > 0
+                      }
                       onDiffStyle={setDiffStyle}
                       onBack={closeFile}
                       onRetry={() => app.openFile(fileDiff.path)}
