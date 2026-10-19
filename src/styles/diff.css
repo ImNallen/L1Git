@@ -8,6 +8,16 @@
   --diffs-font-size: 12px;
   --diffs-header-font-family: "Inter Variable", Inter, sans-serif;
 }
+/* Under a painted theme the diff sits where L1's does: on the canvas in dark, on raised panels in light. */
+:root[data-palette] .file-diff diffs-container {
+  --diffs-bg: var(--canvas);
+  --diffs-fg: var(--text-strong);
+  background-color: var(--diffs-bg);
+  color: var(--diffs-fg);
+}
+:root[data-palette][data-theme="light"] .file-diff diffs-container {
+  --diffs-bg: var(--panel-raised);
+}
 .file-diff-toolbar {
   display: flex;
   align-items: center;
