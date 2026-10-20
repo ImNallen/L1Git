@@ -133,7 +133,8 @@ function GraphCell({
 function ChangesCell({ stats }: { stats: LineStats | undefined }) {
   if (!stats) return <td className="changes-cell" />;
   const { added, deleted } = stats;
-  const label = `${added} lines added, ${deleted} lines deleted`;
+  const lines = (count: number) => `${count} line${count === 1 ? "" : "s"}`;
+  const label = `${lines(added)} added, ${lines(deleted)} deleted`;
   return (
     <td className="changes-cell" aria-label={label} title={label}>
       <span className="change-stat added">+{added.toLocaleString()}</span>
