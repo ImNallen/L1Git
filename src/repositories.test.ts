@@ -106,6 +106,14 @@ describe("bridge transport", () => {
     );
   });
 
+  it("points at pnpm dev for a JSON 400 without an error field", async () => {
+    const { refs } = await load(false);
+    reply(400, { message: "nope" });
+    await expect(refs(root)).rejects.toThrow(
+      "The development bridge rejected the request. Check that pnpm dev is running on this port.",
+    );
+  });
+
   it("points at pnpm dev for a 400 that did not come from the bridge", async () => {
     const { refs } = await load(false);
     fetch.mockResolvedValueOnce(

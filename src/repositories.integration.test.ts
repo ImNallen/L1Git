@@ -377,32 +377,29 @@ describe("real Rust transport contract", () => {
       await rejected({ op: "notAnOperation", path: fixture.repository }),
     ).toEqual({
       status: 400,
-      error: expect.stringContaining("unknown variant `notAnOperation`"),
+      error:
+        "unknown variant `notAnOperation`, expected one of `snapshot`, `refs`, `commitDetail`, `lineStats`, `filePatch`, `overview`, `fastForward` at line 1 column 22",
     });
     expect(
       await rejected({ op: "commitDetail", path: fixture.repository }),
-    ).toEqual({
-      status: 400,
-      error: expect.stringContaining("missing field `oid`"),
-    });
+    ).toEqual({ status: 400, error: "missing field `oid`" });
     expect(
       (await post({ path: fixture.repository }, origin, "/api/snapshot"))
         .status,
     ).toBe(404);
     expect(
-      (await post({ op: "snapshot", path: fixture.repository, extra: 1 }))
-        .status,
-    ).toBe(400);
-    for (const operation of ["snapshot", "refs"])
-      expect(
-        (
-          await post({
-            op: operation,
-            path: fixture.repository,
-            unexpected: true,
-          })
-        ).status,
-      ).toBe(400);
+      await rejected({ op: "snapshot", path: fixture.repository, extra: 1 }),
+    ).toEqual({ status: 400, error: "unknown field `extra`, expected `path`" });
+    expect(
+      await rejected({
+        op: "refs",
+        path: fixture.repository,
+        unexpected: true,
+      }),
+    ).toEqual({
+      status: 400,
+      error: "unknown field `unexpected`, expected `path`",
+    });
   });
 });
 
@@ -567,15 +564,28 @@ describe("real Rust fetch and fast-forward contract", () => {
   });
 
   it("rejects other origins and unexpected fields on fetch and fast-forward", async () => {
-    const bodies = [
-      { op: "overview", path: fixture.sync.repository, mode: "local" },
-      { op: "fastForward", path: fixture.sync.repository, advances: [] },
+    const cases = [
+      {
+        body: { op: "overview", path: fixture.sync.repository, mode: "local" },
+        error: "unknown field `unexpected`, expected `path` or `mode`",
+      },
+      {
+        body: {
+          op: "fastForward",
+          path: fixture.sync.repository,
+          advances: [],
+        },
+        error: "unknown field `unexpected`, expected `path` or `advances`",
+      },
     ];
-    for (const body of bodies) {
+    for (const { body, error } of cases) {
       const foreign = await post(body, "https://example.test");
       expect(foreign.status).toBe(403);
       expect(foreign.headers.get("access-control-allow-origin")).toBeNull();
-      expect((await post({ ...body, unexpected: true })).status).toBe(400);
+      expect(await rejected({ ...body, unexpected: true })).toEqual({
+        status: 400,
+        error,
+      });
     }
     expect(
       (
