@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { GitStatus } from "@pierre/trees";
 import { FileTree, useFileTree } from "@pierre/trees/react";
 import {
@@ -29,8 +29,9 @@ export function ChangedFileTree({ files, selectedPath, onSelectFile }: Props) {
   useEffect(() => {
     onSelectFileRef.current = onSelectFile;
   });
+  const [preparedInput] = useState(() => changedFileTreeInput(files));
   const { model } = useFileTree({
-    preparedInput: changedFileTreeInput(files),
+    preparedInput,
     gitStatus: files.map((file) => ({
       path: file.path,
       status: changeStatuses[file.status].gitStatus,

@@ -397,7 +397,7 @@ export function History({
 
   useEffect(() => {
     trail.current = null;
-  }, [snapshot]);
+  }, [snapshot.root]);
   useEffect(() => {
     if (trail.current?.end !== selectedOid) trail.current = null;
   }, [selectedOid]);

@@ -2,41 +2,48 @@ export type ReadOutcome<Value> =
   | { ok: true; value: Value }
   | { ok: false; error: unknown };
 
-/**
- * Reads only the newest wanted key, one read at a time. A read that runs past
- * `stallMs` stops holding the queue, so a hung read cannot block later keys.
- * `deliver` sees an outcome only while its key is still the newest.
- */
+type Read<Key> = { key: Key; stalled: boolean };
+
 export function latestReader<Key, Value>({
   read,
   deliver,
   same,
   stallMs,
+  maxReads,
 }: {
   read: (key: Key) => Promise<Value>;
   deliver: (key: Key, outcome: ReadOutcome<Value>) => void;
   same: (left: Key, right: Key) => boolean;
   stallMs: number;
+  maxReads: number;
 }): { want: (key: Key | null) => void } {
   let newest: Key | null = null;
-  let settled: Key | null = null;
-  let running: { key: Key; stalled: boolean } | null = null;
+  let settled = false;
+  let latest: Read<Key> | null = null;
+  const running = new Set<Read<Key>>();
 
   function pump() {
     const key = newest;
-    if (key === null || (settled !== null && same(settled, key))) return;
-    if (running && (same(running.key, key) || !running.stalled)) return;
-    const current = { key, stalled: false };
-    running = current;
+    if (key === null || settled) return;
+    const newestInFlight =
+      latest !== null && running.has(latest) && same(latest.key, key);
+    const oneStillWorking = [...running].some((current) => !current.stalled);
+    const atCap = running.size >= maxReads;
+    if (newestInFlight || oneStillWorking || atCap) return;
+    const current: Read<Key> = { key, stalled: false };
+    latest = current;
+    running.add(current);
     const timer = setTimeout(() => {
       current.stalled = true;
       pump();
     }, stallMs);
     const finish = (outcome: ReadOutcome<Value>) => {
       clearTimeout(timer);
-      if (running === current) running = null;
-      if (newest !== null && same(newest, key)) {
-        settled = key;
+      running.delete(current);
+      const stillWanted =
+        current === latest && newest !== null && same(newest, key);
+      if (stillWanted) {
+        settled = true;
         deliver(key, outcome);
       }
       pump();
@@ -50,7 +57,7 @@ export function latestReader<Key, Value>({
   return {
     want(key) {
       newest = key;
-      settled = null;
+      settled = false;
       pump();
     },
   };

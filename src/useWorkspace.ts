@@ -244,6 +244,7 @@ export function useWorkspace() {
         ),
       same: (left, right) => left.root === right.root && left.oid === right.oid,
       stallMs: 1000,
+      maxReads: 2,
     }),
   );
 
