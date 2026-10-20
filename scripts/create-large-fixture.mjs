@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -15,23 +16,37 @@ const root = process.argv[2]
 if (process.argv[2] && existsSync(root))
   throw new Error(`Destination already exists: ${root}`);
 mkdirSync(root, { recursive: true });
+process.on("exit", (code) => {
+  if (code !== 0) rmSync(root, { recursive: true, force: true });
+});
 const repository = join(root, "l1-large");
 const worktree = join(root, "l1-large-worktree");
-const env = Object.fromEntries(
-  Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")),
-);
+const env = {
+  ...Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")),
+  ),
+  GIT_CONFIG_GLOBAL: "/dev/null",
+  GIT_CONFIG_NOSYSTEM: "1",
+};
 function git(path, args, input) {
   const result = spawnSync("git", ["-C", path, ...args], {
     encoding: "utf8",
     env,
     input,
   });
-  if (result.status !== 0) throw new Error(result.stderr || "Git failed");
+  if (result.error) throw result.error;
+  if (result.status !== 0)
+    throw new Error(
+      `git ${args[0]} ${result.signal ? `was killed by ${result.signal}` : `exited with ${result.status}`}\n${result.stderr}`,
+    );
 }
 
 const totalCommits = 60_000;
 const mergeEvery = 40;
 const tagCount = 50;
+const hotEvery = 100;
+const hotLines = 400;
+const oldTipPosition = 1_000;
 const areas = ["graph", "sidebar", "inspector", "diff", "fetch"];
 const kinds = ["feat", "fix", "chore", "perf"];
 const authors = [
@@ -47,11 +62,13 @@ const authors = [
 const startTime = 1_700_000_000;
 const minutes = 60;
 
-const localBranches = Array.from({ length: 199 }, (_, i) => {
+const topicBranches = Array.from({ length: 198 }, (_, i) => {
   const kind = kinds[i % kinds.length];
   const area = areas[Math.floor(i / kinds.length) % areas.length];
   return `${kind}/${area}/topic-${String(i + 1).padStart(3, "0")}`;
 });
+const oldTipBranch = "archive/old-tip";
+const localBranches = [...topicBranches, oldTipBranch];
 const upstreamBranches = Array.from(
   { length: 200 },
   (_, i) =>
@@ -108,6 +125,13 @@ function editModule(position) {
     `export const module = "${path}";\nexport const revisions = [\n${lines.join("\n")}\n];\n`,
   ];
 }
+const hotPath = "src/hot/history.ts";
+const hot = Array.from({ length: hotLines }, (_, line) => `  [${line}, 0],`);
+function editHot(position) {
+  const line = (position / hotEvery) % hotLines;
+  hot[line] = `  [${line}, ${position}],`;
+  return [hotPath, `export const history = [\n${hot.join("\n")}\n];\n`];
+}
 
 const mainMarks = [];
 const mainTimes = [];
@@ -141,6 +165,7 @@ while (mainMarks.length + topics < mainlineTarget) {
   } else {
     const files = [editModule(position)];
     if (position === 0) files.push(["README.md", "# L1 large fixture\n"]);
+    if (position % hotEvery === 0) files.push(editHot(position));
     parent = commit({
       ref: "refs/heads/main",
       time,
@@ -154,22 +179,23 @@ while (mainMarks.length + topics < mainlineTarget) {
 }
 pointRef("refs/remotes/origin/main", parent);
 
-const bases = localBranches.length + upstreamBranches.length;
 const firstBase = Math.floor(mainMarks.length / 2);
-const baseStep = Math.floor((mainMarks.length - firstBase - 1) / bases);
-function branchCommit(ref, name, slot) {
-  const position = firstBase + slot * baseStep;
-  const tip = commit({
+const baseStep = Math.floor(
+  (mainMarks.length - firstBase) / (2 * upstreamBranches.length),
+);
+function branchCommit(ref, name, position) {
+  return commit({
     ref,
     time: mainTimes[position] + minutes,
     subject: `wip(${name.split("/")[1]}): start ${name}`,
     from: mainMarks[position],
     files: [[`changes/${name}.md`, `# ${name}\n\nBranched at ${position}.\n`]],
   });
-  return { position, tip };
 }
 localBranches.forEach((name, i) => {
-  const { position, tip } = branchCommit(`refs/heads/${name}`, name, 2 * i);
+  const position =
+    name === oldTipBranch ? oldTipPosition : firstBase + 2 * i * baseStep;
+  const tip = branchCommit(`refs/heads/${name}`, name, position);
   const originRef = `refs/remotes/origin/${name}`;
   const state = originState(i);
   if (state === "synced") pointRef(originRef, tip);
@@ -184,7 +210,11 @@ localBranches.forEach((name, i) => {
     });
 });
 upstreamBranches.forEach((name, i) =>
-  branchCommit(`refs/remotes/upstream/${name}`, name, 2 * i + 1),
+  branchCommit(
+    `refs/remotes/upstream/${name}`,
+    name,
+    firstBase + (2 * i + 1) * baseStep,
+  ),
 );
 
 for (let i = 0; i < tagCount; i += 1) {
@@ -201,6 +231,7 @@ git(repository, [
   "init",
   "--quiet",
   "--object-format=sha1",
+  "--ref-format=files",
   "--initial-branch=main",
 ]);
 git(repository, ["fast-import", "--quiet", "--done"], chunks.join(""));
