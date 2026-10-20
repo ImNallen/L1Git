@@ -154,6 +154,70 @@ pub struct LineStats {
     pub deleted: u64,
 }
 
+/// The uncommitted changes of one worktree, in Git's path order.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorktreeStatus {
+    pub root: String,
+    pub head: Head,
+    pub entries: Vec<StatusEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum StatusEntry {
+    Ordinary {
+        path: String,
+        staged: StatusCode,
+        unstaged: StatusCode,
+    },
+    Renamed {
+        path: String,
+        original: String,
+        staged: StatusCode,
+        unstaged: StatusCode,
+    },
+    Unmerged {
+        path: String,
+        conflict: Conflict,
+    },
+    Untracked {
+        path: String,
+    },
+}
+
+/// One side of a change: `staged` compares HEAD with the index and `unstaged`
+/// compares the index with the worktree.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum StatusCode {
+    #[serde(rename = ".")]
+    Unmodified,
+    #[serde(rename = "M")]
+    Modified,
+    #[serde(rename = "T")]
+    TypeChanged,
+    #[serde(rename = "A")]
+    Added,
+    #[serde(rename = "D")]
+    Deleted,
+    #[serde(rename = "R")]
+    Renamed,
+    #[serde(rename = "C")]
+    Copied,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum Conflict {
+    BothDeleted,
+    AddedByUs,
+    DeletedByThem,
+    AddedByThem,
+    DeletedByUs,
+    BothAdded,
+    BothModified,
+}
+
 /// A full 40- or 64-digit lowercase object id.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]

@@ -1,7 +1,7 @@
 use crate::{
     Advance, CommitDetail, Coordinator, FastForwardReport, FetchMode, FilePatch, LineStats,
-    RepositoryError, RepositoryOverview, RepositoryRefs, RepositorySnapshot, commit_detail,
-    file_patch, line_stats, refs, snapshot,
+    RepositoryError, RepositoryOverview, RepositoryRefs, RepositorySnapshot, WorktreeStatus,
+    commit_detail, file_patch, line_stats, refs, snapshot, worktree_patch, worktree_status,
 };
 use serde::{Deserialize, Serialize};
 
@@ -35,6 +35,13 @@ pub enum Request {
         path: String,
         advances: Vec<Advance>,
     },
+    WorktreeStatus {
+        path: String,
+    },
+    WorktreePatch {
+        path: String,
+        file: String,
+    },
 }
 
 #[derive(Debug, Serialize)]
@@ -47,6 +54,8 @@ pub enum Response {
     FilePatch(FilePatch),
     Overview(RepositoryOverview),
     FastForward(FastForwardReport),
+    WorktreeStatus(WorktreeStatus),
+    WorktreePatch(FilePatch),
 }
 
 pub fn run(coordinator: &Coordinator, request: Request) -> Result<Response, RepositoryError> {
@@ -61,6 +70,10 @@ pub fn run(coordinator: &Coordinator, request: Request) -> Result<Response, Repo
         Request::Overview { path, mode } => Response::Overview(coordinator.overview(&path, mode)?),
         Request::FastForward { path, advances } => {
             Response::FastForward(coordinator.fast_forward(&path, &advances)?)
+        }
+        Request::WorktreeStatus { path } => Response::WorktreeStatus(worktree_status(&path)?),
+        Request::WorktreePatch { path, file } => {
+            Response::WorktreePatch(worktree_patch(&path, &file)?)
         }
     })
 }

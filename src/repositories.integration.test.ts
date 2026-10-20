@@ -378,7 +378,7 @@ describe("real Rust transport contract", () => {
     ).toEqual({
       status: 400,
       error:
-        "unknown variant `notAnOperation`, expected one of `snapshot`, `refs`, `commitDetail`, `lineStats`, `filePatch`, `overview`, `fastForward` at line 1 column 22",
+        "unknown variant `notAnOperation`, expected one of `snapshot`, `refs`, `commitDetail`, `lineStats`, `filePatch`, `overview`, `fastForward`, `worktreeStatus`, `worktreePatch` at line 1 column 22",
     });
     expect(
       await rejected({ op: "commitDetail", path: fixture.repository }),

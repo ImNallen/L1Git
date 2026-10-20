@@ -10,6 +10,7 @@ import {
   refsSchema,
   repositoryErrorSchema,
   snapshotSchema,
+  worktreeStatusSchema,
 } from "./domain/repository";
 import type { Oid, RepositoryRoot } from "./domain/repository";
 
@@ -23,7 +24,9 @@ type RepositoryRequest =
   | { op: "lineStats"; path: RepositoryRoot; oids: Oid[] }
   | { op: "filePatch"; path: string; oid: Oid; file: string }
   | { op: "overview"; path: RepositoryRoot; mode: FetchMode }
-  | { op: "fastForward"; path: RepositoryRoot; advances: Advance[] };
+  | { op: "fastForward"; path: RepositoryRoot; advances: Advance[] }
+  | { op: "worktreeStatus"; path: RepositoryRoot }
+  | { op: "worktreePatch"; path: RepositoryRoot; file: string };
 
 const responseSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("snapshot"), data: snapshotSchema }),
@@ -33,6 +36,8 @@ const responseSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("filePatch"), data: filePatchSchema }),
   z.object({ op: z.literal("overview"), data: overviewSchema }),
   z.object({ op: z.literal("fastForward"), data: fastForwardReportSchema }),
+  z.object({ op: z.literal("worktreeStatus"), data: worktreeStatusSchema }),
+  z.object({ op: z.literal("worktreePatch"), data: filePatchSchema }),
 ]);
 const envelopeSchema = z.discriminatedUnion("ok", [
   z.object({ ok: z.literal(true) }),
@@ -123,6 +128,14 @@ export async function overview(path: RepositoryRoot, mode: FetchMode) {
 
 export async function fastForward(path: RepositoryRoot, advances: Advance[]) {
   return (await run({ op: "fastForward", path, advances })).data;
+}
+
+export async function worktreeStatus(path: RepositoryRoot) {
+  return (await run({ op: "worktreeStatus", path })).data;
+}
+
+export async function worktreePatch(path: RepositoryRoot, file: string) {
+  return (await run({ op: "worktreePatch", path, file })).data;
 }
 
 export async function chooseDirectory(): Promise<string | null> {

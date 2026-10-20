@@ -73,8 +73,20 @@ fn read_failed() -> RepositoryError {
 }
 
 pub(crate) fn read(path: &Path, args: &[&str]) -> Result<Vec<u8>, RepositoryError> {
+    read_accepting(path, args, &[0])
+}
+
+pub(crate) fn read_accepting(
+    path: &Path,
+    args: &[&str],
+    exit_codes: &[i32],
+) -> Result<Vec<u8>, RepositoryError> {
     let output = run(path, args)?;
-    if !output.status.success() {
+    if !output
+        .status
+        .code()
+        .is_some_and(|code| exit_codes.contains(&code))
+    {
         return Err(read_failed());
     }
     Ok(output.stdout)
@@ -111,6 +123,7 @@ pub(crate) fn read_capped(
     path: &Path,
     args: &[&str],
     cap: usize,
+    exit_codes: &[i32],
 ) -> Result<Capped, RepositoryError> {
     let mut child = command(path, args)
         .stdout(Stdio::piped())
@@ -124,7 +137,8 @@ pub(crate) fn read_capped(
         .read_to_end(&mut kept)
         .map_err(|_| read_failed())?;
     let rest = io::copy(&mut stdout, &mut io::sink()).map_err(|_| read_failed())?;
-    if !child.wait().map_err(|_| read_failed())?.success() {
+    let status = child.wait().map_err(|_| read_failed())?;
+    if !status.code().is_some_and(|code| exit_codes.contains(&code)) {
         return Err(read_failed());
     }
     Ok(if kept.len() <= cap {

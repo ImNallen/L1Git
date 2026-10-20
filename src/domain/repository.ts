@@ -106,6 +106,42 @@ export const lineStatsSchema = z.array(
     deleted: z.number().int().nonnegative(),
   }),
 );
+/** `staged` compares HEAD with the index, `unstaged` the index with the worktree. */
+export const statusCodeSchema = z.enum([".", "M", "T", "A", "D", "R", "C"]);
+export const statusEntrySchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("ordinary"),
+    path: z.string(),
+    staged: statusCodeSchema,
+    unstaged: statusCodeSchema,
+  }),
+  z.object({
+    kind: z.literal("renamed"),
+    path: z.string(),
+    original: z.string(),
+    staged: statusCodeSchema,
+    unstaged: statusCodeSchema,
+  }),
+  z.object({
+    kind: z.literal("unmerged"),
+    path: z.string(),
+    conflict: z.enum([
+      "bothDeleted",
+      "addedByUs",
+      "deletedByThem",
+      "addedByThem",
+      "deletedByUs",
+      "bothAdded",
+      "bothModified",
+    ]),
+  }),
+  z.object({ kind: z.literal("untracked"), path: z.string() }),
+]);
+export const worktreeStatusSchema = z.object({
+  root: rootSchema,
+  head: headSchema,
+  entries: z.array(statusEntrySchema),
+});
 export const repositoryErrorSchema = z.object({
   kind: z.enum([
     "missingPath",
@@ -137,6 +173,9 @@ export type CommitDetail = z.infer<typeof detailSchema>;
 export type ChangedFile = CommitDetail["files"][number];
 export type FilePatch = z.infer<typeof filePatchSchema>;
 export type LineStats = z.infer<typeof lineStatsSchema>[number];
+export type StatusCode = z.infer<typeof statusCodeSchema>;
+export type StatusEntry = z.infer<typeof statusEntrySchema>;
+export type WorktreeStatus = z.infer<typeof worktreeStatusSchema>;
 export type Problem =
   | z.infer<typeof repositoryErrorSchema>
   | { kind: "transport" | "persistence"; message: string };
