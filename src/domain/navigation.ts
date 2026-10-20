@@ -1,21 +1,13 @@
 import type { GraphRow } from "./graph";
 import type { Commit, Oid } from "./repository";
 
-/** `branch-up` and `branch-down` follow the selected commit's first-parent line. */
-export type Move =
-  | "up"
-  | "down"
-  | "first"
-  | "last"
-  | "branch-up"
-  | "branch-down";
+export type Move = "up" | "down" | "first" | "last" | "child" | "parent";
 
 export type HistoryKey = Pick<
   KeyboardEvent,
   "key" | "shiftKey" | "metaKey" | "ctrlKey" | "altKey"
 >;
 
-/** What a key pressed in the history does, or `null` when the history ignores it. */
 export function historyAction(key: HistoryKey): Move | "open" | null {
   if (key.altKey) return null;
   const command = key.metaKey || key.ctrlKey;
@@ -26,8 +18,8 @@ export function historyAction(key: HistoryKey): Move | "open" | null {
   }
   if (command) return null;
   if (key.shiftKey) {
-    if (key.key === "ArrowUp") return "branch-up";
-    if (key.key === "ArrowDown") return "branch-down";
+    if (key.key === "ArrowUp") return "child";
+    if (key.key === "ArrowDown") return "parent";
     return null;
   }
   switch (key.key) {
@@ -68,11 +60,11 @@ export function nextRow(
       return (commits[index - 1] ?? current).oid;
     case "down":
       return (commits[index + 1] ?? current).oid;
-    case "branch-down": {
+    case "parent": {
       const parent = current.parents.at(0);
       return parent !== undefined && graph.has(parent) ? parent : current.oid;
     }
-    case "branch-up": {
+    case "child": {
       const child =
         lineChild(commits, graph, index) ??
         commits
@@ -83,13 +75,6 @@ export function nextRow(
   }
 }
 
-/**
- * The child the graph line drawn into `commits[index]` comes from, when that
- * child is on its first-parent line. The trace follows the commit's lane up
- * through each row's continuations until an edge runs straight into it or the
- * edge that opened the lane is reached. Lane numbers alone cannot tell, since
- * they shift as lanes to the left close.
- */
 function lineChild(
   commits: readonly Pick<Commit, "oid" | "parents">[],
   graph: ReadonlyMap<Oid, GraphRow>,

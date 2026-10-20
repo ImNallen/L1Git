@@ -13,7 +13,6 @@ const f1 = oid("d");
 const t0 = oid("e");
 const root = oid("f");
 
-// Trunk root..t0..t1 merged the feature f1..f2, which forked at t0.
 const history = [
   { oid: merge, parents: [t1, f2] },
   { oid: f2, parents: [f1] },
@@ -42,32 +41,30 @@ describe("history navigation", () => {
 
   it("starts from the newest commit without a loaded selection", () => {
     expect(move(null, "down")).toBe(merge);
-    expect(move(oid("9"), "branch-up")).toBe(merge);
+    expect(move(oid("9"), "child")).toBe(merge);
     expect(move(null, "last")).toBe(root);
     expect(nextRow([], new Map(), null, "down")).toBeNull();
   });
 
   it("follows the first parent across the merge instead of the next row", () => {
-    expect(move(merge, "branch-down")).toBe(t1);
-    expect(move(t1, "branch-up")).toBe(merge);
-    expect(move(f2, "branch-down")).toBe(f1);
-    expect(move(f1, "branch-up")).toBe(f2);
+    expect(move(merge, "parent")).toBe(t1);
+    expect(move(t1, "child")).toBe(merge);
+    expect(move(f2, "parent")).toBe(f1);
+    expect(move(f1, "child")).toBe(f2);
   });
 
   it("stays on a feature tip whose only child merged it as a second parent", () => {
-    expect(move(f2, "branch-up")).toBe(f2);
+    expect(move(f2, "child")).toBe(f2);
   });
 
   it("continues up the fork point's own lane rather than the nearer feature", () => {
-    expect(move(t0, "branch-up")).toBe(t1);
+    expect(move(t0, "child")).toBe(t1);
   });
 
   it("stays when the first parent is not loaded or there is none", () => {
     const partial = history.slice(0, 5);
-    expect(nextRow(partial, buildGraph(partial).rows, t0, "branch-down")).toBe(
-      t0,
-    );
-    expect(move(root, "branch-down")).toBe(root);
+    expect(nextRow(partial, buildGraph(partial).rows, t0, "parent")).toBe(t0);
+    expect(move(root, "parent")).toBe(root);
   });
 
   it("falls back to the nearest child when a merge opened the fork point's line", () => {
@@ -83,7 +80,7 @@ describe("history navigation", () => {
       { oid: base, parents: [bottom] },
       { oid: bottom, parents: [] },
     ];
-    expect(nextRow(commits, buildGraph(commits).rows, base, "branch-up")).toBe(
+    expect(nextRow(commits, buildGraph(commits).rows, base, "child")).toBe(
       side,
     );
   });
@@ -105,7 +102,7 @@ describe("history navigation", () => {
     expect([child, side, fork].map((commit) => rows.get(commit)?.lane)).toEqual(
       [1, 1, 0],
     );
-    expect(nextRow(commits, rows, fork, "branch-up")).toBe(child);
+    expect(nextRow(commits, rows, fork, "child")).toBe(child);
   });
 
   it("takes the straight edge into the fork point over the lane that curves into it", () => {
@@ -126,7 +123,7 @@ describe("history navigation", () => {
     expect(rows.get(trunk)?.continuations).toEqual([
       { oid: fork, from: 1, to: 0 },
     ]);
-    expect(nextRow(commits, rows, fork, "branch-up")).toBe(trunk);
+    expect(nextRow(commits, rows, fork, "child")).toBe(trunk);
   });
 });
 
@@ -154,8 +151,8 @@ describe("history keys", () => {
   it("jumps with Cmd or Ctrl and follows the branch with Shift", () => {
     expect(press("ArrowUp", { metaKey: true })).toBe("first");
     expect(press("ArrowDown", { ctrlKey: true })).toBe("last");
-    expect(press("ArrowUp", { shiftKey: true })).toBe("branch-up");
-    expect(press("ArrowDown", { shiftKey: true })).toBe("branch-down");
+    expect(press("ArrowUp", { shiftKey: true })).toBe("child");
+    expect(press("ArrowDown", { shiftKey: true })).toBe("parent");
   });
 
   it("ignores other keys and combinations", () => {

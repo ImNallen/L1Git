@@ -14,14 +14,19 @@ export const changeStatuses = {
   { label: string; gitStatus: GitStatus }
 >;
 
-/** The path the tree shows first, since every directory starts open. */
+const flattenEmptyDirectories = true;
+
+function treeInput(files: readonly ChangedFile[]) {
+  return prepareFileTreeInput(
+    files.map((file) => file.path),
+    { flattenEmptyDirectories },
+  );
+}
+
 export function firstChangedPath(
   files: readonly ChangedFile[],
 ): string | undefined {
-  return prepareFileTreeInput(
-    files.map((file) => file.path),
-    { flattenEmptyDirectories: true },
-  ).paths.at(0);
+  return treeInput(files).paths.at(0);
 }
 
 type Props = {
@@ -36,13 +41,13 @@ export function ChangedFileTree({ files, selectedPath, onSelectFile }: Props) {
     onSelectFileRef.current = onSelectFile;
   });
   const { model } = useFileTree({
-    paths: files.map((file) => file.path),
+    preparedInput: treeInput(files),
     gitStatus: files.map((file) => ({
       path: file.path,
       status: changeStatuses[file.status].gitStatus,
     })),
     initialExpansion: "open",
-    flattenEmptyDirectories: true,
+    flattenEmptyDirectories,
     density: "compact",
     onSelectionChange: ([path, ...rest]) => {
       if (

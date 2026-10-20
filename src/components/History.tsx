@@ -244,8 +244,7 @@ type Props = {
   selectedOid: Oid | null;
   revealSeq: number;
   onSelect: (oid: Oid) => void;
-  /** Opens the first changed file of the selected commit. */
-  onOpen: () => void;
+  onOpenFirstFile: () => void;
   /** Where the history of `root` was scrolled when it was last shown. */
   scrollTopOf: (root: RepositoryRoot) => number;
   onScroll: (root: RepositoryRoot, scrollTop: number) => void;
@@ -260,7 +259,7 @@ export function History({
   selectedOid,
   revealSeq,
   onSelect,
-  onOpen,
+  onOpenFirstFile,
   scrollTopOf,
   onScroll,
   busy,
@@ -311,8 +310,7 @@ export function History({
   const scrollRef = useRef<HTMLDivElement>(null);
   const headRef = useRef<HTMLTableSectionElement>(null);
   const tableRef = useRef<HTMLTableElement>(null);
-  // Enter hides the history behind a diff, so focus returns when it closes.
-  const refocus = useRef(false);
+  const refocusWhenShown = useRef(false);
   const [viewport, setViewport] = useState({ top: 0, height: 0 });
 
   useLayoutEffect(() => {
@@ -380,8 +378,8 @@ export function History({
   }, [snapshot.root, scrollTopOf, selectedOid, revealSeq, hidden]);
 
   useLayoutEffect(() => {
-    if (hidden || !refocus.current) return;
-    refocus.current = false;
+    if (hidden || !refocusWhenShown.current) return;
+    refocusWhenShown.current = false;
     tableRef.current?.focus({ preventScroll: true });
   }, [hidden]);
 
@@ -390,8 +388,8 @@ export function History({
     if (action === null) return;
     event.preventDefault();
     if (action === "open") {
-      refocus.current = true;
-      onOpen();
+      refocusWhenShown.current = true;
+      onOpenFirstFile();
       return;
     }
     const oid = nextRow(commits, graph.rows, selectedOid, action);

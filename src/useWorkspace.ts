@@ -78,8 +78,7 @@ export function useWorkspace() {
   const [detail, setDetail] = useState<DetailState>({ kind: "empty" });
   const [detailAttempt, setDetailAttempt] = useState(0);
   const [fileDiff, setFileDiff] = useState<FileDiffState>({ kind: "closed" });
-  // Enter can arrive before the selected commit's changed paths do.
-  const [openFirst, setOpenFirst] = useState<Omit<FileKey, "path"> | null>(
+  const [pendingOpen, setPendingOpen] = useState<Omit<FileKey, "path"> | null>(
     null,
   );
   const requestId = useRef(0);
@@ -290,18 +289,23 @@ export function useWorkspace() {
   };
 
   useEffect(() => {
-    if (openFirst === null) return;
-    const settled =
-      detail.kind !== "empty" &&
-      detail.kind !== "loading" &&
-      detail.root === openFirst.root &&
-      detail.oid === openFirst.oid;
-    if (openFirst.root !== root || openFirst.oid !== selectedOid || settled)
-      setOpenFirst(null);
-    if (!settled || detail.kind !== "ready") return;
+    if (pendingOpen === null) return;
+    if (pendingOpen.root !== root || pendingOpen.oid !== selectedOid) {
+      setPendingOpen(null);
+      return;
+    }
+    if (
+      detail.kind === "empty" ||
+      detail.kind === "loading" ||
+      detail.root !== root ||
+      detail.oid !== selectedOid
+    )
+      return;
+    setPendingOpen(null);
+    if (detail.kind === "error") return;
     const path = firstChangedPath(detail.detail.files);
     if (path !== undefined) openFile(path);
-  }, [openFirst, detail, root, selectedOid]);
+  }, [pendingOpen, detail, root, selectedOid]);
 
   return {
     workspace,
@@ -316,7 +320,7 @@ export function useWorkspace() {
     openFile,
     openFirstFile: () => {
       if (root !== null && selectedOid !== null)
-        setOpenFirst({ root, oid: selectedOid });
+        setPendingOpen({ root, oid: selectedOid });
     },
     closeFile,
     selectRepository,
