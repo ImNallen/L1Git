@@ -95,7 +95,7 @@ it("resolves a custom theme to its stored colours over a palette derived from it
     variant.palette.accent,
     variant.palette.sidebar,
     variant.palette.panelRaised,
-  ]).toEqual(["#1b1824", "#e0a040", "#000000", "#211f2a"]);
+  ]).toEqual(["#1b1824", "#e0a040", "#000000", "#221f2b"]);
 });
 
 it("paints L1 from the stylesheet with no inline palette", () => {
@@ -128,7 +128,7 @@ it("duplicates a variant without the colours its own lanes derive", () => {
     appearance: "light",
     colors: { background: "#ffffff", accent: "#346bf1", graphLane3: "#f1fa8c" },
   });
-  expect(paleLanes.palette.onLane).toBe("#323232");
+  expect(paleLanes.palette.onLane).toBe("#282828");
   expect(draftOf(paleLanes, "Paper copy").colors).toEqual({
     background: "#ffffff",
     accent: "#346bf1",
