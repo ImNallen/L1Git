@@ -1,7 +1,6 @@
 import { spawnSync } from "node:child_process";
 import {
   appendFileSync,
-  existsSync,
   mkdirSync,
   mkdtempSync,
   rmSync,
@@ -10,12 +9,20 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-const root = process.argv[2]
-  ? resolve(process.argv[2])
+const destination = process.argv[2];
+const root = destination
+  ? resolve(destination)
   : mkdtempSync(join(tmpdir(), "l1git-large-fixture-"));
-if (process.argv[2] && existsSync(root))
-  throw new Error(`Destination already exists: ${root}`);
-mkdirSync(root, { recursive: true });
+if (destination) {
+  try {
+    mkdirSync(root);
+  } catch (error) {
+    throw new Error(
+      `Destination must not exist and its parent must exist: ${root}`,
+      { cause: error },
+    );
+  }
+}
 process.on("exit", (code) => {
   if (code !== 0) rmSync(root, { recursive: true, force: true });
 });
@@ -34,14 +41,20 @@ function git(path, args, input) {
     env,
     input,
   });
-  if (result.error) throw result.error;
-  if (result.status !== 0)
-    throw new Error(
-      `git ${args[0]} ${result.signal ? `was killed by ${result.signal}` : `exited with ${result.status}`}\n${result.stderr}`,
-    );
+  if (!result.error && result.status === 0) return;
+  const reason = result.error
+    ? `failed: ${result.error.message}`
+    : result.signal
+      ? `was killed by ${result.signal}`
+      : `exited with ${result.status}`;
+  throw new Error(`git ${args[0]} ${reason}\n${result.stderr ?? ""}`, {
+    cause: result.error,
+  });
 }
 
 const totalCommits = 60_000;
+const localBranchCount = 200;
+const remoteBranchCount = 400;
 const mergeEvery = 40;
 const tagCount = 50;
 const hotEvery = 100;
@@ -62,15 +75,19 @@ const authors = [
 const startTime = 1_700_000_000;
 const minutes = 60;
 
-const topicBranches = Array.from({ length: 198 }, (_, i) => {
-  const kind = kinds[i % kinds.length];
-  const area = areas[Math.floor(i / kinds.length) % areas.length];
-  return `${kind}/${area}/topic-${String(i + 1).padStart(3, "0")}`;
-});
 const oldTipBranch = "archive/old-tip";
+const fixedBranches = ["main", oldTipBranch];
+const topicBranches = Array.from(
+  { length: localBranchCount - fixedBranches.length },
+  (_, i) => {
+    const kind = kinds[i % kinds.length];
+    const area = areas[Math.floor(i / kinds.length) % areas.length];
+    return `${kind}/${area}/topic-${String(i + 1).padStart(3, "0")}`;
+  },
+);
 const localBranches = [...topicBranches, oldTipBranch];
 const upstreamBranches = Array.from(
-  { length: 200 },
+  { length: remoteBranchCount - localBranchCount },
   (_, i) =>
     `contrib/user-${String(Math.floor(i / 10) + 1).padStart(2, "0")}/change-${String((i % 10) + 1).padStart(2, "0")}`,
 );
@@ -141,6 +158,7 @@ while (mainMarks.length + topics < mainlineTarget) {
   const position = mainMarks.length;
   const time = startTime + position * 10 * minutes;
   const remaining = mainlineTarget - (position + topics);
+  const hotEdit = position % hotEvery === 0 ? [editHot(position)] : [];
   if ((position + 1) % mergeEvery === 0 && remaining >= 2) {
     topics += 1;
     const note = [
@@ -152,7 +170,7 @@ while (mainMarks.length + topics < mainlineTarget) {
       time: time - 5 * minutes,
       subject: `docs: write topic ${topics}`,
       from: parent,
-      files: [note],
+      files: [note, ...hotEdit],
     });
     parent = commit({
       ref: "refs/heads/main",
@@ -160,12 +178,12 @@ while (mainMarks.length + topics < mainlineTarget) {
       subject: `Merge topic ${topics} into main`,
       from: parent,
       merge: side,
-      files: [note],
+      files: [note, ...hotEdit],
     });
   } else {
     const files = [editModule(position)];
     if (position === 0) files.push(["README.md", "# L1 large fixture\n"]);
-    if (position % hotEvery === 0) files.push(editHot(position));
+    files.push(...hotEdit);
     parent = commit({
       ref: "refs/heads/main",
       time,
@@ -181,7 +199,8 @@ pointRef("refs/remotes/origin/main", parent);
 
 const firstBase = Math.floor(mainMarks.length / 2);
 const baseStep = Math.floor(
-  (mainMarks.length - firstBase) / (2 * upstreamBranches.length),
+  (mainMarks.length - firstBase) /
+    (2 * Math.max(topicBranches.length, upstreamBranches.length)),
 );
 function branchCommit(ref, name, position) {
   return commit({
