@@ -305,13 +305,12 @@ fn base(root: &Path) -> Result<String, RepositoryError> {
 }
 
 /// Runs diff plumbing, which never rewrites the index the way `git diff` does
-/// after it compares a file whose stat changed. Copy detection also prints the
-/// source's own diff, so only the section that ends at `file` is kept.
+/// after it compares a file whose stat changed.
 fn tracked(
     root: &Path,
     command: &[&str],
     paths: &[&str],
-    file: &str,
+    destination: &str,
 ) -> Result<Option<FilePatch>, RepositoryError> {
     let args = |format| {
         let mut args = vec!["--literal-pathspecs"];
@@ -327,27 +326,33 @@ fn tracked(
         args.extend(paths);
         args
     };
-    let Some((section, binary)) = destination(&git::read(root, &args("--numstat"))?, file)? else {
+    let numstat = git::read(root, &args("--numstat"))?;
+    let Some(section) = section_for(&numstat, destination)? else {
         return Ok(None);
     };
-    if binary {
+    if section.binary {
         return Ok(Some(FilePatch::Binary));
     }
     Ok(Some(
         match git::read_capped(root, &args("--patch"), PATCH_LIMIT)? {
-            git::Capped::Within(patch) => {
-                text_patch(sections(&patch).nth(section).ok_or_else(git::malformed)?)
-            }
+            git::Capped::Within(patch) => text_patch(
+                sections(&patch)
+                    .nth(section.index)
+                    .ok_or_else(git::malformed)?,
+            ),
             git::Capped::Over(bytes) => FilePatch::TooLarge { bytes },
         },
     ))
 }
 
-/// Finds the numstat record whose destination is `file`, and whether Git sees
-/// that file as binary.
-fn destination(numstat: &[u8], file: &str) -> Result<Option<(usize, bool)>, RepositoryError> {
+struct Section {
+    index: usize,
+    binary: bool,
+}
+
+fn section_for(numstat: &[u8], destination: &str) -> Result<Option<Section>, RepositoryError> {
     let mut fields = numstat.split(|byte| *byte == 0);
-    let mut section = 0;
+    let mut index = 0;
     while let Some(record) = fields.next() {
         if record.is_empty() {
             continue;
@@ -364,10 +369,13 @@ fn destination(numstat: &[u8], file: &str) -> Result<Option<(usize, bool)>, Repo
         } else {
             path
         };
-        if path == file.as_bytes() {
-            return Ok(Some((section, added == b"-" && deleted == b"-")));
+        if path == destination.as_bytes() {
+            return Ok(Some(Section {
+                index,
+                binary: added == b"-" && deleted == b"-",
+            }));
         }
-        section += 1;
+        index += 1;
     }
     Ok(None)
 }
@@ -388,11 +396,10 @@ enum Found {
     Other,
 }
 
-/// Builds the patch for an untracked path from its bytes. Passing the path to
-/// `git diff --no-index` instead would read stdin for `-`, follow a link that
-/// replaced the file after the check, and fail on line-ending warnings.
 fn untracked(root: &Path, file: &str) -> Result<WorktreePatch, RepositoryError> {
-    let diff = match open_untracked(root, file).map_err(|_| no_changes(file, Side::Unstaged))? {
+    let diff = match open_without_following_links(root, file)
+        .map_err(|_| no_changes(file, Side::Unstaged))?
+    {
         Found::File {
             file: handle,
             executable,
@@ -419,10 +426,8 @@ fn untracked(root: &Path, file: &str) -> Result<WorktreePatch, RepositoryError> 
     Ok(WorktreePatch::Diff { diff })
 }
 
-/// Opens `file` under `root` one component at a time, refusing a symbolic link
-/// at every step, so a path swapped after `git status` cannot lead outside.
 #[cfg(unix)]
-fn open_untracked(root: &Path, file: &str) -> io::Result<Found> {
+fn open_without_following_links(root: &Path, file: &str) -> io::Result<Found> {
     use std::{
         ffi::{CStr, CString},
         os::{
@@ -499,7 +504,7 @@ fn open_untracked(root: &Path, file: &str) -> io::Result<Found> {
 }
 
 #[cfg(not(unix))]
-fn open_untracked(root: &Path, file: &str) -> io::Result<Found> {
+fn open_without_following_links(root: &Path, file: &str) -> io::Result<Found> {
     let path = root.join(file.trim_end_matches('/'));
     let kind = fs::symlink_metadata(&path)?.file_type();
     Ok(if kind.is_symlink() {
@@ -584,7 +589,6 @@ fn newlines(bytes: &[u8]) -> u64 {
 
 const NO_NEWLINE: &str = "\n\\ No newline at end of file\n";
 
-/// Writes the patch Git prints for a newly added file with `--full-index`.
 fn added_patch(
     root: &Path,
     file: &str,
@@ -655,7 +659,7 @@ fn quoted(prefix: &str, path: &str) -> String {
 
 #[cfg(all(test, unix))]
 mod tests {
-    use super::{Found, open_untracked};
+    use super::{Found, open_without_following_links};
     use std::{fs, os::unix::fs::symlink, process::Command};
 
     #[test]
@@ -679,16 +683,19 @@ mod tests {
                 .success()
         );
         assert!(matches!(
-            open_untracked(&root, "real/file"),
+            open_without_following_links(&root, "real/file"),
             Ok(Found::File { .. })
         ));
-        assert!(open_untracked(&root, "swapped/null").is_err());
+        assert!(open_without_following_links(&root, "swapped/null").is_err());
         assert!(
-            matches!(open_untracked(&root, "link"), Ok(Found::Link(target)) if target == outside.as_os_str().as_encoded_bytes())
+            matches!(open_without_following_links(&root, "link"), Ok(Found::Link(target)) if target == outside.as_os_str().as_encoded_bytes())
         );
-        assert!(matches!(open_untracked(&root, "fifo"), Ok(Found::Other)));
         assert!(matches!(
-            open_untracked(&root, "real"),
+            open_without_following_links(&root, "fifo"),
+            Ok(Found::Other)
+        ));
+        assert!(matches!(
+            open_without_following_links(&root, "real"),
             Ok(Found::Directory)
         ));
     }
