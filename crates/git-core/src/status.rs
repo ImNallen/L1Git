@@ -215,6 +215,12 @@ fn untracked_patch(root: &Path, file: &str) -> Result<Option<FilePatch>, Reposit
     {
         return Ok(None);
     }
+    if file.ends_with('/') {
+        return Err(RepositoryError::new(
+            ErrorKind::UnsupportedPath,
+            "L1 Git cannot show a diff for a nested repository.",
+        ));
+    }
     // `--no-index` exits 1 when the files differ, which they always do here.
     let added = |format| {
         [

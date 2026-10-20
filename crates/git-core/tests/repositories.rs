@@ -1067,3 +1067,26 @@ fn worktree_patch_rejects_clean_ignored_and_outside_paths() {
         );
     }
 }
+
+#[test]
+fn worktree_patch_rejects_an_untracked_nested_repository() {
+    let fixture = Fixture::new();
+    fixture.commit("notes.txt", "one\n", "initial");
+    let nested = fixture.repo.join("nested");
+    fs::create_dir(&nested).unwrap();
+    git(&nested, &["init", "--initial-branch=main"]);
+    fs::write(nested.join("inner.txt"), "inner\n").unwrap();
+    assert_eq!(
+        worktree_status(fixture.path()).unwrap().entries,
+        vec![untracked("nested/")]
+    );
+    let error = worktree_patch(fixture.path(), "nested/").unwrap_err();
+    assert!(
+        matches!(error.kind, ErrorKind::UnsupportedPath),
+        "{error:?}"
+    );
+    assert_eq!(
+        error.message,
+        "L1 Git cannot show a diff for a nested repository."
+    );
+}
