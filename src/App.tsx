@@ -448,6 +448,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                     revealSeq={jump?.seq ?? 0}
                     onSelect={app.setSelectedOid}
                     onOpenFirstFile={app.openFirstFile}
+                    onCancelOpen={app.cancelOpenFirstFile}
                     scrollTopOf={app.scrollTopOf}
                     onScroll={app.rememberScroll}
                     busy={busy}

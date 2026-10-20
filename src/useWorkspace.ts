@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { firstChangedPath } from "./components/ChangedFileTree";
 import * as repositories from "./repositories";
+import { firstChangedPath } from "./domain/changedFiles";
 import {
   emptyCatalog,
   forget,
@@ -232,32 +232,37 @@ export function useWorkspace() {
     [],
   );
 
+  const newestDetailKey = useRef<{ root: RepositoryRoot; oid: Oid } | null>(
+    null,
+  );
+  const detailReadInFlight = useRef(false);
+  const readNewestDetail = useCallback(function read() {
+    const key = newestDetailKey.current;
+    if (key === null || detailReadInFlight.current) return;
+    detailReadInFlight.current = true;
+    const settle = (state: DetailState) => {
+      detailReadInFlight.current = false;
+      const wanted = newestDetailKey.current;
+      if (wanted?.root === key.root && wanted.oid === key.oid) setDetail(state);
+      else read();
+    };
+    void repositories.commitDetail(key.root, key.oid).then(
+      (detail) => settle({ kind: "ready", ...key, detail }),
+      (error: unknown) =>
+        settle({ kind: "error", ...key, error: problemFrom(error) }),
+    );
+  }, []);
+
   useEffect(() => {
     if (root === null || selectedOid === null) {
+      newestDetailKey.current = null;
       setDetail({ kind: "empty" });
       return;
     }
-    let cancelled = false;
+    newestDetailKey.current = { root, oid: selectedOid };
     setDetail({ kind: "loading", root, oid: selectedOid });
-    void repositories.commitDetail(root, selectedOid).then(
-      (detail) => {
-        if (!cancelled)
-          setDetail({ kind: "ready", root, oid: selectedOid, detail });
-      },
-      (error: unknown) => {
-        if (!cancelled)
-          setDetail({
-            kind: "error",
-            root,
-            oid: selectedOid,
-            error: problemFrom(error),
-          });
-      },
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, [root, selectedOid, detailAttempt]);
+    readNewestDetail();
+  }, [root, selectedOid, detailAttempt, readNewestDetail]);
 
   useEffect(() => {
     setFileDiff({ kind: "closed" });
@@ -318,6 +323,7 @@ export function useWorkspace() {
     retryDetail: () => setDetailAttempt((attempt) => attempt + 1),
     fileDiff,
     openFile,
+    cancelOpenFirstFile: () => setPendingOpen(null),
     openFirstFile: () => {
       if (root !== null && selectedOid !== null)
         setPendingOpen({ root, oid: selectedOid });

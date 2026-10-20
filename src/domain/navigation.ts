@@ -2,42 +2,88 @@ import type { GraphRow } from "./graph";
 import type { Commit, Oid } from "./repository";
 
 export type Move = "up" | "down" | "first" | "last" | "child" | "parent";
+export type HistoryAction = Move | "open" | "cancel";
 
 export type HistoryKey = Pick<
   KeyboardEvent,
   "key" | "shiftKey" | "metaKey" | "ctrlKey" | "altKey"
 >;
 
-export function historyAction(key: HistoryKey): Move | "open" | null {
-  if (key.altKey) return null;
-  const command = key.metaKey || key.ctrlKey;
-  if (command && !key.shiftKey) {
-    if (key.key === "ArrowUp") return "first";
-    if (key.key === "ArrowDown") return "last";
-    return null;
+export type HistoryBinding = {
+  key: string;
+  shift: boolean;
+  cmdOrCtrl: boolean;
+  action: HistoryAction;
+};
+
+const binding = (
+  key: string,
+  action: HistoryAction,
+  modifiers: { shift?: true; cmdOrCtrl?: true } = {},
+): HistoryBinding => ({
+  key,
+  shift: modifiers.shift ?? false,
+  cmdOrCtrl: modifiers.cmdOrCtrl ?? false,
+  action,
+});
+
+export const historyBindings: readonly HistoryBinding[] = [
+  binding("ArrowDown", "down"),
+  binding("j", "down"),
+  binding("ArrowUp", "up"),
+  binding("k", "up"),
+  binding("Home", "first"),
+  binding("Home", "first", { cmdOrCtrl: true }),
+  binding("ArrowUp", "first", { cmdOrCtrl: true }),
+  binding("End", "last"),
+  binding("End", "last", { cmdOrCtrl: true }),
+  binding("ArrowDown", "last", { cmdOrCtrl: true }),
+  binding("ArrowDown", "parent", { shift: true }),
+  binding("j", "parent", { shift: true }),
+  binding("ArrowUp", "child", { shift: true }),
+  binding("k", "child", { shift: true }),
+  binding("Enter", "open"),
+  binding("Escape", "cancel"),
+];
+
+export function historyAction(event: HistoryKey): HistoryAction | null {
+  if (event.altKey) return null;
+  const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+  const cmdOrCtrl = event.metaKey || event.ctrlKey;
+  return (
+    historyBindings.find(
+      (binding) =>
+        binding.key === key &&
+        binding.shift === event.shiftKey &&
+        binding.cmdOrCtrl === cmdOrCtrl,
+    )?.action ?? null
+  );
+}
+
+export type Trail = { end: Oid; passed: readonly Oid[] };
+
+export function navigate(
+  commits: readonly Pick<Commit, "oid" | "parents">[],
+  graph: ReadonlyMap<Oid, GraphRow>,
+  selected: Oid | null,
+  move: Move,
+  trail: Trail | null,
+): { oid: Oid | null; trail: Trail | null } {
+  const passed = trail !== null && trail.end === selected ? trail.passed : [];
+  const previous = passed.at(-1);
+  if (move === "child" && previous !== undefined) {
+    const rest = passed.slice(0, -1);
+    return {
+      oid: previous,
+      trail: rest.length > 0 ? { end: previous, passed: rest } : null,
+    };
   }
-  if (command) return null;
-  if (key.shiftKey) {
-    if (key.key === "ArrowUp") return "child";
-    if (key.key === "ArrowDown") return "parent";
-    return null;
-  }
-  switch (key.key) {
-    case "ArrowUp":
-    case "k":
-      return "up";
-    case "ArrowDown":
-    case "j":
-      return "down";
-    case "Home":
-      return "first";
-    case "End":
-      return "last";
-    case "Enter":
-      return "open";
-    default:
-      return null;
-  }
+  const oid = nextRow(commits, graph, selected, move);
+  if (move === "parent" && selected !== null && oid !== null)
+    return oid === selected
+      ? { oid, trail }
+      : { oid, trail: { end: oid, passed: [...passed, selected] } };
+  return { oid, trail: null };
 }
 
 /**
@@ -87,9 +133,10 @@ function lineChild(
     if (!row) return undefined;
     const edge = row.parents.find((parent) => parent.oid === target);
     const straight = edge !== undefined && edge.from === edge.to;
-    if (!straight && row.continuations.some((lane) => lane.oid === target))
-      continue;
-    return edge && commit.parents.at(0) === target ? commit : undefined;
+    const firstParent = commit.parents.at(0) === target;
+    if (straight && firstParent) return commit;
+    if (row.continuations.some((lane) => lane.oid === target)) continue;
+    return edge && firstParent ? commit : undefined;
   }
   return undefined;
 }

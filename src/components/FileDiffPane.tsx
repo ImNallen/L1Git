@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useLayoutEffect, useMemo, useRef } from "react";
 import { ArrowLeft, FileX2, LoaderCircle, TriangleAlert } from "lucide-react";
 import { parsePatchFiles } from "@pierre/diffs";
 import { FileDiff, Virtualizer } from "@pierre/diffs/react";
@@ -28,10 +28,21 @@ export function FileDiffPane({
   onBack,
   onRetry,
 }: Props) {
+  const backRef = useRef<HTMLButtonElement>(null);
+  useLayoutEffect(function takeFocusFromHiddenHistory() {
+    const focused = document.activeElement;
+    if (
+      focused === null ||
+      focused === document.body ||
+      focused.closest(".history")
+    )
+      backRef.current?.focus();
+  }, []);
   return (
     <section className="file-diff" aria-label={`Changes to ${state.path}`}>
       <header className="file-diff-toolbar">
         <button
+          ref={backRef}
           className="button secondary"
           onClick={onBack}
           title="Back to history (Esc)"
