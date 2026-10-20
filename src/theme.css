@@ -83,12 +83,12 @@
   --shadow-pane: #0007;
   --shadow-dialog: #000b;
   --dialog-backdrop: #0009;
-  --graph-lane-1: #74acff;
-  --graph-lane-2: #ff7e77;
-  --graph-lane-3: #00c2ca;
-  --graph-lane-4: #ea9600;
-  --graph-lane-5: #bb91ff;
-  --graph-lane-6: #2ec97a;
+  --graph-lane-1: #569bff;
+  --graph-lane-2: #ff5c58;
+  --graph-lane-3: #00d4dc;
+  --graph-lane-4: #ffa400;
+  --graph-lane-5: #af79ff;
+  --graph-lane-6: #00de80;
 }
 
 :root[data-theme="light"] {
@@ -156,12 +156,12 @@
   --shadow-pane: #15152526;
   --shadow-dialog: #15152533;
   --dialog-backdrop: #15152544;
-  --graph-lane-1: #276ed2;
-  --graph-lane-2: #c13c3b;
-  --graph-lane-3: #008287;
-  --graph-lane-4: #9d6300;
-  --graph-lane-5: #8254c4;
-  --graph-lane-6: #00884d;
+  --graph-lane-1: #0072f6;
+  --graph-lane-2: #e50026;
+  --graph-lane-3: #008b91;
+  --graph-lane-4: #a96b00;
+  --graph-lane-5: #8734e0;
+  --graph-lane-6: #009253;
 }
 
 * {

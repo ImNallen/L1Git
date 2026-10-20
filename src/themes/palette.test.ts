@@ -135,15 +135,15 @@ const variantPalette = (id: string) =>
 
 it("turns the graph lanes with the accent, so each family's first lane is its accent hue", () => {
   expect(LANES.map((lane) => variantPalette("grove-dark")[lane])).toEqual([
-    "#4cc893",
-    "#ab9eff",
-    "#bbb148",
-    "#e984d7",
-    "#00c4d2",
-    "#fa8e1e",
+    "#00bc80",
+    "#9d89ff",
+    "#ccc04e",
+    "#fd8fea",
+    "#00b3c0",
+    "#ffa559",
   ]);
-  expect(variantPalette("ember-light").graphLane1).toBe("#b54f00");
-  expect(variantPalette("iris-dark").graphLane1).toBe("#a99efd");
+  expect(variantPalette("ember-light").graphLane1).toBe("#c25500");
+  expect(variantPalette("iris-dark").graphLane1).toBe("#9a8bfd");
 });
 
 it.each(derived.map((v) => [v.id, v.palette] as const))(
@@ -237,7 +237,7 @@ it("tints error washes toward the red a theme brings", () => {
 it("turns lanes from L1's blue when the accent is grey", () => {
   for (const accent of ["#808080", "#7f8081"]) {
     const p = derivePalette("dark", "#0a0a0a", accent);
-    expect([p.graphLane1, p.graphLane3]).toEqual(["#74acff", "#00c2ca"]);
+    expect([p.graphLane1, p.graphLane3]).toEqual(["#569bff", "#00d3db"]);
   }
 });
 
