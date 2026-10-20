@@ -154,7 +154,8 @@ pub struct LineStats {
     pub deleted: u64,
 }
 
-/// The uncommitted changes of one worktree, in Git's path order.
+/// The uncommitted changes of one worktree, in the order Git lists them:
+/// changed paths, then unmerged paths, then untracked paths, each by path.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct WorktreeStatus {
@@ -191,21 +192,16 @@ pub enum StatusEntry {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Sides {
-    Staged { staged: Change },
-    Unstaged { unstaged: Change },
-    Both { staged: Change, unstaged: Change },
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub enum Change {
-    #[serde(rename = "M")]
-    Modified,
-    #[serde(rename = "T")]
-    TypeChanged,
-    #[serde(rename = "A")]
-    Added,
-    #[serde(rename = "D")]
-    Deleted,
+    Staged {
+        staged: ChangeStatus,
+    },
+    Unstaged {
+        unstaged: ChangeStatus,
+    },
+    Both {
+        staged: ChangeStatus,
+        unstaged: ChangeStatus,
+    },
 }
 
 /// A move between the index and the working tree comes from a path added with
@@ -213,7 +209,7 @@ pub enum Change {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum MoveSide {
-    Staged { unstaged: Option<Change> },
+    Staged { unstaged: Option<ChangeStatus> },
     Unstaged,
 }
 

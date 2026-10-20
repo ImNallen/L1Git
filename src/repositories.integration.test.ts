@@ -414,8 +414,10 @@ describe("real Rust transport contract", () => {
     writeFileSync(join(states, "notes.txt"), "one\ntwo\n");
     writeFileSync(join(states, "old.txt"), "a\nb\nc\nd\n");
     writeFileSync(join(states, "shared.txt"), "base\n");
+    writeFileSync(join(states, "source.txt"), "1\n2\n3\n4\n5\n");
     git("add", ".");
     git("commit", "-m", "initial");
+    git("config", "diff.renames", "copies");
     git("switch", "-c", "theirs");
     writeFileSync(join(states, "shared.txt"), "theirs\n");
     git("commit", "-am", "theirs");
@@ -428,6 +430,9 @@ describe("real Rust transport contract", () => {
     git("add", "notes.txt");
     writeFileSync(join(states, "notes.txt"), "one\n2\nthree\n");
     writeFileSync(join(states, "draft notes.txt"), "first draft\n");
+    writeFileSync(join(states, "copy.txt"), "1\n2\n3\n4\n5\n");
+    writeFileSync(join(states, "source.txt"), "1\n2\n3\n4\n5\n6\n");
+    git("add", "copy.txt", "source.txt");
     const root = realpathSync(states);
 
     expect(
@@ -444,6 +449,14 @@ describe("real Rust transport contract", () => {
       entries: [
         {
           kind: "renamed",
+          path: "copy.txt",
+          original: "source.txt",
+          how: "copied",
+          submodule: null,
+          side: { kind: "staged", unstaged: null },
+        },
+        {
+          kind: "renamed",
           path: "new.txt",
           original: "old.txt",
           how: "renamed",
@@ -455,6 +468,12 @@ describe("real Rust transport contract", () => {
           path: "notes.txt",
           submodule: null,
           sides: { kind: "both", staged: "M", unstaged: "M" },
+        },
+        {
+          kind: "ordinary",
+          path: "source.txt",
+          submodule: null,
+          sides: { kind: "staged", staged: "M" },
         },
         {
           kind: "unmerged",
@@ -499,6 +518,15 @@ describe("real Rust transport contract", () => {
         " one",
         " 2",
         "+three",
+        "",
+      ]),
+    );
+    expect(await patch("copy.txt", "staged")).toEqual(
+      text([
+        "diff --git a/source.txt b/copy.txt",
+        "similarity index 100%",
+        "copy from source.txt",
+        "copy to copy.txt",
         "",
       ]),
     );

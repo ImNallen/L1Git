@@ -1,12 +1,12 @@
 use crate::{
-    Change, Conflict, ErrorKind, FilePatch, MoveSide, Moved, RepositoryError, Side, Sides,
-    StatusEntry, SubmoduleState, WorktreePatch, WorktreeStatus,
-    git::{self, Exit},
-    repository::{self, capped_patch},
+    ChangeStatus, Conflict, ErrorKind, FilePatch, MoveSide, Moved, PATCH_LIMIT, RepositoryError,
+    Side, Sides, StatusEntry, SubmoduleState, WorktreePatch, WorktreeStatus, git,
+    repository::{self, text_patch},
 };
 use std::{
     fs,
-    path::{Component, Path, PathBuf},
+    io::{self, BufRead, Read},
+    path::{Component, Path},
 };
 
 pub fn worktree_status(path: &str) -> Result<WorktreeStatus, RepositoryError> {
@@ -89,13 +89,13 @@ fn columns<const N: usize>(record: &[u8]) -> Result<[&[u8]; N], RepositoryError>
         .map_err(|_| git::malformed())
 }
 
-fn change(code: u8) -> Result<Option<Change>, RepositoryError> {
+fn change(code: u8) -> Result<Option<ChangeStatus>, RepositoryError> {
     Ok(Some(match code {
         b'.' => return Ok(None),
-        b'M' => Change::Modified,
-        b'T' => Change::TypeChanged,
-        b'A' => Change::Added,
-        b'D' => Change::Deleted,
+        b'M' => ChangeStatus::Modified,
+        b'T' => ChangeStatus::TypeChanged,
+        b'A' => ChangeStatus::Added,
+        b'D' => ChangeStatus::Deleted,
         _ => return Err(git::malformed()),
     }))
 }
@@ -150,16 +150,7 @@ pub fn worktree_patch(
     side: Side,
 ) -> Result<WorktreePatch, RepositoryError> {
     let root = repository::root(path)?;
-    if file.is_empty()
-        || !Path::new(file)
-            .components()
-            .all(|component| matches!(component, Component::Normal(_)))
-    {
-        return Err(RepositoryError::new(
-            ErrorKind::UnsupportedPath,
-            "Choose a path inside this worktree, relative to its root.",
-        ));
-    }
+    check(file)?;
     let entries = entries(&root)?;
     let entry = entries
         .iter()
@@ -168,6 +159,15 @@ pub fn worktree_patch(
     let changed = |diff: Option<FilePatch>| {
         diff.map(|diff| WorktreePatch::Diff { diff })
             .ok_or_else(|| no_changes(file, side))
+    };
+    let staged = |detect: &str, paths: &[&str]| {
+        let head = base(&root)?;
+        tracked(
+            &root,
+            &["diff-index", "--cached", detect, &head],
+            paths,
+            file,
+        )
     };
     match (entry, side) {
         (
@@ -180,11 +180,8 @@ pub fn worktree_patch(
         ) => Ok(WorktreePatch::Conflicted {
             conflict: *conflict,
             diff: if submodule.is_none() && fs::symlink_metadata(root.join(file)).is_ok() {
-                tracked(
-                    &root,
-                    &["diff-index", "--no-renames", &base(&root)?],
-                    &[file],
-                )?
+                let head = base(&root)?;
+                tracked(&root, &["diff-index", "--no-renames", &head], &[file], file)?
             } else {
                 None
             },
@@ -198,15 +195,11 @@ pub fn worktree_patch(
                 submodule: Some(submodule),
                 ..
             },
-            _,
+            Side::Unstaged,
         ) => Ok(WorktreePatch::Submodule {
             submodule: *submodule,
         }),
-        (StatusEntry::Ordinary { .. }, Side::Staged) => changed(tracked(
-            &root,
-            &["diff-index", "--cached", "--no-renames", &base(&root)?],
-            &[file],
-        )?),
+        (StatusEntry::Ordinary { .. }, Side::Staged) => changed(staged("--no-renames", &[file])?),
         (
             StatusEntry::Ordinary { .. }
             | StatusEntry::Renamed {
@@ -214,24 +207,48 @@ pub fn worktree_patch(
                 ..
             },
             Side::Unstaged,
-        ) => changed(tracked(&root, &["diff-files", "--no-renames"], &[file])?),
+        ) => changed(tracked(
+            &root,
+            &["diff-files", "--no-renames"],
+            &[file],
+            file,
+        )?),
         (StatusEntry::Renamed { original, how, .. }, _) => {
             let detect = match how {
                 Moved::Renamed => "--find-renames",
                 Moved::Copied => "--find-copies-harder",
             };
-            let head;
-            let command = match side {
-                Side::Staged => {
-                    head = base(&root)?;
-                    vec!["diff-index", "--cached", detect, &head]
-                }
-                Side::Unstaged => vec!["diff-files", detect],
-            };
-            changed(tracked(&root, &command, &[original, file])?)
+            changed(match side {
+                Side::Staged => staged(detect, &[original, file])?,
+                Side::Unstaged => tracked(&root, &["diff-files", detect], &[original, file], file)?,
+            })
         }
         (StatusEntry::Untracked { .. }, _) => untracked(&root, file),
     }
+}
+
+fn check(file: &str) -> Result<(), RepositoryError> {
+    let components: Vec<_> = Path::new(file).components().collect();
+    if components.is_empty()
+        || !components
+            .iter()
+            .all(|component| matches!(component, Component::Normal(_)))
+    {
+        return Err(RepositoryError::new(
+            ErrorKind::UnsupportedPath,
+            "Choose a path inside this worktree, relative to its root.",
+        ));
+    }
+    if components
+        .iter()
+        .any(|component| component.as_os_str().eq_ignore_ascii_case(".git"))
+    {
+        return Err(RepositoryError::new(
+            ErrorKind::UnsupportedPath,
+            "L1 Git does not show diffs for files inside a .git directory.",
+        ));
+    }
+    Ok(())
 }
 
 fn lists(entry: &StatusEntry, file: &str, side: Side) -> bool {
@@ -288,11 +305,13 @@ fn base(root: &Path) -> Result<String, RepositoryError> {
 }
 
 /// Runs diff plumbing, which never rewrites the index the way `git diff` does
-/// after it compares a file whose stat changed.
+/// after it compares a file whose stat changed. Copy detection also prints the
+/// source's own diff, so only the section that ends at `file` is kept.
 fn tracked(
     root: &Path,
     command: &[&str],
     paths: &[&str],
+    file: &str,
 ) -> Result<Option<FilePatch>, RepositoryError> {
     let args = |format| {
         let mut args = vec!["--literal-pathspecs"];
@@ -308,107 +327,304 @@ fn tracked(
         args.extend(paths);
         args
     };
-    let numstat = git::read(root, &args("--numstat"))?;
-    if numstat.is_empty() {
+    let Some((section, binary)) = destination(&git::read(root, &args("--numstat"))?, file)? else {
         return Ok(None);
+    };
+    if binary {
+        return Ok(Some(FilePatch::Binary));
     }
-    patch(
-        root,
-        &args("--patch"),
-        numstat.starts_with(b"-\t-\t"),
-        Exit::Success,
-    )
-    .map(Some)
+    Ok(Some(
+        match git::read_capped(root, &args("--patch"), PATCH_LIMIT)? {
+            git::Capped::Within(patch) => {
+                text_patch(sections(&patch).nth(section).ok_or_else(git::malformed)?)
+            }
+            git::Capped::Over(bytes) => FilePatch::TooLarge { bytes },
+        },
+    ))
 }
 
-fn untracked(root: &Path, file: &str) -> Result<WorktreePatch, RepositoryError> {
-    let on_disk = root.join(file.trim_end_matches('/'));
-    let kind = fs::symlink_metadata(&on_disk)
-        .map_err(|_| no_changes(file, Side::Unstaged))?
-        .file_type();
-    let diff = if kind.is_file() {
-        let args = |format| {
-            [
-                "diff",
-                "--no-index",
-                "-z",
-                format,
-                "--full-index",
-                "--no-color",
-                "--no-ext-diff",
-                "--no-textconv",
-                "--src-prefix=a/",
-                "--dst-prefix=b/",
-                "--",
-                "/dev/null",
-                file,
-            ]
+/// Finds the numstat record whose destination is `file`, and whether Git sees
+/// that file as binary.
+fn destination(numstat: &[u8], file: &str) -> Result<Option<(usize, bool)>, RepositoryError> {
+    let mut fields = numstat.split(|byte| *byte == 0);
+    let mut section = 0;
+    while let Some(record) = fields.next() {
+        if record.is_empty() {
+            continue;
+        }
+        let mut columns = record.splitn(3, |byte| *byte == b'\t');
+        let (Some(added), Some(deleted), Some(path)) =
+            (columns.next(), columns.next(), columns.next())
+        else {
+            return Err(git::malformed());
         };
-        let numstat = git::read_exiting(root, &args("--numstat"), Exit::Differs)?;
-        patch(
+        let path = if path.is_empty() {
+            fields.next();
+            fields.next().ok_or_else(git::malformed)?
+        } else {
+            path
+        };
+        if path == file.as_bytes() {
+            return Ok(Some((section, added == b"-" && deleted == b"-")));
+        }
+        section += 1;
+    }
+    Ok(None)
+}
+
+fn sections(patch: &[u8]) -> impl Iterator<Item = &[u8]> {
+    const START: &[u8] = b"diff --git ";
+    let mut starts: Vec<usize> = (0..patch.len())
+        .filter(|&at| (at == 0 || patch[at - 1] == b'\n') && patch[at..].starts_with(START))
+        .collect();
+    starts.push(patch.len());
+    (0..starts.len() - 1).map(move |index| &patch[starts[index]..starts[index + 1]])
+}
+
+enum Found {
+    File { file: fs::File, executable: bool },
+    Link(Vec<u8>),
+    Directory,
+    Other,
+}
+
+/// Builds the patch for an untracked path from its bytes. Passing the path to
+/// `git diff --no-index` instead would read stdin for `-`, follow a link that
+/// replaced the file after the check, and fail on line-ending warnings.
+fn untracked(root: &Path, file: &str) -> Result<WorktreePatch, RepositoryError> {
+    let diff = match open_untracked(root, file).map_err(|_| no_changes(file, Side::Unstaged))? {
+        Found::File {
+            file: handle,
+            executable,
+        } => added_file(
             root,
-            &args("--patch"),
-            numstat.starts_with(b"-\t-\t"),
-            Exit::Differs,
-        )?
-    } else if kind.is_symlink() {
-        let target = fs::read_link(&on_disk).map_err(|_| no_changes(file, Side::Unstaged))?;
-        symlink_patch(root, file, &link_text(target))?
-    } else if kind.is_dir() {
-        return Err(RepositoryError::new(
-            ErrorKind::UnsupportedPath,
-            "L1 Git cannot show a diff for a nested repository.",
-        ));
-    } else {
-        return Err(RepositoryError::new(
-            ErrorKind::UnsupportedPath,
-            "L1 Git can show diffs only for regular files and symbolic links.",
-        ));
+            file,
+            handle,
+            if executable { "100755" } else { "100644" },
+        )?,
+        Found::Link(target) => text_patch(&added_patch(root, file, "120000", &target)?),
+        Found::Directory => {
+            return Err(RepositoryError::new(
+                ErrorKind::UnsupportedPath,
+                "L1 Git cannot show a diff for a nested repository.",
+            ));
+        }
+        Found::Other => {
+            return Err(RepositoryError::new(
+                ErrorKind::UnsupportedPath,
+                "L1 Git can show diffs only for regular files and symbolic links.",
+            ));
+        }
     };
     Ok(WorktreePatch::Diff { diff })
 }
 
+/// Opens `file` under `root` one component at a time, refusing a symbolic link
+/// at every step, so a path swapped after `git status` cannot lead outside.
 #[cfg(unix)]
-fn link_text(target: PathBuf) -> Vec<u8> {
-    std::os::unix::ffi::OsStringExt::into_vec(target.into_os_string())
+fn open_untracked(root: &Path, file: &str) -> io::Result<Found> {
+    use std::{
+        ffi::{CStr, CString},
+        os::{
+            fd::{AsRawFd, FromRawFd, OwnedFd},
+            unix::fs::PermissionsExt,
+        },
+    };
+    let open_at = |dir: &OwnedFd, name: &CStr, flags: libc::c_int| -> io::Result<OwnedFd> {
+        // SAFETY: `dir` is an open descriptor and `name` is NUL-terminated and
+        // outlives the call.
+        let fd = unsafe {
+            libc::openat(
+                dir.as_raw_fd(),
+                name.as_ptr(),
+                flags | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+            )
+        };
+        if fd < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: `openat` returned a new descriptor that nothing else owns.
+        Ok(unsafe { OwnedFd::from_raw_fd(fd) })
+    };
+    let names = file
+        .trim_end_matches('/')
+        .split('/')
+        .map(|name| CString::new(name).map_err(|_| io::Error::from(io::ErrorKind::InvalidInput)))
+        .collect::<io::Result<Vec<_>>>()?;
+    let (name, parents) = names
+        .split_last()
+        .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
+    let mut dir = OwnedFd::from(fs::File::open(root)?);
+    for parent in parents {
+        dir = open_at(&dir, parent, libc::O_RDONLY | libc::O_DIRECTORY)?;
+    }
+    match open_at(&dir, name, libc::O_RDONLY | libc::O_NONBLOCK) {
+        Ok(fd) => {
+            let file = fs::File::from(fd);
+            let metadata = file.metadata()?;
+            Ok(if metadata.is_file() {
+                Found::File {
+                    executable: metadata.permissions().mode() & 0o100 != 0,
+                    file,
+                }
+            } else if metadata.is_dir() {
+                Found::Directory
+            } else {
+                Found::Other
+            })
+        }
+        Err(error) if error.raw_os_error() == Some(libc::ELOOP) => {
+            let mut target = vec![0u8; 4096];
+            loop {
+                // SAFETY: the pointer and length describe `target`, which is
+                // writable and outlives the call.
+                let length = unsafe {
+                    libc::readlinkat(
+                        dir.as_raw_fd(),
+                        name.as_ptr(),
+                        target.as_mut_ptr().cast(),
+                        target.len(),
+                    )
+                };
+                let length = usize::try_from(length).map_err(|_| io::Error::last_os_error())?;
+                if length < target.len() {
+                    target.truncate(length);
+                    return Ok(Found::Link(target));
+                }
+                target.resize(target.len() * 2, 0);
+            }
+        }
+        Err(error) => Err(error),
+    }
 }
 
 #[cfg(not(unix))]
-fn link_text(target: PathBuf) -> Vec<u8> {
-    target.to_string_lossy().into_owned().into_bytes()
+fn open_untracked(root: &Path, file: &str) -> io::Result<Found> {
+    let path = root.join(file.trim_end_matches('/'));
+    let kind = fs::symlink_metadata(&path)?.file_type();
+    Ok(if kind.is_symlink() {
+        Found::Link(
+            fs::read_link(&path)?
+                .to_string_lossy()
+                .into_owned()
+                .into_bytes(),
+        )
+    } else if kind.is_dir() {
+        Found::Directory
+    } else if kind.is_file() {
+        Found::File {
+            file: fs::File::open(&path)?,
+            executable: false,
+        }
+    } else {
+        Found::Other
+    })
 }
 
-/// Writes the patch Git shows for a new symbolic link from the link text alone.
-/// `diff --no-index` would follow the link to a directory or a FIFO.
-fn symlink_patch(root: &Path, file: &str, target: &[u8]) -> Result<FilePatch, RepositoryError> {
+/// Git calls a file binary when its first 8000 bytes contain a NUL.
+const BINARY_PROBE: usize = 8000;
+
+fn added_file(
+    root: &Path,
+    file: &str,
+    handle: fs::File,
+    mode: &str,
+) -> Result<FilePatch, RepositoryError> {
+    let unreadable = |_| no_changes(file, Side::Unstaged);
+    let mut handle = io::BufReader::new(handle);
+    let mut kept = Vec::new();
+    (&mut handle)
+        .take(PATCH_LIMIT as u64 + 1)
+        .read_to_end(&mut kept)
+        .map_err(unreadable)?;
+    if kept[..kept.len().min(BINARY_PROBE)].contains(&0) {
+        return Ok(FilePatch::Binary);
+    }
+    if kept.len() <= PATCH_LIMIT {
+        let patch = added_patch(root, file, mode, &kept)?;
+        return Ok(if patch.len() <= PATCH_LIMIT {
+            text_patch(&patch)
+        } else {
+            FilePatch::TooLarge {
+                bytes: patch.len() as u64,
+            }
+        });
+    }
+    let mut size = kept.len() as u64;
+    let mut breaks = newlines(&kept);
+    let mut last = kept.last().copied();
+    loop {
+        let chunk = handle.fill_buf().map_err(unreadable)?;
+        if chunk.is_empty() {
+            break;
+        }
+        size += chunk.len() as u64;
+        breaks += newlines(chunk);
+        last = chunk.last().copied();
+        let length = chunk.len();
+        handle.consume(length);
+    }
+    let unterminated = u64::from(last != Some(b'\n'));
+    let oid = "0".repeat(
+        match git::line(&git::read(root, &["rev-parse", "--show-object-format"])?).as_str() {
+            "sha256" => 64,
+            _ => 40,
+        },
+    );
+    let lines = breaks + unterminated;
+    let header = header(file, mode, &oid, lines);
+    Ok(FilePatch::TooLarge {
+        bytes: header.len() as u64 + size + lines + unterminated * NO_NEWLINE.len() as u64,
+    })
+}
+
+fn newlines(bytes: &[u8]) -> u64 {
+    bytes.iter().filter(|byte| **byte == b'\n').count() as u64
+}
+
+const NO_NEWLINE: &str = "\n\\ No newline at end of file\n";
+
+/// Writes the patch Git prints for a newly added file with `--full-index`.
+fn added_patch(
+    root: &Path,
+    file: &str,
+    mode: &str,
+    content: &[u8],
+) -> Result<Vec<u8>, RepositoryError> {
     let oid = git::line(&git::read_with_input(
         root,
         &["hash-object", "--no-filters", "--stdin"],
-        target.to_vec(),
+        content.to_vec(),
     )?);
-    let (old, new) = (quoted("a/", file), quoted("b/", file));
-    let tab = if new.contains(' ') { "\t" } else { "" };
-    let lines: Vec<&[u8]> = target.split_inclusive(|byte| *byte == b'\n').collect();
-    let count = match lines.len() {
-        1 => String::new(),
-        count => format!(",{count}"),
-    };
-    let mut patch = format!(
-        "diff --git {old} {new}\nnew file mode 120000\nindex {}..{oid}\n--- /dev/null\n+++ {new}{tab}\n@@ -0,0 +1{count} @@\n",
-        "0".repeat(oid.len()),
-    )
-    .into_bytes();
-    for line in lines {
+    let lines = content.split_inclusive(|byte| *byte == b'\n').count() as u64;
+    let mut patch = header(file, mode, &oid, lines).into_bytes();
+    for line in content.split_inclusive(|byte| *byte == b'\n') {
         patch.push(b'+');
         patch.extend_from_slice(line);
     }
-    if !target.ends_with(b"\n") {
-        patch.extend_from_slice(b"\n\\ No newline at end of file\n");
+    if !content.is_empty() && !content.ends_with(b"\n") {
+        patch.extend_from_slice(NO_NEWLINE.as_bytes());
     }
-    Ok(FilePatch::Text {
-        lossy: std::str::from_utf8(&patch).is_err(),
-        patch: git::text(&patch),
-    })
+    Ok(patch)
+}
+
+fn header(file: &str, mode: &str, oid: &str, lines: u64) -> String {
+    let (old, new) = (quoted("a/", file), quoted("b/", file));
+    let mut header = format!(
+        "diff --git {old} {new}\nnew file mode {mode}\nindex {}..{oid}\n",
+        "0".repeat(oid.len())
+    );
+    if lines > 0 {
+        let tab = if new.contains(' ') { "\t" } else { "" };
+        let count = match lines {
+            1 => String::new(),
+            lines => format!(",{lines}"),
+        };
+        header.push_str(&format!(
+            "--- /dev/null\n+++ {new}{tab}\n@@ -0,0 +1{count} @@\n"
+        ));
+    }
+    header
 }
 
 /// Quotes a path the way Git's diff headers do with `core.quotePath=false`.
@@ -437,15 +653,43 @@ fn quoted(prefix: &str, path: &str) -> String {
     quoted
 }
 
-fn patch(
-    root: &Path,
-    args: &[&str],
-    binary: bool,
-    exit: Exit,
-) -> Result<FilePatch, RepositoryError> {
-    if binary {
-        Ok(FilePatch::Binary)
-    } else {
-        capped_patch(root, args, exit)
+#[cfg(all(test, unix))]
+mod tests {
+    use super::{Found, open_untracked};
+    use std::{fs, os::unix::fs::symlink, process::Command};
+
+    #[test]
+    fn untracked_reads_never_pass_through_a_symbolic_link() {
+        let directory = tempfile::tempdir().unwrap();
+        let (root, outside) = (
+            directory.path().join("root"),
+            directory.path().join("outside"),
+        );
+        fs::create_dir_all(root.join("real")).unwrap();
+        fs::create_dir(&outside).unwrap();
+        fs::write(outside.join("null"), "SECRET\n").unwrap();
+        fs::write(root.join("real/file"), "inside\n").unwrap();
+        symlink(&outside, root.join("swapped")).unwrap();
+        symlink(&outside, root.join("link")).unwrap();
+        assert!(
+            Command::new("mkfifo")
+                .arg(root.join("fifo"))
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert!(matches!(
+            open_untracked(&root, "real/file"),
+            Ok(Found::File { .. })
+        ));
+        assert!(open_untracked(&root, "swapped/null").is_err());
+        assert!(
+            matches!(open_untracked(&root, "link"), Ok(Found::Link(target)) if target == outside.as_os_str().as_encoded_bytes())
+        );
+        assert!(matches!(open_untracked(&root, "fifo"), Ok(Found::Other)));
+        assert!(matches!(
+            open_untracked(&root, "real"),
+            Ok(Found::Directory)
+        ));
     }
 }

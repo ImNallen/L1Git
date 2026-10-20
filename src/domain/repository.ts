@@ -109,14 +109,13 @@ export const lineStatsSchema = z.array(
     deleted: z.number().int().nonnegative(),
   }),
 );
-export const changeSchema = z.enum(["M", "T", "A", "D"]);
 export const sidesSchema = z.discriminatedUnion("kind", [
-  z.strictObject({ kind: z.literal("staged"), staged: changeSchema }),
-  z.strictObject({ kind: z.literal("unstaged"), unstaged: changeSchema }),
+  z.strictObject({ kind: z.literal("staged"), staged: changeStatusSchema }),
+  z.strictObject({ kind: z.literal("unstaged"), unstaged: changeStatusSchema }),
   z.strictObject({
     kind: z.literal("both"),
-    staged: changeSchema,
-    unstaged: changeSchema,
+    staged: changeStatusSchema,
+    unstaged: changeStatusSchema,
   }),
 ]);
 export const submoduleStateSchema = z.strictObject({
@@ -127,7 +126,7 @@ export const submoduleStateSchema = z.strictObject({
 export const moveSideSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("staged"),
-    unstaged: changeSchema.nullable(),
+    unstaged: changeStatusSchema.nullable(),
   }),
   z.strictObject({ kind: z.literal("unstaged") }),
 ]);
@@ -212,7 +211,6 @@ export type CommitDetail = z.infer<typeof detailSchema>;
 export type ChangedFile = CommitDetail["files"][number];
 export type FilePatch = z.infer<typeof filePatchSchema>;
 export type LineStats = z.infer<typeof lineStatsSchema>[number];
-export type Change = z.infer<typeof changeSchema>;
 export type Sides = z.infer<typeof sidesSchema>;
 export type SubmoduleState = z.infer<typeof submoduleStateSchema>;
 export type MoveSide = z.infer<typeof moveSideSchema>;

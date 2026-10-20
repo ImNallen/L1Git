@@ -702,21 +702,19 @@ pub fn file_patch(path: &str, oid: &str, file: &str) -> Result<FilePatch, Reposi
     if added == b"-" && deleted == b"-" {
         return Ok(FilePatch::Binary);
     }
-    capped_patch(&root, &args("--patch"), git::Exit::Success)
+    Ok(
+        match git::read_capped(&root, &args("--patch"), PATCH_LIMIT)? {
+            git::Capped::Within(patch) => text_patch(&patch),
+            git::Capped::Over(bytes) => FilePatch::TooLarge { bytes },
+        },
+    )
 }
 
-pub(crate) fn capped_patch(
-    root: &Path,
-    args: &[&str],
-    exit: git::Exit,
-) -> Result<FilePatch, RepositoryError> {
-    Ok(match git::read_capped(root, args, PATCH_LIMIT, exit)? {
-        git::Capped::Within(patch) => FilePatch::Text {
-            lossy: std::str::from_utf8(&patch).is_err(),
-            patch: git::text(&patch),
-        },
-        git::Capped::Over(bytes) => FilePatch::TooLarge { bytes },
-    })
+pub(crate) fn text_patch(patch: &[u8]) -> FilePatch {
+    FilePatch::Text {
+        lossy: std::str::from_utf8(patch).is_err(),
+        patch: git::text(patch),
+    }
 }
 
 /// Counts each commit's changed lines against the same base as its detail.
