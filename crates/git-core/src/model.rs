@@ -146,6 +146,14 @@ pub enum FilePatch {
     TooLarge { bytes: u64 },
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LineStats {
+    pub oid: String,
+    pub added: u64,
+    pub deleted: u64,
+}
+
 /// A full 40- or 64-digit lowercase object id.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]

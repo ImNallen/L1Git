@@ -1,7 +1,7 @@
 use crate::{
     Branch, ChangeStatus, ChangedFile, Commit, CommitDetail, DiffBase, ErrorKind, FilePatch, Head,
-    Remote, RepositoryError, RepositoryRefs, RepositorySnapshot, Squash, Tag, Worktree, git,
-    remotes,
+    LineStats, Oid, Remote, RepositoryError, RepositoryRefs, RepositorySnapshot, Squash, Tag,
+    Worktree, git, remotes,
 };
 use std::{
     collections::HashMap,
@@ -13,6 +13,7 @@ use std::{
 
 pub const HISTORY_LIMIT: usize = 50_000;
 pub const PATCH_LIMIT: usize = 1024 * 1024;
+pub const LINE_STATS_LIMIT: usize = 500;
 const COMMIT_FORMAT: &str = "--format=%H%x00%P%x00%s%x00%an%x00%ae%x00%at";
 const SQUASH_SCAN_LIMIT: usize = 2000;
 const SQUASH_BRANCH_LIMIT: usize = 1000;
@@ -710,6 +711,80 @@ pub fn file_patch(path: &str, oid: &str, file: &str) -> Result<FilePatch, Reposi
             git::Capped::Over(bytes) => FilePatch::TooLarge { bytes },
         },
     )
+}
+
+/// Counts each commit's changed lines against the same base as its detail.
+/// Commits Git cannot read are left out instead of failing the whole batch.
+pub fn line_stats(path: &str, oids: &[String]) -> Result<Vec<LineStats>, RepositoryError> {
+    if oids.len() > LINE_STATS_LIMIT {
+        return Err(RepositoryError::new(
+            ErrorKind::InvalidOid,
+            format!("Request line counts for at most {LINE_STATS_LIMIT} commits at once."),
+        ));
+    }
+    for oid in oids {
+        Oid::try_from(oid.clone())?;
+    }
+    let root = root(path)?;
+    let output = git::read_with_input(
+        &root,
+        &[
+            "diff-tree",
+            "--stdin",
+            "--always",
+            "-r",
+            "-z",
+            "--numstat",
+            "--no-renames",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--root",
+            "--diff-merges=first-parent",
+        ],
+        oids.iter()
+            .flat_map(|oid| format!("{oid}\n").into_bytes())
+            .collect(),
+    )?;
+    let lines = |count: &[u8]| match count {
+        b"-" => Ok(0),
+        count => std::str::from_utf8(count)
+            .ok()
+            .and_then(|count| count.parse::<u64>().ok())
+            .ok_or_else(git::malformed),
+    };
+    let mut counts: HashMap<&[u8], (u64, u64)> = HashMap::new();
+    let mut current = None;
+    for field in output
+        .split(|byte| *byte == 0)
+        .filter(|field| !field.is_empty())
+    {
+        let mut columns = field.splitn(3, |byte| *byte == b'\t');
+        match (columns.next(), columns.next(), columns.next()) {
+            (Some(oid), None, None) => {
+                counts.entry(oid).or_default();
+                current = Some(oid);
+            }
+            (Some(added), Some(deleted), Some(_)) => {
+                let total = current
+                    .and_then(|oid| counts.get_mut(oid))
+                    .ok_or_else(git::malformed)?;
+                total.0 += lines(added)?;
+                total.1 += lines(deleted)?;
+            }
+            _ => return Err(git::malformed()),
+        }
+    }
+    Ok(oids
+        .iter()
+        .filter_map(|oid| {
+            let &(added, deleted) = counts.get(oid.as_bytes())?;
+            Some(LineStats {
+                oid: oid.clone(),
+                added,
+                deleted,
+            })
+        })
+        .collect())
 }
 
 fn unchanged_path() -> RepositoryError {
