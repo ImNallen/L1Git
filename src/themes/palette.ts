@@ -188,7 +188,7 @@ export const onAccent: Recipe = (s) => {
 
 // A grey accent has no hue to start lanes or turn code colours from, so it reads as L1's blue.
 const GREY_ACCENT_CHROMA = 0.02;
-const GREY_ACCENT_HUE = toOklch(parseHex("#3979ce") ?? BLACK).h;
+const GREY_ACCENT_HUE = toOklch(parseHex("#346bf1") ?? BLACK).h;
 
 function accentHue(accent: Rgba): number {
   const { C, h } = toOklch(accent);

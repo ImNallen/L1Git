@@ -83,17 +83,14 @@ it("derives a light and a dark variant for each of the five seeded families", ()
   ]);
 });
 
-const L1_MUTED_CONTRAST = ratio(
-  stylesheet.dark["--muted"],
-  stylesheet.dark["--canvas"],
-);
+const WCAG_AA_TEXT_CONTRAST = 4.5;
 
 it.each(derived.map((v) => [v.id, v.palette] as const))(
-  "keeps %s text as readable as L1 on its background and accent",
+  "keeps %s muted text at AA 4.5:1, and the rest as readable as L1",
   (_, p) => {
     expect(ratio(p.foreground, p.background)).toBeGreaterThanOrEqual(7);
     expect(ratio(p.muted, p.background)).toBeGreaterThanOrEqual(
-      L1_MUTED_CONTRAST,
+      WCAG_AA_TEXT_CONTRAST,
     );
     expect(ratio(p.textDim, p.background)).toBeGreaterThanOrEqual(3);
     expect(ratio(p.accentForeground, p.accent)).toBeGreaterThanOrEqual(3);
@@ -110,12 +107,12 @@ it("derives every token as hex, keeping the seeds verbatim", () => {
 });
 
 it.each<[Appearance, string, string]>([
-  ["dark", "#0a0a0a", "#d3d3d8"],
-  ["light", "#fafafa", "#303038"],
+  ["dark", "#0a0a0a", "#f5f5f5"],
+  ["light", "#fcfcfc", "#27272a"],
 ])(
   "derives a %s foreground near L1's text from L1's background",
   (appearance, background, text) => {
-    const p = derivePalette(appearance, background, "#3979ce");
+    const p = derivePalette(appearance, background, "#346bf1");
     const [got, want] = [parseHex(p.foreground), parseHex(text)];
     expect(got && want && distance(got, want)).toBeLessThan(0.015);
   },
@@ -147,28 +144,28 @@ const builtInLanes = BUILT_IN_FAMILIES.flatMap((f) => f.variants).map(
 
 it("starts each theme's lanes from L1's lane nearest its accent and keeps L1's order", () => {
   expect(LANES.map((lane) => variantPalette("grove-dark")[lane])).toEqual([
-    "#0de082",
-    "#5c9fff",
-    "#ff645f",
-    "#0bd6de",
-    "#ffa720",
-    "#b17eff",
+    "#32d6c1",
+    "#fdc128",
+    "#ff7488",
+    "#c387ff",
+    "#a5e837",
+    "#3970f7",
   ]);
   expect(
     Object.fromEntries(builtInLanes.map(([id, , lanes]) => [id, lanes[0]])),
   ).toEqual({
-    "l1-light": "#0072f6",
-    "l1-dark": "#569bff",
-    "grove-light": "#039354",
-    "grove-dark": "#0de082",
-    "ocean-light": "#0072f5",
-    "ocean-dark": "#5d9fff",
-    "ember-light": "#e50126",
-    "ember-dark": "#ffa71d",
-    "iris-light": "#8734e0",
-    "iris-dark": "#b17dff",
-    "rose-light": "#e50026",
-    "rose-dark": "#ff615d",
+    "l1-light": "#1b4ed8",
+    "l1-dark": "#346bf1",
+    "grove-light": "#0b9387",
+    "grove-dark": "#32d6c1",
+    "ocean-light": "#1a4cd6",
+    "ocean-dark": "#3870f7",
+    "ember-light": "#d87602",
+    "ember-dark": "#ff7488",
+    "iris-light": "#9231e8",
+    "iris-dark": "#c286ff",
+    "rose-light": "#df1946",
+    "rose-dark": "#fe7488",
   });
 });
 
@@ -218,7 +215,7 @@ it("puts dark ink on pale lanes a theme brings, and keeps white on deep ones", (
     accent: "#346bf1",
     ...pale,
   });
-  expect([light.onLane, light.refOnLane]).toEqual(["#323232", "#323232"]);
+  expect([light.onLane, light.refOnLane]).toEqual(["#282828", "#282828"]);
   const deep = Object.fromEntries(LANES.map((lane) => [lane, "#1d4ed8"]));
   const dark = completePalette("dark", {
     background: "#0a0a0a",
@@ -249,15 +246,15 @@ it.each(derived.map((v) => [v.id, v.palette] as const))(
 it("tints status washes and shadows with the theme's background", () => {
   const grove = variantPalette("grove-dark");
   expect([grove.success, grove.successBg, grove.shadowPane]).toEqual([
-    "#38bf93",
-    "#172e25",
+    "#38d69b",
+    "#173126",
     "#01010177",
   ]);
   const ember = variantPalette("ember-light");
   expect([ember.errorBg, ember.accentMuted, ember.shadowPane]).toEqual([
-    "#fbefed",
-    "#91624c",
-    "#18171726",
+    "#fbeae5",
+    "#895b46",
+    "#19181826",
   ]);
 });
 
@@ -269,7 +266,7 @@ it("washes the background toward the status colour a theme brings", () => {
   });
   expect([p.success, p.successBg, p.successBgHover]).toEqual([
     "#50fa7b",
-    "#344d45",
+    "#344c45",
     "#3a5f4c",
   ]);
 });
@@ -280,13 +277,13 @@ it("tints error washes toward the red a theme brings", () => {
     accent: "#bd93f9",
     deleted: "#ff5555",
   });
-  expect(p.errorBorder).toBe("#5d3940");
+  expect(p.errorBorder).toBe("#5c3940");
 });
 
 it("starts lanes from L1's blue when the accent is grey", () => {
   for (const accent of ["#808080", "#7f8081"]) {
     const p = derivePalette("dark", "#0a0a0a", accent);
-    expect([p.graphLane1, p.graphLane3]).toEqual(["#569bff", "#00d3db"]);
+    expect([p.graphLane1, p.graphLane3]).toEqual(["#346bf1", "#fbbf24"]);
   }
 });
 
@@ -308,10 +305,10 @@ it("colours keywords with the accent and turns the rest of the code with it", ()
     grove.syntaxKeyword,
     grove.syntaxString,
     grove.syntaxComment,
-  ]).toEqual(["#57c08e", "#df9d53", "#787d7b"]);
+  ]).toEqual(["#72daa7", "#fbb76d", "#828684"]);
   expect([
     ember.syntaxKeyword,
     ember.syntaxString,
     ember.syntaxComment,
-  ]).toEqual(["#993e00", "#774990", "#706e6c"]);
+  ]).toEqual(["#8c3800", "#6e4087", "#747170"]);
 });

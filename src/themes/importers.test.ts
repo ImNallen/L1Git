@@ -98,7 +98,7 @@ it("reads syntax colours from the last TextMate rule naming each scope, flatteni
   });
   expect(theme && vsCodeThemeToDraft(theme, "x").colors).toEqual({
     background: "#000000",
-    accent: "#3979ce",
+    accent: "#346bf1",
     syntaxKeyword: "#0000ff",
     syntaxConstant: "#ffb86c",
     syntaxComment: "#808080",
@@ -121,7 +121,7 @@ it("reads a syntax colour from a narrower or compound scope when no rule names t
   });
   expect(theme && vsCodeThemeToDraft(theme, "x").colors).toEqual({
     background: "#000000",
-    accent: "#3979ce",
+    accent: "#346bf1",
     syntaxKeyword: "#00ff00",
     syntaxString: "#ffff00",
     syntaxStringExpression: "#ffff00",
@@ -146,7 +146,7 @@ it("prefers a rule naming the scope over a later compound or narrower one, as Dr
   });
   expect(theme && vsCodeThemeToDraft(theme, "x").colors).toEqual({
     background: "#000000",
-    accent: "#3979ce",
+    accent: "#346bf1",
     syntaxString: "#f1fa8c",
     syntaxStringExpression: "#f1fa8c",
     syntaxConstant: "#bd93f9",
@@ -163,7 +163,7 @@ it("colours quoted strings, which Shiki paints as string expressions, with the t
   });
   expect(theme && vsCodeThemeToDraft(theme, "x").colors).toEqual({
     background: "#000000",
-    accent: "#3979ce",
+    accent: "#346bf1",
     syntaxString: "#9ece6a",
     syntaxStringExpression: "#9ece6a",
   });
@@ -198,7 +198,7 @@ it("takes the appearance from the manifest's uiTheme, then the theme's type, the
         {
           name: "solarized-light",
           appearance: "light",
-          colors: { background: "#fdf6e3", accent: "#316fc1" },
+          colors: { background: "#fdf6e3", accent: "#1b4ed8" },
         },
       ],
     },
@@ -215,7 +215,7 @@ it.each(["constructor", "__proto__", "toString"])(
     expect(theme && vsCodeThemeToDraft(theme, "x", base)).toEqual({
       name: "x",
       appearance: "light",
-      colors: { background: "#fdf6e3", accent: "#316fc1" },
+      colors: { background: "#fdf6e3", accent: "#1b4ed8" },
     });
   },
 );
@@ -240,7 +240,7 @@ it("skips a fully transparent colour, which VS Code themes use to hide an elemen
           colors: {
             background: "#1e1e2e",
             border: "#585b70",
-            accent: "#3979ce",
+            accent: "#346bf1",
           },
         },
       ],
