@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { BUILT_IN_FAMILIES, L1_VARIANTS } from "./catalog";
-import { contrast, distance, parseHex } from "./color";
+import { contrast, distance, parseHex, toOklch } from "./color";
 import {
   completePalette,
   derivePalette,
@@ -133,18 +133,67 @@ it("puts dark text on a pale accent and white text on a deep one", () => {
 const variantPalette = (id: string) =>
   derived.find((v) => v.id === id)?.palette ?? {};
 
-it("turns the graph lanes with the accent, so each family's first lane is its accent hue", () => {
+const builtInLanes = BUILT_IN_FAMILIES.flatMap((f) => f.variants).map(
+  (v) =>
+    [
+      v.id,
+      v.appearance,
+      LANES.map(
+        (lane) =>
+          v.palette[lane] ?? stylesheet[v.appearance][STYLESHEET_TOKENS[lane]],
+      ),
+    ] as const,
+);
+
+it("starts each theme's lanes from L1's lane nearest its accent and keeps L1's order", () => {
   expect(LANES.map((lane) => variantPalette("grove-dark")[lane])).toEqual([
-    "#00bc80",
-    "#9d89ff",
-    "#ccc04e",
-    "#fd8fea",
-    "#00b3c0",
-    "#ffa559",
+    "#0de082",
+    "#5c9fff",
+    "#ff645f",
+    "#0bd6de",
+    "#ffa720",
+    "#b17eff",
   ]);
-  expect(variantPalette("ember-light").graphLane1).toBe("#c25500");
-  expect(variantPalette("iris-dark").graphLane1).toBe("#9a8bfd");
+  expect(
+    Object.fromEntries(builtInLanes.map(([id, , lanes]) => [id, lanes[0]])),
+  ).toEqual({
+    "l1-light": "#0072f6",
+    "l1-dark": "#569bff",
+    "grove-light": "#039354",
+    "grove-dark": "#0de082",
+    "ocean-light": "#0072f5",
+    "ocean-dark": "#5d9fff",
+    "ember-light": "#e50126",
+    "ember-dark": "#ffa71d",
+    "iris-light": "#8734e0",
+    "iris-dark": "#b17dff",
+    "rose-light": "#e50026",
+    "rose-dark": "#ff615d",
+  });
 });
+
+const hue = (hex = "") => {
+  const color = parseHex(hex);
+  return color ? toOklch(color).h : NaN;
+};
+const hueGap = (a: number, b: number) =>
+  Math.abs(((((a - b) % 360) + 540) % 360) - 180);
+
+// Colourblind confusion depends on absolute hue, so only L1's own neighbours are known to stay apart.
+it.each(builtInLanes)(
+  "keeps %s lanes in L1's hues and order, so neighbouring lanes stay apart for colourblind eyes",
+  (_, appearance, lanes) => {
+    const l1 = LANES.map((lane) =>
+      hue(stylesheet[appearance][STYLESHEET_TOKENS[lane]]),
+    );
+    const rotations = l1.flatMap((_, k) =>
+      lanes.every((lane, i) => hueGap(hue(lane), l1[(i + k) % 6] ?? NaN) <= 2)
+        ? [k]
+        : [],
+    );
+    expect(rotations).toHaveLength(1);
+  },
+);
 
 it.each(derived.map((v) => [v.id, v.palette] as const))(
   "keeps %s lanes at 3:1 on the canvas, with initials and ref names at 3:1 on each lane",
@@ -234,7 +283,7 @@ it("tints error washes toward the red a theme brings", () => {
   expect(p.errorBorder).toBe("#5d3940");
 });
 
-it("turns lanes from L1's blue when the accent is grey", () => {
+it("starts lanes from L1's blue when the accent is grey", () => {
   for (const accent of ["#808080", "#7f8081"]) {
     const p = derivePalette("dark", "#0a0a0a", accent);
     expect([p.graphLane1, p.graphLane3]).toEqual(["#569bff", "#00d3db"]);

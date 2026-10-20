@@ -8,7 +8,7 @@ import {
   toOklch,
   type Rgba,
 } from "./color";
-import { FOREGROUND_MIX, RECIPES } from "./recipes.generated";
+import { FOREGROUND_MIX, LANE_CYCLE, RECIPES } from "./recipes.generated";
 
 export type Appearance = "light" | "dark";
 
@@ -139,6 +139,9 @@ export const LANES = [
   "graphLane6",
 ] as const satisfies readonly Token[];
 
+/** One of L1's lane colours: an absolute OKLCH hue and chroma, and lightness `t` between background and foreground. */
+export type LaneStop = { h: number; t: number; C: number };
+
 export const RATIO_RECIPES = {
   ink:
     (t: number): Recipe =>
@@ -171,6 +174,7 @@ export type RecipeSpec =
   | readonly ["fixed", string]
   | readonly ["onAccent"]
   | readonly ["hue", offset: number, t: number, chroma: number]
+  | readonly ["lane", index: number]
   | readonly ["status", hue: number, t: number, chroma: number]
   | readonly ["tone", t: number, chromaScale: number]
   | readonly ["toward", token: Token, t: number]
@@ -182,13 +186,28 @@ export const onAccent: Recipe = (s) => {
   return contrast(WHITE, s.accent) >= 3 ? WHITE : dark;
 };
 
-// A grey accent has no hue to turn lanes from, so they turn from L1's blue instead.
+// A grey accent has no hue to start lanes or turn code colours from, so it reads as L1's blue.
 const GREY_ACCENT_CHROMA = 0.02;
 const GREY_ACCENT_HUE = toOklch(parseHex("#3979ce") ?? BLACK).h;
 
 function accentHue(accent: Rgba): number {
   const { C, h } = toOklch(accent);
   return C < GREY_ACCENT_CHROMA ? GREY_ACCENT_HUE : h;
+}
+
+const hueGap = (a: number, b: number) =>
+  Math.abs(((((a - b) % 360) + 540) % 360) - 180);
+
+// Colourblind confusion is about absolute hues, so lanes keep L1's hues in L1's order and only choose where to start.
+function laneAt(cycle: readonly LaneStop[], index: number): Recipe {
+  return (s) => {
+    const gaps = cycle.map((stop) => hueGap(stop.h, accentHue(s.accent)));
+    const start = gaps.indexOf(Math.min(...gaps));
+    const stop = cycle[(index + start) % cycle.length];
+    return stop
+      ? fromOklch({ L: lightnessAt(s, stop.t), C: stop.C, h: stop.h })
+      : BLACK;
+  };
 }
 
 /** Lightness `t` of the way from the background's to the foreground's, so the colour keeps its contrast on any canvas. */
@@ -214,7 +233,7 @@ const laneInk =
     return worst(dark) > white ? dark : WHITE;
   };
 
-export function recipe(spec: RecipeSpec): Recipe {
+export function recipe(spec: RecipeSpec, cycle: readonly LaneStop[]): Recipe {
   switch (spec[0]) {
     case "seed": {
       const key = spec[1];
@@ -231,6 +250,8 @@ export function recipe(spec: RecipeSpec): Recipe {
       return (s) =>
         fromOklch({ L: lightnessAt(s, t), C, h: accentHue(s.accent) + offset });
     }
+    case "lane":
+      return laneAt(cycle, spec[1]);
     case "status": {
       const [, h, t, C] = spec;
       return (s) => fromOklch({ L: lightnessAt(s, t), C, h });
@@ -271,7 +292,7 @@ function mapRecord<K extends string, A, B>(
   return out;
 }
 
-// Hue offsets turn from the accent as the lanes' do, so keywords take the accent and strings sit near lane 6.
+// Hue offsets turn from the accent, so each theme's code colours sit around its own accent.
 const SYNTAX_RECIPES: Record<Appearance, Record<SyntaxToken, RecipeSpec>> = {
   dark: {
     syntaxKeyword: ["tone", 0.8, 1],
@@ -296,7 +317,9 @@ const SYNTAX_RECIPES: Record<Appearance, Record<SyntaxToken, RecipeSpec>> = {
 };
 
 const COMPILED = mapRecord(RECIPES, (table, appearance) =>
-  mapRecord({ ...table, ...SYNTAX_RECIPES[appearance] }, recipe),
+  mapRecord({ ...table, ...SYNTAX_RECIPES[appearance] }, (spec) =>
+    recipe(spec, LANE_CYCLE[appearance]),
+  ),
 );
 
 /** Callers pass validated hex; an unparsable seed reads as black. */
