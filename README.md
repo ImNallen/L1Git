@@ -59,6 +59,14 @@ The `sync` paths are a second repository for fetch and fast-forward. After a fet
 
 Fixture creation pushes and fetches only against its temporary local bare repositories. It never writes to GitHub. The configured GitHub remotes are display metadata only. Each sets `remote.github.skipFetchAll`, so a fetch skips it.
 
+For performance checks, create a large repository:
+
+```sh
+pnpm fixture:large
+```
+
+The command prints a temporary directory with `repository` and `worktree` paths. The repository has 60,000 commits, a merge every 40 commits on `main`, and 50 annotated tags. It has 200 local branches in nested folders, such as `feat/graph/topic-001`, and 400 remote-tracking branches under `origin` and `upstream`. Each local branch tracks its `origin` branch, and some are ahead or behind. The `worktree` path is a linked worktree with one modified file and one untracked file. Author and commit dates are fixed, so every run creates the same commit IDs. The command takes a few seconds. Its remotes are display metadata only and set `skipFetchAll`, so a fetch skips them.
+
 ## Check and build
 
 ```sh
