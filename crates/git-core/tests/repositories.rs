@@ -1,6 +1,6 @@
 use l1_git_core::{
     Branch, Change, ChangeStatus, Conflict, DiffBase, ErrorKind, FilePatch, HISTORY_LIMIT, Head,
-    LINE_STATS_LIMIT, LineStats, Moved, RepositoryRefs, Side, Sides, Squash, StatusEntry,
+    LINE_STATS_LIMIT, LineStats, MoveSide, Moved, RepositoryRefs, Side, Sides, Squash, StatusEntry,
     SubmoduleState, Tag, Worktree, WorktreePatch, WorktreeStatus, commit_detail, file_patch,
     line_stats, refs, snapshot, worktree_patch, worktree_status,
 };
@@ -922,7 +922,9 @@ fn worktree_status_tags_staged_unstaged_renamed_and_untracked_paths() {
                     original: "old name.txt".into(),
                     how: Moved::Renamed,
                     submodule: None,
-                    unstaged: Some(Change::Modified),
+                    side: MoveSide::Staged {
+                        unstaged: Some(Change::Modified),
+                    },
                 },
                 ordinary(
                     "staged.txt",
@@ -1194,6 +1196,32 @@ fn worktree_patch_shows_a_staged_rename_with_its_edits() {
             "diff --git a/new.txt b/new.txt\nindex edb299e1fc6dc01d9d84b5cec97e815a3f5a09da..82773b0efaae74b4561105269c6a3cc9a27c3abc 100644\n--- a/new.txt\n+++ b/new.txt\n@@ -2,3 +2,4 @@ one\n two\n three\n 4\n+five\n"
         )
     );
+}
+
+#[test]
+fn worktree_status_and_patch_read_a_move_added_with_intent_to_add() {
+    let fixture = Fixture::new();
+    fixture.commit("old.txt", "one\ntwo\nthree\nfour\n", "initial");
+    fs::rename(fixture.repo.join("old.txt"), fixture.repo.join("new.txt")).unwrap();
+    git(&fixture.repo, &["add", "--intent-to-add", "new.txt"]);
+    assert_eq!(
+        worktree_status(fixture.path()).unwrap().entries,
+        vec![StatusEntry::Renamed {
+            path: "new.txt".into(),
+            original: "old.txt".into(),
+            how: Moved::Renamed,
+            submodule: None,
+            side: MoveSide::Unstaged,
+        }]
+    );
+    assert_eq!(
+        worktree_patch(fixture.path(), "new.txt", Side::Unstaged).unwrap(),
+        diff(
+            "diff --git a/old.txt b/new.txt\nsimilarity index 100%\nrename from old.txt\nrename to new.txt\n"
+        )
+    );
+    let error = worktree_patch(fixture.path(), "new.txt", Side::Staged).unwrap_err();
+    assert!(matches!(error.kind, ErrorKind::UnchangedPath), "{error:?}");
 }
 
 #[test]

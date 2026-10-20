@@ -171,14 +171,12 @@ pub enum StatusEntry {
         submodule: Option<SubmoduleState>,
         sides: Sides,
     },
-    /// Git detects renames and copies only between HEAD and the index, so the
-    /// move is always staged and `unstaged` is any later edit to `path`.
     Renamed {
         path: String,
         original: String,
         how: Moved,
         submodule: Option<SubmoduleState>,
-        unstaged: Option<Change>,
+        side: MoveSide,
     },
     Unmerged {
         path: String,
@@ -208,6 +206,15 @@ pub enum Change {
     Added,
     #[serde(rename = "D")]
     Deleted,
+}
+
+/// A move between the index and the working tree comes from a path added with
+/// `git add -N`, and its index side never carries a separate change.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum MoveSide {
+    Staged { unstaged: Option<Change> },
+    Unstaged,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -244,7 +251,8 @@ pub enum WorktreePatch {
         submodule: SubmoduleState,
     },
     /// `diff` compares the working-tree file, conflict markers included, with
-    /// HEAD. It is absent when that file is gone or matches HEAD.
+    /// HEAD. It is absent for a submodule and when that file is gone or matches
+    /// HEAD.
     Conflicted {
         conflict: Conflict,
         diff: Option<FilePatch>,

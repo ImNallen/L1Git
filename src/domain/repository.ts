@@ -124,6 +124,13 @@ export const submoduleStateSchema = z.strictObject({
   modified: z.boolean(),
   untracked: z.boolean(),
 });
+export const moveSideSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("staged"),
+    unstaged: changeSchema.nullable(),
+  }),
+  z.strictObject({ kind: z.literal("unstaged") }),
+]);
 export const conflictSchema = z.enum([
   "bothDeleted",
   "addedByUs",
@@ -146,7 +153,7 @@ export const statusEntrySchema = z.discriminatedUnion("kind", [
     original: z.string(),
     how: z.enum(["renamed", "copied"]),
     submodule: submoduleStateSchema.nullable(),
-    unstaged: changeSchema.nullable(),
+    side: moveSideSchema,
   }),
   z.strictObject({
     kind: z.literal("unmerged"),
@@ -161,7 +168,6 @@ export const worktreeStatusSchema = z.strictObject({
   head: headSchema,
   entries: z.array(statusEntrySchema),
 });
-/** `staged` compares HEAD with the index, `unstaged` the index with the worktree. */
 export const sideSchema = z.enum(["staged", "unstaged"]);
 export const worktreePatchSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("diff"), diff: filePatchSchema }),
@@ -209,6 +215,7 @@ export type LineStats = z.infer<typeof lineStatsSchema>[number];
 export type Change = z.infer<typeof changeSchema>;
 export type Sides = z.infer<typeof sidesSchema>;
 export type SubmoduleState = z.infer<typeof submoduleStateSchema>;
+export type MoveSide = z.infer<typeof moveSideSchema>;
 export type Conflict = z.infer<typeof conflictSchema>;
 export type StatusEntry = z.infer<typeof statusEntrySchema>;
 export type WorktreeStatus = z.infer<typeof worktreeStatusSchema>;

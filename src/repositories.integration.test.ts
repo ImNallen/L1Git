@@ -448,7 +448,7 @@ describe("real Rust transport contract", () => {
           original: "old.txt",
           how: "renamed",
           submodule: null,
-          unstaged: null,
+          side: { kind: "staged", unstaged: null },
         },
         {
           kind: "ordinary",

@@ -1,6 +1,6 @@
 use crate::{
-    Change, Conflict, ErrorKind, FilePatch, Moved, RepositoryError, Side, Sides, StatusEntry,
-    SubmoduleState, WorktreePatch, WorktreeStatus,
+    Change, Conflict, ErrorKind, FilePatch, MoveSide, Moved, RepositoryError, Side, Sides,
+    StatusEntry, SubmoduleState, WorktreePatch, WorktreeStatus,
     git::{self, Exit},
     repository::{self, capped_patch},
 };
@@ -44,19 +44,24 @@ fn entries(root: &Path) -> Result<Vec<StatusEntry>, RepositoryError> {
             }
             [b'2', b' ', record @ ..] => {
                 let [xy, sub, .., path] = columns::<9>(record)?;
-                let [moved, unstaged] = xy else {
-                    return Err(git::malformed());
+                let staged = |unstaged| {
+                    Ok::<_, RepositoryError>(MoveSide::Staged {
+                        unstaged: change(unstaged)?,
+                    })
+                };
+                let (how, side) = match xy {
+                    [b'R', unstaged] => (Moved::Renamed, staged(*unstaged)?),
+                    [b'C', unstaged] => (Moved::Copied, staged(*unstaged)?),
+                    b".R" => (Moved::Renamed, MoveSide::Unstaged),
+                    b".C" => (Moved::Copied, MoveSide::Unstaged),
+                    _ => return Err(git::malformed()),
                 };
                 StatusEntry::Renamed {
                     path: git::text(path),
                     original: git::text(fields.next().ok_or_else(git::malformed)?),
-                    how: match moved {
-                        b'R' => Moved::Renamed,
-                        b'C' => Moved::Copied,
-                        _ => return Err(git::malformed()),
-                    },
+                    how,
                     submodule: submodule(sub)?,
-                    unstaged: change(*unstaged)?,
+                    side,
                 }
             }
             [b'u', b' ', record @ ..] => {
@@ -202,19 +207,28 @@ pub fn worktree_patch(
             &["diff-index", "--cached", "--no-renames", &base(&root)?],
             &[file],
         )?),
-        (StatusEntry::Renamed { original, how, .. }, Side::Staged) => {
+        (
+            StatusEntry::Ordinary { .. }
+            | StatusEntry::Renamed {
+                side: MoveSide::Staged { .. },
+                ..
+            },
+            Side::Unstaged,
+        ) => changed(tracked(&root, &["diff-files", "--no-renames"], &[file])?),
+        (StatusEntry::Renamed { original, how, .. }, _) => {
             let detect = match how {
                 Moved::Renamed => "--find-renames",
                 Moved::Copied => "--find-copies-harder",
             };
-            changed(tracked(
-                &root,
-                &["diff-index", "--cached", detect, &base(&root)?],
-                &[original, file],
-            )?)
-        }
-        (StatusEntry::Ordinary { .. } | StatusEntry::Renamed { .. }, Side::Unstaged) => {
-            changed(tracked(&root, &["diff-files", "--no-renames"], &[file])?)
+            let head;
+            let command = match side {
+                Side::Staged => {
+                    head = base(&root)?;
+                    vec!["diff-index", "--cached", detect, &head]
+                }
+                Side::Unstaged => vec!["diff-files", detect],
+            };
+            changed(tracked(&root, &command, &[original, file])?)
         }
         (StatusEntry::Untracked { .. }, _) => untracked(&root, file),
     }
@@ -231,8 +245,14 @@ fn lists(entry: &StatusEntry, file: &str, side: Side) -> bool {
                         | (Sides::Unstaged { .. }, Side::Unstaged)
                 )
         }
-        StatusEntry::Renamed { path, unstaged, .. } => {
-            path == file && (side == Side::Staged || unstaged.is_some())
+        StatusEntry::Renamed {
+            path, side: moved, ..
+        } => {
+            path == file
+                && match moved {
+                    MoveSide::Staged { unstaged } => side == Side::Staged || unstaged.is_some(),
+                    MoveSide::Unstaged => side == Side::Unstaged,
+                }
         }
         StatusEntry::Unmerged { path, .. } => path == file,
         StatusEntry::Untracked { path } => path == file && side == Side::Unstaged,
