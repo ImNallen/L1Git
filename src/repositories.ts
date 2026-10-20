@@ -6,6 +6,7 @@ import type { Advance, FetchMode } from "./domain/overview";
 import {
   detailSchema,
   filePatchSchema,
+  lineStatsSchema,
   refsSchema,
   repositoryErrorSchema,
   snapshotSchema,
@@ -61,6 +62,15 @@ export function commitDetail(path: string, oid: Oid) {
     "/api/commit-detail",
     { path, oid },
     detailSchema,
+  );
+}
+
+export function lineStats(path: RepositoryRoot, oids: Oid[]) {
+  return call(
+    "repository_line_stats",
+    "/api/line-stats",
+    { path, oids },
+    lineStatsSchema,
   );
 }
 

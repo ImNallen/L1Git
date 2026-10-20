@@ -16,6 +16,7 @@ import type { RepositoryOverview } from "./domain/overview";
 import {
   detailSchema,
   filePatchSchema,
+  lineStatsSchema,
   refsSchema,
   repositoryErrorSchema,
   snapshotSchema,
@@ -267,6 +268,32 @@ describe("real Rust transport contract", () => {
       expect(failure.parse(await patch(inspector.oid, file)).error.kind).toBe(
         "unchangedPath",
       );
+  });
+
+  it("counts root, merge, and binary changes against the inspector's diff base", async () => {
+    const { commits } = snapshotEnvelope.parse(
+      await (await post("snapshot", { path: fixture.repository })).json(),
+    ).data;
+    const oid = (subject: string) =>
+      commits.find((commit) => commit.subject === subject)?.oid;
+    const requested = [
+      oid("docs: start the local Git fixture"),
+      oid("Merge branch feat/history"),
+      oid("feat(inspector): show commit message and changed paths"),
+    ];
+    const response = await post("line-stats", {
+      path: fixture.repository,
+      oids: requested,
+    });
+    expect(
+      z
+        .object({ ok: z.literal(true), data: lineStatsSchema })
+        .parse(await response.json()).data,
+    ).toEqual([
+      { oid: requested[0], added: 1, deleted: 0 },
+      { oid: requested[1], added: 4, deleted: 0 },
+      { oid: requested[2], added: 4, deleted: 2 },
+    ]);
   });
 
   it("reads the same root, name, HEAD, and branches as the snapshot without history", async () => {
