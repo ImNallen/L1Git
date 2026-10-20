@@ -191,6 +191,28 @@ describe("first-parent trail", () => {
     expect(go(fork, "child", null)).toEqual({ oid: trunk, trail: null });
   });
 
+  it("ignores a trail step that an amend removed from the loaded history", () => {
+    const amended = oid("6");
+    const reloaded = [
+      { oid: amended, parents: [feature1] },
+      { oid: feature1, parents: [fork] },
+      { oid: fork, parents: [] },
+    ];
+    expect(
+      navigate(reloaded, buildGraph(reloaded).rows, feature1, "child", {
+        end: feature1,
+        passed: [feature2],
+      }),
+    ).toEqual({ oid: amended, trail: null });
+  });
+
+  it("ignores a trail step whose first parent is no longer the selection", () => {
+    expect(go(fork, "child", { end: fork, passed: [feature2] })).toEqual({
+      oid: trunk,
+      trail: null,
+    });
+  });
+
   it("drops the trail on any other move", () => {
     expect(go(fork, "up", { end: fork, passed: [feature1] })).toEqual({
       oid: trunk,

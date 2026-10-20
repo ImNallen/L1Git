@@ -1,12 +1,4 @@
-import {
-  useEffect,
-  useImperativeHandle,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
-import type { Ref } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   CircleCheck,
@@ -266,10 +258,7 @@ type Props = {
   hidden: boolean;
   /** Tips of the default branch, which the highlight treats as trunk. */
   trunk: Oid[];
-  ref?: Ref<HistoryHandle>;
 };
-
-export type HistoryHandle = { run: (action: HistoryAction) => void };
 
 export function History({
   snapshot,
@@ -283,7 +272,6 @@ export function History({
   busy,
   hidden,
   trunk,
-  ref,
 }: Props) {
   const graph = useMemo(
     () => buildGraph(snapshot.commits, snapshot.squashes),
@@ -401,12 +389,15 @@ export function History({
     function refocusWhenDiffCloses() {
       const shown = wasHidden.current && !hidden;
       wasHidden.current = hidden;
-      if (shown && document.activeElement === document.body)
+      if (shown && !document.activeElement?.closest(".sidebar, dialog"))
         tableRef.current?.focus({ preventScroll: true });
     },
     [hidden],
   );
 
+  useEffect(() => {
+    trail.current = null;
+  }, [snapshot]);
   useEffect(() => {
     if (trail.current?.end !== selectedOid) trail.current = null;
   }, [selectedOid]);
@@ -434,7 +425,6 @@ export function History({
     setViewport({ top: scroller.scrollTop, height: scroller.clientHeight });
     onSelect(next.oid);
   }
-  useImperativeHandle(ref, () => ({ run }));
 
   const first = Math.min(
     commits.length,

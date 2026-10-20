@@ -112,11 +112,13 @@
   outline: 2px solid var(--focus);
   outline-offset: -2px;
 }
-.history-scroll:has(> .history-table:focus-visible):not(
-    :has(tbody tr.selected)
-  ) {
-  outline: 2px solid var(--focus);
-  outline-offset: -2px;
+.history:has(.history-table:focus-visible)::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  border: 2px solid var(--focus);
+  pointer-events: none;
 }
 .commit-description {
   min-width: 0;

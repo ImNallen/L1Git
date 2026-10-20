@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as repositories from "./repositories";
 import { firstChangedPath } from "./domain/changedFiles";
+import { latestReader } from "./latestReader";
 import {
   emptyCatalog,
   forget,
@@ -232,37 +233,29 @@ export function useWorkspace() {
     [],
   );
 
-  const newestDetailKey = useRef<{ root: RepositoryRoot; oid: Oid } | null>(
-    null,
+  const [detailReader] = useState(() =>
+    latestReader<{ root: RepositoryRoot; oid: Oid }, CommitDetail>({
+      read: (key) => repositories.commitDetail(key.root, key.oid),
+      deliver: (key, outcome) =>
+        setDetail(
+          outcome.ok
+            ? { kind: "ready", ...key, detail: outcome.value }
+            : { kind: "error", ...key, error: problemFrom(outcome.error) },
+        ),
+      same: (left, right) => left.root === right.root && left.oid === right.oid,
+      stallMs: 1000,
+    }),
   );
-  const detailReadInFlight = useRef(false);
-  const readNewestDetail = useCallback(function read() {
-    const key = newestDetailKey.current;
-    if (key === null || detailReadInFlight.current) return;
-    detailReadInFlight.current = true;
-    const settle = (state: DetailState) => {
-      detailReadInFlight.current = false;
-      const wanted = newestDetailKey.current;
-      if (wanted?.root === key.root && wanted.oid === key.oid) setDetail(state);
-      else read();
-    };
-    void repositories.commitDetail(key.root, key.oid).then(
-      (detail) => settle({ kind: "ready", ...key, detail }),
-      (error: unknown) =>
-        settle({ kind: "error", ...key, error: problemFrom(error) }),
-    );
-  }, []);
 
   useEffect(() => {
     if (root === null || selectedOid === null) {
-      newestDetailKey.current = null;
+      detailReader.want(null);
       setDetail({ kind: "empty" });
       return;
     }
-    newestDetailKey.current = { root, oid: selectedOid };
+    detailReader.want({ root, oid: selectedOid });
     setDetail({ kind: "loading", root, oid: selectedOid });
-    readNewestDetail();
-  }, [root, selectedOid, detailAttempt, readNewestDetail]);
+  }, [root, selectedOid, detailAttempt, detailReader]);
 
   useEffect(() => {
     setFileDiff({ kind: "closed" });

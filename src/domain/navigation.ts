@@ -69,7 +69,12 @@ export function navigate(
   move: Move,
   trail: Trail | null,
 ): { oid: Oid | null; trail: Trail | null } {
-  const passed = trail !== null && trail.end === selected ? trail.passed : [];
+  const kept = trail?.end === selected ? trail.passed : [];
+  const step = kept.at(-1);
+  const passed =
+    step !== undefined && graph.get(step)?.parents.at(0)?.oid === selected
+      ? kept
+      : [];
   const previous = passed.at(-1);
   if (move === "child" && previous !== undefined) {
     const rest = passed.slice(0, -1);
