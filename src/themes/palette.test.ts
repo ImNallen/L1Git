@@ -135,44 +135,31 @@ const variantPalette = (id: string) =>
 
 it("turns the graph lanes with the accent, so each family's first lane is its accent hue", () => {
   expect(LANES.map((lane) => variantPalette("grove-dark")[lane])).toEqual([
-    "#40c083",
-    "#00bbbf",
-    "#ffafd7",
-    "#f8a236",
-    "#66acff",
-    "#bbc95d",
+    "#4cc893",
+    "#ab9eff",
+    "#bbb148",
+    "#e984d7",
+    "#00c4d2",
+    "#fa8e1e",
   ]);
-  expect(variantPalette("ember-light").graphLane1).toBe("#b04d20");
-  expect(variantPalette("iris-dark").graphLane1).toBe("#9b97fb");
+  expect(variantPalette("ember-light").graphLane1).toBe("#b54f00");
+  expect(variantPalette("iris-dark").graphLane1).toBe("#a99efd");
 });
 
-const L1_INITIALS_CONTRAST =
-  Math.floor(
-    Math.min(
-      ...(["light", "dark"] as const).flatMap((a) =>
-        LANES.map((lane) =>
-          ratio(stylesheet[a]["--on-lane"], stylesheet[a][TOKENS[lane]]),
-        ),
-      ),
-    ) * 100,
-  ) / 100;
-
 it.each(derived.map((v) => [v.id, v.palette] as const))(
-  "keeps %s lanes at 3:1 on the canvas, with initials as readable as L1's",
+  "keeps %s lanes at 3:1 on the canvas, with initials and ref names at 3:1 on each lane",
   (_, p) => {
     for (const lane of LANES) {
       expect(ratio(p[lane], p.background)).toBeGreaterThanOrEqual(3);
-      expect(ratio(p.onLane, p[lane])).toBeGreaterThanOrEqual(
-        L1_INITIALS_CONTRAST,
-      );
+      expect(ratio(p.onLane, p[lane])).toBeGreaterThanOrEqual(3);
       expect(ratio(p.refOnLane, p[lane])).toBeGreaterThanOrEqual(3);
     }
   },
 );
 
-it("switches initials to dark ink on a dark theme whose lanes leave white too faint", () => {
-  expect(variantPalette("grove-dark").onLane).toBe("#ffffff");
-  expect(variantPalette("rose-dark").onLane).toBe("#150d11");
+it("puts dark initials on a dark theme's lanes and keeps white on a light theme's", () => {
+  expect(variantPalette("grove-dark").onLane).toBe("#101c16");
+  expect(variantPalette("grove-light").onLane).toBe("#ffffff");
 });
 
 it("puts dark ink on pale lanes a theme brings, and keeps white on deep ones", () => {
@@ -250,7 +237,7 @@ it("tints error washes toward the red a theme brings", () => {
 it("turns lanes from L1's blue when the accent is grey", () => {
   for (const accent of ["#808080", "#7f8081"]) {
     const p = derivePalette("dark", "#0a0a0a", accent);
-    expect([p.graphLane1, p.graphLane3]).toEqual(["#60a5fa", "#fbbf23"]);
+    expect([p.graphLane1, p.graphLane3]).toEqual(["#74acff", "#00c2ca"]);
   }
 });
 

@@ -197,7 +197,7 @@ function lightnessAt(s: Seeds, t: number): number {
   return bg + (fg - bg) * t;
 }
 
-// `minWhite` is L1's own worst white-on-lane contrast, so ink only turns dark where white would read worse than it does in L1.
+// `minWhite` is the contrast lane ink keeps on every lane, so ink only turns dark where white falls short of it.
 const laneInk =
   (minWhite: number, t: number): Recipe =>
   (s, get) => {
@@ -271,7 +271,7 @@ function mapRecord<K extends string, A, B>(
   return out;
 }
 
-// Hue offsets follow the lanes', so keywords take the accent and strings sit where lane 4 does.
+// Hue offsets turn from the accent as the lanes' do, so keywords take the accent and strings sit near lane 6.
 const SYNTAX_RECIPES: Record<Appearance, Record<SyntaxToken, RecipeSpec>> = {
   dark: {
     syntaxKeyword: ["tone", 0.8, 1],

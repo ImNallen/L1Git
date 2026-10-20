@@ -15,7 +15,7 @@ registerHooks({
   },
 });
 
-const { contrast, distance, formatHex, parseHex, toOklch } =
+const { distance, formatHex, parseHex, toOklch } =
   await import("../src/themes/color.ts");
 const {
   LANES,
@@ -147,26 +147,16 @@ const fits = Object.fromEntries(
   }),
 );
 
-// Ref names need 3:1 on a lane. Initials keep white down to the contrast L1's own initials have on its palest lane,
-// to two places so rounding a derived lane can't flip L1's.
-const LANE_INK_MINIMUM = {
-  refOnLane: 3,
-  onLane:
-    Math.floor(
-      Math.min(
-        ...Object.values(fits).flatMap(({ get }) =>
-          LANES.map((lane) => contrast(WHITE, get(lane))),
-        ),
-      ) * 100,
-    ) / 100,
-};
+// Ref names and initials keep 3:1 on every lane.
+const LANE_INK_MINIMUM = 3;
+const LANE_INKS = new Set(["refOnLane", "onLane"]);
 
 function fitToken(token, { seeds, get }, target) {
   if (Object.hasOwn(SEEDS, token)) return { spec: ["seed", token] };
   if (token === "accentForeground") return { spec: ["onAccent"] };
-  if (Object.hasOwn(LANE_INK_MINIMUM, token))
+  if (LANE_INKS.has(token))
     return nearest(
-      steps().map((t) => ["laneInk", LANE_INK_MINIMUM[token], t]),
+      steps().map((t) => ["laneInk", LANE_INK_MINIMUM, t]),
       seeds,
       get,
       target,
