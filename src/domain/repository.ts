@@ -174,6 +174,7 @@ export const worktreePatchSchema = z.discriminatedUnion("kind", [
     kind: z.literal("submodule"),
     submodule: submoduleStateSchema,
   }),
+  z.strictObject({ kind: z.literal("filtered"), filter: z.string() }),
   z.strictObject({
     kind: z.literal("conflicted"),
     conflict: conflictSchema,
@@ -191,6 +192,7 @@ export const repositoryErrorSchema = z.object({
     "invalidOid",
     "unchangedPath",
     "unsupportedPath",
+    "unreadablePath",
   ]),
   message: z.string(),
 });

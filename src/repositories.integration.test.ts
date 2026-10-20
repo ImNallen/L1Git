@@ -415,9 +415,12 @@ describe("real Rust transport contract", () => {
     writeFileSync(join(states, "old.txt"), "a\nb\nc\nd\n");
     writeFileSync(join(states, "shared.txt"), "base\n");
     writeFileSync(join(states, "source.txt"), "1\n2\n3\n4\n5\n");
+    writeFileSync(join(states, ".gitattributes"), "*.up filter=upper\n");
     git("add", ".");
     git("commit", "-m", "initial");
     git("config", "diff.renames", "copies");
+    git("config", "filter.upper.clean", "tr a-z A-Z");
+    writeFileSync(join(states, "draft.up"), "lower\n");
     git("switch", "-c", "theirs");
     writeFileSync(join(states, "shared.txt"), "theirs\n");
     git("commit", "-am", "theirs");
@@ -482,6 +485,7 @@ describe("real Rust transport contract", () => {
           submodule: null,
         },
         { kind: "untracked", path: "draft notes.txt" },
+        { kind: "untracked", path: "draft.up" },
       ],
     });
 
@@ -551,6 +555,10 @@ describe("real Rust transport contract", () => {
         "",
       ]),
     );
+    expect(await patch("draft.up", "unstaged")).toEqual({
+      kind: "filtered",
+      filter: "upper",
+    });
     const conflicted = {
       kind: "conflicted",
       conflict: "bothModified",

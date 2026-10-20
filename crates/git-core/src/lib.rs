@@ -5,6 +5,7 @@ mod repository;
 mod run;
 mod status;
 mod sync;
+mod untracked;
 
 pub use model::*;
 pub use repository::{

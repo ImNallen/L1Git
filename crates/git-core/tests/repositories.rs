@@ -1261,7 +1261,7 @@ fn worktree_patch_shows_untracked_files_as_added_on_the_unstaged_side() {
     assert_eq!(
         worktree_patch(fixture.path(), "large.txt", Side::Unstaged).unwrap(),
         WorktreePatch::Diff {
-            diff: FilePatch::TooLarge { bytes: 1_190_195 }
+            diff: FilePatch::TooLarge { bytes: 1_120_000 }
         }
     );
     let error = worktree_patch(fixture.path(), "with space.txt", Side::Staged).unwrap_err();
@@ -1461,10 +1461,58 @@ fn within<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> T {
         .expect("the read hung")
 }
 
+/// Reads each untracked path through `worktree_patch`, then stages every path
+/// with `git add -N` and checks that `git diff --full-index` prints the same
+/// bytes. `Binary` must match Git's binary notice.
+fn assert_matches_git(fixture: &Fixture, names: &[&str]) {
+    let path = fixture.path().to_owned();
+    let owned: Vec<String> = names.iter().map(|name| (*name).to_owned()).collect();
+    let ours = within(move || {
+        owned
+            .iter()
+            .map(|name| worktree_patch(&path, name, Side::Unstaged).unwrap())
+            .collect::<Vec<_>>()
+    });
+    let mut add = vec!["add", "--intent-to-add", "--"];
+    add.extend(names);
+    git(&fixture.repo, &add);
+    for (name, ours) in names.iter().zip(ours) {
+        let theirs = Command::new("git")
+            .arg("-C")
+            .arg(&fixture.repo)
+            .args([
+                "-c",
+                "core.quotePath=false",
+                "diff",
+                "--full-index",
+                "--no-color",
+                "--",
+                name,
+            ])
+            .output()
+            .unwrap();
+        assert!(theirs.status.success(), "{name}");
+        let theirs = String::from_utf8_lossy(&theirs.stdout);
+        match ours {
+            WorktreePatch::Diff {
+                diff: FilePatch::Text { patch, .. },
+            } => assert_eq!(patch, theirs, "{name:?}"),
+            WorktreePatch::Diff {
+                diff: FilePatch::Binary,
+            } => assert!(
+                theirs.ends_with(&format!("Binary files /dev/null and b/{name} differ\n")),
+                "{name:?}: {theirs}"
+            ),
+            other => panic!("{name}: {other:?}"),
+        }
+    }
+}
+
 #[test]
 fn worktree_patch_writes_untracked_patches_byte_identical_to_git() {
     let fixture = Fixture::new();
     fixture.commit("notes.txt", "one\n", "initial");
+    git(&fixture.repo, &["config", "core.autocrlf", "false"]);
     let files: [(&str, &[u8]); 14] = [
         ("plain.txt", b"one\ntwo\n"),
         ("with space.txt", b"x\n"),
@@ -1485,6 +1533,7 @@ fn worktree_patch_writes_untracked_patches_byte_identical_to_git() {
     for (name, content) in files {
         fs::write(fixture.repo.join(name), content).unwrap();
     }
+    let mut names: Vec<&str> = files.iter().map(|(name, _)| *name).collect();
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -1495,68 +1544,107 @@ fn worktree_patch_writes_untracked_patches_byte_identical_to_git() {
         .unwrap();
         std::os::unix::fs::symlink("target text", fixture.repo.join("link")).unwrap();
         std::os::unix::fs::symlink("../x", fixture.repo.join("dir link")).unwrap();
-    }
-    let mut names: Vec<&str> = files.iter().map(|(name, _)| *name).collect();
-    if cfg!(unix) {
         names.extend(["link", "dir link"]);
     }
-    let path = fixture.path().to_owned();
-    let owned: Vec<String> = names.iter().map(|name| (*name).to_owned()).collect();
-    let ours = within(move || {
-        owned
-            .iter()
-            .map(|name| worktree_patch(&path, name, Side::Unstaged).unwrap())
-            .collect::<Vec<_>>()
-    });
-    git(&fixture.repo, &["add", "--intent-to-add", "--", "."]);
-    for (name, ours) in names.iter().zip(ours) {
-        let theirs = Command::new("git")
-            .arg("-C")
-            .arg(&fixture.repo)
-            .args([
-                "-c",
-                "core.quotePath=false",
-                "-c",
-                "core.autocrlf=false",
-                "diff",
-                "--full-index",
-                "--no-color",
-                "--",
-                name,
-            ])
-            .output()
-            .unwrap();
-        assert!(theirs.status.success(), "{name}");
-        let WorktreePatch::Diff {
-            diff: FilePatch::Text { patch, .. },
-        } = ours
-        else {
-            panic!("{name}: {ours:?}");
-        };
-        assert_eq!(patch, String::from_utf8_lossy(&theirs.stdout), "{name:?}");
+    assert_matches_git(&fixture, &names);
+}
+
+#[test]
+fn worktree_patch_converts_line_endings_and_honors_attributes_like_git() {
+    let crlf: &[u8] = b"a\r\nb\r\n";
+    let lone_cr: &[u8] = b"a\r\nb\rc\n";
+    type Files<'a> = &'a [(&'a str, &'a [u8])];
+    let cases: [(&str, &str, Files); 4] = [
+        (
+            "input",
+            "",
+            &[
+                ("crlf.txt", crlf),
+                ("lone cr.txt", lone_cr),
+                ("plain.txt", b"x\n"),
+            ],
+        ),
+        ("true", "", &[("crlf.txt", crlf), ("lone cr.txt", lone_cr)]),
+        (
+            "false",
+            "*.lf text eol=lf\n*.crlf text eol=crlf\n*.auto text=auto\n*.raw -text\n*.legacy crlf=input\n*.text text\n",
+            &[
+                ("a.lf", crlf),
+                ("a.crlf", crlf),
+                ("a.auto", crlf),
+                ("lone.auto", lone_cr),
+                ("a.raw", crlf),
+                ("a.legacy", crlf),
+                ("a.text", lone_cr),
+            ],
+        ),
+        (
+            "false",
+            "*.dat binary\n*.nod -diff\n",
+            &[
+                ("a.dat", b"text\n"),
+                ("a.nod", b"text\n"),
+                ("nul.txt", b"a\0b\n"),
+            ],
+        ),
+    ];
+    for (autocrlf, attributes, files) in cases {
+        let fixture = Fixture::new();
+        fixture.commit("notes.txt", "one\n", "initial");
+        if !attributes.is_empty() {
+            fixture.commit(".gitattributes", attributes, "attributes");
+        }
+        git(&fixture.repo, &["config", "core.autocrlf", autocrlf]);
+        for (name, content) in files {
+            fs::write(fixture.repo.join(name), content).unwrap();
+        }
+        let names: Vec<&str> = files.iter().map(|(name, _)| *name).collect();
+        assert_matches_git(&fixture, &names);
     }
 }
 
 #[test]
-fn worktree_patch_reads_untracked_files_despite_line_ending_settings() {
+fn worktree_patch_follows_big_file_threshold_and_file_mode_like_git() {
     let fixture = Fixture::new();
     fixture.commit("notes.txt", "one\n", "initial");
-    git(&fixture.repo, &["config", "core.autocrlf", "true"]);
-    git(&fixture.repo, &["config", "core.safecrlf", "warn"]);
-    fs::write(fixture.repo.join("crlf.txt"), "a\r\nb\r\n").unwrap();
-    fs::write(fixture.repo.join("lf.txt"), "a\nb\n").unwrap();
-    for (file, body) in [("crlf.txt", "+a\r\n+b\r\n"), ("lf.txt", "+a\n+b\n")] {
-        let WorktreePatch::Diff {
-            diff: FilePatch::Text { patch, .. },
-        } = worktree_patch(fixture.path(), file, Side::Unstaged).unwrap()
-        else {
-            panic!("{file}: expected a text patch");
-        };
-        assert!(
-            patch.ends_with(&format!("@@ -0,0 +1,2 @@\n{body}")),
-            "{patch:?}"
-        );
+    git(&fixture.repo, &["config", "core.bigFileThreshold", "10"]);
+    git(&fixture.repo, &["config", "core.fileMode", "false"]);
+    fs::write(fixture.repo.join("big.txt"), "more than ten bytes\n").unwrap();
+    fs::write(fixture.repo.join("run.sh"), "x\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(
+            fixture.repo.join("run.sh"),
+            fs::Permissions::from_mode(0o755),
+        )
+        .unwrap();
     }
+    assert_matches_git(&fixture, &["big.txt", "run.sh"]);
+}
+
+#[test]
+fn worktree_patch_names_a_clean_filter_instead_of_showing_working_tree_bytes() {
+    let fixture = Fixture::new();
+    fixture.commit(
+        ".gitattributes",
+        "*.up filter=upper\n*.off filter=unconfigured\n",
+        "attributes",
+    );
+    git(
+        &fixture.repo,
+        &["config", "filter.upper.clean", "tr a-z A-Z"],
+    );
+    git(&fixture.repo, &["config", "core.autocrlf", "false"]);
+    fs::write(fixture.repo.join("a.up"), "lower\n").unwrap();
+    fs::write(fixture.repo.join("a.off"), "lower\n").unwrap();
+    assert_eq!(
+        worktree_patch(fixture.path(), "a.up", Side::Unstaged).unwrap(),
+        WorktreePatch::Filtered {
+            filter: "upper".into()
+        }
+    );
+    assert_matches_git(&fixture, &["a.off"]);
 }
 
 #[test]
@@ -1691,4 +1779,127 @@ fn worktree_patch_never_leaks_through_a_file_swapped_for_a_symlink() {
     done.store(true, Ordering::Relaxed);
     swapper.join().unwrap();
     assert_eq!(leaks, 0);
+}
+
+#[cfg(unix)]
+#[test]
+fn worktree_patch_shows_both_sections_of_a_type_change_on_either_side() {
+    let fixture = Fixture::new();
+    fixture.commit("staged", "s\n", "initial");
+    fixture.commit("unstaged", "u\n", "second");
+    for name in ["staged", "unstaged"] {
+        fs::remove_file(fixture.repo.join(name)).unwrap();
+        std::os::unix::fs::symlink("elsewhere", fixture.repo.join(name)).unwrap();
+    }
+    git(&fixture.repo, &["add", "staged"]);
+    assert_eq!(
+        worktree_status(fixture.path()).unwrap().entries,
+        vec![
+            ordinary(
+                "staged",
+                Sides::Staged {
+                    staged: ChangeStatus::TypeChanged,
+                }
+            ),
+            ordinary(
+                "unstaged",
+                Sides::Unstaged {
+                    unstaged: ChangeStatus::TypeChanged,
+                }
+            ),
+        ]
+    );
+    assert_eq!(
+        worktree_patch(fixture.path(), "staged", Side::Staged).unwrap(),
+        diff(
+            "diff --git a/staged b/staged\ndeleted file mode 100644\nindex b4785957bc986dc39c629de9fac9df46972c00fc..0000000000000000000000000000000000000000\n--- a/staged\n+++ /dev/null\n@@ -1 +0,0 @@\n-s\ndiff --git a/staged b/staged\nnew file mode 120000\nindex 0000000000000000000000000000000000000000..f98eb10ae82b19af44956c0891e3cc36187fa092\n--- /dev/null\n+++ b/staged\n@@ -0,0 +1 @@\n+elsewhere\n\\ No newline at end of file\n"
+        )
+    );
+    assert_eq!(
+        worktree_patch(fixture.path(), "unstaged", Side::Unstaged).unwrap(),
+        diff(
+            "diff --git a/unstaged b/unstaged\ndeleted file mode 100644\nindex 4ae8ef021bf6fcfff43a13be5abfa52bb6fb5dbc..0000000000000000000000000000000000000000\n--- a/unstaged\n+++ /dev/null\n@@ -1 +0,0 @@\n-u\ndiff --git a/unstaged b/unstaged\nnew file mode 120000\nindex 0000000000000000000000000000000000000000..f98eb10ae82b19af44956c0891e3cc36187fa092\n--- /dev/null\n+++ b/unstaged\n@@ -0,0 +1 @@\n+elsewhere\n\\ No newline at end of file\n"
+        )
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn worktree_patch_keeps_only_the_copy_next_to_a_type_change() {
+    let fixture = Fixture::new();
+    fixture.commit("c", "one\ntwo\nthree\nfour\n", "initial");
+    git(&fixture.repo, &["config", "status.renames", "copies"]);
+    fs::copy(fixture.repo.join("c"), fixture.repo.join("c2")).unwrap();
+    git(&fixture.repo, &["add", "c2"]);
+    fs::remove_file(fixture.repo.join("c")).unwrap();
+    std::os::unix::fs::symlink("elsewhere", fixture.repo.join("c")).unwrap();
+    git(&fixture.repo, &["add", "c"]);
+    assert_eq!(
+        worktree_patch(fixture.path(), "c2", Side::Staged).unwrap(),
+        diff("diff --git a/c b/c2\nsimilarity index 100%\ncopy from c\ncopy to c2\n")
+    );
+    assert_eq!(
+        worktree_patch(fixture.path(), "c", Side::Staged).unwrap(),
+        diff(
+            "diff --git a/c b/c\ndeleted file mode 100644\nindex f384549cbeb481e437091320de6d1f2e15e11b4a..0000000000000000000000000000000000000000\n--- a/c\n+++ /dev/null\n@@ -1,4 +0,0 @@\n-one\n-two\n-three\n-four\ndiff --git a/c b/c\nnew file mode 120000\nindex 0000000000000000000000000000000000000000..f98eb10ae82b19af44956c0891e3cc36187fa092\n--- /dev/null\n+++ b/c\n@@ -0,0 +1 @@\n+elsewhere\n\\ No newline at end of file\n"
+        )
+    );
+}
+
+#[test]
+fn worktree_patch_stops_reading_at_the_cap_and_reports_the_size() {
+    let fixture = Fixture::new();
+    fixture.commit("notes.txt", "one\n", "initial");
+    for (name, size) in [
+        ("over cap.txt", 256u64 << 20),
+        ("over threshold.txt", 4 << 30),
+    ] {
+        fs::write(fixture.repo.join(name), "text line\n".repeat(200_000)).unwrap();
+        fs::File::options()
+            .write(true)
+            .open(fixture.repo.join(name))
+            .unwrap()
+            .set_len(size)
+            .unwrap();
+    }
+    let path = fixture.path().to_owned();
+    let started = std::time::Instant::now();
+    let patches = within(move || {
+        ["over cap.txt", "over threshold.txt"]
+            .map(|name| worktree_patch(&path, name, Side::Unstaged).unwrap())
+    });
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(2),
+        "{:?}",
+        started.elapsed()
+    );
+    assert_eq!(
+        patches,
+        [
+            WorktreePatch::Diff {
+                diff: FilePatch::TooLarge { bytes: 256 << 20 }
+            },
+            WorktreePatch::Diff {
+                diff: FilePatch::Binary
+            },
+        ]
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn worktree_patch_names_a_read_failure() {
+    use std::os::unix::fs::PermissionsExt;
+    let fixture = Fixture::new();
+    fixture.commit("notes.txt", "one\n", "initial");
+    let locked = fixture.repo.join("locked.txt");
+    fs::write(&locked, "x\n").unwrap();
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+    let error = worktree_patch(fixture.path(), "locked.txt", Side::Unstaged).unwrap_err();
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o644)).unwrap();
+    assert!(matches!(error.kind, ErrorKind::UnreadablePath), "{error:?}");
+    assert_eq!(
+        error.message,
+        "L1 Git could not read this file (Permission denied (os error 13)). Check its permissions, then refresh."
+    );
 }
