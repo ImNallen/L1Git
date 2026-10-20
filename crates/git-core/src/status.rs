@@ -142,18 +142,17 @@ pub fn worktree_patch(path: &str, file: &str) -> Result<FilePatch, RepositoryErr
         return Err(no_changes());
     }
     let base = base(&root)?;
+    // `git diff` rewrites the index after comparing a file whose stat changed,
+    // even with optional locks off. The `diff-index` plumbing never writes it.
     let tracked = |format| {
         [
             "--literal-pathspecs",
-            "diff",
+            "diff-index",
             "-z",
             format,
-            "--no-color",
             "--no-renames",
             "--no-ext-diff",
             "--no-textconv",
-            "--src-prefix=a/",
-            "--dst-prefix=b/",
             &base,
             "--",
             file,
@@ -171,15 +170,50 @@ pub fn worktree_patch(path: &str, file: &str) -> Result<FilePatch, RepositoryErr
     }) {
         return patch(&root, &tracked("--patch"), binary, &[0]);
     }
-    if !untracked(&root, file)? {
-        return Err(if file.contains(char::REPLACEMENT_CHARACTER) {
+    untracked_patch(&root, file)?.ok_or_else(|| {
+        if file.contains(char::REPLACEMENT_CHARACTER) {
             RepositoryError::new(
                 ErrorKind::UnsupportedPath,
                 "L1 Git cannot open diffs for file names that are not valid UTF-8.",
             )
         } else {
             no_changes()
-        });
+        }
+    })
+}
+
+fn base(root: &Path) -> Result<String, RepositoryError> {
+    let head = git::run(root, &["rev-parse", "--verify", "--quiet", "HEAD^{commit}"])?;
+    if head.status.success() {
+        return Ok(git::line(&head.stdout));
+    }
+    Ok(git::line(&git::read_with_input(
+        root,
+        &["hash-object", "-t", "tree", "--stdin"],
+        Vec::new(),
+    )?))
+}
+
+fn untracked_patch(root: &Path, file: &str) -> Result<Option<FilePatch>, RepositoryError> {
+    let listed = git::run(
+        root,
+        &[
+            "--literal-pathspecs",
+            "ls-files",
+            "--others",
+            "--exclude-standard",
+            "-z",
+            "--",
+            file,
+        ],
+    )?;
+    if !listed.status.success()
+        || !listed
+            .stdout
+            .split(|byte| *byte == 0)
+            .any(|listed| listed == file.as_bytes())
+    {
+        return Ok(None);
     }
     // `--no-index` exits 1 when the files differ, which they always do here.
     let added = |format| {
@@ -198,47 +232,14 @@ pub fn worktree_patch(path: &str, file: &str) -> Result<FilePatch, RepositoryErr
             file,
         ]
     };
-    let numstat = git::read_accepting(&root, &added("--numstat"), &[1])?;
+    let numstat = git::read_accepting(root, &added("--numstat"), &[1])?;
     patch(
-        &root,
+        root,
         &added("--patch"),
         numstat.starts_with(b"-\t-\t"),
         &[1],
     )
-}
-
-fn base(root: &Path) -> Result<String, RepositoryError> {
-    let head = git::run(root, &["rev-parse", "--verify", "--quiet", "HEAD^{commit}"])?;
-    if head.status.success() {
-        return Ok(git::line(&head.stdout));
-    }
-    Ok(git::line(&git::read_with_input(
-        root,
-        &["hash-object", "-t", "tree", "--stdin"],
-        Vec::new(),
-    )?))
-}
-
-/// Only a path Git itself lists as untracked reaches `--no-index`, which would
-/// otherwise read any file on disk.
-fn untracked(root: &Path, file: &str) -> Result<bool, RepositoryError> {
-    let listed = git::run(
-        root,
-        &[
-            "--literal-pathspecs",
-            "ls-files",
-            "--others",
-            "--exclude-standard",
-            "-z",
-            "--",
-            file,
-        ],
-    )?;
-    Ok(listed.status.success()
-        && listed
-            .stdout
-            .split(|byte| *byte == 0)
-            .any(|listed| listed == file.as_bytes()))
+    .map(Some)
 }
 
 fn no_changes() -> RepositoryError {

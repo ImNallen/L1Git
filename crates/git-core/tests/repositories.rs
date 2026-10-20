@@ -940,17 +940,19 @@ fn worktree_status_reads_conflicts_clean_unborn_and_detached_worktrees() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn worktree_reads_leave_the_index_untouched() {
-    use std::os::unix::fs::MetadataExt;
     let fixture = Fixture::new();
     fixture.commit("notes.txt", "one\n", "initial");
     let index = fixture.repo.join(".git/index");
     let before = fs::read(&index).unwrap();
-    let modified = fs::metadata(&index).unwrap().mtime_nsec();
-    std::thread::sleep(std::time::Duration::from_millis(20));
-    fs::write(fixture.repo.join("notes.txt"), "one\n").unwrap();
+    let modified = fs::metadata(&index).unwrap().modified().unwrap();
+    fs::File::options()
+        .write(true)
+        .open(fixture.repo.join("notes.txt"))
+        .unwrap()
+        .set_modified(modified + std::time::Duration::from_secs(10))
+        .unwrap();
     fs::write(fixture.repo.join("loose.txt"), "loose\n").unwrap();
     assert_eq!(
         worktree_status(fixture.path()).unwrap().entries,
@@ -958,7 +960,7 @@ fn worktree_reads_leave_the_index_untouched() {
     );
     assert!(worktree_patch(fixture.path(), "loose.txt").is_ok());
     assert!(worktree_patch(fixture.path(), "notes.txt").is_err());
-    assert_eq!(fs::metadata(&index).unwrap().mtime_nsec(), modified);
+    assert_eq!(fs::metadata(&index).unwrap().modified().unwrap(), modified);
     assert_eq!(fs::read(&index).unwrap(), before);
 }
 

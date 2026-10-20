@@ -106,7 +106,6 @@ export const lineStatsSchema = z.array(
     deleted: z.number().int().nonnegative(),
   }),
 );
-/** `staged` compares HEAD with the index, `unstaged` the index with the worktree. */
 export const statusCodeSchema = z.enum([".", "M", "T", "A", "D", "R", "C"]);
 export const statusEntrySchema = z.discriminatedUnion("kind", [
   z.object({

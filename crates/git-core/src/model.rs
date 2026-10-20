@@ -186,8 +186,6 @@ pub enum StatusEntry {
     },
 }
 
-/// One side of a change: `staged` compares HEAD with the index and `unstaged`
-/// compares the index with the worktree.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum StatusCode {
     #[serde(rename = ".")]
