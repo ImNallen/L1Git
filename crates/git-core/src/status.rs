@@ -1,96 +1,79 @@
 use crate::{
-    Conflict, ErrorKind, FilePatch, Head, RepositoryError, StatusCode, StatusEntry, WorktreeStatus,
-    git,
+    Change, Conflict, ErrorKind, FilePatch, Moved, RepositoryError, Side, Sides, StatusEntry,
+    SubmoduleState, WorktreePatch, WorktreeStatus,
+    git::{self, Exit},
     repository::{self, capped_patch},
 };
-use std::path::{Component, Path};
+use std::{
+    fs,
+    path::{Component, Path, PathBuf},
+};
 
 pub fn worktree_status(path: &str) -> Result<WorktreeStatus, RepositoryError> {
     let root = repository::root(path)?;
+    Ok(WorktreeStatus {
+        head: repository::head(&root)?,
+        entries: entries(&root)?,
+        root: root.to_string_lossy().into_owned(),
+    })
+}
+
+fn entries(root: &Path) -> Result<Vec<StatusEntry>, RepositoryError> {
     let output = git::read(
-        &root,
+        root,
         &[
             "status",
             "--porcelain=v2",
             "-z",
-            "--branch",
-            "--no-ahead-behind",
             "--find-renames",
             "--untracked-files=all",
         ],
     )?;
-    let (head, entries) = parse(&output)?;
-    Ok(WorktreeStatus {
-        root: root.to_string_lossy().into_owned(),
-        head,
-        entries,
-    })
-}
-
-fn parse(output: &[u8]) -> Result<(Head, Vec<StatusEntry>), RepositoryError> {
-    let (mut oid, mut branch) = (None, None);
     let mut entries = Vec::new();
-    let mut fields = output
-        .strip_suffix(&[0])
-        .unwrap_or(output)
-        .split(|byte| *byte == 0);
+    let mut fields = output.split(|byte| *byte == 0);
     while let Some(field) = fields.next() {
-        let entry = match field {
-            [b'#', b' ', header @ ..] => {
-                if let Some(value) = header.strip_prefix(b"branch.oid ") {
-                    oid = Some(git::text(value));
-                } else if let Some(value) = header.strip_prefix(b"branch.head ") {
-                    branch = Some(git::text(value));
-                }
-                continue;
-            }
+        entries.push(match field {
+            [] => continue,
             [b'1', b' ', record @ ..] => {
-                let [xy, .., path] = columns::<8>(record)?;
-                let (staged, unstaged) = codes(xy)?;
+                let [xy, sub, .., path] = columns::<8>(record)?;
                 StatusEntry::Ordinary {
                     path: git::text(path),
-                    staged,
-                    unstaged,
+                    submodule: submodule(sub)?,
+                    sides: sides(xy)?,
                 }
             }
             [b'2', b' ', record @ ..] => {
-                let [xy, .., path] = columns::<9>(record)?;
-                let (staged, unstaged) = codes(xy)?;
+                let [xy, sub, .., path] = columns::<9>(record)?;
+                let [moved, unstaged] = xy else {
+                    return Err(git::malformed());
+                };
                 StatusEntry::Renamed {
                     path: git::text(path),
                     original: git::text(fields.next().ok_or_else(git::malformed)?),
-                    staged,
-                    unstaged,
+                    how: match moved {
+                        b'R' => Moved::Renamed,
+                        b'C' => Moved::Copied,
+                        _ => return Err(git::malformed()),
+                    },
+                    submodule: submodule(sub)?,
+                    unstaged: change(*unstaged)?,
                 }
             }
             [b'u', b' ', record @ ..] => {
-                let [xy, .., path] = columns::<10>(record)?;
+                let [xy, sub, .., path] = columns::<10>(record)?;
                 StatusEntry::Unmerged {
                     path: git::text(path),
                     conflict: conflict(xy)?,
+                    submodule: submodule(sub)?,
                 }
             }
             [b'?', b' ', path @ ..] => StatusEntry::Untracked {
                 path: git::text(path),
             },
             _ => return Err(git::malformed()),
-        };
-        entries.push(entry);
+        });
     }
-    let head = match (oid, branch) {
-        (Some(oid), Some(branch)) if oid == "(initial)" && branch != "(detached)" => Head::Unborn {
-            reference: format!("refs/heads/{branch}"),
-        },
-        (Some(oid), Some(branch)) if oid != "(initial)" && branch == "(detached)" => {
-            Head::Detached { oid }
-        }
-        (Some(oid), Some(branch)) if oid != "(initial)" => Head::Attached {
-            reference: format!("refs/heads/{branch}"),
-            oid,
-        },
-        _ => return Err(git::malformed()),
-    };
-    Ok((head, entries))
+    Ok(entries)
 }
 
 fn columns<const N: usize>(record: &[u8]) -> Result<[&[u8]; N], RepositoryError> {
@@ -101,21 +84,42 @@ fn columns<const N: usize>(record: &[u8]) -> Result<[&[u8]; N], RepositoryError>
         .map_err(|_| git::malformed())
 }
 
-fn codes(xy: &[u8]) -> Result<(StatusCode, StatusCode), RepositoryError> {
-    let code = |byte| {
-        Ok(match byte {
-            b'.' => StatusCode::Unmodified,
-            b'M' => StatusCode::Modified,
-            b'T' => StatusCode::TypeChanged,
-            b'A' => StatusCode::Added,
-            b'D' => StatusCode::Deleted,
-            b'R' => StatusCode::Renamed,
-            b'C' => StatusCode::Copied,
-            _ => return Err(git::malformed()),
-        })
+fn change(code: u8) -> Result<Option<Change>, RepositoryError> {
+    Ok(Some(match code {
+        b'.' => return Ok(None),
+        b'M' => Change::Modified,
+        b'T' => Change::TypeChanged,
+        b'A' => Change::Added,
+        b'D' => Change::Deleted,
+        _ => return Err(git::malformed()),
+    }))
+}
+
+fn sides(xy: &[u8]) -> Result<Sides, RepositoryError> {
+    let [staged, unstaged] = xy else {
+        return Err(git::malformed());
     };
-    match xy {
-        [staged, unstaged] => Ok((code(*staged)?, code(*unstaged)?)),
+    match (change(*staged)?, change(*unstaged)?) {
+        (Some(staged), Some(unstaged)) => Ok(Sides::Both { staged, unstaged }),
+        (Some(staged), None) => Ok(Sides::Staged { staged }),
+        (None, Some(unstaged)) => Ok(Sides::Unstaged { unstaged }),
+        (None, None) => Err(git::malformed()),
+    }
+}
+
+fn submodule(field: &[u8]) -> Result<Option<SubmoduleState>, RepositoryError> {
+    let flag = |byte: u8, set: u8| match byte {
+        b'.' => Ok(false),
+        byte if byte == set => Ok(true),
+        _ => Err(git::malformed()),
+    };
+    match field {
+        b"N..." => Ok(None),
+        [b'S', commit, modified, untracked] => Ok(Some(SubmoduleState {
+            commit_changed: flag(*commit, b'C')?,
+            modified: flag(*modified, b'M')?,
+            untracked: flag(*untracked, b'U')?,
+        })),
         _ => Err(git::malformed()),
     }
 }
@@ -133,53 +137,122 @@ fn conflict(xy: &[u8]) -> Result<Conflict, RepositoryError> {
     })
 }
 
-/// Diffs `file` in the worktree against HEAD, or against the empty tree before
-/// the first commit. An untracked file diffs against `/dev/null`.
-pub fn worktree_patch(path: &str, file: &str) -> Result<FilePatch, RepositoryError> {
+/// Reads one side of a path that `worktree_status` lists, so the patch always
+/// agrees with the entry it was opened from.
+pub fn worktree_patch(
+    path: &str,
+    file: &str,
+    side: Side,
+) -> Result<WorktreePatch, RepositoryError> {
     let root = repository::root(path)?;
-    let mut components = Path::new(file).components();
-    if !components.all(|component| matches!(component, Component::Normal(_))) || file.is_empty() {
-        return Err(no_changes());
+    if file.is_empty()
+        || !Path::new(file)
+            .components()
+            .all(|component| matches!(component, Component::Normal(_)))
+    {
+        return Err(RepositoryError::new(
+            ErrorKind::UnsupportedPath,
+            "Choose a path inside this worktree, relative to its root.",
+        ));
     }
-    let base = base(&root)?;
-    // `git diff` rewrites the index after comparing a file whose stat changed,
-    // even with optional locks off. The `diff-index` plumbing never writes it.
-    let tracked = |format| {
-        [
-            "--literal-pathspecs",
-            "diff-index",
-            "-z",
-            format,
-            "--no-renames",
-            "--no-ext-diff",
-            "--no-textconv",
-            &base,
-            "--",
-            file,
-        ]
+    let entries = entries(&root)?;
+    let entry = entries
+        .iter()
+        .find(|entry| lists(entry, file, side))
+        .ok_or_else(|| no_changes(file, side))?;
+    let changed = |diff: Option<FilePatch>| {
+        diff.map(|diff| WorktreePatch::Diff { diff })
+            .ok_or_else(|| no_changes(file, side))
     };
-    let numstat = git::read(&root, &tracked("--numstat"))?;
-    if let Some(binary) = numstat.split(|byte| *byte == 0).find_map(|record| {
-        let mut fields = record.splitn(3, |byte| *byte == b'\t');
-        match (fields.next(), fields.next(), fields.next()) {
-            (Some(added), Some(deleted), Some(changed)) if changed == file.as_bytes() => {
-                Some(added == b"-" && deleted == b"-")
+    match (entry, side) {
+        (
+            StatusEntry::Unmerged {
+                conflict,
+                submodule,
+                ..
+            },
+            _,
+        ) => Ok(WorktreePatch::Conflicted {
+            conflict: *conflict,
+            diff: if submodule.is_none() && fs::symlink_metadata(root.join(file)).is_ok() {
+                tracked(
+                    &root,
+                    &["diff-index", "--no-renames", &base(&root)?],
+                    &[file],
+                )?
+            } else {
+                None
+            },
+        }),
+        (
+            StatusEntry::Ordinary {
+                submodule: Some(submodule),
+                ..
             }
-            _ => None,
+            | StatusEntry::Renamed {
+                submodule: Some(submodule),
+                ..
+            },
+            _,
+        ) => Ok(WorktreePatch::Submodule {
+            submodule: *submodule,
+        }),
+        (StatusEntry::Ordinary { .. }, Side::Staged) => changed(tracked(
+            &root,
+            &["diff-index", "--cached", "--no-renames", &base(&root)?],
+            &[file],
+        )?),
+        (StatusEntry::Renamed { original, how, .. }, Side::Staged) => {
+            let detect = match how {
+                Moved::Renamed => "--find-renames",
+                Moved::Copied => "--find-copies-harder",
+            };
+            changed(tracked(
+                &root,
+                &["diff-index", "--cached", detect, &base(&root)?],
+                &[original, file],
+            )?)
         }
-    }) {
-        return patch(&root, &tracked("--patch"), binary, &[0]);
+        (StatusEntry::Ordinary { .. } | StatusEntry::Renamed { .. }, Side::Unstaged) => {
+            changed(tracked(&root, &["diff-files", "--no-renames"], &[file])?)
+        }
+        (StatusEntry::Untracked { .. }, _) => untracked(&root, file),
     }
-    untracked_patch(&root, file)?.ok_or_else(|| {
-        if file.contains(char::REPLACEMENT_CHARACTER) {
-            RepositoryError::new(
-                ErrorKind::UnsupportedPath,
-                "L1 Git cannot open diffs for file names that are not valid UTF-8.",
-            )
-        } else {
-            no_changes()
+}
+
+fn lists(entry: &StatusEntry, file: &str, side: Side) -> bool {
+    match entry {
+        StatusEntry::Ordinary { path, sides, .. } => {
+            path == file
+                && matches!(
+                    (sides, side),
+                    (Sides::Both { .. }, _)
+                        | (Sides::Staged { .. }, Side::Staged)
+                        | (Sides::Unstaged { .. }, Side::Unstaged)
+                )
         }
-    })
+        StatusEntry::Renamed { path, unstaged, .. } => {
+            path == file && (side == Side::Staged || unstaged.is_some())
+        }
+        StatusEntry::Unmerged { path, .. } => path == file,
+        StatusEntry::Untracked { path } => path == file && side == Side::Unstaged,
+    }
+}
+
+fn no_changes(file: &str, side: Side) -> RepositoryError {
+    if file.contains(char::REPLACEMENT_CHARACTER) {
+        return RepositoryError::new(
+            ErrorKind::UnsupportedPath,
+            "L1 Git cannot open diffs for file names that are not valid UTF-8.",
+        );
+    }
+    RepositoryError::new(
+        ErrorKind::UnchangedPath,
+        match side {
+            Side::Staged => "This file has no staged changes. Refresh the worktree status.",
+            Side::Unstaged => "This file has no unstaged changes. Refresh the worktree status.",
+        },
+    )
 }
 
 fn base(root: &Path) -> Result<String, RepositoryError> {
@@ -194,76 +267,165 @@ fn base(root: &Path) -> Result<String, RepositoryError> {
     )?))
 }
 
-fn untracked_patch(root: &Path, file: &str) -> Result<Option<FilePatch>, RepositoryError> {
-    let listed = git::run(
-        root,
-        &[
-            "--literal-pathspecs",
-            "ls-files",
-            "--others",
-            "--exclude-standard",
-            "-z",
-            "--",
-            file,
-        ],
-    )?;
-    if !listed.status.success()
-        || !listed
-            .stdout
-            .split(|byte| *byte == 0)
-            .any(|listed| listed == file.as_bytes())
-    {
-        return Ok(None);
-    }
-    if file.ends_with('/') {
-        return Err(RepositoryError::new(
-            ErrorKind::UnsupportedPath,
-            "L1 Git cannot show a diff for a nested repository.",
-        ));
-    }
-    // `--no-index` exits 1 when the files differ, which they always do here.
-    let added = |format| {
-        [
-            "diff",
-            "--no-index",
+/// Runs diff plumbing, which never rewrites the index the way `git diff` does
+/// after it compares a file whose stat changed.
+fn tracked(
+    root: &Path,
+    command: &[&str],
+    paths: &[&str],
+) -> Result<Option<FilePatch>, RepositoryError> {
+    let args = |format| {
+        let mut args = vec!["--literal-pathspecs"];
+        args.extend(command);
+        args.extend([
             "-z",
             format,
-            "--no-color",
+            "--full-index",
             "--no-ext-diff",
             "--no-textconv",
-            "--src-prefix=a/",
-            "--dst-prefix=b/",
             "--",
-            "/dev/null",
-            file,
-        ]
+        ]);
+        args.extend(paths);
+        args
     };
-    let numstat = git::read_accepting(root, &added("--numstat"), &[1])?;
+    let numstat = git::read(root, &args("--numstat"))?;
+    if numstat.is_empty() {
+        return Ok(None);
+    }
     patch(
         root,
-        &added("--patch"),
+        &args("--patch"),
         numstat.starts_with(b"-\t-\t"),
-        &[1],
+        Exit::Success,
     )
     .map(Some)
 }
 
-fn no_changes() -> RepositoryError {
-    RepositoryError::new(
-        ErrorKind::UnchangedPath,
-        "This file has no uncommitted changes. Refresh the worktree status.",
+fn untracked(root: &Path, file: &str) -> Result<WorktreePatch, RepositoryError> {
+    let on_disk = root.join(file.trim_end_matches('/'));
+    let kind = fs::symlink_metadata(&on_disk)
+        .map_err(|_| no_changes(file, Side::Unstaged))?
+        .file_type();
+    let diff = if kind.is_file() {
+        let args = |format| {
+            [
+                "diff",
+                "--no-index",
+                "-z",
+                format,
+                "--full-index",
+                "--no-color",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--src-prefix=a/",
+                "--dst-prefix=b/",
+                "--",
+                "/dev/null",
+                file,
+            ]
+        };
+        let numstat = git::read_exiting(root, &args("--numstat"), Exit::Differs)?;
+        patch(
+            root,
+            &args("--patch"),
+            numstat.starts_with(b"-\t-\t"),
+            Exit::Differs,
+        )?
+    } else if kind.is_symlink() {
+        let target = fs::read_link(&on_disk).map_err(|_| no_changes(file, Side::Unstaged))?;
+        symlink_patch(root, file, &link_text(target))?
+    } else if kind.is_dir() {
+        return Err(RepositoryError::new(
+            ErrorKind::UnsupportedPath,
+            "L1 Git cannot show a diff for a nested repository.",
+        ));
+    } else {
+        return Err(RepositoryError::new(
+            ErrorKind::UnsupportedPath,
+            "L1 Git can show diffs only for regular files and symbolic links.",
+        ));
+    };
+    Ok(WorktreePatch::Diff { diff })
+}
+
+#[cfg(unix)]
+fn link_text(target: PathBuf) -> Vec<u8> {
+    std::os::unix::ffi::OsStringExt::into_vec(target.into_os_string())
+}
+
+#[cfg(not(unix))]
+fn link_text(target: PathBuf) -> Vec<u8> {
+    target.to_string_lossy().into_owned().into_bytes()
+}
+
+/// Writes the patch Git shows for a new symbolic link from the link text alone.
+/// `diff --no-index` would follow the link to a directory or a FIFO.
+fn symlink_patch(root: &Path, file: &str, target: &[u8]) -> Result<FilePatch, RepositoryError> {
+    let oid = git::line(&git::read_with_input(
+        root,
+        &["hash-object", "--no-filters", "--stdin"],
+        target.to_vec(),
+    )?);
+    let (old, new) = (quoted("a/", file), quoted("b/", file));
+    let tab = if new.contains(' ') { "\t" } else { "" };
+    let lines: Vec<&[u8]> = target.split_inclusive(|byte| *byte == b'\n').collect();
+    let count = match lines.len() {
+        1 => String::new(),
+        count => format!(",{count}"),
+    };
+    let mut patch = format!(
+        "diff --git {old} {new}\nnew file mode 120000\nindex {}..{oid}\n--- /dev/null\n+++ {new}{tab}\n@@ -0,0 +1{count} @@\n",
+        "0".repeat(oid.len()),
     )
+    .into_bytes();
+    for line in lines {
+        patch.push(b'+');
+        patch.extend_from_slice(line);
+    }
+    if !target.ends_with(b"\n") {
+        patch.extend_from_slice(b"\n\\ No newline at end of file\n");
+    }
+    Ok(FilePatch::Text {
+        lossy: std::str::from_utf8(&patch).is_err(),
+        patch: git::text(&patch),
+    })
+}
+
+/// Quotes a path the way Git's diff headers do with `core.quotePath=false`.
+fn quoted(prefix: &str, path: &str) -> String {
+    let special = |c: char| c < ' ' || c == '"' || c == '\\' || c == '\x7f';
+    if !path.contains(special) {
+        return format!("{prefix}{path}");
+    }
+    let mut quoted = format!("\"{prefix}");
+    for c in path.chars() {
+        match c {
+            '\x07' => quoted.push_str("\\a"),
+            '\x08' => quoted.push_str("\\b"),
+            '\t' => quoted.push_str("\\t"),
+            '\n' => quoted.push_str("\\n"),
+            '\x0b' => quoted.push_str("\\v"),
+            '\x0c' => quoted.push_str("\\f"),
+            '\r' => quoted.push_str("\\r"),
+            '"' => quoted.push_str("\\\""),
+            '\\' => quoted.push_str("\\\\"),
+            c if special(c) => quoted.push_str(&format!("\\{:03o}", c as u32)),
+            c => quoted.push(c),
+        }
+    }
+    quoted.push('"');
+    quoted
 }
 
 fn patch(
     root: &Path,
     args: &[&str],
     binary: bool,
-    exit_codes: &[i32],
+    exit: Exit,
 ) -> Result<FilePatch, RepositoryError> {
     if binary {
         Ok(FilePatch::Binary)
     } else {
-        capped_patch(root, args, exit_codes)
+        capped_patch(root, args, exit)
     }
 }

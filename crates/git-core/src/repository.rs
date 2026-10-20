@@ -59,7 +59,7 @@ pub(crate) fn root(path: &str) -> Result<PathBuf, RepositoryError> {
     })
 }
 
-fn head(path: &Path) -> Result<Head, RepositoryError> {
+pub(crate) fn head(path: &Path) -> Result<Head, RepositoryError> {
     let symbolic = git::run(path, &["symbolic-ref", "--quiet", "HEAD"])?;
     let target = git::run(path, &["rev-parse", "--verify", "HEAD^{commit}"])?;
     match (symbolic.status.success(), target.status.success()) {
@@ -702,23 +702,21 @@ pub fn file_patch(path: &str, oid: &str, file: &str) -> Result<FilePatch, Reposi
     if added == b"-" && deleted == b"-" {
         return Ok(FilePatch::Binary);
     }
-    capped_patch(&root, &args("--patch"), &[0])
+    capped_patch(&root, &args("--patch"), git::Exit::Success)
 }
 
 pub(crate) fn capped_patch(
     root: &Path,
     args: &[&str],
-    exit_codes: &[i32],
+    exit: git::Exit,
 ) -> Result<FilePatch, RepositoryError> {
-    Ok(
-        match git::read_capped(root, args, PATCH_LIMIT, exit_codes)? {
-            git::Capped::Within(patch) => FilePatch::Text {
-                lossy: std::str::from_utf8(&patch).is_err(),
-                patch: git::text(&patch),
-            },
-            git::Capped::Over(bytes) => FilePatch::TooLarge { bytes },
+    Ok(match git::read_capped(root, args, PATCH_LIMIT, exit)? {
+        git::Capped::Within(patch) => FilePatch::Text {
+            lossy: std::str::from_utf8(&patch).is_err(),
+            patch: git::text(&patch),
         },
-    )
+        git::Capped::Over(bytes) => FilePatch::TooLarge { bytes },
+    })
 }
 
 /// Counts each commit's changed lines against the same base as its detail.

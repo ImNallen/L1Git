@@ -1,8 +1,8 @@
 use l1_git_core::{
-    Branch, ChangeStatus, Conflict, DiffBase, ErrorKind, FilePatch, HISTORY_LIMIT, Head,
-    LINE_STATS_LIMIT, LineStats, RepositoryRefs, Squash, StatusCode, StatusEntry, Tag, Worktree,
-    WorktreeStatus, commit_detail, file_patch, line_stats, refs, snapshot, worktree_patch,
-    worktree_status,
+    Branch, Change, ChangeStatus, Conflict, DiffBase, ErrorKind, FilePatch, HISTORY_LIMIT, Head,
+    LINE_STATS_LIMIT, LineStats, Moved, RepositoryRefs, Side, Sides, Squash, StatusEntry,
+    SubmoduleState, Tag, Worktree, WorktreePatch, WorktreeStatus, commit_detail, file_patch,
+    line_stats, refs, snapshot, worktree_patch, worktree_status,
 };
 use std::{
     fs,
@@ -615,6 +615,20 @@ fn file_patch_treats_pathspec_magic_as_a_literal_path() {
 }
 
 #[test]
+fn file_patch_leaves_non_ascii_names_unquoted() {
+    let fixture = Fixture::new();
+    let oid = fixture.commit("café.txt", "crème\n", "initial");
+    let FilePatch::Text { patch, .. } = file_patch(fixture.path(), &oid, "café.txt").unwrap()
+    else {
+        panic!("expected a text patch");
+    };
+    assert!(
+        patch.starts_with("diff --git a/café.txt b/café.txt\n"),
+        "{patch:?}"
+    );
+}
+
+#[test]
 fn file_patch_reports_non_utf8_file_names_as_unsupported() {
     use std::os::unix::ffi::OsStrExt;
     let fixture = Fixture::new();
@@ -796,11 +810,11 @@ fn rejects_missing_invalid_and_bare_repositories_and_invalid_oids() {
     }
 }
 
-fn ordinary(path: &str, staged: StatusCode, unstaged: StatusCode) -> StatusEntry {
+fn ordinary(path: &str, sides: Sides) -> StatusEntry {
     StatusEntry::Ordinary {
         path: path.into(),
-        staged,
-        unstaged,
+        submodule: None,
+        sides,
     }
 }
 
@@ -808,11 +822,45 @@ fn untracked(path: &str) -> StatusEntry {
     StatusEntry::Untracked { path: path.into() }
 }
 
-fn text(patch: &str) -> FilePatch {
-    FilePatch::Text {
+fn unmerged(path: &str, conflict: Conflict) -> StatusEntry {
+    StatusEntry::Unmerged {
+        path: path.into(),
+        conflict,
+        submodule: None,
+    }
+}
+
+fn diff(patch: &str) -> WorktreePatch {
+    WorktreePatch::Diff {
+        diff: FilePatch::Text {
+            patch: patch.into(),
+            lossy: false,
+        },
+    }
+}
+
+fn text(patch: &str) -> Option<FilePatch> {
+    Some(FilePatch::Text {
         patch: patch.into(),
         lossy: false,
-    }
+    })
+}
+
+fn merge(fixture: &Fixture, branch: &str) {
+    let merge = Command::new("git")
+        .arg("-C")
+        .arg(&fixture.repo)
+        .args([
+            "-c",
+            "user.name=Ada",
+            "-c",
+            "user.email=ada@example.test",
+            "merge",
+            branch,
+        ])
+        .output()
+        .unwrap();
+    assert!(!merge.status.success());
 }
 
 #[test]
@@ -826,7 +874,7 @@ fn worktree_status_tags_staged_unstaged_renamed_and_untracked_paths() {
         "line\nbreak.txt",
         "clean.txt",
     ] {
-        fs::write(fixture.repo.join(name), format!("{name}\n")).unwrap();
+        fs::write(fixture.repo.join(name), format!("{name}\none\ntwo\n")).unwrap();
     }
     git(&fixture.repo, &["add", "."]);
     git(&fixture.repo, &["commit", "-m", "initial"]);
@@ -838,6 +886,11 @@ fn worktree_status_tags_staged_unstaged_renamed_and_untracked_paths() {
     git(&fixture.repo, &["add", "both.txt"]);
     fs::write(fixture.repo.join("both.txt"), "staged\nthen edited\n").unwrap();
     git(&fixture.repo, &["mv", "old name.txt", "new name.txt"]);
+    fs::write(
+        fixture.repo.join("new name.txt"),
+        "old name.txt\none\ntwo\nthree\n",
+    )
+    .unwrap();
     fs::write(fixture.repo.join("line\nbreak.txt"), "edited\n").unwrap();
     fs::write(fixture.repo.join("with space.txt"), "new\n").unwrap();
     fs::create_dir(fixture.repo.join("folder")).unwrap();
@@ -851,20 +904,38 @@ fn worktree_status_tags_staged_unstaged_renamed_and_untracked_paths() {
                 oid,
             },
             entries: vec![
-                ordinary("both.txt", StatusCode::Modified, StatusCode::Modified),
+                ordinary(
+                    "both.txt",
+                    Sides::Both {
+                        staged: Change::Modified,
+                        unstaged: Change::Modified,
+                    }
+                ),
                 ordinary(
                     "line\nbreak.txt",
-                    StatusCode::Unmodified,
-                    StatusCode::Modified
+                    Sides::Unstaged {
+                        unstaged: Change::Modified,
+                    }
                 ),
                 StatusEntry::Renamed {
                     path: "new name.txt".into(),
                     original: "old name.txt".into(),
-                    staged: StatusCode::Renamed,
-                    unstaged: StatusCode::Unmodified,
+                    how: Moved::Renamed,
+                    submodule: None,
+                    unstaged: Some(Change::Modified),
                 },
-                ordinary("staged.txt", StatusCode::Modified, StatusCode::Unmodified),
-                ordinary("unstaged.txt", StatusCode::Unmodified, StatusCode::Modified),
+                ordinary(
+                    "staged.txt",
+                    Sides::Staged {
+                        staged: Change::Modified,
+                    }
+                ),
+                ordinary(
+                    "unstaged.txt",
+                    Sides::Unstaged {
+                        unstaged: Change::Modified,
+                    }
+                ),
                 untracked("folder/nested\nname.txt"),
                 untracked("with space.txt"),
             ],
@@ -873,43 +944,118 @@ fn worktree_status_tags_staged_unstaged_renamed_and_untracked_paths() {
 }
 
 #[test]
-fn worktree_status_reads_conflicts_clean_unborn_and_detached_worktrees() {
+fn worktree_status_and_patch_read_every_conflict_kind() {
     let fixture = Fixture::new();
-    let first = fixture.commit("shared.txt", "base\n", "initial");
-    assert_eq!(worktree_status(fixture.path()).unwrap().entries, vec![]);
+    fs::write(fixture.repo.join("shared.txt"), "base\n").unwrap();
+    fs::write(fixture.repo.join("gone.txt"), "moved\nlines\n").unwrap();
+    fs::write(fixture.repo.join("kept by us.txt"), "base\n").unwrap();
+    fs::write(fixture.repo.join("kept by them.txt"), "base\n").unwrap();
+    git(&fixture.repo, &["add", "."]);
+    git(&fixture.repo, &["commit", "-m", "initial"]);
     git(&fixture.repo, &["switch", "-c", "theirs"]);
-    fixture.commit("shared.txt", "theirs\n", "theirs");
-    fixture.commit("both added.txt", "theirs\n", "theirs adds");
+    fs::write(fixture.repo.join("shared.txt"), "theirs\n").unwrap();
+    fs::write(fixture.repo.join("both added.txt"), "theirs\n").unwrap();
+    fs::write(fixture.repo.join("kept by them.txt"), "theirs\n").unwrap();
+    fs::remove_file(fixture.repo.join("kept by us.txt")).unwrap();
+    git(&fixture.repo, &["mv", "gone.txt", "theirs.txt"]);
+    git(&fixture.repo, &["add", "-A"]);
+    git(&fixture.repo, &["commit", "-m", "theirs"]);
     git(&fixture.repo, &["switch", "main"]);
-    fixture.commit("shared.txt", "ours\n", "ours");
-    fixture.commit("both added.txt", "ours\n", "ours adds");
-    let merge = Command::new("git")
-        .arg("-C")
-        .arg(&fixture.repo)
-        .args([
-            "-c",
-            "user.name=Ada",
-            "-c",
-            "user.email=ada@example.test",
-            "merge",
-            "theirs",
-        ])
-        .output()
-        .unwrap();
-    assert!(!merge.status.success());
+    fs::write(fixture.repo.join("shared.txt"), "ours\n").unwrap();
+    fs::write(fixture.repo.join("both added.txt"), "ours\n").unwrap();
+    fs::write(fixture.repo.join("kept by us.txt"), "ours\n").unwrap();
+    fs::remove_file(fixture.repo.join("kept by them.txt")).unwrap();
+    git(&fixture.repo, &["mv", "gone.txt", "ours.txt"]);
+    git(&fixture.repo, &["add", "-A"]);
+    git(&fixture.repo, &["commit", "-m", "ours"]);
+    merge(&fixture, "theirs");
     assert_eq!(
         worktree_status(fixture.path()).unwrap().entries,
         vec![
-            StatusEntry::Unmerged {
-                path: "both added.txt".into(),
-                conflict: Conflict::BothAdded,
-            },
-            StatusEntry::Unmerged {
-                path: "shared.txt".into(),
-                conflict: Conflict::BothModified,
-            },
+            unmerged("both added.txt", Conflict::BothAdded),
+            unmerged("gone.txt", Conflict::BothDeleted),
+            unmerged("kept by them.txt", Conflict::DeletedByUs),
+            unmerged("kept by us.txt", Conflict::DeletedByThem),
+            unmerged("ours.txt", Conflict::AddedByUs),
+            unmerged("shared.txt", Conflict::BothModified),
+            unmerged("theirs.txt", Conflict::AddedByThem),
         ]
     );
+    let expected = [
+        (
+            "both added.txt",
+            Conflict::BothAdded,
+            text(
+                "diff --git a/both added.txt b/both added.txt\nindex b19a1e93bec1317dc6097229e12afaffbfa74dc2..5eb9640fc3f80dac61e1d3494746a7cd2aa5e64e 100644\n--- a/both added.txt\t\n+++ b/both added.txt\t\n@@ -1 +1,5 @@\n+<<<<<<< HEAD\n ours\n+=======\n+theirs\n+>>>>>>> theirs\n",
+            ),
+        ),
+        ("gone.txt", Conflict::BothDeleted, None),
+        (
+            "kept by them.txt",
+            Conflict::DeletedByUs,
+            text(
+                "diff --git a/kept by them.txt b/kept by them.txt\nnew file mode 100644\nindex 0000000000000000000000000000000000000000..950b81b7eee953d050aa05a641f8e056c85dd1bd\n--- /dev/null\n+++ b/kept by them.txt\t\n@@ -0,0 +1 @@\n+theirs\n",
+            ),
+        ),
+        ("kept by us.txt", Conflict::DeletedByThem, None),
+        ("ours.txt", Conflict::AddedByUs, None),
+        (
+            "shared.txt",
+            Conflict::BothModified,
+            text(
+                "diff --git a/shared.txt b/shared.txt\nindex b19a1e93bec1317dc6097229e12afaffbfa74dc2..5eb9640fc3f80dac61e1d3494746a7cd2aa5e64e 100644\n--- a/shared.txt\n+++ b/shared.txt\n@@ -1 +1,5 @@\n+<<<<<<< HEAD\n ours\n+=======\n+theirs\n+>>>>>>> theirs\n",
+            ),
+        ),
+        (
+            "theirs.txt",
+            Conflict::AddedByThem,
+            text(
+                "diff --git a/theirs.txt b/theirs.txt\nnew file mode 100644\nindex 0000000000000000000000000000000000000000..27cc1fc6636cc4c570f9f4bf9a3000d9e70793ab\n--- /dev/null\n+++ b/theirs.txt\n@@ -0,0 +1,2 @@\n+moved\n+lines\n",
+            ),
+        ),
+    ];
+    for (file, conflict, diff) in expected {
+        for side in [Side::Staged, Side::Unstaged] {
+            assert_eq!(
+                worktree_patch(fixture.path(), file, side).unwrap(),
+                WorktreePatch::Conflicted {
+                    conflict,
+                    diff: diff.clone(),
+                },
+                "{file} {side:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn worktree_status_reads_head_from_the_real_ref() {
+    let fixture = Fixture::new();
+    let first = fixture.commit("notes.txt", "one\n", "initial");
+    assert_eq!(worktree_status(fixture.path()).unwrap().entries, vec![]);
+    let agrees = |path: &str| {
+        let head = worktree_status(path).unwrap().head;
+        assert_eq!(head, snapshot(path).unwrap().head);
+        head
+    };
+    git(&fixture.repo, &["switch", "-c", "(detached)"]);
+    assert_eq!(
+        agrees(fixture.path()),
+        Head::Attached {
+            reference: "refs/heads/(detached)".into(),
+            oid: first.clone(),
+        }
+    );
+    git(&fixture.repo, &["tag", "v1"]);
+    git(&fixture.repo, &["symbolic-ref", "HEAD", "refs/tags/v1"]);
+    assert_eq!(
+        agrees(fixture.path()),
+        Head::Attached {
+            reference: "refs/tags/v1".into(),
+            oid: first.clone(),
+        }
+    );
+    git(&fixture.repo, &["switch", "main"]);
 
     let detached = fixture._directory.path().join("detached");
     git(
@@ -922,13 +1068,14 @@ fn worktree_status_reads_conflicts_clean_unborn_and_detached_worktrees() {
             &first,
         ],
     );
-    let status = worktree_status(detached.to_str().unwrap()).unwrap();
-    assert_eq!(status.head, Head::Detached { oid: first });
-    assert_eq!(status.entries, vec![]);
+    assert_eq!(
+        agrees(detached.to_str().unwrap()),
+        Head::Detached { oid: first }
+    );
 
     let unborn = fixture._directory.path().join("unborn");
     fs::create_dir(&unborn).unwrap();
-    git(&unborn, &["init", "--initial-branch=trunk"]);
+    git(&unborn, &["init", "--initial-branch=(detached)"]);
     fs::write(unborn.join("added.txt"), "added\n").unwrap();
     git(&unborn, &["add", "added.txt"]);
     fs::write(unborn.join("loose.txt"), "loose\n").unwrap();
@@ -937,10 +1084,15 @@ fn worktree_status_reads_conflicts_clean_unborn_and_detached_worktrees() {
         WorktreeStatus {
             root: snapshot(unborn.to_str().unwrap()).unwrap().root,
             head: Head::Unborn {
-                reference: "refs/heads/trunk".into(),
+                reference: "refs/heads/(detached)".into(),
             },
             entries: vec![
-                ordinary("added.txt", StatusCode::Added, StatusCode::Unmodified),
+                ordinary(
+                    "added.txt",
+                    Sides::Staged {
+                        staged: Change::Added,
+                    }
+                ),
                 untracked("loose.txt"),
             ],
         }
@@ -965,40 +1117,91 @@ fn worktree_reads_leave_the_index_untouched() {
         worktree_status(fixture.path()).unwrap().entries,
         vec![untracked("loose.txt")]
     );
-    assert!(worktree_patch(fixture.path(), "loose.txt").is_ok());
-    assert!(worktree_patch(fixture.path(), "notes.txt").is_err());
+    assert!(worktree_patch(fixture.path(), "loose.txt", Side::Unstaged).is_ok());
+    for side in [Side::Staged, Side::Unstaged] {
+        assert!(worktree_patch(fixture.path(), "notes.txt", side).is_err());
+    }
     assert_eq!(fs::metadata(&index).unwrap().modified().unwrap(), modified);
     assert_eq!(fs::read(&index).unwrap(), before);
 }
 
 #[test]
-fn worktree_patch_diffs_tracked_changes_against_head() {
+fn worktree_patch_splits_staged_and_unstaged_sides() {
     let fixture = Fixture::new();
     fixture.commit("notes.txt", "one\ntwo\n", "initial");
     fixture.commit("gone.txt", "bye\n", "second");
+    fixture.commit("kept.txt", "kept\n", "third");
     fs::write(fixture.repo.join("notes.txt"), "one\n2\n").unwrap();
     git(&fixture.repo, &["add", "notes.txt"]);
     fs::write(fixture.repo.join("notes.txt"), "one\n2\nthree\n").unwrap();
     fs::remove_file(fixture.repo.join("gone.txt")).unwrap();
+    git(&fixture.repo, &["rm", "--cached", "--quiet", "kept.txt"]);
     assert_eq!(
-        worktree_patch(fixture.path(), "notes.txt").unwrap(),
-        text(
-            "diff --git a/notes.txt b/notes.txt\nindex 814f4a4..f04eb26 100644\n--- a/notes.txt\n+++ b/notes.txt\n@@ -1,2 +1,3 @@\n one\n-two\n+2\n+three\n"
+        worktree_patch(fixture.path(), "notes.txt", Side::Staged).unwrap(),
+        diff(
+            "diff --git a/notes.txt b/notes.txt\nindex 814f4a422927b82f5f8a43f8fab6d3839e3983f2..99b356dcd03dde0755c749bcd4cae4b2b73a8fa8 100644\n--- a/notes.txt\n+++ b/notes.txt\n@@ -1,2 +1,2 @@\n one\n-two\n+2\n"
         )
     );
     assert_eq!(
-        worktree_patch(fixture.path(), "gone.txt").unwrap(),
-        text(
-            "diff --git a/gone.txt b/gone.txt\ndeleted file mode 100644\nindex b023018..0000000\n--- a/gone.txt\n+++ /dev/null\n@@ -1 +0,0 @@\n-bye\n"
+        worktree_patch(fixture.path(), "notes.txt", Side::Unstaged).unwrap(),
+        diff(
+            "diff --git a/notes.txt b/notes.txt\nindex 99b356dcd03dde0755c749bcd4cae4b2b73a8fa8..f04eb265ebd74fba2cddf0a6adf2a6a7f81c87aa 100644\n--- a/notes.txt\n+++ b/notes.txt\n@@ -1,2 +1,3 @@\n one\n 2\n+three\n"
+        )
+    );
+    assert_eq!(
+        worktree_patch(fixture.path(), "gone.txt", Side::Unstaged).unwrap(),
+        diff(
+            "diff --git a/gone.txt b/gone.txt\ndeleted file mode 100644\nindex b023018cabc396e7692c70bbf5784a93d3f738ab..0000000000000000000000000000000000000000\n--- a/gone.txt\n+++ /dev/null\n@@ -1 +0,0 @@\n-bye\n"
+        )
+    );
+    let error = worktree_patch(fixture.path(), "gone.txt", Side::Staged).unwrap_err();
+    assert!(matches!(error.kind, ErrorKind::UnchangedPath));
+    assert_eq!(
+        error.message,
+        "This file has no staged changes. Refresh the worktree status."
+    );
+    assert_eq!(
+        worktree_patch(fixture.path(), "kept.txt", Side::Staged).unwrap(),
+        diff(
+            "diff --git a/kept.txt b/kept.txt\ndeleted file mode 100644\nindex bd93009536360a2d96f2b097ac88b28f1fc8cdb4..0000000000000000000000000000000000000000\n--- a/kept.txt\n+++ /dev/null\n@@ -1 +0,0 @@\n-kept\n"
+        )
+    );
+    assert_eq!(
+        worktree_patch(fixture.path(), "kept.txt", Side::Unstaged).unwrap(),
+        diff(
+            "diff --git a/kept.txt b/kept.txt\nnew file mode 100644\nindex 0000000000000000000000000000000000000000..bd93009536360a2d96f2b097ac88b28f1fc8cdb4\n--- /dev/null\n+++ b/kept.txt\n@@ -0,0 +1 @@\n+kept\n"
         )
     );
 }
 
 #[test]
-fn worktree_patch_shows_untracked_files_as_added() {
+fn worktree_patch_shows_a_staged_rename_with_its_edits() {
+    let fixture = Fixture::new();
+    fixture.commit("old.txt", "one\ntwo\nthree\nfour\n", "initial");
+    git(&fixture.repo, &["mv", "old.txt", "new.txt"]);
+    fs::write(fixture.repo.join("new.txt"), "one\ntwo\nthree\n4\n").unwrap();
+    git(&fixture.repo, &["add", "new.txt"]);
+    fs::write(fixture.repo.join("new.txt"), "one\ntwo\nthree\n4\nfive\n").unwrap();
+    assert_eq!(
+        worktree_patch(fixture.path(), "new.txt", Side::Staged).unwrap(),
+        diff(
+            "diff --git a/old.txt b/new.txt\nsimilarity index 73%\nrename from old.txt\nrename to new.txt\nindex f384549cbeb481e437091320de6d1f2e15e11b4a..edb299e1fc6dc01d9d84b5cec97e815a3f5a09da 100644\n--- a/old.txt\n+++ b/new.txt\n@@ -1,4 +1,4 @@\n one\n two\n three\n-four\n+4\n"
+        )
+    );
+    assert_eq!(
+        worktree_patch(fixture.path(), "new.txt", Side::Unstaged).unwrap(),
+        diff(
+            "diff --git a/new.txt b/new.txt\nindex edb299e1fc6dc01d9d84b5cec97e815a3f5a09da..82773b0efaae74b4561105269c6a3cc9a27c3abc 100644\n--- a/new.txt\n+++ b/new.txt\n@@ -2,3 +2,4 @@ one\n two\n three\n 4\n+five\n"
+        )
+    );
+}
+
+#[test]
+fn worktree_patch_shows_untracked_files_as_added_on_the_unstaged_side() {
     let fixture = Fixture::new();
     fixture.commit("notes.txt", "one\n", "initial");
     fs::write(fixture.repo.join("with space.txt"), "hello\nworld\n").unwrap();
+    fs::write(fixture.repo.join("café.txt"), "crème\n").unwrap();
     fs::write(
         fixture.repo.join("logo.png"),
         [0x89, b'P', b'N', b'G', 0, 1],
@@ -1010,18 +1213,96 @@ fn worktree_patch_shows_untracked_files_as_added() {
     )
     .unwrap();
     assert_eq!(
-        worktree_patch(fixture.path(), "with space.txt").unwrap(),
-        text(
-            "diff --git a/with space.txt b/with space.txt\nnew file mode 100644\nindex 0000000..94954ab\n--- /dev/null\n+++ b/with space.txt\t\n@@ -0,0 +1,2 @@\n+hello\n+world\n"
+        worktree_patch(fixture.path(), "with space.txt", Side::Unstaged).unwrap(),
+        diff(
+            "diff --git a/with space.txt b/with space.txt\nnew file mode 100644\nindex 0000000000000000000000000000000000000000..94954abda49de8615a048f8d2e64b5de848e27a1\n--- /dev/null\n+++ b/with space.txt\t\n@@ -0,0 +1,2 @@\n+hello\n+world\n"
         )
     );
     assert_eq!(
-        worktree_patch(fixture.path(), "logo.png").unwrap(),
-        FilePatch::Binary
+        worktree_patch(fixture.path(), "café.txt", Side::Unstaged).unwrap(),
+        diff(
+            "diff --git a/café.txt b/café.txt\nnew file mode 100644\nindex 0000000000000000000000000000000000000000..8049d57230284eb1e7b8fb6a9a3d68c565bbdee2\n--- /dev/null\n+++ b/café.txt\n@@ -0,0 +1 @@\n+crème\n"
+        )
     );
     assert_eq!(
-        worktree_patch(fixture.path(), "large.txt").unwrap(),
-        FilePatch::TooLarge { bytes: 1_190_129 }
+        worktree_patch(fixture.path(), "logo.png", Side::Unstaged).unwrap(),
+        WorktreePatch::Diff {
+            diff: FilePatch::Binary
+        }
+    );
+    assert_eq!(
+        worktree_patch(fixture.path(), "large.txt", Side::Unstaged).unwrap(),
+        WorktreePatch::Diff {
+            diff: FilePatch::TooLarge { bytes: 1_190_195 }
+        }
+    );
+    let error = worktree_patch(fixture.path(), "with space.txt", Side::Staged).unwrap_err();
+    assert!(matches!(error.kind, ErrorKind::UnchangedPath));
+}
+
+#[cfg(unix)]
+#[test]
+fn worktree_patch_reads_untracked_symlinks_without_following_them() {
+    use std::os::unix::fs::symlink;
+    let fixture = Fixture::new();
+    fixture.commit("notes.txt", "one\n", "initial");
+    let outside = fixture._directory.path();
+    fs::create_dir(outside.join("with null")).unwrap();
+    fs::write(outside.join("with null/null"), "OUTSIDE-NULL-SECRET\n").unwrap();
+    fs::create_dir(outside.join("without null")).unwrap();
+    fs::write(outside.join("secret.txt"), "OUTSIDE-FILE-SECRET\n").unwrap();
+    assert!(
+        Command::new("mkfifo")
+            .arg(outside.join("fifo"))
+            .status()
+            .unwrap()
+            .success()
+    );
+    let links = [
+        ("to dir", "../with null"),
+        ("to empty dir", "../without null"),
+        ("to file", "../secret.txt"),
+        ("to fifo", "../fifo"),
+        ("broken", "missing"),
+        ("odd\nname", "target"),
+    ];
+    for (name, target) in links {
+        symlink(target, fixture.repo.join(name)).unwrap();
+    }
+    let path = fixture.path().to_owned();
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let patches: Vec<_> = links
+            .iter()
+            .map(|(name, _)| worktree_patch(&path, name, Side::Unstaged))
+            .collect();
+        let _ = sender.send(patches);
+    });
+    let patches = receiver
+        .recv_timeout(std::time::Duration::from_secs(20))
+        .expect("a symlink read hung");
+    assert_eq!(
+        patches.into_iter().map(Result::unwrap).collect::<Vec<_>>(),
+        vec![
+            diff(
+                "diff --git a/to dir b/to dir\nnew file mode 120000\nindex 0000000000000000000000000000000000000000..440d74ac48b8da9a4db8e41c520476957674e62c\n--- /dev/null\n+++ b/to dir\t\n@@ -0,0 +1 @@\n+../with null\n\\ No newline at end of file\n"
+            ),
+            diff(
+                "diff --git a/to empty dir b/to empty dir\nnew file mode 120000\nindex 0000000000000000000000000000000000000000..d76cc606224471c316e6064fdc46fa25698a755f\n--- /dev/null\n+++ b/to empty dir\t\n@@ -0,0 +1 @@\n+../without null\n\\ No newline at end of file\n"
+            ),
+            diff(
+                "diff --git a/to file b/to file\nnew file mode 120000\nindex 0000000000000000000000000000000000000000..54707ca7814ef46338e75afbc95f399b9d0dac7f\n--- /dev/null\n+++ b/to file\t\n@@ -0,0 +1 @@\n+../secret.txt\n\\ No newline at end of file\n"
+            ),
+            diff(
+                "diff --git a/to fifo b/to fifo\nnew file mode 120000\nindex 0000000000000000000000000000000000000000..3c8a36b7f613603fac0348c2b5ed3e93d27d9d9f\n--- /dev/null\n+++ b/to fifo\t\n@@ -0,0 +1 @@\n+../fifo\n\\ No newline at end of file\n"
+            ),
+            diff(
+                "diff --git a/broken b/broken\nnew file mode 120000\nindex 0000000000000000000000000000000000000000..6eab79a6ce25b19851f591e3e974e192c6858cf6\n--- /dev/null\n+++ b/broken\n@@ -0,0 +1 @@\n+missing\n\\ No newline at end of file\n"
+            ),
+            diff(
+                "diff --git \"a/odd\\nname\" \"b/odd\\nname\"\nnew file mode 120000\nindex 0000000000000000000000000000000000000000..1de565933b05f74c75ff9a6520af5f9f8a5a2f1d\n--- /dev/null\n+++ \"b/odd\\nname\"\n@@ -0,0 +1 @@\n+target\n\\ No newline at end of file\n"
+            )
+        ]
     );
 }
 
@@ -1032,38 +1313,89 @@ fn worktree_patch_diffs_against_the_empty_tree_before_the_first_commit() {
     git(&fixture.repo, &["add", "first.txt"]);
     fs::write(fixture.repo.join("loose.txt"), "loose\n").unwrap();
     assert_eq!(
-        worktree_patch(fixture.path(), "first.txt").unwrap(),
-        text(
-            "diff --git a/first.txt b/first.txt\nnew file mode 100644\nindex 0000000..9c59e24\n--- /dev/null\n+++ b/first.txt\n@@ -0,0 +1 @@\n+first\n"
+        worktree_patch(fixture.path(), "first.txt", Side::Staged).unwrap(),
+        diff(
+            "diff --git a/first.txt b/first.txt\nnew file mode 100644\nindex 0000000000000000000000000000000000000000..9c59e24b8393179a5d712de4f990178df5734d99\n--- /dev/null\n+++ b/first.txt\n@@ -0,0 +1 @@\n+first\n"
         )
     );
+    assert!(worktree_patch(fixture.path(), "first.txt", Side::Unstaged).is_err());
     assert_eq!(
-        worktree_patch(fixture.path(), "loose.txt").unwrap(),
-        text(
-            "diff --git a/loose.txt b/loose.txt\nnew file mode 100644\nindex 0000000..b658666\n--- /dev/null\n+++ b/loose.txt\n@@ -0,0 +1 @@\n+loose\n"
+        worktree_patch(fixture.path(), "loose.txt", Side::Unstaged).unwrap(),
+        diff(
+            "diff --git a/loose.txt b/loose.txt\nnew file mode 100644\nindex 0000000000000000000000000000000000000000..b6586661e7ec0a4c9389276355d01e145861eb0c\n--- /dev/null\n+++ b/loose.txt\n@@ -0,0 +1 @@\n+loose\n"
         )
     );
 }
 
 #[test]
-fn worktree_patch_rejects_clean_ignored_and_outside_paths() {
+fn worktree_patch_marks_submodules_with_a_notice() {
+    let fixture = Fixture::new();
+    fixture.commit("notes.txt", "one\n", "initial");
+    let source = fixture._directory.path().join("source");
+    fs::create_dir(&source).unwrap();
+    git(&source, &["init", "--initial-branch=main"]);
+    fs::write(source.join("inner.txt"), "inner\n").unwrap();
+    git(&source, &["add", "inner.txt"]);
+    git(&source, &["commit", "-m", "inner"]);
+    git(
+        &fixture.repo,
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            "--quiet",
+            source.to_str().unwrap(),
+            "module",
+        ],
+    );
+    git(&fixture.repo, &["commit", "-m", "add module"]);
+    fs::write(fixture.repo.join("module/inner.txt"), "edited\n").unwrap();
+    fs::write(fixture.repo.join("module/loose.txt"), "loose\n").unwrap();
+    let state = SubmoduleState {
+        commit_changed: false,
+        modified: true,
+        untracked: true,
+    };
+    assert_eq!(
+        worktree_status(fixture.path()).unwrap().entries,
+        vec![StatusEntry::Ordinary {
+            path: "module".into(),
+            submodule: Some(state),
+            sides: Sides::Unstaged {
+                unstaged: Change::Modified,
+            },
+        }]
+    );
+    assert_eq!(
+        worktree_patch(fixture.path(), "module", Side::Unstaged).unwrap(),
+        WorktreePatch::Submodule { submodule: state }
+    );
+}
+
+#[test]
+fn worktree_patch_rejects_paths_without_changes_and_paths_outside_the_worktree() {
     let fixture = Fixture::new();
     fixture.commit("notes.txt", "one\n", "initial");
     fixture.commit(".gitignore", "ignored.txt\n", "ignore");
     fs::write(fixture.repo.join("ignored.txt"), "secret\n").unwrap();
     fs::write(fixture._directory.path().join("outside.txt"), "outside\n").unwrap();
-    for file in [
-        "",
-        "notes.txt",
-        "ignored.txt",
-        "../outside.txt",
-        "*.txt",
-        "missing.txt",
-    ] {
-        let error = worktree_patch(fixture.path(), file).unwrap_err();
+    for file in ["notes.txt", "ignored.txt", "*.txt", "missing.txt"] {
+        let error = worktree_patch(fixture.path(), file, Side::Unstaged).unwrap_err();
         assert!(
             matches!(error.kind, ErrorKind::UnchangedPath),
             "{file}: {error}"
+        );
+    }
+    for file in ["", "../outside.txt", "/etc/hosts", "./notes.txt"] {
+        let error = worktree_patch(fixture.path(), file, Side::Unstaged).unwrap_err();
+        assert!(
+            matches!(error.kind, ErrorKind::UnsupportedPath),
+            "{file}: {error}"
+        );
+        assert_eq!(
+            error.message,
+            "Choose a path inside this worktree, relative to its root."
         );
     }
 }
@@ -1080,7 +1412,7 @@ fn worktree_patch_rejects_an_untracked_nested_repository() {
         worktree_status(fixture.path()).unwrap().entries,
         vec![untracked("nested/")]
     );
-    let error = worktree_patch(fixture.path(), "nested/").unwrap_err();
+    let error = worktree_patch(fixture.path(), "nested/", Side::Unstaged).unwrap_err();
     assert!(
         matches!(error.kind, ErrorKind::UnsupportedPath),
         "{error:?}"

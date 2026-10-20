@@ -13,13 +13,13 @@ export const refSchema = z
   .regex(/^refs\/.+\/.+$/)
   .brand<"FullRef">();
 export const headSchema = z.discriminatedUnion("kind", [
-  z.object({
+  z.strictObject({
     kind: z.literal("attached"),
     reference: refSchema,
     oid: oidSchema,
   }),
-  z.object({ kind: z.literal("unborn"), reference: refSchema }),
-  z.object({ kind: z.literal("detached"), oid: oidSchema }),
+  z.strictObject({ kind: z.literal("unborn"), reference: refSchema }),
+  z.strictObject({ kind: z.literal("detached"), oid: oidSchema }),
 ]);
 export const branchSchema = z.discriminatedUnion("kind", [
   z.object({
@@ -91,13 +91,16 @@ export const detailSchema = z.object({
   diffBase: z.enum(["emptyTree", "firstParent"]),
 });
 export const filePatchSchema = z.discriminatedUnion("kind", [
-  z.object({
+  z.strictObject({
     kind: z.literal("text"),
     patch: z.string(),
     lossy: z.boolean(),
   }),
-  z.object({ kind: z.literal("binary") }),
-  z.object({ kind: z.literal("tooLarge"), bytes: z.number().int().positive() }),
+  z.strictObject({ kind: z.literal("binary") }),
+  z.strictObject({
+    kind: z.literal("tooLarge"),
+    bytes: z.number().int().positive(),
+  }),
 ]);
 export const lineStatsSchema = z.array(
   z.object({
@@ -106,41 +109,72 @@ export const lineStatsSchema = z.array(
     deleted: z.number().int().nonnegative(),
   }),
 );
-export const statusCodeSchema = z.enum([".", "M", "T", "A", "D", "R", "C"]);
+export const changeSchema = z.enum(["M", "T", "A", "D"]);
+export const sidesSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("staged"), staged: changeSchema }),
+  z.strictObject({ kind: z.literal("unstaged"), unstaged: changeSchema }),
+  z.strictObject({
+    kind: z.literal("both"),
+    staged: changeSchema,
+    unstaged: changeSchema,
+  }),
+]);
+export const submoduleStateSchema = z.strictObject({
+  commitChanged: z.boolean(),
+  modified: z.boolean(),
+  untracked: z.boolean(),
+});
+export const conflictSchema = z.enum([
+  "bothDeleted",
+  "addedByUs",
+  "deletedByThem",
+  "addedByThem",
+  "deletedByUs",
+  "bothAdded",
+  "bothModified",
+]);
 export const statusEntrySchema = z.discriminatedUnion("kind", [
-  z.object({
+  z.strictObject({
     kind: z.literal("ordinary"),
     path: z.string(),
-    staged: statusCodeSchema,
-    unstaged: statusCodeSchema,
+    submodule: submoduleStateSchema.nullable(),
+    sides: sidesSchema,
   }),
-  z.object({
+  z.strictObject({
     kind: z.literal("renamed"),
     path: z.string(),
     original: z.string(),
-    staged: statusCodeSchema,
-    unstaged: statusCodeSchema,
+    how: z.enum(["renamed", "copied"]),
+    submodule: submoduleStateSchema.nullable(),
+    unstaged: changeSchema.nullable(),
   }),
-  z.object({
+  z.strictObject({
     kind: z.literal("unmerged"),
     path: z.string(),
-    conflict: z.enum([
-      "bothDeleted",
-      "addedByUs",
-      "deletedByThem",
-      "addedByThem",
-      "deletedByUs",
-      "bothAdded",
-      "bothModified",
-    ]),
+    conflict: conflictSchema,
+    submodule: submoduleStateSchema.nullable(),
   }),
-  z.object({ kind: z.literal("untracked"), path: z.string() }),
+  z.strictObject({ kind: z.literal("untracked"), path: z.string() }),
 ]);
-export const worktreeStatusSchema = z.object({
+export const worktreeStatusSchema = z.strictObject({
   root: rootSchema,
   head: headSchema,
   entries: z.array(statusEntrySchema),
 });
+/** `staged` compares HEAD with the index, `unstaged` the index with the worktree. */
+export const sideSchema = z.enum(["staged", "unstaged"]);
+export const worktreePatchSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("diff"), diff: filePatchSchema }),
+  z.strictObject({
+    kind: z.literal("submodule"),
+    submodule: submoduleStateSchema,
+  }),
+  z.strictObject({
+    kind: z.literal("conflicted"),
+    conflict: conflictSchema,
+    diff: filePatchSchema.nullable(),
+  }),
+]);
 export const repositoryErrorSchema = z.object({
   kind: z.enum([
     "missingPath",
@@ -172,9 +206,14 @@ export type CommitDetail = z.infer<typeof detailSchema>;
 export type ChangedFile = CommitDetail["files"][number];
 export type FilePatch = z.infer<typeof filePatchSchema>;
 export type LineStats = z.infer<typeof lineStatsSchema>[number];
-export type StatusCode = z.infer<typeof statusCodeSchema>;
+export type Change = z.infer<typeof changeSchema>;
+export type Sides = z.infer<typeof sidesSchema>;
+export type SubmoduleState = z.infer<typeof submoduleStateSchema>;
+export type Conflict = z.infer<typeof conflictSchema>;
 export type StatusEntry = z.infer<typeof statusEntrySchema>;
 export type WorktreeStatus = z.infer<typeof worktreeStatusSchema>;
+export type Side = z.infer<typeof sideSchema>;
+export type WorktreePatch = z.infer<typeof worktreePatchSchema>;
 export type Problem =
   | z.infer<typeof repositoryErrorSchema>
   | { kind: "transport" | "persistence"; message: string };

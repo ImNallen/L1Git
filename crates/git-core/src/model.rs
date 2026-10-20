@@ -168,18 +168,22 @@ pub struct WorktreeStatus {
 pub enum StatusEntry {
     Ordinary {
         path: String,
-        staged: StatusCode,
-        unstaged: StatusCode,
+        submodule: Option<SubmoduleState>,
+        sides: Sides,
     },
+    /// Git detects renames and copies only between HEAD and the index, so the
+    /// move is always staged and `unstaged` is any later edit to `path`.
     Renamed {
         path: String,
         original: String,
-        staged: StatusCode,
-        unstaged: StatusCode,
+        how: Moved,
+        submodule: Option<SubmoduleState>,
+        unstaged: Option<Change>,
     },
     Unmerged {
         path: String,
         conflict: Conflict,
+        submodule: Option<SubmoduleState>,
     },
     Untracked {
         path: String,
@@ -187,9 +191,15 @@ pub enum StatusEntry {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub enum StatusCode {
-    #[serde(rename = ".")]
-    Unmodified,
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum Sides {
+    Staged { staged: Change },
+    Unstaged { unstaged: Change },
+    Both { staged: Change, unstaged: Change },
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum Change {
     #[serde(rename = "M")]
     Modified,
     #[serde(rename = "T")]
@@ -198,10 +208,47 @@ pub enum StatusCode {
     Added,
     #[serde(rename = "D")]
     Deleted,
-    #[serde(rename = "R")]
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum Moved {
     Renamed,
-    #[serde(rename = "C")]
     Copied,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SubmoduleState {
+    pub commit_changed: bool,
+    pub modified: bool,
+    pub untracked: bool,
+}
+
+/// `Staged` compares HEAD, or the empty tree before the first commit, with the
+/// index. `Unstaged` compares the index with the working tree.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum Side {
+    Staged,
+    Unstaged,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum WorktreePatch {
+    Diff {
+        diff: FilePatch,
+    },
+    Submodule {
+        submodule: SubmoduleState,
+    },
+    /// `diff` compares the working-tree file, conflict markers included, with
+    /// HEAD. It is absent when that file is gone or matches HEAD.
+    Conflicted {
+        conflict: Conflict,
+        diff: Option<FilePatch>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

@@ -25,6 +25,8 @@ fn base(path: &Path, lazy_fetch: bool) -> Command {
             "color.ui=false",
             "-c",
             "log.showSignature=false",
+            "-c",
+            "core.quotePath=false",
             "-C",
         ])
         .arg(path)
@@ -72,21 +74,34 @@ fn read_failed() -> RepositoryError {
     )
 }
 
-pub(crate) fn read(path: &Path, args: &[&str]) -> Result<Vec<u8>, RepositoryError> {
-    read_accepting(path, args, &[0])
+#[derive(Clone, Copy)]
+pub(crate) enum Exit {
+    Success,
+    /// `diff --no-index` exits 1 both when the files differ and on some errors,
+    /// which only stderr tells apart.
+    Differs,
 }
 
-pub(crate) fn read_accepting(
+impl Exit {
+    fn accepts(self, code: Option<i32>, stderr: &[u8]) -> bool {
+        match self {
+            Self::Success => code == Some(0),
+            Self::Differs => code == Some(1) && stderr.is_empty(),
+        }
+    }
+}
+
+pub(crate) fn read(path: &Path, args: &[&str]) -> Result<Vec<u8>, RepositoryError> {
+    read_exiting(path, args, Exit::Success)
+}
+
+pub(crate) fn read_exiting(
     path: &Path,
     args: &[&str],
-    exit_codes: &[i32],
+    exit: Exit,
 ) -> Result<Vec<u8>, RepositoryError> {
     let output = run(path, args)?;
-    if !output
-        .status
-        .code()
-        .is_some_and(|code| exit_codes.contains(&code))
-    {
+    if !exit.accepts(output.status.code(), &output.stderr) {
         return Err(read_failed());
     }
     Ok(output.stdout)
@@ -123,14 +138,21 @@ pub(crate) fn read_capped(
     path: &Path,
     args: &[&str],
     cap: usize,
-    exit_codes: &[i32],
+    exit: Exit,
 ) -> Result<Capped, RepositoryError> {
     let mut child = command(path, args)
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()
         .map_err(spawn_error)?;
     let mut stdout = child.stdout.take().ok_or_else(read_failed)?;
+    let mut stderr = child.stderr.take().ok_or_else(read_failed)?;
+    let errors = thread::spawn(move || {
+        let mut kept = Vec::new();
+        let _ = (&mut stderr).take(STDERR_CAP).read_to_end(&mut kept);
+        let _ = io::copy(&mut stderr, &mut io::sink());
+        kept
+    });
     let mut kept = Vec::new();
     (&mut stdout)
         .take(cap as u64 + 1)
@@ -138,7 +160,8 @@ pub(crate) fn read_capped(
         .map_err(|_| read_failed())?;
     let rest = io::copy(&mut stdout, &mut io::sink()).map_err(|_| read_failed())?;
     let status = child.wait().map_err(|_| read_failed())?;
-    if !status.code().is_some_and(|code| exit_codes.contains(&code)) {
+    let stderr = errors.join().map_err(|_| read_failed())?;
+    if !exit.accepts(status.code(), &stderr) {
         return Err(read_failed());
     }
     Ok(if kept.len() <= cap {
@@ -319,4 +342,19 @@ fn signal_group(child: &mut Child, signal: libc::c_int) {
 fn stop(child: &mut Child) {
     let _ = child.kill();
     let _ = child.wait();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Exit;
+
+    #[test]
+    fn a_difference_is_exit_one_with_nothing_on_stderr() {
+        assert!(Exit::Differs.accepts(Some(1), b""));
+        assert!(!Exit::Differs.accepts(Some(1), b"error: Could not access 'link/null'\n"));
+        assert!(!Exit::Differs.accepts(Some(0), b""));
+        assert!(!Exit::Differs.accepts(None, b""));
+        assert!(Exit::Success.accepts(Some(0), b"warning\n"));
+        assert!(!Exit::Success.accepts(Some(1), b""));
+    }
 }
