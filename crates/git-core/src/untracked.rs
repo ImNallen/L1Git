@@ -8,9 +8,6 @@ use std::{
     path::Path,
 };
 
-/// Builds the patch `git add -N` followed by `git diff --full-index` would
-/// show for an untracked path, without writing to the repository and without
-/// handing the path to Git to open.
 pub(crate) fn untracked(root: &Path, file: &str) -> Result<WorktreePatch, RepositoryError> {
     let found =
         open_without_following_links(root, file).map_err(|error| unreadable(file, error))?;
@@ -121,7 +118,6 @@ fn regular(
     })
 }
 
-/// What Git's attributes and config say about one untracked path.
 struct Rules {
     filter: Option<String>,
     binary: bool,
@@ -241,7 +237,6 @@ fn config(root: &Path) -> Result<Vec<Setting>, RepositoryError> {
         .collect())
 }
 
-/// Reads a Git boolean. A key with no value means true.
 fn boolean(value: Option<&str>) -> Option<bool> {
     let Some(value) = value else {
         return Some(true);
@@ -253,7 +248,6 @@ fn boolean(value: Option<&str>) -> Option<bool> {
     }
 }
 
-/// Reads a Git size such as `512m`.
 fn size(value: &str) -> Option<u64> {
     let value = value.trim();
     let (number, unit) = match value.char_indices().last()? {
@@ -272,7 +266,6 @@ enum AutoCrlf {
     Input,
 }
 
-/// How Git turns working-tree line endings into the content it would stage.
 #[derive(Debug, PartialEq)]
 enum Eol {
     Keep,
@@ -305,8 +298,6 @@ impl Eol {
         }
     }
 
-    /// Mirrors `crlf_to_git`: auto mode leaves content Git would call binary
-    /// alone, and every conversion drops the CR of each CRLF pair.
     fn to_git(&self, content: &[u8]) -> Vec<u8> {
         if *self == Self::Keep || (*self == Self::Auto && looks_binary(content)) {
             return content.to_vec();

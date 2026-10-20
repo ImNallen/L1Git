@@ -1461,9 +1461,6 @@ fn within<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> T {
         .expect("the read hung")
 }
 
-/// Reads each untracked path through `worktree_patch`, then stages every path
-/// with `git add -N` and checks that `git diff --full-index` prints the same
-/// bytes. `Binary` must match Git's binary notice.
 fn assert_matches_git(fixture: &Fixture, names: &[&str]) {
     let path = fixture.path().to_owned();
     let owned: Vec<String> = names.iter().map(|name| (*name).to_owned()).collect();

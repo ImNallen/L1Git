@@ -354,8 +354,6 @@ fn tracked(
     ))
 }
 
-/// Whether Git sees the change that ends at `destination` as binary, or `None`
-/// when no numstat record ends there.
 fn binary_at(numstat: &[u8], destination: &str) -> Result<Option<bool>, RepositoryError> {
     let mut fields = numstat.split(|byte| *byte == 0);
     while let Some(record) = fields.next() {
@@ -390,8 +388,6 @@ fn sections(patch: &[u8]) -> impl Iterator<Item = &[u8]> {
     (0..starts.len() - 1).map(move |index| &patch[starts[index]..starts[index + 1]])
 }
 
-/// A section ends at `file` when it moves a path to `file`, or when it
-/// changes `file` in place.
 fn ends_at(section: &[u8], file: &str) -> bool {
     let target = quoted("", file);
     let same = format!("diff --git {} {}", quoted("a/", file), quoted("b/", file));
