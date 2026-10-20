@@ -886,7 +886,14 @@ fn worktree_status_reads_conflicts_clean_unborn_and_detached_worktrees() {
     let merge = Command::new("git")
         .arg("-C")
         .arg(&fixture.repo)
-        .args(["merge", "theirs"])
+        .args([
+            "-c",
+            "user.name=Ada",
+            "-c",
+            "user.email=ada@example.test",
+            "merge",
+            "theirs",
+        ])
         .output()
         .unwrap();
     assert!(!merge.status.success());
