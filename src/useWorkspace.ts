@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { firstChangedPath } from "./components/ChangedFileTree";
 import * as repositories from "./repositories";
 import {
   emptyCatalog,
@@ -77,6 +78,10 @@ export function useWorkspace() {
   const [detail, setDetail] = useState<DetailState>({ kind: "empty" });
   const [detailAttempt, setDetailAttempt] = useState(0);
   const [fileDiff, setFileDiff] = useState<FileDiffState>({ kind: "closed" });
+  // Enter can arrive before the selected commit's changed paths do.
+  const [openFirst, setOpenFirst] = useState<Omit<FileKey, "path"> | null>(
+    null,
+  );
   const requestId = useRef(0);
   const snapshots = useRef<SnapshotCache>(new Map());
   const views = useRef(new Map<RepositoryRoot, RepositoryView>());
@@ -284,6 +289,20 @@ export function useWorkspace() {
     );
   };
 
+  useEffect(() => {
+    if (openFirst === null) return;
+    const settled =
+      detail.kind !== "empty" &&
+      detail.kind !== "loading" &&
+      detail.root === openFirst.root &&
+      detail.oid === openFirst.oid;
+    if (openFirst.root !== root || openFirst.oid !== selectedOid || settled)
+      setOpenFirst(null);
+    if (!settled || detail.kind !== "ready") return;
+    const path = firstChangedPath(detail.detail.files);
+    if (path !== undefined) openFile(path);
+  }, [openFirst, detail, root, selectedOid]);
+
   return {
     workspace,
     current,
@@ -295,6 +314,10 @@ export function useWorkspace() {
     retryDetail: () => setDetailAttempt((attempt) => attempt + 1),
     fileDiff,
     openFile,
+    openFirstFile: () => {
+      if (root !== null && selectedOid !== null)
+        setOpenFirst({ root, oid: selectedOid });
+    },
     closeFile,
     selectRepository,
     addRepository,

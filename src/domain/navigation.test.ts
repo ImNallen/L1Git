@@ -70,7 +70,7 @@ describe("history navigation", () => {
     expect(move(root, "branch-down")).toBe(root);
   });
 
-  it("falls back to the nearest child when none shares the fork point's lane", () => {
+  it("falls back to the nearest child when a merge opened the fork point's line", () => {
     const top = oid("1");
     const side = oid("2");
     const trunk = oid("3");
@@ -83,9 +83,29 @@ describe("history navigation", () => {
       { oid: base, parents: [bottom] },
       { oid: bottom, parents: [] },
     ];
+    expect(nextRow(commits, buildGraph(commits).rows, base, "branch-up")).toBe(
+      side,
+    );
+  });
+
+  it("follows the fork point's line up after a lane to its left closes", () => {
+    const top = oid("1");
+    const child = oid("2");
+    const closed = oid("3");
+    const side = oid("4");
+    const fork = oid("5");
+    const commits = [
+      { oid: top, parents: [closed] },
+      { oid: child, parents: [fork] },
+      { oid: closed, parents: [] },
+      { oid: side, parents: [fork] },
+      { oid: fork, parents: [] },
+    ];
     const rows = buildGraph(commits).rows;
-    expect([rows.get(base)?.lane, rows.get(side)?.lane]).toEqual([1, 2]);
-    expect(nextRow(commits, rows, base, "branch-up")).toBe(side);
+    expect([child, side, fork].map((commit) => rows.get(commit)?.lane)).toEqual(
+      [1, 1, 0],
+    );
+    expect(nextRow(commits, rows, fork, "branch-up")).toBe(child);
   });
 });
 

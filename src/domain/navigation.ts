@@ -73,15 +73,17 @@ export function nextRow(
       return parent !== undefined && graph.has(parent) ? parent : current.oid;
     }
     case "branch-up": {
-      const children = commits
-        .slice(0, index)
-        .filter((commit) => commit.parents.at(0) === current.oid);
-      // A fork point has several first-parent children. The nearest one drawn
-      // in the same lane continues the line the eye follows.
-      const lane = graph.get(current.oid)?.lane;
+      const above = commits.slice(0, index);
+      // The newest commit with an edge to `current` opens the lane that
+      // carries it down, so that child continues the line the eye follows.
+      // Lane numbers cannot tell, because they shift as lanes close.
+      const opener = above.find((commit) =>
+        graph.get(commit.oid)?.parents.some((edge) => edge.oid === current.oid),
+      );
       const child =
-        children.findLast((commit) => graph.get(commit.oid)?.lane === lane) ??
-        children.at(-1);
+        opener?.parents.at(0) === current.oid
+          ? opener
+          : above.findLast((commit) => commit.parents.at(0) === current.oid);
       return child?.oid ?? current.oid;
     }
   }
