@@ -25,10 +25,8 @@ function git(path, args, input) {
     encoding: "utf8",
     env,
     input,
-    maxBuffer: 64 * 1024 * 1024,
   });
   if (result.status !== 0) throw new Error(result.stderr || "Git failed");
-  return result.stdout.trim();
 }
 
 const totalCommits = 60_000;
@@ -118,7 +116,7 @@ let parent;
 while (mainMarks.length + topics < mainlineTarget) {
   const position = mainMarks.length;
   const time = startTime + position * 10 * minutes;
-  const remaining = mainlineTarget - (mainMarks.length + topics);
+  const remaining = mainlineTarget - (position + topics);
   if ((position + 1) % mergeEvery === 0 && remaining >= 2) {
     topics += 1;
     const note = [
