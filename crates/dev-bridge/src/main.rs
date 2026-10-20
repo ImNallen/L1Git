@@ -1,4 +1,6 @@
-use l1_git_core::{Advance, Coordinator, FetchMode, commit_detail, file_patch, refs, snapshot};
+use l1_git_core::{
+    Advance, Coordinator, FetchMode, commit_detail, file_patch, line_stats, refs, snapshot,
+};
 use serde::Deserialize;
 use serde_json::json;
 use std::{io::Read, sync::Arc, thread};
@@ -17,6 +19,13 @@ struct SnapshotRequest {
 struct DetailRequest {
     path: String,
     oid: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LineStatsRequest {
+    path: String,
+    oids: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -106,6 +115,8 @@ fn handle(mut request: Request, origins: &[String], coordinator: &Coordinator) {
             .map(|input| refs(&input.path).map(|data| json!(data))),
         "/api/commit-detail" => serde_json::from_slice::<DetailRequest>(&bytes)
             .map(|input| commit_detail(&input.path, &input.oid).map(|data| json!(data))),
+        "/api/line-stats" => serde_json::from_slice::<LineStatsRequest>(&bytes)
+            .map(|input| line_stats(&input.path, &input.oids).map(|data| json!(data))),
         "/api/file-patch" => serde_json::from_slice::<FilePatchRequest>(&bytes)
             .map(|input| file_patch(&input.path, &input.oid, &input.file).map(|data| json!(data))),
         "/api/overview" => serde_json::from_slice::<OverviewRequest>(&bytes).map(|input| {

@@ -1,6 +1,7 @@
 use l1_git_core::{
-    Branch, ChangeStatus, DiffBase, ErrorKind, FilePatch, HISTORY_LIMIT, Head, RepositoryRefs,
-    Squash, Tag, Worktree, commit_detail, file_patch, refs, snapshot,
+    Branch, ChangeStatus, DiffBase, ErrorKind, FilePatch, HISTORY_LIMIT, Head, LINE_STATS_LIMIT,
+    LineStats, RepositoryRefs, Squash, Tag, Worktree, commit_detail, file_patch, line_stats, refs,
+    snapshot,
 };
 use std::{
     fs,
@@ -637,6 +638,70 @@ fn file_patch_reports_non_utf8_file_names_as_unsupported() {
             .unwrap_err()
             .kind,
         ErrorKind::UnsupportedPath
+    ));
+}
+
+#[test]
+fn line_stats_count_lines_against_the_first_parent_or_the_empty_tree() {
+    let fixture = Fixture::new();
+    let root = fixture.commit("notes", "one\ntwo\n", "root");
+    let edit = fixture.commit("notes", "one\nTWO\nthree\n", "edit");
+    fs::write(
+        fixture.repo.join("logo.png"),
+        [0x89, b'P', b'N', b'G', 0, 1],
+    )
+    .unwrap();
+    git(&fixture.repo, &["add", "logo.png"]);
+    let binary = fixture.commit("notes", "one\nTWO\nthree\nfour\n", "binary");
+    git(&fixture.repo, &["commit", "--allow-empty", "-m", "empty"]);
+    let empty = git(&fixture.repo, &["rev-parse", "HEAD"]);
+    git(&fixture.repo, &["checkout", "-b", "feature"]);
+    fixture.commit("feature.txt", "a\nb\nc\n", "feature");
+    git(&fixture.repo, &["checkout", "main"]);
+    fixture.commit("main.txt", "main\n", "main");
+    git(
+        &fixture.repo,
+        &["merge", "--no-ff", "feature", "-m", "merge"],
+    );
+    let merge = git(&fixture.repo, &["rev-parse", "HEAD"]);
+    let missing = "0123456789abcdef0123456789abcdef01234567".to_owned();
+    let stats = |oid: &String, added, deleted| LineStats {
+        oid: oid.clone(),
+        added,
+        deleted,
+    };
+    assert_eq!(
+        line_stats(
+            fixture.path(),
+            &[
+                merge.clone(),
+                missing,
+                empty.clone(),
+                binary.clone(),
+                edit.clone(),
+                root.clone()
+            ]
+        )
+        .unwrap(),
+        [
+            stats(&merge, 3, 0),
+            stats(&empty, 0, 0),
+            stats(&binary, 1, 0),
+            stats(&edit, 2, 1),
+            stats(&root, 2, 0),
+        ]
+    );
+    assert!(matches!(
+        line_stats(fixture.path(), &["HEAD".to_owned()])
+            .unwrap_err()
+            .kind,
+        ErrorKind::InvalidOid
+    ));
+    assert!(matches!(
+        line_stats(fixture.path(), &vec![root; LINE_STATS_LIMIT + 1])
+            .unwrap_err()
+            .kind,
+        ErrorKind::InvalidOid
     ));
 }
 

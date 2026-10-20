@@ -39,7 +39,7 @@ pnpm dev
 
 Open <http://127.0.0.1:1422>. The browser uses the same Rust core through a development-only loopback bridge on port 9417. The Add dialog accepts a local absolute path. The native directory picker is available in the desktop app.
 
-The bridge accepts JSON POST requests only from the development origin. It exposes the same reads, fetch, and fast-forward as the app, and no other Git writes. The reads are `/api/snapshot`, `/api/refs`, `/api/commit-detail`, and `/api/file-patch`. `/api/refs` returns only the root, name, HEAD, and branches, so the sidebar can list a repository's branches without reading its history. The bridge is not included in the native app. To run another isolated instance, choose both ports:
+The bridge accepts JSON POST requests only from the development origin. It exposes the same reads, fetch, and fast-forward as the app, and no other Git writes. The reads are `/api/snapshot`, `/api/refs`, `/api/commit-detail`, `/api/line-stats`, and `/api/file-patch`. `/api/line-stats` counts added and deleted lines for up to 500 commits at once, so the history reads them only for the rows on screen. `/api/refs` returns only the root, name, HEAD, and branches, so the sidebar can list a repository's branches without reading its history. The bridge is not included in the native app. To run another isolated instance, choose both ports:
 
 ```sh
 L1GIT_DEV_PORT=1423 L1GIT_BRIDGE_PORT=9418 pnpm dev

@@ -99,6 +99,13 @@ export const filePatchSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("binary") }),
   z.object({ kind: z.literal("tooLarge"), bytes: z.number().int().positive() }),
 ]);
+export const lineStatsSchema = z.array(
+  z.object({
+    oid: oidSchema,
+    added: z.number().int().nonnegative(),
+    deleted: z.number().int().nonnegative(),
+  }),
+);
 export const repositoryErrorSchema = z.object({
   kind: z.enum([
     "missingPath",
@@ -129,6 +136,7 @@ export type ChangeStatus = z.infer<typeof changeStatusSchema>;
 export type CommitDetail = z.infer<typeof detailSchema>;
 export type ChangedFile = CommitDetail["files"][number];
 export type FilePatch = z.infer<typeof filePatchSchema>;
+export type LineStats = z.infer<typeof lineStatsSchema>[number];
 export type Problem =
   | z.infer<typeof repositoryErrorSchema>
   | { kind: "transport" | "persistence"; message: string };

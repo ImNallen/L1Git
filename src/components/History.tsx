@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { initials } from "../domain/author";
+import { diffstatBlocks } from "../domain/diffstat";
 import { buildGraph } from "../domain/graph";
 import type { GraphRow } from "../domain/graph";
 import { highlightBranch } from "../domain/highlight";
@@ -18,10 +19,12 @@ import { refLabels } from "../domain/refs";
 import type { RefLabel } from "../domain/refs";
 import type {
   Commit,
+  LineStats,
   Oid,
   RepositoryRoot,
   RepositorySnapshot,
 } from "../domain/repository";
+import { useLineStats } from "../useLineStats";
 
 const ROW_HEIGHT = 36;
 const OVERSCAN = 10;
@@ -124,6 +127,27 @@ function GraphCell({
         )}
       </g>
     </svg>
+  );
+}
+
+function ChangesCell({ stats }: { stats: LineStats | undefined }) {
+  if (!stats) return <td className="changes-cell" />;
+  const { added, deleted } = stats;
+  const lines = (count: number) => `${count} line${count === 1 ? "" : "s"}`;
+  const label = `${lines(added)} added, ${lines(deleted)} deleted`;
+  return (
+    <td className="changes-cell" aria-label={label} title={label}>
+      <span className="change-stat added">+{added.toLocaleString()}</span>
+      <span className="change-stat deleted">
+        {"\u2212"}
+        {deleted.toLocaleString()}
+      </span>
+      <span className="diffstat" aria-hidden="true">
+        {diffstatBlocks(added, deleted).map((block, index) => (
+          <span key={index} className={block} />
+        ))}
+      </span>
+    </td>
   );
 }
 
@@ -358,8 +382,13 @@ export function History({
     commits.length,
     Math.ceil((viewport.top + viewport.height) / ROW_HEIGHT) + OVERSCAN,
   );
+  const visible = useMemo(
+    () => commits.slice(first, last),
+    [commits, first, last],
+  );
+  const lineStats = useLineStats(snapshot.root, visible);
   const graphWidth = Math.max(48, graph.lanes * 24 + 10);
-  const columns = `200px ${graphWidth}px minmax(260px, 1fr)`;
+  const columns = `200px ${graphWidth}px minmax(260px, 1fr) 160px`;
 
   return (
     <section
@@ -371,7 +400,7 @@ export function History({
       <div className="history-scroll" ref={scrollRef}>
         <table
           className={`history-table${highlight ? " highlighting" : ""}`}
-          style={{ minWidth: graphWidth + 460 }}
+          style={{ minWidth: graphWidth + 620 }}
           aria-rowcount={commits.length + 1}
         >
           <thead ref={headRef}>
@@ -379,13 +408,14 @@ export function History({
               <th scope="col">Branch / Tag</th>
               <th scope="col">Graph</th>
               <th scope="col">Commit message</th>
+              <th scope="col">Changes</th>
             </tr>
           </thead>
           <tbody>
             {first > 0 && (
               <tr aria-hidden="true" style={{ height: first * ROW_HEIGHT }} />
             )}
-            {commits.slice(first, last).map((commit, offset) => {
+            {visible.map((commit, offset) => {
               const row = graph.rows.get(commit.oid);
               const [label, ...more] = labels.get(commit.oid) ?? [];
               const selected = selectedOid === commit.oid;
@@ -439,6 +469,7 @@ export function History({
                       </span>
                     </button>
                   </td>
+                  <ChangesCell stats={lineStats.get(commit.oid)} />
                 </tr>
               );
             })}
