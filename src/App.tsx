@@ -30,6 +30,7 @@ import { readyAdvances } from "./domain/overview";
 import type { Branch, FullRef, RepositoryRoot } from "./domain/repository";
 import { useExpandedRepositories } from "./expandedRepositories";
 import { useFetchSettings } from "./fetchSettings";
+import { useHistoryColumns } from "./historyColumns";
 import { repositoryWarnings, useOverview } from "./overview";
 import { macNative } from "./repositories";
 import { useRepositoryRefs } from "./useRepositoryRefs";
@@ -92,6 +93,11 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     ? { root: snapshot.root, name: snapshot.name }
     : opening && { root: opening.path, name: opening.name };
   const expansion = useExpandedRepositories(app.catalog);
+  const historyColumns = useHistoryColumns();
+  const persistenceError =
+    app.persistenceError ??
+    expansion.persistenceError ??
+    historyColumns.persistenceError;
   const branchRefs = useRepositoryRefs(
     expansion.expanded,
     snapshot,
@@ -406,12 +412,10 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                 {!inspectorVisible && inspectorToggle}
               </div>
             </header>
-            {(app.persistenceError ?? expansion.persistenceError) && (
+            {persistenceError && (
               <div className="notice error-notice" role="alert">
                 <TriangleAlert size={14} />
-                <span>
-                  {app.persistenceError ?? expansion.persistenceError}
-                </span>
+                <span>{persistenceError}</span>
               </div>
             )}
             {current?.error && (
@@ -454,6 +458,8 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                     busy={busy}
                     hidden={fileOpen}
                     trunk={trunk}
+                    visibleColumns={historyColumns.visible}
+                    onToggleColumn={historyColumns.toggle}
                   />
                   {fileDiff.kind !== "closed" && (
                     <FileDiffPane

@@ -1,6 +1,15 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import type { MouseEvent, ReactNode } from "react";
 import { createPortal } from "react-dom";
 import {
+  Check,
   CircleCheck,
   Cloud,
   FolderGit2,
@@ -19,6 +28,8 @@ import { historyAction, navigate, revealRow } from "../domain/navigation";
 import type { HistoryAction, Trail } from "../domain/navigation";
 import { refLabels } from "../domain/refs";
 import type { RefLabel } from "../domain/refs";
+import { uniqueShortOids } from "../domain/shortOid";
+import { relativeTime } from "../domain/time";
 import type {
   Commit,
   LineStats,
@@ -26,13 +37,18 @@ import type {
   RepositoryRoot,
   RepositorySnapshot,
 } from "../domain/repository";
+import { columnLayout, historyColumns } from "../historyColumns";
+import type { ColumnId } from "../historyColumns";
 import { useLineStats } from "../useLineStats";
+import { ContextMenu } from "./ContextMenu";
 
 const ROW_HEIGHT = 36;
 const OVERSCAN = 10;
 const HIGHLIGHT_DELAY = 400;
 const color = (lane: number) => `var(--graph-lane-${(lane % 6) + 1})`;
 const x = (lane: number) => 14 + lane * 24;
+const NO_COMMITS: readonly Commit[] = [];
+const FIXED_COLUMNS = 3;
 
 function GraphCell({
   row,
@@ -158,6 +174,69 @@ function ChangesCell({ stats }: { stats: LineStats | undefined }) {
   );
 }
 
+function TextCell({
+  className,
+  title,
+  children,
+}: {
+  className?: string;
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <td
+      role="gridcell"
+      className={className ? `text-cell ${className}` : "text-cell"}
+      title={title}
+    >
+      <span>{children}</span>
+    </td>
+  );
+}
+
+type CellContext = {
+  stats: LineStats | undefined;
+  shortOid: string;
+  now: number;
+};
+
+const cells: Record<
+  ColumnId,
+  (commit: Commit, context: CellContext) => ReactNode
+> = {
+  author: (commit) => (
+    <TextCell title={`${commit.author} <${commit.email}>`}>
+      {commit.author}
+    </TextCell>
+  ),
+  date: (commit, { now }) => (
+    <TextCell
+      className="date-cell"
+      title={new Date(commit.timestamp * 1000).toLocaleString()}
+    >
+      {relativeTime(commit.timestamp, now)}
+    </TextCell>
+  ),
+  sha: (commit, { shortOid }) => (
+    <TextCell className="sha-cell" title={commit.oid}>
+      {shortOid}
+    </TextCell>
+  ),
+  changes: (_, { stats }) => <ChangesCell stats={stats} />,
+};
+
+function useNowSeconds(ticking: boolean): number {
+  const [now, setNow] = useState(() => Date.now() / 1000);
+  useEffect(() => {
+    if (!ticking) return;
+    const tick = () => setNow(Date.now() / 1000);
+    tick();
+    const timer = window.setInterval(tick, 60_000);
+    return () => window.clearInterval(timer);
+  }, [ticking]);
+  return now;
+}
+
 function labelName(label: RefLabel): string {
   return label.kind === "head" ? "HEAD" : label.name;
 }
@@ -258,6 +337,8 @@ type Props = {
   hidden: boolean;
   /** Tips of the default branch, which the highlight treats as trunk. */
   trunk: Oid[];
+  visibleColumns: ReadonlySet<ColumnId>;
+  onToggleColumn: (id: ColumnId) => void;
 };
 
 export function History({
@@ -272,6 +353,8 @@ export function History({
   busy,
   hidden,
   trunk,
+  visibleColumns,
+  onToggleColumn,
 }: Props) {
   const graph = useMemo(
     () => buildGraph(snapshot.commits, snapshot.squashes),
@@ -320,6 +403,24 @@ export function History({
   const trail = useRef<Trail | null>(null);
   const wasHidden = useRef(hidden);
   const [viewport, setViewport] = useState({ top: 0, height: 0 });
+  const [columnMenu, setColumnMenu] = useState<{ x: number; y: number } | null>(
+    null,
+  );
+  const revealOnClose = useRef<ColumnId | null>(null);
+  const now = useNowSeconds(visibleColumns.has("date"));
+  const shaShown = visibleColumns.has("sha");
+  const short = useMemo(
+    () =>
+      shaShown
+        ? uniqueShortOids(commits.map((commit) => commit.oid))
+        : new Map<Oid, string>(),
+    [commits, shaShown],
+  );
+
+  function openColumnMenu(event: MouseEvent) {
+    event.preventDefault();
+    setColumnMenu({ x: event.clientX, y: event.clientY });
+  }
 
   useLayoutEffect(() => {
     const scroller = scrollRef.current;
@@ -405,6 +506,11 @@ export function History({
   function run(action: HistoryAction) {
     if (action === "open") return onOpenFirstFile();
     if (action === "cancel") return onCancelOpen();
+    if (action === "columns") {
+      const header = headRef.current?.getBoundingClientRect();
+      if (header) setColumnMenu({ x: header.left + 14, y: header.bottom });
+      return;
+    }
     const next = navigate(
       commits,
       graph.rows,
@@ -438,9 +544,24 @@ export function History({
     () => commits.slice(first, last),
     [commits, first, last],
   );
-  const lineStats = useLineStats(snapshot.root, visible);
+  const lineStats = useLineStats(
+    snapshot.root,
+    visibleColumns.has("changes") ? visible : NO_COMMITS,
+  );
   const graphWidth = Math.max(48, graph.lanes * 24 + 10);
-  const columns = `200px ${graphWidth}px minmax(260px, 1fr) 160px`;
+  const layout = columnLayout(graphWidth, visibleColumns);
+  function revealColumn(id: ColumnId | null) {
+    const index = layout.columns.findIndex((column) => column.id === id);
+    const cell = headRef.current?.rows[0]?.cells[FIXED_COLUMNS + index];
+    const scroller = scrollRef.current;
+    if (index < 0 || !cell || !scroller) return;
+    const { left, right } = cell.getBoundingClientRect();
+    const view = scroller.getBoundingClientRect();
+    const viewRight = view.left + scroller.clientWidth;
+    if (right > viewRight) scroller.scrollLeft += right - viewRight;
+    else if (left < view.left) scroller.scrollLeft -= view.left - left;
+  }
+
   const active =
     selectedOid !== null && visible.some((commit) => commit.oid === selectedOid)
       ? rowId(selectedOid)
@@ -457,7 +578,7 @@ export function History({
         <table
           ref={tableRef}
           className={`history-table${highlight ? " highlighting" : ""}`}
-          style={{ minWidth: graphWidth + 620 }}
+          style={{ minWidth: layout.minWidth }}
           role="grid"
           tabIndex={0}
           aria-label="Commits"
@@ -474,10 +595,10 @@ export function History({
               onCancelOpen();
           }}
         >
-          <thead ref={headRef}>
+          <thead ref={headRef} onContextMenu={openColumnMenu}>
             <tr
               role="row"
-              style={{ gridTemplateColumns: columns }}
+              style={{ gridTemplateColumns: layout.template }}
               aria-rowindex={1}
             >
               <th role="columnheader" scope="col">
@@ -489,9 +610,18 @@ export function History({
               <th role="columnheader" scope="col">
                 Commit message
               </th>
-              <th role="columnheader" scope="col">
-                Changes
-              </th>
+              {layout.columns.map((column) => (
+                <th
+                  key={column.id}
+                  role="columnheader"
+                  scope="col"
+                  className={
+                    column.id === "changes" ? "changes-header" : undefined
+                  }
+                >
+                  {column.label}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
@@ -513,7 +643,7 @@ export function History({
                       .filter(Boolean)
                       .join(" ") || undefined
                   }
-                  style={{ gridTemplateColumns: columns }}
+                  style={{ gridTemplateColumns: layout.template }}
                   aria-rowindex={first + offset + 2}
                   aria-selected={selected}
                   onClick={() => {
@@ -558,7 +688,15 @@ export function History({
                       </span>
                     </button>
                   </td>
-                  <ChangesCell stats={lineStats.get(commit.oid)} />
+                  {layout.columns.map((column) => (
+                    <Fragment key={column.id}>
+                      {cells[column.id](commit, {
+                        stats: lineStats.get(commit.oid),
+                        shortOid: short.get(commit.oid) ?? commit.oid,
+                        now,
+                      })}
+                    </Fragment>
+                  ))}
                 </tr>
               );
             })}
@@ -581,6 +719,37 @@ export function History({
           </div>
         )}
       </div>
+      {columnMenu && (
+        <ContextMenu
+          x={columnMenu.x}
+          y={columnMenu.y}
+          label="History columns"
+          onClose={(refocus) => {
+            setColumnMenu(null);
+            if (refocus) tableRef.current?.focus({ preventScroll: true });
+            revealColumn(revealOnClose.current);
+            revealOnClose.current = null;
+          }}
+        >
+          {historyColumns.map((column) => {
+            const checked = visibleColumns.has(column.id);
+            return (
+              <button
+                key={column.id}
+                role="menuitemcheckbox"
+                aria-checked={checked}
+                onClick={() => {
+                  if (!checked) revealOnClose.current = column.id;
+                  onToggleColumn(column.id);
+                }}
+              >
+                <Check size={14} visibility={checked ? "visible" : "hidden"} />
+                <span>{column.label}</span>
+              </button>
+            );
+          })}
+        </ContextMenu>
+      )}
     </section>
   );
 }

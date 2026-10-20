@@ -2,7 +2,7 @@ import type { GraphRow } from "./graph";
 import type { Commit, Oid } from "./repository";
 
 export type Move = "up" | "down" | "first" | "last" | "child" | "parent";
-export type HistoryAction = Move | "open" | "cancel";
+export type HistoryAction = Move | "open" | "cancel" | "columns";
 
 export type HistoryKey = Pick<
   KeyboardEvent,
@@ -44,6 +44,8 @@ export const historyBindings: readonly HistoryBinding[] = [
   binding("k", "child", { shift: true }),
   binding("Enter", "open"),
   binding("Escape", "cancel"),
+  binding("ContextMenu", "columns"),
+  binding("F10", "columns", { shift: true }),
 ];
 
 export function historyAction(event: HistoryKey): HistoryAction | null {

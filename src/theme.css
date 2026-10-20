@@ -5,6 +5,7 @@
 @import "./styles/diff.css";
 @import "./styles/dialog.css";
 @import "./styles/settings.css";
+@import "./styles/menu.css";
 
 :root {
   font-family: "Inter Variable", Inter, sans-serif;
