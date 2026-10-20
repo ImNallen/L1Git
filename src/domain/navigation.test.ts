@@ -107,6 +107,27 @@ describe("history navigation", () => {
     );
     expect(nextRow(commits, rows, fork, "branch-up")).toBe(child);
   });
+
+  it("takes the straight edge into the fork point over the lane that curves into it", () => {
+    const merge = oid("1");
+    const feature2 = oid("2");
+    const feature1 = oid("3");
+    const trunk = oid("4");
+    const fork = oid("5");
+    const commits = [
+      { oid: merge, parents: [trunk, feature2] },
+      { oid: feature2, parents: [feature1] },
+      { oid: feature1, parents: [fork] },
+      { oid: trunk, parents: [fork] },
+      { oid: fork, parents: [] },
+    ];
+    const rows = buildGraph(commits).rows;
+    expect(rows.get(trunk)?.parents).toEqual([{ oid: fork, from: 0, to: 0 }]);
+    expect(rows.get(trunk)?.continuations).toEqual([
+      { oid: fork, from: 1, to: 0 },
+    ]);
+    expect(nextRow(commits, rows, fork, "branch-up")).toBe(trunk);
+  });
 });
 
 describe("history keys", () => {

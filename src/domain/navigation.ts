@@ -73,20 +73,40 @@ export function nextRow(
       return parent !== undefined && graph.has(parent) ? parent : current.oid;
     }
     case "branch-up": {
-      const above = commits.slice(0, index);
-      // The newest commit with an edge to `current` opens the lane that
-      // carries it down, so that child continues the line the eye follows.
-      // Lane numbers cannot tell, because they shift as lanes close.
-      const opener = above.find((commit) =>
-        graph.get(commit.oid)?.parents.some((edge) => edge.oid === current.oid),
-      );
       const child =
-        opener?.parents.at(0) === current.oid
-          ? opener
-          : above.findLast((commit) => commit.parents.at(0) === current.oid);
+        lineChild(commits, graph, index) ??
+        commits
+          .slice(0, index)
+          .findLast((commit) => commit.parents.at(0) === current.oid);
       return child?.oid ?? current.oid;
     }
   }
+}
+
+/**
+ * The child the graph line drawn into `commits[index]` comes from, when that
+ * child is on its first-parent line. The trace follows the commit's lane up
+ * through each row's continuations until an edge runs straight into it or the
+ * edge that opened the lane is reached. Lane numbers alone cannot tell, since
+ * they shift as lanes to the left close.
+ */
+function lineChild(
+  commits: readonly Pick<Commit, "oid" | "parents">[],
+  graph: ReadonlyMap<Oid, GraphRow>,
+  index: number,
+): Pick<Commit, "oid" | "parents"> | undefined {
+  const target = commits[index]?.oid;
+  for (let above = index - 1; above >= 0; above--) {
+    const commit = commits[above];
+    const row = commit && graph.get(commit.oid);
+    if (!row) return undefined;
+    const edge = row.parents.find((parent) => parent.oid === target);
+    const straight = edge !== undefined && edge.from === edge.to;
+    if (!straight && row.continuations.some((lane) => lane.oid === target))
+      continue;
+    return edge && commit.parents.at(0) === target ? commit : undefined;
+  }
+  return undefined;
 }
 
 /**
