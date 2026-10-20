@@ -40,12 +40,14 @@ let bridge: ChildProcess;
 let endpoint: string;
 const origin = "http://127.0.0.1:1422";
 const answer = <T extends z.ZodType>(op: string, data: T) =>
-  z
-    .object({
-      ok: z.literal(true),
-      data: z.object({ op: z.literal(op), data }),
-    })
-    .transform((envelope) => envelope.data);
+  z.object({ ok: z.literal(true), op: z.literal(op), data });
+const rejected = async (body: unknown) => {
+  const response = await post(body);
+  return {
+    status: response.status,
+    error: z.object({ error: z.string() }).parse(await response.json()).error,
+  };
+};
 const snapshotEnvelope = answer("snapshot", snapshotSchema);
 const refsEnvelope = answer("refs", refsSchema.strict());
 const overviewEnvelope = answer("overview", overviewSchema);
@@ -371,7 +373,18 @@ describe("real Rust transport contract", () => {
         expect(response.status).toBe(403);
         expect(response.headers.get("access-control-allow-origin")).toBeNull();
       }
-    expect((await post({ op: "checkout" })).status).toBe(400);
+    expect(
+      await rejected({ op: "notAnOperation", path: fixture.repository }),
+    ).toEqual({
+      status: 400,
+      error: expect.stringContaining("unknown variant `notAnOperation`"),
+    });
+    expect(
+      await rejected({ op: "commitDetail", path: fixture.repository }),
+    ).toEqual({
+      status: 400,
+      error: expect.stringContaining("missing field `oid`"),
+    });
     expect(
       (await post({ path: fixture.repository }, origin, "/api/snapshot"))
         .status,

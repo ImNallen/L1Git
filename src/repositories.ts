@@ -35,9 +35,10 @@ const responseSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("fastForward"), data: fastForwardReportSchema }),
 ]);
 const envelopeSchema = z.discriminatedUnion("ok", [
-  z.object({ ok: z.literal(true), data: responseSchema }),
+  z.object({ ok: z.literal(true) }),
   z.object({ ok: z.literal(false), error: repositoryErrorSchema }),
 ]);
+const rejectionSchema = z.object({ error: z.string() });
 
 type RepositoryResponse = z.infer<typeof responseSchema>;
 type Answer<R extends RepositoryRequest> = Extract<
@@ -45,11 +46,8 @@ type Answer<R extends RepositoryRequest> = Extract<
   { op: R["op"] }
 >;
 
-async function send(request: RepositoryRequest): Promise<RepositoryResponse> {
-  if (native)
-    return responseSchema.parse(
-      await invoke<unknown>("repository_run", { request }),
-    );
+async function send(request: RepositoryRequest): Promise<unknown> {
+  if (native) return invoke<unknown>("repository_run", { request });
   let response: Response;
   try {
     response = await fetch("/api/run", {
@@ -62,13 +60,18 @@ async function send(request: RepositoryRequest): Promise<RepositoryResponse> {
       "The development bridge is unavailable. Start pnpm dev and try again.",
     );
   }
+  if (response.status === 400) {
+    const { error } = rejectionSchema.parse(await response.json());
+    throw new Error(`The development bridge rejected the request. ${error}`);
+  }
   if (!response.ok)
     throw new Error(
       "The development bridge rejected the request. Check that pnpm dev is running on this port.",
     );
-  const envelope = envelopeSchema.parse(await response.json());
+  const body: unknown = await response.json();
+  const envelope = envelopeSchema.parse(body);
   if (!envelope.ok) throw envelope.error;
-  return envelope.data;
+  return body;
 }
 
 function answers<R extends RepositoryRequest>(
@@ -81,10 +84,10 @@ function answers<R extends RepositoryRequest>(
 async function run<R extends RepositoryRequest>(
   request: R,
 ): Promise<Answer<R>> {
-  const response = await send(request);
+  const response = responseSchema.parse(await send(request));
   if (!answers(request, response))
     throw new Error(
-      `The repository reader answered ${response.op} to ${request.op}.`,
+      `L1 Git's core answered ${response.op} to a ${request.op} request.`,
     );
   return response;
 }

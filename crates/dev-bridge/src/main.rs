@@ -70,9 +70,13 @@ fn handle(mut request: Request, origins: &[String], coordinator: &Coordinator) {
     match serde_json::from_slice::<l1_git_core::Request>(&bytes)
         .map(|input| run(coordinator, input))
     {
-        Ok(Ok(data)) => respond(request, 200, json!({"ok": true, "data": data})),
+        Ok(Ok(response)) => {
+            let mut body = json!(response);
+            body["ok"] = json!(true);
+            respond(request, 200, body)
+        }
         Ok(Err(error)) => respond(request, 200, json!({"ok": false, "error": error})),
-        Err(_) => respond(request, 400, json!({"error": "Invalid request."})),
+        Err(error) => respond(request, 400, json!({"error": error.to_string()})),
     }
 }
 
