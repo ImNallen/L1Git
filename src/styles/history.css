@@ -67,6 +67,35 @@
 .history-table td:nth-child(3) {
   padding: 0 10px 0 0;
 }
+.history-table th:nth-child(4),
+.history-table td.changes-cell {
+  justify-content: flex-end;
+  padding-right: 14px;
+}
+.changes-cell {
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.diffstat {
+  display: flex;
+  gap: 2px;
+  margin-left: 2px;
+}
+.diffstat span {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--border-strong);
+}
+.diffstat .added {
+  background: var(--success);
+}
+.diffstat .deleted {
+  background: var(--deleted);
+}
 .history-table tbody tr {
   cursor: pointer;
 }
@@ -104,6 +133,7 @@
 }
 .ref-cell,
 .commit-description,
+.changes-cell,
 .graph-node,
 .graph-cell path {
   transition: opacity 120ms ease-out;
@@ -111,7 +141,7 @@
 .history-table.highlighting
   tbody
   tr:not(.lit)
-  :is(.ref-cell, .commit-description, .graph-node),
+  :is(.ref-cell, .commit-description, .changes-cell, .graph-node),
 .graph-cell path.dim {
   opacity: 0.3;
 }
