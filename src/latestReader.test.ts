@@ -39,6 +39,24 @@ describe("latest reader", () => {
     expect(delivered).toEqual(["c=detail c"]);
   });
 
+  it("reads a settled key once, however long it stays wanted", async () => {
+    const { reader, reads, delivered, finish } = controlled();
+    reader.want("a");
+    await finish("a");
+    vi.advanceTimersByTime(10_000);
+    await finish("a");
+    expect(reads).toEqual(["a"]);
+    expect(delivered).toEqual(["a=detail a"]);
+  });
+
+  it("reads a settled key again when it is wanted again", async () => {
+    const { reader, reads, finish } = controlled();
+    reader.want("a");
+    await finish("a");
+    reader.want("a");
+    expect(reads).toEqual(["a", "a"]);
+  });
+
   it("does not read a key twice while it is in flight", () => {
     const { reader, reads } = controlled();
     reader.want("a");

@@ -19,11 +19,12 @@ export function latestReader<Key, Value>({
   stallMs: number;
 }): { want: (key: Key | null) => void } {
   let newest: Key | null = null;
+  let settled: Key | null = null;
   let running: { key: Key; stalled: boolean } | null = null;
 
   function pump() {
     const key = newest;
-    if (key === null) return;
+    if (key === null || (settled !== null && same(settled, key))) return;
     if (running && (same(running.key, key) || !running.stalled)) return;
     const current = { key, stalled: false };
     running = current;
@@ -34,7 +35,10 @@ export function latestReader<Key, Value>({
     const finish = (outcome: ReadOutcome<Value>) => {
       clearTimeout(timer);
       if (running === current) running = null;
-      if (newest !== null && same(newest, key)) deliver(key, outcome);
+      if (newest !== null && same(newest, key)) {
+        settled = key;
+        deliver(key, outcome);
+      }
       pump();
     };
     read(key).then(
@@ -46,6 +50,7 @@ export function latestReader<Key, Value>({
   return {
     want(key) {
       newest = key;
+      settled = null;
       pump();
     },
   };
