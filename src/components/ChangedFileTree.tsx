@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { prepareFileTreeInput } from "@pierre/trees";
 import type { GitStatus } from "@pierre/trees";
 import { FileTree, useFileTree } from "@pierre/trees/react";
 import type { ChangeStatus, ChangedFile } from "../domain/repository";
@@ -12,6 +13,16 @@ export const changeStatuses = {
   ChangeStatus,
   { label: string; gitStatus: GitStatus }
 >;
+
+/** The path the tree shows first, since every directory starts open. */
+export function firstChangedPath(
+  files: readonly ChangedFile[],
+): string | undefined {
+  return prepareFileTreeInput(
+    files.map((file) => file.path),
+    { flattenEmptyDirectories: true },
+  ).paths.at(0);
+}
 
 type Props = {
   files: readonly ChangedFile[];

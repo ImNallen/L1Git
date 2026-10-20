@@ -105,6 +105,13 @@
 .history-table tr.selected td {
   background: var(--row-selected);
 }
+.history-table:focus {
+  outline: none;
+}
+.history-table:focus-visible tbody tr.selected {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
 .commit-description {
   min-width: 0;
   width: 100%;

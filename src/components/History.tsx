@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import {
   CircleCheck,
@@ -15,6 +16,7 @@ import { buildGraph } from "../domain/graph";
 import type { GraphRow } from "../domain/graph";
 import { highlightBranch } from "../domain/highlight";
 import type { RowHighlight } from "../domain/highlight";
+import { historyAction, nextRow, revealRow } from "../domain/navigation";
 import { refLabels } from "../domain/refs";
 import type { RefLabel } from "../domain/refs";
 import type {
@@ -214,12 +216,9 @@ function MoreRefs({ labels, lane }: { labels: RefLabel[]; lane: number }) {
       <span
         className="ref-badge more-refs"
         style={{ background: color(lane) }}
-        tabIndex={0}
         aria-label={`${labels.length} more: ${labels.map(labelName).join(", ")}`}
         onMouseEnter={open}
-        onFocus={open}
         onMouseLeave={() => setAnchor(null)}
-        onBlur={() => setAnchor(null)}
       >
         +{labels.length}
       </span>
@@ -245,6 +244,8 @@ type Props = {
   selectedOid: Oid | null;
   revealSeq: number;
   onSelect: (oid: Oid) => void;
+  /** Opens the first changed file of the selected commit. */
+  onOpen: () => void;
   /** Where the history of `root` was scrolled when it was last shown. */
   scrollTopOf: (root: RepositoryRoot) => number;
   onScroll: (root: RepositoryRoot, scrollTop: number) => void;
@@ -259,6 +260,7 @@ export function History({
   selectedOid,
   revealSeq,
   onSelect,
+  onOpen,
   scrollTopOf,
   onScroll,
   busy,
@@ -308,6 +310,9 @@ export function History({
   } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const headRef = useRef<HTMLTableSectionElement>(null);
+  const tableRef = useRef<HTMLTableElement>(null);
+  // Enter hides the history behind a diff, so focus returns when it closes.
+  const refocus = useRef(false);
   const [viewport, setViewport] = useState({ top: 0, height: 0 });
 
   useLayoutEffect(() => {
@@ -374,6 +379,35 @@ export function History({
     setViewport({ top: scroller.scrollTop, height: scroller.clientHeight });
   }, [snapshot.root, scrollTopOf, selectedOid, revealSeq, hidden]);
 
+  useLayoutEffect(() => {
+    if (hidden || !refocus.current) return;
+    refocus.current = false;
+    tableRef.current?.focus({ preventScroll: true });
+  }, [hidden]);
+
+  function keyboard(event: KeyboardEvent<HTMLTableElement>) {
+    const action = historyAction(event.nativeEvent);
+    if (action === null) return;
+    event.preventDefault();
+    if (action === "open") {
+      refocus.current = true;
+      onOpen();
+      return;
+    }
+    const oid = nextRow(commits, graph.rows, selectedOid, action);
+    const scroller = scrollRef.current;
+    if (oid === null || !scroller) return;
+    const header = headRef.current?.offsetHeight ?? 0;
+    scroller.scrollTop = revealRow(
+      commits.findIndex((commit) => commit.oid === oid),
+      ROW_HEIGHT,
+      scroller.scrollTop,
+      scroller.clientHeight - header,
+    );
+    setViewport({ top: scroller.scrollTop, height: scroller.clientHeight });
+    onSelect(oid);
+  }
+
   const first = Math.min(
     commits.length,
     Math.max(0, Math.floor(viewport.top / ROW_HEIGHT) - OVERSCAN),
@@ -389,6 +423,10 @@ export function History({
   const lineStats = useLineStats(snapshot.root, visible);
   const graphWidth = Math.max(48, graph.lanes * 24 + 10);
   const columns = `200px ${graphWidth}px minmax(260px, 1fr) 160px`;
+  const active =
+    selectedOid !== null && visible.some((commit) => commit.oid === selectedOid)
+      ? rowId(selectedOid)
+      : undefined;
 
   return (
     <section
@@ -399,9 +437,15 @@ export function History({
     >
       <div className="history-scroll" ref={scrollRef}>
         <table
+          ref={tableRef}
           className={`history-table${highlight ? " highlighting" : ""}`}
           style={{ minWidth: graphWidth + 620 }}
+          role="grid"
+          tabIndex={0}
+          aria-label="Commits"
           aria-rowcount={commits.length + 1}
+          aria-activedescendant={active}
+          onKeyDown={keyboard}
         >
           <thead ref={headRef}>
             <tr style={{ gridTemplateColumns: columns }} aria-rowindex={1}>
@@ -423,6 +467,7 @@ export function History({
               return (
                 <tr
                   key={commit.oid}
+                  id={rowId(commit.oid)}
                   className={
                     [selected && "selected", lit && "lit"]
                       .filter(Boolean)
@@ -430,7 +475,11 @@ export function History({
                   }
                   style={{ gridTemplateColumns: columns }}
                   aria-rowindex={first + offset + 2}
-                  onClick={() => onSelect(commit.oid)}
+                  aria-selected={selected}
+                  onClick={() => {
+                    onSelect(commit.oid);
+                    tableRef.current?.focus({ preventScroll: true });
+                  }}
                 >
                   <td className="ref-cell">
                     {label && (
@@ -461,6 +510,7 @@ export function History({
                   <td>
                     <button
                       className="commit-description"
+                      tabIndex={-1}
                       aria-label={`${commit.subject}, ${commit.author}, ${commit.oid.slice(0, 7)}`}
                       aria-pressed={selected}
                     >
@@ -494,6 +544,10 @@ export function History({
       </div>
     </section>
   );
+}
+
+function rowId(oid: Oid): string {
+  return `history-row-${oid}`;
 }
 
 /** Holds the history pane while a repository opens for the first time. */

@@ -19,6 +19,7 @@ import type { ThemeSettings } from "./themes/catalog";
 import { AppearanceSettings } from "./components/AppearanceSettings";
 import { AddRepositoryDialog } from "./components/AddRepositoryDialog";
 import { FetchSettings } from "./components/FetchSettings";
+import { firstChangedPath } from "./components/ChangedFileTree";
 import { CommitInspector, InspectorFrame } from "./components/CommitInspector";
 import { FileDiffPane } from "./components/FileDiffPane";
 import type { DiffStyle } from "./components/FileDiffPane";
@@ -179,6 +180,17 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       seq: (previous?.seq ?? 0) + 1,
       pending,
     }));
+  }
+  function openFirstFile() {
+    const { detail } = app;
+    if (
+      detail.kind !== "ready" ||
+      detail.root !== snapshot?.root ||
+      detail.oid !== app.selectedOid
+    )
+      return;
+    const path = firstChangedPath(detail.detail.files);
+    if (path !== undefined) app.openFile(path);
   }
   async function addRepository(path: string, signal: AbortSignal) {
     const added = await app.addRepository(path, signal);
@@ -447,6 +459,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                     selectedOid={app.selectedOid}
                     revealSeq={jump?.seq ?? 0}
                     onSelect={app.setSelectedOid}
+                    onOpen={openFirstFile}
                     scrollTopOf={app.scrollTopOf}
                     onScroll={app.rememberScroll}
                     busy={busy}
