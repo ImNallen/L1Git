@@ -710,13 +710,15 @@ pub(crate) fn capped_patch(
     args: &[&str],
     exit_codes: &[i32],
 ) -> Result<FilePatch, RepositoryError> {
-    Ok(match git::read_capped(root, args, PATCH_LIMIT, exit_codes)? {
-        git::Capped::Within(patch) => FilePatch::Text {
-            lossy: std::str::from_utf8(&patch).is_err(),
-            patch: git::text(&patch),
+    Ok(
+        match git::read_capped(root, args, PATCH_LIMIT, exit_codes)? {
+            git::Capped::Within(patch) => FilePatch::Text {
+                lossy: std::str::from_utf8(&patch).is_err(),
+                patch: git::text(&patch),
+            },
+            git::Capped::Over(bytes) => FilePatch::TooLarge { bytes },
         },
-        git::Capped::Over(bytes) => FilePatch::TooLarge { bytes },
-    })
+    )
 }
 
 /// Counts each commit's changed lines against the same base as its detail.

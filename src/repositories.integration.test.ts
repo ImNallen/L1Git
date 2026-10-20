@@ -20,6 +20,7 @@ import {
   refsSchema,
   repositoryErrorSchema,
   snapshotSchema,
+  worktreeStatusSchema,
 } from "./domain/repository";
 
 const fixtureSchema = z.object({
@@ -52,6 +53,11 @@ const snapshotEnvelope = answer("snapshot", snapshotSchema);
 const refsEnvelope = answer("refs", refsSchema.strict());
 const overviewEnvelope = answer("overview", overviewSchema);
 const fastForwardEnvelope = answer("fastForward", fastForwardReportSchema);
+const worktreeStatusEnvelope = answer(
+  "worktreeStatus",
+  worktreeStatusSchema.strict(),
+);
+const worktreePatchEnvelope = answer("worktreePatch", filePatchSchema);
 
 async function post(
   body: unknown,
@@ -357,6 +363,100 @@ describe("real Rust transport contract", () => {
         ).json(),
       ).error.kind,
     ).toBe("missingPath");
+  });
+
+  it("reads a worktree's uncommitted changes and their patches against HEAD", async () => {
+    const dirty = realpathSync(fixture.sync.dirty);
+    const status = worktreeStatusEnvelope.parse(
+      await (await post({ op: "worktreeStatus", path: dirty })).json(),
+    ).data;
+    expect(status).toEqual({
+      root: dirty,
+      head: {
+        kind: "attached",
+        reference: "refs/heads/develop",
+        oid: execFileSync("git", ["-C", dirty, "rev-parse", "HEAD"], {
+          encoding: "utf8",
+        }).trim(),
+      },
+      entries: [
+        { kind: "ordinary", path: "README.md", staged: ".", unstaged: "M" },
+      ],
+    });
+    expect(
+      worktreePatchEnvelope.parse(
+        await (
+          await post({ op: "worktreePatch", path: dirty, file: "README.md" })
+        ).json(),
+      ).data,
+    ).toEqual({
+      kind: "text",
+      lossy: false,
+      patch: [
+        "diff --git a/README.md b/README.md",
+        "index 77b86f0..afa6241 100644",
+        "--- a/README.md",
+        "+++ b/README.md",
+        "@@ -1 +1,3 @@",
+        " # Sync demo",
+        "+",
+        "+Uncommitted.",
+        "",
+      ].join("\n"),
+    });
+
+    const unborn = realpathSync(fixture.unborn);
+    writeFileSync(join(unborn, "draft notes.txt"), "first draft\n");
+    try {
+      expect(
+        worktreeStatusEnvelope.parse(
+          await (await post({ op: "worktreeStatus", path: unborn })).json(),
+        ).data,
+      ).toEqual({
+        root: unborn,
+        head: { kind: "unborn", reference: "refs/heads/main" },
+        entries: [{ kind: "untracked", path: "draft notes.txt" }],
+      });
+      expect(
+        worktreePatchEnvelope.parse(
+          await (
+            await post({
+              op: "worktreePatch",
+              path: unborn,
+              file: "draft notes.txt",
+            })
+          ).json(),
+        ).data,
+      ).toEqual({
+        kind: "text",
+        lossy: false,
+        patch: [
+          "diff --git a/draft notes.txt b/draft notes.txt",
+          "new file mode 100644",
+          "index 0000000..42293fd",
+          "--- /dev/null",
+          "+++ b/draft notes.txt\t",
+          "@@ -0,0 +1 @@",
+          "+first draft",
+          "",
+        ].join("\n"),
+      });
+    } finally {
+      rmSync(join(unborn, "draft notes.txt"));
+    }
+    expect(
+      z
+        .object({ ok: z.literal(false), error: repositoryErrorSchema })
+        .parse(
+          await (
+            await post({ op: "worktreePatch", path: dirty, file: "main.txt" })
+          ).json(),
+        ).error,
+    ).toEqual({
+      kind: "unchangedPath",
+      message:
+        "This file has no uncommitted changes. Refresh the worktree status.",
+    });
   });
 
   it("rejects other origins, absent origins, unknown operations, and malformed requests", async () => {

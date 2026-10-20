@@ -3,7 +3,7 @@ use crate::{
     git,
     repository::{self, capped_patch},
 };
-use std::path::Path;
+use std::path::{Component, Path};
 
 pub fn worktree_status(path: &str) -> Result<WorktreeStatus, RepositoryError> {
     let root = repository::root(path)?;
@@ -78,11 +78,9 @@ fn parse(output: &[u8]) -> Result<(Head, Vec<StatusEntry>), RepositoryError> {
         entries.push(entry);
     }
     let head = match (oid, branch) {
-        (Some(oid), Some(branch)) if oid == "(initial)" && branch != "(detached)" => {
-            Head::Unborn {
-                reference: format!("refs/heads/{branch}"),
-            }
-        }
+        (Some(oid), Some(branch)) if oid == "(initial)" && branch != "(detached)" => Head::Unborn {
+            reference: format!("refs/heads/{branch}"),
+        },
         (Some(oid), Some(branch)) if oid != "(initial)" && branch == "(detached)" => {
             Head::Detached { oid }
         }
@@ -139,7 +137,8 @@ fn conflict(xy: &[u8]) -> Result<Conflict, RepositoryError> {
 /// the first commit. An untracked file diffs against `/dev/null`.
 pub fn worktree_patch(path: &str, file: &str) -> Result<FilePatch, RepositoryError> {
     let root = repository::root(path)?;
-    if file.is_empty() {
+    let mut components = Path::new(file).components();
+    if !components.all(|component| matches!(component, Component::Normal(_))) || file.is_empty() {
         return Err(no_changes());
     }
     let base = base(&root)?;
