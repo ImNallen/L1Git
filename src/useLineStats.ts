@@ -8,10 +8,21 @@ import type {
 } from "./domain/repository";
 
 const SETTLE_DELAY = 100;
-// A commit ID names its content, so its counts never change and outlive
-// refreshes and repository switches.
-const known = new Map<Oid, LineStats>();
-const pending = new Set<Oid>();
+// A commit's counts outlive refreshes, but each repository's attributes and
+// diff drivers decide which files count as binary, so caches stay per root.
+const caches = new Map<
+  RepositoryRoot,
+  { known: Map<Oid, LineStats>; pending: Set<Oid> }
+>();
+
+function cacheOf(root: RepositoryRoot) {
+  let cache = caches.get(root);
+  if (!cache) {
+    cache = { known: new Map(), pending: new Set() };
+    caches.set(root, cache);
+  }
+  return cache;
+}
 
 /**
  * Line counts for the rendered commits. Reads the missing ones in one batch
@@ -24,6 +35,7 @@ export function useLineStats(
   const [, setSettled] = useState(0);
   useEffect(() => {
     const timer = window.setTimeout(() => {
+      const { known, pending } = cacheOf(root);
       const batch = commits
         .map((commit) => commit.oid)
         .filter((oid) => !known.has(oid) && !pending.has(oid));
@@ -44,5 +56,5 @@ export function useLineStats(
     }, SETTLE_DELAY);
     return () => window.clearTimeout(timer);
   }, [root, commits]);
-  return known;
+  return cacheOf(root).known;
 }
