@@ -61,8 +61,13 @@ async function send(request: RepositoryRequest): Promise<unknown> {
     );
   }
   if (response.status === 400) {
-    const { error } = rejectionSchema.parse(await response.json());
-    throw new Error(`The development bridge rejected the request. ${error}`);
+    const rejection = rejectionSchema.safeParse(
+      await response.json().catch(() => null),
+    );
+    if (rejection.success)
+      throw new Error(
+        `The development bridge rejected the request. ${rejection.data.error}`,
+      );
   }
   if (!response.ok)
     throw new Error(

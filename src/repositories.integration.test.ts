@@ -359,7 +359,7 @@ describe("real Rust transport contract", () => {
     ).toBe("missingPath");
   });
 
-  it("rejects other origins, absent origins, unknown commands, and malformed requests", async () => {
+  it("rejects other origins, absent origins, unknown operations, and malformed requests", async () => {
     for (const operation of ["snapshot", "refs"])
       for (const requestOrigin of [
         null,

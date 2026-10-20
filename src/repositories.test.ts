@@ -56,7 +56,15 @@ describe("native transport", () => {
       op: "lineStats",
       data: [{ oid: "HEAD", added: 4, deleted: 2 }],
     });
-    await expect(lineStats(root, [oid])).rejects.toThrow(/oid/);
+    await expect(lineStats(root, [oid])).rejects.toMatchObject({
+      issues: [
+        {
+          path: ["data", 0, "oid"],
+          message:
+            "Invalid string: must match pattern /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/",
+        },
+      ],
+    });
   });
 });
 
@@ -94,7 +102,17 @@ describe("bridge transport", () => {
     const { refs } = await load(false);
     reply(404, { error: "Unknown route." });
     await expect(refs(root)).rejects.toThrow(
-      "Check that pnpm dev is running on this port.",
+      "The development bridge rejected the request. Check that pnpm dev is running on this port.",
+    );
+  });
+
+  it("points at pnpm dev for a 400 that did not come from the bridge", async () => {
+    const { refs } = await load(false);
+    fetch.mockResolvedValueOnce(
+      new Response("<html>Bad Request</html>", { status: 400 }),
+    );
+    await expect(refs(root)).rejects.toThrow(
+      "The development bridge rejected the request. Check that pnpm dev is running on this port.",
     );
   });
 });
