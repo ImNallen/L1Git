@@ -122,20 +122,74 @@ pub struct ChangedFile {
     pub status: ChangeStatus,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CommitDetail {
-    pub commit: Commit,
-    pub message: String,
-    pub files: Vec<ChangedFile>,
-    pub diff_base: DiffBase,
+/// What `commitDetail` and `filePatch` diff. `FirstParent` is the target
+/// commit's first parent, or the empty tree for a root commit, and needs a
+/// commit target.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct Comparison {
+    pub base: Base,
+    pub target: Target,
+}
+
+impl Comparison {
+    /// One commit against its first parent.
+    pub fn commit(oid: impl Into<String>) -> Self {
+        Self {
+            base: Base::FirstParent,
+            target: Target::Commit { oid: oid.into() },
+        }
+    }
+
+    pub fn between(base: impl Into<String>, target: impl Into<String>) -> Self {
+        Self {
+            base: Base::Commit { oid: base.into() },
+            target: Target::Commit { oid: target.into() },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
+pub enum Base {
+    FirstParent,
+    Commit { oid: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
+pub enum Target {
+    Commit {
+        oid: String,
+    },
+    /// A worktree root of the repository, compared with its files on disk,
+    /// untracked files included.
+    Worktree {
+        root: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub enum DiffBase {
+pub struct CommitDetail {
+    pub base: BaseDetail,
+    pub target: TargetDetail,
+    pub files: Vec<ChangedFile>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum BaseDetail {
     EmptyTree,
     FirstParent,
+    Commit { commit: Commit },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum TargetDetail {
+    Commit { commit: Commit, message: String },
+    Worktree { root: String, head: Head },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

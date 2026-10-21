@@ -1,9 +1,9 @@
 use crate::{
-    Branch, ChangeStatus, ChangedFile, Commit, CommitDetail, DiffBase, ErrorKind, FilePatch, Head,
-    LineStats, Oid, Remote, RepositoryError, RepositoryRefs, RepositorySnapshot, Squash, Tag,
-    Worktree,
+    Base, BaseDetail, Branch, ChangeStatus, ChangedFile, Commit, CommitDetail, Comparison,
+    ErrorKind, FilePatch, Head, LineStats, Oid, Remote, RepositoryError, RepositoryRefs,
+    RepositorySnapshot, Squash, Tag, Target, TargetDetail, Worktree,
     git::{self, Deadline, LocalRead},
-    remotes,
+    remotes, status,
 };
 use std::{
     collections::HashMap,
@@ -611,20 +611,15 @@ fn patch_ids(
     .collect()
 }
 
-fn open_commit(
-    path: &str,
-    oid: &str,
-    deadline: Deadline,
-) -> Result<(PathBuf, Commit), RepositoryError> {
+fn read_commit(root: &Path, oid: &str, deadline: Deadline) -> Result<Commit, RepositoryError> {
     if !matches!(oid.len(), 40 | 64) || !oid.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return Err(RepositoryError::new(
             ErrorKind::InvalidOid,
             "Choose a full commit ID from this repository's history.",
         ));
     }
-    let root = root(path, deadline)?;
     let verified = git::run(
-        &root,
+        root,
         &["rev-parse", "--verify", &format!("{oid}^{{commit}}")],
         deadline,
     )?;
@@ -635,105 +630,199 @@ fn open_commit(
         ));
     }
     let output = git::read(
-        &root,
+        root,
         &["log", "-1", COMMIT_FORMAT, "-z", oid, "--"],
         deadline,
     )?;
-    let commit = parse_commits(&output)?
+    parse_commits(&output)?
         .into_iter()
         .next()
-        .ok_or_else(git::malformed)?;
-    Ok((root, commit))
+        .ok_or_else(git::malformed)
 }
 
-fn diff_base(commit: &Commit) -> (DiffBase, &str) {
-    match commit.parents.first() {
-        Some(parent) => (DiffBase::FirstParent, parent),
-        None => (DiffBase::EmptyTree, "--root"),
+/// The two ends of a comparison, read and checked against the repository.
+enum Ends {
+    /// `base` is a commit ID or `--root`, which `diff-tree` reads as the empty
+    /// tree.
+    Trees {
+        base: (BaseDetail, String),
+        target: Commit,
+    },
+    Worktree {
+        base: Commit,
+        root: PathBuf,
+    },
+}
+
+fn ends(root: &Path, comparison: &Comparison, deadline: Deadline) -> Result<Ends, RepositoryError> {
+    match (&comparison.base, &comparison.target) {
+        (base, Target::Commit { oid }) => {
+            let target = read_commit(root, oid, deadline)?;
+            let base = match (base, target.parents.first()) {
+                (Base::FirstParent, Some(parent)) => (BaseDetail::FirstParent, parent.clone()),
+                (Base::FirstParent, None) => (BaseDetail::EmptyTree, "--root".into()),
+                (Base::Commit { oid }, _) => {
+                    let commit = read_commit(root, oid, deadline)?;
+                    let oid = commit.oid.clone();
+                    (BaseDetail::Commit { commit }, oid)
+                }
+            };
+            Ok(Ends::Trees { base, target })
+        }
+        (Base::Commit { oid }, Target::Worktree { root: worktree }) => Ok(Ends::Worktree {
+            base: read_commit(root, oid, deadline)?,
+            root: worktree_root(root, worktree, deadline)?,
+        }),
+        (Base::FirstParent, Target::Worktree { .. }) => Err(RepositoryError::new(
+            ErrorKind::InvalidOid,
+            "Choose a commit to compare the working copy with.",
+        )),
     }
 }
 
-pub fn commit_detail(path: &str, oid: &str) -> Result<CommitDetail, RepositoryError> {
-    commit_detail_within(path, oid, Deadline::of(LocalRead::CommitDetail))
+fn worktree_root(
+    root: &Path,
+    worktree: &str,
+    deadline: Deadline,
+) -> Result<PathBuf, RepositoryError> {
+    let missing = || {
+        RepositoryError::new(
+            ErrorKind::MissingPath,
+            "This worktree is no longer listed. Refresh the repository.",
+        )
+    };
+    let worktree = Path::new(worktree).canonicalize().map_err(|_| missing())?;
+    worktrees(root, deadline)?
+        .into_iter()
+        .any(|listed| Path::new(&listed.root) == worktree)
+        .then_some(worktree)
+        .ok_or_else(missing)
+}
+
+pub fn commit_detail(path: &str, comparison: &Comparison) -> Result<CommitDetail, RepositoryError> {
+    commit_detail_within(path, comparison, Deadline::of(LocalRead::CommitDetail))
 }
 
 pub(crate) fn commit_detail_within(
     path: &str,
-    oid: &str,
+    comparison: &Comparison,
     deadline: Deadline,
 ) -> Result<CommitDetail, RepositoryError> {
-    let (root, commit) = open_commit(path, oid, deadline)?;
-    let message = git::line(&git::read(
-        &root,
-        &["show", "--no-patch", "--format=%B", oid, "--"],
-        deadline,
-    )?);
-    let (diff_base, base) = diff_base(&commit);
-    let args = [
-        "diff-tree",
-        "--no-commit-id",
-        "--name-status",
-        "-r",
-        "-z",
-        "--no-renames",
-        "--no-ext-diff",
-        "--no-textconv",
-        base,
-        oid,
-        "--",
-    ];
-    let output = git::read(&root, &args, deadline)?;
-    let mut files = Vec::new();
-    if !output.is_empty() {
-        let fields: Vec<_> = output
-            .strip_suffix(&[0])
-            .unwrap_or(&output)
-            .split(|byte| *byte == 0)
-            .collect();
-        let mut records = fields.chunks_exact(2);
-        for row in records.by_ref() {
-            let [status, path] = row else {
-                return Err(git::malformed());
-            };
-            let status = match *status {
-                b"A" => ChangeStatus::Added,
-                b"D" => ChangeStatus::Deleted,
-                b"M" => ChangeStatus::Modified,
-                b"T" => ChangeStatus::TypeChanged,
-                _ => return Err(git::malformed()),
-            };
-            files.push(ChangedFile {
-                path: git::text(path),
-                status,
-            });
+    let root = root(path, deadline)?;
+    Ok(match ends(&root, comparison, deadline)? {
+        Ends::Trees {
+            base: (base, from),
+            target,
+        } => {
+            let message = git::line(&git::read(
+                &root,
+                &["show", "--no-patch", "--format=%B", &target.oid, "--"],
+                deadline,
+            )?);
+            let output = git::read(
+                &root,
+                &[
+                    "diff-tree",
+                    "--no-commit-id",
+                    "--name-status",
+                    "-r",
+                    "-z",
+                    "--no-renames",
+                    "--no-ext-diff",
+                    "--no-textconv",
+                    &from,
+                    &target.oid,
+                    "--",
+                ],
+                deadline,
+            )?;
+            CommitDetail {
+                base,
+                files: name_status(&output)?,
+                target: TargetDetail::Commit {
+                    commit: target,
+                    message,
+                },
+            }
         }
-        if !records.remainder().is_empty() {
-            return Err(git::malformed());
-        }
-    }
-    Ok(CommitDetail {
-        commit,
-        message,
-        files,
-        diff_base,
+        Ends::Worktree { base, root } => CommitDetail {
+            files: status::worktree_changes(&root, &base.oid, deadline)?,
+            target: TargetDetail::Worktree {
+                head: head(&root, deadline)?,
+                root: root.to_string_lossy().into_owned(),
+            },
+            base: BaseDetail::Commit { commit: base },
+        },
     })
 }
 
-pub fn file_patch(path: &str, oid: &str, file: &str) -> Result<FilePatch, RepositoryError> {
-    file_patch_within(path, oid, file, Deadline::of(LocalRead::FilePatch))
+/// Parses `--name-status -z` output. An unmerged path, which only a worktree
+/// has, counts as modified.
+pub(crate) fn name_status(output: &[u8]) -> Result<Vec<ChangedFile>, RepositoryError> {
+    let mut files = Vec::new();
+    if output.is_empty() {
+        return Ok(files);
+    }
+    let fields: Vec<_> = output
+        .strip_suffix(&[0])
+        .unwrap_or(output)
+        .split(|byte| *byte == 0)
+        .collect();
+    let mut records = fields.chunks_exact(2);
+    for row in records.by_ref() {
+        let [status, path] = row else {
+            return Err(git::malformed());
+        };
+        files.push(ChangedFile {
+            path: git::text(path),
+            status: change_status(status)?,
+        });
+    }
+    if !records.remainder().is_empty() {
+        return Err(git::malformed());
+    }
+    Ok(files)
+}
+
+pub(crate) fn change_status(status: &[u8]) -> Result<ChangeStatus, RepositoryError> {
+    Ok(match status {
+        b"A" => ChangeStatus::Added,
+        b"D" => ChangeStatus::Deleted,
+        b"M" | b"U" => ChangeStatus::Modified,
+        b"T" => ChangeStatus::TypeChanged,
+        _ => return Err(git::malformed()),
+    })
+}
+
+pub fn file_patch(
+    path: &str,
+    comparison: &Comparison,
+    file: &str,
+) -> Result<FilePatch, RepositoryError> {
+    file_patch_within(path, comparison, file, Deadline::of(LocalRead::FilePatch))
 }
 
 pub(crate) fn file_patch_within(
     path: &str,
-    oid: &str,
+    comparison: &Comparison,
     file: &str,
     deadline: Deadline,
 ) -> Result<FilePatch, RepositoryError> {
-    let (root, commit) = open_commit(path, oid, deadline)?;
+    let root = root(path, deadline)?;
+    let ends = ends(&root, comparison, deadline)?;
     if file.is_empty() {
-        return Err(unchanged_path());
+        return Err(unchanged_path(comparison));
     }
-    let (_, base) = diff_base(&commit);
+    let (from, target) = match ends {
+        Ends::Trees {
+            base: (_, from),
+            target,
+        } => (from, target.oid),
+        Ends::Worktree { base, root } => {
+            return status::worktree_file_patch(&root, &base.oid, file, deadline)?
+                .ok_or_else(|| unchanged_path(comparison));
+        }
+    };
     let args = |format| {
         [
             "--literal-pathspecs",
@@ -745,8 +834,8 @@ pub(crate) fn file_patch_within(
             "--no-renames",
             "--no-ext-diff",
             "--no-textconv",
-            base,
-            oid,
+            &from,
+            &target,
             "--",
             file,
         ]
@@ -765,12 +854,9 @@ pub(crate) fn file_patch_within(
         })
         .ok_or_else(|| {
             if file.contains(char::REPLACEMENT_CHARACTER) {
-                RepositoryError::new(
-                    ErrorKind::UnsupportedPath,
-                    "L1 Git cannot open diffs for file names that are not valid UTF-8.",
-                )
+                non_utf8_path()
             } else {
-                unchanged_path()
+                unchanged_path(comparison)
             }
         })?;
     if added == b"-" && deleted == b"-" {
@@ -874,9 +960,20 @@ pub(crate) fn line_stats_within(
         .collect())
 }
 
-fn unchanged_path() -> RepositoryError {
+fn unchanged_path(comparison: &Comparison) -> RepositoryError {
     RepositoryError::new(
         ErrorKind::UnchangedPath,
-        "This file did not change in the selected commit. Choose one of its changed paths.",
+        if comparison.base == Base::FirstParent {
+            "This file did not change in the selected commit. Choose one of its changed paths."
+        } else {
+            "This file is the same at both ends of the comparison. Choose one of its changed paths."
+        },
+    )
+}
+
+pub(crate) fn non_utf8_path() -> RepositoryError {
+    RepositoryError::new(
+        ErrorKind::UnsupportedPath,
+        "L1 Git cannot open diffs for file names that are not valid UTF-8.",
     )
 }
