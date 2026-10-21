@@ -1,10 +1,8 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useState } from "react";
 import type {
   KeyboardEvent as ReactKeyboardEvent,
   MouseEvent as ReactMouseEvent,
-  ReactNode,
 } from "react";
-import { createPortal } from "react-dom";
 import {
   ChevronDown,
   ChevronRight,
@@ -17,6 +15,7 @@ import type { RecentRepository } from "../domain/recents";
 import type { Branch, FullRef, RepositoryRoot } from "../domain/repository";
 import type { RootSync } from "../overview";
 import type { RefsState } from "../useRepositoryRefs";
+import { ContextMenu } from "./ContextMenu";
 import { RepositoryBranches } from "./RepositoryBranches";
 import { SyncCounts } from "./SyncCounts";
 
@@ -202,12 +201,11 @@ export function RepositoryTree({
           x={menu.x}
           y={menu.y}
           label={`${menu.entry.name} actions`}
-          onClose={(refocus) => {
+          onClose={() => {
             setMenu(null);
-            if (refocus)
-              menu.trigger
-                .querySelector<HTMLElement>(".repository-open")
-                ?.focus();
+            menu.trigger
+              .querySelector<HTMLElement>(".repository-open")
+              ?.focus({ preventScroll: true });
           }}
         >
           <button
@@ -224,74 +222,5 @@ export function RepositoryTree({
         </ContextMenu>
       )}
     </>
-  );
-}
-
-function ContextMenu({
-  x,
-  y,
-  label,
-  onClose,
-  children,
-}: {
-  x: number;
-  y: number;
-  label: string;
-  onClose: (refocus: boolean) => void;
-  children: ReactNode;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [position, setPosition] = useState({ top: y, left: x });
-  const onCloseRef = useRef(onClose);
-  useEffect(() => {
-    onCloseRef.current = onClose;
-  });
-  useLayoutEffect(() => {
-    const menu = ref.current;
-    if (!menu) return;
-    setPosition({
-      top: Math.max(4, Math.min(y, window.innerHeight - menu.offsetHeight - 4)),
-      left: Math.max(4, Math.min(x, window.innerWidth - menu.offsetWidth - 4)),
-    });
-    menu.querySelector<HTMLElement>("[role=menuitem]")?.focus();
-  }, [x, y]);
-  useEffect(() => {
-    const close = () => onCloseRef.current(false);
-    const outside = (event: PointerEvent) => {
-      if (!ref.current?.contains(event.target as Node)) close();
-    };
-    // Capture so the app's own Escape handling never sees this keypress.
-    const key = (event: KeyboardEvent) => {
-      if (event.key === "Escape" || event.key === "Tab") {
-        event.preventDefault();
-        event.stopPropagation();
-        onCloseRef.current(true);
-      }
-    };
-    window.addEventListener("pointerdown", outside, true);
-    window.addEventListener("keydown", key, true);
-    window.addEventListener("scroll", close, true);
-    window.addEventListener("resize", close);
-    window.addEventListener("blur", close);
-    return () => {
-      window.removeEventListener("pointerdown", outside, true);
-      window.removeEventListener("keydown", key, true);
-      window.removeEventListener("scroll", close, true);
-      window.removeEventListener("resize", close);
-      window.removeEventListener("blur", close);
-    };
-  }, []);
-  return createPortal(
-    <div
-      ref={ref}
-      className="context-menu"
-      role="menu"
-      aria-label={label}
-      style={position}
-      onContextMenu={(event) => event.preventDefault()}
-    >
-      {children}
-    </div>,
-    document.body,
   );
 }

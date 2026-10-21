@@ -319,6 +319,12 @@ describe("history keys", () => {
     expect(press("Escape")).toBe("cancel");
   });
 
+  it("opens the column menu with Shift+F10 or the context menu key", () => {
+    expect(press("F10", { shiftKey: true })).toBe("columns");
+    expect(press("ContextMenu")).toBe("columns");
+    expect(press("F10")).toBeNull();
+  });
+
   it("ignores other keys and combinations", () => {
     expect(press("j", { metaKey: true })).toBeNull();
     expect(press("Enter", { shiftKey: true })).toBeNull();
