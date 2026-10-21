@@ -1,8 +1,9 @@
 use crate::{
     ChangeStatus, Conflict, ErrorKind, FilePatch, MoveSide, Moved, PATCH_LIMIT, RepositoryError,
     Side, Sides, StatusEntry, SubmoduleState, WorktreePatch, WorktreeStatus, git,
+    git::quoted,
     repository::{self, text_patch},
-    untracked::{quoted, untracked},
+    untracked::untracked,
 };
 use std::{
     fs,
@@ -223,7 +224,9 @@ pub fn worktree_patch(
                 Side::Unstaged => tracked(&root, &["diff-files", detect], &[original, file], file)?,
             })
         }
-        (StatusEntry::Untracked { .. }, _) => untracked(&root, file),
+        (StatusEntry::Untracked { .. }, _) => {
+            untracked(&root, file)?.ok_or_else(|| no_changes(file, side))
+        }
     }
 }
 
@@ -233,6 +236,11 @@ fn check(file: &str) -> Result<(), RepositoryError> {
         || !components
             .iter()
             .all(|component| matches!(component, Component::Normal(_)))
+        || file
+            .strip_suffix('/')
+            .unwrap_or(file)
+            .split('/')
+            .any(|name| name.is_empty() || name == ".")
     {
         return Err(RepositoryError::new(
             ErrorKind::UnsupportedPath,
@@ -276,7 +284,7 @@ fn lists(entry: &StatusEntry, file: &str, side: Side) -> bool {
     }
 }
 
-pub(crate) fn no_changes(file: &str, side: Side) -> RepositoryError {
+fn no_changes(file: &str, side: Side) -> RepositoryError {
     if file.contains(char::REPLACEMENT_CHARACTER) {
         return RepositoryError::new(
             ErrorKind::UnsupportedPath,

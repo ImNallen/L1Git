@@ -555,10 +555,18 @@ describe("real Rust transport contract", () => {
         "",
       ]),
     );
-    expect(await patch("draft.up", "unstaged")).toEqual({
-      kind: "filtered",
-      filter: "upper",
-    });
+    expect(await patch("draft.up", "unstaged")).toEqual(
+      text([
+        "diff --git a/draft.up b/draft.up",
+        "new file mode 100644",
+        "index 0000000000000000000000000000000000000000..bd531ae71de0d872de62ebbbffc968bb4f4c8c47",
+        "--- /dev/null",
+        "+++ b/draft.up",
+        "@@ -0,0 +1 @@",
+        "+LOWER",
+        "",
+      ]),
+    );
     const conflicted = {
       kind: "conflicted",
       conflict: "bothModified",
@@ -598,6 +606,66 @@ describe("real Rust transport contract", () => {
     ).toEqual({
       kind: "unchangedPath",
       message: "This file has no staged changes. Refresh the worktree status.",
+    });
+  });
+
+  it("sends submodule, binary, and too-large patches and unreadable files across the bridge", async () => {
+    const kinds = join(fixture.root, "worktree kinds");
+    const sub = join(kinds, "sub");
+    mkdirSync(sub, { recursive: true });
+    const env = {
+      ...Object.fromEntries(
+        Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")),
+      ),
+      GIT_AUTHOR_NAME: "Ada",
+      GIT_AUTHOR_EMAIL: "ada@example.test",
+      GIT_COMMITTER_NAME: "Ada",
+      GIT_COMMITTER_EMAIL: "ada@example.test",
+    };
+    const git = (cwd: string, ...args: string[]) =>
+      execFileSync("git", ["-C", cwd, ...args], {
+        encoding: "utf8",
+        env,
+        stdio: ["ignore", "pipe", "ignore"],
+      }).trim();
+    for (const repository of [kinds, sub]) {
+      git(repository, "init", "--initial-branch=main");
+      git(repository, "commit", "--allow-empty", "-m", "initial");
+    }
+    git(kinds, "add", "sub");
+    git(kinds, "commit", "-m", "submodule");
+    git(sub, "commit", "--allow-empty", "-m", "moved");
+    writeFileSync(join(kinds, "image.bin"), "a\0b\n");
+    writeFileSync(join(kinds, "large.txt"), "x".repeat(1_500_000));
+    writeFileSync(join(kinds, "locked.txt"), "x\n");
+    chmodSync(join(kinds, "locked.txt"), 0o000);
+    const root = realpathSync(kinds);
+    const request = async (file: string) =>
+      (
+        await post({ op: "worktreePatch", path: root, file, side: "unstaged" })
+      ).json();
+
+    expect(worktreePatchEnvelope.parse(await request("sub")).data).toEqual({
+      kind: "submodule",
+      submodule: { commitChanged: true, modified: false, untracked: false },
+    });
+    expect(
+      worktreePatchEnvelope.parse(await request("image.bin")).data,
+    ).toEqual({ kind: "diff", diff: { kind: "binary" } });
+    expect(
+      worktreePatchEnvelope.parse(await request("large.txt")).data,
+    ).toEqual({ kind: "diff", diff: { kind: "tooLarge", bytes: 1_500_000 } });
+    const unreadable = z
+      .strictObject({
+        ok: z.literal(false),
+        error: repositoryErrorSchema.strict(),
+      })
+      .parse(await request("locked.txt")).error;
+    chmodSync(join(kinds, "locked.txt"), 0o644);
+    expect(unreadable).toEqual({
+      kind: "unreadablePath",
+      message:
+        "L1 Git could not read this file (Permission denied (os error 13)). Check its permissions, then refresh.",
     });
   });
 

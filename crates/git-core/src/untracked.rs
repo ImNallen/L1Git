@@ -1,6 +1,5 @@
 use crate::{
-    ErrorKind, FilePatch, PATCH_LIMIT, RepositoryError, Side, WorktreePatch, git,
-    repository::text_patch, status::no_changes,
+    ErrorKind, FilePatch, PATCH_LIMIT, RepositoryError, WorktreePatch, git, repository::text_patch,
 };
 use std::{
     fs,
@@ -8,21 +7,21 @@ use std::{
     path::Path,
 };
 
-pub(crate) fn untracked(root: &Path, file: &str) -> Result<WorktreePatch, RepositoryError> {
-    let found =
-        open_without_following_links(root, file).map_err(|error| unreadable(file, error))?;
+/// Reads without following links first, so Git's diff can be checked against worktree bytes.
+pub(crate) fn untracked(root: &Path, file: &str) -> Result<Option<WorktreePatch>, RepositoryError> {
+    let found = match open_without_following_links(root, file) {
+        Ok(found) => found,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(unreadable(error)),
+    };
     let diff = match found {
         Found::File {
             file: handle,
             executable,
-        } => return regular(root, file, handle, executable),
+        } => regular(root, file, handle, executable)?,
         Found::Link(target) => {
-            let oid = git::line(&git::read_with_input(
-                root,
-                &["hash-object", "--no-filters", "--stdin"],
-                target.clone(),
-            )?);
-            text_patch(&new_file_patch(file, "120000", &oid, &target))
+            let oid = hash(root, &["--no-filters"], target.clone())?;
+            text_patch(&link_patch(file, &oid, &target))
         }
         Found::Directory => {
             return Err(RepositoryError::new(
@@ -37,361 +36,185 @@ pub(crate) fn untracked(root: &Path, file: &str) -> Result<WorktreePatch, Reposi
             ));
         }
     };
-    Ok(WorktreePatch::Diff { diff })
+    Ok(Some(WorktreePatch::Diff { diff }))
 }
 
-fn unreadable(file: &str, error: io::Error) -> RepositoryError {
-    match error.kind() {
-        io::ErrorKind::NotFound => no_changes(file, Side::Unstaged),
-        _ => RepositoryError::new(
-            ErrorKind::UnreadablePath,
-            format!(
-                "L1 Git could not read this file ({error}). Check its permissions, then refresh."
-            ),
-        ),
-    }
+fn unreadable(error: io::Error) -> RepositoryError {
+    RepositoryError::new(
+        ErrorKind::UnreadablePath,
+        format!("L1 Git could not read this file ({error}). Check its permissions, then refresh."),
+    )
 }
 
-/// Git calls content binary when its first 8000 bytes contain a NUL.
-const BINARY_PROBE: usize = 8000;
+fn changed() -> RepositoryError {
+    RepositoryError::new(
+        ErrorKind::UnreadablePath,
+        "This file changed while L1 Git was reading it. Refresh the worktree status.",
+    )
+}
 
+/// Git opens the path again for the blob id and again for the shown text, so
+/// both are checked against the bytes read here.
 fn regular(
     root: &Path,
     file: &str,
     mut handle: fs::File,
     executable: bool,
-) -> Result<WorktreePatch, RepositoryError> {
-    let rules = Rules::read(root, file)?;
-    if let Some(filter) = rules.filter {
-        return Ok(WorktreePatch::Filtered { filter });
+) -> Result<FilePatch, RepositoryError> {
+    let size = handle.metadata().map_err(unreadable)?.len();
+    if size > PATCH_LIMIT as u64 {
+        return Ok(FilePatch::TooLarge { bytes: size });
     }
-    let binary = WorktreePatch::Diff {
-        diff: FilePatch::Binary,
-    };
-    let size = handle
-        .metadata()
-        .map_err(|error| unreadable(file, error))?
-        .len();
-    if rules.binary || size > rules.big_file_threshold {
-        return Ok(binary);
-    }
-    let mut kept = Vec::new();
+    let mut read_without_links = Vec::new();
     (&mut handle)
         .take(PATCH_LIMIT as u64 + 1)
-        .read_to_end(&mut kept)
-        .map_err(|error| unreadable(file, error))?;
-    if kept[..kept.len().min(BINARY_PROBE)].contains(&0) {
-        return Ok(binary);
-    }
-    if kept.len() > PATCH_LIMIT || size > PATCH_LIMIT as u64 {
-        return Ok(WorktreePatch::Diff {
-            diff: FilePatch::TooLarge {
-                bytes: size.max(kept.len() as u64),
-            },
+        .read_to_end(&mut read_without_links)
+        .map_err(unreadable)?;
+    if read_without_links.len() > PATCH_LIMIT {
+        return Ok(FilePatch::TooLarge {
+            bytes: read_without_links.len() as u64,
         });
     }
-    let oid = git::line(&git::read_with_input(
+    // Git reads standard input for a bare `-`.
+    let given = if file == "-" { "./-" } else { file };
+    // A file swapped for a FIFO after the read above blocks this diff until
+    // local Git reads get a deadline.
+    let run = git::run_capped(
         root,
         &[
             "-c",
             "core.safecrlf=false",
-            "hash-object",
-            "--stdin",
-            &format!("--path={file}"),
+            "diff",
+            "--no-index",
+            "--no-color",
+            "--src-prefix=a/",
+            "--dst-prefix=b/",
+            "--full-index",
+            "--no-textconv",
+            "--no-ext-diff",
+            "--",
+            "/dev/null",
+            given,
         ],
-        kept.clone(),
-    )?);
-    let mode = if executable && rules.file_mode {
+        PATCH_LIMIT,
+    )?;
+    if !matches!(run.code, Some(0 | 1)) {
+        return Err(if run.stderr.is_empty() {
+            git::read_failed()
+        } else {
+            RepositoryError::new(ErrorKind::GitFailed, run.stderr)
+        });
+    }
+    let patch = match run.stdout {
+        git::Capped::Within(patch) => patch,
+        git::Capped::Over(bytes) => return Ok(FilePatch::TooLarge { bytes }),
+    };
+    let oid = hash(root, &[&format!("--path={file}")], read_without_links)?;
+    let read_mode = if executable { "100755" } else { "100644" };
+    let body = patch
+        .strip_prefix(header(given, read_mode, &oid).as_bytes())
+        .ok_or_else(changed)?;
+    let binary = format!(
+        "Binary files /dev/null and {} differ\n",
+        git::quoted("b/", given)
+    );
+    if body == binary.as_bytes() {
+        return Ok(FilePatch::Binary);
+    }
+    let hunk = match body {
+        [] => body,
+        _ => body
+            .strip_prefix(lead(given).as_bytes())
+            .ok_or_else(changed)?,
+    };
+    let shown = added(hunk).ok_or_else(changed)?;
+    if hash(root, &["--no-filters"], shown)? != oid {
+        return Err(changed());
+    }
+    let mode = if executable && file_mode(root)? {
         "100755"
     } else {
         "100644"
     };
-    let patch = new_file_patch(file, mode, &oid, &rules.eol.to_git(&kept));
-    Ok(WorktreePatch::Diff {
-        diff: if patch.len() > PATCH_LIMIT {
-            FilePatch::TooLarge {
-                bytes: patch.len() as u64,
-            }
-        } else {
-            text_patch(&patch)
-        },
-    })
-}
-
-struct Rules {
-    filter: Option<String>,
-    binary: bool,
-    eol: Eol,
-    big_file_threshold: u64,
-    file_mode: bool,
-}
-
-#[derive(PartialEq)]
-enum Attribute {
-    Set,
-    Unset,
-    Unspecified,
-    Value(String),
-}
-
-impl Rules {
-    fn read(root: &Path, file: &str) -> Result<Self, RepositoryError> {
-        let output = git::read(
-            root,
-            &[
-                "check-attr",
-                "-z",
-                "diff",
-                "text",
-                "eol",
-                "crlf",
-                "filter",
-                "--",
-                file,
-            ],
-        )?;
-        let fields: Vec<&[u8]> = output.split(|byte| *byte == 0).collect();
-        let attribute = |name: &str| {
-            fields
-                .chunks_exact(3)
-                .find(|record| record[1] == name.as_bytes())
-                .map_or(Attribute::Unspecified, |record| match record[2] {
-                    b"set" => Attribute::Set,
-                    b"unset" => Attribute::Unset,
-                    b"unspecified" => Attribute::Unspecified,
-                    value => Attribute::Value(git::text(value)),
-                })
-        };
-        let config = config(root)?;
-        let setting = |key: &str| {
-            config
-                .iter()
-                .rev()
-                .find(|(name, _)| name == key)
-                .map(|(_, value)| value)
-        };
-        let drivers_with_clean: Vec<&str> = config
-            .iter()
-            .filter_map(|(name, _)| {
-                let rest = name.strip_prefix("filter.")?;
-                rest.strip_suffix(".clean")
-                    .or_else(|| rest.strip_suffix(".process"))
-            })
-            .collect();
-        let auto_crlf = match setting("core.autocrlf") {
-            Some(Some(value)) if value.eq_ignore_ascii_case("input") => AutoCrlf::Input,
-            Some(value) if boolean(value.as_deref()) == Some(true) => AutoCrlf::True,
-            _ => AutoCrlf::False,
-        };
-        Ok(Self {
-            filter: match attribute("filter") {
-                Attribute::Value(driver) if drivers_with_clean.contains(&driver.as_str()) => {
-                    Some(driver)
-                }
-                _ => None,
-            },
-            binary: attribute("diff") == Attribute::Unset,
-            eol: Eol::decide(
-                &attribute("text"),
-                &attribute("crlf"),
-                &attribute("eol"),
-                auto_crlf,
-            ),
-            big_file_threshold: setting("core.bigfilethreshold")
-                .and_then(|value| size(value.as_deref()?))
-                .unwrap_or(512 * 1024 * 1024),
-            file_mode: setting("core.filemode")
-                .and_then(|value| boolean(value.as_deref()))
-                .unwrap_or(true),
-        })
+    let mut patch = header(file, mode, &oid).into_bytes();
+    if !hunk.is_empty() {
+        patch.extend_from_slice(lead(file).as_bytes());
+        patch.extend_from_slice(hunk);
     }
+    Ok(text_patch(&patch))
 }
 
-type Setting = (String, Option<String>);
+fn hash(root: &Path, options: &[&str], content: Vec<u8>) -> Result<String, RepositoryError> {
+    let mut args = vec!["-c", "core.safecrlf=false", "hash-object", "--stdin"];
+    args.extend(options);
+    Ok(git::line(&git::read_with_input(root, &args, content)?))
+}
 
-fn config(root: &Path) -> Result<Vec<Setting>, RepositoryError> {
-    let output = git::run(
-        root,
-        &[
-            "config",
-            "-z",
-            "--get-regexp",
-            r"^(core\.(autocrlf|filemode|bigfilethreshold)|filter\..*\.(clean|process))$",
-        ],
-    )?;
+/// `git diff --no-index` prints the executable bit even where `core.fileMode`
+/// tells `git add` to ignore it.
+fn file_mode(root: &Path) -> Result<bool, RepositoryError> {
+    let output = git::run(root, &["config", "--type=bool", "--get", "core.fileMode"])?;
     match output.status.code() {
-        Some(0) => {}
-        Some(1) => return Ok(Vec::new()),
-        _ => return Err(git::malformed()),
-    }
-    Ok(output
-        .stdout
-        .split(|byte| *byte == 0)
-        .filter(|record| !record.is_empty())
-        .map(
-            |record| match record.iter().position(|byte| *byte == b'\n') {
-                Some(at) => (git::text(&record[..at]), Some(git::text(&record[at + 1..]))),
-                None => (git::text(record), None),
-            },
-        )
-        .collect())
-}
-
-fn boolean(value: Option<&str>) -> Option<bool> {
-    let Some(value) = value else {
-        return Some(true);
-    };
-    match value.to_ascii_lowercase().as_str() {
-        "true" | "yes" | "on" => Some(true),
-        "false" | "no" | "off" | "" => Some(false),
-        number => number.parse::<i64>().ok().map(|number| number != 0),
+        Some(0) => Ok(output.stdout != b"false\n"),
+        Some(1) => Ok(true),
+        _ => Err(git::malformed()),
     }
 }
 
-fn size(value: &str) -> Option<u64> {
-    let value = value.trim();
-    let (number, unit) = match value.char_indices().last()? {
-        (at, 'k' | 'K') => (&value[..at], 1 << 10),
-        (at, 'm' | 'M') => (&value[..at], 1 << 20),
-        (at, 'g' | 'G') => (&value[..at], 1 << 30),
-        _ => (value, 1),
-    };
-    number.parse::<u64>().ok()?.checked_mul(unit)
-}
+const NO_NEWLINE: &[u8] = b"\\ No newline at end of file\n";
 
-#[derive(Clone, Copy)]
-enum AutoCrlf {
-    False,
-    True,
-    Input,
-}
-
-#[derive(Debug, PartialEq)]
-enum Eol {
-    Keep,
-    Text,
-    Auto,
-}
-
-impl Eol {
-    /// Mirrors `convert_attrs` in Git's `convert.c`. Only the direction toward
-    /// the repository matters here, and it turns CRLF into LF for every text
-    /// action.
-    fn decide(text: &Attribute, crlf: &Attribute, eol: &Attribute, auto_crlf: AutoCrlf) -> Self {
-        let from = |attribute: &Attribute| match attribute {
-            Attribute::Set => Some(Self::Text),
-            Attribute::Unset => Some(Self::Keep),
-            Attribute::Value(value) if value == "input" => Some(Self::Text),
-            Attribute::Value(value) if value == "auto" => Some(Self::Auto),
-            _ => None,
-        };
-        let action = from(text).or_else(|| from(crlf));
-        let eol = matches!(eol, Attribute::Value(value) if value == "lf" || value == "crlf");
-        match (action, eol) {
-            (Some(Self::Keep), _) => Self::Keep,
-            (Some(Self::Auto), _) => Self::Auto,
-            (_, true) | (Some(Self::Text), false) => Self::Text,
-            (None, false) => match auto_crlf {
-                AutoCrlf::False => Self::Keep,
-                AutoCrlf::True | AutoCrlf::Input => Self::Auto,
-            },
-        }
+fn added(hunk: &[u8]) -> Option<Vec<u8>> {
+    let mut lines = hunk.split_inclusive(|byte| *byte == b'\n');
+    let mut content = Vec::new();
+    if lines
+        .next()
+        .is_some_and(|range| !range.starts_with(b"@@ -0,0 +1"))
+    {
+        return None;
     }
-
-    fn to_git(&self, content: &[u8]) -> Vec<u8> {
-        if *self == Self::Keep || (*self == Self::Auto && looks_binary(content)) {
-            return content.to_vec();
-        }
-        let mut converted = Vec::with_capacity(content.len());
-        for (at, byte) in content.iter().enumerate() {
-            if !(*byte == b'\r' && content.get(at + 1) == Some(&b'\n')) {
-                converted.push(*byte);
+    for line in lines {
+        match line {
+            [b'+', rest @ ..] => content.extend_from_slice(rest),
+            _ if line == NO_NEWLINE && content.ends_with(b"\n") => {
+                content.pop();
             }
+            _ => return None,
         }
-        converted
     }
+    Some(content)
 }
 
-/// Mirrors `gather_stats` and `convert_is_binary` in Git's `convert.c`.
-fn looks_binary(content: &[u8]) -> bool {
-    let (mut lone_cr, mut nul, mut printable, mut nonprintable) = (0u64, 0u64, 0u64, 0u64);
-    let mut at = 0;
-    while at < content.len() {
-        match content[at] {
-            b'\r' if content.get(at + 1) == Some(&b'\n') => at += 1,
-            b'\r' => lone_cr += 1,
-            b'\n' => {}
-            127 => nonprintable += 1,
-            b'\x08' | b'\t' | b'\x1b' | b'\x0c' => printable += 1,
-            0 => {
-                nul += 1;
-                nonprintable += 1;
-            }
-            byte if byte < 32 => nonprintable += 1,
-            _ => printable += 1,
-        }
-        at += 1;
-    }
-    if content.last() == Some(&0x1a) {
-        nonprintable = nonprintable.saturating_sub(1);
-    }
-    lone_cr > 0 || nul > 0 || (printable >> 7) < nonprintable
-}
-
-const NO_NEWLINE: &str = "\n\\ No newline at end of file\n";
-
-fn new_file_patch(file: &str, mode: &str, oid: &str, content: &[u8]) -> Vec<u8> {
-    let (old, new) = (quoted("a/", file), quoted("b/", file));
-    let mut patch = format!(
-        "diff --git {old} {new}\nnew file mode {mode}\nindex {}..{oid}\n",
+fn header(file: &str, mode: &str, oid: &str) -> String {
+    format!(
+        "diff --git {} {}\nnew file mode {mode}\nindex {}..{oid}\n",
+        git::quoted("a/", file),
+        git::quoted("b/", file),
         "0".repeat(oid.len())
     )
-    .into_bytes();
-    if content.is_empty() {
-        return patch;
-    }
+}
+
+fn lead(file: &str) -> String {
+    let new = git::quoted("b/", file);
     let tab = if new.contains(' ') { "\t" } else { "" };
-    let count = match content.split_inclusive(|byte| *byte == b'\n').count() {
+    format!("--- /dev/null\n+++ {new}{tab}\n")
+}
+
+fn link_patch(file: &str, oid: &str, target: &[u8]) -> Vec<u8> {
+    let mut patch = (header(file, "120000", oid) + &lead(file)).into_bytes();
+    let count = match target.split_inclusive(|byte| *byte == b'\n').count() {
         1 => String::new(),
         lines => format!(",{lines}"),
     };
-    patch.extend_from_slice(
-        format!("--- /dev/null\n+++ {new}{tab}\n@@ -0,0 +1{count} @@\n").as_bytes(),
-    );
-    for line in content.split_inclusive(|byte| *byte == b'\n') {
+    patch.extend_from_slice(format!("@@ -0,0 +1{count} @@\n").as_bytes());
+    for line in target.split_inclusive(|byte| *byte == b'\n') {
         patch.push(b'+');
         patch.extend_from_slice(line);
     }
-    if !content.ends_with(b"\n") {
-        patch.extend_from_slice(NO_NEWLINE.as_bytes());
+    if !target.ends_with(b"\n") {
+        patch.push(b'\n');
+        patch.extend_from_slice(NO_NEWLINE);
     }
     patch
-}
-
-/// Quotes a path the way Git's diff headers do with `core.quotePath=false`.
-pub(crate) fn quoted(prefix: &str, path: &str) -> String {
-    let special = |c: char| c < ' ' || c == '"' || c == '\\' || c == '\x7f';
-    if !path.contains(special) {
-        return format!("{prefix}{path}");
-    }
-    let mut quoted = format!("\"{prefix}");
-    for c in path.chars() {
-        match c {
-            '\x07' => quoted.push_str("\\a"),
-            '\x08' => quoted.push_str("\\b"),
-            '\t' => quoted.push_str("\\t"),
-            '\n' => quoted.push_str("\\n"),
-            '\x0b' => quoted.push_str("\\v"),
-            '\x0c' => quoted.push_str("\\f"),
-            '\r' => quoted.push_str("\\r"),
-            '"' => quoted.push_str("\\\""),
-            '\\' => quoted.push_str("\\\\"),
-            c if special(c) => quoted.push_str(&format!("\\{:03o}", c as u32)),
-            c => quoted.push(c),
-        }
-    }
-    quoted.push('"');
-    quoted
 }
 
 enum Found {
@@ -511,36 +334,6 @@ fn open_without_following_links(root: &Path, file: &str) -> io::Result<Found> {
     } else {
         Found::Other
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{Attribute, AutoCrlf, Eol, looks_binary};
-
-    #[test]
-    fn line_endings_follow_git_convert_rules() {
-        let value = |value: &str| Attribute::Value(value.into());
-        let (none, set, unset) = (Attribute::Unspecified, Attribute::Set, Attribute::Unset);
-        let (lf, crlf, auto, input) = (value("lf"), value("crlf"), value("auto"), value("input"));
-        let cases = [
-            (&none, &none, &none, AutoCrlf::False, Eol::Keep),
-            (&none, &none, &none, AutoCrlf::Input, Eol::Auto),
-            (&none, &none, &none, AutoCrlf::True, Eol::Auto),
-            (&set, &none, &none, AutoCrlf::False, Eol::Text),
-            (&unset, &none, &lf, AutoCrlf::True, Eol::Keep),
-            (&none, &none, &lf, AutoCrlf::False, Eol::Text),
-            (&auto, &none, &crlf, AutoCrlf::False, Eol::Auto),
-            (&none, &input, &none, AutoCrlf::False, Eol::Text),
-        ];
-        for (text, crlf, eol, auto_crlf, expected) in cases {
-            assert_eq!(Eol::decide(text, crlf, eol, auto_crlf), expected);
-        }
-        assert_eq!(Eol::Text.to_git(b"a\r\nb\rc\r"), b"a\nb\rc\r");
-        assert_eq!(Eol::Auto.to_git(b"a\r\nb\r\n"), b"a\nb\n");
-        assert_eq!(Eol::Auto.to_git(b"a\r\nb\rc"), b"a\r\nb\rc");
-        assert!(looks_binary(b"a\0b"));
-        assert!(!looks_binary(b"plain\r\ntext\n\x1a"));
-    }
 }
 
 #[cfg(all(test, unix))]

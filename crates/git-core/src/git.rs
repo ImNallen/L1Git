@@ -68,7 +68,7 @@ pub(crate) fn run(path: &Path, args: &[&str]) -> Result<Output, RepositoryError>
     Ok(output)
 }
 
-fn read_failed() -> RepositoryError {
+pub(crate) fn read_failed() -> RepositoryError {
     RepositoryError::new(
         ErrorKind::GitFailed,
         "Git could not read this repository. Check its permissions and missing objects. For a partial clone, fetch the required objects with Git, then refresh.",
@@ -110,31 +110,59 @@ pub(crate) enum Capped {
     Over(u64),
 }
 
-pub(crate) fn read_capped(
+pub(crate) struct CappedRun {
+    pub(crate) code: Option<i32>,
+    pub(crate) stdout: Capped,
+    pub(crate) stderr: String,
+}
+
+pub(crate) fn run_capped(
     path: &Path,
     args: &[&str],
     cap: usize,
-) -> Result<Capped, RepositoryError> {
+) -> Result<CappedRun, RepositoryError> {
     let mut child = command(path, args)
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()
         .map_err(spawn_error)?;
     let mut stdout = child.stdout.take().ok_or_else(read_failed)?;
+    let mut stderr = child.stderr.take().ok_or_else(read_failed)?;
+    let errors = thread::spawn(move || {
+        let mut kept = Vec::new();
+        let _ = (&mut stderr).take(STDERR_CAP).read_to_end(&mut kept);
+        let _ = io::copy(&mut stderr, &mut io::sink());
+        kept
+    });
     let mut kept = Vec::new();
     (&mut stdout)
         .take(cap as u64 + 1)
         .read_to_end(&mut kept)
         .map_err(|_| read_failed())?;
     let rest = io::copy(&mut stdout, &mut io::sink()).map_err(|_| read_failed())?;
-    if !child.wait().map_err(|_| read_failed())?.success() {
+    let status = child.wait().map_err(|_| read_failed())?;
+    let stderr = errors.join().map_err(|_| read_failed())?;
+    Ok(CappedRun {
+        code: status.code(),
+        stdout: if kept.len() <= cap {
+            Capped::Within(kept)
+        } else {
+            Capped::Over(kept.len() as u64 + rest)
+        },
+        stderr: text(&stderr).trim_end().to_owned(),
+    })
+}
+
+pub(crate) fn read_capped(
+    path: &Path,
+    args: &[&str],
+    cap: usize,
+) -> Result<Capped, RepositoryError> {
+    let run = run_capped(path, args, cap)?;
+    if run.code != Some(0) {
         return Err(read_failed());
     }
-    Ok(if kept.len() <= cap {
-        Capped::Within(kept)
-    } else {
-        Capped::Over(kept.len() as u64 + rest)
-    })
+    Ok(run.stdout)
 }
 
 pub(crate) fn text(bytes: &[u8]) -> String {
@@ -143,6 +171,32 @@ pub(crate) fn text(bytes: &[u8]) -> String {
 
 pub(crate) fn line(bytes: &[u8]) -> String {
     text(bytes.strip_suffix(b"\n").unwrap_or(bytes))
+}
+
+/// Quotes a path the way Git's diff headers do with `core.quotePath=false`.
+pub(crate) fn quoted(prefix: &str, path: &str) -> String {
+    let special = |c: char| c < ' ' || c == '"' || c == '\\' || c == '\x7f';
+    if !path.contains(special) {
+        return format!("{prefix}{path}");
+    }
+    let mut quoted = format!("\"{prefix}");
+    for c in path.chars() {
+        match c {
+            '\x07' => quoted.push_str("\\a"),
+            '\x08' => quoted.push_str("\\b"),
+            '\t' => quoted.push_str("\\t"),
+            '\n' => quoted.push_str("\\n"),
+            '\x0b' => quoted.push_str("\\v"),
+            '\x0c' => quoted.push_str("\\f"),
+            '\r' => quoted.push_str("\\r"),
+            '"' => quoted.push_str("\\\""),
+            '\\' => quoted.push_str("\\\\"),
+            c if special(c) => quoted.push_str(&format!("\\{:03o}", c as u32)),
+            c => quoted.push(c),
+        }
+    }
+    quoted.push('"');
+    quoted
 }
 
 pub(crate) fn malformed() -> RepositoryError {

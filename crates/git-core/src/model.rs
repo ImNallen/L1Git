@@ -246,11 +246,6 @@ pub enum WorktreePatch {
     Submodule {
         submodule: SubmoduleState,
     },
-    /// A clean filter such as Git LFS decides what Git would stage, so L1 Git
-    /// names the filter instead of showing the working-tree bytes.
-    Filtered {
-        filter: String,
-    },
     /// `diff` compares the working-tree file, conflict markers included, with
     /// HEAD. It is absent for a submodule and when that file is gone or matches
     /// HEAD.

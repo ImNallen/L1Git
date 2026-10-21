@@ -1415,7 +1415,16 @@ fn worktree_patch_rejects_paths_without_changes_and_paths_outside_the_worktree()
             "{file}: {error}"
         );
     }
-    for file in ["", "../outside.txt", "/etc/hosts", "./notes.txt"] {
+    fs::create_dir_all(fixture.repo.join("nested/deeper")).unwrap();
+    fs::write(fixture.repo.join("nested/deeper/leaf.txt"), "leaf\n").unwrap();
+    for file in [
+        "",
+        "../outside.txt",
+        "/etc/hosts",
+        "./notes.txt",
+        "nested/./deeper/leaf.txt",
+        "nested//deeper/leaf.txt",
+    ] {
         let error = worktree_patch(fixture.path(), file, Side::Unstaged).unwrap_err();
         assert!(
             matches!(error.kind, ErrorKind::UnsupportedPath),
@@ -1483,6 +1492,8 @@ fn assert_matches_git(fixture: &Fixture, names: &[&str]) {
                 "diff",
                 "--full-index",
                 "--no-color",
+                "--no-textconv",
+                "--no-ext-diff",
                 "--",
                 name,
             ])
@@ -1621,27 +1632,52 @@ fn worktree_patch_follows_big_file_threshold_and_file_mode_like_git() {
 }
 
 #[test]
-fn worktree_patch_names_a_clean_filter_instead_of_showing_working_tree_bytes() {
+fn worktree_patch_shows_what_git_would_stage_under_any_attribute() {
     let fixture = Fixture::new();
     fixture.commit(
         ".gitattributes",
-        "*.up filter=upper\n*.off filter=unconfigured\n",
+        "*.up filter=upper\n*.off filter=unconfigured\n*.bin diff=bin\n*.forced diff\n*.nod -diff\n*.id ident\n*.u16 working-tree-encoding=UTF-16\n",
         "attributes",
     );
-    git(
-        &fixture.repo,
-        &["config", "filter.upper.clean", "tr a-z A-Z"],
+    for (key, value) in [
+        ("filter.upper.clean", "tr a-z A-Z"),
+        ("diff.bin.binary", "true"),
+        ("core.autocrlf", "false"),
+    ] {
+        git(&fixture.repo, &["config", key, value]);
+    }
+    let files: [(&str, &[u8]); 8] = [
+        ("a.up", b"lower\n"),
+        ("a.off", b"lower\n"),
+        ("a.bin", b"text\n"),
+        ("a.forced", b"a\0b\n"),
+        ("empty.nod", b""),
+        ("a.nod", b"text\n"),
+        ("a.id", b"x\n$Id: 0123456789abcdef $\n"),
+        ("a.u16", b"\xff\xfeo\0n\0e\0\n\0"),
+    ];
+    for (name, content) in files {
+        fs::write(fixture.repo.join(name), content).unwrap();
+    }
+    let names: Vec<&str> = files.iter().map(|(name, _)| *name).collect();
+    assert_matches_git(&fixture, &names);
+}
+
+#[test]
+fn worktree_patch_names_a_required_filter_that_fails() {
+    let fixture = Fixture::new();
+    fixture.commit(".gitattributes", "*.req filter=req\n", "attributes");
+    git(&fixture.repo, &["config", "filter.req.clean", "false"]);
+    git(&fixture.repo, &["config", "filter.req.required", "true"]);
+    fs::write(fixture.repo.join("a.req"), "x\n").unwrap();
+    let error = worktree_patch(fixture.path(), "a.req", Side::Unstaged).unwrap_err();
+    assert!(matches!(error.kind, ErrorKind::GitFailed), "{error:?}");
+    assert!(
+        error
+            .message
+            .ends_with("fatal: a.req: clean filter 'req' failed"),
+        "{error:?}"
     );
-    git(&fixture.repo, &["config", "core.autocrlf", "false"]);
-    fs::write(fixture.repo.join("a.up"), "lower\n").unwrap();
-    fs::write(fixture.repo.join("a.off"), "lower\n").unwrap();
-    assert_eq!(
-        worktree_patch(fixture.path(), "a.up", Side::Unstaged).unwrap(),
-        WorktreePatch::Filtered {
-            filter: "upper".into()
-        }
-    );
-    assert_matches_git(&fixture, &["a.off"]);
 }
 
 #[test]
@@ -1753,6 +1789,7 @@ fn worktree_patch_never_leaks_through_a_file_swapped_for_a_symlink() {
     let outside = fixture._directory.path().join("outside");
     fs::create_dir(&outside).unwrap();
     fs::write(outside.join("null"), "SECRET\n").unwrap();
+    fs::write(outside.join("secret"), "SECRET\n").unwrap();
     let victim = fixture.repo.join("victim");
     fs::write(&victim, "plain\n").unwrap();
     let done = Arc::new(AtomicBool::new(false));
@@ -1761,11 +1798,13 @@ fn worktree_patch_never_leaks_through_a_file_swapped_for_a_symlink() {
         std::thread::spawn(move || {
             let staging = victim.with_file_name("staging");
             while !done.load(Ordering::Relaxed) {
-                let _ = fs::remove_file(&staging);
-                let _ = std::os::unix::fs::symlink(&outside, &staging);
-                let _ = fs::rename(&staging, &victim);
-                let _ = fs::write(&staging, "plain\n");
-                let _ = fs::rename(&staging, &victim);
+                for target in [outside.clone(), outside.join("secret")] {
+                    let _ = fs::remove_file(&staging);
+                    let _ = std::os::unix::fs::symlink(&target, &staging);
+                    let _ = fs::rename(&staging, &victim);
+                    let _ = fs::write(&staging, "plain\n");
+                    let _ = fs::rename(&staging, &victim);
+                }
             }
         })
     };
@@ -1776,6 +1815,33 @@ fn worktree_patch_never_leaks_through_a_file_swapped_for_a_symlink() {
     done.store(true, Ordering::Relaxed);
     swapper.join().unwrap();
     assert_eq!(leaks, 0);
+}
+
+#[cfg(unix)]
+#[test]
+fn worktree_patch_never_shows_text_that_git_read_after_a_swap() {
+    let fixture = Fixture::new();
+    fixture.commit(".gitattributes", "d/victim filter=slow\n", "attributes");
+    git(
+        &fixture.repo,
+        &["config", "filter.slow.clean", "sh -c 'cat; sleep 1'"],
+    );
+    let outside = fixture._directory.path().join("outside");
+    fs::create_dir_all(outside.join("d")).unwrap();
+    fs::write(outside.join("d/victim"), "SECRET\n").unwrap();
+    fs::create_dir(fixture.repo.join("d")).unwrap();
+    fs::write(fixture.repo.join("d/victim"), "plain\n").unwrap();
+    let path = fixture.path().to_owned();
+    let reader = std::thread::spawn(move || worktree_patch(&path, "d/victim", Side::Unstaged));
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    fs::rename(fixture.repo.join("d"), fixture.repo.join("real")).unwrap();
+    std::os::unix::fs::symlink(outside.join("d"), fixture.repo.join("d")).unwrap();
+    let error = reader.join().unwrap().unwrap_err();
+    assert!(matches!(error.kind, ErrorKind::UnreadablePath), "{error:?}");
+    assert_eq!(
+        error.message,
+        "This file changed while L1 Git was reading it. Refresh the worktree status."
+    );
 }
 
 #[cfg(unix)]
@@ -1877,7 +1943,7 @@ fn worktree_patch_stops_reading_at_the_cap_and_reports_the_size() {
                 diff: FilePatch::TooLarge { bytes: 256 << 20 }
             },
             WorktreePatch::Diff {
-                diff: FilePatch::Binary
+                diff: FilePatch::TooLarge { bytes: 4 << 30 }
             },
         ]
     );
