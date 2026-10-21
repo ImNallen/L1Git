@@ -1,13 +1,14 @@
 import {
   Fragment,
   useEffect,
+  useImperativeHandle,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
-import type { MouseEvent, ReactNode } from "react";
-import { createPortal } from "react-dom";
+import type { MouseEvent, ReactNode, Ref } from "react";
+import { createPortal, flushSync } from "react-dom";
 import {
   Check,
   CircleCheck,
@@ -28,6 +29,7 @@ import { historyAction, navigate, revealRow } from "../domain/navigation";
 import type { HistoryAction, Trail } from "../domain/navigation";
 import { refLabels } from "../domain/refs";
 import type { RefLabel } from "../domain/refs";
+import { matchCommits } from "../domain/search";
 import { SHORT_OID_MIN_LENGTH, uniqueShortOids } from "../domain/shortOid";
 import { relativeTime } from "../domain/time";
 import type {
@@ -41,6 +43,7 @@ import { columnLayout, historyColumns } from "../historyColumns";
 import type { ColumnId } from "../historyColumns";
 import { useLineStats } from "../useLineStats";
 import { ContextMenu } from "./ContextMenu";
+import { HistorySearch } from "./HistorySearch";
 
 const ROW_HEIGHT = 36;
 const OVERSCAN = 10;
@@ -48,6 +51,11 @@ const HIGHLIGHT_DELAY = 400;
 const color = (lane: number) => `var(--graph-lane-${(lane % 6) + 1})`;
 const x = (lane: number) => 14 + lane * 24;
 const NO_COMMITS: readonly Commit[] = [];
+const NO_EDGES: RowHighlight = {
+  incoming: false,
+  parents: [],
+  continuations: [],
+};
 
 function GraphCell({
   row,
@@ -322,7 +330,13 @@ function MoreRefs({ labels, lane }: { labels: RefLabel[]; lane: number }) {
   );
 }
 
+export type HistoryHandle = { openSearch: () => void };
+
+/** `current` is the match Enter last selected. A query belongs to `root`. */
+type Search = { root: RepositoryRoot; query: string; current: Oid | null };
+
 type Props = {
+  ref?: Ref<HistoryHandle>;
   snapshot: RepositorySnapshot;
   selectedOid: Oid | null;
   revealSeq: number;
@@ -341,6 +355,7 @@ type Props = {
 };
 
 export function History({
+  ref,
   snapshot,
   selectedOid,
   revealSeq,
@@ -365,14 +380,31 @@ export function History({
   );
   const labels = useMemo(() => refLabels(snapshot), [snapshot]);
   const commits = snapshot.commits;
+  const [search, setSearch] = useState<Search | null>(null);
+  const searchInput = useRef<HTMLInputElement>(null);
+  const searchHere = search?.root === snapshot.root ? search : null;
+  const query = searchHere?.query ?? "";
+  const matches = useMemo(() => matchCommits(commits, query), [commits, query]);
+  const matchIndex = useMemo(
+    () => new Map(matches.map((oid, index) => [oid, index])),
+    [matches],
+  );
+  const searching = matches.length > 0;
+  const current = searchHere?.current ?? null;
+  const position =
+    current === null
+      ? null
+      : (matchIndex.get(selectedOid ?? current) ??
+        matchIndex.get(current) ??
+        null);
   const [hovered, setHovered] = useState<Oid | null>(null);
   const hoverTimer = useRef<number | undefined>(undefined);
   const highlight = useMemo(
     () =>
-      hovered === null
+      hovered === null || searching
         ? null
         : highlightBranch(snapshot.commits, graph.rows, hovered, trunk),
-    [snapshot.commits, graph.rows, hovered, trunk],
+    [snapshot.commits, graph.rows, hovered, trunk, searching],
   );
   const hover = (oid: Oid) => {
     window.clearTimeout(hoverTimer.current);
@@ -456,6 +488,22 @@ export function History({
     rootRef.current = snapshot.root;
   });
 
+  /** Scrolls row `index` to the middle of the history unless it is already visible. */
+  function centerRow(index: number) {
+    const scroller = scrollRef.current;
+    if (index < 0 || !scroller) return;
+    const header = headRef.current?.offsetHeight ?? 0;
+    const rows = scroller.clientHeight - header;
+    const rowTop = index * ROW_HEIGHT;
+    if (
+      rowTop + ROW_HEIGHT > scroller.scrollTop &&
+      rowTop < scroller.scrollTop + rows
+    )
+      return;
+    scroller.scrollTop = rowTop + ROW_HEIGHT / 2 - rows / 2;
+    setViewport({ top: scroller.scrollTop, height: scroller.clientHeight });
+  }
+
   useLayoutEffect(() => {
     const scroller = scrollRef.current;
     if (hidden || !scroller) return;
@@ -477,20 +525,9 @@ export function History({
       (last.oid === selectedOid && last.seq === revealSeq)
     )
       return;
-    const index = commitsRef.current.findIndex(
-      (commit) => commit.oid === selectedOid,
+    centerRow(
+      commitsRef.current.findIndex((commit) => commit.oid === selectedOid),
     );
-    if (index < 0) return;
-    const header = headRef.current?.offsetHeight ?? 0;
-    const rows = scroller.clientHeight - header;
-    const rowTop = index * ROW_HEIGHT;
-    if (
-      rowTop + ROW_HEIGHT > scroller.scrollTop &&
-      rowTop < scroller.scrollTop + rows
-    )
-      return;
-    scroller.scrollTop = rowTop + ROW_HEIGHT / 2 - rows / 2;
-    setViewport({ top: scroller.scrollTop, height: scroller.clientHeight });
   }, [snapshot.root, scrollTopOf, selectedOid, revealSeq, hidden]);
 
   useLayoutEffect(
@@ -509,6 +546,37 @@ export function History({
   useEffect(() => {
     if (trail.current?.end !== selectedOid) trail.current = null;
   }, [selectedOid]);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      openSearch() {
+        flushSync(() =>
+          setSearch(
+            (open) => open ?? { root: snapshot.root, query: "", current: null },
+          ),
+        );
+        searchInput.current?.focus();
+        searchInput.current?.select();
+      },
+    }),
+    [snapshot.root],
+  );
+
+  function closeSearch() {
+    setSearch(null);
+    tableRef.current?.focus({ preventScroll: true });
+  }
+
+  function stepMatch(by: 1 | -1) {
+    const count = matches.length;
+    const from = position ?? (by === 1 ? -1 : count);
+    const oid = matches[(from + by + count) % count];
+    if (oid === undefined) return;
+    setSearch({ root: snapshot.root, query, current: oid });
+    centerRow(commits.findIndex((commit) => commit.oid === oid));
+    onSelect(oid);
+  }
 
   function run(action: HistoryAction) {
     if (action === "open") return onOpenFirstFile();
@@ -585,10 +653,23 @@ export function History({
       aria-busy={busy}
       hidden={hidden}
     >
+      {search && (
+        <HistorySearch
+          inputRef={searchInput}
+          query={query}
+          count={matches.length}
+          position={position}
+          onQuery={(next) =>
+            setSearch({ root: snapshot.root, query: next, current: null })
+          }
+          onStep={stepMatch}
+          onClose={closeSearch}
+        />
+      )}
       <div className="history-scroll" ref={scrollRef}>
         <table
           ref={tableRef}
-          className={`history-table${highlight ? " highlighting" : ""}`}
+          className={`history-table${highlight || searching ? " highlighting" : ""}`}
           style={{ minWidth: layout.minWidth }}
           role="grid"
           tabIndex={0}
@@ -643,7 +724,9 @@ export function History({
               const row = graph.rows.get(commit.oid);
               const [label, ...more] = labels.get(commit.oid) ?? [];
               const selected = selectedOid === commit.oid;
-              const lit = highlight?.commits.has(commit.oid);
+              const lit = searching
+                ? matchIndex.has(commit.oid)
+                : highlight?.commits.has(commit.oid);
               return (
                 <tr
                   key={commit.oid}
@@ -684,7 +767,9 @@ export function History({
                         selected={selected}
                         width={graphWidth}
                         known={known}
-                        lit={highlight?.rows.get(commit.oid)}
+                        lit={
+                          searching ? NO_EDGES : highlight?.rows.get(commit.oid)
+                        }
                       />
                     )}
                   </td>
