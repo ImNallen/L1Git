@@ -382,15 +382,17 @@ export function History({
   const commits = snapshot.commits;
   const [search, setSearch] = useState<Search | null>(null);
   const searchInput = useRef<HTMLInputElement>(null);
-  const searchHere = search?.root === snapshot.root ? search : null;
-  const query = searchHere?.query ?? "";
+  // The history can stay mounted across a repository switch, so a query
+  // must not carry over to the next repository.
+  if (search && search.root !== snapshot.root) setSearch(null);
+  const query = search?.query ?? "";
   const matches = useMemo(() => matchCommits(commits, query), [commits, query]);
   const matchIndex = useMemo(
     () => new Map(matches.map((oid, index) => [oid, index])),
     [matches],
   );
   const searching = matches.length > 0;
-  const current = searchHere?.current ?? null;
+  const current = search?.current ?? null;
   const position =
     current === null
       ? null

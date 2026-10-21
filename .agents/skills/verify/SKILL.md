@@ -27,7 +27,7 @@ If the Add dialog says the reader is unavailable, check the bridge log and both 
 
 Follow the mapped journeys with accessible names from live snapshots. Start with [Add and restore repositories](features/repositories.md), then [Browse the commit graph](features/history.md), then [Inspect a commit](features/inspector.md), then [Read a file diff](features/diff.md), then [Change appearance](features/appearance.md), then [Update behind branches](features/overview.md). The separate [reader contract](features/reader.md) has automated coverage.
 
-Use **Cmd/Ctrl+O** to add a repository, **Escape** to cancel, and **Cmd/Ctrl+F** to focus loaded-history search. Escape also closes an open file diff. The native dialog traps focus. Pane separators support pointer dragging and arrow keys. At narrow widths the inspector starts hidden; **Toggle commit inspector** opens it as an overlay.
+Use **Cmd/Ctrl+O** to add a repository, **Escape** to cancel, and **Cmd/Ctrl+F** to open loaded-history search. Escape also closes an open file diff. The native dialog traps focus. Pane separators support pointer dragging and arrow keys. At narrow widths the inspector starts hidden; **Toggle commit inspector** opens it as an overlay.
 
 Run `cargo test --locked`, `pnpm test`, `pnpm build`, `pnpm format:check`, and `cargo fmt --all --check` after code changes. No network account is required.
 
