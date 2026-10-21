@@ -1,9 +1,9 @@
 use crate::{
-    Blame, BlameRange, ErrorKind, FileRevision, RepositoryError,
+    Blame, BlameRange, Commit, ErrorKind, FileRevision, RepositoryError,
     git::{self, Deadline, LocalRead},
     repository::{COMMIT_FORMAT, PATCH_LIMIT, non_utf8_path, parse_commits, root, verify_commit},
 };
-use std::collections::HashMap;
+use std::{collections::HashMap, path::Path};
 
 const BLAME_LIMIT: usize = 16 * PATCH_LIMIT;
 const BINARY_PROBE: usize = 8000;
@@ -110,8 +110,8 @@ pub(crate) fn blame_within(
         ],
         deadline,
     )?;
-    let (kind, bytes) = tree_entry(&entry, file)?.ok_or_else(missing_file)?;
-    match kind {
+    let entry = tree_entry(&entry, file)?.ok_or_else(missing_file)?;
+    match entry.kind {
         b"blob" => {}
         b"commit" => {
             return Err(RepositoryError::new(
@@ -121,19 +121,47 @@ pub(crate) fn blame_within(
         }
         _ => return Err(missing_file()),
     }
-    if bytes > PATCH_LIMIT as u64 {
-        return Ok(Blame::TooLarge { bytes });
+    if entry.bytes > PATCH_LIMIT as u64 {
+        return Ok(Blame::TooLarge { bytes: entry.bytes });
     }
-    let output = match git::read_capped(
-        &root,
-        &["blame", "--porcelain", "--no-textconv", oid, "--", file],
-        BLAME_LIMIT,
-        deadline,
-    )? {
-        git::Capped::Within(output) => output,
-        git::Capped::Over(_) => return Ok(Blame::TooLarge { bytes }),
+    let object = git::text(entry.object);
+    let contents =
+        match git::read_capped(&root, &["cat-file", "blob", &object], PATCH_LIMIT, deadline)? {
+            git::Capped::Within(contents) => contents,
+            git::Capped::Over(bytes) => return Ok(Blame::TooLarge { bytes }),
+        };
+    if contents[..contents.len().min(BINARY_PROBE)].contains(&0) {
+        return Ok(Blame::Binary);
+    }
+    let ranges = if contents.is_empty() {
+        Vec::new()
+    } else {
+        let output = match git::read_capped(
+            &root,
+            &[
+                "blame",
+                "--porcelain",
+                "--no-textconv",
+                "--no-ignore-revs-file",
+                oid,
+                "--",
+                file,
+            ],
+            BLAME_LIMIT,
+            deadline,
+        )? {
+            git::Capped::Within(output) => output,
+            git::Capped::Over(_) => {
+                return Ok(Blame::TooLarge { bytes: entry.bytes });
+            }
+        };
+        credited(&root, porcelain(&output)?, deadline)?
     };
-    porcelain(&output, bytes)
+    Ok(Blame::Text {
+        lossy: std::str::from_utf8(&contents).is_err(),
+        contents: git::text(&contents),
+        ranges,
+    })
 }
 
 fn missing_file() -> RepositoryError {
@@ -143,11 +171,14 @@ fn missing_file() -> RepositoryError {
     )
 }
 
+struct TreeEntry<'a> {
+    kind: &'a [u8],
+    object: &'a [u8],
+    bytes: u64,
+}
+
 /// `ls-tree -l` prints `<mode> <type> <object> <size>\t<path>`.
-fn tree_entry<'a>(
-    output: &'a [u8],
-    file: &str,
-) -> Result<Option<(&'a [u8], u64)>, RepositoryError> {
+fn tree_entry<'a>(output: &'a [u8], file: &str) -> Result<Option<TreeEntry<'a>>, RepositoryError> {
     for record in output.split(|byte| *byte == 0).filter(|r| !r.is_empty()) {
         let tab = record
             .iter()
@@ -159,7 +190,7 @@ fn tree_entry<'a>(
         let mut columns = record[..tab]
             .split(|byte| *byte == b' ')
             .filter(|column| !column.is_empty());
-        let (Some(_mode), Some(kind), Some(_object), Some(size)) = (
+        let (Some(_mode), Some(kind), Some(object), Some(size)) = (
             columns.next(),
             columns.next(),
             columns.next(),
@@ -167,108 +198,89 @@ fn tree_entry<'a>(
         ) else {
             return Err(git::malformed());
         };
-        let size = std::str::from_utf8(size)
+        let bytes = std::str::from_utf8(size)
             .ok()
             .and_then(|size| size.parse().ok())
             .unwrap_or(0);
-        return Ok(Some((kind, size)));
+        return Ok(Some(TreeEntry {
+            kind,
+            object,
+            bytes,
+        }));
     }
     Ok(None)
 }
 
-#[derive(Default)]
-struct Author {
-    name: String,
-    email: String,
-    time: i64,
-    summary: String,
-}
-
-/// Porcelain ends every line with a newline, so a blob of `bytes` bytes
-/// without a final newline reads one byte longer.
-fn porcelain(output: &[u8], bytes: u64) -> Result<Blame, RepositoryError> {
-    let mut authors: HashMap<String, Author> = HashMap::new();
-    let mut ranges: Vec<BlameRange> = Vec::new();
-    let mut contents = Vec::new();
-    let mut current: Option<(String, u32)> = None;
-    let mut lines = output.split(|byte| *byte == b'\n').peekable();
-    while let Some(line) = lines.next() {
-        if line.is_empty() && lines.peek().is_none() {
-            break;
-        }
-        if let Some(content) = line.strip_prefix(b"\t") {
-            let (oid, final_line) = current.take().ok_or_else(git::malformed)?;
-            contents.extend_from_slice(content);
-            contents.push(b'\n');
-            match ranges.last_mut() {
-                Some(range) if range.oid == oid && range.start + range.lines == final_line => {
-                    range.lines += 1;
-                }
-                _ => ranges.push(BlameRange {
-                    oid,
-                    start: final_line,
-                    lines: 1,
-                    author: String::new(),
-                    email: String::new(),
-                    timestamp: 0,
-                    summary: String::new(),
-                }),
+/// Each porcelain group starts with `<oid> <original line> <final line>`,
+/// then key-value lines, then the line's text after a tab.
+fn porcelain(output: &[u8]) -> Result<Vec<(String, u32, u32)>, RepositoryError> {
+    let mut ranges: Vec<(String, u32, u32)> = Vec::new();
+    let mut header = true;
+    for line in output.split(|byte| *byte == b'\n') {
+        if header {
+            if line.is_empty() {
+                continue;
             }
-            continue;
-        }
-        if current.is_none() {
             let text = std::str::from_utf8(line).map_err(|_| git::malformed())?;
             let mut columns = text.split(' ');
-            let (Some(oid), Some(_), Some(final_line)) =
+            let (Some(oid), Some(_), Some(start)) =
                 (columns.next(), columns.next(), columns.next())
             else {
                 return Err(git::malformed());
             };
-            let final_line = final_line.parse().map_err(|_| git::malformed())?;
-            authors.entry(oid.to_owned()).or_default();
-            current = Some((oid.to_owned(), final_line));
-            continue;
-        }
-        let (oid, _) = current.as_ref().ok_or_else(git::malformed)?;
-        let author = authors.get_mut(oid).ok_or_else(git::malformed)?;
-        let (key, value) = match line.iter().position(|byte| *byte == b' ') {
-            Some(space) => (&line[..space], &line[space + 1..]),
-            None => (line, &line[line.len()..]),
-        };
-        match key {
-            b"author" => author.name = git::text(value),
-            b"author-mail" => {
-                author.email = git::text(value)
-                    .trim_start_matches('<')
-                    .trim_end_matches('>')
-                    .to_owned();
+            let start: u32 = start.parse().map_err(|_| git::malformed())?;
+            match ranges.last_mut() {
+                Some((last, first, lines)) if last == oid && *first + *lines == start => {
+                    *lines += 1;
+                }
+                _ => ranges.push((oid.to_owned(), start, 1)),
             }
-            b"author-time" => {
-                author.time = git::text(value).parse().map_err(|_| git::malformed())?;
-            }
-            b"summary" => author.summary = git::text(value),
-            _ => {}
+            header = false;
+        } else if line.starts_with(b"\t") {
+            header = true;
         }
     }
-    if current.is_some() {
+    if !header {
         return Err(git::malformed());
     }
-    if contents.len() as u64 == bytes + 1 {
-        contents.pop();
-    }
-    if contents[..contents.len().min(BINARY_PROBE)].contains(&0) {
-        return Ok(Blame::Binary);
-    }
-    for range in &mut ranges {
-        let author = &authors[&range.oid];
-        range.author.clone_from(&author.name);
-        range.email.clone_from(&author.email);
-        range.timestamp = author.time;
-        range.summary.clone_from(&author.summary);
-    }
-    Ok(Blame::Text {
-        lossy: std::str::from_utf8(&contents).is_err(),
-        contents: git::text(&contents),
-        ranges,
-    })
+    Ok(ranges)
+}
+
+/// Names each range's commit with the history's own format, so Blame and the
+/// graph show the same author.
+fn credited(
+    root: &Path,
+    ranges: Vec<(String, u32, u32)>,
+    deadline: Deadline,
+) -> Result<Vec<BlameRange>, RepositoryError> {
+    let mut oids: Vec<&str> = ranges.iter().map(|(oid, ..)| oid.as_str()).collect();
+    oids.sort_unstable();
+    oids.dedup();
+    let output = git::read_with_input(
+        root,
+        &["log", "--no-walk=unsorted", COMMIT_FORMAT, "-z", "--stdin"],
+        oids.iter()
+            .flat_map(|oid| format!("{oid}\n").into_bytes())
+            .collect(),
+        deadline,
+    )?;
+    let commits: HashMap<String, Commit> = parse_commits(&output)?
+        .into_iter()
+        .map(|commit| (commit.oid.clone(), commit))
+        .collect();
+    ranges
+        .into_iter()
+        .map(|(oid, start, lines)| {
+            let commit = commits.get(&oid).ok_or_else(git::malformed)?;
+            Ok(BlameRange {
+                start,
+                lines,
+                author: commit.author.clone(),
+                email: commit.email.clone(),
+                timestamp: commit.timestamp,
+                summary: commit.subject.clone(),
+                oid,
+            })
+        })
+        .collect()
 }

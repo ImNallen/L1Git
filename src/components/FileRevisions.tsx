@@ -28,6 +28,8 @@ export type Revision = { root: RepositoryRoot; oid: Oid; path: string };
 type Look = { diffStyle: DiffStyle; theme: Appearance; painted: boolean };
 
 const short = (oid: Oid) => oid.slice(0, SHORT_OID_MIN_LENGTH);
+/** Keys that move the history list read a diff only once the row stays this long. */
+const SETTLE_MS = 150;
 
 export function FileHistory({
   revision,
@@ -68,13 +70,17 @@ function RevisionList({
   revisions: FileRevision[];
 } & Look) {
   const [index, setIndex] = useState(0);
+  const [settled, setSettled] = useState(0);
   const list = useRef<HTMLDivElement>(null);
-  const chosen = revisions[index] ?? newest;
+  const chosen = revisions[settled] ?? newest;
   useEffect(() => {
     list.current
       ?.querySelector(`[data-index="${index}"]`)
       ?.scrollIntoView({ block: "nearest" });
-  }, [index]);
+    if (index === settled) return;
+    const settle = setTimeout(() => setSettled(index), SETTLE_MS);
+    return () => clearTimeout(settle);
+  }, [index, settled]);
   const move = (event: KeyboardEvent) => {
     const next =
       event.key === "ArrowDown"
@@ -110,7 +116,10 @@ function RevisionList({
             role="option"
             aria-selected={at === index}
             className="file-revision"
-            onClick={() => setIndex(at)}
+            onClick={() => {
+              setIndex(at);
+              setSettled(at);
+            }}
           >
             <span className="file-revision-oid">{short(commit.oid)}</span>
             <span className="file-revision-subject" title={commit.subject}>
@@ -203,6 +212,12 @@ export function FileBlame({
             ? "Binary file. L1 Git does not blame binary files."
             : `This file is ${(value.bytes / 1024 / 1024).toFixed(1)} MiB, above the 1 MiB display limit.`}
         </p>
+      </div>
+    );
+  if (value.contents === "")
+    return (
+      <div className="file-diff-empty">
+        <p>This file is empty in this commit, so it has no lines to blame.</p>
       </div>
     );
   const now = Date.now() / 1000;

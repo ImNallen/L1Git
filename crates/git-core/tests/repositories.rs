@@ -898,6 +898,60 @@ fn blame_reads_ranges_for_a_file_edited_by_two_authors() {
 }
 
 #[test]
+fn blame_ignores_a_configured_ignore_revs_file() {
+    let fixture = Fixture::new();
+    let oid = fixture.commit("a.txt", "a\n", "initial");
+    git(
+        &fixture.repo,
+        &["config", "blame.ignoreRevsFile", "missing-revs.txt"],
+    );
+    let Blame::Text { ranges, .. } = blame(fixture.path(), &oid, "a.txt").unwrap() else {
+        panic!("expected text");
+    };
+    assert_eq!(ranges.len(), 1);
+}
+
+#[test]
+fn blame_names_authors_as_the_history_does_and_reads_an_empty_file() {
+    let fixture = Fixture::new();
+    fixture.commit(
+        ".mailmap",
+        "Mapped <mapped@example.test> <ada@example.test>\n",
+        "map",
+    );
+    let oid = fixture.commit("empty.txt", "", "empty");
+    let Blame::Text {
+        contents, ranges, ..
+    } = blame(fixture.path(), &oid, ".mailmap").unwrap()
+    else {
+        panic!("expected text");
+    };
+    assert_eq!(
+        contents,
+        "Mapped <mapped@example.test> <ada@example.test>\n"
+    );
+    let commit = snapshot(fixture.path())
+        .unwrap()
+        .commits
+        .into_iter()
+        .find(|commit| commit.oid == ranges[0].oid)
+        .unwrap();
+    assert_eq!(
+        (ranges[0].author.as_str(), ranges[0].email.as_str()),
+        (commit.author.as_str(), commit.email.as_str())
+    );
+    assert_eq!(ranges[0].author, "Ada");
+    assert_eq!(
+        blame(fixture.path(), &oid, "empty.txt").unwrap(),
+        Blame::Text {
+            contents: String::new(),
+            lossy: false,
+            ranges: Vec::new(),
+        }
+    );
+}
+
+#[test]
 fn blame_keeps_a_missing_final_newline() {
     let fixture = Fixture::new();
     let oid = fixture.commit("tail.txt", "one\ntwo", "no final newline");
