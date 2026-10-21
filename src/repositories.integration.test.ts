@@ -496,7 +496,7 @@ describe("real Rust transport contract", () => {
     ]);
   });
 
-  it("reads the same root, name, HEAD, and branches as the snapshot without history", async () => {
+  it("reads the same refs as the snapshot without history", async () => {
     for (const path of [fixture.repository, fixture.unborn, fixture.detached]) {
       const snapshot = snapshotEnvelope.parse(
         await (await post({ op: "snapshot", path })).json(),
@@ -509,12 +509,18 @@ describe("real Rust transport contract", () => {
         name: snapshot.name,
         head: snapshot.head,
         branches: snapshot.branches,
+        tags: snapshot.tags,
+        stashes: snapshot.stashes,
+        submodules: snapshot.submodules,
       });
     }
     const refs = refsEnvelope.parse(
       await (await post({ op: "refs", path: fixture.repository })).json(),
     ).data;
     expect(refs.name).toBe("l1-demo");
+    expect(refs.tags.map((tag) => tag.name)).toEqual(["v0.1.0"]);
+    expect(refs.stashes).toEqual([]);
+    expect(refs.submodules).toEqual([]);
     expect(refs.branches.map((branch) => branch.reference)).toEqual([
       "refs/heads/feat/history",
       "refs/heads/feat/squashed",
@@ -529,6 +535,79 @@ describe("real Rust transport contract", () => {
         .parse(await (await post({ op: "refs", path: fixture.remote })).json())
         .error.kind,
     ).toBe("bareRepository");
+  });
+
+  it("lists a stash and a submodule, and details the stash against its first parent", async () => {
+    const scratch = join(fixture.root, "stash and submodule");
+    const env = {
+      ...Object.fromEntries(
+        Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")),
+      ),
+      GIT_AUTHOR_NAME: "Ada",
+      GIT_AUTHOR_EMAIL: "ada@example.test",
+      GIT_COMMITTER_NAME: "Ada",
+      GIT_COMMITTER_EMAIL: "ada@example.test",
+    };
+    const git = (cwd: string, ...args: string[]) =>
+      execFileSync("git", ["-C", cwd, ...args], {
+        encoding: "utf8",
+        env,
+        stdio: ["ignore", "pipe", "ignore"],
+      }).trim();
+    git(fixture.root, "clone", "--quiet", fixture.repository, scratch);
+    git(scratch, "config", "core.hooksPath", "/dev/null");
+    git(
+      scratch,
+      "-c",
+      "protocol.file.allow=always",
+      "submodule",
+      "add",
+      "--quiet",
+      fixture.repository,
+      "vendor/demo",
+    );
+    git(scratch, "commit", "-m", "Add the demo submodule");
+    const head = git(scratch, "rev-parse", "HEAD");
+    writeFileSync(join(scratch, "README.md"), "Stashed\n");
+    git(scratch, "stash", "push", "-m", "Try a README");
+    const stash = git(scratch, "rev-parse", "stash@{0}");
+
+    const refs = refsEnvelope.parse(
+      await (await post({ op: "refs", path: scratch })).json(),
+    ).data;
+    expect(refs.stashes).toEqual([
+      {
+        name: "stash@{0}",
+        oid: stash,
+        message: "On main: Try a README",
+        timestamp: Number(git(scratch, "log", "-1", "--format=%at", stash)),
+      },
+    ]);
+    expect(refs.submodules).toEqual([
+      {
+        path: "vendor/demo",
+        oid: git(scratch, "rev-parse", "HEAD:vendor/demo"),
+      },
+    ]);
+    const snapshot = snapshotEnvelope.parse(
+      await (await post({ op: "snapshot", path: scratch })).json(),
+    ).data;
+    expect(snapshot.commits.map((commit) => commit.oid)).not.toContain(stash);
+    const detail = answer("commitDetail", detailSchema).parse(
+      await (
+        await post({
+          op: "commitDetail",
+          path: scratch,
+          comparison: single(stash),
+        })
+      ).json(),
+    ).data;
+    expect(detail.files.map((file) => [file.path, file.status])).toEqual([
+      ["README.md", "M"],
+    ]);
+    expect(
+      detail.target.kind === "commit" && detail.target.commit.parents[0],
+    ).toBe(head);
   });
 
   it("reports empty, detached, bare, and missing states through the same contract", async () => {

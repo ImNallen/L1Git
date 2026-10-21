@@ -1,12 +1,28 @@
 import { worktreeRowId } from "./graph";
 import type { RowId } from "./graph";
-import type { Oid, RepositoryRoot, Worktree } from "./repository";
+import type {
+  Oid,
+  RepositoryRoot,
+  RepositorySnapshot,
+  Worktree,
+} from "./repository";
 import type { HistoryRow } from "./worktree";
 
 export type CommitSelection = { kind: "commit"; oid: Oid };
 export type Selection =
   | CommitSelection
   | { kind: "worktree"; root: RepositoryRoot };
+
+/** A selection can name a stash, which is a commit outside the history. */
+export function listsCommit(
+  snapshot: Pick<RepositorySnapshot, "commits" | "stashes">,
+  oid: Oid,
+): boolean {
+  return (
+    snapshot.commits.some((commit) => commit.oid === oid) ||
+    snapshot.stashes.some((stash) => stash.oid === oid)
+  );
+}
 
 export function sameSelection(
   left: Selection | null,

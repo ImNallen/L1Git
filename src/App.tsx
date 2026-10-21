@@ -54,7 +54,15 @@ import { RepositoryTree } from "./components/RepositoryTree";
 import { swapEnds } from "./domain/comparison";
 import { trunkTips } from "./domain/highlight";
 import { readyAdvances } from "./domain/overview";
-import type { Branch, FullRef, Oid, RepositoryRoot } from "./domain/repository";
+import type {
+  Branch,
+  FullRef,
+  Oid,
+  RepositoryRefs,
+  RepositoryRoot,
+  Stash,
+  Tag,
+} from "./domain/repository";
 import { sameSelection } from "./domain/selection";
 import type { Compare } from "./domain/comparison";
 import type { Selection } from "./domain/selection";
@@ -100,6 +108,21 @@ function shownElement(element: Element | null): element is HTMLElement {
   );
 }
 
+type JumpTarget = Branch | Tag;
+
+const isBranch = (target: JumpTarget): target is Branch => "kind" in target;
+
+function listedRef(
+  refs: Pick<RepositoryRefs, "branches" | "tags">,
+  reference: FullRef,
+): JumpTarget | null {
+  return (
+    refs.branches.find((branch) => branch.reference === reference) ??
+    refs.tags.find((tag) => tag.reference === reference) ??
+    null
+  );
+}
+
 const settingsSections = [
   { section: "appearance", label: "Appearance", Icon: Palette },
   { section: "fetching", label: "Fetching", Icon: CloudDownload },
@@ -127,7 +150,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   const [inspectorWidth, setInspectorWidth] = useState(320);
   const [diffStyle, setDiffStyle] = useState<DiffStyle>("unified");
   const [jump, setJump] = useState<Jump | null>(null);
-  // The branch last selected in each repository, so it stays highlighted after a round trip.
+  // The branch or tag last selected in each repository, so it stays highlighted after a round trip.
   const [lastBranch, setLastBranch] = useState<
     ReadonlyMap<RepositoryRoot, FullRef>
   >(new Map());
@@ -205,6 +228,11 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     (oid: Oid) => select({ kind: "commit", oid }),
     [select],
   );
+  // A stash clicked in another repository, selected once its snapshot loads.
+  const [pendingStash, setPendingStash] = useState<{
+    root: RepositoryRoot;
+    oid: Oid;
+  } | null>(null);
   const [sidebarJump, setSidebarJump] = useState<{
     root: RepositoryRoot;
     reference: FullRef;
@@ -234,11 +262,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       ? lastBranch.get(snapshot.root)
       : undefined;
   const jumped =
-    snapshot && jumpedReference
-      ? (snapshot.branches.find(
-          (branch) => branch.reference === jumpedReference,
-        ) ?? null)
-      : null;
+    snapshot && jumpedReference ? listedRef(snapshot, jumpedReference) : null;
   const jumpedUnloaded = jumped !== null && !loaded.has(jumped.oid);
   const hiddenJump =
     jumped !== null &&
@@ -251,7 +275,14 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   const highlighted =
     jumped !== null &&
     sameSelection(app.selection, { kind: "commit", oid: jumped.oid });
-  const ruledBranch = jumped && (highlighted || hiddenJump) ? jumped : null;
+  const ruledBranch =
+    jumped && isBranch(jumped) && (highlighted || hiddenJump) ? jumped : null;
+  const selectedStash =
+    snapshot &&
+    selected?.kind === "commit" &&
+    snapshot.stashes.some((stash) => stash.oid === selected.oid)
+      ? { root: snapshot.root, oid: selected.oid }
+      : null;
   const refreshRef = useRef(app.refresh);
   const reloadRefsRef = useRef(branchRefs.reload);
   useEffect(() => {
@@ -296,17 +327,17 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     expansion.setExpanded(root, true);
     if (root !== snapshot?.root) void app.selectRepository(root);
   }
-  function jumpTo(root: RepositoryRoot, branch: Branch) {
+  function jumpTo(root: RepositoryRoot, target: JumpTarget) {
     closeFile();
     const pending = root !== snapshot?.root;
     if (pending) showRepository(root);
-    else if (visibleOids.has(branch.oid))
-      app.select({ kind: "commit", oid: branch.oid });
-    setSidebarJump({ root, reference: branch.reference });
-    setLastBranch((previous) => new Map(previous).set(root, branch.reference));
+    else if (visibleOids.has(target.oid))
+      app.select({ kind: "commit", oid: target.oid });
+    setSidebarJump({ root, reference: target.reference });
+    setLastBranch((previous) => new Map(previous).set(root, target.reference));
     setJump((previous) => ({
       root,
-      reference: branch.reference,
+      reference: target.reference,
       seq: (previous?.seq ?? 0) + 1,
       pending,
     }));
@@ -327,13 +358,22 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     setSidebarJump(null);
     visibility.setRule(root, next);
   }
-  function showBranch(root: RepositoryRoot, branch: Branch) {
+  function showStash(root: RepositoryRoot, stash: Stash) {
+    closeFile();
+    if (root === snapshot?.root) select({ kind: "commit", oid: stash.oid });
+    else {
+      showRepository(root);
+      setPendingStash({ root, oid: stash.oid });
+    }
+  }
+  function showInGraph(root: RepositoryRoot, target: JumpTarget) {
     setSidebarJump(null);
-    visibility.reveal(root, branch.reference);
-    app.select({ kind: "commit", oid: branch.oid });
+    if (isBranch(target)) visibility.reveal(root, target.reference);
+    else visibility.setRule(root, NO_RULE);
+    app.select({ kind: "commit", oid: target.oid });
     setJump((previous) => ({
       root,
-      reference: branch.reference,
+      reference: target.reference,
       seq: (previous?.seq ?? 0) + 1,
       pending: false,
     }));
@@ -373,7 +413,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     swapCompare: app.swapCompare,
     endCompare,
     toggleHide: () => {
-      if (snapshot && hiddenJump) showBranch(snapshot.root, hiddenJump);
+      if (snapshot && hiddenJump) showInGraph(snapshot.root, hiddenJump);
       else if (snapshot && ruledBranch)
         setRule(snapshot.root, toggleRule(rule, "hide", ruledBranch.reference));
     },
@@ -395,11 +435,12 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
         });
       gridFocus.current = { root, from: focusedElement(), cancel };
     },
-    jumpToBranch: (reference) => {
-      const branch = snapshot?.branches.find(
-        (branch) => branch.reference === reference,
-      );
-      if (snapshot && branch) jumpTo(snapshot.root, branch);
+    jumpToRef: (reference) => {
+      const target = snapshot && listedRef(snapshot, reference);
+      if (snapshot && target) jumpTo(snapshot.root, target);
+    },
+    showStash: (stash) => {
+      if (snapshot) showStash(snapshot.root, stash);
     },
   };
   const context: ActionContext = {
@@ -515,18 +556,28 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     </button>
   );
 
+  // A cached snapshot can predate the branch, tag, or stash clicked in the
+  // sidebar, so pending selections wait for the reread to finish.
+  const reread = workspace.kind === "ready" ? workspace.snapshot : null;
   useEffect(() => {
     if (jump === null) return;
     if (app.activeRoot !== jump.root) setJump(null);
-    else if (jump.pending && snapshot?.root === jump.root) {
-      const branch = snapshot.branches.find(
-        (branch) => branch.reference === jump.reference,
-      );
-      if (branch && visibleOids.has(branch.oid))
-        app.select({ kind: "commit", oid: branch.oid });
+    else if (jump.pending && reread?.root === jump.root) {
+      const target = listedRef(reread, jump.reference);
+      if (target && visibleOids.has(target.oid))
+        app.select({ kind: "commit", oid: target.oid });
       setJump({ ...jump, pending: false, seq: jump.seq + 1 });
     }
-  }, [jump, snapshot, visibleOids, app.activeRoot, app.select]);
+  }, [jump, reread, visibleOids, app.activeRoot, app.select]);
+  useEffect(() => {
+    if (pendingStash === null) return;
+    if (app.activeRoot !== pendingStash.root) setPendingStash(null);
+    else if (reread?.root === pendingStash.root) {
+      if (reread.stashes.some((stash) => stash.oid === pendingStash.oid))
+        app.select({ kind: "commit", oid: pendingStash.oid });
+      setPendingStash(null);
+    }
+  }, [pendingStash, reread, app.activeRoot, app.select]);
   useEffect(() => {
     function keyboard(event: KeyboardEvent) {
       const { context, commands, palette } = keys.current;
@@ -592,12 +643,14 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                 ? { root: snapshot.root, reference: jumped.reference }
                 : null
             }
+            selectedStash={selectedStash}
             sync={overview.syncByRoot}
             onSelect={showRepository}
             onToggle={(root) =>
               expansion.setExpanded(root, !expansion.expanded.has(root))
             }
             onJump={jumpTo}
+            onStash={showStash}
             ruleFor={visibility.ruleFor}
             onRule={setRule}
             onRemove={(root) => {
@@ -735,8 +788,10 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                     ? "is outside the soloed branches."
                     : "is hidden in the graph."}
                 </span>
-                <button onClick={() => showBranch(snapshot.root, hiddenJump)}>
-                  Show {hiddenJump.name}
+                <button onClick={() => showInGraph(snapshot.root, hiddenJump)}>
+                  {isBranch(hiddenJump)
+                    ? `Show ${hiddenJump.name}`
+                    : "Show all branches"}
                 </button>
               </div>
             )}
@@ -937,7 +992,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
             commands,
             mac,
             app.catalog.entries,
-            snapshot?.branches ?? [],
+            snapshot,
           )}
           onClose={closePalette}
           onRun={runItem}

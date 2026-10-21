@@ -45,6 +45,8 @@ function snapshot(head: Record<string, unknown>) {
       { reference: "refs/tags/v1.0", name: "v1.0", oid: a },
       { reference: "refs/tags/v0.9", name: "v0.9", oid: c },
     ],
+    stashes: [],
+    submodules: [],
     worktrees: [
       {
         root: "/code/app",

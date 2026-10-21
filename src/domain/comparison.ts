@@ -1,6 +1,6 @@
 import type { RowId } from "./graph";
 import type { Oid, RepositoryRoot, RepositorySnapshot } from "./repository";
-import { selectedRowId } from "./selection";
+import { listsCommit, selectedRowId } from "./selection";
 import type { Selection } from "./selection";
 
 export type Comparison = {
@@ -48,11 +48,10 @@ export function compareRows(
 }
 
 export function compareListed(
-  snapshot: Pick<RepositorySnapshot, "commits" | "worktrees">,
+  snapshot: Pick<RepositorySnapshot, "commits" | "stashes" | "worktrees">,
   { base, target }: Compare,
 ): boolean {
-  const has = (oid: Oid) =>
-    snapshot.commits.some((commit) => commit.oid === oid);
+  const has = (oid: Oid) => listsCommit(snapshot, oid);
   return (
     has(base) &&
     (target.kind === "commit"

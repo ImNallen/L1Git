@@ -1,7 +1,7 @@
 use crate::{
     Base, BaseDetail, Branch, ChangeStatus, ChangedFile, Commit, CommitDetail, Comparison,
     ErrorKind, FilePatch, Head, LineStats, Oid, Remote, RepositoryError, RepositoryRefs,
-    RepositorySnapshot, Squash, Tag, Target, TargetDetail, Worktree,
+    RepositorySnapshot, Squash, Stash, Submodule, Tag, Target, TargetDetail, Worktree,
     git::{self, Deadline, LocalRead},
     remotes, status,
 };
@@ -292,18 +292,31 @@ pub(crate) fn parse_commits(output: &[u8]) -> Result<Vec<Commit>, RepositoryErro
 
 fn read_refs(
     root: &Path,
-    remotes: &[Remote],
     deadline: Deadline,
-) -> Result<RepositoryRefs, RepositoryError> {
-    let head = head(root, deadline)?;
-    let branches = branches(
-        root,
-        &remotes
-            .iter()
-            .map(|remote| remote.name.as_str())
-            .collect::<Vec<_>>(),
-        deadline,
-    )?;
+) -> Result<(RepositoryRefs, Vec<Remote>), RepositoryError> {
+    let (head, branches, tags, stashes, submodules) = thread::scope(|scope| {
+        let head = scope.spawn(|| head(root, deadline));
+        let tags = scope.spawn(|| tags(root, deadline));
+        let stashes = scope.spawn(|| stashes(root, deadline));
+        let submodules = scope.spawn(|| submodules(root, deadline));
+        let branches = remotes::read(root, deadline).and_then(|remotes| {
+            let names = remotes
+                .iter()
+                .map(|remote| remote.name.as_str())
+                .collect::<Vec<_>>();
+            let branches = branches(root, &names, deadline)?;
+            Ok((remotes, branches))
+        });
+        (
+            joined(head),
+            branches,
+            joined(tags),
+            joined(stashes),
+            joined(submodules),
+        )
+    });
+    let head = head?;
+    let (remotes, branches) = branches?;
     let name = root
         .file_name()
         .map(|s| s.to_string_lossy().into_owned())
@@ -317,12 +330,16 @@ fn read_refs(
             )
         })?
         .to_owned();
-    Ok(RepositoryRefs {
+    let refs = RepositoryRefs {
         root,
         name,
         head,
         branches,
-    })
+        tags: tags?,
+        stashes: stashes.unwrap_or_default(),
+        submodules: submodules.unwrap_or_default(),
+    };
+    Ok((refs, remotes))
 }
 
 pub fn refs(path: &str) -> Result<RepositoryRefs, RepositoryError> {
@@ -333,8 +350,103 @@ pub(crate) fn refs_within(
     path: &str,
     deadline: Deadline,
 ) -> Result<RepositoryRefs, RepositoryError> {
-    let root = root(path, deadline)?;
-    read_refs(&root, &remotes::read(&root, deadline)?, deadline)
+    Ok(read_refs(&root(path, deadline)?, deadline)?.0)
+}
+
+fn stashes(root: &Path, deadline: Deadline) -> Result<Vec<Stash>, RepositoryError> {
+    let output = git::read(
+        root,
+        &["stash", "list", "-z", "--format=%H%x00%gd%x00%gs%x00%at"],
+        deadline,
+    )?;
+    let output = output.strip_suffix(&[0]).unwrap_or(&output);
+    if output.is_empty() {
+        return Ok(Vec::new());
+    }
+    let fields: Vec<_> = output.split(|byte| *byte == 0).collect();
+    let mut records = fields.chunks_exact(4);
+    let stashes = records
+        .by_ref()
+        .map(|fields| {
+            let [oid, name, message, timestamp] = fields else {
+                return Err(git::malformed());
+            };
+            Ok(Stash {
+                name: git::text(name),
+                oid: git::text(oid),
+                message: git::text(message),
+                timestamp: git::text(timestamp).parse().map_err(|_| git::malformed())?,
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if !records.remainder().is_empty() {
+        return Err(git::malformed());
+    }
+    Ok(stashes)
+}
+
+/// Lists the gitlinks in the index that `.gitmodules` maps. `git submodule
+/// status` would fail the whole read on one unmapped gitlink.
+fn submodules(root: &Path, deadline: Deadline) -> Result<Vec<Submodule>, RepositoryError> {
+    // A sparse checkout can leave `.gitmodules` only in the index.
+    let source = if root.join(".gitmodules").is_file() {
+        "--file=.gitmodules"
+    } else {
+        "--blob=:.gitmodules"
+    };
+    let mapped = git::run(
+        root,
+        &[
+            "config",
+            source,
+            "-z",
+            "--get-regexp",
+            r"^submodule\..*\.path$",
+        ],
+        deadline,
+    )?;
+    if !mapped.status.success() {
+        return Ok(Vec::new());
+    }
+    let paths: Vec<_> = mapped
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter_map(|entry| {
+            let start = entry.iter().position(|byte| *byte == b'\n')? + 1;
+            Some(git::text(&entry[start..]))
+        })
+        .collect();
+    if paths.is_empty() {
+        return Ok(Vec::new());
+    }
+    let pathspecs: Vec<_> = paths
+        .iter()
+        .map(|path| format!(":(literal){path}"))
+        .collect();
+    let mut args = vec!["ls-files", "-z", "--stage", "--"];
+    args.extend(pathspecs.iter().map(String::as_str));
+    let mut submodules = Vec::new();
+    for entry in git::read(root, &args, deadline)?
+        .split(|byte| *byte == 0)
+        .filter(|entry| !entry.is_empty())
+    {
+        let entry = git::text(entry);
+        let Some((fields, path)) = entry.split_once('\t') else {
+            return Err(git::malformed());
+        };
+        let [mode, oid, stage] = fields.split(' ').collect::<Vec<_>>()[..] else {
+            return Err(git::malformed());
+        };
+        // A conflicted path has no stage 0, and stage 2 is what HEAD records.
+        let mapped = paths.iter().any(|mapped| mapped == path);
+        if mode == "160000" && (stage == "0" || stage == "2") && mapped {
+            submodules.push(Submodule {
+                path: path.into(),
+                oid: oid.into(),
+            });
+        }
+    }
+    Ok(submodules)
 }
 
 pub fn snapshot(path: &str) -> Result<RepositorySnapshot, RepositoryError> {
@@ -346,14 +458,18 @@ pub(crate) fn snapshot_within(
     deadline: Deadline,
 ) -> Result<RepositorySnapshot, RepositoryError> {
     let root = root(path, deadline)?;
-    let remotes = remotes::read(&root, deadline)?;
-    let RepositoryRefs {
-        root: root_text,
-        name,
-        head,
-        branches,
-    } = read_refs(&root, &remotes, deadline)?;
-    let tags = tags(&root, deadline)?;
+    let (
+        RepositoryRefs {
+            root: root_text,
+            name,
+            head,
+            branches,
+            tags,
+            stashes,
+            submodules,
+        },
+        remotes,
+    ) = read_refs(&root, deadline)?;
     let worktrees = worktrees(&root, deadline)?;
     let limit = format!("--max-count={}", HISTORY_LIMIT + 1);
     let mut args = vec![
@@ -389,6 +505,8 @@ pub(crate) fn snapshot_within(
         head,
         branches,
         tags,
+        stashes,
+        submodules,
         worktrees,
         remotes,
         commits,
@@ -535,12 +653,14 @@ fn in_parallel<A: Send, B>(a: impl FnOnce() -> A + Send, b: impl FnOnce() -> B) 
     thread::scope(|scope| {
         let a = scope.spawn(a);
         let b = b();
-        (
-            a.join()
-                .unwrap_or_else(|payload| panic::resume_unwind(payload)),
-            b,
-        )
+        (joined(a), b)
     })
+}
+
+fn joined<T>(handle: thread::ScopedJoinHandle<'_, T>) -> T {
+    handle
+        .join()
+        .unwrap_or_else(|payload| panic::resume_unwind(payload))
 }
 
 /// Maps each commit `git diff-tree --stdin` reports to its changed paths, one

@@ -1,5 +1,5 @@
 import { normalizeSearch } from "./domain/search";
-import type { FullRef, Oid, RepositoryRoot } from "./domain/repository";
+import type { FullRef, Oid, RepositoryRoot, Stash } from "./domain/repository";
 import type { Selection } from "./domain/selection";
 import type { BranchVisibility, VisibilityRule } from "./domain/visibility";
 
@@ -48,7 +48,8 @@ export type Commands = {
   toggleSolo: () => void;
   showAllBranches: () => void;
   openRepository: (root: RepositoryRoot) => void;
-  jumpToBranch: (reference: FullRef) => void;
+  jumpToRef: (reference: FullRef) => void;
+  showStash: (stash: Stash) => void;
 };
 
 export type Shortcut = {
@@ -358,23 +359,31 @@ export function shortcutLabel(shortcut: Shortcut, mac: boolean): string {
   return mac ? `⌘${key}` : `Ctrl+${key}`;
 }
 
-export type PaletteKind = "action" | "repository" | "branch";
+export type PaletteKind = "action" | "repository" | "branch" | "tag" | "stash";
 
 export type PaletteItem = {
   id: string;
   kind: PaletteKind;
   title: string;
   detail?: string;
+  /** Other names the search matches, ranked after the title. */
+  aliases?: readonly string[];
   shortcut?: string;
   run: () => void;
 };
+
+type NamedRef = { reference: FullRef; name: string };
 
 export function paletteItems(
   context: ActionContext,
   commands: Commands,
   mac: boolean,
   repositories: readonly { root: RepositoryRoot; name: string }[],
-  branches: readonly { reference: FullRef; name: string }[],
+  refs: {
+    branches: readonly NamedRef[];
+    tags: readonly NamedRef[];
+    stashes: readonly Stash[];
+  } | null,
 ): PaletteItem[] {
   const listed: PaletteItem[] = availableActions(context).map((action) => ({
     id: `action:${action.id}`,
@@ -395,12 +404,30 @@ export function paletteItems(
         run: () => commands.openRepository(repository.root),
       }),
     ),
-    ...branches.map(
+    ...(refs?.branches ?? []).map(
       (branch): PaletteItem => ({
         id: `branch:${branch.reference}`,
         kind: "branch",
         title: branch.name,
-        run: () => commands.jumpToBranch(branch.reference),
+        run: () => commands.jumpToRef(branch.reference),
+      }),
+    ),
+    ...(refs?.tags ?? []).map(
+      (tag): PaletteItem => ({
+        id: `tag:${tag.reference}`,
+        kind: "tag",
+        title: tag.name,
+        run: () => commands.jumpToRef(tag.reference),
+      }),
+    ),
+    ...(refs?.stashes ?? []).map(
+      (stash): PaletteItem => ({
+        id: `stash:${stash.name}`,
+        kind: "stash",
+        title: stash.message,
+        detail: stash.name,
+        aliases: [stash.name],
+        run: () => commands.showStash(stash),
       }),
     ),
   ];
@@ -436,6 +463,8 @@ const KIND_ORDER: Record<PaletteKind, number> = {
   action: 0,
   repository: 1,
   branch: 2,
+  tag: 3,
+  stash: 4,
 };
 
 export function filterPalette(
@@ -446,8 +475,14 @@ export function filterPalette(
   if (needle === "") return items;
   const ranked: { item: PaletteItem; score: number; index: number }[] = [];
   items.forEach((item, index) => {
-    const score = rank(item.title, needle);
-    if (score !== null) ranked.push({ item, score, index });
+    const scores = [item.title, ...(item.aliases ?? [])].flatMap(
+      (name, position) => {
+        const score = rank(name, needle);
+        return score === null ? [] : [score + position * 0.5];
+      },
+    );
+    if (scores.length > 0)
+      ranked.push({ item, score: Math.min(...scores), index });
   });
   ranked.sort(
     (left, right) =>

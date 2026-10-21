@@ -65,9 +65,12 @@ export class RepositoryRefsStore {
     const fresh = freshSnapshot(workspace);
     if (fresh === null || fresh === this.#accepted) return;
     this.#accepted = fresh;
-    const { root, name, head, branches } = fresh;
+    const { root, name, head, branches, tags, stashes, submodules } = fresh;
     this.#latestReadId.set(root, ++this.#next);
-    this.#write(root, { kind: "ready", refs: { root, name, head, branches } });
+    this.#write(root, {
+      kind: "ready",
+      refs: { root, name, head, branches, tags, stashes, submodules },
+    });
     this.#onFreshBranches(root, branches);
   }
 

@@ -42,6 +42,16 @@ export const tagSchema = z.object({
   name: z.string(),
   oid: oidSchema,
 });
+export const stashSchema = z.object({
+  name: z.string(),
+  oid: oidSchema,
+  message: z.string(),
+  timestamp: z.number().int(),
+});
+export const submoduleSchema = z.object({
+  path: z.string(),
+  oid: oidSchema,
+});
 export const worktreeSchema = z.object({
   root: rootSchema,
   name: z.string(),
@@ -64,6 +74,8 @@ export const snapshotSchema = z.object({
   head: headSchema,
   branches: z.array(branchSchema),
   tags: z.array(tagSchema),
+  stashes: z.array(stashSchema),
+  submodules: z.array(submoduleSchema),
   worktrees: z.array(worktreeSchema),
   remotes: z.array(
     z.object({
@@ -82,6 +94,9 @@ export const refsSchema = snapshotSchema.pick({
   name: true,
   head: true,
   branches: true,
+  tags: true,
+  stashes: true,
+  submodules: true,
 });
 export const changeStatusSchema = z.enum(["A", "D", "M", "T"]);
 export const detailSchema = z.object({
@@ -242,6 +257,8 @@ export type FullRef = z.infer<typeof refSchema>;
 export type Head = z.infer<typeof headSchema>;
 export type Branch = z.infer<typeof branchSchema>;
 export type Tag = z.infer<typeof tagSchema>;
+export type Stash = z.infer<typeof stashSchema>;
+export type Submodule = z.infer<typeof submoduleSchema>;
 export type Worktree = z.infer<typeof worktreeSchema>;
 export type Commit = z.infer<typeof commitSchema>;
 export type Squash = z.infer<typeof squashSchema>;
