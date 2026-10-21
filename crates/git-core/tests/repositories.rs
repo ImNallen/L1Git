@@ -648,6 +648,37 @@ fn compares_a_commit_with_a_dirty_worktree() {
     ));
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn compares_a_worktree_and_reports_a_non_utf8_untracked_name_as_unsupported() {
+    use std::os::unix::ffi::OsStrExt;
+    let fixture = Fixture::new();
+    let oid = fixture.commit("a.txt", "a\n", "first");
+    fs::write(
+        fixture
+            .repo
+            .join(std::ffi::OsStr::from_bytes(b"bad\xff.txt")),
+        "new\n",
+    )
+    .unwrap();
+    let comparison = Comparison {
+        base: Base::Commit { oid },
+        target: Target::Worktree {
+            root: fixture.path().to_owned(),
+        },
+    };
+    assert_eq!(
+        paths(comparison.clone(), &fixture),
+        [changed("bad\u{FFFD}.txt", ChangeStatus::Added)]
+    );
+    assert!(matches!(
+        file_patch(fixture.path(), &comparison, "bad\u{FFFD}.txt")
+            .unwrap_err()
+            .kind,
+        ErrorKind::UnsupportedPath
+    ));
+}
+
 #[test]
 fn rejects_a_worktree_target_without_a_base_commit_or_from_another_repository() {
     let fixture = Fixture::new();

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { singleCommit } from "./domain/comparison";
 import { oidSchema, rootSchema } from "./domain/repository";
 
 const invoke = vi.fn();
@@ -98,14 +99,14 @@ describe("bridge transport", () => {
         "Reading this commit took longer than 20 s, so L1 Git stopped Git. Retry. If it happens again, check for a slow disk or a Git filter that does not finish.",
     };
     reply(200, { ok: false, error });
-    await expect(commitDetail(root, oid)).rejects.toEqual(error);
+    await expect(commitDetail(root, singleCommit(oid))).rejects.toEqual(error);
   });
 
   it("names the bridge's reason for a 400", async () => {
     const { commitDetail } = await load(false);
-    reply(400, { error: "missing field `oid`" });
-    await expect(commitDetail(root, oid)).rejects.toThrow(
-      "The development bridge rejected the request. missing field `oid`",
+    reply(400, { error: "missing field `comparison`" });
+    await expect(commitDetail(root, singleCommit(oid))).rejects.toThrow(
+      "The development bridge rejected the request. missing field `comparison`",
     );
   });
 

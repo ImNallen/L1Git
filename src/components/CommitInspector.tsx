@@ -1,6 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
+  ArrowLeftRight,
+  ArrowRight,
   ArrowUpRight,
   Check,
   ChevronDown,
@@ -12,7 +14,11 @@ import {
   LoaderCircle,
 } from "lucide-react";
 import { githubHandle, initials } from "../domain/author";
+import { sameComparison } from "../domain/comparison";
+import type { Compare, Comparison } from "../domain/comparison";
 import type {
+  ChangedFile,
+  Commit,
   Oid,
   RepositoryRoot,
   RepositorySnapshot,
@@ -24,7 +30,6 @@ import type {
   WorktreeChanges,
   WorktreeGroup,
 } from "../domain/worktree";
-import { sameSelection } from "../domain/selection";
 import type { Selection } from "../domain/selection";
 import { relativeTime } from "../domain/time";
 import type { DetailState } from "../useWorkspace";
@@ -34,8 +39,11 @@ type Props = {
   state: DetailState;
   root: RepositoryRoot;
   selection: Selection | null;
+  compare: Compare | null;
+  comparison: Comparison | null;
   snapshot: RepositorySnapshot;
   onSelect: (selection: Selection) => void;
+  onSwap: () => void;
   selectedFile: OpenedFile | null;
   onSelectFile: (path: string, side: ListSide | null) => void;
   toggleButton: ReactNode;
@@ -111,8 +119,11 @@ export function CommitInspector({
   state,
   root,
   selection,
+  compare,
+  comparison,
   snapshot,
   onSelect,
+  onSwap,
   selectedFile,
   onSelectFile,
   toggleButton,
@@ -121,7 +132,6 @@ export function CommitInspector({
   onRefreshChanges,
 }: Props) {
   const [copy, setCopy] = useState<"idle" | "copied" | "failed">("idle");
-  const [changesOpen, setChangesOpen] = useState(true);
   useEffect(() => {
     setCopy("idle");
   }, [selection]);
@@ -130,19 +140,12 @@ export function CommitInspector({
     const timer = window.setTimeout(() => setCopy("idle"), 1500);
     return () => window.clearTimeout(timer);
   }, [copy]);
-  const detail =
-    state.kind === "ready" &&
-    state.root === root &&
-    sameSelection(state.selection, selection)
-      ? state.detail
-      : null;
-  const handle = detail && githubHandle(detail.commit.email);
-  const error =
-    state.kind === "error" &&
-    state.root === root &&
-    sameSelection(state.selection, selection)
-      ? state.error
-      : null;
+  const current = (key: { root: RepositoryRoot; comparison: Comparison }) =>
+    key.root === root &&
+    comparison !== null &&
+    sameComparison(key.comparison, comparison);
+  const detail = state.kind === "ready" && current(state) ? state.detail : null;
+  const error = state.kind === "error" && current(state) ? state.error : null;
 
   async function copySha(oid: Oid) {
     try {
@@ -153,7 +156,7 @@ export function CommitInspector({
     }
   }
 
-  if (selection?.kind === "worktree")
+  if (selection?.kind === "worktree" && compare === null)
     return (
       <InspectorFrame toggleButton={toggleButton}>
         {worktree ? (
@@ -174,24 +177,141 @@ export function CommitInspector({
       </InspectorFrame>
     );
 
+  const pending = error ? (
+    <div className="inspector-empty">
+      <p role="alert">{error.message}</p>
+      <button className="button secondary" onClick={onRetry}>
+        Retry details
+      </button>
+    </div>
+  ) : (
+    <div className="inspector-empty">
+      {selection ? (
+        <>
+          <LoaderCircle size={23} className="spin" />
+          <p>{compare ? "Reading comparison…" : "Reading commit…"}</p>
+        </>
+      ) : (
+        <>
+          <GitCommitHorizontal size={30} />
+          <p>Select a commit to inspect it.</p>
+        </>
+      )}
+    </div>
+  );
+
+  if (compare !== null)
+    return (
+      <InspectorFrame
+        toggleButton={toggleButton}
+        heading={
+          <span className="compare-ends">
+            <code>{compare.base.slice(0, 7)}</code>
+            <ArrowRight size={12} aria-label="to" />
+            <code>
+              {compare.target.kind === "commit"
+                ? compare.target.oid.slice(0, 7)
+                : "Working copy"}
+            </code>
+            {compare.target.kind === "commit" && (
+              <button
+                className="button secondary compare-swap"
+                onClick={onSwap}
+                title="Swap the base and the target"
+              >
+                <ArrowLeftRight size={12} />
+                <span>Swap</span>
+              </button>
+            )}
+          </span>
+        }
+      >
+        {detail ? (
+          <div className="inspector-content">
+            <h2>
+              {detail.target.kind === "worktree"
+                ? "Compared with the working copy"
+                : "Compared commits"}
+            </h2>
+            <dl className="commit-metadata">
+              {detail.base.kind === "commit" && (
+                <CompareEnd
+                  label="Base"
+                  commit={detail.base.commit}
+                  onSelect={onSelect}
+                />
+              )}
+              {detail.target.kind === "commit" ? (
+                <CompareEnd
+                  label="Target"
+                  commit={detail.target.commit}
+                  onSelect={onSelect}
+                />
+              ) : (
+                <div className="meta-row">
+                  <dt className="visually-hidden">Target</dt>
+                  <dd>
+                    <span className="meta-icon" aria-hidden="true">
+                      <FolderGit2 size={13} />
+                    </span>
+                    <span className="meta-lines">
+                      <span className="meta-primary">
+                        {snapshot.worktrees.find(
+                          (listed) =>
+                            detail.target.kind === "worktree" &&
+                            listed.root === detail.target.root,
+                        )?.name ?? "Working copy"}
+                      </span>
+                      <span
+                        className="meta-secondary"
+                        title={detail.target.root}
+                      >
+                        {detail.target.root}
+                      </span>
+                    </span>
+                  </dd>
+                </div>
+              )}
+            </dl>
+            <ChangedFiles
+              files={detail.files}
+              treeKey={JSON.stringify(comparison)}
+              title={`Compared ${compare.base} with ${compare.target.kind === "commit" ? compare.target.oid : "the working copy"}. Renames appear as added and deleted paths.`}
+              empty={
+                detail.target.kind === "worktree"
+                  ? "No changes between this commit and the working copy."
+                  : "No changes between these commits."
+              }
+              selectedFile={selectedFile}
+              onSelectFile={onSelectFile}
+            />
+          </div>
+        ) : (
+          pending
+        )}
+      </InspectorFrame>
+    );
+
+  const target = detail?.target.kind === "commit" ? detail.target : null;
+  const handle = target && githubHandle(target.commit.email);
   return (
     <InspectorFrame
       toggleButton={toggleButton}
       heading={
-        detail && (
+        target && (
           <button
             className={`sha-chip ${copy}`}
-            onClick={() => void copySha(detail.commit.oid)}
-            aria-label={`Copy commit SHA ${detail.commit.oid}`}
-            title={copy === "copied" ? "Copied" : `Copy ${detail.commit.oid}`}
+            onClick={() => void copySha(target.commit.oid)}
+            aria-label={`Copy commit SHA ${target.commit.oid}`}
+            title={copy === "copied" ? "Copied" : `Copy ${target.commit.oid}`}
           >
-            <code>{detail.commit.oid.slice(0, 7)}</code>
+            <code>{target.commit.oid.slice(0, 7)}</code>
             {copy === "copied" ? <Check size={12} /> : <Copy size={12} />}
           </button>
         )
       }
     >
-      {detail ? (
+      {detail && target ? (
         <div className="inspector-content">
           <span className="visually-hidden" role="status">
             {copy === "copied" ? "Commit SHA copied" : ""}
@@ -199,17 +319,17 @@ export function CommitInspector({
           {copy === "failed" && (
             <p className="copy-error">
               Could not copy. Select the SHA to copy it:{" "}
-              <code>{detail.commit.oid}</code>
+              <code>{target.commit.oid}</code>
             </p>
           )}
-          <h2>{detail.commit.subject || "(no subject)"}</h2>
+          <h2>{target.commit.subject || "(no subject)"}</h2>
           <CommitMessage
-            key={`message:${detail.commit.oid}`}
-            body={detail.message.slice(detail.message.indexOf("\n") + 1).trim()}
+            key={`message:${target.commit.oid}`}
+            body={target.message.slice(target.message.indexOf("\n") + 1).trim()}
           />
           <div className="inspector-refs">
             {snapshot.branches
-              .filter((branch) => branch.oid === detail.commit.oid)
+              .filter((branch) => branch.oid === target.commit.oid)
               .map((branch) => (
                 <span
                   className={`ref-badge ${branch.kind}`}
@@ -224,12 +344,12 @@ export function CommitInspector({
               <dt className="visually-hidden">Author</dt>
               <dd>
                 <span className="meta-icon avatar" aria-hidden="true">
-                  {initials(detail.commit.author)}
+                  {initials(target.commit.author)}
                 </span>
                 <span className="meta-lines">
-                  <span className="meta-primary">{detail.commit.author}</span>
-                  <span className="meta-secondary" title={detail.commit.email}>
-                    {handle ? `@${handle}` : detail.commit.email}
+                  <span className="meta-primary">{target.commit.author}</span>
+                  <span className="meta-secondary" title={target.commit.email}>
+                    {handle ? `@${handle}` : target.commit.email}
                   </span>
                 </span>
               </dd>
@@ -243,14 +363,14 @@ export function CommitInspector({
                 <time
                   className="meta-lines"
                   dateTime={new Date(
-                    detail.commit.timestamp * 1000,
+                    target.commit.timestamp * 1000,
                   ).toISOString()}
                 >
                   <span className="meta-primary">
-                    {relativeTime(detail.commit.timestamp)}
+                    {relativeTime(target.commit.timestamp)}
                   </span>
                   <span className="meta-secondary">
-                    {new Date(detail.commit.timestamp * 1000).toLocaleString(
+                    {new Date(target.commit.timestamp * 1000).toLocaleString(
                       undefined,
                       {
                         weekday: "short",
@@ -267,7 +387,7 @@ export function CommitInspector({
             </div>
             <div className="meta-row">
               <dt className="visually-hidden">
-                {detail.commit.parents.length === 1 ? "Parent" : "Parents"}
+                {target.commit.parents.length === 1 ? "Parent" : "Parents"}
               </dt>
               <dd>
                 <span className="meta-icon" aria-hidden="true">
@@ -275,9 +395,9 @@ export function CommitInspector({
                 </span>
                 <span className="meta-lines">
                   <span className="meta-primary parents">
-                    {detail.commit.parents.length === 0
+                    {target.commit.parents.length === 0
                       ? "Root commit"
-                      : detail.commit.parents.map((parent) => (
+                      : target.commit.parents.map((parent) => (
                           <button
                             className="sha-chip"
                             key={parent}
@@ -292,94 +412,138 @@ export function CommitInspector({
                         ))}
                   </span>
                   <span className="meta-secondary">
-                    {detail.commit.parents.length === 0
+                    {target.commit.parents.length === 0
                       ? "No parent"
-                      : detail.commit.parents.length === 1
+                      : target.commit.parents.length === 1
                         ? "Parent"
-                        : `Merge of ${detail.commit.parents.length} parents`}
+                        : `Merge of ${target.commit.parents.length} parents`}
                   </span>
                 </span>
               </dd>
             </div>
           </dl>
-          <button
-            className="changed-files-heading"
-            aria-expanded={changesOpen}
-            aria-controls="changed-files"
-            onClick={() => setChangesOpen(!changesOpen)}
-            title={`${detail.diffBase === "emptyTree" ? "Compared with the empty tree" : "Compared with the first parent"}. Renames appear as added and deleted paths.`}
-          >
-            <span className="changed-files-title">
-              {changesOpen ? (
-                <ChevronDown size={13} />
-              ) : (
-                <ChevronRight size={13} />
-              )}
-              Changes
-              <span className="count">{detail.files.length}</span>
-            </span>
-            <span className="change-summary">
-              {changeKinds.flatMap(({ gitStatus, symbol, label }) => {
-                const count = detail.files.filter(
-                  (file) => changeStatuses[file.status].gitStatus === gitStatus,
-                ).length;
-                return count === 0
-                  ? []
-                  : [
-                      <span
-                        key={gitStatus}
-                        className={`change-stat ${gitStatus}`}
-                        title={`${count} ${label}`}
-                        aria-label={`${count} ${label}`}
-                      >
-                        {symbol}
-                        {count}
-                      </span>,
-                    ];
-              })}
-            </span>
-          </button>
-          {changesOpen && (
-            <div id="changed-files" className="changed-files">
-              {detail.files.length > 0 ? (
-                <ChangedFileTree
-                  key={detail.commit.oid}
-                  files={detail.files.map((file) => ({
-                    path: file.path,
-                    status: changeStatuses[file.status].gitStatus,
-                  }))}
-                  selectedPath={selectedFile?.path ?? null}
-                  onSelectFile={(path) => onSelectFile(path, null)}
-                />
-              ) : (
-                <p className="muted">No paths changed against this base.</p>
-              )}
-            </div>
-          )}
-        </div>
-      ) : error ? (
-        <div className="inspector-empty">
-          <p role="alert">{error.message}</p>
-          <button className="button secondary" onClick={onRetry}>
-            Retry details
-          </button>
+          <ChangedFiles
+            files={detail.files}
+            treeKey={target.commit.oid}
+            title={`${detail.base.kind === "emptyTree" ? "Compared with the empty tree" : "Compared with the first parent"}. Renames appear as added and deleted paths.`}
+            empty="No paths changed against this base."
+            selectedFile={selectedFile}
+            onSelectFile={onSelectFile}
+          />
         </div>
       ) : (
-        <div className="inspector-empty">
-          {selection ? (
-            <>
-              <LoaderCircle size={23} className="spin" />
-              <p>Reading commit…</p>
-            </>
+        pending
+      )}
+    </InspectorFrame>
+  );
+}
+
+function CompareEnd({
+  label,
+  commit,
+  onSelect,
+}: {
+  label: "Base" | "Target";
+  commit: Commit;
+  onSelect: (selection: Selection) => void;
+}) {
+  return (
+    <div className="meta-row">
+      <dt className="visually-hidden">{label}</dt>
+      <dd>
+        <span className="meta-icon" aria-hidden="true">
+          <GitCommitHorizontal size={14} />
+        </span>
+        <span className="meta-lines">
+          <span className="meta-primary" title={commit.subject}>
+            {commit.subject || "(no subject)"}
+          </span>
+          <span className="meta-secondary parents">
+            {label}
+            <button
+              className="sha-chip"
+              title={`Open ${commit.oid}`}
+              onClick={() => onSelect({ kind: "commit", oid: commit.oid })}
+            >
+              <code>{commit.oid.slice(0, 7)}</code>
+              <ArrowUpRight size={12} />
+            </button>
+          </span>
+        </span>
+      </dd>
+    </div>
+  );
+}
+
+function ChangedFiles({
+  files,
+  treeKey,
+  title,
+  empty,
+  selectedFile,
+  onSelectFile,
+}: {
+  files: ChangedFile[];
+  treeKey: string;
+  title: string;
+  empty: string;
+  selectedFile: OpenedFile | null;
+  onSelectFile: (path: string, side: ListSide | null) => void;
+}) {
+  const [open, setOpen] = useState(true);
+  return (
+    <>
+      <button
+        className="changed-files-heading"
+        aria-expanded={open}
+        aria-controls="changed-files"
+        onClick={() => setOpen(!open)}
+        title={title}
+      >
+        <span className="changed-files-title">
+          {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+          Changes
+          <span className="count">{files.length}</span>
+        </span>
+        <span className="change-summary">
+          {changeKinds.flatMap(({ gitStatus, symbol, label }) => {
+            const count = files.filter(
+              (file) => changeStatuses[file.status].gitStatus === gitStatus,
+            ).length;
+            return count === 0
+              ? []
+              : [
+                  <span
+                    key={gitStatus}
+                    className={`change-stat ${gitStatus}`}
+                    title={`${count} ${label}`}
+                    aria-label={`${count} ${label}`}
+                  >
+                    {symbol}
+                    {count}
+                  </span>,
+                ];
+          })}
+        </span>
+      </button>
+      {open && (
+        <div id="changed-files" className="changed-files">
+          {files.length > 0 ? (
+            <ChangedFileTree
+              key={treeKey}
+              files={files.map((file) => ({
+                path: file.path,
+                status: changeStatuses[file.status].gitStatus,
+              }))}
+              selectedPath={selectedFile?.path ?? null}
+              onSelectFile={(path) => onSelectFile(path, null)}
+            />
           ) : (
-            <>
-              <GitCommitHorizontal size={30} />
-              <p>Select a commit to inspect it.</p>
-            </>
+            <p className="muted">{empty}</p>
           )}
         </div>
       )}
-    </InspectorFrame>
+    </>
   );
 }
 

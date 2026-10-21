@@ -262,10 +262,9 @@ pub(crate) fn worktree_patch_within(
     }
 }
 
-/// Lists what differs between `base` and the files on disk, untracked files
-/// included. `--raw` lists a file whose stat changed but whose content did
-/// not, because plumbing never refreshes the index, so only the paths
-/// `--numstat` counts are kept. An unmerged path is kept either way.
+/// `--raw` lists a file whose stat changed but whose content did not, because
+/// plumbing never refreshes the index, so only the paths `--numstat` counts
+/// are kept.
 pub(crate) fn worktree_changes(
     root: &Path,
     base: &str,
@@ -328,8 +327,6 @@ pub(crate) fn worktree_changes(
     Ok(files)
 }
 
-/// Diffs one path that `worktree_changes` lists. `None` means the path matches
-/// `base` or is gone.
 pub(crate) fn worktree_file_patch(
     root: &Path,
     base: &str,
@@ -337,6 +334,9 @@ pub(crate) fn worktree_file_patch(
     deadline: Deadline,
 ) -> Result<Option<FilePatch>, RepositoryError> {
     check(file)?;
+    if file.contains(char::REPLACEMENT_CHARACTER) {
+        return Err(repository::non_utf8_path());
+    }
     if let Some(diff) = tracked(
         root,
         &["diff-index", "--no-renames", base],
@@ -350,11 +350,7 @@ pub(crate) fn worktree_file_patch(
         .iter()
         .any(|entry| matches!(entry, StatusEntry::Untracked { path } if path == file));
     if !untracked_path {
-        return if file.contains(char::REPLACEMENT_CHARACTER) {
-            Err(repository::non_utf8_path())
-        } else {
-            Ok(None)
-        };
+        return Ok(None);
     }
     match untracked(root, file, deadline)? {
         Some(WorktreePatch::Diff { diff }) => Ok(Some(diff)),

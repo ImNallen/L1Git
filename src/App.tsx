@@ -32,6 +32,7 @@ import { trunkTips } from "./domain/highlight";
 import { readyAdvances } from "./domain/overview";
 import type { Branch, FullRef, RepositoryRoot } from "./domain/repository";
 import { sameSelection } from "./domain/selection";
+import type { Compare } from "./domain/comparison";
 import type { Selection } from "./domain/selection";
 import { NO_RULE, visibleCommits } from "./domain/visibility";
 import type { VisibilityRule } from "./domain/visibility";
@@ -248,6 +249,14 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   function select(next: Selection) {
     setSidebarJump(null);
     app.select(next);
+  }
+  function compareWith(next: Compare) {
+    setSidebarJump(null);
+    app.compareWith(next);
+  }
+  function endCompare() {
+    setSidebarJump(null);
+    app.endCompare();
   }
   function setRule(root: RepositoryRoot, next: VisibilityRule) {
     setSidebarJump(null);
@@ -565,8 +574,11 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                     rows={rows}
                     rule={rule}
                     selection={app.selection}
+                    compare={app.compare}
                     revealSeq={jump?.seq ?? 0}
                     onSelect={select}
+                    onCompare={compareWith}
+                    onEndCompare={endCompare}
                     onOpenFirstFile={app.openFirstFile}
                     onCancelOpen={app.cancelOpenFirstFile}
                     scrollTopOf={app.scrollTopOf}
@@ -674,8 +686,11 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                     state={app.detail}
                     root={snapshot.root}
                     selection={app.selection}
+                    compare={app.compare}
+                    comparison={app.comparison}
                     snapshot={snapshot}
                     onSelect={select}
+                    onSwap={app.swapCompare}
                     selectedFile={fileOpen ? fileDiff : null}
                     onSelectFile={app.openFile}
                     toggleButton={inspectorToggle}

@@ -85,10 +85,24 @@ export const refsSchema = snapshotSchema.pick({
 });
 export const changeStatusSchema = z.enum(["A", "D", "M", "T"]);
 export const detailSchema = z.object({
-  commit: commitSchema,
-  message: z.string(),
+  base: z.discriminatedUnion("kind", [
+    z.strictObject({ kind: z.literal("emptyTree") }),
+    z.strictObject({ kind: z.literal("firstParent") }),
+    z.strictObject({ kind: z.literal("commit"), commit: commitSchema }),
+  ]),
+  target: z.discriminatedUnion("kind", [
+    z.strictObject({
+      kind: z.literal("commit"),
+      commit: commitSchema,
+      message: z.string(),
+    }),
+    z.strictObject({
+      kind: z.literal("worktree"),
+      root: rootSchema,
+      head: headSchema,
+    }),
+  ]),
   files: z.array(z.object({ path: z.string(), status: changeStatusSchema })),
-  diffBase: z.enum(["emptyTree", "firstParent"]),
 });
 export const filePatchSchema = z.discriminatedUnion("kind", [
   z.strictObject({

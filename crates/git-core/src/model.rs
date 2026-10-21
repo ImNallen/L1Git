@@ -122,9 +122,6 @@ pub struct ChangedFile {
     pub status: ChangeStatus,
 }
 
-/// What `commitDetail` and `filePatch` diff. `FirstParent` is the target
-/// commit's first parent, or the empty tree for a root commit, and needs a
-/// commit target.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Comparison {
@@ -133,7 +130,6 @@ pub struct Comparison {
 }
 
 impl Comparison {
-    /// One commit against its first parent.
     pub fn commit(oid: impl Into<String>) -> Self {
         Self {
             base: Base::FirstParent,
@@ -159,14 +155,8 @@ pub enum Base {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
 pub enum Target {
-    Commit {
-        oid: String,
-    },
-    /// A worktree root of the repository, compared with its files on disk,
-    /// untracked files included.
-    Worktree {
-        root: String,
-    },
+    Commit { oid: String },
+    Worktree { root: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

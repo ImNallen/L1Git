@@ -4,7 +4,7 @@
 | ----------------------------------------------- | --------------------------------------------------------------------- | ---------------------------------------------------------------------- |
 | [Add and restore repositories](repositories.md) | Open a working copy and keep it across restarts                       | Visible list, canonical path, unchanged files                          |
 | [Browse the commit graph](history.md)           | See every branch in one graph and jump to a branch tip                | Full graph, selected tip, unchanged HEAD                               |
-| [Inspect a commit](inspector.md)                | Read the message, parents, and changed paths                          | Merge and root details, working parent links                           |
+| [Inspect a commit](inspector.md)                | Read the message, parents, and changed paths, or compare two commits  | Merge and root details, working parent links, compared paths           |
 | [Read a file diff](diff.md)                     | Read one changed file's patch in place of the history                 | Unified and split diffs, binary notice, Escape back                    |
 | [Change appearance](appearance.md)              | Choose System, Light, or Dark without losing the repository view      | Saved preference, live system changes, themed workspace and diffs      |
 | [Update behind branches](overview.md)           | Fetch saved repositories and fast-forward ready branches in one click | Moved refs match the count, blocked branches stay put, refreshed graph |

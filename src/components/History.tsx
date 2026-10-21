@@ -16,10 +16,15 @@ import {
   FolderGit2,
   GitBranch,
   GitCommitHorizontal,
+  GitCompareArrows,
+  Pin,
   Tag,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { initials } from "../domain/author";
+import { mac } from "../repositories";
+import { compareRows, comparedRowId } from "../domain/comparison";
+import type { Compare } from "../domain/comparison";
 import { diffstatBlocks } from "../domain/diffstat";
 import { buildGraph } from "../domain/graph";
 import type { GraphRow, RowId } from "../domain/graph";
@@ -130,7 +135,18 @@ function GraphCell({
   );
 }
 
-function SelectedRing({ lane, radius }: { lane: number; radius: number }) {
+type Ring = "selected" | "compared" | null;
+
+function RowRing({
+  lane,
+  radius,
+  ring,
+}: {
+  lane: number;
+  radius: number;
+  ring: Ring;
+}) {
+  if (ring === null) return null;
   return (
     <circle
       cx={x(lane)}
@@ -139,14 +155,15 @@ function SelectedRing({ lane, radius }: { lane: number; radius: number }) {
       fill="none"
       stroke="var(--text)"
       strokeWidth={2}
+      strokeDasharray={ring === "compared" ? "3 2" : undefined}
     />
   );
 }
 
-function WorktreeNode({ lane, selected }: { lane: number; selected: boolean }) {
+function WorktreeNode({ lane, ring }: { lane: number; ring: Ring }) {
   return (
     <g className="graph-node">
-      {selected && <SelectedRing lane={lane} radius={8} />}
+      <RowRing lane={lane} radius={8} ring={ring} />
       <circle
         cx={x(lane)}
         cy={18}
@@ -163,18 +180,18 @@ function WorktreeNode({ lane, selected }: { lane: number; selected: boolean }) {
 function CommitNode({
   commit,
   lane,
-  selected,
+  ring,
 }: {
   commit: Commit;
   lane: number;
-  selected: boolean;
+  ring: Ring;
 }) {
   const merge = commit.parents.length > 1;
   const radius = merge ? 5 : 10;
   return (
     <g className="graph-node">
       <title>{`${commit.author} <${commit.email}>`}</title>
-      {selected && <SelectedRing lane={lane} radius={radius} />}
+      <RowRing lane={lane} radius={radius} ring={ring} />
       {merge ? (
         <circle
           cx={x(lane)}
@@ -412,8 +429,11 @@ type Props = {
   rows: readonly HistoryRow[];
   rule: VisibilityRule;
   selection: Selection | null;
+  compare: Compare | null;
   revealSeq: number;
   onSelect: (selection: Selection) => void;
+  onCompare: (compare: Compare) => void;
+  onEndCompare: () => void;
   onOpenFirstFile: () => void;
   onCancelOpen: () => void;
   /** Where the history of `root` was scrolled when it was last shown. */
@@ -435,8 +455,11 @@ export function History({
   rows,
   rule,
   selection,
+  compare,
   revealSeq,
   onSelect,
+  onCompare,
+  onEndCompare,
   onOpenFirstFile,
   onCancelOpen,
   scrollTopOf,
@@ -449,6 +472,7 @@ export function History({
 }: Props) {
   const selectedOid = selection?.kind === "commit" ? selection.oid : null;
   const selectedId = selectedRowId(selection);
+  const comparedId = compare && comparedRowId(compare);
   const graph = useMemo(
     () =>
       buildGraph(
@@ -517,9 +541,11 @@ export function History({
   const trail = useRef<Trail | null>(null);
   const wasHidden = useRef(hidden);
   const [viewport, setViewport] = useState({ top: 0, height: 0 });
-  const [columnMenu, setColumnMenu] = useState<{ x: number; y: number } | null>(
-    null,
-  );
+  const [menu, setMenu] = useState<{
+    x: number;
+    y: number;
+    commit: Oid | null;
+  } | null>(null);
   const revealOnClose = useRef<ColumnId | null>(null);
   const now = useNowSeconds(visibleColumns.has("date"));
   const shaShown = visibleColumns.has("sha");
@@ -541,7 +567,34 @@ export function History({
 
   function openColumnMenu(event: MouseEvent) {
     event.preventDefault();
-    setColumnMenu({ x: event.clientX, y: event.clientY });
+    setMenu({ x: event.clientX, y: event.clientY, commit: null });
+  }
+
+  function clickRow(event: MouseEvent, row: HistoryRow) {
+    const picked = rowSelection(row);
+    const anchor = compare?.anchor ?? selection;
+    const next =
+      anchor !== null && (mac ? event.metaKey : event.ctrlKey)
+        ? compareRows(rows, snapshot.root, anchor, picked)
+        : null;
+    if (next) onCompare(next);
+    else onSelect(picked);
+    tableRef.current?.focus({ preventScroll: true });
+  }
+
+  const [mark, setMark] = useState<{
+    root: RepositoryRoot;
+    oid: Oid;
+  } | null>(null);
+
+  function compareWithWorkingCopy(oid: Oid) {
+    const commit: Selection = { kind: "commit", oid };
+    onCompare({
+      root: snapshot.root,
+      anchor: commit,
+      base: oid,
+      target: { kind: "worktree", root: snapshot.root },
+    });
   }
 
   useLayoutEffect(() => {
@@ -651,7 +704,7 @@ export function History({
       const selectedRow = rows.findIndex((row) => row.id === selectedId);
       const selectedShown = selectedRow >= 0 && rowShown(selectedRow);
       flushSync(() => {
-        closeColumnMenu();
+        closeMenu();
         setSearch((open) => open ?? { root: snapshot.root, query: "" });
       });
       if (scroller) {
@@ -682,20 +735,35 @@ export function History({
     onSelect({ kind: "commit", oid });
   }
 
-  function closeColumnMenu() {
-    setColumnMenu(null);
+  function closeMenu() {
+    setMenu(null);
     revealColumn(revealOnClose.current);
     revealOnClose.current = null;
   }
 
   function run(action: HistoryAction) {
     if (action === "open") return onOpenFirstFile();
-    if (action === "cancel") return onCancelOpen();
+    if (action === "cancel") {
+      onCancelOpen();
+      if (compare) onEndCompare();
+      return;
+    }
     if (action === "columns") {
       const header = headRef.current?.getBoundingClientRect();
       const pane = scrollRef.current?.getBoundingClientRect();
+      const commit =
+        selectedOid !== null && rows.some((row) => row.id === selectedOid)
+          ? selectedOid
+          : null;
+      const row =
+        commit &&
+        document.getElementById(rowId(commit))?.getBoundingClientRect();
       if (header && pane)
-        setColumnMenu({ x: pane.left + 14, y: header.bottom });
+        setMenu({
+          x: pane.left + 14,
+          y: row ? row.bottom : header.bottom,
+          commit,
+        });
       return;
     }
     const landing = landingFromHidden(
@@ -761,6 +829,15 @@ export function History({
     selectedId !== null && visible.some((row) => row.id === selectedId)
       ? rowId(selectedId)
       : undefined;
+  const menuCommit = menu?.commit ?? null;
+  const markedCommit =
+    mark?.root === snapshot.root
+      ? commits.find((commit) => commit.oid === mark.oid)
+      : undefined;
+  const marked = markedCommit && {
+    oid: markedCommit.oid,
+    subject: markedCommit.subject,
+  };
 
   return (
     <section
@@ -837,6 +914,11 @@ export function History({
             {visible.map((entry, offset) => {
               const row = graph.rows.get(entry.id);
               const selected = selectedId === entry.id;
+              const ring: Ring = selected
+                ? "selected"
+                : comparedId === entry.id
+                  ? "compared"
+                  : null;
               const lit = searching
                 ? entry.kind === "commit" && matches.has(entry.id)
                 : highlight?.commits.has(entry.id);
@@ -846,17 +928,23 @@ export function History({
                 className:
                   [
                     entry.kind === "worktree" && "worktree-row",
-                    selected && "selected",
+                    ring,
                     lit && "lit",
                   ]
                     .filter(Boolean)
                     .join(" ") || undefined,
                 style: { gridTemplateColumns: layout.template },
                 "aria-rowindex": first + offset + 2,
-                "aria-selected": selected,
-                onClick: () => {
-                  onSelect(rowSelection(entry));
-                  tableRef.current?.focus({ preventScroll: true });
+                "aria-selected": ring !== null,
+                onClick: (event: MouseEvent) => clickRow(event, entry),
+                onContextMenu: (event: MouseEvent) => {
+                  event.preventDefault();
+                  if (!selected || compare) onSelect(rowSelection(entry));
+                  setMenu({
+                    x: event.clientX,
+                    y: event.clientY,
+                    commit: entry.kind === "commit" ? entry.commit.oid : null,
+                  });
                 },
               };
               const edges = searching
@@ -888,7 +976,7 @@ export function History({
                           lit={edges}
                           parentDash={WORKTREE_DASH}
                         >
-                          <WorktreeNode lane={row.lane} selected={selected} />
+                          <WorktreeNode lane={row.lane} ring={ring} />
                         </GraphCell>
                       )}
                     </td>
@@ -935,7 +1023,7 @@ export function History({
                         <CommitNode
                           commit={commit}
                           lane={row.lane}
-                          selected={selected}
+                          ring={ring}
                         />
                       </GraphCell>
                     )}
@@ -982,17 +1070,68 @@ export function History({
           </div>
         )}
       </div>
-      {columnMenu && (
+      {menu && (
         <ContextMenu
-          x={columnMenu.x}
-          y={columnMenu.y}
-          label="History columns"
+          x={menu.x}
+          y={menu.y}
+          label={menuCommit ? "Commit" : "History columns"}
           ignoreScrollIn={scrollRef}
           onClose={() => {
-            closeColumnMenu();
+            closeMenu();
             tableRef.current?.focus({ preventScroll: true });
           }}
         >
+          {menuCommit && (
+            <>
+              <button
+                role="menuitem"
+                onClick={() => {
+                  compareWithWorkingCopy(menuCommit);
+                  closeMenu();
+                  tableRef.current?.focus({ preventScroll: true });
+                }}
+              >
+                <GitCompareArrows size={14} />
+                <span>Compare with working copy</span>
+              </button>
+              {marked && marked.oid !== menuCommit ? (
+                <button
+                  role="menuitem"
+                  title={marked.subject}
+                  onClick={() => {
+                    const next = compareRows(
+                      rows,
+                      snapshot.root,
+                      { kind: "commit", oid: menuCommit },
+                      { kind: "commit", oid: marked.oid },
+                    );
+                    if (next) onCompare(next);
+                    setMark(null);
+                    closeMenu();
+                    tableRef.current?.focus({ preventScroll: true });
+                  }}
+                >
+                  <GitCompareArrows size={14} />
+                  <span>Compare with {marked.oid.slice(0, 7)}</span>
+                </button>
+              ) : (
+                <button
+                  role="menuitem"
+                  onClick={() => {
+                    setMark({ root: snapshot.root, oid: menuCommit });
+                    closeMenu();
+                    tableRef.current?.focus({ preventScroll: true });
+                  }}
+                >
+                  <Pin size={14} />
+                  <span>Pick for comparison</span>
+                </button>
+              )}
+              <div className="menu-heading" role="presentation">
+                Columns
+              </div>
+            </>
+          )}
           {historyColumns.map((column) => {
             const checked = visibleColumns.has(column.id);
             return (

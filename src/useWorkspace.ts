@@ -1,6 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as repositories from "./repositories";
 import { firstChangedPath } from "./domain/changedFiles";
+import {
+  compared,
+  compareListed,
+  sameComparison,
+  singleCommit,
+  swapEnds,
+} from "./domain/comparison";
+import type { Compare, Comparison } from "./domain/comparison";
 import { latestReader } from "./latestReader";
 import { oneReadPerKey } from "./oneReadPerKey";
 import {
@@ -20,7 +28,7 @@ import {
 } from "./domain/revisit";
 import type { RepositoryView, SnapshotCache } from "./domain/revisit";
 import { sameSelection, stableSelection } from "./domain/selection";
-import type { CommitSelection, Selection } from "./domain/selection";
+import type { Selection } from "./domain/selection";
 import {
   firstWorktreeFile,
   openDiffAfter,
@@ -61,21 +69,12 @@ export type Workspace =
   | { kind: "loading"; path: RepositoryRoot; previous: ReadyWorkspace }
   | { kind: "error"; path: RepositoryRoot; error: Problem }
   | ReadyWorkspace;
+type DetailKey = { root: RepositoryRoot; comparison: Comparison };
 export type DetailState =
   | { kind: "empty" }
-  | { kind: "loading"; root: RepositoryRoot; selection: Selection }
-  | {
-      kind: "ready";
-      root: RepositoryRoot;
-      selection: CommitSelection;
-      detail: CommitDetail;
-    }
-  | {
-      kind: "error";
-      root: RepositoryRoot;
-      selection: Selection;
-      error: Problem;
-    };
+  | ({ kind: "loading" } & DetailKey)
+  | ({ kind: "ready"; detail: CommitDetail } & DetailKey)
+  | ({ kind: "error"; error: Problem } & DetailKey);
 /** `superseded` means another repository opened while this one was read. */
 export type Added =
   | { kind: "opened"; root: RepositoryRoot }
@@ -83,10 +82,9 @@ export type Added =
   | { kind: "failed"; problem: Problem };
 type WorktreeSelection = Extract<Selection, { kind: "worktree" }>;
 type FileKey = { root: RepositoryRoot; path: string } & (
-  | { selection: CommitSelection; side: null }
+  | { comparison: Comparison; side: null }
   | { selection: WorktreeSelection; side: ListSide }
 );
-type CommitKey = { root: RepositoryRoot; selection: CommitSelection };
 export type FileDiffState =
   | { kind: "closed" }
   | ({ kind: "loading" } & FileKey)
@@ -120,9 +118,11 @@ export function useWorkspace() {
   const [detail, setDetail] = useState<DetailState>({ kind: "empty" });
   const [detailAttempt, setDetailAttempt] = useState(0);
   const [fileDiff, setFileDiff] = useState<FileDiffState>({ kind: "closed" });
+  const [compare, setCompare] = useState<Compare | null>(null);
   const [pendingOpen, setPendingOpen] = useState<{
     root: RepositoryRoot;
     selection: Selection;
+    compare: Compare | null;
   } | null>(null);
   const [changes, setChanges] = useState<ChangesByWorktree>(new Map());
   const changesRef = useRef(changes);
@@ -143,6 +143,22 @@ export function useWorkspace() {
     workspace.kind === "loading" || workspace.kind === "opening"
       ? workspace.path
       : root;
+  const activeCompare =
+    compare !== null &&
+    compare.root === root &&
+    sameSelection(compare.anchor, selection)
+      ? compare
+      : null;
+  const comparisonKey = activeCompare
+    ? JSON.stringify(compared(activeCompare))
+    : selection?.kind === "commit"
+      ? JSON.stringify(singleCommit(selection.oid))
+      : null;
+  const comparison = useMemo(
+    () =>
+      comparisonKey === null ? null : (JSON.parse(comparisonKey) as Comparison),
+    [comparisonKey],
+  );
 
   const save = useCallback((next: Catalog) => {
     catalogRef.current = next;
@@ -162,6 +178,13 @@ export function useWorkspace() {
       setWorkspace({ kind: "ready", snapshot, error: null });
       setSelection((selected) =>
         restoreSelection(snapshot, selected, changesRef.current),
+      );
+      setCompare((kept) =>
+        kept === null ||
+        kept.root !== snapshot.root ||
+        compareListed(snapshot, kept)
+          ? kept
+          : null,
       );
       if (rememberRepository) save(remember(catalogRef.current, snapshot));
     },
@@ -320,8 +343,8 @@ export function useWorkspace() {
   }, [current, selection, changes]);
 
   const [detailReader] = useState(() =>
-    latestReader<CommitKey, CommitDetail>({
-      read: (key) => repositories.commitDetail(key.root, key.selection.oid),
+    latestReader<DetailKey, CommitDetail>({
+      read: (key) => repositories.commitDetail(key.root, key.comparison),
       deliver: (key, outcome) =>
         setDetail(
           outcome.ok
@@ -329,40 +352,49 @@ export function useWorkspace() {
             : { kind: "error", ...key, error: problemFrom(outcome.error) },
         ),
       same: (left, right) =>
-        left.root === right.root && left.selection.oid === right.selection.oid,
+        left.root === right.root &&
+        sameComparison(left.comparison, right.comparison),
       stallMs: 1000,
       maxReads: 2,
     }),
   );
 
+  const targetChanges =
+    comparison?.target.kind === "worktree"
+      ? changes.get(comparison.target.root)
+      : undefined;
   useEffect(() => {
-    if (root === null || selection?.kind !== "commit") {
+    if (root === null || comparison === null) {
       detailReader.want(null);
       setDetail({ kind: "empty" });
       return;
     }
-    detailReader.want({ root, selection });
-    setDetail({ kind: "loading", root, selection });
-  }, [root, selection, detailAttempt, detailReader]);
+    detailReader.want({ root, comparison });
+    setDetail({ kind: "loading", root, comparison });
+  }, [root, comparison, detailAttempt, detailReader, targetChanges]);
 
   useEffect(() => {
     setFileDiff({ kind: "closed" });
-  }, [root, selection]);
+  }, [root, selection, comparison]);
 
   const closeFile = useCallback(() => setFileDiff({ kind: "closed" }), []);
 
-  const select = useCallback(
-    (next: Selection) =>
-      setSelection((previous) => stableSelection(previous, next)),
-    [],
-  );
+  const select = useCallback((next: Selection) => {
+    setCompare(null);
+    setSelection((previous) => stableSelection(previous, next));
+  }, []);
+
+  const compareWith = useCallback((next: Compare) => {
+    setCompare(next);
+    setSelection((previous) => stableSelection(previous, next.anchor));
+  }, []);
 
   const openFile = (path: string, side: ListSide | null, keepShown = false) => {
     if (root === null || selection === null) return;
     const key: FileKey | null =
-      selection.kind === "commit"
-        ? { root, selection, path, side: null }
-        : side !== null
+      comparison !== null
+        ? { root, comparison, path, side: null }
+        : selection.kind === "worktree" && side !== null
           ? { root, selection, path, side }
           : null;
     if (key === null) return;
@@ -371,14 +403,13 @@ export function useWorkspace() {
       read === fileRead.current &&
       state.kind !== "closed" &&
       state.root === key.root &&
-      sameSelection(state.selection, key.selection) &&
       state.path === key.path &&
       state.side === key.side;
     if (!keepShown) setFileDiff({ kind: "loading", ...key });
     const reading: Promise<WorktreePatch> =
       key.side === null
         ? repositories
-            .filePatch(key.root, key.selection.oid, key.path)
+            .filePatch(key.root, key.comparison, key.path)
             .then((diff) => ({ kind: "diff", diff }))
         : repositories.worktreePatch(
             key.selection.root,
@@ -421,12 +452,13 @@ export function useWorkspace() {
     if (pendingOpen === null) return;
     if (
       pendingOpen.root !== root ||
-      !sameSelection(pendingOpen.selection, selection)
+      !sameSelection(pendingOpen.selection, selection) ||
+      pendingOpen.compare !== activeCompare
     ) {
       setPendingOpen(null);
       return;
     }
-    if (selection?.kind === "worktree") {
+    if (comparison === null && selection?.kind === "worktree") {
       const found = changes.get(selection.root);
       if (found === undefined) return;
       setPendingOpen(null);
@@ -436,17 +468,26 @@ export function useWorkspace() {
       return;
     }
     if (
+      comparison === null ||
       detail.kind === "empty" ||
       detail.kind === "loading" ||
       detail.root !== root ||
-      !sameSelection(detail.selection, selection)
+      !sameComparison(detail.comparison, comparison)
     )
       return;
     setPendingOpen(null);
     if (detail.kind === "error") return;
     const path = firstChangedPath(detail.detail.files);
     if (path !== undefined) openFile(path, null);
-  }, [pendingOpen, detail, changes, root, selection]);
+  }, [
+    pendingOpen,
+    detail,
+    changes,
+    root,
+    selection,
+    comparison,
+    activeCompare,
+  ]);
 
   return {
     workspace,
@@ -455,6 +496,14 @@ export function useWorkspace() {
     persistenceError,
     selection,
     select,
+    compare: activeCompare,
+    compareWith,
+    swapCompare: () => {
+      const swapped = activeCompare && swapEnds(activeCompare);
+      if (swapped) setCompare(swapped);
+    },
+    endCompare: () => setCompare(null),
+    comparison,
     detail,
     changes,
     refreshChanges: () => setChangesAttempt((attempt) => attempt + 1),
@@ -464,7 +513,7 @@ export function useWorkspace() {
     cancelOpenFirstFile: () => setPendingOpen(null),
     openFirstFile: () => {
       if (root !== null && selection !== null)
-        setPendingOpen({ root, selection });
+        setPendingOpen({ root, selection, compare: activeCompare });
     },
     closeFile,
     selectRepository,

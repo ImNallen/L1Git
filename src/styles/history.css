@@ -301,3 +301,6 @@
   color: var(--text-dim);
   font-size: 11px;
 }
+.history-table tr.compared td {
+  background: var(--row-selected);
+}

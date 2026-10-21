@@ -29,3 +29,10 @@
   flex-shrink: 0;
   color: var(--muted);
 }
+.context-menu .menu-heading {
+  margin-top: 4px;
+  padding: 6px 8px 2px;
+  border-top: 1px solid var(--border-control);
+  font-size: 10px;
+  color: var(--text-dim);
+}

@@ -640,32 +640,31 @@ fn read_commit(root: &Path, oid: &str, deadline: Deadline) -> Result<Commit, Rep
         .ok_or_else(git::malformed)
 }
 
-/// The two ends of a comparison, read and checked against the repository.
 enum Ends {
-    /// `base` is a commit ID or `--root`, which `diff-tree` reads as the empty
-    /// tree.
-    Trees {
-        base: (BaseDetail, String),
-        target: Commit,
-    },
-    Worktree {
-        base: Commit,
-        root: PathBuf,
-    },
+    Trees { base: BaseDetail, target: Commit },
+    Worktree { base: Commit, root: PathBuf },
+}
+
+/// `diff-tree` reads `--root` as the empty tree.
+fn diff_from<'a>(base: &'a BaseDetail, target: &'a Commit) -> &'a str {
+    match base {
+        BaseDetail::Commit { commit } => &commit.oid,
+        BaseDetail::FirstParent | BaseDetail::EmptyTree => {
+            target.parents.first().map_or("--root", String::as_str)
+        }
+    }
 }
 
 fn ends(root: &Path, comparison: &Comparison, deadline: Deadline) -> Result<Ends, RepositoryError> {
     match (&comparison.base, &comparison.target) {
         (base, Target::Commit { oid }) => {
             let target = read_commit(root, oid, deadline)?;
-            let base = match (base, target.parents.first()) {
-                (Base::FirstParent, Some(parent)) => (BaseDetail::FirstParent, parent.clone()),
-                (Base::FirstParent, None) => (BaseDetail::EmptyTree, "--root".into()),
-                (Base::Commit { oid }, _) => {
-                    let commit = read_commit(root, oid, deadline)?;
-                    let oid = commit.oid.clone();
-                    (BaseDetail::Commit { commit }, oid)
-                }
+            let base = match base {
+                Base::FirstParent if target.parents.is_empty() => BaseDetail::EmptyTree,
+                Base::FirstParent => BaseDetail::FirstParent,
+                Base::Commit { oid } => BaseDetail::Commit {
+                    commit: read_commit(root, oid, deadline)?,
+                },
             };
             Ok(Ends::Trees { base, target })
         }
@@ -710,10 +709,7 @@ pub(crate) fn commit_detail_within(
 ) -> Result<CommitDetail, RepositoryError> {
     let root = root(path, deadline)?;
     Ok(match ends(&root, comparison, deadline)? {
-        Ends::Trees {
-            base: (base, from),
-            target,
-        } => {
+        Ends::Trees { base, target } => {
             let message = git::line(&git::read(
                 &root,
                 &["show", "--no-patch", "--format=%B", &target.oid, "--"],
@@ -730,7 +726,7 @@ pub(crate) fn commit_detail_within(
                     "--no-renames",
                     "--no-ext-diff",
                     "--no-textconv",
-                    &from,
+                    diff_from(&base, &target),
                     &target.oid,
                     "--",
                 ],
@@ -756,8 +752,6 @@ pub(crate) fn commit_detail_within(
     })
 }
 
-/// Parses `--name-status -z` output. An unmerged path, which only a worktree
-/// has, counts as modified.
 pub(crate) fn name_status(output: &[u8]) -> Result<Vec<ChangedFile>, RepositoryError> {
     let mut files = Vec::new();
     if output.is_empty() {
@@ -813,11 +807,8 @@ pub(crate) fn file_patch_within(
     if file.is_empty() {
         return Err(unchanged_path(comparison));
     }
-    let (from, target) = match ends {
-        Ends::Trees {
-            base: (_, from),
-            target,
-        } => (from, target.oid),
+    let (base, target) = match ends {
+        Ends::Trees { base, target } => (base, target),
         Ends::Worktree { base, root } => {
             return status::worktree_file_patch(&root, &base.oid, file, deadline)?
                 .ok_or_else(|| unchanged_path(comparison));
@@ -834,8 +825,8 @@ pub(crate) fn file_patch_within(
             "--no-renames",
             "--no-ext-diff",
             "--no-textconv",
-            &from,
-            &target,
+            diff_from(&base, &target),
+            &target.oid,
             "--",
             file,
         ]
