@@ -77,6 +77,8 @@ pub(crate) enum LocalRead {
     CommitDetail,
     LineStats,
     FilePatch,
+    FileHistory,
+    Blame,
     WorktreeStatus,
     WorktreePatch,
     BranchStatus,
@@ -87,7 +89,7 @@ impl LocalRead {
         Duration::from_secs(match self {
             Self::Snapshot => 120,
             Self::Refs | Self::LineStats | Self::WorktreeStatus | Self::WorktreePatch => 30,
-            Self::CommitDetail | Self::FilePatch => 20,
+            Self::CommitDetail | Self::FilePatch | Self::FileHistory | Self::Blame => 20,
             Self::BranchStatus => 60,
         })
     }
@@ -99,6 +101,8 @@ impl LocalRead {
             Self::CommitDetail => "this commit",
             Self::LineStats => "the line counts",
             Self::FilePatch => "this file's diff",
+            Self::FileHistory => "this file's history",
+            Self::Blame => "this file's blame",
             Self::WorktreeStatus => "the worktree status",
             Self::WorktreePatch => "this file's changes",
             Self::BranchStatus => "the branch status",

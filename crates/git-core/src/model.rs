@@ -190,6 +190,41 @@ pub enum FilePatch {
     TooLarge { bytes: u64 },
 }
 
+/// A commit in a file's history, with the file's path in that commit.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileRevision {
+    pub commit: Commit,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum Blame {
+    Text {
+        contents: String,
+        lossy: bool,
+        ranges: Vec<BlameRange>,
+    },
+    Binary,
+    TooLarge {
+        bytes: u64,
+    },
+}
+
+/// `lines` lines from line `start`, counted from 1, last changed by `oid`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BlameRange {
+    pub oid: String,
+    pub start: u32,
+    pub lines: u32,
+    pub author: String,
+    pub email: String,
+    pub timestamp: i64,
+    pub summary: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct LineStats {

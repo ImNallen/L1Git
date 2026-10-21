@@ -1,4 +1,5 @@
 mod exit_signals;
+mod file_history;
 mod git;
 mod model;
 mod remotes;
