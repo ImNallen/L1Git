@@ -6,6 +6,7 @@ mod stderr;
 use crate::{
     Advance, AdvanceOutcome, FastForwardReport, FetchMode, FetchSummary, RepositoryError,
     RepositoryOverview, SkipReason,
+    git::{Deadline, LocalRead},
 };
 use std::{
     collections::HashMap,
@@ -41,6 +42,7 @@ impl Default for Limits {
 /// and at most `network_slots` fetches at once. Local reads take no lock.
 pub struct Coordinator {
     limits: Limits,
+    read_cap: Option<Duration>,
     gates: Mutex<HashMap<PathBuf, Arc<Mutex<Gate>>>>,
     slots: Semaphore,
 }
@@ -60,9 +62,23 @@ impl Coordinator {
     pub fn new(limits: Limits) -> Self {
         Self {
             limits,
+            read_cap: None,
             gates: Mutex::default(),
             slots: Semaphore::new(limits.network_slots),
         }
+    }
+
+    /// Lowers every local read's deadline to at most `cap`.
+    pub fn cap_reads(self, cap: Duration) -> Self {
+        Self {
+            read_cap: Some(cap),
+            ..self
+        }
+    }
+
+    pub(crate) fn deadline(&self, read: LocalRead) -> Deadline {
+        let budget = read.budget();
+        Deadline::start(read, self.read_cap.map_or(budget, |cap| cap.min(budget)))
     }
 
     /// The local branches of the repository containing `path`. With
@@ -74,10 +90,11 @@ impl Coordinator {
         mode: FetchMode,
     ) -> Result<RepositoryOverview, RepositoryError> {
         let requested = Instant::now();
-        let repository = read::open(path)?;
+        let reads = self.deadline(LocalRead::BranchStatus);
+        let repository = read::open(path, reads)?;
         let deadline = self.limits.local_deadline;
         if mode == FetchMode::Local {
-            return read::read(&repository, None, deadline);
+            return read::read(&repository, None, deadline, reads);
         }
         let gate = self.gate(&repository.common_dir);
         let mut gate = lock_ignoring_poison(&gate);
@@ -89,13 +106,17 @@ impl Coordinator {
             _ => {
                 let summary = {
                     let _slot = self.slots.acquire();
-                    fetch::fetch_all(&repository.root, self.limits.fetch_deadline)?
+                    fetch::fetch_all(
+                        &repository.root,
+                        self.limits.fetch_deadline,
+                        reads.renewed(),
+                    )?
                 };
                 gate.last_fetch = Some((Instant::now(), summary.clone()));
                 summary
             }
         };
-        read::read(&repository, Some(summary), deadline)
+        read::read(&repository, Some(summary), deadline, reads.renewed())
     }
 
     /// Fast-forwards each requested branch in order, then rereads the repository
@@ -107,26 +128,26 @@ impl Coordinator {
         path: &str,
         advances: &[Advance],
     ) -> Result<FastForwardReport, RepositoryError> {
-        let repository = read::open(path)?;
+        let reads = self.deadline(LocalRead::BranchStatus);
+        let repository = read::open(path, reads)?;
         let deadline = self.limits.local_deadline;
         let gate = self.gate(&repository.common_dir);
         let _gate = lock_ignoring_poison(&gate);
         let outcomes = advances
             .iter()
             .map(|request| {
-                advance::advance(&repository.root, request, deadline).unwrap_or_else(|error| {
-                    AdvanceOutcome::Skipped {
+                advance::advance(&repository.root, request, deadline, reads.renewed())
+                    .unwrap_or_else(|error| AdvanceOutcome::Skipped {
                         reference: request.reference.clone(),
                         reason: SkipReason::Failed {
                             message: error.message,
                         },
-                    }
-                })
+                    })
             })
             .collect();
         Ok(FastForwardReport {
             outcomes,
-            overview: read::read(&repository, None, deadline)?,
+            overview: read::read(&repository, None, deadline, reads.renewed())?,
         })
     }
 

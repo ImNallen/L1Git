@@ -1,6 +1,7 @@
 use crate::{
     ChangeStatus, Conflict, ErrorKind, FilePatch, MoveSide, Moved, PATCH_LIMIT, RepositoryError,
-    Side, Sides, StatusEntry, SubmoduleState, WorktreePatch, WorktreeStatus, git,
+    Side, Sides, StatusEntry, SubmoduleState, WorktreePatch, WorktreeStatus,
+    git::{self, Deadline, LocalRead},
     repository::{self, text_patch},
     untracked::untracked,
 };
@@ -10,15 +11,22 @@ use std::{
 };
 
 pub fn worktree_status(path: &str) -> Result<WorktreeStatus, RepositoryError> {
-    let root = repository::root(path)?;
+    worktree_status_within(path, Deadline::of(LocalRead::WorktreeStatus))
+}
+
+pub(crate) fn worktree_status_within(
+    path: &str,
+    deadline: Deadline,
+) -> Result<WorktreeStatus, RepositoryError> {
+    let root = repository::root(path, deadline)?;
     Ok(WorktreeStatus {
-        head: repository::head(&root)?,
-        entries: entries(&root)?,
+        head: repository::head(&root, deadline)?,
+        entries: entries(&root, deadline)?,
         root: root.to_string_lossy().into_owned(),
     })
 }
 
-fn entries(root: &Path) -> Result<Vec<StatusEntry>, RepositoryError> {
+fn entries(root: &Path, deadline: Deadline) -> Result<Vec<StatusEntry>, RepositoryError> {
     let output = git::read(
         root,
         &[
@@ -28,6 +36,7 @@ fn entries(root: &Path) -> Result<Vec<StatusEntry>, RepositoryError> {
             "--find-renames",
             "--untracked-files=all",
         ],
+        deadline,
     )?;
     let mut entries = Vec::new();
     let mut fields = output.split(|byte| *byte == 0);
@@ -149,9 +158,18 @@ pub fn worktree_patch(
     file: &str,
     side: Side,
 ) -> Result<WorktreePatch, RepositoryError> {
-    let root = repository::root(path)?;
+    worktree_patch_within(path, file, side, Deadline::of(LocalRead::WorktreePatch))
+}
+
+pub(crate) fn worktree_patch_within(
+    path: &str,
+    file: &str,
+    side: Side,
+    deadline: Deadline,
+) -> Result<WorktreePatch, RepositoryError> {
+    let root = repository::root(path, deadline)?;
     check(file)?;
-    let entries = entries(&root)?;
+    let entries = entries(&root, deadline)?;
     let entry = entries
         .iter()
         .find(|entry| lists(entry, file, side))
@@ -161,12 +179,13 @@ pub fn worktree_patch(
             .ok_or_else(|| no_changes(file, side))
     };
     let staged = |detect: &str, paths: &[&str]| {
-        let head = head_or_empty_tree(&root)?;
+        let head = head_or_empty_tree(&root, deadline)?;
         tracked(
             &root,
             &["diff-index", "--cached", detect, &head],
             paths,
             file,
+            deadline,
         )
     };
     match (entry, side) {
@@ -180,8 +199,14 @@ pub fn worktree_patch(
         ) => Ok(WorktreePatch::Conflicted {
             conflict: *conflict,
             diff: if submodule.is_none() && fs::symlink_metadata(root.join(file)).is_ok() {
-                let head = head_or_empty_tree(&root)?;
-                tracked(&root, &["diff-index", "--no-renames", &head], &[file], file)?
+                let head = head_or_empty_tree(&root, deadline)?;
+                tracked(
+                    &root,
+                    &["diff-index", "--no-renames", &head],
+                    &[file],
+                    file,
+                    deadline,
+                )?
             } else {
                 None
             },
@@ -212,6 +237,7 @@ pub fn worktree_patch(
             &["diff-files", "--no-renames"],
             &[file],
             file,
+            deadline,
         )?),
         (StatusEntry::Renamed { original, how, .. }, _) => {
             let detect = match how {
@@ -220,11 +246,17 @@ pub fn worktree_patch(
             };
             changed(match side {
                 Side::Staged => staged(detect, &[original, file])?,
-                Side::Unstaged => tracked(&root, &["diff-files", detect], &[original, file], file)?,
+                Side::Unstaged => tracked(
+                    &root,
+                    &["diff-files", detect],
+                    &[original, file],
+                    file,
+                    deadline,
+                )?,
             })
         }
         (StatusEntry::Untracked { .. }, _) => {
-            untracked(&root, file)?.ok_or_else(|| no_changes(file, side))
+            untracked(&root, file, deadline)?.ok_or_else(|| no_changes(file, side))
         }
     }
 }
@@ -299,8 +331,12 @@ fn no_changes(file: &str, side: Side) -> RepositoryError {
     )
 }
 
-fn head_or_empty_tree(root: &Path) -> Result<String, RepositoryError> {
-    let head = git::run(root, &["rev-parse", "--verify", "--quiet", "HEAD^{commit}"])?;
+fn head_or_empty_tree(root: &Path, deadline: Deadline) -> Result<String, RepositoryError> {
+    let head = git::run(
+        root,
+        &["rev-parse", "--verify", "--quiet", "HEAD^{commit}"],
+        deadline,
+    )?;
     if head.status.success() {
         return Ok(git::line(&head.stdout));
     }
@@ -308,6 +344,7 @@ fn head_or_empty_tree(root: &Path) -> Result<String, RepositoryError> {
         root,
         &["hash-object", "-t", "tree", "--stdin"],
         Vec::new(),
+        deadline,
     )?))
 }
 
@@ -320,6 +357,7 @@ fn tracked(
     command: &[&str],
     paths: &[&str],
     destination: &str,
+    deadline: Deadline,
 ) -> Result<Option<FilePatch>, RepositoryError> {
     let args = |format| {
         let mut args = vec!["--literal-pathspecs"];
@@ -335,7 +373,7 @@ fn tracked(
         args.extend(paths);
         args
     };
-    let numstat = git::read(root, &args("--numstat"))?;
+    let numstat = git::read(root, &args("--numstat"), deadline)?;
     let Some(binary) = binary_at(&numstat, destination)? else {
         return Ok(None);
     };
@@ -343,7 +381,7 @@ fn tracked(
         return Ok(Some(FilePatch::Binary));
     }
     Ok(Some(
-        match git::read_capped(root, &args("--patch"), PATCH_LIMIT)? {
+        match git::read_capped(root, &args("--patch"), PATCH_LIMIT, deadline)? {
             git::Capped::Within(patch) if paths.len() == 1 => text_patch(&patch),
             git::Capped::Within(patch) => {
                 let kept: Vec<u8> = sections(&patch)

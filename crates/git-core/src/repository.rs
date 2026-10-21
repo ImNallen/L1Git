@@ -1,7 +1,9 @@
 use crate::{
     Branch, ChangeStatus, ChangedFile, Commit, CommitDetail, DiffBase, ErrorKind, FilePatch, Head,
     LineStats, Oid, Remote, RepositoryError, RepositoryRefs, RepositorySnapshot, Squash, Tag,
-    Worktree, git, remotes,
+    Worktree,
+    git::{self, Deadline, LocalRead},
+    remotes,
 };
 use std::{
     collections::HashMap,
@@ -18,7 +20,7 @@ const COMMIT_FORMAT: &str = "--format=%H%x00%P%x00%s%x00%an%x00%ae%x00%at";
 const SQUASH_SCAN_LIMIT: usize = 2000;
 const SQUASH_BRANCH_LIMIT: usize = 1000;
 
-pub(crate) fn root(path: &str) -> Result<PathBuf, RepositoryError> {
+pub(crate) fn root(path: &str, deadline: Deadline) -> Result<PathBuf, RepositoryError> {
     let path = Path::new(path).canonicalize().map_err(|_| {
         RepositoryError::new(
             ErrorKind::MissingPath,
@@ -31,7 +33,7 @@ pub(crate) fn root(path: &str) -> Result<PathBuf, RepositoryError> {
             "Choose a repository directory, not a file.",
         ));
     }
-    let bare = git::run(&path, &["rev-parse", "--is-bare-repository"])?;
+    let bare = git::run(&path, &["rev-parse", "--is-bare-repository"], deadline)?;
     if !bare.status.success() {
         return Err(RepositoryError::new(
             ErrorKind::NotRepository,
@@ -44,7 +46,7 @@ pub(crate) fn root(path: &str) -> Result<PathBuf, RepositoryError> {
             "Bare repositories are not supported yet. Choose a working copy of this repository.",
         ));
     }
-    let top = git::read(&path, &["rev-parse", "--show-toplevel"])?;
+    let top = git::read(&path, &["rev-parse", "--show-toplevel"], deadline)?;
     let top = std::str::from_utf8(top.strip_suffix(b"\n").unwrap_or(&top)).map_err(|_| {
         RepositoryError::new(
             ErrorKind::UnsupportedPath,
@@ -59,9 +61,9 @@ pub(crate) fn root(path: &str) -> Result<PathBuf, RepositoryError> {
     })
 }
 
-pub(crate) fn head(path: &Path) -> Result<Head, RepositoryError> {
-    let symbolic = git::run(path, &["symbolic-ref", "--quiet", "HEAD"])?;
-    let target = git::run(path, &["rev-parse", "--verify", "HEAD^{commit}"])?;
+pub(crate) fn head(path: &Path, deadline: Deadline) -> Result<Head, RepositoryError> {
+    let symbolic = git::run(path, &["symbolic-ref", "--quiet", "HEAD"], deadline)?;
+    let target = git::run(path, &["rev-parse", "--verify", "HEAD^{commit}"], deadline)?;
     match (symbolic.status.success(), target.status.success()) {
         (true, true) => Ok(Head::Attached {
             reference: git::line(&symbolic.stdout),
@@ -80,7 +82,11 @@ pub(crate) fn head(path: &Path) -> Result<Head, RepositoryError> {
     }
 }
 
-fn branches(path: &Path, remote_names: &[&str]) -> Result<Vec<Branch>, RepositoryError> {
+fn branches(
+    path: &Path,
+    remote_names: &[&str],
+    deadline: Deadline,
+) -> Result<Vec<Branch>, RepositoryError> {
     let output = git::read(
         path,
         &[
@@ -90,6 +96,7 @@ fn branches(path: &Path, remote_names: &[&str]) -> Result<Vec<Branch>, Repositor
             "refs/heads/",
             "refs/remotes/",
         ],
+        deadline,
     )?;
     let mut branches = Vec::new();
     for row in output
@@ -137,7 +144,7 @@ fn branches(path: &Path, remote_names: &[&str]) -> Result<Vec<Branch>, Repositor
     Ok(branches)
 }
 
-fn tags(path: &Path) -> Result<Vec<Tag>, RepositoryError> {
+fn tags(path: &Path, deadline: Deadline) -> Result<Vec<Tag>, RepositoryError> {
     let output = git::read(
         path,
         &[
@@ -146,6 +153,7 @@ fn tags(path: &Path) -> Result<Vec<Tag>, RepositoryError> {
             "--format=%(refname)%00%(objectname)%00%(objecttype)%00%(*objectname)%00%(*objecttype)",
             "refs/tags/",
         ],
+        deadline,
     )?;
     let mut tags = Vec::new();
     for row in output
@@ -164,7 +172,7 @@ fn tags(path: &Path) -> Result<Vec<Tag>, RepositoryError> {
         let reference = git::text(reference);
         let oid = match *kind {
             b"commit" => git::text(oid),
-            b"tag" => match peel_to_commit(path, &reference)? {
+            b"tag" => match peel_to_commit(path, &reference, deadline)? {
                 Some(oid) => oid,
                 None => continue,
             },
@@ -184,7 +192,11 @@ fn tags(path: &Path) -> Result<Vec<Tag>, RepositoryError> {
 
 /// Older Git dereferences `%(*objectname)` only once, so a tag of a tag can
 /// still name a tag object.
-fn peel_to_commit(path: &Path, reference: &str) -> Result<Option<String>, RepositoryError> {
+fn peel_to_commit(
+    path: &Path,
+    reference: &str,
+    deadline: Deadline,
+) -> Result<Option<String>, RepositoryError> {
     let output = git::run(
         path,
         &[
@@ -193,12 +205,13 @@ fn peel_to_commit(path: &Path, reference: &str) -> Result<Option<String>, Reposi
             "--quiet",
             &format!("{reference}^{{commit}}"),
         ],
+        deadline,
     )?;
     Ok(output.status.success().then(|| git::line(&output.stdout)))
 }
 
-fn worktrees(root: &Path) -> Result<Vec<Worktree>, RepositoryError> {
-    let output = git::read(root, &["worktree", "list", "--porcelain", "-z"])?;
+fn worktrees(root: &Path, deadline: Deadline) -> Result<Vec<Worktree>, RepositoryError> {
+    let output = git::read(root, &["worktree", "list", "--porcelain", "-z"], deadline)?;
     let fields: Vec<_> = output.split(|byte| *byte == 0).collect();
     let mut worktrees = Vec::new();
     for record in fields
@@ -277,14 +290,19 @@ fn parse_commits(output: &[u8]) -> Result<Vec<Commit>, RepositoryError> {
     Ok(commits)
 }
 
-fn read_refs(root: &Path, remotes: &[Remote]) -> Result<RepositoryRefs, RepositoryError> {
-    let head = head(root)?;
+fn read_refs(
+    root: &Path,
+    remotes: &[Remote],
+    deadline: Deadline,
+) -> Result<RepositoryRefs, RepositoryError> {
+    let head = head(root, deadline)?;
     let branches = branches(
         root,
         &remotes
             .iter()
             .map(|remote| remote.name.as_str())
             .collect::<Vec<_>>(),
+        deadline,
     )?;
     let name = root
         .file_name()
@@ -308,21 +326,35 @@ fn read_refs(root: &Path, remotes: &[Remote]) -> Result<RepositoryRefs, Reposito
 }
 
 pub fn refs(path: &str) -> Result<RepositoryRefs, RepositoryError> {
-    let root = root(path)?;
-    read_refs(&root, &remotes::read(&root)?)
+    refs_within(path, Deadline::of(LocalRead::Refs))
+}
+
+pub(crate) fn refs_within(
+    path: &str,
+    deadline: Deadline,
+) -> Result<RepositoryRefs, RepositoryError> {
+    let root = root(path, deadline)?;
+    read_refs(&root, &remotes::read(&root, deadline)?, deadline)
 }
 
 pub fn snapshot(path: &str) -> Result<RepositorySnapshot, RepositoryError> {
-    let root = root(path)?;
-    let remotes = remotes::read(&root)?;
+    snapshot_within(path, Deadline::of(LocalRead::Snapshot))
+}
+
+pub(crate) fn snapshot_within(
+    path: &str,
+    deadline: Deadline,
+) -> Result<RepositorySnapshot, RepositoryError> {
+    let root = root(path, deadline)?;
+    let remotes = remotes::read(&root, deadline)?;
     let RepositoryRefs {
         root: root_text,
         name,
         head,
         branches,
-    } = read_refs(&root, &remotes)?;
-    let tags = tags(&root)?;
-    let worktrees = worktrees(&root)?;
+    } = read_refs(&root, &remotes, deadline)?;
+    let tags = tags(&root, deadline)?;
+    let worktrees = worktrees(&root, deadline)?;
     let limit = format!("--max-count={}", HISTORY_LIMIT + 1);
     let mut args = vec![
         "log",
@@ -346,11 +378,11 @@ pub fn snapshot(path: &str) -> Result<RepositorySnapshot, RepositoryError> {
             }),
     );
     args.push("--");
-    let mut commits = parse_commits(&git::read(&root, &args)?)?;
+    let mut commits = parse_commits(&git::read(&root, &args, deadline)?)?;
     let history_truncated = commits.len() > HISTORY_LIMIT;
     commits.truncate(HISTORY_LIMIT);
     // A partial clone lacks the blobs to diff, so it shows no squash merges.
-    let squashes = squashes(&root, &commits).unwrap_or_default();
+    let squashes = squashes(&root, &commits, deadline).unwrap_or_default();
     Ok(RepositorySnapshot {
         root: root_text,
         name,
@@ -371,7 +403,11 @@ pub fn snapshot(path: &str) -> Result<RepositorySnapshot, RepositoryError> {
 
 /// Pairs each branch tip that no loaded commit builds on with a newer commit
 /// whose patch equals the branch's changes since it forked.
-fn squashes(root: &Path, commits: &[Commit]) -> Result<Vec<Squash>, RepositoryError> {
+fn squashes(
+    root: &Path,
+    commits: &[Commit],
+    deadline: Deadline,
+) -> Result<Vec<Squash>, RepositoryError> {
     let index: HashMap<&str, usize> = commits
         .iter()
         .enumerate()
@@ -425,8 +461,8 @@ fn squashes(root: &Path, commits: &[Commit]) -> Result<Vec<Squash>, RepositoryEr
     // Diffing every candidate costs far more than listing the paths it
     // changes, so only commits that change a branch's exact paths get diffed.
     let (branch_paths, candidate_paths) = in_parallel(
-        || changed_paths(root, ranges(commits, &branches)),
-        || changed_paths(root, singles(commits, &candidates)),
+        || changed_paths(root, ranges(commits, &branches), deadline),
+        || changed_paths(root, singles(commits, &candidates), deadline),
     );
     let (branch_paths, candidate_paths) = (branch_paths?, candidate_paths?);
     let mut by_paths: HashMap<&str, Vec<usize>> = HashMap::new();
@@ -458,8 +494,8 @@ fn squashes(root: &Path, commits: &[Commit]) -> Result<Vec<Squash>, RepositoryEr
     paired_candidates.sort_unstable();
     paired_candidates.dedup();
     let (branch_patches, candidate_patches) = in_parallel(
-        || patch_ids(root, ranges(commits, &paired_branches)),
-        || patch_ids(root, singles(commits, &paired_candidates)),
+        || patch_ids(root, ranges(commits, &paired_branches), deadline),
+        || patch_ids(root, singles(commits, &paired_candidates), deadline),
     );
     let (branch_patches, candidate_patches) = (branch_patches?, candidate_patches?);
     Ok(pairs
@@ -509,7 +545,11 @@ fn in_parallel<A: Send, B>(a: impl FnOnce() -> A + Send, b: impl FnOnce() -> B) 
 
 /// Maps each commit `git diff-tree --stdin` reports to its changed paths, one
 /// `<status>\t<path>` line each. Empty diffs have no entry.
-fn changed_paths(root: &Path, input: Vec<u8>) -> Result<HashMap<String, String>, RepositoryError> {
+fn changed_paths(
+    root: &Path,
+    input: Vec<u8>,
+    deadline: Deadline,
+) -> Result<HashMap<String, String>, RepositoryError> {
     let output = git::read_with_input(
         root,
         &[
@@ -520,6 +560,7 @@ fn changed_paths(root: &Path, input: Vec<u8>) -> Result<HashMap<String, String>,
             "--no-renames",
         ],
         input,
+        deadline,
     )?;
     let mut changes: HashMap<String, String> = HashMap::new();
     let mut current = None;
@@ -538,7 +579,11 @@ fn changed_paths(root: &Path, input: Vec<u8>) -> Result<HashMap<String, String>,
 
 /// Maps each commit `git diff-tree --stdin` reports to the stable patch ID of
 /// its diff. Empty diffs have no entry.
-fn patch_ids(root: &Path, input: Vec<u8>) -> Result<HashMap<String, String>, RepositoryError> {
+fn patch_ids(
+    root: &Path,
+    input: Vec<u8>,
+    deadline: Deadline,
+) -> Result<HashMap<String, String>, RepositoryError> {
     let diff = git::read_with_input(
         root,
         &[
@@ -550,11 +595,13 @@ fn patch_ids(root: &Path, input: Vec<u8>) -> Result<HashMap<String, String>, Rep
             "--no-textconv",
         ],
         input,
+        deadline,
     )?;
     git::text(&git::read_with_input(
         root,
         &["patch-id", "--stable"],
         diff,
+        deadline,
     )?)
     .lines()
     .map(|line| {
@@ -564,17 +611,22 @@ fn patch_ids(root: &Path, input: Vec<u8>) -> Result<HashMap<String, String>, Rep
     .collect()
 }
 
-fn open_commit(path: &str, oid: &str) -> Result<(PathBuf, Commit), RepositoryError> {
+fn open_commit(
+    path: &str,
+    oid: &str,
+    deadline: Deadline,
+) -> Result<(PathBuf, Commit), RepositoryError> {
     if !matches!(oid.len(), 40 | 64) || !oid.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return Err(RepositoryError::new(
             ErrorKind::InvalidOid,
             "Choose a full commit ID from this repository's history.",
         ));
     }
-    let root = root(path)?;
+    let root = root(path, deadline)?;
     let verified = git::run(
         &root,
         &["rev-parse", "--verify", &format!("{oid}^{{commit}}")],
+        deadline,
     )?;
     if !verified.status.success() {
         return Err(RepositoryError::new(
@@ -582,7 +634,11 @@ fn open_commit(path: &str, oid: &str) -> Result<(PathBuf, Commit), RepositoryErr
             "This commit is no longer available. Refresh the repository.",
         ));
     }
-    let output = git::read(&root, &["log", "-1", COMMIT_FORMAT, "-z", oid, "--"])?;
+    let output = git::read(
+        &root,
+        &["log", "-1", COMMIT_FORMAT, "-z", oid, "--"],
+        deadline,
+    )?;
     let commit = parse_commits(&output)?
         .into_iter()
         .next()
@@ -598,10 +654,19 @@ fn diff_base(commit: &Commit) -> (DiffBase, &str) {
 }
 
 pub fn commit_detail(path: &str, oid: &str) -> Result<CommitDetail, RepositoryError> {
-    let (root, commit) = open_commit(path, oid)?;
+    commit_detail_within(path, oid, Deadline::of(LocalRead::CommitDetail))
+}
+
+pub(crate) fn commit_detail_within(
+    path: &str,
+    oid: &str,
+    deadline: Deadline,
+) -> Result<CommitDetail, RepositoryError> {
+    let (root, commit) = open_commit(path, oid, deadline)?;
     let message = git::line(&git::read(
         &root,
         &["show", "--no-patch", "--format=%B", oid, "--"],
+        deadline,
     )?);
     let (diff_base, base) = diff_base(&commit);
     let args = [
@@ -617,7 +682,7 @@ pub fn commit_detail(path: &str, oid: &str) -> Result<CommitDetail, RepositoryEr
         oid,
         "--",
     ];
-    let output = git::read(&root, &args)?;
+    let output = git::read(&root, &args, deadline)?;
     let mut files = Vec::new();
     if !output.is_empty() {
         let fields: Vec<_> = output
@@ -655,7 +720,16 @@ pub fn commit_detail(path: &str, oid: &str) -> Result<CommitDetail, RepositoryEr
 }
 
 pub fn file_patch(path: &str, oid: &str, file: &str) -> Result<FilePatch, RepositoryError> {
-    let (root, commit) = open_commit(path, oid)?;
+    file_patch_within(path, oid, file, Deadline::of(LocalRead::FilePatch))
+}
+
+pub(crate) fn file_patch_within(
+    path: &str,
+    oid: &str,
+    file: &str,
+    deadline: Deadline,
+) -> Result<FilePatch, RepositoryError> {
+    let (root, commit) = open_commit(path, oid, deadline)?;
     if file.is_empty() {
         return Err(unchanged_path());
     }
@@ -677,7 +751,7 @@ pub fn file_patch(path: &str, oid: &str, file: &str) -> Result<FilePatch, Reposi
             file,
         ]
     };
-    let numstat = git::read(&root, &args("--numstat"))?;
+    let numstat = git::read(&root, &args("--numstat"), deadline)?;
     let (added, deleted) = numstat
         .split(|byte| *byte == 0)
         .find_map(|record| {
@@ -703,7 +777,7 @@ pub fn file_patch(path: &str, oid: &str, file: &str) -> Result<FilePatch, Reposi
         return Ok(FilePatch::Binary);
     }
     Ok(
-        match git::read_capped(&root, &args("--patch"), PATCH_LIMIT)? {
+        match git::read_capped(&root, &args("--patch"), PATCH_LIMIT, deadline)? {
             git::Capped::Within(patch) => text_patch(&patch),
             git::Capped::Over(bytes) => FilePatch::TooLarge { bytes },
         },
@@ -720,6 +794,14 @@ pub(crate) fn text_patch(patch: &[u8]) -> FilePatch {
 /// Counts each commit's changed lines against the same base as its detail.
 /// Commits Git cannot read are left out instead of failing the whole batch.
 pub fn line_stats(path: &str, oids: &[String]) -> Result<Vec<LineStats>, RepositoryError> {
+    line_stats_within(path, oids, Deadline::of(LocalRead::LineStats))
+}
+
+pub(crate) fn line_stats_within(
+    path: &str,
+    oids: &[String],
+    deadline: Deadline,
+) -> Result<Vec<LineStats>, RepositoryError> {
     if oids.len() > LINE_STATS_LIMIT {
         return Err(RepositoryError::new(
             ErrorKind::InvalidOid,
@@ -729,7 +811,7 @@ pub fn line_stats(path: &str, oids: &[String]) -> Result<Vec<LineStats>, Reposit
     for oid in oids {
         Oid::try_from(oid.clone())?;
     }
-    let root = root(path)?;
+    let root = root(path, deadline)?;
     let output = git::read_with_input(
         &root,
         &[
@@ -748,6 +830,7 @@ pub fn line_stats(path: &str, oids: &[String]) -> Result<Vec<LineStats>, Reposit
         oids.iter()
             .flat_map(|oid| format!("{oid}\n").into_bytes())
             .collect(),
+        deadline,
     )?;
     let lines = |count: &[u8]| match count {
         b"-" => Ok(0),

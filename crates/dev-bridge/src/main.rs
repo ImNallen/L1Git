@@ -1,6 +1,6 @@
 use l1_git_core::{Coordinator, run};
 use serde_json::json;
-use std::{io::Read, sync::Arc, thread};
+use std::{io::Read, sync::Arc, thread, time::Duration};
 use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
 
 const BODY_LIMIT: u64 = 64 * 1024;
@@ -16,7 +16,11 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         format!("http://127.0.0.1:{dev_port}"),
         format!("http://localhost:{dev_port}"),
     ]);
-    let coordinator = Arc::new(Coordinator::default());
+    let coordinator = match std::env::var("L1GIT_READ_DEADLINE_MS") {
+        Ok(cap) => Coordinator::default().cap_reads(Duration::from_millis(cap.parse()?)),
+        Err(_) => Coordinator::default(),
+    };
+    let coordinator = Arc::new(coordinator);
     let server = Server::http((std::net::Ipv4Addr::LOCALHOST, port))?;
     eprintln!("L1 Git development bridge on http://127.0.0.1:{port}");
     for request in server.incoming_requests() {

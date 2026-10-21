@@ -542,6 +542,7 @@ pub enum ErrorKind {
     UnchangedPath,
     UnsupportedPath,
     UnreadablePath,
+    TimedOut,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -2,7 +2,7 @@ use crate::{BranchRef, ErrorKind, Oid, RepositoryError};
 use std::{
     io::{self, Read, Write},
     path::Path,
-    process::{Child, ChildStderr, Command, Output, Stdio},
+    process::{Child, ChildStderr, Command, ExitStatus, Stdio},
     sync::mpsc,
     thread,
     time::{Duration, Instant},
@@ -55,17 +55,211 @@ fn spawn_error(error: io::Error) -> RepositoryError {
     }
 }
 
-pub(crate) fn run(path: &Path, args: &[&str]) -> Result<Output, RepositoryError> {
-    let output = command(path, args).output().map_err(spawn_error)?;
-    if output.status.code() == Some(129)
-        && String::from_utf8_lossy(&output.stderr).contains("no-lazy-fetch")
+/// Every local read L1 Git serves. Each gets one deadline for all of its Git
+/// commands, at least 10 times its slowest run on the large fixture.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LocalRead {
+    Snapshot,
+    Refs,
+    CommitDetail,
+    LineStats,
+    FilePatch,
+    WorktreeStatus,
+    WorktreePatch,
+    BranchStatus,
+}
+
+impl LocalRead {
+    pub(crate) const fn budget(self) -> Duration {
+        Duration::from_secs(match self {
+            Self::Snapshot => 120,
+            Self::Refs | Self::LineStats | Self::WorktreeStatus | Self::WorktreePatch => 30,
+            Self::CommitDetail | Self::FilePatch => 20,
+            Self::BranchStatus => 60,
+        })
+    }
+
+    const fn subject(self) -> &'static str {
+        match self {
+            Self::Snapshot => "the commit history",
+            Self::Refs => "the branches",
+            Self::CommitDetail => "this commit",
+            Self::LineStats => "the line counts",
+            Self::FilePatch => "this file's diff",
+            Self::WorktreeStatus => "the worktree status",
+            Self::WorktreePatch => "this file's changes",
+            Self::BranchStatus => "the branch status",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Deadline {
+    read: LocalRead,
+    budget: Duration,
+    at: Instant,
+}
+
+impl Deadline {
+    pub(crate) fn of(read: LocalRead) -> Self {
+        Self::start(read, read.budget())
+    }
+
+    pub(crate) fn start(read: LocalRead, budget: Duration) -> Self {
+        Self {
+            read,
+            budget,
+            at: Instant::now() + budget,
+        }
+    }
+
+    /// The same read with its full budget again, for reads that follow a fetch,
+    /// a merge, or a probe, which have their own deadlines.
+    pub(crate) fn renewed(self) -> Self {
+        Self::start(self.read, self.budget)
+    }
+
+    fn remaining(&self) -> Duration {
+        self.at.saturating_duration_since(Instant::now())
+    }
+
+    fn expired(&self) -> RepositoryError {
+        let budget = if self.budget.subsec_millis() == 0 {
+            format!("{} s", self.budget.as_secs())
+        } else {
+            format!("{} ms", self.budget.as_millis())
+        };
+        RepositoryError::new(
+            ErrorKind::TimedOut,
+            format!(
+                "Reading {} took longer than {budget}, so L1 Git stopped Git. Retry. If it happens again, check for a slow disk or a Git filter that does not finish.",
+                self.read.subject()
+            ),
+        )
+    }
+}
+
+struct Ran {
+    status: ExitStatus,
+    stdout: Capped,
+    stderr: Stderr,
+}
+
+/// Spawns Git in its own process group so an expired deadline stops every
+/// process it started, such as a clean filter.
+fn execute(
+    path: &Path,
+    args: &[&str],
+    deadline: Deadline,
+    input: Option<Vec<u8>>,
+    cap: Option<usize>,
+) -> Result<Ran, RepositoryError> {
+    let mut command = command(path, args);
+    command
+        .stdin(if input.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut command, 0);
+    let mut child = command.spawn().map_err(spawn_error)?;
+    // Writing from another thread keeps a full stdout pipe from blocking Git.
+    let writer = child
+        .stdin
+        .take()
+        .zip(input)
+        .map(|(mut stdin, input)| thread::spawn(move || stdin.write_all(&input)));
+    let stderr = Stderr::drain(child.stderr.take());
+    let Some(mut pipe) = child.stdout.take() else {
+        stop(child);
+        return Err(read_failed());
+    };
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        let _ = sender.send(capped(&mut pipe, cap));
+    });
+    let stdout = match receiver.recv_timeout(deadline.remaining()) {
+        Ok(Ok(stdout)) => stdout,
+        Ok(Err(_)) => {
+            stop(child);
+            return Err(read_failed());
+        }
+        Err(_) => {
+            stop(child);
+            return Err(deadline.expired());
+        }
+    };
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if deadline.remaining().is_zero() => {
+                stop(child);
+                return Err(deadline.expired());
+            }
+            Ok(None) => thread::sleep(EXIT_POLL),
+            Err(_) => {
+                stop(child);
+                return Err(read_failed());
+            }
+        }
+    };
+    if let Some(writer) = writer
+        && !matches!(writer.join(), Ok(Ok(())))
+    {
+        return Err(read_failed());
+    }
+    Ok(Ran {
+        status,
+        stdout,
+        stderr,
+    })
+}
+
+fn capped(pipe: &mut impl Read, cap: Option<usize>) -> io::Result<Capped> {
+    let mut kept = Vec::new();
+    let Some(cap) = cap else {
+        pipe.read_to_end(&mut kept)?;
+        return Ok(Capped::Within(kept));
+    };
+    pipe.take(cap as u64 + 1).read_to_end(&mut kept)?;
+    let rest = io::copy(pipe, &mut io::sink())?;
+    Ok(if kept.len() <= cap {
+        Capped::Within(kept)
+    } else {
+        Capped::Over(kept.len() as u64 + rest)
+    })
+}
+
+/// The status and output of a Git command. Its stderr is never read, so a
+/// process that holds stderr open cannot delay it.
+pub(crate) struct Exit {
+    pub(crate) status: ExitStatus,
+    pub(crate) stdout: Vec<u8>,
+}
+
+fn whole(ran: Ran) -> Result<Exit, RepositoryError> {
+    let Capped::Within(stdout) = ran.stdout else {
+        return Err(read_failed());
+    };
+    if ran.status.code() == Some(129)
+        && String::from_utf8_lossy(&ran.stderr.after_exit()).contains("no-lazy-fetch")
     {
         return Err(RepositoryError::new(
             ErrorKind::GitFailed,
             "L1 Git requires Git 2.45 or later. Update Git and try again.",
         ));
     }
-    Ok(output)
+    Ok(Exit {
+        status: ran.status,
+        stdout,
+    })
+}
+
+pub(crate) fn run(path: &Path, args: &[&str], deadline: Deadline) -> Result<Exit, RepositoryError> {
+    whole(execute(path, args, deadline, None, None)?)
 }
 
 pub(crate) fn read_failed() -> RepositoryError {
@@ -75,34 +269,28 @@ pub(crate) fn read_failed() -> RepositoryError {
     )
 }
 
-pub(crate) fn read(path: &Path, args: &[&str]) -> Result<Vec<u8>, RepositoryError> {
-    let output = run(path, args)?;
+fn succeeded(output: Exit) -> Result<Vec<u8>, RepositoryError> {
     if !output.status.success() {
         return Err(read_failed());
     }
     Ok(output.stdout)
 }
 
+pub(crate) fn read(
+    path: &Path,
+    args: &[&str],
+    deadline: Deadline,
+) -> Result<Vec<u8>, RepositoryError> {
+    succeeded(run(path, args, deadline)?)
+}
+
 pub(crate) fn read_with_input(
     path: &Path,
     args: &[&str],
     input: Vec<u8>,
+    deadline: Deadline,
 ) -> Result<Vec<u8>, RepositoryError> {
-    let mut child = command(path, args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(spawn_error)?;
-    let mut stdin = child.stdin.take().ok_or_else(read_failed)?;
-    // Writing from another thread keeps a full stdout pipe from blocking Git.
-    let writer = thread::spawn(move || stdin.write_all(&input));
-    let output = child.wait_with_output().map_err(|_| read_failed())?;
-    let written = writer.join().map_err(|_| read_failed())?;
-    if written.is_err() || !output.status.success() {
-        return Err(read_failed());
-    }
-    Ok(output.stdout)
+    succeeded(whole(execute(path, args, deadline, Some(input), None)?)?)
 }
 
 pub(crate) enum Capped {
@@ -113,37 +301,27 @@ pub(crate) enum Capped {
 pub(crate) struct CappedRun {
     pub(crate) code: Option<i32>,
     pub(crate) stdout: Capped,
-    pub(crate) stderr: String,
+    stderr: Stderr,
+}
+
+impl CappedRun {
+    /// Waits at most 1 s after Git exits for the rest of its stderr.
+    pub(crate) fn stderr(self) -> String {
+        text(&self.stderr.after_exit()).trim_end().to_owned()
+    }
 }
 
 pub(crate) fn run_capped(
     path: &Path,
     args: &[&str],
     cap: usize,
+    deadline: Deadline,
 ) -> Result<CappedRun, RepositoryError> {
-    let mut child = command(path, args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(spawn_error)?;
-    let mut stdout = child.stdout.take().ok_or_else(read_failed)?;
-    let stderr = Stderr::drain(child.stderr.take());
-    let mut kept = Vec::new();
-    (&mut stdout)
-        .take(cap as u64 + 1)
-        .read_to_end(&mut kept)
-        .map_err(|_| read_failed())?;
-    let rest = io::copy(&mut stdout, &mut io::sink()).map_err(|_| read_failed())?;
-    let status = child.wait().map_err(|_| read_failed())?;
-    let stderr = stderr.after_exit();
+    let ran = execute(path, args, deadline, None, Some(cap))?;
     Ok(CappedRun {
-        code: status.code(),
-        stdout: if kept.len() <= cap {
-            Capped::Within(kept)
-        } else {
-            Capped::Over(kept.len() as u64 + rest)
-        },
-        stderr: text(&stderr).trim_end().to_owned(),
+        code: ran.status.code(),
+        stdout: ran.stdout,
+        stderr: ran.stderr,
     })
 }
 
@@ -151,8 +329,9 @@ pub(crate) fn read_capped(
     path: &Path,
     args: &[&str],
     cap: usize,
+    deadline: Deadline,
 ) -> Result<Capped, RepositoryError> {
-    let run = run_capped(path, args, cap)?;
+    let run = run_capped(path, args, cap, deadline)?;
     if run.code != Some(0) {
         return Err(read_failed());
     }
@@ -266,6 +445,7 @@ pub(crate) enum Finished {
 
 const STDERR_CAP: u64 = 64 * 1024;
 const POLL: Duration = Duration::from_millis(10);
+const EXIT_POLL: Duration = Duration::from_millis(1);
 const INHERITED_STDERR_WAIT: Duration = Duration::from_secs(1);
 const TERMINATE_GRACE: Duration = Duration::from_secs(2);
 
@@ -332,26 +512,37 @@ pub(crate) fn mutate(
             });
         }
         if started.elapsed() >= deadline {
-            stop(&mut child);
+            stop(child);
             return Ok(Finished::TimedOut);
         }
         thread::sleep(POLL);
     }
 }
 
-/// Git deletes its lock files on SIGTERM but cannot on SIGKILL.
+/// Git deletes its lock files on SIGTERM but cannot on SIGKILL. A process
+/// stuck in the kernel survives SIGKILL, so another thread reaps it.
 #[cfg(unix)]
-fn stop(child: &mut Child) {
-    signal_group(child, libc::SIGTERM);
+fn stop(mut child: Child) {
+    signal_group(&mut child, libc::SIGTERM);
+    if exited_within(&mut child, TERMINATE_GRACE) {
+        return;
+    }
+    signal_group(&mut child, libc::SIGKILL);
+    if !exited_within(&mut child, TERMINATE_GRACE) {
+        thread::spawn(move || child.wait());
+    }
+}
+
+#[cfg(unix)]
+fn exited_within(child: &mut Child, grace: Duration) -> bool {
     let asked = Instant::now();
-    while asked.elapsed() < TERMINATE_GRACE {
+    while asked.elapsed() < grace {
         if !matches!(child.try_wait(), Ok(None)) {
-            return;
+            return true;
         }
         thread::sleep(POLL);
     }
-    signal_group(child, libc::SIGKILL);
-    let _ = child.wait();
+    false
 }
 
 #[cfg(unix)]
@@ -368,7 +559,7 @@ fn signal_group(child: &mut Child, signal: libc::c_int) {
 }
 
 #[cfg(not(unix))]
-fn stop(child: &mut Child) {
+fn stop(mut child: Child) {
     let _ = child.kill();
-    let _ = child.wait();
+    thread::spawn(move || child.wait());
 }

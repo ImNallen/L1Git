@@ -1,8 +1,12 @@
 use crate::{
     Advance, CommitDetail, Coordinator, FastForwardReport, FetchMode, FilePatch, LineStats,
     RepositoryError, RepositoryOverview, RepositoryRefs, RepositorySnapshot, Side, WorktreePatch,
-    WorktreeStatus, commit_detail, file_patch, line_stats, refs, snapshot, worktree_patch,
-    worktree_status,
+    WorktreeStatus,
+    git::LocalRead,
+    repository::{
+        commit_detail_within, file_patch_within, line_stats_within, refs_within, snapshot_within,
+    },
+    status::{worktree_patch_within, worktree_status_within},
 };
 use serde::{Deserialize, Serialize};
 
@@ -61,21 +65,38 @@ pub enum Response {
 }
 
 pub fn run(coordinator: &Coordinator, request: Request) -> Result<Response, RepositoryError> {
+    let deadline = |read| coordinator.deadline(read);
     Ok(match request {
-        Request::Snapshot { path } => Response::Snapshot(snapshot(&path)?),
-        Request::Refs { path } => Response::Refs(refs(&path)?),
-        Request::CommitDetail { path, oid } => Response::CommitDetail(commit_detail(&path, &oid)?),
-        Request::LineStats { path, oids } => Response::LineStats(line_stats(&path, &oids)?),
-        Request::FilePatch { path, oid, file } => {
-            Response::FilePatch(file_patch(&path, &oid, &file)?)
+        Request::Snapshot { path } => {
+            Response::Snapshot(snapshot_within(&path, deadline(LocalRead::Snapshot))?)
         }
+        Request::Refs { path } => Response::Refs(refs_within(&path, deadline(LocalRead::Refs))?),
+        Request::CommitDetail { path, oid } => Response::CommitDetail(commit_detail_within(
+            &path,
+            &oid,
+            deadline(LocalRead::CommitDetail),
+        )?),
+        Request::LineStats { path, oids } => Response::LineStats(line_stats_within(
+            &path,
+            &oids,
+            deadline(LocalRead::LineStats),
+        )?),
+        Request::FilePatch { path, oid, file } => Response::FilePatch(file_patch_within(
+            &path,
+            &oid,
+            &file,
+            deadline(LocalRead::FilePatch),
+        )?),
         Request::Overview { path, mode } => Response::Overview(coordinator.overview(&path, mode)?),
         Request::FastForward { path, advances } => {
             Response::FastForward(coordinator.fast_forward(&path, &advances)?)
         }
-        Request::WorktreeStatus { path } => Response::WorktreeStatus(worktree_status(&path)?),
-        Request::WorktreePatch { path, file, side } => {
-            Response::WorktreePatch(worktree_patch(&path, &file, side)?)
-        }
+        Request::WorktreeStatus { path } => Response::WorktreeStatus(worktree_status_within(
+            &path,
+            deadline(LocalRead::WorktreeStatus),
+        )?),
+        Request::WorktreePatch { path, file, side } => Response::WorktreePatch(
+            worktree_patch_within(&path, &file, side, deadline(LocalRead::WorktreePatch))?,
+        ),
     })
 }
