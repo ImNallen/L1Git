@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { oidSchema } from "./repository";
 import type { Oid } from "./repository";
 import {
-  foldCase,
-  indexMatches,
+  normalizeSearch,
+  matchPositions,
   matchCommits,
   matchCount,
   stepMatch,
@@ -83,7 +83,7 @@ describe("history search", () => {
     expect(match("RENÉE")).toEqual([
       "9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b",
     ]);
-    expect(foldCase("Café")).toBe("café");
+    expect(normalizeSearch("Café")).toBe("café");
   });
 
   it("never matches across the subject, author, and email", () => {
@@ -98,7 +98,7 @@ describe("history search", () => {
 });
 
 describe("history search count", () => {
-  const matches = indexMatches([themes, editor]);
+  const matches = matchPositions([themes, editor]);
   const count = (selected: Oid | null) =>
     matchCount("theme", matches, selected);
 
@@ -110,26 +110,28 @@ describe("history search count", () => {
   it("reads the total when the selected commit is not a match", () => {
     expect(count(selection)).toBe("2 matches");
     expect(count(null)).toBe("2 matches");
-    expect(matchCount("okaf", indexMatches([selection]), cafe)).toBe("1 match");
+    expect(matchCount("okaf", matchPositions([selection]), cafe)).toBe(
+      "1 match",
+    );
   });
 
   it("says no matches, and nothing for an empty query", () => {
-    expect(matchCount("zzzz", indexMatches([]), themes)).toBe("No matches");
-    expect(matchCount("  ", indexMatches([]), themes)).toBe("");
+    expect(matchCount("zzzz", matchPositions([]), themes)).toBe("No matches");
+    expect(matchCount("  ", matchPositions([]), themes)).toBe("");
   });
 
   it("formats large counts", () => {
     const many = Array.from({ length: 1234 }, (_, index) =>
       oidSchema.parse(index.toString(16).padStart(40, "0")),
     );
-    expect(matchCount("a", indexMatches(many), many[999] ?? null)).toBe(
+    expect(matchCount("a", matchPositions(many), many[999] ?? null)).toBe(
       "1,000 of 1,234",
     );
   });
 });
 
 describe("history search steps", () => {
-  const matches = indexMatches([themes, editor]);
+  const matches = matchPositions([themes, editor]);
   const step = (selected: Oid | null, by: 1 | -1) =>
     stepMatch(commits, matches, selected, by);
 
@@ -152,7 +154,9 @@ describe("history search steps", () => {
   });
 
   it("returns the only match again, and nothing without matches", () => {
-    expect(stepMatch(commits, indexMatches([editor]), editor, 1)).toBe(editor);
-    expect(stepMatch(commits, indexMatches([]), editor, 1)).toBeNull();
+    expect(stepMatch(commits, matchPositions([editor]), editor, 1)).toBe(
+      editor,
+    );
+    expect(stepMatch(commits, matchPositions([]), editor, 1)).toBeNull();
   });
 });

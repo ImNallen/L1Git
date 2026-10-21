@@ -30,7 +30,7 @@ import type { HistoryAction, Trail } from "../domain/navigation";
 import { refLabels } from "../domain/refs";
 import type { RefLabel } from "../domain/refs";
 import {
-  indexMatches,
+  matchPositions,
   matchCommits,
   matchCount,
   stepMatch,
@@ -389,7 +389,7 @@ export function History({
   if (search && search.root !== snapshot.root) setSearch(null);
   const query = search?.query ?? "";
   const matches = useMemo(
-    () => indexMatches(matchCommits(commits, query)),
+    () => matchPositions(matchCommits(commits, query)),
     [commits, query],
   );
   const searching = matches.size > 0;
