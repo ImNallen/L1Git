@@ -57,6 +57,14 @@ const rejected = async (body: unknown) => {
     error: z.object({ error: z.string() }).parse(await response.json()).error,
   };
 };
+const single = (oid: string) => ({
+  base: { kind: "firstParent" },
+  target: { kind: "commit", oid },
+});
+const between = (base: string, target: string) => ({
+  base: { kind: "commit", oid: base },
+  target: { kind: "commit", oid: target },
+});
 const snapshotEnvelope = answer("snapshot", snapshotSchema);
 const refsEnvelope = answer("refs", refsSchema.strict());
 const overviewEnvelope = answer("overview", overviewSchema);
@@ -197,7 +205,7 @@ describe("real Rust transport contract", () => {
         await post({
           op: "commitDetail",
           path: fixture.repository,
-          oid: inspector.oid,
+          comparison: single(inspector.oid),
         })
       ).json(),
     ).data;
@@ -219,15 +227,102 @@ describe("real Rust transport contract", () => {
         await post({
           op: "commitDetail",
           path: fixture.repository,
-          oid: merge.oid,
+          comparison: single(merge.oid),
         })
       ).json(),
     ).data;
-    expect(detail.diffBase).toBe("firstParent");
+    expect(detail.base).toEqual({ kind: "firstParent" });
     expect(detail.files.map((file) => file.path)).toEqual([
       "graph.ts",
       "history.ts",
     ]);
+  });
+
+  it("compares two commits and a commit with a dirty worktree", async () => {
+    const { commits } = snapshotEnvelope.parse(
+      await (await post({ op: "snapshot", path: fixture.repository })).json(),
+    ).data;
+    const root = commits.find((commit) => commit.parents.length === 0);
+    const merge = commits.find((commit) => commit.parents.length === 2);
+    if (!root || !merge) throw new Error("Fixture commits are missing");
+    const detail = async (comparison: unknown, path = fixture.repository) =>
+      answer("commitDetail", detailSchema).parse(
+        await (await post({ op: "commitDetail", path, comparison })).json(),
+      ).data;
+    const forward = await detail(between(root.oid, merge.oid));
+    expect(forward.base).toMatchObject({
+      kind: "commit",
+      commit: { oid: root.oid },
+    });
+    expect(forward.target).toMatchObject({
+      kind: "commit",
+      commit: { oid: merge.oid },
+    });
+    expect(forward.files).toEqual([
+      { path: "graph.ts", status: "A" },
+      { path: "history.ts", status: "A" },
+      { path: "theme.css", status: "A" },
+    ]);
+    expect((await detail(between(merge.oid, root.oid))).files).toEqual([
+      { path: "graph.ts", status: "D" },
+      { path: "history.ts", status: "D" },
+      { path: "theme.css", status: "D" },
+    ]);
+    expect((await detail(between(merge.oid, merge.oid))).files).toEqual([]);
+    const patch = answer("filePatch", filePatchSchema).parse(
+      await (
+        await post({
+          op: "filePatch",
+          path: fixture.repository,
+          comparison: between(merge.oid, root.oid),
+          file: "graph.ts",
+        })
+      ).json(),
+    ).data;
+    expect(patch.kind === "text" && patch.patch).toContain("deleted file mode");
+
+    const sync = snapshotEnvelope.parse(
+      await (
+        await post({ op: "snapshot", path: fixture.sync.repository })
+      ).json(),
+    ).data;
+    const dirty = realpathSync(fixture.sync.dirty);
+    const head = sync.worktrees.find(
+      (worktree) => worktree.root === dirty,
+    )?.head;
+    if (head?.kind !== "attached") throw new Error("sync.dirty is missing");
+    const working = await detail(
+      {
+        base: { kind: "commit", oid: head.oid },
+        target: { kind: "worktree", root: dirty },
+      },
+      fixture.sync.repository,
+    );
+    expect(working.target).toMatchObject({ kind: "worktree", root: dirty });
+    expect(working.files).toEqual([{ path: "README.md", status: "M" }]);
+    expect(
+      await rejected({
+        op: "commitDetail",
+        path: fixture.repository,
+        comparison: { ...single(merge.oid), extra: 1 },
+      }),
+    ).toEqual({
+      status: 400,
+      error: expect.stringContaining("unknown field `extra`") as string,
+    });
+    expect(
+      await rejected({
+        op: "commitDetail",
+        path: fixture.repository,
+        comparison: {
+          base: { kind: "firstParent", oid: root.oid },
+          target: { kind: "commit", oid: merge.oid },
+        },
+      }),
+    ).toEqual({
+      status: 400,
+      error: expect.stringContaining("unknown field `oid`") as string,
+    });
   });
 
   it("reads text, binary, and root file patches and rejects unchanged paths", async () => {
@@ -243,7 +338,12 @@ describe("real Rust transport contract", () => {
     if (!inspector || !root) throw new Error("Fixture commits are missing");
     const patch = async (oid: string, file: string) =>
       (
-        await post({ op: "filePatch", path: fixture.repository, oid, file })
+        await post({
+          op: "filePatch",
+          path: fixture.repository,
+          comparison: single(oid),
+          file,
+        })
       ).json();
     const success = answer("filePatch", filePatchSchema);
     expect(
@@ -700,7 +800,7 @@ describe("real Rust transport contract", () => {
     });
     expect(
       await rejected({ op: "commitDetail", path: fixture.repository }),
-    ).toEqual({ status: 400, error: "missing field `oid`" });
+    ).toEqual({ status: 400, error: "missing field `comparison`" });
     expect(
       (await post({ path: fixture.repository }, origin, "/api/snapshot"))
         .status,
@@ -983,7 +1083,7 @@ describe("real Rust read deadlines", () => {
           body: JSON.stringify({
             op: "commitDetail",
             path: fixture.repository,
-            oid,
+            comparison: single(oid),
           }),
         })
       ).json();
@@ -1005,7 +1105,10 @@ describe("real Rust read deadlines", () => {
       const detail = answer("commitDetail", detailSchema).parse(
         await read(other.oid),
       ).data;
-      expect(detail.commit.oid).toBe(other.oid);
+      expect(detail.target).toMatchObject({
+        kind: "commit",
+        commit: { oid: other.oid },
+      });
     } finally {
       slowBridge.bridge.kill();
       await once(slowBridge.bridge, "exit");
@@ -1046,7 +1149,7 @@ describe("real Rust read deadlines", () => {
         body: JSON.stringify({
           op: "commitDetail",
           path: fixture.repository,
-          oid: slow.oid,
+          comparison: single(slow.oid),
         }),
       }).catch(() => undefined);
       for (let attempt = 0; attempt < 100 && Number.isNaN(pid); attempt++) {

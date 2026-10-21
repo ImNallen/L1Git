@@ -1,11 +1,12 @@
 use crate::{
-    ChangeStatus, Conflict, ErrorKind, FilePatch, MoveSide, Moved, PATCH_LIMIT, RepositoryError,
-    Side, Sides, StatusEntry, SubmoduleState, WorktreePatch, WorktreeStatus,
+    ChangeStatus, ChangedFile, Conflict, ErrorKind, FilePatch, MoveSide, Moved, PATCH_LIMIT,
+    RepositoryError, Side, Sides, StatusEntry, SubmoduleState, WorktreePatch, WorktreeStatus,
     git::{self, Deadline, LocalRead},
     repository::{self, text_patch},
     untracked::untracked,
 };
 use std::{
+    collections::HashSet,
     fs,
     path::{Component, Path},
 };
@@ -258,6 +259,103 @@ pub(crate) fn worktree_patch_within(
         (StatusEntry::Untracked { .. }, _) => {
             untracked(&root, file, deadline)?.ok_or_else(|| no_changes(file, side))
         }
+    }
+}
+
+/// `--raw` lists a file whose stat changed but whose content did not, because
+/// plumbing never refreshes the index, so only the paths `--numstat` counts
+/// are kept.
+pub(crate) fn worktree_changes(
+    root: &Path,
+    base: &str,
+    deadline: Deadline,
+) -> Result<Vec<ChangedFile>, RepositoryError> {
+    let output = git::read(
+        root,
+        &[
+            "diff-index",
+            "-z",
+            "--raw",
+            "--numstat",
+            "--no-renames",
+            base,
+            "--",
+        ],
+        deadline,
+    )?;
+    let mut listed = Vec::new();
+    let mut counted = HashSet::new();
+    let mut fields = output.split(|byte| *byte == 0);
+    while let Some(field) = fields.next() {
+        match field {
+            [] => continue,
+            [b':', raw @ ..] => {
+                let status = raw.rsplit(|byte| *byte == b' ').next().unwrap_or_default();
+                listed.push((status, fields.next().ok_or_else(git::malformed)?));
+            }
+            numstat => {
+                let path = numstat
+                    .splitn(3, |byte| *byte == b'\t')
+                    .nth(2)
+                    .ok_or_else(git::malformed)?;
+                counted.insert(path);
+            }
+        }
+    }
+    let mut files = listed
+        .into_iter()
+        .filter(|(status, path)| *status == b"U" || counted.contains(path))
+        .map(|(status, path)| {
+            Ok(ChangedFile {
+                path: git::text(path),
+                status: repository::change_status(status)?,
+            })
+        })
+        .collect::<Result<Vec<_>, RepositoryError>>()?;
+    let tracked: HashSet<String> = files.iter().map(|file| file.path.clone()).collect();
+    files.extend(
+        entries(root, deadline)?
+            .into_iter()
+            .filter_map(|entry| match entry {
+                StatusEntry::Untracked { path } if !tracked.contains(&path) => Some(ChangedFile {
+                    path,
+                    status: ChangeStatus::Added,
+                }),
+                _ => None,
+            }),
+    );
+    Ok(files)
+}
+
+pub(crate) fn worktree_file_patch(
+    root: &Path,
+    base: &str,
+    file: &str,
+    deadline: Deadline,
+) -> Result<Option<FilePatch>, RepositoryError> {
+    check(file)?;
+    if file.contains(char::REPLACEMENT_CHARACTER) {
+        return Err(repository::non_utf8_path());
+    }
+    if let Some(diff) = tracked(
+        root,
+        &["diff-index", "--no-renames", base],
+        &[file],
+        file,
+        deadline,
+    )? {
+        return Ok(Some(diff));
+    }
+    let untracked_path = entries(root, deadline)?
+        .iter()
+        .any(|entry| matches!(entry, StatusEntry::Untracked { path } if path == file));
+    if !untracked_path {
+        return Ok(None);
+    }
+    match untracked(root, file, deadline)? {
+        Some(WorktreePatch::Diff { diff }) => Ok(Some(diff)),
+        Some(_) => Err(git::malformed()),
+        None => Ok(None),
     }
 }
 

@@ -51,8 +51,14 @@ export function ChangedFileTree({
     onSelectFileRef.current = onSelectFile;
   });
   const [preparedInput] = useState(() => changedFileTreeInput(files));
+  const [initialSelectedPaths] = useState(() =>
+    selectedPath !== null && files.some((file) => file.path === selectedPath)
+      ? [treePath(selectedPath)]
+      : [],
+  );
   const { model } = useFileTree({
     preparedInput,
+    initialSelectedPaths,
     gitStatus: files.map((file) => ({
       path: treePath(file.path),
       status: file.status,

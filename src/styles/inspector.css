@@ -278,3 +278,29 @@
   flex: 1 0 auto;
   margin: 0 -21px;
 }
+.compare-ends {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--muted);
+}
+.compare-ends code {
+  font-size: 11px;
+  white-space: nowrap;
+}
+.compare-swap {
+  height: 24px;
+  margin-left: 6px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+.meta-secondary.parents {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.meta-secondary.parents .sha-chip {
+  height: 16px;
+  margin-left: 0;
+}

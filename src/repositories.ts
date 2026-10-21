@@ -2,6 +2,7 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { z } from "zod";
 import { fastForwardReportSchema, overviewSchema } from "./domain/overview";
+import type { Comparison } from "./domain/comparison";
 import type { Advance, FetchMode } from "./domain/overview";
 import {
   detailSchema,
@@ -22,9 +23,9 @@ export const macNative = native && mac;
 type RepositoryRequest =
   | { op: "snapshot"; path: string }
   | { op: "refs"; path: RepositoryRoot }
-  | { op: "commitDetail"; path: string; oid: Oid }
+  | { op: "commitDetail"; path: string; comparison: Comparison }
   | { op: "lineStats"; path: RepositoryRoot; oids: Oid[] }
-  | { op: "filePatch"; path: string; oid: Oid; file: string }
+  | { op: "filePatch"; path: string; comparison: Comparison; file: string }
   | { op: "overview"; path: RepositoryRoot; mode: FetchMode }
   | { op: "fastForward"; path: RepositoryRoot; advances: Advance[] }
   | { op: "worktreeStatus"; path: RepositoryRoot }
@@ -112,16 +113,20 @@ export async function refs(path: RepositoryRoot) {
   return (await run({ op: "refs", path })).data;
 }
 
-export async function commitDetail(path: string, oid: Oid) {
-  return (await run({ op: "commitDetail", path, oid })).data;
+export async function commitDetail(path: string, comparison: Comparison) {
+  return (await run({ op: "commitDetail", path, comparison })).data;
 }
 
 export async function lineStats(path: RepositoryRoot, oids: Oid[]) {
   return (await run({ op: "lineStats", path, oids })).data;
 }
 
-export async function filePatch(path: string, oid: Oid, file: string) {
-  return (await run({ op: "filePatch", path, oid, file })).data;
+export async function filePatch(
+  path: string,
+  comparison: Comparison,
+  file: string,
+) {
+  return (await run({ op: "filePatch", path, comparison, file })).data;
 }
 
 export async function overview(path: RepositoryRoot, mode: FetchMode) {

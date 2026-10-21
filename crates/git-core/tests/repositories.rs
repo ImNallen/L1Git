@@ -1,8 +1,9 @@
 use l1_git_core::{
-    Branch, ChangeStatus, Conflict, DiffBase, ErrorKind, FilePatch, HISTORY_LIMIT, Head,
-    LINE_STATS_LIMIT, LineStats, MoveSide, Moved, RepositoryRefs, Side, Sides, Squash, StatusEntry,
-    SubmoduleState, Tag, Worktree, WorktreePatch, WorktreeStatus, commit_detail, file_patch,
-    line_stats, refs, snapshot, worktree_patch, worktree_status,
+    Base, BaseDetail, Branch, ChangeStatus, Comparison, Conflict, ErrorKind, FilePatch,
+    HISTORY_LIMIT, Head, LINE_STATS_LIMIT, LineStats, MoveSide, Moved, RepositoryRefs, Side, Sides,
+    Squash, StatusEntry, SubmoduleState, Tag, Target, TargetDetail, Worktree, WorktreePatch,
+    WorktreeStatus, commit_detail, file_patch, line_stats, refs, snapshot, worktree_patch,
+    worktree_status,
 };
 use std::{
     fs,
@@ -444,12 +445,15 @@ fn pairs_a_squash_merged_branch_with_its_squash_commit_only() {
 fn detail_preserves_message_paths_and_first_parent_merge_policy() {
     let fixture = Fixture::new();
     let root_oid = fixture.commit("first", "one", "initial\n\nFull body.");
-    let initial = commit_detail(fixture.path(), &root_oid).unwrap();
-    assert_eq!(initial.commit.subject, "initial");
-    assert_eq!(initial.commit.author, "Ada");
-    assert_eq!(initial.commit.timestamp, 1700000000);
-    assert_eq!(initial.message, "initial\n\nFull body.\n");
-    assert!(matches!(initial.diff_base, DiffBase::EmptyTree));
+    let initial = commit_detail(fixture.path(), &Comparison::commit(&root_oid)).unwrap();
+    let TargetDetail::Commit { commit, message } = initial.target else {
+        panic!("a commit target");
+    };
+    assert_eq!(commit.subject, "initial");
+    assert_eq!(commit.author, "Ada");
+    assert_eq!(commit.timestamp, 1700000000);
+    assert_eq!(message, "initial\n\nFull body.\n");
+    assert!(matches!(initial.base, BaseDetail::EmptyTree));
     assert_eq!(initial.files[0].path, "first");
     assert_eq!(initial.files[0].status, ChangeStatus::Added);
     git(&fixture.repo, &["checkout", "-b", "feature"]);
@@ -461,9 +465,12 @@ fn detail_preserves_message_paths_and_first_parent_merge_policy() {
         &["merge", "--no-ff", "feature", "-m", "merge"],
     );
     let merge = git(&fixture.repo, &["rev-parse", "HEAD"]);
-    let detail = commit_detail(fixture.path(), &merge).unwrap();
-    assert_eq!(detail.commit.parents, [main, feature]);
-    assert!(matches!(detail.diff_base, DiffBase::FirstParent));
+    let detail = commit_detail(fixture.path(), &Comparison::commit(&merge)).unwrap();
+    let TargetDetail::Commit { commit, .. } = &detail.target else {
+        panic!("a commit target");
+    };
+    assert_eq!(commit.parents, [main, feature]);
+    assert!(matches!(detail.base, BaseDetail::FirstParent));
     assert_eq!(detail.files.len(), 1);
     assert_eq!(detail.files[0].path, "a\tfile\n.txt");
     assert_eq!(detail.files[0].status, ChangeStatus::Added);
@@ -491,7 +498,7 @@ fn detail_reports_added_deleted_modified_and_type_changed_paths() {
     );
     git(&fixture.repo, &["commit", "-m", "every status"]);
     let oid = git(&fixture.repo, &["rev-parse", "HEAD"]);
-    let files = commit_detail(fixture.path(), &oid)
+    let files = commit_detail(fixture.path(), &Comparison::commit(&oid))
         .unwrap()
         .files
         .into_iter()
@@ -508,20 +515,216 @@ fn detail_reports_added_deleted_modified_and_type_changed_paths() {
     );
 }
 
+fn paths(comparison: Comparison, fixture: &Fixture) -> Vec<(String, ChangeStatus)> {
+    commit_detail(fixture.path(), &comparison)
+        .unwrap()
+        .files
+        .into_iter()
+        .map(|file| (file.path, file.status))
+        .collect()
+}
+
+fn changed(path: &str, status: ChangeStatus) -> (String, ChangeStatus) {
+    (path.to_owned(), status)
+}
+
+#[test]
+fn compares_two_commits_either_way_round() {
+    let fixture = Fixture::new();
+    let first = fixture.commit("kept.txt", "one\n", "first");
+    fixture.commit("gone.txt", "bye\n", "second");
+    git(&fixture.repo, &["rm", "--quiet", "gone.txt"]);
+    fixture.commit("kept.txt", "two\n", "third");
+    let last = fixture.commit("new.txt", "hi\n", "fourth");
+    assert_eq!(
+        paths(Comparison::between(&first, &last), &fixture),
+        [
+            changed("kept.txt", ChangeStatus::Modified),
+            changed("new.txt", ChangeStatus::Added),
+        ]
+    );
+    assert_eq!(
+        paths(Comparison::between(&last, &first), &fixture),
+        [
+            changed("kept.txt", ChangeStatus::Modified),
+            changed("new.txt", ChangeStatus::Deleted),
+        ]
+    );
+    let detail = commit_detail(fixture.path(), &Comparison::between(&first, &last)).unwrap();
+    assert!(matches!(detail.base, BaseDetail::Commit { commit } if commit.oid == first));
+    assert!(matches!(detail.target, TargetDetail::Commit { commit, .. } if commit.oid == last));
+    let FilePatch::Text { patch, .. } = file_patch(
+        fixture.path(),
+        &Comparison::between(&last, &first),
+        "kept.txt",
+    )
+    .unwrap() else {
+        panic!("a text patch");
+    };
+    assert!(patch.contains("-two\n+one\n"), "{patch}");
+    assert!(paths(Comparison::between(&last, &last), &fixture).is_empty());
+    assert!(matches!(
+        file_patch(
+            fixture.path(),
+            &Comparison::between(&last, &last),
+            "kept.txt"
+        )
+        .unwrap_err()
+        .kind,
+        ErrorKind::UnchangedPath
+    ));
+}
+
+#[test]
+fn compares_a_commit_with_a_dirty_worktree() {
+    let fixture = Fixture::new();
+    let first = fixture.commit("edited.txt", "one\n", "first");
+    let second = fixture.commit("touched.txt", "same\n", "second");
+    let linked = fixture._directory.path().join("linked");
+    git(
+        &fixture.repo,
+        &["worktree", "add", "--detach", linked.to_str().unwrap()],
+    );
+    fs::write(linked.join("edited.txt"), "two\n").unwrap();
+    fs::write(linked.join("notes.txt"), "new\n").unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    fs::write(linked.join("touched.txt"), "same\n").unwrap();
+    let against = |oid: &str| Comparison {
+        base: Base::Commit {
+            oid: oid.to_owned(),
+        },
+        target: Target::Worktree {
+            root: linked.to_str().unwrap().to_owned(),
+        },
+    };
+    let comparison = against(&second);
+    assert_eq!(
+        paths(comparison.clone(), &fixture),
+        [
+            changed("edited.txt", ChangeStatus::Modified),
+            changed("notes.txt", ChangeStatus::Added),
+        ]
+    );
+    assert_eq!(
+        paths(against(&first), &fixture),
+        [
+            changed("edited.txt", ChangeStatus::Modified),
+            changed("touched.txt", ChangeStatus::Added),
+            changed("notes.txt", ChangeStatus::Added),
+        ]
+    );
+    let detail = commit_detail(fixture.path(), &comparison).unwrap();
+    assert!(matches!(
+        detail.target,
+        TargetDetail::Worktree {
+            head: Head::Detached { .. },
+            ..
+        }
+    ));
+    let FilePatch::Text { patch, .. } =
+        file_patch(fixture.path(), &comparison, "edited.txt").unwrap()
+    else {
+        panic!("a text patch");
+    };
+    assert!(patch.contains("-one\n+two\n"), "{patch}");
+    let FilePatch::Text { patch, .. } =
+        file_patch(fixture.path(), &comparison, "notes.txt").unwrap()
+    else {
+        panic!("a text patch");
+    };
+    assert!(patch.contains("+new\n"), "{patch}");
+    fs::remove_file(linked.join("notes.txt")).unwrap();
+    assert!(matches!(
+        file_patch(fixture.path(), &comparison, "notes.txt")
+            .unwrap_err()
+            .kind,
+        ErrorKind::UnchangedPath
+    ));
+    assert!(matches!(
+        file_patch(fixture.path(), &comparison, "../outside.txt")
+            .unwrap_err()
+            .kind,
+        ErrorKind::UnsupportedPath
+    ));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn compares_a_worktree_and_reports_a_non_utf8_untracked_name_as_unsupported() {
+    use std::os::unix::ffi::OsStrExt;
+    let fixture = Fixture::new();
+    let oid = fixture.commit("a.txt", "a\n", "first");
+    fs::write(
+        fixture
+            .repo
+            .join(std::ffi::OsStr::from_bytes(b"bad\xff.txt")),
+        "new\n",
+    )
+    .unwrap();
+    let comparison = Comparison {
+        base: Base::Commit { oid },
+        target: Target::Worktree {
+            root: fixture.path().to_owned(),
+        },
+    };
+    assert_eq!(
+        paths(comparison.clone(), &fixture),
+        [changed("bad\u{FFFD}.txt", ChangeStatus::Added)]
+    );
+    assert!(matches!(
+        file_patch(fixture.path(), &comparison, "bad\u{FFFD}.txt")
+            .unwrap_err()
+            .kind,
+        ErrorKind::UnsupportedPath
+    ));
+}
+
+#[test]
+fn rejects_a_worktree_target_without_a_base_commit_or_from_another_repository() {
+    let fixture = Fixture::new();
+    let oid = fixture.commit("a.txt", "a\n", "first");
+    let other = Fixture::new();
+    other.commit("b.txt", "b\n", "other");
+    let worktree = |base, root: &str| Comparison {
+        base,
+        target: Target::Worktree {
+            root: root.to_owned(),
+        },
+    };
+    assert!(matches!(
+        commit_detail(
+            fixture.path(),
+            &worktree(Base::FirstParent {}, fixture.path())
+        )
+        .unwrap_err()
+        .kind,
+        ErrorKind::InvalidOid
+    ));
+    assert!(matches!(
+        commit_detail(
+            fixture.path(),
+            &worktree(Base::Commit { oid }, other.path())
+        )
+        .unwrap_err()
+        .kind,
+        ErrorKind::MissingPath
+    ));
+}
+
 #[test]
 fn file_patch_reads_text_against_the_first_parent_and_the_empty_tree() {
     let fixture = Fixture::new();
     let root = fixture.commit("notes.txt", "one\ntwo\n", "initial");
     let second = fixture.commit("notes.txt", "one\n2\n", "edit");
     assert_eq!(
-        file_patch(fixture.path(), &root, "notes.txt").unwrap(),
+        file_patch(fixture.path(), &Comparison::commit(&root), "notes.txt").unwrap(),
         FilePatch::Text {
             patch: "diff --git a/notes.txt b/notes.txt\nnew file mode 100644\nindex 0000000..814f4a4\n--- /dev/null\n+++ b/notes.txt\n@@ -0,0 +1,2 @@\n+one\n+two\n".into(),
             lossy: false,
         }
     );
     assert_eq!(
-        file_patch(fixture.path(), &second, "notes.txt").unwrap(),
+        file_patch(fixture.path(), &Comparison::commit(&second), "notes.txt").unwrap(),
         FilePatch::Text {
             patch: "diff --git a/notes.txt b/notes.txt\nindex 814f4a4..99b356d 100644\n--- a/notes.txt\n+++ b/notes.txt\n@@ -1,2 +1,2 @@\n one\n-two\n+2\n".into(),
             lossy: false,
@@ -536,7 +739,8 @@ fn file_patch_flags_text_that_is_not_valid_utf8() {
     fs::write(fixture.repo.join("latin1.txt"), b"caf\xe9\n").unwrap();
     git(&fixture.repo, &["commit", "-am", "latin-1"]);
     let oid = git(&fixture.repo, &["rev-parse", "HEAD"]);
-    let FilePatch::Text { patch, lossy } = file_patch(fixture.path(), &oid, "latin1.txt").unwrap()
+    let FilePatch::Text { patch, lossy } =
+        file_patch(fixture.path(), &Comparison::commit(&oid), "latin1.txt").unwrap()
     else {
         panic!("expected a text patch");
     };
@@ -558,11 +762,11 @@ fn file_patch_reports_binary_and_oversized_files_without_patch_text() {
     git(&fixture.repo, &["commit", "-m", "assets"]);
     let oid = git(&fixture.repo, &["rev-parse", "HEAD"]);
     assert_eq!(
-        file_patch(fixture.path(), &oid, "logo.png").unwrap(),
+        file_patch(fixture.path(), &Comparison::commit(&oid), "logo.png").unwrap(),
         FilePatch::Binary
     );
     assert_eq!(
-        file_patch(fixture.path(), &oid, "large.txt").unwrap(),
+        file_patch(fixture.path(), &Comparison::commit(&oid), "large.txt").unwrap(),
         FilePatch::TooLarge { bytes: 1_190_129 }
     );
 }
@@ -576,16 +780,22 @@ fn file_patch_rejects_paths_the_commit_did_not_change() {
     for path in ["kept.txt", "dir", "missing.txt", ""] {
         assert!(
             matches!(
-                file_patch(fixture.path(), &oid, path).unwrap_err().kind,
+                file_patch(fixture.path(), &Comparison::commit(&oid), path)
+                    .unwrap_err()
+                    .kind,
                 ErrorKind::UnchangedPath
             ),
             "{path:?}"
         );
     }
     assert!(matches!(
-        file_patch(fixture.path(), "HEAD", "dir/changed.txt")
-            .unwrap_err()
-            .kind,
+        file_patch(
+            fixture.path(),
+            &Comparison::commit("HEAD"),
+            "dir/changed.txt"
+        )
+        .unwrap_err()
+        .kind,
         ErrorKind::InvalidOid
     ));
 }
@@ -600,14 +810,14 @@ fn file_patch_treats_pathspec_magic_as_a_literal_path() {
     git(&fixture.repo, &["commit", "-m", "glob-looking path"]);
     let oid = git(&fixture.repo, &["rev-parse", "HEAD"]);
     assert_eq!(
-        file_patch(fixture.path(), &oid, "*").unwrap(),
+        file_patch(fixture.path(), &Comparison::commit(&oid), "*").unwrap(),
         FilePatch::Text {
             patch: "diff --git a/* b/*\nnew file mode 100644\nindex 0000000..ce7b819\n--- /dev/null\n+++ b/*\n@@ -0,0 +1 @@\n+star\n\\ No newline at end of file\n".into(),
             lossy: false,
         }
     );
     assert!(matches!(
-        file_patch(fixture.path(), &oid, ":(glob)*")
+        file_patch(fixture.path(), &Comparison::commit(&oid), ":(glob)*")
             .unwrap_err()
             .kind,
         ErrorKind::UnchangedPath
@@ -618,7 +828,8 @@ fn file_patch_treats_pathspec_magic_as_a_literal_path() {
 fn file_patch_leaves_non_ascii_names_unquoted() {
     let fixture = Fixture::new();
     let oid = fixture.commit("café.txt", "crème\n", "initial");
-    let FilePatch::Text { patch, .. } = file_patch(fixture.path(), &oid, "café.txt").unwrap()
+    let FilePatch::Text { patch, .. } =
+        file_patch(fixture.path(), &Comparison::commit(&oid), "café.txt").unwrap()
     else {
         panic!("expected a text patch");
     };
@@ -646,12 +857,16 @@ fn file_patch_reports_non_utf8_file_names_as_unsupported() {
     assert!(status.success());
     git(&fixture.repo, &["commit", "-m", "non-UTF-8 name"]);
     let oid = git(&fixture.repo, &["rev-parse", "HEAD"]);
-    let detail = commit_detail(fixture.path(), &oid).unwrap();
+    let detail = commit_detail(fixture.path(), &Comparison::commit(&oid)).unwrap();
     assert_eq!(detail.files[0].path, "bad\u{FFFD}.txt");
     assert!(matches!(
-        file_patch(fixture.path(), &oid, &detail.files[0].path)
-            .unwrap_err()
-            .kind,
+        file_patch(
+            fixture.path(),
+            &Comparison::commit(&oid),
+            &detail.files[0].path
+        )
+        .unwrap_err()
+        .kind,
         ErrorKind::UnsupportedPath
     ));
 }
@@ -769,7 +984,7 @@ fn partial_clone_details_never_fetch_missing_objects() {
         names
     };
     let before = packs();
-    let result = commit_detail(clone.to_str().unwrap(), &oid)
+    let result = commit_detail(clone.to_str().unwrap(), &Comparison::commit(&oid))
         .map(|_| "detail loaded".to_owned())
         .unwrap_or_else(|error| format!("{:?}", error.kind));
     assert_eq!(result, "GitFailed");
@@ -804,7 +1019,9 @@ fn rejects_missing_invalid_and_bare_repositories_and_invalid_oids() {
         "0000000000000000000000000000000000000000",
     ] {
         assert!(matches!(
-            commit_detail(fixture.path(), oid).unwrap_err().kind,
+            commit_detail(fixture.path(), &Comparison::commit(oid))
+                .unwrap_err()
+                .kind,
             ErrorKind::InvalidOid
         ));
     }

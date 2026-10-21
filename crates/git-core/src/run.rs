@@ -1,7 +1,7 @@
 use crate::{
-    Advance, CommitDetail, Coordinator, FastForwardReport, FetchMode, FilePatch, LineStats,
-    RepositoryError, RepositoryOverview, RepositoryRefs, RepositorySnapshot, Side, WorktreePatch,
-    WorktreeStatus,
+    Advance, CommitDetail, Comparison, Coordinator, FastForwardReport, FetchMode, FilePatch,
+    LineStats, RepositoryError, RepositoryOverview, RepositoryRefs, RepositorySnapshot, Side,
+    WorktreePatch, WorktreeStatus,
     git::LocalRead,
     repository::{
         commit_detail_within, file_patch_within, line_stats_within, refs_within, snapshot_within,
@@ -21,7 +21,7 @@ pub enum Request {
     },
     CommitDetail {
         path: String,
-        oid: String,
+        comparison: Comparison,
     },
     LineStats {
         path: String,
@@ -29,7 +29,7 @@ pub enum Request {
     },
     FilePatch {
         path: String,
-        oid: String,
+        comparison: Comparison,
         file: String,
     },
     Overview {
@@ -71,9 +71,9 @@ pub fn run(coordinator: &Coordinator, request: Request) -> Result<Response, Repo
             Response::Snapshot(snapshot_within(&path, deadline(LocalRead::Snapshot))?)
         }
         Request::Refs { path } => Response::Refs(refs_within(&path, deadline(LocalRead::Refs))?),
-        Request::CommitDetail { path, oid } => Response::CommitDetail(commit_detail_within(
+        Request::CommitDetail { path, comparison } => Response::CommitDetail(commit_detail_within(
             &path,
-            &oid,
+            &comparison,
             deadline(LocalRead::CommitDetail),
         )?),
         Request::LineStats { path, oids } => Response::LineStats(line_stats_within(
@@ -81,9 +81,13 @@ pub fn run(coordinator: &Coordinator, request: Request) -> Result<Response, Repo
             &oids,
             deadline(LocalRead::LineStats),
         )?),
-        Request::FilePatch { path, oid, file } => Response::FilePatch(file_patch_within(
+        Request::FilePatch {
+            path,
+            comparison,
+            file,
+        } => Response::FilePatch(file_patch_within(
             &path,
-            &oid,
+            &comparison,
             &file,
             deadline(LocalRead::FilePatch),
         )?),

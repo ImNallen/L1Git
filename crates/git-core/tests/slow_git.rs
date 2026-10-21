@@ -1,6 +1,6 @@
 #![cfg(unix)]
 
-use l1_git_core::{Coordinator, ErrorKind, Request, Response, run};
+use l1_git_core::{Comparison, Coordinator, ErrorKind, Request, Response, TargetDetail, run};
 use std::{
     fs,
     os::unix::fs::PermissionsExt,
@@ -74,7 +74,7 @@ fn a_git_that_hangs_on_one_commit_times_out_that_detail_and_leaves_no_process() 
     let coordinator = Coordinator::default().cap_reads(CAP);
     let request = |oid: &str| Request::CommitDetail {
         path: root.to_str().unwrap().to_owned(),
-        oid: oid.to_owned(),
+        comparison: Comparison::commit(oid),
     };
     let started = Instant::now();
     let error = run(&coordinator, request(&slow)).unwrap_err();
@@ -102,5 +102,5 @@ fn a_git_that_hangs_on_one_commit_times_out_that_detail_and_leaves_no_process() 
     let Ok(Response::CommitDetail(detail)) = run(&coordinator, request(&first)) else {
         panic!("the other commit did not load");
     };
-    assert_eq!(detail.commit.oid, first);
+    assert!(matches!(detail.target, TargetDetail::Commit { commit, .. } if commit.oid == first));
 }
