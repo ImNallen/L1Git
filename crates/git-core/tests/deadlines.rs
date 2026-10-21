@@ -158,6 +158,16 @@ fn a_filter_that_never_finishes_times_out_an_untracked_patch_and_leaves_no_proce
 }
 
 #[test]
+fn a_filter_that_ignores_sigterm_is_still_stopped() {
+    let repository = Repository::with_filter(&format!("trap '' TERM; {HANGS}"));
+    repository.edit_tracked();
+    timed_out(Request::WorktreeStatus {
+        path: repository.path(),
+    });
+    repository.assert_filters_stopped();
+}
+
+#[test]
 fn a_filter_that_leaves_stderr_open_stalls_neither_status_nor_a_tracked_patch() {
     let repository = Repository::with_filter(LEAVES_STDERR_OPEN);
     repository.edit_tracked();

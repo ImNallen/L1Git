@@ -519,30 +519,45 @@ pub(crate) fn mutate(
     }
 }
 
-/// Git deletes its lock files on SIGTERM but cannot on SIGKILL. A process
-/// stuck in the kernel survives SIGKILL, so another thread reaps it.
+/// Git deletes its lock files on SIGTERM but cannot on SIGKILL. SIGKILL then
+/// reaches every process Git started, including one that ignores SIGTERM. A
+/// process stuck in the kernel survives SIGKILL, so another thread reaps it.
 #[cfg(unix)]
 fn stop(mut child: Child) {
     signal_group(&mut child, libc::SIGTERM);
-    if exited_within(&mut child, TERMINATE_GRACE) {
-        return;
-    }
+    let exited = exited_within(&child, TERMINATE_GRACE);
     signal_group(&mut child, libc::SIGKILL);
-    if !exited_within(&mut child, TERMINATE_GRACE) {
+    if exited || exited_within(&child, TERMINATE_GRACE) {
+        let _ = child.wait();
+    } else {
         thread::spawn(move || child.wait());
     }
 }
 
+/// Leaves the child unreaped, so its pid keeps naming its process group.
 #[cfg(unix)]
-fn exited_within(child: &mut Child, grace: Duration) -> bool {
+fn exited_within(child: &Child, grace: Duration) -> bool {
     let asked = Instant::now();
-    while asked.elapsed() < grace {
-        if !matches!(child.try_wait(), Ok(None)) {
+    loop {
+        // SAFETY: `siginfo_t` is plain data that waitid(2) only writes to.
+        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+        // SAFETY: `info` is a valid, writable `siginfo_t` for the whole call.
+        let status = unsafe {
+            libc::waitid(
+                libc::P_PID,
+                child.id(),
+                &mut info,
+                libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+            )
+        };
+        if status != 0 || info.si_signo != 0 {
             return true;
+        }
+        if asked.elapsed() >= grace {
+            return false;
         }
         thread::sleep(POLL);
     }
-    false
 }
 
 #[cfg(unix)]
