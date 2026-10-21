@@ -502,7 +502,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                   <History
                     ref={historyRef}
                     snapshot={snapshot}
-                    commits={visible}
+                    visibleCommits={visible}
                     rule={rule}
                     selectedOid={app.selectedOid}
                     revealSeq={jump?.seq ?? 0}

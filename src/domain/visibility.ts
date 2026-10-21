@@ -1,6 +1,5 @@
 import type { Commit, FullRef, Oid, RepositorySnapshot } from "./repository";
 
-/** Hiding removes branches from the graph's tips. Soloing keeps only the soloed ones and HEAD. */
 export type VisibilityRule =
   | { kind: "none" }
   | { kind: "hide" | "solo"; refs: ReadonlySet<FullRef> };
@@ -17,7 +16,6 @@ export function branchVisibility(
   return rule.kind === "hide" ? "hidden" : "soloed";
 }
 
-/** Toggles `reference` in a rule of `kind`, replacing a rule of the other kind. */
 export function toggleRule(
   rule: VisibilityRule,
   kind: "hide" | "solo",
@@ -29,7 +27,6 @@ export function toggleRule(
   return refs.size === 0 ? NO_RULE : { kind, refs };
 }
 
-/** The smallest change to `rule` that shows the tip of `reference`. */
 export function revealBranch(
   rule: VisibilityRule,
   reference: FullRef,
@@ -47,40 +44,38 @@ type Refs = Pick<
   "head" | "branches" | "tags" | "worktrees"
 >;
 
-function tips(refs: Refs, rule: VisibilityRule): Oid[] | null {
-  const head = refs.head.kind === "unborn" ? [] : [refs.head.oid];
-  if (rule.kind === "solo") {
-    const soloed = refs.branches.filter((branch) =>
-      rule.refs.has(branch.reference),
-    );
-    if (soloed.length === 0) return null;
-    return [...head, ...soloed.map((branch) => branch.oid)];
-  }
-  if (rule.kind === "hide")
-    return [
-      ...head,
-      ...refs.branches
-        .filter((branch) => !rule.refs.has(branch.reference))
-        .map((branch) => branch.oid),
-      ...refs.tags.map((tag) => tag.oid),
-      ...refs.worktrees.flatMap((worktree) =>
-        worktree.head.kind === "unborn" ? [] : [worktree.head.oid],
-      ),
-    ];
-  return null;
+function soloTips(refs: Refs, soloed: ReadonlySet<FullRef>): Oid[] {
+  return refs.branches
+    .filter((branch) => soloed.has(branch.reference))
+    .map((branch) => branch.oid);
 }
 
-/**
- * The commits reachable from the tips `rule` leaves visible, in their original
- * order. A solo rule whose branches are all gone shows everything.
- */
+function unhiddenTips(refs: Refs, hidden: ReadonlySet<FullRef>): Oid[] {
+  return [
+    ...refs.branches
+      .filter((branch) => !hidden.has(branch.reference))
+      .map((branch) => branch.oid),
+    ...refs.tags.map((tag) => tag.oid),
+    ...refs.worktrees.flatMap((worktree) =>
+      worktree.head.kind === "unborn" ? [] : [worktree.head.oid],
+    ),
+  ];
+}
+
 export function visibleCommits<C extends Pick<Commit, "oid" | "parents">>(
   commits: readonly C[],
   refs: Refs,
   rule: VisibilityRule,
 ): readonly C[] {
-  const pending = tips(refs, rule);
-  if (pending === null) return commits;
+  if (rule.kind === "none") return commits;
+  const branchTips =
+    rule.kind === "solo"
+      ? soloTips(refs, rule.refs)
+      : unhiddenTips(refs, rule.refs);
+  const soloedBranchesAllGone = rule.kind === "solo" && branchTips.length === 0;
+  if (soloedBranchesAllGone) return commits;
+  const pending = refs.head.kind === "unborn" ? [] : [refs.head.oid];
+  pending.push(...branchTips);
   const parents = new Map(
     commits.map((commit) => [commit.oid, commit.parents]),
   );

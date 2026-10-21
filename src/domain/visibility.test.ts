@@ -21,8 +21,6 @@ const squashed = oid("f");
 const squash = oid("1");
 const inspector = oid("2");
 
-// main: squash -> merge -> {theme, history2 -> history1} -> base
-// feat/history: history2. feat/squashed: squashed -> merge. feat/inspector: inspector -> merge.
 const commits = [
   { oid: inspector, parents: [merge] },
   { oid: squash, parents: [merge] },

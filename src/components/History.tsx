@@ -344,8 +344,7 @@ type Search = { root: RepositoryRoot; query: string };
 type Props = {
   ref?: Ref<HistoryHandle>;
   snapshot: RepositorySnapshot;
-  /** The commits `rule` leaves visible, in history order. */
-  commits: readonly Commit[];
+  visibleCommits: readonly Commit[];
   rule: VisibilityRule;
   selectedOid: Oid | null;
   revealSeq: number;
@@ -366,7 +365,7 @@ type Props = {
 export function History({
   ref,
   snapshot,
-  commits,
+  visibleCommits: commits,
   rule,
   selectedOid,
   revealSeq,
