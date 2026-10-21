@@ -59,7 +59,7 @@ pub(crate) fn root(path: &str) -> Result<PathBuf, RepositoryError> {
     })
 }
 
-fn head(path: &Path) -> Result<Head, RepositoryError> {
+pub(crate) fn head(path: &Path) -> Result<Head, RepositoryError> {
     let symbolic = git::run(path, &["symbolic-ref", "--quiet", "HEAD"])?;
     let target = git::run(path, &["rev-parse", "--verify", "HEAD^{commit}"])?;
     match (symbolic.status.success(), target.status.success()) {
@@ -704,13 +704,17 @@ pub fn file_patch(path: &str, oid: &str, file: &str) -> Result<FilePatch, Reposi
     }
     Ok(
         match git::read_capped(&root, &args("--patch"), PATCH_LIMIT)? {
-            git::Capped::Within(patch) => FilePatch::Text {
-                lossy: std::str::from_utf8(&patch).is_err(),
-                patch: git::text(&patch),
-            },
+            git::Capped::Within(patch) => text_patch(&patch),
             git::Capped::Over(bytes) => FilePatch::TooLarge { bytes },
         },
     )
+}
+
+pub(crate) fn text_patch(patch: &[u8]) -> FilePatch {
+    FilePatch::Text {
+        lossy: std::str::from_utf8(patch).is_err(),
+        patch: git::text(patch),
+    }
 }
 
 /// Counts each commit's changed lines against the same base as its detail.

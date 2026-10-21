@@ -2,7 +2,7 @@ use crate::{BranchRef, ErrorKind, Oid, RepositoryError};
 use std::{
     io::{self, Read, Write},
     path::Path,
-    process::{Child, Command, Output, Stdio},
+    process::{Child, ChildStderr, Command, Output, Stdio},
     sync::mpsc,
     thread,
     time::{Duration, Instant},
@@ -25,13 +25,16 @@ fn base(path: &Path, lazy_fetch: bool) -> Command {
             "color.ui=false",
             "-c",
             "log.showSignature=false",
+            "-c",
+            "core.quotePath=false",
             "-C",
         ])
         .arg(path)
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_OPTIONAL_LOCKS", "0")
         .env("GIT_NO_REPLACE_OBJECTS", "1")
-        .env("LC_ALL", "C");
+        .env("LC_ALL", "C")
+        .stdin(Stdio::null());
     command
 }
 
@@ -65,7 +68,7 @@ pub(crate) fn run(path: &Path, args: &[&str]) -> Result<Output, RepositoryError>
     Ok(output)
 }
 
-fn read_failed() -> RepositoryError {
+pub(crate) fn read_failed() -> RepositoryError {
     RepositoryError::new(
         ErrorKind::GitFailed,
         "Git could not read this repository. Check its permissions and missing objects. For a partial clone, fetch the required objects with Git, then refresh.",
@@ -107,31 +110,53 @@ pub(crate) enum Capped {
     Over(u64),
 }
 
-pub(crate) fn read_capped(
+pub(crate) struct CappedRun {
+    pub(crate) code: Option<i32>,
+    pub(crate) stdout: Capped,
+    pub(crate) stderr: String,
+}
+
+pub(crate) fn run_capped(
     path: &Path,
     args: &[&str],
     cap: usize,
-) -> Result<Capped, RepositoryError> {
+) -> Result<CappedRun, RepositoryError> {
     let mut child = command(path, args)
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()
         .map_err(spawn_error)?;
     let mut stdout = child.stdout.take().ok_or_else(read_failed)?;
+    let stderr = Stderr::drain(child.stderr.take());
     let mut kept = Vec::new();
     (&mut stdout)
         .take(cap as u64 + 1)
         .read_to_end(&mut kept)
         .map_err(|_| read_failed())?;
     let rest = io::copy(&mut stdout, &mut io::sink()).map_err(|_| read_failed())?;
-    if !child.wait().map_err(|_| read_failed())?.success() {
+    let status = child.wait().map_err(|_| read_failed())?;
+    let stderr = stderr.after_exit();
+    Ok(CappedRun {
+        code: status.code(),
+        stdout: if kept.len() <= cap {
+            Capped::Within(kept)
+        } else {
+            Capped::Over(kept.len() as u64 + rest)
+        },
+        stderr: text(&stderr).trim_end().to_owned(),
+    })
+}
+
+pub(crate) fn read_capped(
+    path: &Path,
+    args: &[&str],
+    cap: usize,
+) -> Result<Capped, RepositoryError> {
+    let run = run_capped(path, args, cap)?;
+    if run.code != Some(0) {
         return Err(read_failed());
     }
-    Ok(if kept.len() <= cap {
-        Capped::Within(kept)
-    } else {
-        Capped::Over(kept.len() as u64 + rest)
-    })
+    Ok(run.stdout)
 }
 
 pub(crate) fn text(bytes: &[u8]) -> String {
@@ -140,6 +165,32 @@ pub(crate) fn text(bytes: &[u8]) -> String {
 
 pub(crate) fn line(bytes: &[u8]) -> String {
     text(bytes.strip_suffix(b"\n").unwrap_or(bytes))
+}
+
+/// Quotes a path the way Git's diff headers do with `core.quotePath=false`.
+pub(crate) fn quoted(prefix: &str, path: &str) -> String {
+    let special = |c: char| c < ' ' || c == '"' || c == '\\' || c == '\x7f';
+    if !path.contains(special) {
+        return format!("{prefix}{path}");
+    }
+    let mut quoted = format!("\"{prefix}");
+    for c in path.chars() {
+        match c {
+            '\x07' => quoted.push_str("\\a"),
+            '\x08' => quoted.push_str("\\b"),
+            '\t' => quoted.push_str("\\t"),
+            '\n' => quoted.push_str("\\n"),
+            '\x0b' => quoted.push_str("\\v"),
+            '\x0c' => quoted.push_str("\\f"),
+            '\r' => quoted.push_str("\\r"),
+            '"' => quoted.push_str("\\\""),
+            '\\' => quoted.push_str("\\\\"),
+            c if special(c) => quoted.push_str(&format!("\\{:03o}", c as u32)),
+            c => quoted.push(c),
+        }
+    }
+    quoted.push('"');
+    quoted
 }
 
 pub(crate) fn malformed() -> RepositoryError {
@@ -218,6 +269,31 @@ const POLL: Duration = Duration::from_millis(10);
 const INHERITED_STDERR_WAIT: Duration = Duration::from_secs(1);
 const TERMINATE_GRACE: Duration = Duration::from_secs(2);
 
+/// A process that Git starts, such as a clean filter, can keep stderr open
+/// after Git exits.
+struct Stderr(mpsc::Receiver<Vec<u8>>);
+
+impl Stderr {
+    fn drain(pipe: Option<ChildStderr>) -> Self {
+        let (sender, receiver) = mpsc::channel();
+        if let Some(mut pipe) = pipe {
+            thread::spawn(move || {
+                let mut kept = Vec::new();
+                let _ = (&mut pipe).take(STDERR_CAP).read_to_end(&mut kept);
+                let _ = io::copy(&mut pipe, &mut io::sink());
+                let _ = sender.send(kept);
+            });
+        }
+        Self(receiver)
+    }
+
+    fn after_exit(self) -> Vec<u8> {
+        self.0
+            .recv_timeout(INHERITED_STDERR_WAIT)
+            .unwrap_or_default()
+    }
+}
+
 pub(crate) fn mutate(
     path: &Path,
     mutation: Mutation<'_>,
@@ -241,22 +317,12 @@ pub(crate) fn mutate(
     std::os::unix::process::CommandExt::process_group(&mut command, 0);
     let started = Instant::now();
     let mut child = command.spawn().map_err(spawn_error)?;
-    let (sender, receiver) = mpsc::channel();
-    if let Some(mut stderr) = child.stderr.take() {
-        thread::spawn(move || {
-            let mut kept = Vec::new();
-            let _ = (&mut stderr).take(STDERR_CAP).read_to_end(&mut kept);
-            let _ = io::copy(&mut stderr, &mut io::sink());
-            let _ = sender.send(kept);
-        });
-    }
+    let stderr = Stderr::drain(child.stderr.take());
     loop {
         if let Some(status) = child.try_wait().map_err(|error| {
             RepositoryError::new(ErrorKind::GitFailed, format!("Could not run Git: {error}"))
         })? {
-            let stderr = receiver
-                .recv_timeout(INHERITED_STDERR_WAIT)
-                .unwrap_or_default();
+            let stderr = stderr.after_exit();
             return Ok(if status.success() {
                 Finished::Succeeded
             } else {

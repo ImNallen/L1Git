@@ -1,7 +1,13 @@
 import { execFileSync, spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 import { once } from "node:events";
-import { chmodSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import { setTimeout } from "node:timers/promises";
@@ -20,6 +26,8 @@ import {
   refsSchema,
   repositoryErrorSchema,
   snapshotSchema,
+  worktreePatchSchema,
+  worktreeStatusSchema,
 } from "./domain/repository";
 
 const fixtureSchema = z.object({
@@ -52,6 +60,14 @@ const snapshotEnvelope = answer("snapshot", snapshotSchema);
 const refsEnvelope = answer("refs", refsSchema.strict());
 const overviewEnvelope = answer("overview", overviewSchema);
 const fastForwardEnvelope = answer("fastForward", fastForwardReportSchema);
+const worktreeStatusEnvelope = answer(
+  "worktreeStatus",
+  worktreeStatusSchema,
+).strict();
+const worktreePatchEnvelope = answer(
+  "worktreePatch",
+  worktreePatchSchema,
+).strict();
 
 async function post(
   body: unknown,
@@ -359,6 +375,300 @@ describe("real Rust transport contract", () => {
     ).toBe("missingPath");
   });
 
+  it("reads worktree entries and each side of their patches", async () => {
+    const dirty = realpathSync(fixture.sync.dirty);
+    expect(
+      worktreeStatusEnvelope.parse(
+        await (await post({ op: "worktreeStatus", path: dirty })).json(),
+      ).data.entries,
+    ).toEqual([
+      {
+        kind: "ordinary",
+        path: "README.md",
+        submodule: null,
+        sides: { kind: "unstaged", unstaged: "M" },
+      },
+    ]);
+
+    const states = join(fixture.root, "worktree states");
+    mkdirSync(states);
+    const env = {
+      ...Object.fromEntries(
+        Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")),
+      ),
+      GIT_AUTHOR_NAME: "Ada",
+      GIT_AUTHOR_EMAIL: "ada@example.test",
+      GIT_AUTHOR_DATE: "1700000000 +0000",
+      GIT_COMMITTER_NAME: "Ada",
+      GIT_COMMITTER_EMAIL: "ada@example.test",
+      GIT_COMMITTER_DATE: "1700000000 +0000",
+    };
+    const git = (...args: string[]) =>
+      execFileSync("git", ["-C", states, ...args], {
+        encoding: "utf8",
+        env,
+        stdio: ["ignore", "pipe", "ignore"],
+      }).trim();
+    git("init", "--initial-branch=main");
+    git("config", "core.hooksPath", "/dev/null");
+    writeFileSync(join(states, "notes.txt"), "one\ntwo\n");
+    writeFileSync(join(states, "old.txt"), "a\nb\nc\nd\n");
+    writeFileSync(join(states, "shared.txt"), "base\n");
+    writeFileSync(join(states, "source.txt"), "1\n2\n3\n4\n5\n");
+    writeFileSync(join(states, ".gitattributes"), "*.up filter=upper\n");
+    git("add", ".");
+    git("commit", "-m", "initial");
+    git("config", "diff.renames", "copies");
+    git("config", "filter.upper.clean", "tr a-z A-Z");
+    writeFileSync(join(states, "draft.up"), "lower\n");
+    git("switch", "-c", "theirs");
+    writeFileSync(join(states, "shared.txt"), "theirs\n");
+    git("commit", "-am", "theirs");
+    git("switch", "main");
+    writeFileSync(join(states, "shared.txt"), "ours\n");
+    git("commit", "-am", "ours");
+    expect(() => git("merge", "theirs")).toThrow();
+    git("mv", "old.txt", "new.txt");
+    writeFileSync(join(states, "notes.txt"), "one\n2\n");
+    git("add", "notes.txt");
+    writeFileSync(join(states, "notes.txt"), "one\n2\nthree\n");
+    writeFileSync(join(states, "draft notes.txt"), "first draft\n");
+    writeFileSync(join(states, "copy.txt"), "1\n2\n3\n4\n5\n");
+    writeFileSync(join(states, "source.txt"), "1\n2\n3\n4\n5\n6\n");
+    git("add", "copy.txt", "source.txt");
+    const root = realpathSync(states);
+
+    expect(
+      worktreeStatusEnvelope.parse(
+        await (await post({ op: "worktreeStatus", path: root })).json(),
+      ).data,
+    ).toEqual({
+      root,
+      head: {
+        kind: "attached",
+        reference: "refs/heads/main",
+        oid: git("rev-parse", "HEAD"),
+      },
+      entries: [
+        {
+          kind: "renamed",
+          path: "copy.txt",
+          original: "source.txt",
+          how: "copied",
+          submodule: null,
+          side: { kind: "staged", unstaged: null },
+        },
+        {
+          kind: "renamed",
+          path: "new.txt",
+          original: "old.txt",
+          how: "renamed",
+          submodule: null,
+          side: { kind: "staged", unstaged: null },
+        },
+        {
+          kind: "ordinary",
+          path: "notes.txt",
+          submodule: null,
+          sides: { kind: "both", staged: "M", unstaged: "M" },
+        },
+        {
+          kind: "ordinary",
+          path: "source.txt",
+          submodule: null,
+          sides: { kind: "staged", staged: "M" },
+        },
+        {
+          kind: "unmerged",
+          path: "shared.txt",
+          conflict: "bothModified",
+          submodule: null,
+        },
+        { kind: "untracked", path: "draft notes.txt" },
+        { kind: "untracked", path: "draft.up" },
+      ],
+    });
+
+    const patch = async (file: string, side: string) =>
+      worktreePatchEnvelope.parse(
+        await (
+          await post({ op: "worktreePatch", path: root, file, side })
+        ).json(),
+      ).data;
+    const text = (lines: string[]) => ({
+      kind: "diff",
+      diff: { kind: "text", lossy: false, patch: lines.join("\n") },
+    });
+    expect(await patch("notes.txt", "staged")).toEqual(
+      text([
+        "diff --git a/notes.txt b/notes.txt",
+        "index 814f4a422927b82f5f8a43f8fab6d3839e3983f2..99b356dcd03dde0755c749bcd4cae4b2b73a8fa8 100644",
+        "--- a/notes.txt",
+        "+++ b/notes.txt",
+        "@@ -1,2 +1,2 @@",
+        " one",
+        "-two",
+        "+2",
+        "",
+      ]),
+    );
+    expect(await patch("notes.txt", "unstaged")).toEqual(
+      text([
+        "diff --git a/notes.txt b/notes.txt",
+        "index 99b356dcd03dde0755c749bcd4cae4b2b73a8fa8..f04eb265ebd74fba2cddf0a6adf2a6a7f81c87aa 100644",
+        "--- a/notes.txt",
+        "+++ b/notes.txt",
+        "@@ -1,2 +1,3 @@",
+        " one",
+        " 2",
+        "+three",
+        "",
+      ]),
+    );
+    expect(await patch("copy.txt", "staged")).toEqual(
+      text([
+        "diff --git a/source.txt b/copy.txt",
+        "similarity index 100%",
+        "copy from source.txt",
+        "copy to copy.txt",
+        "",
+      ]),
+    );
+    expect(await patch("new.txt", "staged")).toEqual(
+      text([
+        "diff --git a/old.txt b/new.txt",
+        "similarity index 100%",
+        "rename from old.txt",
+        "rename to new.txt",
+        "",
+      ]),
+    );
+    expect(await patch("draft notes.txt", "unstaged")).toEqual(
+      text([
+        "diff --git a/draft notes.txt b/draft notes.txt",
+        "new file mode 100644",
+        "index 0000000000000000000000000000000000000000..42293fde779e36a65af4896dd9fa13f00a042c3c",
+        "--- /dev/null",
+        "+++ b/draft notes.txt\t",
+        "@@ -0,0 +1 @@",
+        "+first draft",
+        "",
+      ]),
+    );
+    expect(await patch("draft.up", "unstaged")).toEqual(
+      text([
+        "diff --git a/draft.up b/draft.up",
+        "new file mode 100644",
+        "index 0000000000000000000000000000000000000000..bd531ae71de0d872de62ebbbffc968bb4f4c8c47",
+        "--- /dev/null",
+        "+++ b/draft.up",
+        "@@ -0,0 +1 @@",
+        "+LOWER",
+        "",
+      ]),
+    );
+    const conflicted = {
+      kind: "conflicted",
+      conflict: "bothModified",
+      diff: {
+        kind: "text",
+        lossy: false,
+        patch: [
+          "diff --git a/shared.txt b/shared.txt",
+          "index b19a1e93bec1317dc6097229e12afaffbfa74dc2..5eb9640fc3f80dac61e1d3494746a7cd2aa5e64e 100644",
+          "--- a/shared.txt",
+          "+++ b/shared.txt",
+          "@@ -1 +1,5 @@",
+          "+<<<<<<< HEAD",
+          " ours",
+          "+=======",
+          "+theirs",
+          "+>>>>>>> theirs",
+          "",
+        ].join("\n"),
+      },
+    };
+    expect(await patch("shared.txt", "staged")).toEqual(conflicted);
+    expect(await patch("shared.txt", "unstaged")).toEqual(conflicted);
+    expect(
+      z
+        .strictObject({ ok: z.literal(false), error: repositoryErrorSchema })
+        .parse(
+          await (
+            await post({
+              op: "worktreePatch",
+              path: root,
+              file: "draft notes.txt",
+              side: "staged",
+            })
+          ).json(),
+        ).error,
+    ).toEqual({
+      kind: "unchangedPath",
+      message: "This file has no staged changes. Refresh the worktree status.",
+    });
+  });
+
+  it("sends submodule, binary, and too-large patches and unreadable files across the bridge", async () => {
+    const kinds = join(fixture.root, "worktree kinds");
+    const sub = join(kinds, "sub");
+    mkdirSync(sub, { recursive: true });
+    const env = {
+      ...Object.fromEntries(
+        Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")),
+      ),
+      GIT_AUTHOR_NAME: "Ada",
+      GIT_AUTHOR_EMAIL: "ada@example.test",
+      GIT_COMMITTER_NAME: "Ada",
+      GIT_COMMITTER_EMAIL: "ada@example.test",
+    };
+    const git = (cwd: string, ...args: string[]) =>
+      execFileSync("git", ["-C", cwd, ...args], {
+        encoding: "utf8",
+        env,
+        stdio: ["ignore", "pipe", "ignore"],
+      }).trim();
+    for (const repository of [kinds, sub]) {
+      git(repository, "init", "--initial-branch=main");
+      git(repository, "commit", "--allow-empty", "-m", "initial");
+    }
+    git(kinds, "add", "sub");
+    git(kinds, "commit", "-m", "submodule");
+    git(sub, "commit", "--allow-empty", "-m", "moved");
+    writeFileSync(join(kinds, "image.bin"), "a\0b\n");
+    writeFileSync(join(kinds, "large.txt"), "x".repeat(1_500_000));
+    writeFileSync(join(kinds, "locked.txt"), "x\n");
+    chmodSync(join(kinds, "locked.txt"), 0o000);
+    const root = realpathSync(kinds);
+    const request = async (file: string) =>
+      (
+        await post({ op: "worktreePatch", path: root, file, side: "unstaged" })
+      ).json();
+
+    expect(worktreePatchEnvelope.parse(await request("sub")).data).toEqual({
+      kind: "submodule",
+      submodule: { commitChanged: true, modified: false, untracked: false },
+    });
+    expect(
+      worktreePatchEnvelope.parse(await request("image.bin")).data,
+    ).toEqual({ kind: "diff", diff: { kind: "binary" } });
+    expect(
+      worktreePatchEnvelope.parse(await request("large.txt")).data,
+    ).toEqual({ kind: "diff", diff: { kind: "tooLarge", bytes: 1_500_000 } });
+    const unreadable = z
+      .strictObject({
+        ok: z.literal(false),
+        error: repositoryErrorSchema.strict(),
+      })
+      .parse(await request("locked.txt")).error;
+    chmodSync(join(kinds, "locked.txt"), 0o644);
+    expect(unreadable).toEqual({
+      kind: "unreadablePath",
+      message:
+        "L1 Git could not read this file (Permission denied (os error 13)). Check its permissions, then refresh.",
+    });
+  });
+
   it("rejects other origins, absent origins, unknown operations, and malformed requests", async () => {
     for (const operation of ["snapshot", "refs"])
       for (const requestOrigin of [
@@ -378,7 +688,7 @@ describe("real Rust transport contract", () => {
     ).toEqual({
       status: 400,
       error:
-        "unknown variant `notAnOperation`, expected one of `snapshot`, `refs`, `commitDetail`, `lineStats`, `filePatch`, `overview`, `fastForward` at line 1 column 22",
+        "unknown variant `notAnOperation`, expected one of `snapshot`, `refs`, `commitDetail`, `lineStats`, `filePatch`, `overview`, `fastForward`, `worktreeStatus`, `worktreePatch` at line 1 column 22",
     });
     expect(
       await rejected({ op: "commitDetail", path: fixture.repository }),
