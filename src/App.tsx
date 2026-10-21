@@ -84,6 +84,13 @@ type Jump = {
   seq: number;
   pending: boolean;
 };
+function focusedElement(): Element | null {
+  let focused = document.activeElement;
+  while (focused?.shadowRoot?.activeElement)
+    focused = focused.shadowRoot.activeElement;
+  return focused;
+}
+
 function shownElement(element: Element | null): element is HTMLElement {
   return (
     element instanceof HTMLElement &&
@@ -129,6 +136,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   const settingsRef = useRef<HTMLButtonElement>(null);
   const historyRef = useRef<HistoryHandle>(null);
   const fileDiffRef = useRef<FileDiffHandle>(null);
+  const gridFocusRoot = useRef<RepositoryRoot | null>(null);
   const leaveSettings = useCallback(() => {
     flushSync(() => setScreen("repository"));
     (sidebarOpen ? settingsRef : sidebarToggleRef).current?.focus();
@@ -274,6 +282,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     [overviewStore, app.activeRoot],
   );
   function showRepository(root: RepositoryRoot) {
+    gridFocusRoot.current = null;
     setSidebarJump(null);
     setScreen("repository");
     expansion.setExpanded(root, true);
@@ -367,7 +376,10 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     showAllBranches: () => {
       if (snapshot) setRule(snapshot.root, NO_RULE);
     },
-    openRepository: showRepository,
+    openRepository: (root) => {
+      showRepository(root);
+      if (root !== snapshot?.root) gridFocusRoot.current = root;
+    },
     jumpToBranch: (reference) => {
       const branch = snapshot?.branches.find(
         (branch) => branch.reference === reference,
@@ -406,31 +418,38 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     keys.current = { context, commands, palette: palette !== null };
   });
   const openPalette = useCallback(() => {
-    paletteReturn.current = document.activeElement;
+    paletteReturn.current = focusedElement();
     setPalette({ picked: historyRef.current?.picked() ?? null });
   }, []);
-  const settleFocus = useRef(false);
   const focusFallback = () => {
-    historyRef.current?.focus();
-    if (!shownElement(document.activeElement))
-      sidebarToggleRef.current?.focus();
+    for (const focus of [
+      () => historyRef.current?.focus(),
+      () => fileDiffRef.current?.focus(),
+      () => sidebarToggleRef.current?.focus(),
+    ]) {
+      focus();
+      if (shownElement(focusedElement())) return;
+    }
   };
-  useLayoutEffect(() => {
-    if (!settleFocus.current) return;
-    settleFocus.current = false;
-    if (!shownElement(document.activeElement)) focusFallback();
-  });
   const closePalette = () => {
     flushSync(() => setPalette(null));
     const back = paletteReturn.current;
     if (shownElement(back)) back.focus({ preventScroll: true });
-    else focusFallback();
+    if (!shownElement(back) || focusedElement() !== back) focusFallback();
   };
   const runItem = (item: PaletteItem) => {
     closePalette();
-    settleFocus.current = true;
     item.run();
+    requestAnimationFrame(() => {
+      if (!shownElement(focusedElement())) focusFallback();
+    });
   };
+  useEffect(() => {
+    if (gridFocusRoot.current === null) return;
+    if (snapshot?.root === gridFocusRoot.current) historyRef.current?.focus();
+    else if (workspace.kind !== "error") return;
+    gridFocusRoot.current = null;
+  }, [snapshot?.root, workspace.kind]);
   async function addRepository(path: string, signal: AbortSignal) {
     const added = await app.addRepository(path, signal);
     if (added.kind === "opened") {

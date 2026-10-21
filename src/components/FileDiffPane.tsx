@@ -15,7 +15,10 @@ export type { DiffStyle };
 
 export type View = DiffStyle | "history" | "blame";
 
-export type FileDiffHandle = { show: (view: View) => void };
+export type FileDiffHandle = {
+  show: (view: View) => void;
+  focus: () => void;
+};
 
 const VIEWS: { view: View; label: string }[] = [
   { view: "unified", label: "Unified" },
@@ -83,7 +86,10 @@ export function FileDiffPane({
       onDiffStyle(next);
     }
   };
-  useImperativeHandle(ref, () => ({ show: choose }));
+  useImperativeHandle(ref, () => ({
+    show: choose,
+    focus: () => backRef.current?.focus(),
+  }));
   const look = { diffStyle, theme, painted };
   return (
     <section className="file-diff" aria-label={`Changes to ${state.path}`}>
