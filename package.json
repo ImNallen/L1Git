@@ -9,6 +9,7 @@
     "dev:web": "vite",
     "bridge": "cargo run -p l1-git-dev-bridge",
     "fixture": "node scripts/create-fixture.mjs",
+    "fixture:large": "node scripts/create-large-fixture.mjs",
     "typecheck": "tsc --noEmit",
     "build": "pnpm typecheck && vite build",
     "test": "cargo build -p l1-git-dev-bridge && vitest run",
