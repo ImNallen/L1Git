@@ -898,6 +898,16 @@ fn blame_reads_ranges_for_a_file_edited_by_two_authors() {
 }
 
 #[test]
+fn blame_keeps_a_missing_final_newline() {
+    let fixture = Fixture::new();
+    let oid = fixture.commit("tail.txt", "one\ntwo", "no final newline");
+    let Blame::Text { contents, .. } = blame(fixture.path(), &oid, "tail.txt").unwrap() else {
+        panic!("expected text");
+    };
+    assert_eq!(contents, "one\ntwo");
+}
+
+#[test]
 fn blame_reports_binary_oversized_missing_and_submodule_paths() {
     let fixture = Fixture::new();
     fs::write(

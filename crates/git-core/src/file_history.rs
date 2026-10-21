@@ -133,7 +133,7 @@ pub(crate) fn blame_within(
         git::Capped::Within(output) => output,
         git::Capped::Over(_) => return Ok(Blame::TooLarge { bytes }),
     };
-    porcelain(&output)
+    porcelain(&output, bytes)
 }
 
 fn missing_file() -> RepositoryError {
@@ -184,7 +184,9 @@ struct Author {
     summary: String,
 }
 
-fn porcelain(output: &[u8]) -> Result<Blame, RepositoryError> {
+/// Porcelain ends every line with a newline, so a blob of `bytes` bytes
+/// without a final newline reads one byte longer.
+fn porcelain(output: &[u8], bytes: u64) -> Result<Blame, RepositoryError> {
     let mut authors: HashMap<String, Author> = HashMap::new();
     let mut ranges: Vec<BlameRange> = Vec::new();
     let mut contents = Vec::new();
@@ -250,6 +252,9 @@ fn porcelain(output: &[u8]) -> Result<Blame, RepositoryError> {
     }
     if current.is_some() {
         return Err(git::malformed());
+    }
+    if contents.len() as u64 == bytes + 1 {
+        contents.pop();
     }
     if contents[..contents.len().min(BINARY_PROBE)].contains(&0) {
         return Ok(Blame::Binary);
