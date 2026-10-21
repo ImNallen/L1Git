@@ -177,10 +177,10 @@
   gap: 4px;
   min-width: 0;
 }
-.ref-cell,
+.ref-cell > *,
 .commit-description,
-.text-cell,
-.changes-cell,
+.text-cell > *,
+.changes-cell > *,
 .graph-node,
 .graph-cell path {
   transition: opacity 120ms ease-out;
@@ -188,7 +188,13 @@
 .history-table.highlighting
   tbody
   tr:not(.lit)
-  :is(.ref-cell, .commit-description, .text-cell, .changes-cell, .graph-node),
+  :is(
+    .ref-cell > *,
+    .commit-description,
+    .text-cell > *,
+    .changes-cell > *,
+    .graph-node
+  ),
 .graph-cell path.dim {
   opacity: 0.3;
 }

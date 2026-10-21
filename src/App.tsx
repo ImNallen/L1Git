@@ -33,7 +33,7 @@ import { useExpandedRepositories } from "./expandedRepositories";
 import { useFetchSettings } from "./fetchSettings";
 import { useHistoryColumns } from "./historyColumns";
 import { repositoryWarnings, useOverview } from "./overview";
-import { macNative } from "./repositories";
+import { mac, macNative } from "./repositories";
 import { useRepositoryRefs } from "./useRepositoryRefs";
 import { useWorkspace } from "./useWorkspace";
 
@@ -259,7 +259,9 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       if (
         !fileOpen &&
         historyRef.current &&
-        (event.metaKey || event.ctrlKey) &&
+        (mac
+          ? event.metaKey && !event.ctrlKey
+          : event.ctrlKey && !event.metaKey) &&
         !event.shiftKey &&
         !event.altKey &&
         event.key.toLowerCase() === "f"

@@ -29,7 +29,12 @@ import { historyAction, navigate, revealRow } from "../domain/navigation";
 import type { HistoryAction, Trail } from "../domain/navigation";
 import { refLabels } from "../domain/refs";
 import type { RefLabel } from "../domain/refs";
-import { matchCommits } from "../domain/search";
+import {
+  indexMatches,
+  matchCommits,
+  matchCount,
+  stepMatch,
+} from "../domain/search";
 import { SHORT_OID_MIN_LENGTH, uniqueShortOids } from "../domain/shortOid";
 import { relativeTime } from "../domain/time";
 import type {
@@ -332,7 +337,7 @@ function MoreRefs({ labels, lane }: { labels: RefLabel[]; lane: number }) {
 
 export type HistoryHandle = { openSearch: () => void };
 
-type Search = { root: RepositoryRoot; query: string; stepped: Oid | null };
+type Search = { root: RepositoryRoot; query: string };
 
 type Props = {
   ref?: Ref<HistoryHandle>;
@@ -383,19 +388,11 @@ export function History({
   const searchInput = useRef<HTMLInputElement>(null);
   if (search && search.root !== snapshot.root) setSearch(null);
   const query = search?.query ?? "";
-  const matches = useMemo(() => matchCommits(commits, query), [commits, query]);
-  const matchIndex = useMemo(
-    () => new Map(matches.map((oid, index) => [oid, index])),
-    [matches],
+  const matches = useMemo(
+    () => indexMatches(matchCommits(commits, query)),
+    [commits, query],
   );
-  const searching = matches.length > 0;
-  const stepped = search?.stepped ?? null;
-  const currentMatch =
-    stepped === null
-      ? null
-      : (matchIndex.get(selectedOid ?? stepped) ??
-        matchIndex.get(stepped) ??
-        null);
+  const searching = matches.size > 0;
   const [hovered, setHovered] = useState<Oid | null>(null);
   const hoverTimer = useRef<number | undefined>(undefined);
   const highlight = useMemo(
@@ -545,35 +542,33 @@ export function History({
     if (trail.current?.end !== selectedOid) trail.current = null;
   }, [selectedOid]);
 
-  useImperativeHandle(
-    ref,
-    () => ({
-      openSearch() {
-        flushSync(() =>
-          setSearch(
-            (open) => open ?? { root: snapshot.root, query: "", stepped: null },
-          ),
-        );
-        searchInput.current?.focus();
-        searchInput.current?.select();
-      },
-    }),
-    [snapshot.root],
-  );
+  useImperativeHandle(ref, () => ({
+    openSearch() {
+      flushSync(() => {
+        closeColumnMenu();
+        setSearch((open) => open ?? { root: snapshot.root, query: "" });
+      });
+      searchInput.current?.focus();
+      searchInput.current?.select();
+    },
+  }));
 
   function closeSearch() {
     setSearch(null);
     tableRef.current?.focus({ preventScroll: true });
   }
 
-  function stepMatch(by: 1 | -1) {
-    const count = matches.length;
-    const from = currentMatch ?? (by === 1 ? -1 : count);
-    const oid = matches[(from + by + count) % count];
-    if (oid === undefined) return;
-    setSearch({ root: snapshot.root, query, stepped: oid });
+  function step(by: 1 | -1) {
+    const oid = stepMatch(commits, matches, selectedOid, by);
+    if (oid === null) return;
     revealCentered(commits.findIndex((commit) => commit.oid === oid));
     onSelect(oid);
+  }
+
+  function closeColumnMenu() {
+    setColumnMenu(null);
+    revealColumn(revealOnClose.current);
+    revealOnClose.current = null;
   }
 
   function run(action: HistoryAction) {
@@ -655,12 +650,10 @@ export function History({
         <HistorySearch
           inputRef={searchInput}
           query={query}
-          count={matches.length}
-          currentMatch={currentMatch}
-          onQuery={(next) =>
-            setSearch({ root: snapshot.root, query: next, stepped: null })
-          }
-          onStep={stepMatch}
+          count={matchCount(query, matches, selectedOid)}
+          canStep={searching}
+          onQuery={(next) => setSearch({ root: snapshot.root, query: next })}
+          onStep={step}
           onClose={closeSearch}
         />
       )}
@@ -723,7 +716,7 @@ export function History({
               const [label, ...more] = labels.get(commit.oid) ?? [];
               const selected = selectedOid === commit.oid;
               const lit = searching
-                ? matchIndex.has(commit.oid)
+                ? matches.has(commit.oid)
                 : highlight?.commits.has(commit.oid);
               return (
                 <tr
@@ -820,10 +813,8 @@ export function History({
           label="History columns"
           ignoreScrollIn={scrollRef}
           onClose={() => {
-            setColumnMenu(null);
+            closeColumnMenu();
             tableRef.current?.focus({ preventScroll: true });
-            revealColumn(revealOnClose.current);
-            revealOnClose.current = null;
           }}
         >
           {historyColumns.map((column) => {

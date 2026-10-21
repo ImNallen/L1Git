@@ -12,6 +12,7 @@ import {
   Trash2,
 } from "lucide-react";
 import type { RecentRepository } from "../domain/recents";
+import { foldCase } from "../domain/search";
 import type { Branch, FullRef, RepositoryRoot } from "../domain/repository";
 import type { RootSync } from "../overview";
 import type { RefsState } from "../useRepositoryRefs";
@@ -58,8 +59,8 @@ export function RepositoryTree({
   const [overrides, setOverrides] = useState<ReadonlyMap<string, boolean>>(
     new Map(),
   );
-  const search = query.toLocaleLowerCase();
-  const matches = (value: string) => value.toLocaleLowerCase().includes(search);
+  const search = foldCase(query);
+  const matches = (value: string) => foldCase(value).includes(search);
   const loaded = (root: RepositoryRoot) => {
     const state = expanded.has(root) ? refs.get(root) : undefined;
     return state?.kind === "ready" ? state.refs : null;
