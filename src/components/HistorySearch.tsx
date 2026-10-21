@@ -1,19 +1,19 @@
 import type { RefObject } from "react";
 import { ChevronDown, ChevronUp, Search, X } from "lucide-react";
 
-function status(query: string, count: number, position: number | null) {
+function status(query: string, count: number, currentMatch: number | null) {
   if (query.trim() === "") return "";
   if (count === 0) return "No matches";
-  if (position === null)
+  if (currentMatch === null)
     return `${count.toLocaleString()} ${count === 1 ? "match" : "matches"}`;
-  return `${(position + 1).toLocaleString()} of ${count.toLocaleString()}`;
+  return `${(currentMatch + 1).toLocaleString()} of ${count.toLocaleString()}`;
 }
 
 export function HistorySearch({
   inputRef,
   query,
   count,
-  position,
+  currentMatch,
   onQuery,
   onStep,
   onClose,
@@ -21,8 +21,7 @@ export function HistorySearch({
   inputRef: RefObject<HTMLInputElement | null>;
   query: string;
   count: number;
-  /** The index of the current match, or null before Enter picks one. */
-  position: number | null;
+  currentMatch: number | null;
   onQuery: (query: string) => void;
   onStep: (by: 1 | -1) => void;
   onClose: () => void;
@@ -49,7 +48,7 @@ export function HistorySearch({
         }}
       />
       <span className="history-search-count" role="status">
-        {status(query, count, position)}
+        {status(query, count, currentMatch)}
       </span>
       <button
         className="icon-button"

@@ -332,8 +332,7 @@ function MoreRefs({ labels, lane }: { labels: RefLabel[]; lane: number }) {
 
 export type HistoryHandle = { openSearch: () => void };
 
-/** `current` is the match Enter last selected. A query belongs to `root`. */
-type Search = { root: RepositoryRoot; query: string; current: Oid | null };
+type Search = { root: RepositoryRoot; query: string; stepped: Oid | null };
 
 type Props = {
   ref?: Ref<HistoryHandle>;
@@ -382,8 +381,6 @@ export function History({
   const commits = snapshot.commits;
   const [search, setSearch] = useState<Search | null>(null);
   const searchInput = useRef<HTMLInputElement>(null);
-  // The history can stay mounted across a repository switch, so a query
-  // must not carry over to the next repository.
   if (search && search.root !== snapshot.root) setSearch(null);
   const query = search?.query ?? "";
   const matches = useMemo(() => matchCommits(commits, query), [commits, query]);
@@ -392,12 +389,12 @@ export function History({
     [matches],
   );
   const searching = matches.length > 0;
-  const current = search?.current ?? null;
-  const position =
-    current === null
+  const stepped = search?.stepped ?? null;
+  const currentMatch =
+    stepped === null
       ? null
-      : (matchIndex.get(selectedOid ?? current) ??
-        matchIndex.get(current) ??
+      : (matchIndex.get(selectedOid ?? stepped) ??
+        matchIndex.get(stepped) ??
         null);
   const [hovered, setHovered] = useState<Oid | null>(null);
   const hoverTimer = useRef<number | undefined>(undefined);
@@ -490,8 +487,7 @@ export function History({
     rootRef.current = snapshot.root;
   });
 
-  /** Scrolls row `index` to the middle of the history unless it is already visible. */
-  function centerRow(index: number) {
+  function revealCentered(index: number) {
     const scroller = scrollRef.current;
     if (index < 0 || !scroller) return;
     const header = headRef.current?.offsetHeight ?? 0;
@@ -527,7 +523,7 @@ export function History({
       (last.oid === selectedOid && last.seq === revealSeq)
     )
       return;
-    centerRow(
+    revealCentered(
       commitsRef.current.findIndex((commit) => commit.oid === selectedOid),
     );
   }, [snapshot.root, scrollTopOf, selectedOid, revealSeq, hidden]);
@@ -555,7 +551,7 @@ export function History({
       openSearch() {
         flushSync(() =>
           setSearch(
-            (open) => open ?? { root: snapshot.root, query: "", current: null },
+            (open) => open ?? { root: snapshot.root, query: "", stepped: null },
           ),
         );
         searchInput.current?.focus();
@@ -572,11 +568,11 @@ export function History({
 
   function stepMatch(by: 1 | -1) {
     const count = matches.length;
-    const from = position ?? (by === 1 ? -1 : count);
+    const from = currentMatch ?? (by === 1 ? -1 : count);
     const oid = matches[(from + by + count) % count];
     if (oid === undefined) return;
-    setSearch({ root: snapshot.root, query, current: oid });
-    centerRow(commits.findIndex((commit) => commit.oid === oid));
+    setSearch({ root: snapshot.root, query, stepped: oid });
+    revealCentered(commits.findIndex((commit) => commit.oid === oid));
     onSelect(oid);
   }
 
@@ -660,9 +656,9 @@ export function History({
           inputRef={searchInput}
           query={query}
           count={matches.length}
-          position={position}
+          currentMatch={currentMatch}
           onQuery={(next) =>
-            setSearch({ root: snapshot.root, query: next, current: null })
+            setSearch({ root: snapshot.root, query: next, stepped: null })
           }
           onStep={stepMatch}
           onClose={closeSearch}

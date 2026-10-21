@@ -1,10 +1,5 @@
 import type { Commit, Oid } from "./repository";
 
-/**
- * The loaded commits that match `query`, in history order. A commit matches when
- * its subject, author name, or email contains the query, ignoring case, or when
- * its ID starts with it.
- */
 export function matchCommits(
   commits: readonly Pick<Commit, "oid" | "subject" | "author" | "email">[],
   query: string,
