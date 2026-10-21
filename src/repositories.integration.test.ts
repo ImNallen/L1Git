@@ -84,14 +84,7 @@ async function post(
   });
 }
 
-beforeAll(async () => {
-  fixture = fixtureSchema.parse(
-    JSON.parse(
-      execFileSync(process.execPath, ["scripts/create-fixture.mjs"], {
-        encoding: "utf8",
-      }),
-    ),
-  );
+async function startBridge(env: Record<string, string>) {
   const server = createServer();
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
@@ -102,24 +95,38 @@ beforeAll(async () => {
   await new Promise<void>((resolve, reject) =>
     server.close((error) => (error ? reject(error) : resolve())),
   );
-  endpoint = `http://127.0.0.1:${port}`;
-  bridge = spawn("./target/debug/l1-git-dev-bridge", [], {
-    env: {
-      ...process.env,
-      L1GIT_BRIDGE_PORT: String(port),
-      L1GIT_DEV_PORT: "1422",
-    },
-    stdio: "ignore",
-  });
+  const started = {
+    endpoint: `http://127.0.0.1:${port}`,
+    bridge: spawn("./target/debug/l1-git-dev-bridge", [], {
+      env: {
+        ...process.env,
+        ...env,
+        L1GIT_BRIDGE_PORT: String(port),
+        L1GIT_DEV_PORT: "1422",
+      },
+      stdio: "ignore",
+    }),
+  };
   for (let attempt = 0; attempt < 50; attempt++) {
     try {
-      await post({ op: "snapshot", path: fixture.unborn });
-      return;
+      await fetch(`${started.endpoint}/api/run`, { method: "POST" });
+      return started;
     } catch {
       await setTimeout(50);
     }
   }
   throw new Error("The real development bridge did not start");
+}
+
+beforeAll(async () => {
+  fixture = fixtureSchema.parse(
+    JSON.parse(
+      execFileSync(process.execPath, ["scripts/create-fixture.mjs"], {
+        encoding: "utf8",
+      }),
+    ),
+  );
+  ({ bridge, endpoint } = await startBridge({}));
 }, 20_000);
 
 afterAll(async () => {
@@ -945,4 +952,60 @@ describe("real Rust fetch and fast-forward contract", () => {
     expect(fetched.finishedAt - started).toBeGreaterThanOrEqual(2000);
     expect(fetched.finishedAt - readFinishedAt).toBeGreaterThan(500);
   });
+});
+
+describe("real Rust read deadlines", () => {
+  it("returns timedOut for a commit read that hangs and still reads other commits", async () => {
+    const snapshot = snapshotEnvelope.parse(
+      await (await post({ op: "snapshot", path: fixture.repository })).json(),
+    ).data;
+    const [slow, other] = snapshot.commits;
+    if (!slow || !other) throw new Error("The fixture needs two commits");
+    const real = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+    const bin = join(fixture.root, "slow-git-bin");
+    mkdirSync(bin);
+    writeFileSync(
+      join(bin, "git"),
+      `#!/bin/sh\nfor arg in "$@"; do [ "$arg" = ${slow.oid} ] && exec sleep 30; done\nexec '${real}' "$@"\n`,
+    );
+    chmodSync(join(bin, "git"), 0o755);
+    const slowBridge = await startBridge({
+      PATH: `${bin}:${process.env.PATH ?? ""}`,
+      L1GIT_READ_DEADLINE_MS: "1000",
+    });
+    const read = async (oid: string) =>
+      (
+        await fetch(`${slowBridge.endpoint}/api/run`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Origin: origin },
+          body: JSON.stringify({
+            op: "commitDetail",
+            path: fixture.repository,
+            oid,
+          }),
+        })
+      ).json();
+    try {
+      const started = performance.now();
+      const failed = z
+        .object({ ok: z.literal(false), error: repositoryErrorSchema })
+        .strict()
+        .parse(await read(slow.oid));
+      const elapsed = performance.now() - started;
+      expect(failed.error).toEqual({
+        kind: "timedOut",
+        message:
+          "Reading this commit took longer than 1 s, so L1 Git stopped Git. Retry. If it happens again, check for a slow disk or a Git filter that does not finish.",
+      });
+      expect(elapsed).toBeGreaterThanOrEqual(1000);
+      expect(elapsed).toBeLessThan(3500);
+      const detail = answer("commitDetail", detailSchema).parse(
+        await read(other.oid),
+      ).data;
+      expect(detail.commit.oid).toBe(other.oid);
+    } finally {
+      slowBridge.bridge.kill();
+      await once(slowBridge.bridge, "exit");
+    }
+  }, 20_000);
 });
