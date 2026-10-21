@@ -93,6 +93,28 @@ export function navigate(
   return { oid, trail: null };
 }
 
+export function landingFromHidden(
+  all: readonly Pick<Commit, "oid">[],
+  shown: ReadonlySet<Oid>,
+  selected: Oid | null,
+  move: Move,
+): Oid | null {
+  if (
+    selected === null ||
+    shown.has(selected) ||
+    move === "first" ||
+    move === "last"
+  )
+    return null;
+  const index = all.findIndex((commit) => commit.oid === selected);
+  if (index < 0) return null;
+  const older = all.slice(index + 1).find((commit) => shown.has(commit.oid));
+  const newer = all.slice(0, index).findLast((commit) => shown.has(commit.oid));
+  const toward =
+    move === "down" || move === "parent" ? [older, newer] : [newer, older];
+  return (toward[0] ?? toward[1])?.oid ?? null;
+}
+
 /**
  * The commit a move selects among the loaded `commits`, newest first. Without
  * a loaded selection, `last` selects the oldest commit and every other move the

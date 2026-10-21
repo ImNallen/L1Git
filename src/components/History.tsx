@@ -25,7 +25,12 @@ import { buildGraph } from "../domain/graph";
 import type { GraphRow } from "../domain/graph";
 import { highlightBranch } from "../domain/highlight";
 import type { RowHighlight } from "../domain/highlight";
-import { historyAction, navigate, revealRow } from "../domain/navigation";
+import {
+  historyAction,
+  navigate,
+  landingFromHidden,
+  revealRow,
+} from "../domain/navigation";
 import type { HistoryAction, Trail } from "../domain/navigation";
 import { refLabels } from "../domain/refs";
 import type { RefLabel } from "../domain/refs";
@@ -37,6 +42,8 @@ import {
 } from "../domain/search";
 import { SHORT_OID_MIN_LENGTH, uniqueShortOids } from "../domain/shortOid";
 import { relativeTime } from "../domain/time";
+import { branchVisibility } from "../domain/visibility";
+import type { VisibilityRule } from "../domain/visibility";
 import type {
   Commit,
   LineStats,
@@ -74,7 +81,7 @@ function GraphCell({
   commit: Commit;
   selected: boolean;
   width: number;
-  known: Set<Oid>;
+  known: ReadonlySet<Oid>;
   lit: RowHighlight | undefined;
 }) {
   const dim = (on: boolean | undefined) => (lit && !on ? "dim" : undefined);
@@ -335,13 +342,16 @@ function MoreRefs({ labels, lane }: { labels: RefLabel[]; lane: number }) {
   );
 }
 
-export type HistoryHandle = { openSearch: () => void };
+export type HistoryHandle = { openSearch: () => void; focus: () => void };
 
 type Search = { root: RepositoryRoot; query: string };
 
 type Props = {
   ref?: Ref<HistoryHandle>;
   snapshot: RepositorySnapshot;
+  visibleCommits: readonly Commit[];
+  visibleOids: ReadonlySet<Oid>;
+  rule: VisibilityRule;
   selectedOid: Oid | null;
   revealSeq: number;
   onSelect: (oid: Oid) => void;
@@ -361,6 +371,9 @@ type Props = {
 export function History({
   ref,
   snapshot,
+  visibleCommits: commits,
+  visibleOids: known,
+  rule,
   selectedOid,
   revealSeq,
   onSelect,
@@ -375,15 +388,27 @@ export function History({
   onToggleColumn,
 }: Props) {
   const graph = useMemo(
-    () => buildGraph(snapshot.commits, snapshot.squashes),
-    [snapshot.commits, snapshot.squashes],
+    () =>
+      buildGraph(
+        commits,
+        commits === snapshot.commits
+          ? snapshot.squashes
+          : snapshot.squashes.filter(
+              (squash) => known.has(squash.commit) && known.has(squash.tip),
+            ),
+      ),
+    [commits, known, snapshot.commits, snapshot.squashes],
   );
-  const known = useMemo(
-    () => new Set(snapshot.commits.map((commit) => commit.oid)),
-    [snapshot.commits],
+  const labels = useMemo(
+    () =>
+      refLabels({
+        ...snapshot,
+        branches: snapshot.branches.filter(
+          (branch) => branchVisibility(rule, branch.reference) !== "hidden",
+        ),
+      }),
+    [snapshot, rule],
   );
-  const labels = useMemo(() => refLabels(snapshot), [snapshot]);
-  const commits = snapshot.commits;
   const [search, setSearch] = useState<Search | null>(null);
   const searchInput = useRef<HTMLInputElement>(null);
   if (search && search.root !== snapshot.root) setSearch(null);
@@ -399,8 +424,8 @@ export function History({
     () =>
       hovered === null || searching
         ? null
-        : highlightBranch(snapshot.commits, graph.rows, hovered, trunk),
-    [snapshot.commits, graph.rows, hovered, trunk, searching],
+        : highlightBranch(commits, graph.rows, hovered, trunk),
+    [commits, graph.rows, hovered, trunk, searching],
   );
   const hover = (oid: Oid) => {
     window.clearTimeout(hoverTimer.current);
@@ -416,7 +441,7 @@ export function History({
   useEffect(() => () => window.clearTimeout(hoverTimer.current), []);
   // A refresh can move or drop the hovered tip without unmounting its badge
   // under a still pointer, so no mouseleave arrives to clear it.
-  useLayoutEffect(unhover, [snapshot]);
+  useLayoutEffect(unhover, [snapshot, commits]);
   const commitsRef = useRef(commits);
   const rootRef = useRef(snapshot.root);
   const revealed = useRef<{
@@ -439,9 +464,9 @@ export function History({
   const short = useMemo(
     () =>
       shaShown
-        ? uniqueShortOids(commits.map((commit) => commit.oid))
+        ? uniqueShortOids(snapshot.commits.map((commit) => commit.oid))
         : new Map<Oid, string>(),
-    [commits, shaShown],
+    [snapshot.commits, shaShown],
   );
   const shaLength = useMemo(
     () =>
@@ -529,6 +554,14 @@ export function History({
     );
   }, [snapshot.root, scrollTopOf, selectedOid, revealSeq, hidden]);
 
+  const ruleShown = useRef({ root: snapshot.root, rule });
+  useLayoutEffect(() => {
+    const last = ruleShown.current;
+    ruleShown.current = { root: snapshot.root, rule };
+    if (last.root === snapshot.root && last.rule !== rule)
+      revealCentered(commits.findIndex((commit) => commit.oid === selectedOid));
+  }, [snapshot.root, rule, commits, selectedOid]);
+
   useLayoutEffect(
     function refocusWhenDiffCloses() {
       const shown = wasHidden.current && !hidden;
@@ -547,6 +580,9 @@ export function History({
   }, [selectedOid]);
 
   useImperativeHandle(ref, () => ({
+    focus() {
+      tableRef.current?.focus({ preventScroll: true });
+    },
     openSearch() {
       const scroller = scrollRef.current;
       const atBottom =
@@ -582,7 +618,7 @@ export function History({
   }
 
   function step(by: 1 | -1) {
-    const oid = stepMatch(commits, matches, selectedOid, by);
+    const oid = stepMatch(snapshot.commits, matches, selectedOid, by);
     if (oid === null) return;
     revealCentered(commits.findIndex((commit) => commit.oid === oid));
     onSelect(oid);
@@ -604,13 +640,16 @@ export function History({
         setColumnMenu({ x: pane.left + 14, y: header.bottom });
       return;
     }
-    const next = navigate(
-      commits,
-      graph.rows,
+    const landing = landingFromHidden(
+      snapshot.commits,
+      known,
       selectedOid,
       action,
-      trail.current,
     );
+    const next =
+      landing === null
+        ? navigate(commits, graph.rows, selectedOid, action, trail.current)
+        : { oid: landing, trail: null };
     trail.current = next.trail;
     const scroller = scrollRef.current;
     if (next.oid === null || !scroller) return;

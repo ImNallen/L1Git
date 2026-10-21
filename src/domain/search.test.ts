@@ -153,6 +153,12 @@ describe("history search steps", () => {
     expect(step(cafe, -1)).toBe(editor);
   });
 
+  it("steps from where a selection the graph hides sits in the full history", () => {
+    const shownMatches = matchPositions([themes, cafe]);
+    expect(stepMatch(commits, shownMatches, editor, 1)).toBe(cafe);
+    expect(stepMatch(commits, shownMatches, editor, -1)).toBe(themes);
+  });
+
   it("returns the only match again, and nothing without matches", () => {
     expect(stepMatch(commits, matchPositions([editor]), editor, 1)).toBe(
       editor,

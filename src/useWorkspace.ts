@@ -32,6 +32,12 @@ type ReadyWorkspace = {
   snapshot: RepositorySnapshot;
   error: Problem | null;
 };
+export function freshSnapshot(workspace: Workspace): RepositorySnapshot | null {
+  return workspace.kind === "ready" && workspace.error === null
+    ? workspace.snapshot
+    : null;
+}
+
 /**
  * `opening` reads a repository with nothing to show yet. `loading` rereads
  * one while its last snapshot stays on screen.

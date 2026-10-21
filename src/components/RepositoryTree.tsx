@@ -6,6 +6,9 @@ import type {
 import {
   ChevronDown,
   ChevronRight,
+  Eye,
+  EyeOff,
+  Focus,
   FolderGit2,
   Plus,
   Search,
@@ -14,9 +17,11 @@ import {
 import type { RecentRepository } from "../domain/recents";
 import { normalizeSearch } from "../domain/search";
 import type { Branch, FullRef, RepositoryRoot } from "../domain/repository";
+import { NO_RULE, branchVisibility, toggleRule } from "../domain/visibility";
+import type { VisibilityRule } from "../domain/visibility";
 import type { RootSync } from "../overview";
 import type { RefsState } from "../useRepositoryRefs";
-import { ContextMenu } from "./ContextMenu";
+import { ContextMenu, opensMenu } from "./ContextMenu";
 import { RepositoryBranches } from "./RepositoryBranches";
 import { SyncCounts } from "./SyncCounts";
 
@@ -31,6 +36,8 @@ type Props = {
   onSelect: (root: RepositoryRoot) => void;
   onToggle: (root: RepositoryRoot) => void;
   onJump: (root: RepositoryRoot, branch: Branch) => void;
+  ruleFor: (root: RepositoryRoot) => VisibilityRule;
+  onRule: (root: RepositoryRoot, rule: VisibilityRule) => void;
   onRemove: (root: RepositoryRoot) => void;
   onAdd: () => void;
 };
@@ -45,15 +52,19 @@ export function RepositoryTree({
   onSelect,
   onToggle,
   onJump,
+  ruleFor,
+  onRule,
   onRemove,
   onAdd,
 }: Props) {
   const [query, setQuery] = useState("");
   const [menu, setMenu] = useState<{
-    entry: RecentRepository;
+    target:
+      | { kind: "repository"; entry: RecentRepository }
+      | { kind: "branch"; root: RepositoryRoot; branch: Branch };
     x: number;
     y: number;
-    trigger: HTMLElement;
+    focus: HTMLElement;
   } | null>(null);
   // Explicit section and folder toggles. An absent key falls back to the default.
   const [overrides, setOverrides] = useState<ReadonlyMap<string, boolean>>(
@@ -75,20 +86,82 @@ export function RepositoryTree({
 
   function openMenu(
     event: ReactMouseEvent<HTMLElement> | ReactKeyboardEvent<HTMLElement>,
-    entry: RecentRepository,
+    target: NonNullable<typeof menu>["target"],
+    focus: HTMLElement,
   ) {
     event.preventDefault();
-    const trigger = event.currentTarget;
-    const rect = trigger.getBoundingClientRect();
+    const rect = event.currentTarget.getBoundingClientRect();
     // Keyboard-opened menus have no pointer position, so they open below the row.
     const pointer =
       "clientX" in event && (event.clientX !== 0 || event.clientY !== 0);
     setMenu({
-      entry,
+      target,
       x: pointer ? event.clientX : rect.left + 24,
       y: pointer ? event.clientY : rect.bottom,
-      trigger,
+      focus,
     });
+  }
+
+  function repositoryMenu(
+    event: ReactMouseEvent<HTMLElement> | ReactKeyboardEvent<HTMLElement>,
+    entry: RecentRepository,
+  ) {
+    const open =
+      event.currentTarget.querySelector<HTMLElement>(".repository-open");
+    if (open) openMenu(event, { kind: "repository", entry }, open);
+  }
+
+  function closeMenu() {
+    setMenu(null);
+    menu?.focus.focus({ preventScroll: true });
+  }
+
+  function menuItems(target: NonNullable<typeof menu>["target"]) {
+    if (target.kind === "repository")
+      return (
+        <button
+          role="menuitem"
+          title="Repository files stay on disk."
+          onClick={() => {
+            setMenu(null);
+            onRemove(target.entry.root);
+          }}
+        >
+          <Trash2 size={14} />
+          <span>Remove</span>
+        </button>
+      );
+    const { root, branch } = target;
+    const rule = ruleFor(root);
+    const state = branchVisibility(rule, branch.reference);
+    const apply = (next: VisibilityRule) => () => {
+      onRule(root, next);
+      closeMenu();
+    };
+    return (
+      <>
+        <button
+          role="menuitem"
+          onClick={apply(toggleRule(rule, "hide", branch.reference))}
+        >
+          {state === "hidden" ? <Eye size={14} /> : <EyeOff size={14} />}
+          <span>{state === "hidden" ? "Show" : "Hide"}</span>
+        </button>
+        <button
+          role="menuitem"
+          onClick={apply(toggleRule(rule, "solo", branch.reference))}
+        >
+          <Focus size={14} />
+          <span>{state === "soloed" ? "Stop soloing" : "Solo"}</span>
+        </button>
+        {rule.kind !== "none" && (
+          <button role="menuitem" onClick={apply(NO_RULE)}>
+            <Eye size={14} />
+            <span>Show all branches</span>
+          </button>
+        )}
+      </>
+    );
   }
 
   function branches(entry: RecentRepository) {
@@ -115,6 +188,15 @@ export function RepositoryTree({
           setOverrides((previous) => new Map(previous).set(key, open))
         }
         onJump={(branch) => onJump(entry.root, branch)}
+        rule={ruleFor(entry.root)}
+        onRule={(rule) => onRule(entry.root, rule)}
+        onMenu={(event, branch) =>
+          openMenu(
+            event,
+            { kind: "branch", root: entry.root, branch },
+            event.currentTarget,
+          )
+        }
       />
     );
   }
@@ -148,13 +230,9 @@ export function RepositoryTree({
             <div className="repository-group" key={entry.root}>
               <div
                 className={`repository-row ${active ? "active" : ""}`}
-                onContextMenu={(event) => openMenu(event, entry)}
+                onContextMenu={(event) => repositoryMenu(event, entry)}
                 onKeyDown={(event) => {
-                  if (
-                    event.key === "ContextMenu" ||
-                    (event.shiftKey && event.key === "F10")
-                  )
-                    openMenu(event, entry);
+                  if (opensMenu(event)) repositoryMenu(event, entry);
                 }}
               >
                 <button
@@ -201,25 +279,10 @@ export function RepositoryTree({
         <ContextMenu
           x={menu.x}
           y={menu.y}
-          label={`${menu.entry.name} actions`}
-          onClose={() => {
-            setMenu(null);
-            menu.trigger
-              .querySelector<HTMLElement>(".repository-open")
-              ?.focus({ preventScroll: true });
-          }}
+          label={`${menu.target.kind === "repository" ? menu.target.entry.name : menu.target.branch.name} actions`}
+          onClose={closeMenu}
         >
-          <button
-            role="menuitem"
-            title="Repository files stay on disk."
-            onClick={() => {
-              setMenu(null);
-              onRemove(menu.entry.root);
-            }}
-          >
-            <Trash2 size={14} />
-            <span>Remove</span>
-          </button>
+          {menuItems(menu.target)}
         </ContextMenu>
       )}
     </>

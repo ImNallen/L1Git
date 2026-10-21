@@ -178,6 +178,54 @@ input::placeholder {
 .branch-row.head:not(.selected) > svg {
   color: var(--success);
 }
+.branch-item {
+  position: relative;
+}
+.branch-item > .branch-row {
+  padding-right: 34px;
+}
+.branch-item:hover > .branch-row:not(.selected, .head) {
+  background: var(--row-hover);
+}
+.branch-item.hidden > .branch-row {
+  color: var(--text-dim);
+}
+.branch-visibility {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  color: var(--muted);
+  opacity: 0;
+}
+.branch-item:hover > .branch-visibility,
+.branch-item.hidden > .branch-visibility,
+.branch-item.soloed > .branch-visibility {
+  opacity: 1;
+}
+.branch-visibility:hover {
+  background: var(--control-hover);
+  color: var(--text-secondary);
+}
+.branch-item.hidden > .branch-visibility {
+  color: var(--text-faint);
+}
+.branch-item.soloed > .branch-visibility {
+  color: var(--blue);
+}
+.rule-cue {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--text-faint);
+}
+.rule-cue.solo {
+  color: var(--blue);
+}
 .branch-head {
   font-size: 8px;
   letter-spacing: 0.5px;
@@ -294,4 +342,60 @@ input::placeholder {
 .sidebar[hidden],
 .repository-navigation[hidden] {
   display: none;
+}
+
+.app {
+  --focus-bar: var(--blue);
+  --focus-tint: color-mix(in srgb, var(--primary-bg) 10%, var(--sidebar));
+}
+.sidebar button:focus-visible,
+.sidebar button:focus-visible:hover:not(:disabled) {
+  outline: none;
+  background: var(--focus-tint);
+  box-shadow: inset 2px 0 0 var(--focus-bar);
+}
+.sidebar .branch-row.selected:focus-visible,
+.sidebar .branch-row.selected:focus-visible:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--primary-bg) 10%, var(--nav-selected-bg));
+}
+.sidebar .branch-row.head:not(.selected):focus-visible,
+.sidebar .branch-row.head:not(.selected):focus-visible:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--primary-bg) 10%, var(--success-bg));
+}
+.sidebar .branch-item:hover > .branch-row:focus-visible:not(.selected, .head) {
+  background: var(--focus-tint);
+}
+.sidebar .settings-nav-item[aria-current="page"]:focus-visible,
+.sidebar
+  .settings-nav-item[aria-current="page"]:focus-visible:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--primary-bg) 10%, var(--nav-selected-bg));
+}
+.sidebar-toggle:focus-visible,
+.sidebar-toggle:focus-visible:hover:not(:disabled) {
+  outline: none;
+  background: var(--focus-tint);
+}
+.sidebar .icon-button:focus-visible,
+.sidebar .icon-button:focus-visible:hover:not(:disabled),
+.sidebar-toggle:focus-visible,
+.sidebar-toggle:focus-visible:hover:not(:disabled),
+.sidebar-bottom button:focus-visible,
+.sidebar-bottom button:focus-visible:hover:not(:disabled),
+.sidebar .repository-toggle:focus-visible,
+.sidebar .repository-toggle:focus-visible:hover:not(:disabled),
+.sidebar-empty button:focus-visible,
+.sidebar-empty button:focus-visible:hover:not(:disabled) {
+  box-shadow: inset 0 -2px 0 var(--focus-bar);
+}
+.repository-toggle:focus-visible {
+  border-radius: 6px 0 0 6px;
+}
+.sidebar .repository-open:focus-visible,
+.sidebar .repository-open:focus-visible:hover:not(:disabled) {
+  background: none;
+  box-shadow: none;
+}
+.repository-row:has(> .repository-open:focus-visible) {
+  background: var(--focus-tint);
+  box-shadow: inset 2px 0 0 var(--focus-bar);
 }
