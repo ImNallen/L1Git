@@ -40,14 +40,25 @@ export function restoreSelection(
   snapshot: Pick<RepositorySnapshot, "commits" | "worktrees">,
   remembered: Selection | null,
 ): Selection | null {
-  const kept =
-    remembered?.kind === "commit"
-      ? snapshot.commits.some((commit) => commit.oid === remembered.oid)
-      : remembered?.kind === "worktree" &&
-        snapshot.worktrees.some(
-          (worktree) => worktree.root === remembered.root,
-        );
-  if (kept) return remembered;
   const newest = snapshot.commits[0];
-  return newest ? { kind: "commit", oid: newest.oid } : null;
+  const fallback: Selection | null = newest
+    ? { kind: "commit", oid: newest.oid }
+    : null;
+  if (remembered === null) return fallback;
+  switch (remembered.kind) {
+    case "commit":
+      return snapshot.commits.some((commit) => commit.oid === remembered.oid)
+        ? remembered
+        : fallback;
+    case "worktree":
+      return snapshot.worktrees.some(
+        (worktree) => worktree.root === remembered.root,
+      )
+        ? remembered
+        : fallback;
+    default: {
+      const exhaustive: never = remembered;
+      return exhaustive;
+    }
+  }
 }

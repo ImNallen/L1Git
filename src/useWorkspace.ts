@@ -18,8 +18,8 @@ import {
   restoreSelection,
 } from "./domain/revisit";
 import type { RepositoryView, SnapshotCache } from "./domain/revisit";
-import { sameSelection } from "./domain/selection";
-import type { Selection } from "./domain/selection";
+import { sameSelection, stableSelection } from "./domain/selection";
+import type { CommitSelection, Selection } from "./domain/selection";
 import type {
   CommitDetail,
   FilePatch,
@@ -55,7 +55,7 @@ export type DetailState =
   | {
       kind: "ready";
       root: RepositoryRoot;
-      selection: Selection;
+      selection: CommitSelection;
       detail: CommitDetail;
     }
   | {
@@ -70,10 +70,7 @@ export type Added =
   | { kind: "superseded" }
   | { kind: "failed"; problem: Problem };
 type FileKey = { root: RepositoryRoot; selection: Selection; path: string };
-type CommitKey = {
-  root: RepositoryRoot;
-  selection: Extract<Selection, { kind: "commit" }>;
-};
+type CommitKey = { root: RepositoryRoot; selection: CommitSelection };
 export type FileDiffState =
   | { kind: "closed" }
   | ({ kind: "loading" } & FileKey)
@@ -288,9 +285,7 @@ export function useWorkspace() {
 
   const select = useCallback(
     (next: Selection) =>
-      setSelection((previous) =>
-        sameSelection(previous, next) ? previous : next,
-      ),
+      setSelection((previous) => stableSelection(previous, next)),
     [],
   );
 
@@ -352,7 +347,7 @@ export function useWorkspace() {
     openFile,
     cancelOpenFirstFile: () => setPendingOpen(null),
     openFirstFile: () => {
-      if (root !== null && selection !== null)
+      if (root !== null && selection?.kind === "commit")
         setPendingOpen({ root, selection });
     },
     closeFile,
