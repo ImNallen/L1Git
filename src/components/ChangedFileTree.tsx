@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState } from "react";
+import { FILE_TREE_DENSITY_PRESETS } from "@pierre/trees";
 import type { GitStatus } from "@pierre/trees";
 import { FileTree, useFileTree } from "@pierre/trees/react";
 import {
   changedFileTreeInput,
+  changedPathAt,
   flattenEmptyDirectories,
   initialExpansion,
+  treePath,
 } from "../domain/changedFiles";
-import type { ChangeStatus, ChangedFile } from "../domain/repository";
+import type { ChangeStatus } from "../domain/repository";
 
 export const changeStatuses = {
   A: { label: "added", gitStatus: "added" },
@@ -19,12 +22,30 @@ export const changeStatuses = {
 >;
 
 type Props = {
-  files: readonly ChangedFile[];
+  files: readonly { path: string; status: GitStatus }[];
   selectedPath: string | null;
   onSelectFile: (path: string) => void;
+  maxRows?: number;
 };
 
-export function ChangedFileTree({ files, selectedPath, onSelectFile }: Props) {
+const ITEM_HEIGHT = FILE_TREE_DENSITY_PRESETS.compact.itemHeight;
+
+export const keyboardFocusOnly = `
+  [data-type="item"]:focus-visible {
+    background-color: color-mix(in srgb, var(--primary-bg) 10%, var(--canvas));
+    box-shadow: inset 2px 0 0 var(--blue);
+  }
+  [data-type="item"][data-item-selected="true"]:focus-visible {
+    background-color: color-mix(in srgb, var(--primary-bg) 10%, var(--nav-selected-bg));
+  }
+`;
+
+export function ChangedFileTree({
+  files,
+  selectedPath,
+  onSelectFile,
+  maxRows,
+}: Props) {
   const onSelectFileRef = useRef(onSelectFile);
   useEffect(() => {
     onSelectFileRef.current = onSelectFile;
@@ -33,18 +54,17 @@ export function ChangedFileTree({ files, selectedPath, onSelectFile }: Props) {
   const { model } = useFileTree({
     preparedInput,
     gitStatus: files.map((file) => ({
-      path: file.path,
-      status: changeStatuses[file.status].gitStatus,
+      path: treePath(file.path),
+      status: file.status,
     })),
     initialExpansion,
     flattenEmptyDirectories,
     density: "compact",
-    onSelectionChange: ([path, ...rest]) => {
-      if (
-        path !== undefined &&
-        rest.length === 0 &&
-        files.some((file) => file.path === path)
-      )
+    unsafeCSS: keyboardFocusOnly,
+    onSelectionChange: ([shown, ...rest]) => {
+      const path =
+        shown === undefined ? undefined : changedPathAt(files, shown);
+      if (path !== undefined && rest.length === 0)
         onSelectFileRef.current(path);
     },
   });
@@ -53,5 +73,21 @@ export function ChangedFileTree({ files, selectedPath, onSelectFile }: Props) {
       for (const path of model.getSelectedPaths())
         model.getItem(path)?.deselect();
   }, [model, selectedPath]);
-  return <FileTree model={model} className="changed-file-tree" />;
+  const [rows, setRows] = useState(() => model.getVisibleCount());
+  useEffect(() => {
+    if (maxRows === undefined) return;
+    const count = () => setRows(model.getVisibleCount());
+    count();
+    return model.subscribe(count);
+  }, [model, maxRows]);
+  const tree = <FileTree model={model} className="changed-file-tree" />;
+  if (maxRows === undefined) return tree;
+  return (
+    <div
+      className="fitted-file-tree"
+      style={{ height: Math.min(rows, maxRows) * ITEM_HEIGHT + 8 }}
+    >
+      {tree}
+    </div>
+  );
 }

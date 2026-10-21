@@ -287,3 +287,17 @@
   background: var(--border-control);
   opacity: 0.6;
 }
+.worktree-subject {
+  flex: 0 1 auto;
+  font-style: italic;
+}
+.worktree-summary {
+  flex: 1 1 0;
+  min-width: 0;
+  margin-left: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-dim);
+  font-size: 11px;
+}

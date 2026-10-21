@@ -1,4 +1,4 @@
-import type { GraphRow } from "./graph";
+import type { GraphNode, GraphRow, RowId } from "./graph";
 import type { Commit, Oid } from "./repository";
 
 export type Move = "up" | "down" | "first" | "last" | "child" | "parent";
@@ -62,15 +62,15 @@ export function historyAction(event: HistoryKey): HistoryAction | null {
   );
 }
 
-export type Trail = { end: Oid; passed: readonly Oid[] };
+export type Trail = { end: RowId; passed: readonly RowId[] };
 
 export function navigate(
-  commits: readonly Pick<Commit, "oid" | "parents">[],
-  graph: ReadonlyMap<Oid, GraphRow>,
-  selected: Oid | null,
+  rows: readonly GraphNode[],
+  graph: ReadonlyMap<RowId, GraphRow>,
+  selected: RowId | null,
   move: Move,
   trail: Trail | null,
-): { oid: Oid | null; trail: Trail | null } {
+): { id: RowId | null; trail: Trail | null } {
   const kept = trail?.end === selected ? trail.passed : [];
   const step = kept.at(-1);
   const passed =
@@ -81,16 +81,16 @@ export function navigate(
   if (move === "child" && previous !== undefined) {
     const rest = passed.slice(0, -1);
     return {
-      oid: previous,
+      id: previous,
       trail: rest.length > 0 ? { end: previous, passed: rest } : null,
     };
   }
-  const oid = nextRow(commits, graph, selected, move);
-  if (move === "parent" && selected !== null && oid !== null)
-    return oid === selected
-      ? { oid, trail }
-      : { oid, trail: { end: oid, passed: [...passed, selected] } };
-  return { oid, trail: null };
+  const id = nextRow(rows, graph, selected, move);
+  if (move === "parent" && selected !== null && id !== null)
+    return id === selected
+      ? { id, trail }
+      : { id, trail: { end: id, passed: [...passed, selected] } };
+  return { id, trail: null };
 }
 
 export function landingFromHidden(
@@ -116,56 +116,56 @@ export function landingFromHidden(
 }
 
 /**
- * The commit a move selects among the loaded `commits`, newest first. Without
- * a loaded selection, `last` selects the oldest commit and every other move the
+ * The row a move selects among the loaded `rows`, newest first. Without a
+ * loaded selection, `last` selects the oldest row and every other move the
  * newest. A move past either end, or off the loaded branch, keeps `selected`.
  */
 export function nextRow(
-  commits: readonly Pick<Commit, "oid" | "parents">[],
-  graph: ReadonlyMap<Oid, GraphRow>,
-  selected: Oid | null,
+  rows: readonly GraphNode[],
+  graph: ReadonlyMap<RowId, GraphRow>,
+  selected: RowId | null,
   move: Move,
-): Oid | null {
-  const index = commits.findIndex((commit) => commit.oid === selected);
-  const current = commits[index];
+): RowId | null {
+  const index = rows.findIndex((row) => row.id === selected);
+  const current = rows[index];
   if (current === undefined || move === "first" || move === "last")
-    return (move === "last" ? commits.at(-1) : commits.at(0))?.oid ?? null;
+    return (move === "last" ? rows.at(-1) : rows.at(0))?.id ?? null;
   switch (move) {
     case "up":
-      return (commits[index - 1] ?? current).oid;
+      return (rows[index - 1] ?? current).id;
     case "down":
-      return (commits[index + 1] ?? current).oid;
+      return (rows[index + 1] ?? current).id;
     case "parent": {
       const parent = current.parents.at(0);
-      return parent !== undefined && graph.has(parent) ? parent : current.oid;
+      return parent !== undefined && graph.has(parent) ? parent : current.id;
     }
     case "child": {
       const child =
-        lineChild(commits, graph, index) ??
-        commits
+        lineChild(rows, graph, index) ??
+        rows
           .slice(0, index)
-          .findLast((commit) => commit.parents.at(0) === current.oid);
-      return child?.oid ?? current.oid;
+          .findLast((row) => row.parents.at(0) === current.id);
+      return child?.id ?? current.id;
     }
   }
 }
 
 function lineChild(
-  commits: readonly Pick<Commit, "oid" | "parents">[],
-  graph: ReadonlyMap<Oid, GraphRow>,
+  rows: readonly GraphNode[],
+  graph: ReadonlyMap<RowId, GraphRow>,
   index: number,
-): Pick<Commit, "oid" | "parents"> | undefined {
-  const target = commits[index]?.oid;
+): GraphNode | undefined {
+  const target = rows[index]?.id;
   for (let above = index - 1; above >= 0; above--) {
-    const commit = commits[above];
-    const row = commit && graph.get(commit.oid);
+    const node = rows[above];
+    const row = node && graph.get(node.id);
     if (!row) return undefined;
     const edge = row.parents.find((parent) => parent.oid === target);
     const straight = edge !== undefined && edge.from === edge.to;
-    const firstParent = commit.parents.at(0) === target;
-    if (straight && firstParent) return commit;
+    const firstParent = node.parents.at(0) === target;
+    if (straight && firstParent) return node;
     if (row.continuations.some((lane) => lane.oid === target)) continue;
-    return edge && firstParent ? commit : undefined;
+    return edge && firstParent ? node : undefined;
   }
   return undefined;
 }

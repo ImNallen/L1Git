@@ -229,7 +229,7 @@
   --trees-accent-override: var(--blue);
   --trees-selected-bg-override: var(--nav-selected-bg);
   --trees-selected-fg-override: var(--text-strong);
-  --trees-focus-ring-color-override: var(--focus);
+  --trees-focus-ring-width-override: 0px;
   --trees-border-color-override: var(--border);
   --trees-indent-guide-bg-override: var(--separator);
   --trees-scrollbar-thumb-override: var(--scrollbar);
@@ -260,4 +260,21 @@
   text-align: center;
   line-height: 1.7;
   font-size: 12px;
+}
+.worktree-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 22px;
+}
+.worktree-group .changed-files-title {
+  margin: 0 0 4px;
+}
+.fitted-file-tree {
+  display: flex;
+  flex-direction: column;
+}
+.fitted-file-tree .changed-file-tree {
+  flex: 1 0 auto;
+  margin: 0 -21px;
 }

@@ -20,12 +20,12 @@ const t0 = oid("e");
 const root = oid("f");
 
 const history = [
-  { oid: merge, parents: [t1, f2] },
-  { oid: f2, parents: [f1] },
-  { oid: t1, parents: [t0] },
-  { oid: f1, parents: [t0] },
-  { oid: t0, parents: [root] },
-  { oid: root, parents: [] },
+  { id: merge, parents: [t1, f2] },
+  { id: f2, parents: [f1] },
+  { id: t1, parents: [t0] },
+  { id: f1, parents: [t0] },
+  { id: t0, parents: [root] },
+  { id: root, parents: [] },
 ];
 const graph = buildGraph(history).rows;
 const move = (selected: Oid | null, to: Move) =>
@@ -80,11 +80,11 @@ describe("history navigation", () => {
     const base = oid("4");
     const bottom = oid("5");
     const commits = [
-      { oid: top, parents: [trunk, base] },
-      { oid: side, parents: [base] },
-      { oid: trunk, parents: [bottom] },
-      { oid: base, parents: [bottom] },
-      { oid: bottom, parents: [] },
+      { id: top, parents: [trunk, base] },
+      { id: side, parents: [base] },
+      { id: trunk, parents: [bottom] },
+      { id: base, parents: [bottom] },
+      { id: bottom, parents: [] },
     ];
     expect(nextRow(commits, buildGraph(commits).rows, base, "child")).toBe(
       side,
@@ -98,11 +98,11 @@ describe("history navigation", () => {
     const side = oid("4");
     const fork = oid("5");
     const commits = [
-      { oid: top, parents: [closed] },
-      { oid: child, parents: [fork] },
-      { oid: closed, parents: [] },
-      { oid: side, parents: [fork] },
-      { oid: fork, parents: [] },
+      { id: top, parents: [closed] },
+      { id: child, parents: [fork] },
+      { id: closed, parents: [] },
+      { id: side, parents: [fork] },
+      { id: fork, parents: [] },
     ];
     const rows = buildGraph(commits).rows;
     expect([child, side, fork].map((commit) => rows.get(commit)?.lane)).toEqual(
@@ -120,13 +120,13 @@ describe("history navigation", () => {
     const t = oid("6");
     const p = oid("7");
     const commits = [
-      { oid: x, parents: [z] },
-      { oid: a, parents: [t] },
-      { oid: b, parents: [t] },
-      { oid: q, parents: [p] },
-      { oid: z, parents: [p, t] },
-      { oid: t, parents: [] },
-      { oid: p, parents: [] },
+      { id: x, parents: [z] },
+      { id: a, parents: [t] },
+      { id: b, parents: [t] },
+      { id: q, parents: [p] },
+      { id: z, parents: [p, t] },
+      { id: t, parents: [] },
+      { id: p, parents: [] },
     ];
     expect(nextRow(commits, buildGraph(commits).rows, t, "child")).toBe(a);
   });
@@ -138,11 +138,11 @@ describe("history navigation", () => {
     const trunk = oid("4");
     const fork = oid("5");
     const commits = [
-      { oid: merge, parents: [trunk, feature2] },
-      { oid: feature2, parents: [feature1] },
-      { oid: feature1, parents: [fork] },
-      { oid: trunk, parents: [fork] },
-      { oid: fork, parents: [] },
+      { id: merge, parents: [trunk, feature2] },
+      { id: feature2, parents: [feature1] },
+      { id: feature1, parents: [fork] },
+      { id: trunk, parents: [fork] },
+      { id: fork, parents: [] },
     ];
     const rows = buildGraph(commits).rows;
     expect(rows.get(trunk)?.parents).toEqual([{ oid: fork, from: 0, to: 0 }]);
@@ -159,11 +159,11 @@ describe("first-parent trail", () => {
   const trunk = oid("4");
   const fork = oid("5");
   const commits = [
-    { oid: oid("1"), parents: [trunk, feature2] },
-    { oid: feature2, parents: [feature1] },
-    { oid: feature1, parents: [fork] },
-    { oid: trunk, parents: [fork] },
-    { oid: fork, parents: [] },
+    { id: oid("1"), parents: [trunk, feature2] },
+    { id: feature2, parents: [feature1] },
+    { id: feature1, parents: [fork] },
+    { id: trunk, parents: [fork] },
+    { id: fork, parents: [] },
   ];
   const rows = buildGraph(commits).rows;
   const go = (selected: Oid, to: Move, trail: Trail | null) =>
@@ -172,63 +172,63 @@ describe("first-parent trail", () => {
   it("retraces Shift+Down with Shift+Up past the fork point", () => {
     const one = go(feature2, "parent", null);
     expect(one).toEqual({
-      oid: feature1,
+      id: feature1,
       trail: { end: feature1, passed: [feature2] },
     });
     const two = go(feature1, "parent", one.trail);
     expect(two).toEqual({
-      oid: fork,
+      id: fork,
       trail: { end: fork, passed: [feature2, feature1] },
     });
     const three = go(fork, "child", two.trail);
     expect(three).toEqual({
-      oid: feature1,
+      id: feature1,
       trail: { end: feature1, passed: [feature2] },
     });
     expect(go(feature1, "child", three.trail)).toEqual({
-      oid: feature2,
+      id: feature2,
       trail: null,
     });
   });
 
   it("follows the line once the selection has left the trail", () => {
     const trail = { end: feature1, passed: [feature2] };
-    expect(go(fork, "child", trail)).toEqual({ oid: trunk, trail: null });
-    expect(go(fork, "child", null)).toEqual({ oid: trunk, trail: null });
+    expect(go(fork, "child", trail)).toEqual({ id: trunk, trail: null });
+    expect(go(fork, "child", null)).toEqual({ id: trunk, trail: null });
   });
 
   it("ignores a trail step that an amend removed from the loaded history", () => {
     const amended = oid("6");
     const reloaded = [
-      { oid: amended, parents: [feature1] },
-      { oid: feature1, parents: [fork] },
-      { oid: fork, parents: [] },
+      { id: amended, parents: [feature1] },
+      { id: feature1, parents: [fork] },
+      { id: fork, parents: [] },
     ];
     expect(
       navigate(reloaded, buildGraph(reloaded).rows, feature1, "child", {
         end: feature1,
         passed: [feature2],
       }),
-    ).toEqual({ oid: amended, trail: null });
+    ).toEqual({ id: amended, trail: null });
   });
 
   it("ignores a trail step whose first parent is no longer the selection", () => {
     expect(go(fork, "child", { end: fork, passed: [feature2] })).toEqual({
-      oid: trunk,
+      id: trunk,
       trail: null,
     });
   });
 
   it("drops the trail on any other move", () => {
     expect(go(fork, "up", { end: fork, passed: [feature1] })).toEqual({
-      oid: trunk,
+      id: trunk,
       trail: null,
     });
   });
 
   it("keeps the trail when Shift+Down has no parent to move to", () => {
     const trail = { end: fork, passed: [feature1] };
-    expect(go(fork, "parent", trail)).toEqual({ oid: fork, trail });
+    expect(go(fork, "parent", trail)).toEqual({ id: fork, trail });
   });
 });
 
@@ -255,7 +255,7 @@ describe("first-parent moves on generated graphs", () => {
         if (parent !== undefined && !parents.includes(parent))
           parents.push(parent);
       }
-      return { oid: id, parents };
+      return { id, parents };
     });
   }
 
@@ -264,21 +264,20 @@ describe("first-parent moves on generated graphs", () => {
       const commits = generate(seed);
       const rows = buildGraph(commits).rows;
       commits.forEach((commit, index) => {
-        const up = nextRow(commits, rows, commit.oid, "child");
+        const up = nextRow(commits, rows, commit.id, "child");
         const children = commits
           .slice(0, index)
-          .filter((child) => child.parents.at(0) === commit.oid);
+          .filter((child) => child.parents.at(0) === commit.id);
         expect(
           children.length === 0
-            ? up === commit.oid
-            : children.some((child) => child.oid === up),
+            ? up === commit.id
+            : children.some((child) => child.id === up),
         ).toBe(true);
-        const down = navigate(commits, rows, commit.oid, "parent", null);
-        if (down.oid === commit.oid) return;
+        const down = navigate(commits, rows, commit.id, "parent", null);
+        if (down.id === commit.id) return;
         expect(
-          navigate(commits, rows, down.oid ?? commit.oid, "child", down.trail)
-            .oid,
-        ).toBe(commit.oid);
+          navigate(commits, rows, down.id ?? commit.id, "child", down.trail).id,
+        ).toBe(commit.id);
       });
     }
   });
@@ -350,28 +349,29 @@ describe("revealing a row", () => {
 });
 
 describe("moving from a selection a rule hides", () => {
+  const loaded = history.map((row) => ({ oid: row.id }));
   const shown = new Set([merge, t1, t0, root]);
 
   it("lands on the nearest shown row below for Down and Shift+Down", () => {
-    expect(landingFromHidden(history, shown, f2, "down")).toBe(t1);
-    expect(landingFromHidden(history, shown, f1, "parent")).toBe(t0);
+    expect(landingFromHidden(loaded, shown, f2, "down")).toBe(t1);
+    expect(landingFromHidden(loaded, shown, f1, "parent")).toBe(t0);
   });
 
   it("lands on the nearest shown row above for Up and Shift+Up", () => {
-    expect(landingFromHidden(history, shown, f1, "up")).toBe(t1);
-    expect(landingFromHidden(history, shown, f2, "child")).toBe(merge);
+    expect(landingFromHidden(loaded, shown, f1, "up")).toBe(t1);
+    expect(landingFromHidden(loaded, shown, f2, "child")).toBe(merge);
   });
 
   it("falls back to the other side at either end", () => {
     const oldest = new Set([merge]);
-    expect(landingFromHidden(history, oldest, f2, "down")).toBe(merge);
+    expect(landingFromHidden(loaded, oldest, f2, "down")).toBe(merge);
     const newest = new Set([root]);
-    expect(landingFromHidden(history, newest, f2, "up")).toBe(root);
+    expect(landingFromHidden(loaded, newest, f2, "up")).toBe(root);
   });
 
   it("leaves shown, unloaded, and whole-history moves to navigate", () => {
-    expect(landingFromHidden(history, shown, t1, "down")).toBeNull();
-    expect(landingFromHidden(history, shown, oid("9"), "down")).toBeNull();
-    expect(landingFromHidden(history, shown, f2, "last")).toBeNull();
+    expect(landingFromHidden(loaded, shown, t1, "down")).toBeNull();
+    expect(landingFromHidden(loaded, shown, oid("9"), "down")).toBeNull();
+    expect(landingFromHidden(loaded, shown, f2, "last")).toBeNull();
   });
 });

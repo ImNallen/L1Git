@@ -35,6 +35,7 @@ import { sameSelection } from "./domain/selection";
 import type { Selection } from "./domain/selection";
 import { NO_RULE, visibleCommits } from "./domain/visibility";
 import type { VisibilityRule } from "./domain/visibility";
+import { historyRows } from "./domain/worktree";
 import { useExpandedRepositories } from "./expandedRepositories";
 import { useFetchSettings } from "./fetchSettings";
 import { useHistoryColumns } from "./historyColumns";
@@ -120,6 +121,22 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     () => (snapshot ? visibleCommits(snapshot.commits, snapshot, rule) : []),
     [snapshot, rule],
   );
+  const rows = useMemo(
+    () =>
+      snapshot ? historyRows(visible, snapshot.worktrees, app.changes) : [],
+    [snapshot, visible, app.changes],
+  );
+  const selected = app.selection;
+  const listedWorktree =
+    selected?.kind === "worktree"
+      ? snapshot?.worktrees.find((worktree) => worktree.root === selected.root)
+      : undefined;
+  const selectedWorktree = listedWorktree
+    ? {
+        worktree: listedWorktree,
+        changes: app.changes.get(listedWorktree.root),
+      }
+    : null;
   const loaded = useMemo(
     () => new Set(snapshot?.commits.map((commit) => commit.oid)),
     [snapshot],
@@ -177,7 +194,10 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   const refreshRef = useRef(app.refresh);
   const reloadRefsRef = useRef(branchRefs.reload);
   useEffect(() => {
-    refreshRef.current = app.refresh;
+    refreshRef.current = () => {
+      app.refreshChanges();
+      return app.refresh();
+    };
     reloadRefsRef.current = branchRefs.reload;
   });
   // Commits and branches made outside L1 Git show up when its window regains focus.
@@ -542,6 +562,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                     snapshot={snapshot}
                     visibleCommits={visible}
                     visibleOids={visibleOids}
+                    rows={rows}
                     rule={rule}
                     selection={app.selection}
                     revealSeq={jump?.seq ?? 0}
@@ -566,7 +587,11 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                       }
                       onDiffStyle={setDiffStyle}
                       onBack={closeFile}
-                      onRetry={() => app.openFile(fileDiff.path)}
+                      onRetry={() => app.openFile(fileDiff.path, fileDiff.side)}
+                      onRefresh={() => {
+                        app.refreshChanges();
+                        app.openFile(fileDiff.path, fileDiff.side);
+                      }}
                     />
                   )}
                 </>
@@ -651,10 +676,12 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                     selection={app.selection}
                     snapshot={snapshot}
                     onSelect={select}
-                    selectedFile={fileOpen ? fileDiff.path : null}
+                    selectedFile={fileOpen ? fileDiff : null}
                     onSelectFile={app.openFile}
                     toggleButton={inspectorToggle}
                     onRetry={app.retryDetail}
+                    worktree={selectedWorktree}
+                    onRefreshChanges={app.refreshChanges}
                   />
                 ) : (
                   <InspectorFrame toggleButton={inspectorToggle} />
