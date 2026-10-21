@@ -484,18 +484,22 @@ export function History({
     rootRef.current = snapshot.root;
   });
 
-  function revealCentered(index: number) {
+  function rowShown(index: number): boolean {
     const scroller = scrollRef.current;
-    if (index < 0 || !scroller) return;
-    const header = headRef.current?.offsetHeight ?? 0;
-    const rows = scroller.clientHeight - header;
+    if (!scroller) return false;
+    const rows = scroller.clientHeight - (headRef.current?.offsetHeight ?? 0);
     const rowTop = index * ROW_HEIGHT;
-    if (
+    return (
       rowTop + ROW_HEIGHT > scroller.scrollTop &&
       rowTop < scroller.scrollTop + rows
-    )
-      return;
-    scroller.scrollTop = rowTop + ROW_HEIGHT / 2 - rows / 2;
+    );
+  }
+
+  function revealCentered(index: number) {
+    const scroller = scrollRef.current;
+    if (index < 0 || !scroller || rowShown(index)) return;
+    const rows = scroller.clientHeight - (headRef.current?.offsetHeight ?? 0);
+    scroller.scrollTop = index * ROW_HEIGHT + ROW_HEIGHT / 2 - rows / 2;
     setViewport({ top: scroller.scrollTop, height: scroller.clientHeight });
   }
 
@@ -544,10 +548,29 @@ export function History({
 
   useImperativeHandle(ref, () => ({
     openSearch() {
+      const scroller = scrollRef.current;
+      const atBottom =
+        scroller !== null &&
+        scroller.scrollTop >= scroller.scrollHeight - scroller.clientHeight - 1;
+      const selectedRow = commits.findIndex(
+        (commit) => commit.oid === selectedOid,
+      );
+      const selectedShown = selectedRow >= 0 && rowShown(selectedRow);
       flushSync(() => {
         closeColumnMenu();
         setSearch((open) => open ?? { root: snapshot.root, query: "" });
       });
+      if (scroller) {
+        if (atBottom) scroller.scrollTop = scroller.scrollHeight;
+        if (selectedShown)
+          scroller.scrollTop = revealRow(
+            selectedRow,
+            ROW_HEIGHT,
+            scroller.scrollTop,
+            scroller.clientHeight - (headRef.current?.offsetHeight ?? 0),
+          );
+        setViewport({ top: scroller.scrollTop, height: scroller.clientHeight });
+      }
       searchInput.current?.focus();
       searchInput.current?.select();
     },

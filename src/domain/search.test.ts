@@ -120,12 +120,12 @@ describe("history search count", () => {
     expect(matchCount("  ", matchPositions([]), themes)).toBe("");
   });
 
-  it("formats large counts", () => {
+  it("formats large counts in the user's locale", () => {
     const many = Array.from({ length: 1234 }, (_, index) =>
       oidSchema.parse(index.toString(16).padStart(40, "0")),
     );
     expect(matchCount("a", matchPositions(many), many[999] ?? null)).toBe(
-      "1,000 of 1,234",
+      `${(1000).toLocaleString()} of ${(1234).toLocaleString()}`,
     );
   });
 });
