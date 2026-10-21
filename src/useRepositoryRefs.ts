@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as repositories from "./repositories";
 import { problemFrom } from "./domain/repository";
 import type {
+  Branch,
   Problem,
   RepositoryRefs,
   RepositoryRoot,
@@ -14,14 +15,25 @@ export type RefsState =
   | { kind: "ready"; refs: RepositoryRefs }
   | { kind: "error"; problem: Problem };
 
+export function withOpenRepository(
+  states: ReadonlyMap<RepositoryRoot, RefsState>,
+  snapshot: RepositorySnapshot | null,
+): ReadonlyMap<RepositoryRoot, RefsState> {
+  if (snapshot === null || states.get(snapshot.root)?.kind === "ready")
+    return states;
+  return new Map(states).set(snapshot.root, { kind: "ready", refs: snapshot });
+}
+
 /**
  * Branch data for every expanded repository. The open repository reads it from
  * its snapshot. The others read only their refs, which skips the history walk.
  */
 export function useRepositoryRefs(
   expanded: ReadonlySet<RepositoryRoot>,
-  snapshot: RepositorySnapshot | null,
+  shown: RepositorySnapshot | null,
+  fresh: RepositorySnapshot | null,
   store: OverviewStore,
+  onFreshBranches: (root: RepositoryRoot, branches: readonly Branch[]) => void,
 ) {
   const [states, setStates] = useState<ReadonlyMap<RepositoryRoot, RefsState>>(
     new Map(),
@@ -29,7 +41,11 @@ export function useRepositoryRefs(
   // The latest request per root. A response from an older request is stale.
   const requests = useRef(new Map<RepositoryRoot, number>());
   const nextRequest = useRef(0);
-  const activeRoot = snapshot?.root ?? null;
+  const activeRoot = shown?.root ?? null;
+  const onFreshBranchesRef = useRef(onFreshBranches);
+  useEffect(() => {
+    onFreshBranchesRef.current = onFreshBranches;
+  });
 
   const load = useCallback((roots: readonly RepositoryRoot[]) => {
     for (const root of roots) {
@@ -46,7 +62,11 @@ export function useRepositoryRefs(
           : new Map(previous).set(root, { kind: "loading" }),
       );
       void repositories.refs(root).then(
-        (refs) => settle({ kind: "ready", refs }),
+        (refs) => {
+          if (requests.current.get(root) !== id) return;
+          settle({ kind: "ready", refs });
+          onFreshBranchesRef.current(root, refs.branches);
+        },
         (error: unknown) =>
           settle({ kind: "error", problem: problemFrom(error) }),
       );
@@ -61,8 +81,8 @@ export function useRepositoryRefs(
   // Keep the open repository's branches, so they stay visible after another
   // repository opens. Bumping its request drops an older refs response.
   useEffect(() => {
-    if (snapshot === null) return;
-    const { root, name, head, branches } = snapshot;
+    if (fresh === null) return;
+    const { root, name, head, branches } = fresh;
     requests.current.set(root, ++nextRequest.current);
     setStates((previous) =>
       new Map(previous).set(root, {
@@ -70,7 +90,8 @@ export function useRepositoryRefs(
         refs: { root, name, head, branches },
       }),
     );
-  }, [snapshot]);
+    onFreshBranchesRef.current(root, branches);
+  }, [fresh]);
 
   useEffect(() => {
     setStates((previous) => {
@@ -101,14 +122,8 @@ export function useRepositoryRefs(
   );
 
   const refs = useMemo(
-    (): ReadonlyMap<RepositoryRoot, RefsState> =>
-      snapshot === null
-        ? states
-        : new Map(states).set(snapshot.root, {
-            kind: "ready",
-            refs: snapshot,
-          }),
-    [states, snapshot],
+    () => withOpenRepository(states, shown),
+    [states, shown],
   );
 
   return { refs, reload: () => load(background) };

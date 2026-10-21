@@ -39,7 +39,7 @@ import { useHistoryColumns } from "./historyColumns";
 import { repositoryWarnings, useOverview } from "./overview";
 import { mac, macNative } from "./repositories";
 import { useRepositoryRefs } from "./useRepositoryRefs";
-import { useWorkspace } from "./useWorkspace";
+import { freshSnapshot, useWorkspace } from "./useWorkspace";
 
 type AppScreen = "repository" | "settings";
 type SettingsSection = "appearance" | "fetching";
@@ -109,7 +109,9 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   const branchRefs = useRepositoryRefs(
     expansion.expanded,
     snapshot,
+    freshSnapshot(workspace),
     overviewStore,
+    visibility.prune,
   );
   const rule = snapshot ? visibility.ruleFor(snapshot.root) : NO_RULE;
   const visible = useMemo(
@@ -131,14 +133,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     root: RepositoryRoot;
     reference: FullRef;
   } | null>(null);
-  const { prune } = visibility;
-  useEffect(() => {
-    if (snapshot) prune(snapshot.root, snapshot.branches);
-  }, [snapshot, prune]);
-  useEffect(() => {
-    for (const [root, state] of branchRefs.refs)
-      if (state.kind === "ready") prune(root, state.refs.branches);
-  }, [branchRefs.refs, prune]);
   const inspectorVisible = Boolean(shown && inspectorOpen);
   const activePath =
     shown?.root ?? (workspace.kind === "error" ? workspace.path : null);
@@ -209,6 +203,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     [overviewStore, app.activeRoot],
   );
   function showRepository(root: RepositoryRoot) {
+    setSidebarJump(null);
     setScreen("repository");
     expansion.setExpanded(root, true);
     if (root !== snapshot?.root) void app.selectRepository(root);
@@ -537,6 +532,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                     ref={historyRef}
                     snapshot={snapshot}
                     visibleCommits={visible}
+                    visibleOids={visibleOids}
                     rule={rule}
                     selectedOid={app.selectedOid}
                     revealSeq={jump?.seq ?? 0}

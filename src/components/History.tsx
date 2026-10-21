@@ -81,7 +81,7 @@ function GraphCell({
   commit: Commit;
   selected: boolean;
   width: number;
-  known: Set<Oid>;
+  known: ReadonlySet<Oid>;
   lit: RowHighlight | undefined;
 }) {
   const dim = (on: boolean | undefined) => (lit && !on ? "dim" : undefined);
@@ -350,6 +350,7 @@ type Props = {
   ref?: Ref<HistoryHandle>;
   snapshot: RepositorySnapshot;
   visibleCommits: readonly Commit[];
+  visibleOids: ReadonlySet<Oid>;
   rule: VisibilityRule;
   selectedOid: Oid | null;
   revealSeq: number;
@@ -371,6 +372,7 @@ export function History({
   ref,
   snapshot,
   visibleCommits: commits,
+  visibleOids: known,
   rule,
   selectedOid,
   revealSeq,
@@ -385,10 +387,6 @@ export function History({
   visibleColumns,
   onToggleColumn,
 }: Props) {
-  const known = useMemo(
-    () => new Set(commits.map((commit) => commit.oid)),
-    [commits],
-  );
   const graph = useMemo(
     () =>
       buildGraph(
@@ -620,7 +618,7 @@ export function History({
   }
 
   function step(by: 1 | -1) {
-    const oid = stepMatch(commits, matches, selectedOid, by);
+    const oid = stepMatch(snapshot.commits, matches, selectedOid, by);
     if (oid === null) return;
     revealCentered(commits.findIndex((commit) => commit.oid === oid));
     onSelect(oid);

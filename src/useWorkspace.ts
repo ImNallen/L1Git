@@ -36,6 +36,12 @@ type ReadyWorkspace = {
  * `opening` reads a repository with nothing to show yet. `loading` rereads
  * one while its last snapshot stays on screen.
  */
+export function freshSnapshot(workspace: Workspace): RepositorySnapshot | null {
+  return workspace.kind === "ready" && workspace.error === null
+    ? workspace.snapshot
+    : null;
+}
+
 export type Workspace =
   | { kind: "empty" }
   | { kind: "opening"; path: RepositoryRoot; name: string }

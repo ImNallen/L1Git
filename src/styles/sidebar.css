@@ -226,16 +226,6 @@ input::placeholder {
 .rule-cue.solo {
   color: var(--blue);
 }
-.repository-tree button:focus-visible {
-  outline: none;
-  background: color-mix(in srgb, var(--primary-bg) 16%, var(--row-selected));
-}
-.repository-tree .branch-row.selected:focus-visible {
-  background: color-mix(in srgb, var(--primary-bg) 16%, var(--nav-selected-bg));
-}
-.repository-tree .branch-row.head:not(.selected):focus-visible {
-  background: color-mix(in srgb, var(--primary-bg) 16%, var(--success-bg));
-}
 .branch-head {
   font-size: 8px;
   letter-spacing: 0.5px;
@@ -352,4 +342,46 @@ input::placeholder {
 .sidebar[hidden],
 .repository-navigation[hidden] {
   display: none;
+}
+
+.sidebar {
+  --focus-bar: var(--blue);
+  --focus-tint: color-mix(in srgb, var(--primary-bg) 10%, var(--sidebar));
+}
+.sidebar button:focus-visible,
+.sidebar button:focus-visible:hover:not(:disabled) {
+  outline: none;
+  background: var(--focus-tint);
+  box-shadow: inset 2px 0 0 var(--focus-bar);
+}
+.sidebar .branch-row.selected:focus-visible,
+.sidebar .branch-row.selected:focus-visible:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--primary-bg) 10%, var(--nav-selected-bg));
+}
+.sidebar .branch-row.head:not(.selected):focus-visible,
+.sidebar .branch-row.head:not(.selected):focus-visible:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--primary-bg) 10%, var(--success-bg));
+}
+.sidebar .branch-item:hover > .branch-row:focus-visible:not(.selected, .head) {
+  background: var(--focus-tint);
+}
+.sidebar .icon-button:focus-visible,
+.sidebar .icon-button:focus-visible:hover:not(:disabled),
+.sidebar .repository-toggle:focus-visible,
+.sidebar .repository-toggle:focus-visible:hover:not(:disabled),
+.sidebar-empty button:focus-visible,
+.sidebar-empty button:focus-visible:hover:not(:disabled) {
+  box-shadow: inset 0 -2px 0 var(--focus-bar);
+}
+.repository-toggle:focus-visible {
+  border-radius: 6px 0 0 6px;
+}
+.sidebar .repository-open:focus-visible,
+.sidebar .repository-open:focus-visible:hover:not(:disabled) {
+  background: none;
+  box-shadow: none;
+}
+.repository-row:has(> .repository-open:focus-visible) {
+  background: var(--focus-tint);
+  box-shadow: inset 2px 0 0 var(--focus-bar);
 }
