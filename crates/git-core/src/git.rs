@@ -2,7 +2,7 @@ use crate::{BranchRef, ErrorKind, Oid, RepositoryError};
 use std::{
     io::{self, Read, Write},
     path::Path,
-    process::{Child, Command, Output, Stdio},
+    process::{Child, ChildStderr, Command, Output, Stdio},
     sync::mpsc,
     thread,
     time::{Duration, Instant},
@@ -127,13 +127,7 @@ pub(crate) fn run_capped(
         .spawn()
         .map_err(spawn_error)?;
     let mut stdout = child.stdout.take().ok_or_else(read_failed)?;
-    let mut stderr = child.stderr.take().ok_or_else(read_failed)?;
-    let errors = thread::spawn(move || {
-        let mut kept = Vec::new();
-        let _ = (&mut stderr).take(STDERR_CAP).read_to_end(&mut kept);
-        let _ = io::copy(&mut stderr, &mut io::sink());
-        kept
-    });
+    let stderr = Stderr::drain(child.stderr.take());
     let mut kept = Vec::new();
     (&mut stdout)
         .take(cap as u64 + 1)
@@ -141,7 +135,7 @@ pub(crate) fn run_capped(
         .map_err(|_| read_failed())?;
     let rest = io::copy(&mut stdout, &mut io::sink()).map_err(|_| read_failed())?;
     let status = child.wait().map_err(|_| read_failed())?;
-    let stderr = errors.join().map_err(|_| read_failed())?;
+    let stderr = stderr.after_exit();
     Ok(CappedRun {
         code: status.code(),
         stdout: if kept.len() <= cap {
@@ -275,6 +269,31 @@ const POLL: Duration = Duration::from_millis(10);
 const INHERITED_STDERR_WAIT: Duration = Duration::from_secs(1);
 const TERMINATE_GRACE: Duration = Duration::from_secs(2);
 
+/// A process that Git starts, such as a clean filter, can keep stderr open
+/// after Git exits.
+struct Stderr(mpsc::Receiver<Vec<u8>>);
+
+impl Stderr {
+    fn drain(pipe: Option<ChildStderr>) -> Self {
+        let (sender, receiver) = mpsc::channel();
+        if let Some(mut pipe) = pipe {
+            thread::spawn(move || {
+                let mut kept = Vec::new();
+                let _ = (&mut pipe).take(STDERR_CAP).read_to_end(&mut kept);
+                let _ = io::copy(&mut pipe, &mut io::sink());
+                let _ = sender.send(kept);
+            });
+        }
+        Self(receiver)
+    }
+
+    fn after_exit(self) -> Vec<u8> {
+        self.0
+            .recv_timeout(INHERITED_STDERR_WAIT)
+            .unwrap_or_default()
+    }
+}
+
 pub(crate) fn mutate(
     path: &Path,
     mutation: Mutation<'_>,
@@ -298,22 +317,12 @@ pub(crate) fn mutate(
     std::os::unix::process::CommandExt::process_group(&mut command, 0);
     let started = Instant::now();
     let mut child = command.spawn().map_err(spawn_error)?;
-    let (sender, receiver) = mpsc::channel();
-    if let Some(mut stderr) = child.stderr.take() {
-        thread::spawn(move || {
-            let mut kept = Vec::new();
-            let _ = (&mut stderr).take(STDERR_CAP).read_to_end(&mut kept);
-            let _ = io::copy(&mut stderr, &mut io::sink());
-            let _ = sender.send(kept);
-        });
-    }
+    let stderr = Stderr::drain(child.stderr.take());
     loop {
         if let Some(status) = child.try_wait().map_err(|error| {
             RepositoryError::new(ErrorKind::GitFailed, format!("Could not run Git: {error}"))
         })? {
-            let stderr = receiver
-                .recv_timeout(INHERITED_STDERR_WAIT)
-                .unwrap_or_default();
+            let stderr = stderr.after_exit();
             return Ok(if status.success() {
                 Finished::Succeeded
             } else {

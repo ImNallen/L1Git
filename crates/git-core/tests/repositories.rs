@@ -1636,17 +1636,18 @@ fn worktree_patch_shows_what_git_would_stage_under_any_attribute() {
     let fixture = Fixture::new();
     fixture.commit(
         ".gitattributes",
-        "*.up filter=upper\n*.off filter=unconfigured\n*.bin diff=bin\n*.forced diff\n*.nod -diff\n*.id ident\n*.u16 working-tree-encoding=UTF-16\n",
+        "*.up filter=upper\n*.off filter=unconfigured\n*.bin diff=bin\n*.forced diff\n*.nod -diff\n*.id ident\n*.u16 working-tree-encoding=UTF-16\n*.stamp filter=stamp\n",
         "attributes",
     );
     for (key, value) in [
         ("filter.upper.clean", "tr a-z A-Z"),
+        ("filter.stamp.clean", "sh -c 'echo stamped; cat'"),
         ("diff.bin.binary", "true"),
         ("core.autocrlf", "false"),
     ] {
         git(&fixture.repo, &["config", key, value]);
     }
-    let files: [(&str, &[u8]); 8] = [
+    let files: [(&str, &[u8]); 10] = [
         ("a.up", b"lower\n"),
         ("a.off", b"lower\n"),
         ("a.bin", b"text\n"),
@@ -1655,6 +1656,8 @@ fn worktree_patch_shows_what_git_would_stage_under_any_attribute() {
         ("a.nod", b"text\n"),
         ("a.id", b"x\n$Id: 0123456789abcdef $\n"),
         ("a.u16", b"\xff\xfeo\0n\0e\0\n\0"),
+        ("empty.stamp", b""),
+        ("a.stamp", b"x\n"),
     ];
     for (name, content) in files {
         fs::write(fixture.repo.join(name), content).unwrap();
@@ -1808,13 +1811,54 @@ fn worktree_patch_never_leaks_through_a_file_swapped_for_a_symlink() {
             }
         })
     };
-    let leaks = (0..200)
-        .filter_map(|_| worktree_patch(fixture.path(), "victim", Side::Unstaged).ok())
-        .filter(|patch| format!("{patch:?}").contains("SECRET"))
-        .count();
+    let reads: Vec<_> = (0..200)
+        .map(|_| worktree_patch(fixture.path(), "victim", Side::Unstaged))
+        .collect();
     done.store(true, Ordering::Relaxed);
     swapper.join().unwrap();
+    let leaks = reads
+        .iter()
+        .filter(|read| format!("{read:?}").contains("SECRET"))
+        .count();
     assert_eq!(leaks, 0);
+    let unexplained: Vec<_> = reads
+        .iter()
+        .filter_map(|read| read.as_ref().err())
+        .filter(|error| error.message.contains("os error"))
+        .collect();
+    assert!(unexplained.is_empty(), "{unexplained:?}");
+}
+
+#[test]
+fn worktree_patch_returns_when_a_filter_leaves_stderr_open() {
+    let fixture = Fixture::new();
+    fixture.commit(".gitattributes", "*.bg filter=bg\n", "attributes");
+    git(
+        &fixture.repo,
+        &[
+            "config",
+            "filter.bg.clean",
+            "sh -c 'sleep 8 </dev/null >/dev/null & cat'",
+        ],
+    );
+    fs::write(fixture.repo.join("a.bg"), "x\n").unwrap();
+    let path = fixture.path().to_owned();
+    let started = std::time::Instant::now();
+    let patch = within(move || worktree_patch(&path, "a.bg", Side::Unstaged));
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(5),
+        "{:?}",
+        started.elapsed()
+    );
+    assert!(
+        matches!(
+            patch,
+            Ok(WorktreePatch::Diff {
+                diff: FilePatch::Text { .. }
+            })
+        ),
+        "{patch:?}"
+    );
 }
 
 #[cfg(unix)]

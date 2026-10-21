@@ -23,12 +23,13 @@ pub(crate) fn untracked(root: &Path, file: &str) -> Result<Option<WorktreePatch>
             let oid = hash(root, &["--no-filters"], target.clone())?;
             text_patch(&link_patch(file, &oid, &target))
         }
-        Found::Directory => {
+        Found::Directory if file.ends_with('/') => {
             return Err(RepositoryError::new(
                 ErrorKind::UnsupportedPath,
                 "L1 Git cannot show a diff for a nested repository.",
             ));
         }
+        Found::Directory | Found::Changed => return Err(changed()),
         Found::Other => {
             return Err(RepositoryError::new(
                 ErrorKind::UnsupportedPath,
@@ -54,7 +55,9 @@ fn changed() -> RepositoryError {
 }
 
 /// Git opens the path again for the blob id and again for the shown text, so
-/// both are checked against the bytes read here.
+/// both are checked against the bytes read here. Git takes attributes from the
+/// working tree, not the index, and a clean filter must give the same output
+/// on each run.
 fn regular(
     root: &Path,
     file: &str,
@@ -109,6 +112,7 @@ fn regular(
         git::Capped::Within(patch) => patch,
         git::Capped::Over(bytes) => return Ok(FilePatch::TooLarge { bytes }),
     };
+    let read_nothing = read_without_links.is_empty();
     let oid = hash(root, &[&format!("--path={file}")], read_without_links)?;
     let read_mode = if executable { "100755" } else { "100644" };
     let body = patch
@@ -128,7 +132,9 @@ fn regular(
             .ok_or_else(changed)?,
     };
     let shown = added(hunk).ok_or_else(changed)?;
-    if hash(root, &["--no-filters"], shown)? != oid {
+    // Git shows no lines for an empty file, even when a clean filter adds some.
+    let hidden = read_nothing && shown.is_empty();
+    if !hidden && hash(root, &["--no-filters"], shown)? != oid {
         return Err(changed());
     }
     let mode = if executable && file_mode(root)? {
@@ -218,6 +224,7 @@ fn link_patch(file: &str, oid: &str, target: &[u8]) -> Vec<u8> {
 }
 
 enum Found {
+    Changed,
     File { file: fs::File, executable: bool },
     Link(Vec<u8>),
     Directory,
@@ -270,7 +277,13 @@ fn open_without_following_links(root: &Path, file: &str) -> io::Result<Found> {
         .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
     let mut dir = OwnedFd::from(fs::File::open(root)?);
     for parent in parents {
-        dir = open_at(&dir, parent, libc::O_RDONLY | libc::O_DIRECTORY)?;
+        dir = match open_at(&dir, parent, libc::O_RDONLY | libc::O_DIRECTORY) {
+            Ok(dir) => dir,
+            Err(error) if matches!(error.raw_os_error(), Some(libc::ELOOP | libc::ENOTDIR)) => {
+                return Ok(Found::Changed);
+            }
+            Err(error) => return Err(error),
+        };
     }
     match open_at(&dir, name, libc::O_RDONLY | libc::O_NONBLOCK) {
         Ok(fd) => {
@@ -290,7 +303,7 @@ fn open_without_following_links(root: &Path, file: &str) -> io::Result<Found> {
         Err(error) if error.raw_os_error() == Some(libc::ELOOP) => {
             let mut target = vec![0u8; 4096];
             loop {
-                let length = retrying(|| {
+                let length = match retrying(|| {
                     // SAFETY: the pointer and length describe `target`, which
                     // is writable and outlives the call.
                     unsafe {
@@ -301,7 +314,13 @@ fn open_without_following_links(root: &Path, file: &str) -> io::Result<Found> {
                             target.len(),
                         )
                     }
-                })? as usize;
+                }) {
+                    Ok(length) => length as usize,
+                    Err(error) if error.raw_os_error() == Some(libc::EINVAL) => {
+                        return Ok(Found::Changed);
+                    }
+                    Err(error) => return Err(error),
+                };
                 if length < target.len() {
                     target.truncate(length);
                     return Ok(Found::Link(target));
@@ -314,26 +333,8 @@ fn open_without_following_links(root: &Path, file: &str) -> io::Result<Found> {
 }
 
 #[cfg(not(unix))]
-fn open_without_following_links(root: &Path, file: &str) -> io::Result<Found> {
-    let path = root.join(file.trim_end_matches('/'));
-    let kind = fs::symlink_metadata(&path)?.file_type();
-    Ok(if kind.is_symlink() {
-        Found::Link(
-            fs::read_link(&path)?
-                .to_string_lossy()
-                .into_owned()
-                .into_bytes(),
-        )
-    } else if kind.is_dir() {
-        Found::Directory
-    } else if kind.is_file() {
-        Found::File {
-            file: fs::File::open(&path)?,
-            executable: false,
-        }
-    } else {
-        Found::Other
-    })
+fn open_without_following_links(_root: &Path, _file: &str) -> io::Result<Found> {
+    Err(io::Error::from(io::ErrorKind::Unsupported))
 }
 
 #[cfg(all(test, unix))]
@@ -365,7 +366,10 @@ mod unix_tests {
             open_without_following_links(&root, "real/file"),
             Ok(Found::File { .. })
         ));
-        assert!(open_without_following_links(&root, "swapped/null").is_err());
+        assert!(matches!(
+            open_without_following_links(&root, "swapped/null"),
+            Ok(Found::Changed)
+        ));
         assert!(
             matches!(open_without_following_links(&root, "link"), Ok(Found::Link(target)) if target == outside.as_os_str().as_encoded_bytes())
         );

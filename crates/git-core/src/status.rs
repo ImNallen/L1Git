@@ -1,7 +1,6 @@
 use crate::{
     ChangeStatus, Conflict, ErrorKind, FilePatch, MoveSide, Moved, PATCH_LIMIT, RepositoryError,
     Side, Sides, StatusEntry, SubmoduleState, WorktreePatch, WorktreeStatus, git,
-    git::quoted,
     repository::{self, text_patch},
     untracked::untracked,
 };
@@ -397,8 +396,12 @@ fn sections(patch: &[u8]) -> impl Iterator<Item = &[u8]> {
 }
 
 fn ends_at(section: &[u8], file: &str) -> bool {
-    let target = quoted("", file);
-    let same = format!("diff --git {} {}", quoted("a/", file), quoted("b/", file));
+    let target = git::quoted("", file);
+    let same = format!(
+        "diff --git {} {}",
+        git::quoted("a/", file),
+        git::quoted("b/", file)
+    );
     section
         .split(|byte| *byte == b'\n')
         .enumerate()
