@@ -7,6 +7,7 @@ import {
   ChevronRight,
   Clock,
   Copy,
+  FolderGit2,
   GitCommitHorizontal,
   LoaderCircle,
 } from "lucide-react";
@@ -15,7 +16,14 @@ import type {
   Oid,
   RepositoryRoot,
   RepositorySnapshot,
+  Worktree,
 } from "../domain/repository";
+import { clampMessage, worktreeGroups } from "../domain/worktree";
+import type {
+  ListSide,
+  WorktreeChanges,
+  WorktreeGroup,
+} from "../domain/worktree";
 import { sameSelection } from "../domain/selection";
 import type { Selection } from "../domain/selection";
 import { relativeTime } from "../domain/time";
@@ -28,10 +36,12 @@ type Props = {
   selection: Selection | null;
   snapshot: RepositorySnapshot;
   onSelect: (selection: Selection) => void;
-  selectedFile: string | null;
-  onSelectFile: (path: string) => void;
+  selectedFile: OpenedFile | null;
+  onSelectFile: (path: string, side: ListSide | null) => void;
   toggleButton: ReactNode;
   onRetry: () => void;
+  worktree: { worktree: Worktree; changes: WorktreeChanges | undefined } | null;
+  onRefreshChanges: () => void;
 };
 
 export function InspectorFrame({
@@ -107,6 +117,8 @@ export function CommitInspector({
   onSelectFile,
   toggleButton,
   onRetry,
+  worktree,
+  onRefreshChanges,
 }: Props) {
   const [copy, setCopy] = useState<"idle" | "copied" | "failed">("idle");
   const [changesOpen, setChangesOpen] = useState(true);
@@ -140,6 +152,27 @@ export function CommitInspector({
       setCopy("failed");
     }
   }
+
+  if (selection?.kind === "worktree")
+    return (
+      <InspectorFrame toggleButton={toggleButton}>
+        {worktree ? (
+          <WorktreeInspector
+            worktree={worktree.worktree}
+            changes={worktree.changes}
+            snapshot={snapshot}
+            onSelect={onSelect}
+            selectedFile={selectedFile}
+            onSelectFile={onSelectFile}
+            onRefresh={onRefreshChanges}
+          />
+        ) : (
+          <div className="inspector-empty">
+            <p>This worktree is no longer listed.</p>
+          </div>
+        )}
+      </InspectorFrame>
+    );
 
   return (
     <InspectorFrame
@@ -311,9 +344,12 @@ export function CommitInspector({
               {detail.files.length > 0 ? (
                 <ChangedFileTree
                   key={detail.commit.oid}
-                  files={detail.files}
-                  selectedPath={selectedFile}
-                  onSelectFile={onSelectFile}
+                  files={detail.files.map((file) => ({
+                    path: file.path,
+                    status: changeStatuses[file.status].gitStatus,
+                  }))}
+                  selectedPath={selectedFile?.path ?? null}
+                  onSelectFile={(path) => onSelectFile(path, null)}
                 />
               ) : (
                 <p className="muted">No paths changed against this base.</p>
@@ -344,5 +380,143 @@ export function CommitInspector({
         </div>
       )}
     </InspectorFrame>
+  );
+}
+
+type OpenedFile = { path: string; side: ListSide | null };
+
+const GROUP_MAX_ROWS = 12;
+
+function WorktreeFiles({
+  group: { title, files, side },
+  selectedFile,
+  onSelectFile,
+}: {
+  group: WorktreeGroup;
+  selectedFile: OpenedFile | null;
+  onSelectFile: (path: string, side: ListSide) => void;
+}) {
+  return (
+    <section className="worktree-group" aria-label={title}>
+      <h3 className="changed-files-title">
+        {title}
+        <span className="count">{files.length}</span>
+      </h3>
+      <ChangedFileTree
+        key={files.map((file) => `${file.status}:${file.path}`).join("\0")}
+        files={files}
+        selectedPath={selectedFile?.side === side ? selectedFile.path : null}
+        onSelectFile={(path) => onSelectFile(path, side)}
+        maxRows={GROUP_MAX_ROWS}
+      />
+    </section>
+  );
+}
+
+function WorktreeInspector({
+  worktree,
+  changes,
+  snapshot,
+  onSelect,
+  selectedFile,
+  onSelectFile,
+  onRefresh,
+}: {
+  worktree: Worktree;
+  changes: WorktreeChanges | undefined;
+  snapshot: RepositorySnapshot;
+  onSelect: (selection: Selection) => void;
+  selectedFile: OpenedFile | null;
+  onSelectFile: (path: string, side: ListSide) => void;
+  onRefresh: () => void;
+}) {
+  const { head } = worktree;
+  const branch =
+    head.kind === "detached"
+      ? null
+      : (snapshot.branches.find(
+          (candidate) => candidate.reference === head.reference,
+        )?.name ?? head.reference.replace(/^refs\/heads\//, ""));
+  return (
+    <div className="inspector-content">
+      <h2>Uncommitted changes</h2>
+      <dl className="commit-metadata">
+        <div className="meta-row">
+          <dt className="visually-hidden">Worktree</dt>
+          <dd>
+            <span className="meta-icon" aria-hidden="true">
+              <FolderGit2 size={13} />
+            </span>
+            <span className="meta-lines">
+              <span className="meta-primary">{worktree.name}</span>
+              <span className="meta-secondary" title={worktree.root}>
+                {worktree.root}
+              </span>
+            </span>
+          </dd>
+        </div>
+        <div className="meta-row">
+          <dt className="visually-hidden">HEAD</dt>
+          <dd>
+            <span className="meta-icon" aria-hidden="true">
+              <GitCommitHorizontal size={14} />
+            </span>
+            <span className="meta-lines">
+              <span className="meta-primary parents">
+                {head.kind === "unborn" ? (
+                  "No commits yet"
+                ) : (
+                  <button
+                    className="sha-chip"
+                    title={`Open HEAD ${head.oid}`}
+                    onClick={() => onSelect({ kind: "commit", oid: head.oid })}
+                  >
+                    <code>{head.oid.slice(0, 7)}</code>
+                    <ArrowUpRight size={12} />
+                  </button>
+                )}
+              </span>
+              <span className="meta-secondary">
+                {branch === null ? "Detached HEAD" : `On ${branch}`}
+              </span>
+            </span>
+          </dd>
+        </div>
+      </dl>
+      {changes === undefined ? (
+        <div className="inspector-empty" role="status">
+          <LoaderCircle size={23} className="spin" />
+          <p>Reading changes…</p>
+        </div>
+      ) : changes.kind === "error" ? (
+        <div className="inspector-empty">
+          {changes.error.kind === "gitFailed" ? (
+            <pre className="problem-detail" role="alert">
+              {clampMessage(changes.error.message)}
+            </pre>
+          ) : (
+            <p role="alert">{changes.error.message}</p>
+          )}
+          <button className="button secondary" onClick={onRefresh}>
+            Refresh
+          </button>
+        </div>
+      ) : changes.status.entries.length === 0 ? (
+        <p className="muted">No uncommitted changes.</p>
+      ) : (
+        <div className="worktree-groups">
+          {worktreeGroups(changes.status.entries)
+            .filter((group) => group.files.length > 0)
+            .map((group) => (
+              <WorktreeFiles
+                key={group.title}
+                group={group}
+                selectedFile={selectedFile}
+                onSelectFile={onSelectFile}
+              />
+            ))}
+        </div>
+      )}
+    </div>
   );
 }

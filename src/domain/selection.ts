@@ -1,4 +1,7 @@
+import { worktreeRowId } from "./graph";
+import type { RowId } from "./graph";
 import type { Oid, RepositoryRoot } from "./repository";
+import type { HistoryRow } from "./worktree";
 
 export type CommitSelection = { kind: "commit"; oid: Oid };
 export type Selection =
@@ -21,4 +24,17 @@ export function stableSelection(
   next: Selection,
 ): Selection {
   return previous !== null && sameSelection(previous, next) ? previous : next;
+}
+
+export function selectedRowId(selection: Selection | null): RowId | null {
+  if (selection === null) return null;
+  return selection.kind === "commit"
+    ? selection.oid
+    : worktreeRowId(selection.root);
+}
+
+export function rowSelection(row: HistoryRow): Selection {
+  return row.kind === "commit"
+    ? { kind: "commit", oid: row.id }
+    : { kind: "worktree", root: row.worktree.root };
 }

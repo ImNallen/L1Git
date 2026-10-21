@@ -15,7 +15,7 @@ const t1 = oid("f");
 const t0 = oid("0");
 
 const highlight = (
-  commits: { oid: Oid; parents: Oid[] }[],
+  commits: { id: Oid; parents: Oid[] }[],
   squashes: Squash[],
   tip: Oid,
   trunk: Oid[],
@@ -24,12 +24,12 @@ const highlight = (
 // Feature f1..f2 forked at t0 while trunk moved on to t1 and t2, then
 // squash-merged as `squash`.
 const squashed = [
-  { oid: squash, parents: [t2] },
-  { oid: f2, parents: [f1] },
-  { oid: t2, parents: [t1] },
-  { oid: f1, parents: [t0] },
-  { oid: t1, parents: [t0] },
-  { oid: t0, parents: [] },
+  { id: squash, parents: [t2] },
+  { id: f2, parents: [f1] },
+  { id: t2, parents: [t1] },
+  { id: f1, parents: [t0] },
+  { id: t1, parents: [t0] },
+  { id: t0, parents: [] },
 ];
 const squashes = [{ tip: f2, commit: squash }];
 
@@ -53,11 +53,11 @@ describe("branch highlight", () => {
 
   it("lights a real merge commit as merged into the feature", () => {
     const commits = [
-      { oid: merge, parents: [t1, f2] },
-      { oid: f2, parents: [f1] },
-      { oid: t1, parents: [t0] },
-      { oid: f1, parents: [t0] },
-      { oid: t0, parents: [] },
+      { id: merge, parents: [t1, f2] },
+      { id: f2, parents: [f1] },
+      { id: t1, parents: [t0] },
+      { id: f1, parents: [t0] },
+      { id: t0, parents: [] },
     ];
     const { commits: lit, rows } = highlight(commits, [], f2, [merge]);
     expect(lit).toEqual(new Set([f2, f1, t0, merge]));

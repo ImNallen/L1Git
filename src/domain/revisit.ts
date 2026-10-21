@@ -1,5 +1,7 @@
 import type { RepositoryRoot, RepositorySnapshot } from "./repository";
 import type { Selection } from "./selection";
+import { hasRow } from "./worktree";
+import type { ChangesByWorktree } from "./worktree";
 
 /** A snapshot can hold 50,000 commits, so only a few stay in memory. */
 export const SNAPSHOT_CACHE_SIZE = 8;
@@ -39,6 +41,7 @@ export function evictSnapshot(
 export function restoreSelection(
   snapshot: Pick<RepositorySnapshot, "commits" | "worktrees">,
   remembered: Selection | null,
+  changes: ChangesByWorktree,
 ): Selection | null {
   const newest = snapshot.commits[0];
   const fallback: Selection | null = newest
@@ -50,12 +53,14 @@ export function restoreSelection(
       return snapshot.commits.some((commit) => commit.oid === remembered.oid)
         ? remembered
         : fallback;
-    case "worktree":
-      return snapshot.worktrees.some(
-        (worktree) => worktree.root === remembered.root,
-      )
+    case "worktree": {
+      const found = changes.get(remembered.root);
+      const notKnownClean = found === undefined || hasRow(found);
+      return notKnownClean &&
+        snapshot.worktrees.some((worktree) => worktree.root === remembered.root)
         ? remembered
         : fallback;
+    }
     default: {
       const exhaustive: never = remembered;
       return exhaustive;

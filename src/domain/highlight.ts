@@ -1,6 +1,6 @@
-import type { GraphRow } from "./graph";
+import type { GraphNode, GraphRow, RowId } from "./graph";
 import type { BranchStatus } from "./overview";
-import type { Branch, Commit, Oid } from "./repository";
+import type { Branch, Oid } from "./repository";
 
 /** Which strokes of one graph row stay lit, index-aligned with its `GraphRow`. */
 export type RowHighlight = {
@@ -11,8 +11,8 @@ export type RowHighlight = {
 
 /** What one hovered branch tip affects: its commits and every graph stroke among them. */
 export type BranchHighlight = {
-  commits: Set<Oid>;
-  rows: Map<Oid, RowHighlight>;
+  commits: Set<RowId>;
+  rows: Map<RowId, RowHighlight>;
 };
 
 /**
@@ -21,13 +21,13 @@ export type BranchHighlight = {
  * trunk, it is the whole first-parent chain.
  */
 export function highlightBranch(
-  commits: readonly Pick<Commit, "oid" | "parents">[],
-  rows: ReadonlyMap<Oid, GraphRow>,
+  nodes: readonly GraphNode[],
+  rows: ReadonlyMap<RowId, GraphRow>,
   tip: Oid,
   trunk: readonly Oid[],
 ): BranchHighlight {
   const firstParent = new Map(
-    commits.map((commit) => [commit.oid, commit.parents.at(0)]),
+    nodes.map((node) => [node.id, node.parents.at(0)]),
   );
   const trunkChain = new Set<Oid>();
   for (let oid of trunk) {
@@ -39,9 +39,9 @@ export function highlightBranch(
     }
   }
 
-  const lit = new Set<Oid>();
-  const litEdges = new Map<Oid, Set<number>>();
-  const light = (child: Oid, index: number) =>
+  const lit = new Set<RowId>();
+  const litEdges = new Map<RowId, Set<number>>();
+  const light = (child: RowId, index: number) =>
     litEdges.set(child, (litEdges.get(child) ?? new Set()).add(index));
 
   const onTrunk = trunkChain.has(tip);
@@ -66,9 +66,9 @@ export function highlightBranch(
     });
   }
 
-  const awaited = new Set<Oid>();
-  const highlighted = new Map<Oid, RowHighlight>();
-  for (const { oid } of commits) {
+  const awaited = new Set<RowId>();
+  const highlighted = new Map<RowId, RowHighlight>();
+  for (const { id: oid } of nodes) {
     const row = rows.get(oid);
     if (!row) continue;
     const edges = litEdges.get(oid);

@@ -22,7 +22,7 @@ import type { LucideIcon } from "lucide-react";
 import { initials } from "../domain/author";
 import { diffstatBlocks } from "../domain/diffstat";
 import { buildGraph } from "../domain/graph";
-import type { GraphRow } from "../domain/graph";
+import type { GraphRow, RowId } from "../domain/graph";
 import { highlightBranch } from "../domain/highlight";
 import type { RowHighlight } from "../domain/highlight";
 import {
@@ -40,7 +40,10 @@ import {
   matchCount,
   stepMatch,
 } from "../domain/search";
+import { rowSelection, selectedRowId } from "../domain/selection";
 import type { Selection } from "../domain/selection";
+import { changeSummary } from "../domain/worktree";
+import type { HistoryRow, WorktreeRow } from "../domain/worktree";
 import { SHORT_OID_MIN_LENGTH, uniqueShortOids } from "../domain/shortOid";
 import { relativeTime } from "../domain/time";
 import { branchVisibility } from "../domain/visibility";
@@ -64,6 +67,7 @@ const HIGHLIGHT_DELAY = 400;
 const color = (lane: number) => `var(--graph-lane-${(lane % 6) + 1})`;
 const x = (lane: number) => 14 + lane * 24;
 const NO_COMMITS: readonly Commit[] = [];
+const WORKTREE_DASH = "2 3";
 const NO_EDGES: RowHighlight = {
   incoming: false,
   parents: [],
@@ -72,24 +76,22 @@ const NO_EDGES: RowHighlight = {
 
 function GraphCell({
   row,
-  commit,
-  selected,
   width,
   known,
   lit,
+  parentDash,
+  children,
 }: {
   row: GraphRow;
-  commit: Commit;
-  selected: boolean;
   width: number;
   known: ReadonlySet<Oid>;
   lit: RowHighlight | undefined;
+  parentDash?: string;
+  children: ReactNode;
 }) {
   const dim = (on: boolean | undefined) => (lit && !on ? "dim" : undefined);
   const curve = (from: number, to: number, start: number, end: number) =>
     `M ${x(from)} ${start} C ${x(from)} ${(start + end) / 2}, ${x(to)} ${(start + end) / 2}, ${x(to)} ${end}`;
-  const merge = commit.parents.length > 1;
-  const radius = merge ? 5 : 10;
   return (
     <svg
       className="graph-cell"
@@ -118,53 +120,108 @@ function GraphCell({
           className={dim(lit?.parents[index])}
           d={curve(edge.from, edge.to, 18, 36)}
           stroke={color(edge.to)}
-          strokeDasharray={known.has(edge.oid) ? undefined : "3 3"}
+          strokeDasharray={
+            parentDash ?? (known.has(edge.oid) ? undefined : "3 3")
+          }
         />
       ))}
-      <g className="graph-node">
-        <title>{`${commit.author} <${commit.email}>`}</title>
-        {selected && (
-          <circle
-            cx={x(row.lane)}
-            cy={18}
-            r={radius + 2}
-            fill="none"
-            stroke="var(--text)"
-            strokeWidth={2}
-          />
-        )}
-        {merge ? (
-          <circle
-            cx={x(row.lane)}
-            cy={18}
-            r={radius}
-            fill="var(--canvas)"
-            stroke={color(row.lane)}
-            strokeWidth={2}
-          />
-        ) : (
-          <>
-            <circle
-              cx={x(row.lane)}
-              cy={18}
-              r={radius}
-              fill={color(row.lane)}
-            />
-            <text
-              x={x(row.lane)}
-              y={18}
-              textAnchor="middle"
-              dominantBaseline="central"
-              fill="var(--on-lane)"
-              fontSize={8.5}
-              fontWeight={600}
-            >
-              {initials(commit.author)}
-            </text>
-          </>
-        )}
-      </g>
+      {children}
     </svg>
+  );
+}
+
+function SelectedRing({ lane, radius }: { lane: number; radius: number }) {
+  return (
+    <circle
+      cx={x(lane)}
+      cy={18}
+      r={radius + 2}
+      fill="none"
+      stroke="var(--text)"
+      strokeWidth={2}
+    />
+  );
+}
+
+function WorktreeNode({ lane, selected }: { lane: number; selected: boolean }) {
+  return (
+    <g className="graph-node">
+      {selected && <SelectedRing lane={lane} radius={8} />}
+      <circle
+        cx={x(lane)}
+        cy={18}
+        r={8}
+        fill="var(--canvas)"
+        stroke={color(lane)}
+        strokeWidth={2}
+        strokeDasharray={WORKTREE_DASH}
+      />
+    </g>
+  );
+}
+
+function CommitNode({
+  commit,
+  lane,
+  selected,
+}: {
+  commit: Commit;
+  lane: number;
+  selected: boolean;
+}) {
+  const merge = commit.parents.length > 1;
+  const radius = merge ? 5 : 10;
+  return (
+    <g className="graph-node">
+      <title>{`${commit.author} <${commit.email}>`}</title>
+      {selected && <SelectedRing lane={lane} radius={radius} />}
+      {merge ? (
+        <circle
+          cx={x(lane)}
+          cy={18}
+          r={radius}
+          fill="var(--canvas)"
+          stroke={color(lane)}
+          strokeWidth={2}
+        />
+      ) : (
+        <>
+          <circle cx={x(lane)} cy={18} r={radius} fill={color(lane)} />
+          <text
+            x={x(lane)}
+            y={18}
+            textAnchor="middle"
+            dominantBaseline="central"
+            fill="var(--on-lane)"
+            fontSize={8.5}
+            fontWeight={600}
+          >
+            {initials(commit.author)}
+          </text>
+        </>
+      )}
+    </g>
+  );
+}
+
+function WorktreeDescription({ row }: { row: WorktreeRow }) {
+  const summary =
+    row.changes.kind === "error"
+      ? "Could not read the changes"
+      : changeSummary(row.changes.status.entries);
+  return (
+    <button
+      className="commit-description"
+      tabIndex={-1}
+      aria-label={`Uncommitted changes in ${row.worktree.name}, ${summary}`}
+    >
+      <span className="commit-subject worktree-subject">
+        Uncommitted changes
+      </span>
+      <span className="worktree-summary" title={summary}>
+        {summary}
+      </span>
+    </button>
   );
 }
 
@@ -352,6 +409,7 @@ type Props = {
   snapshot: RepositorySnapshot;
   visibleCommits: readonly Commit[];
   visibleOids: ReadonlySet<Oid>;
+  rows: readonly HistoryRow[];
   rule: VisibilityRule;
   selection: Selection | null;
   revealSeq: number;
@@ -374,6 +432,7 @@ export function History({
   snapshot,
   visibleCommits: commits,
   visibleOids: known,
+  rows,
   rule,
   selection,
   revealSeq,
@@ -389,17 +448,18 @@ export function History({
   onToggleColumn,
 }: Props) {
   const selectedOid = selection?.kind === "commit" ? selection.oid : null;
+  const selectedId = selectedRowId(selection);
   const graph = useMemo(
     () =>
       buildGraph(
-        commits,
+        rows,
         commits === snapshot.commits
           ? snapshot.squashes
           : snapshot.squashes.filter(
               (squash) => known.has(squash.commit) && known.has(squash.tip),
             ),
       ),
-    [commits, known, snapshot.commits, snapshot.squashes],
+    [rows, commits, known, snapshot.commits, snapshot.squashes],
   );
   const labels = useMemo(
     () =>
@@ -426,8 +486,8 @@ export function History({
     () =>
       hovered === null || searching
         ? null
-        : highlightBranch(commits, graph.rows, hovered, trunk),
-    [commits, graph.rows, hovered, trunk, searching],
+        : highlightBranch(rows, graph.rows, hovered, trunk),
+    [rows, graph.rows, hovered, trunk, searching],
   );
   const hover = (oid: Oid) => {
     window.clearTimeout(hoverTimer.current);
@@ -443,12 +503,12 @@ export function History({
   useEffect(() => () => window.clearTimeout(hoverTimer.current), []);
   // A refresh can move or drop the hovered tip without unmounting its badge
   // under a still pointer, so no mouseleave arrives to clear it.
-  useLayoutEffect(unhover, [snapshot, commits]);
-  const commitsRef = useRef(commits);
+  useLayoutEffect(unhover, [snapshot, rows]);
+  const rowsRef = useRef(rows);
   const rootRef = useRef(snapshot.root);
   const revealed = useRef<{
     root: RepositoryRoot;
-    oid: Oid | null;
+    id: RowId | null;
     seq: number;
   } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -507,26 +567,26 @@ export function History({
   }, [onScroll]);
 
   useLayoutEffect(() => {
-    commitsRef.current = commits;
+    rowsRef.current = rows;
     rootRef.current = snapshot.root;
   });
 
   function rowShown(index: number): boolean {
     const scroller = scrollRef.current;
     if (!scroller) return false;
-    const rows = scroller.clientHeight - (headRef.current?.offsetHeight ?? 0);
+    const height = scroller.clientHeight - (headRef.current?.offsetHeight ?? 0);
     const rowTop = index * ROW_HEIGHT;
     return (
       rowTop + ROW_HEIGHT > scroller.scrollTop &&
-      rowTop < scroller.scrollTop + rows
+      rowTop < scroller.scrollTop + height
     );
   }
 
   function revealCentered(index: number) {
     const scroller = scrollRef.current;
     if (index < 0 || !scroller || rowShown(index)) return;
-    const rows = scroller.clientHeight - (headRef.current?.offsetHeight ?? 0);
-    scroller.scrollTop = index * ROW_HEIGHT + ROW_HEIGHT / 2 - rows / 2;
+    const height = scroller.clientHeight - (headRef.current?.offsetHeight ?? 0);
+    scroller.scrollTop = index * ROW_HEIGHT + ROW_HEIGHT / 2 - height / 2;
     setViewport({ top: scroller.scrollTop, height: scroller.clientHeight });
   }
 
@@ -536,7 +596,7 @@ export function History({
     const last = revealed.current;
     revealed.current = {
       root: snapshot.root,
-      oid: selectedOid,
+      id: selectedId,
       seq: revealSeq,
     };
     // A repository reopens where it was left instead of jumping to its
@@ -547,22 +607,20 @@ export function History({
       return;
     }
     if (
-      selectedOid === null ||
-      (last.oid === selectedOid && last.seq === revealSeq)
+      selectedId === null ||
+      (last.id === selectedId && last.seq === revealSeq)
     )
       return;
-    revealCentered(
-      commitsRef.current.findIndex((commit) => commit.oid === selectedOid),
-    );
-  }, [snapshot.root, scrollTopOf, selectedOid, revealSeq, hidden]);
+    revealCentered(rowsRef.current.findIndex((row) => row.id === selectedId));
+  }, [snapshot.root, scrollTopOf, selectedId, revealSeq, hidden]);
 
   const ruleShown = useRef({ root: snapshot.root, rule });
   useLayoutEffect(() => {
     const last = ruleShown.current;
     ruleShown.current = { root: snapshot.root, rule };
     if (last.root === snapshot.root && last.rule !== rule)
-      revealCentered(commits.findIndex((commit) => commit.oid === selectedOid));
-  }, [snapshot.root, rule, commits, selectedOid]);
+      revealCentered(rows.findIndex((row) => row.id === selectedId));
+  }, [snapshot.root, rule, rows, selectedId]);
 
   useLayoutEffect(
     function refocusWhenDiffCloses() {
@@ -578,8 +636,8 @@ export function History({
     trail.current = null;
   }, [snapshot.root]);
   useEffect(() => {
-    if (trail.current?.end !== selectedOid) trail.current = null;
-  }, [selectedOid]);
+    if (trail.current?.end !== selectedId) trail.current = null;
+  }, [selectedId]);
 
   useImperativeHandle(ref, () => ({
     focus() {
@@ -590,9 +648,7 @@ export function History({
       const atBottom =
         scroller !== null &&
         scroller.scrollTop >= scroller.scrollHeight - scroller.clientHeight - 1;
-      const selectedRow = commits.findIndex(
-        (commit) => commit.oid === selectedOid,
-      );
+      const selectedRow = rows.findIndex((row) => row.id === selectedId);
       const selectedShown = selectedRow >= 0 && rowShown(selectedRow);
       flushSync(() => {
         closeColumnMenu();
@@ -622,7 +678,7 @@ export function History({
   function step(by: 1 | -1) {
     const oid = stepMatch(snapshot.commits, matches, selectedOid, by);
     if (oid === null) return;
-    revealCentered(commits.findIndex((commit) => commit.oid === oid));
+    revealCentered(rows.findIndex((row) => row.id === oid));
     onSelect({ kind: "commit", oid });
   }
 
@@ -650,38 +706,41 @@ export function History({
     );
     const next =
       landing === null
-        ? navigate(commits, graph.rows, selectedOid, action, trail.current)
-        : { oid: landing, trail: null };
+        ? navigate(rows, graph.rows, selectedId, action, trail.current)
+        : { id: landing, trail: null };
     trail.current = next.trail;
     const scroller = scrollRef.current;
-    if (next.oid === null || !scroller) return;
+    const index = rows.findIndex((row) => row.id === next.id);
+    const row = rows[index];
+    if (row === undefined || !scroller) return;
     const header = headRef.current?.offsetHeight ?? 0;
     scroller.scrollTop = revealRow(
-      commits.findIndex((commit) => commit.oid === next.oid),
+      index,
       ROW_HEIGHT,
       scroller.scrollTop,
       scroller.clientHeight - header,
     );
     setViewport({ top: scroller.scrollTop, height: scroller.clientHeight });
-    onSelect({ kind: "commit", oid: next.oid });
+    onSelect(rowSelection(row));
   }
 
   const first = Math.min(
-    commits.length,
+    rows.length,
     Math.max(0, Math.floor(viewport.top / ROW_HEIGHT) - OVERSCAN),
   );
   const last = Math.min(
-    commits.length,
+    rows.length,
     Math.ceil((viewport.top + viewport.height) / ROW_HEIGHT) + OVERSCAN,
   );
-  const visible = useMemo(
-    () => commits.slice(first, last),
-    [commits, first, last],
+  const visible = useMemo(() => rows.slice(first, last), [rows, first, last]);
+  const visibleCommits = useMemo(
+    () =>
+      visibleColumns.has("changes")
+        ? visible.flatMap((row) => (row.kind === "commit" ? [row.commit] : []))
+        : NO_COMMITS,
+    [visible, visibleColumns],
   );
-  const lineStats = useLineStats(
-    snapshot.root,
-    visibleColumns.has("changes") ? visible : NO_COMMITS,
-  );
+  const lineStats = useLineStats(snapshot.root, visibleCommits);
   const graphWidth = Math.max(48, graph.lanes * 24 + 10);
   const layout = columnLayout(graphWidth, visibleColumns, shaLength);
   function revealColumn(id: ColumnId | null) {
@@ -699,8 +758,8 @@ export function History({
   }
 
   const active =
-    selectedOid !== null && visible.some((commit) => commit.oid === selectedOid)
-      ? rowId(selectedOid)
+    selectedId !== null && visible.some((row) => row.id === selectedId)
+      ? rowId(selectedId)
       : undefined;
 
   return (
@@ -729,7 +788,7 @@ export function History({
           role="grid"
           tabIndex={0}
           aria-label="Commits"
-          aria-rowcount={commits.length + 1}
+          aria-rowcount={rows.length + 1}
           aria-activedescendant={active}
           onKeyDown={(event) => {
             const action = historyAction(event.nativeEvent);
@@ -775,31 +834,82 @@ export function History({
             {first > 0 && (
               <tr aria-hidden="true" style={{ height: first * ROW_HEIGHT }} />
             )}
-            {visible.map((commit, offset) => {
-              const row = graph.rows.get(commit.oid);
-              const [label, ...more] = labels.get(commit.oid) ?? [];
-              const selected = selectedOid === commit.oid;
+            {visible.map((entry, offset) => {
+              const row = graph.rows.get(entry.id);
+              const selected = selectedId === entry.id;
               const lit = searching
-                ? matches.has(commit.oid)
-                : highlight?.commits.has(commit.oid);
+                ? entry.kind === "commit" && matches.has(entry.id)
+                : highlight?.commits.has(entry.id);
+              const rowProps = {
+                id: rowId(entry.id),
+                role: "row",
+                className:
+                  [
+                    entry.kind === "worktree" && "worktree-row",
+                    selected && "selected",
+                    lit && "lit",
+                  ]
+                    .filter(Boolean)
+                    .join(" ") || undefined,
+                style: { gridTemplateColumns: layout.template },
+                "aria-rowindex": first + offset + 2,
+                "aria-selected": selected,
+                onClick: () => {
+                  onSelect(rowSelection(entry));
+                  tableRef.current?.focus({ preventScroll: true });
+                },
+              };
+              const edges = searching
+                ? NO_EDGES
+                : highlight?.rows.get(entry.id);
+              if (entry.kind === "worktree")
+                return (
+                  <tr key={entry.id} {...rowProps}>
+                    <td role="gridcell" className="ref-cell">
+                      <span className="ref-badges">
+                        <span
+                          className="ref-badge worktree"
+                          style={{ background: color(row?.lane ?? 0) }}
+                          title={entry.worktree.root}
+                        >
+                          <FolderGit2 size={11} />
+                          <span className="ref-name">
+                            {entry.worktree.name}
+                          </span>
+                        </span>
+                      </span>
+                    </td>
+                    <td role="gridcell">
+                      {row && (
+                        <GraphCell
+                          row={row}
+                          width={graphWidth}
+                          known={known}
+                          lit={edges}
+                          parentDash={WORKTREE_DASH}
+                        >
+                          <WorktreeNode lane={row.lane} selected={selected} />
+                        </GraphCell>
+                      )}
+                    </td>
+                    <td role="gridcell">
+                      <WorktreeDescription row={entry} />
+                    </td>
+                    {layout.columns.map((column) => (
+                      <td
+                        key={column.id}
+                        role="gridcell"
+                        className={
+                          column.id === "changes" ? "changes-cell" : "text-cell"
+                        }
+                      />
+                    ))}
+                  </tr>
+                );
+              const commit = entry.commit;
+              const [label, ...more] = labels.get(commit.oid) ?? [];
               return (
-                <tr
-                  key={commit.oid}
-                  id={rowId(commit.oid)}
-                  role="row"
-                  className={
-                    [selected && "selected", lit && "lit"]
-                      .filter(Boolean)
-                      .join(" ") || undefined
-                  }
-                  style={{ gridTemplateColumns: layout.template }}
-                  aria-rowindex={first + offset + 2}
-                  aria-selected={selected}
-                  onClick={() => {
-                    onSelect({ kind: "commit", oid: commit.oid });
-                    tableRef.current?.focus({ preventScroll: true });
-                  }}
-                >
+                <tr key={commit.oid} {...rowProps}>
                   <td role="gridcell" className="ref-cell">
                     {label && (
                       <span
@@ -818,14 +928,16 @@ export function History({
                     {row && (
                       <GraphCell
                         row={row}
-                        commit={commit}
-                        selected={selected}
                         width={graphWidth}
                         known={known}
-                        lit={
-                          searching ? NO_EDGES : highlight?.rows.get(commit.oid)
-                        }
-                      />
+                        lit={edges}
+                      >
+                        <CommitNode
+                          commit={commit}
+                          lane={row.lane}
+                          selected={selected}
+                        />
+                      </GraphCell>
                     )}
                   </td>
                   <td role="gridcell">
@@ -851,10 +963,10 @@ export function History({
                 </tr>
               );
             })}
-            {last < commits.length && (
+            {last < rows.length && (
               <tr
                 aria-hidden="true"
-                style={{ height: (commits.length - last) * ROW_HEIGHT }}
+                style={{ height: (rows.length - last) * ROW_HEIGHT }}
               />
             )}
           </tbody>
@@ -904,8 +1016,9 @@ export function History({
   );
 }
 
-function rowId(oid: Oid): string {
-  return `history-row-${oid}`;
+/** Worktree roots can hold spaces, which an `aria-activedescendant` ID cannot. */
+function rowId(id: RowId): string {
+  return `history-row-${encodeURIComponent(id)}`;
 }
 
 /** Holds the history pane while a repository opens for the first time. */
