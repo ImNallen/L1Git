@@ -7,7 +7,7 @@ const BODY_LIMIT: u64 = 64 * 1024;
 
 fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     #[cfg(unix)]
-    stop_git_on_exit_signals();
+    exit_signals::stop_git_on_exit()?;
     let port: u16 = std::env::var("L1GIT_BRIDGE_PORT")
         .unwrap_or_else(|_| "9417".into())
         .parse()?;
@@ -33,28 +33,66 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 }
 
 /// Git commands run in their own process groups, so Ctrl-C in a terminal does
-/// not reach them. Blocking the signals here, before any other thread starts,
-/// leaves them to one thread. Child processes start with no signals blocked.
+/// not reach them. The handler only writes the signal to a pipe, and a thread
+/// stops Git and exits. No signal is blocked, so children start with none
+/// blocked, and exec resets the handler in them.
 #[cfg(unix)]
-fn stop_git_on_exit_signals() {
-    // SAFETY: `sigset_t` is plain data that the calls below initialize.
-    let mut signals: libc::sigset_t = unsafe { std::mem::zeroed() };
-    // SAFETY: each call gets a valid, writable `sigset_t`, and the old mask is
-    // not requested.
-    unsafe {
-        libc::sigemptyset(&mut signals);
-        for signal in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP] {
-            libc::sigaddset(&mut signals, signal);
+mod exit_signals {
+    use std::{
+        fs::File,
+        io::{self, Read},
+        os::fd::FromRawFd,
+        sync::atomic::{AtomicI32, Ordering},
+        thread,
+    };
+
+    static WRITE_END: AtomicI32 = AtomicI32::new(-1);
+
+    extern "C" fn record(signal: libc::c_int) {
+        let byte = signal as u8;
+        // SAFETY: write(2) is async-signal-safe, and `byte` outlives the call.
+        unsafe {
+            libc::write(
+                WRITE_END.load(Ordering::Relaxed),
+                (&raw const byte).cast(),
+                1,
+            );
         }
-        libc::pthread_sigmask(libc::SIG_BLOCK, &signals, std::ptr::null_mut());
     }
-    thread::spawn(move || {
-        let mut signal = 0;
-        // SAFETY: both pointers are valid for the whole call.
-        unsafe { libc::sigwait(&signals, &mut signal) };
-        l1_git_core::stop_all_git();
-        std::process::exit(128 + signal);
-    });
+
+    pub(super) fn stop_git_on_exit() -> io::Result<()> {
+        let mut ends = [0; 2];
+        // SAFETY: `ends` has room for the two descriptors pipe(2) writes.
+        if unsafe { libc::pipe(ends.as_mut_ptr()) } != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        for end in ends {
+            // SAFETY: `end` is a descriptor pipe(2) just returned.
+            unsafe { libc::fcntl(end, libc::F_SETFD, libc::FD_CLOEXEC) };
+        }
+        WRITE_END.store(ends[1], Ordering::Relaxed);
+        // SAFETY: pipe(2) returned this descriptor, and nothing else owns it.
+        let mut read_end = unsafe { File::from_raw_fd(ends[0]) };
+        thread::spawn(move || {
+            let mut signal = [0];
+            if read_end.read_exact(&mut signal).is_ok() {
+                l1_git_core::stop_all_git();
+                std::process::exit(128 + i32::from(signal[0]));
+            }
+        });
+        for signal in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP] {
+            // SAFETY: `sigaction` is plain data, filled in below.
+            let mut action: libc::sigaction = unsafe { std::mem::zeroed() };
+            action.sa_sigaction = record as extern "C" fn(libc::c_int) as libc::sighandler_t;
+            action.sa_flags = libc::SA_RESTART;
+            // SAFETY: `action` is valid for the call, and `record` only calls
+            // write(2).
+            if unsafe { libc::sigaction(signal, &action, std::ptr::null_mut()) } != 0 {
+                return Err(io::Error::last_os_error());
+            }
+        }
+        Ok(())
+    }
 }
 
 fn handle(mut request: Request, origins: &[String], coordinator: &Coordinator) {

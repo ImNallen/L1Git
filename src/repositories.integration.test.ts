@@ -964,10 +964,11 @@ describe("real Rust read deadlines", () => {
     if (!slow || !other) throw new Error("The fixture needs two commits");
     const real = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
     const bin = join(fixture.root, "slow-git-bin");
+    const masks = join(fixture.root, "slow-git-masks");
     mkdirSync(bin);
     writeFileSync(
       join(bin, "git"),
-      `#!/bin/sh\nfor arg in "$@"; do [ "$arg" = ${slow.oid} ] && exec sleep 30; done\nexec '${real}' "$@"\n`,
+      `#!/bin/sh\nfor arg in "$@"; do [ "$arg" = ${slow.oid} ] && { perl -MPOSIX -e 'my $s = POSIX::SigSet->new; sigprocmask(SIG_BLOCK, POSIX::SigSet->new, $s); print join(",", grep { $s->ismember($_) } 1, 2, 15), "\\n"' >> '${masks}'; exec sleep 30; }; done\nexec '${real}' "$@"\n`,
     );
     chmodSync(join(bin, "git"), 0o755);
     const slowBridge = await startBridge({
@@ -998,8 +999,9 @@ describe("real Rust read deadlines", () => {
         message:
           "Reading this commit took longer than 1 s, so L1 Git stopped Git. Retry. If it happens again, check for a slow disk or a Git filter that does not finish.",
       });
+      expect(readFileSync(masks, "utf8")).toBe("\n");
       expect(elapsed).toBeGreaterThanOrEqual(1000);
-      expect(elapsed).toBeLessThan(3500);
+      expect(elapsed).toBeLessThan(2000);
       const detail = answer("commitDetail", detailSchema).parse(
         await read(other.oid),
       ).data;
@@ -1025,18 +1027,6 @@ describe("real Rust read deadlines", () => {
       `#!/bin/sh\nfor arg in "$@"; do [ "$arg" = ${slow.oid} ] && { echo $$ >> '${pids}'; exec sleep 60; }; done\nexec '${real}' "$@"\n`,
     );
     chmodSync(join(bin, "git"), 0o755);
-    const hungBridge = await startBridge({
-      PATH: `${bin}:${process.env.PATH ?? ""}`,
-    });
-    void fetch(`${hungBridge.endpoint}/api/run`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Origin: origin },
-      body: JSON.stringify({
-        op: "commitDetail",
-        path: fixture.repository,
-        oid: slow.oid,
-      }),
-    }).catch(() => undefined);
     const alive = (pid: number) => {
       try {
         process.kill(pid, 0);
@@ -1045,21 +1035,52 @@ describe("real Rust read deadlines", () => {
         return false;
       }
     };
+    const hungBridge = await startBridge({
+      PATH: `${bin}:${process.env.PATH ?? ""}`,
+    });
     let pid = Number.NaN;
-    for (let attempt = 0; attempt < 100 && Number.isNaN(pid); attempt++) {
-      await setTimeout(50);
-      try {
-        pid = Number.parseInt(readFileSync(pids, "utf8"), 10);
-      } catch {
-        pid = Number.NaN;
+    try {
+      void fetch(`${hungBridge.endpoint}/api/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Origin: origin },
+        body: JSON.stringify({
+          op: "commitDetail",
+          path: fixture.repository,
+          oid: slow.oid,
+        }),
+      }).catch(() => undefined);
+      for (let attempt = 0; attempt < 100 && Number.isNaN(pid); attempt++) {
+        await setTimeout(50);
+        try {
+          pid = Number.parseInt(readFileSync(pids, "utf8"), 10);
+        } catch {
+          pid = Number.NaN;
+        }
       }
+      expect(pid).toBeGreaterThan(1);
+      expect(alive(pid)).toBe(true);
+      const exited = once(hungBridge.bridge, "exit");
+      const interrupted = performance.now();
+      hungBridge.bridge.kill("SIGINT");
+      expect(await exited).toEqual([130, null]);
+      expect(performance.now() - interrupted).toBeLessThan(1000);
+      expect(alive(pid)).toBe(false);
+    } finally {
+      if (
+        hungBridge.bridge.exitCode === null &&
+        hungBridge.bridge.signalCode === null
+      ) {
+        hungBridge.bridge.kill("SIGKILL");
+        await once(hungBridge.bridge, "exit");
+      }
+      const ownSleep =
+        Number.isInteger(pid) &&
+        pid > 1 &&
+        alive(pid) &&
+        execFileSync("ps", ["-o", "command=", "-p", String(pid)], {
+          encoding: "utf8",
+        }).trim() === "sleep 60";
+      if (ownSleep) process.kill(pid, "SIGKILL");
     }
-    expect(alive(pid)).toBe(true);
-    const exited = once(hungBridge.bridge, "exit");
-    hungBridge.bridge.kill("SIGINT");
-    expect(await exited).toEqual([130, null]);
-    for (let attempt = 0; attempt < 20 && alive(pid); attempt++)
-      await setTimeout(50);
-    expect(alive(pid)).toBe(false);
   }, 20_000);
 });

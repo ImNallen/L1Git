@@ -1,6 +1,6 @@
 #![cfg(unix)]
 
-use l1_git_core::{ErrorKind, Side, stop_all_git, worktree_patch};
+use l1_git_core::{ErrorKind, Side, stop_all_git, worktree_patch, worktree_status};
 use std::{
     fs,
     path::Path,
@@ -64,8 +64,27 @@ fn stop_all_git_stops_a_hung_read_and_every_process_it_started() {
         thread::sleep(Duration::from_millis(20));
     }
 
+    let mut own_group = Command::new("sleep").arg("30").spawn().unwrap();
+    let mut other_group = Command::new("sleep");
+    other_group.arg("30");
+    std::os::unix::process::CommandExt::process_group(&mut other_group, 0);
+    let mut other_group = other_group.spawn().unwrap();
+
     let stopping = Instant::now();
     stop_all_git();
+    let untouched = [
+        own_group.try_wait().unwrap(),
+        other_group.try_wait().unwrap(),
+    ];
+    for child in [&mut own_group, &mut other_group] {
+        child.kill().unwrap();
+        child.wait().unwrap();
+    }
+    assert_eq!(
+        untouched,
+        [None, None],
+        "stop_all_git signalled a process it did not start"
+    );
     let error = read.join().unwrap().unwrap_err();
     assert!(matches!(error.kind, ErrorKind::GitFailed), "{error:?}");
     assert!(
@@ -79,4 +98,10 @@ fn stop_all_git_stops_a_hung_read_and_every_process_it_started() {
         thread::sleep(Duration::from_millis(20));
     }
     assert!(!alive(&pid), "the filter {pid} is still running");
+
+    let refused = worktree_status(root.to_str().unwrap()).unwrap_err();
+    assert_eq!(
+        refused.message,
+        "L1 Git is quitting, so it did not run Git."
+    );
 }

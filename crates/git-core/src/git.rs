@@ -48,6 +48,13 @@ fn command(path: &Path, args: &[&str]) -> Command {
     command
 }
 
+fn quitting() -> RepositoryError {
+    RepositoryError::new(
+        ErrorKind::GitFailed,
+        "L1 Git is quitting, so it did not run Git.",
+    )
+}
+
 fn spawn_error(error: io::Error) -> RepositoryError {
     if error.kind() == io::ErrorKind::NotFound {
         RepositoryError::new(
@@ -121,7 +128,8 @@ impl Deadline {
 
     /// The same read with its full budget again. Branch status renews only
     /// after a fetch, probe, ref move, or merge, which have their own
-    /// deadlines, or after waiting for another fetch of the repository.
+    /// deadlines, or after waiting for another fetch or fast-forward of the
+    /// repository.
     pub(crate) fn renewed(self) -> Self {
         Self::start(self.read, self.budget)
     }
@@ -512,7 +520,14 @@ pub(crate) fn mutate(
         RepositoryError::new(ErrorKind::GitFailed, format!("Could not run Git: {error}"))
     };
     loop {
-        if child.exited().map_err(failed)? {
+        let exited = match child.exited() {
+            Ok(exited) => exited,
+            Err(error) => {
+                child.stop();
+                return Err(failed(error));
+            }
+        };
+        if exited {
             let status = child.wait().map_err(failed)?;
             let stderr = stderr.after_exit();
             return Ok(if status.success() {
@@ -546,12 +561,22 @@ fn running() -> MutexGuard<'static, Vec<u32>> {
 struct Group(Child);
 
 impl Group {
+    /// Refuses to start once `stop_all_git` has begun, and stops a command
+    /// that started while it began.
     fn spawn(mut command: Command) -> Result<Self, RepositoryError> {
+        if STOPPING.load(Ordering::SeqCst) {
+            return Err(quitting());
+        }
         #[cfg(unix)]
         std::os::unix::process::CommandExt::process_group(&mut command, 0);
         let child = command.spawn().map_err(spawn_error)?;
         running().push(child.id());
-        Ok(Self(child))
+        let group = Self(child);
+        if STOPPING.load(Ordering::SeqCst) {
+            group.stop();
+            return Err(quitting());
+        }
+        Ok(group)
     }
 
     /// Leaves the command unreaped, so its pid keeps naming its group.
@@ -654,10 +679,11 @@ enum Signal {
 }
 
 /// Callers hold a pid that is unreaped or listed in `RUNNING`, so it cannot
-/// name another process group.
+/// name another process group. A group below 2 would make kill(2) signal the
+/// caller's own group or every process.
 #[cfg(unix)]
 fn signal_group(pid: u32, signal: Signal) {
-    let Ok(group) = i32::try_from(pid) else {
+    let Ok(group @ 2..) = i32::try_from(pid) else {
         return;
     };
     let signal = match signal {
