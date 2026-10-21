@@ -89,8 +89,8 @@ impl LocalRead {
         Duration::from_secs(match self {
             Self::Snapshot => 120,
             Self::Refs | Self::LineStats | Self::WorktreeStatus | Self::WorktreePatch => 30,
-            Self::CommitDetail | Self::FilePatch | Self::FileHistory | Self::Blame => 20,
-            Self::BranchStatus => 60,
+            Self::CommitDetail | Self::FilePatch => 20,
+            Self::FileHistory | Self::Blame | Self::BranchStatus => 60,
         })
     }
 

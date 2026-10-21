@@ -1,15 +1,25 @@
-import { useLayoutEffect, useMemo, useRef } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { ArrowLeft, FileX2, LoaderCircle, TriangleAlert } from "lucide-react";
-import { parsePatchFiles } from "@pierre/diffs";
-import { FileDiff, Virtualizer } from "@pierre/diffs/react";
-import { diffTheme } from "../themes/diffTheme";
 import type { Appearance } from "../themes/palette";
-import type { FilePatch, SubmoduleState } from "../domain/repository";
+import type { Oid, SubmoduleState } from "../domain/repository";
 import { clampMessage, conflictLabels } from "../domain/worktree";
 import type { ListSide } from "../domain/worktree";
 import type { FileDiffState } from "../useWorkspace";
+import { Diff } from "./FilePatchView";
+import type { DiffStyle } from "./FilePatchView";
+import { FileBlame, FileHistory } from "./FileRevisions";
+import type { Revision } from "./FileRevisions";
 
-export type DiffStyle = "unified" | "split";
+export type { DiffStyle };
+
+type View = DiffStyle | "history" | "blame";
+
+const VIEWS: { view: View; label: string }[] = [
+  { view: "unified", label: "Unified" },
+  { view: "split", label: "Split" },
+  { view: "history", label: "History" },
+  { view: "blame", label: "Blame" },
+];
 
 type Props = {
   state: Exclude<FileDiffState, { kind: "closed" }>;
@@ -21,7 +31,20 @@ type Props = {
   onBack: () => void;
   onRetry: () => void;
   onRefresh: () => void;
+  selectable: (oid: Oid) => boolean;
+  onSelectCommit: (oid: Oid) => void;
 };
+
+/** History and blame read the file in the target commit, which a worktree does not have. */
+function revisionOf(state: Props["state"]): Revision | null {
+  if (state.side !== null || state.comparison.target.kind !== "commit")
+    return null;
+  return {
+    root: state.root,
+    oid: state.comparison.target.oid,
+    path: state.path,
+  };
+}
 
 export function FileDiffPane({
   state,
@@ -32,8 +55,13 @@ export function FileDiffPane({
   onBack,
   onRetry,
   onRefresh,
+  selectable,
+  onSelectCommit,
 }: Props) {
   const backRef = useRef<HTMLButtonElement>(null);
+  const [mode, setMode] = useState<"diff" | "history" | "blame">("diff");
+  const revision = revisionOf(state);
+  const view: View = revision === null || mode === "diff" ? diffStyle : mode;
   useLayoutEffect(function takeFocusFromHiddenHistory() {
     const focused = document.activeElement;
     if (
@@ -43,6 +71,14 @@ export function FileDiffPane({
     )
       backRef.current?.focus();
   }, []);
+  const choose = (next: View) => {
+    if (next === "history" || next === "blame") setMode(next);
+    else {
+      setMode("diff");
+      onDiffStyle(next);
+    }
+  };
+  const look = { diffStyle, theme, painted };
   return (
     <section className="file-diff" aria-label={`Changes to ${state.path}`}>
       <header className="file-diff-toolbar">
@@ -61,19 +97,39 @@ export function FileDiffPane({
         {state.side !== null && (
           <span className="file-diff-side">{sideLabels[state.side]}</span>
         )}
-        <div className="diff-style" role="group" aria-label="Diff layout">
-          {(["unified", "split"] as const).map((style) => (
-            <button
-              key={style}
-              aria-pressed={diffStyle === style}
-              onClick={() => onDiffStyle(style)}
-            >
-              {style === "unified" ? "Unified" : "Split"}
-            </button>
-          ))}
+        <div className="diff-style" role="group" aria-label="File view">
+          {VIEWS.map(({ view: each, label }) => {
+            const needsCommit =
+              revision === null && (each === "history" || each === "blame");
+            return (
+              <button
+                key={each}
+                aria-pressed={view === each}
+                disabled={needsCommit}
+                title={
+                  needsCommit
+                    ? "History and blame need a commit. Select a commit to read this file's history."
+                    : undefined
+                }
+                onClick={() => choose(each)}
+              >
+                {label}
+              </button>
+            );
+          })}
         </div>
       </header>
-      {state.kind === "loading" ? (
+      {revision !== null && view === "history" ? (
+        <FileHistory revision={revision} {...look} />
+      ) : revision !== null && view === "blame" ? (
+        <FileBlame
+          revision={revision}
+          theme={theme}
+          painted={painted}
+          selectable={selectable}
+          onSelectCommit={onSelectCommit}
+        />
+      ) : state.kind === "loading" ? (
         <div className="file-diff-empty" role="status">
           <LoaderCircle size={23} className="spin" />
           <p>Reading changes…</p>
@@ -119,12 +175,7 @@ export function FileDiffPane({
             </span>
           </div>
           {state.patch.diff ? (
-            <Diff
-              diff={state.patch.diff}
-              diffStyle={diffStyle}
-              theme={theme}
-              painted={painted}
-            />
+            <Diff diff={state.patch.diff} {...look} />
           ) : (
             <div className="file-diff-empty">
               <p>
@@ -135,12 +186,7 @@ export function FileDiffPane({
           )}
         </>
       ) : (
-        <Diff
-          diff={state.patch.diff}
-          diffStyle={diffStyle}
-          theme={theme}
-          painted={painted}
-        />
+        <Diff diff={state.patch.diff} {...look} />
       )}
     </section>
   );
@@ -159,95 +205,4 @@ function submoduleText(submodule: SubmoduleState): string {
     submodule.untracked && "it has untracked files",
   ].filter(Boolean);
   return `This is a submodule${parts.length > 0 ? `, and ${parts.join(", ")}` : ""}. L1 Git does not show the changes inside it.`;
-}
-
-function Diff({
-  diff,
-  diffStyle,
-  theme,
-  painted,
-}: {
-  diff: FilePatch;
-  diffStyle: DiffStyle;
-  theme: Appearance;
-  painted: boolean;
-}) {
-  if (diff.kind !== "text")
-    return (
-      <div className="file-diff-empty">
-        <FileX2 size={28} />
-        <p>
-          {diff.kind === "binary"
-            ? "Binary file. L1 Git does not display binary changes."
-            : `This change is ${(diff.bytes / 1024 / 1024).toFixed(1)} MiB, above the 1 MiB display limit.`}
-        </p>
-      </div>
-    );
-  return (
-    <>
-      {diff.lossy && (
-        <div className="notice error-notice" role="status">
-          <TriangleAlert size={14} />
-          <span>
-            This file is not valid UTF-8. Bytes that are not UTF-8 appear as �,
-            so some changed lines can look identical.
-          </span>
-        </div>
-      )}
-      <Patch
-        patch={diff.patch}
-        diffStyle={diffStyle}
-        theme={theme}
-        painted={painted}
-      />
-    </>
-  );
-}
-
-function Patch({
-  patch,
-  diffStyle,
-  theme,
-  painted,
-}: {
-  patch: string;
-  diffStyle: DiffStyle;
-  theme: Appearance;
-  painted: boolean;
-}) {
-  const files = useMemo(
-    () => parsePatchFiles(patch).flatMap((parsed) => parsed.files),
-    [patch],
-  );
-  const options = useMemo(
-    () =>
-      ({
-        theme: diffTheme(theme, painted),
-        themeType: theme,
-        diffStyle,
-        disableFileHeader: true,
-      }) as const,
-    [diffStyle, theme, painted],
-  );
-  if (files.every((file) => file.hunks.length === 0)) {
-    const moved = files.find(
-      (file) => file.prevName !== undefined && file.prevName !== file.name,
-    );
-    return (
-      <div className="file-diff-empty">
-        <p>
-          {moved
-            ? `${/^copy from /m.test(patch) ? "Copied" : "Renamed"} from ${moved.prevName}. The content did not change.`
-            : "No content changes. Only the file mode or an empty file changed."}
-        </p>
-      </div>
-    );
-  }
-  return (
-    <Virtualizer className="file-diff-scroll">
-      {files.map((file, index) => (
-        <FileDiff key={index} fileDiff={file} options={options} />
-      ))}
-    </Virtualizer>
-  );
 }

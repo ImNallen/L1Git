@@ -1,12 +1,24 @@
 use crate::{
     Blame, BlameRange, ErrorKind, FileRevision, RepositoryError,
-    git::{self, Deadline},
+    git::{self, Deadline, LocalRead},
     repository::{COMMIT_FORMAT, PATCH_LIMIT, non_utf8_path, parse_commits, root, verify_commit},
 };
 use std::collections::HashMap;
 
 const BLAME_LIMIT: usize = 16 * PATCH_LIMIT;
 const BINARY_PROBE: usize = 8000;
+
+pub fn file_history(
+    path: &str,
+    oid: &str,
+    file: &str,
+) -> Result<Vec<FileRevision>, RepositoryError> {
+    file_history_within(path, oid, file, Deadline::of(LocalRead::FileHistory))
+}
+
+pub fn blame(path: &str, oid: &str, file: &str) -> Result<Blame, RepositoryError> {
+    blame_within(path, oid, file, Deadline::of(LocalRead::Blame))
+}
 
 pub(crate) fn file_history_within(
     path: &str,
@@ -78,6 +90,9 @@ pub(crate) fn blame_within(
 ) -> Result<Blame, RepositoryError> {
     let root = root(path, deadline)?;
     verify_commit(&root, oid, deadline)?;
+    if file.is_empty() {
+        return Err(missing_file());
+    }
     if file.contains(char::REPLACEMENT_CHARACTER) {
         return Err(non_utf8_path());
     }

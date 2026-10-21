@@ -5,7 +5,9 @@ import { fastForwardReportSchema, overviewSchema } from "./domain/overview";
 import type { Comparison } from "./domain/comparison";
 import type { Advance, FetchMode } from "./domain/overview";
 import {
+  blameSchema,
   detailSchema,
+  fileHistorySchema,
   filePatchSchema,
   lineStatsSchema,
   refsSchema,
@@ -26,6 +28,8 @@ type RepositoryRequest =
   | { op: "commitDetail"; path: string; comparison: Comparison }
   | { op: "lineStats"; path: RepositoryRoot; oids: Oid[] }
   | { op: "filePatch"; path: string; comparison: Comparison; file: string }
+  | { op: "fileHistory"; path: RepositoryRoot; oid: Oid; file: string }
+  | { op: "blame"; path: RepositoryRoot; oid: Oid; file: string }
   | { op: "overview"; path: RepositoryRoot; mode: FetchMode }
   | { op: "fastForward"; path: RepositoryRoot; advances: Advance[] }
   | { op: "worktreeStatus"; path: RepositoryRoot }
@@ -37,6 +41,8 @@ const responseSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("commitDetail"), data: detailSchema }),
   z.object({ op: z.literal("lineStats"), data: lineStatsSchema }),
   z.object({ op: z.literal("filePatch"), data: filePatchSchema }),
+  z.object({ op: z.literal("fileHistory"), data: fileHistorySchema }),
+  z.object({ op: z.literal("blame"), data: blameSchema }),
   z.object({ op: z.literal("overview"), data: overviewSchema }),
   z.object({ op: z.literal("fastForward"), data: fastForwardReportSchema }),
   z.object({ op: z.literal("worktreeStatus"), data: worktreeStatusSchema }),
@@ -127,6 +133,18 @@ export async function filePatch(
   file: string,
 ) {
   return (await run({ op: "filePatch", path, comparison, file })).data;
+}
+
+export async function fileHistory(
+  path: RepositoryRoot,
+  oid: Oid,
+  file: string,
+) {
+  return (await run({ op: "fileHistory", path, oid, file })).data;
+}
+
+export async function blame(path: RepositoryRoot, oid: Oid, file: string) {
+  return (await run({ op: "blame", path, oid, file })).data;
 }
 
 export async function overview(path: RepositoryRoot, mode: FetchMode) {

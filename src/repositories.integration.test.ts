@@ -21,7 +21,9 @@ import {
 } from "./domain/overview";
 import type { RepositoryOverview } from "./domain/overview";
 import {
+  blameSchema,
   detailSchema,
+  fileHistorySchema,
   filePatchSchema,
   lineStatsSchema,
   refsSchema,
@@ -389,6 +391,84 @@ describe("real Rust transport contract", () => {
       expect(failure.parse(await patch(inspector.oid, file)).error.kind).toBe(
         "unchangedPath",
       );
+  });
+
+  it("reads a file's history and blame, and notices for binary and deleted files", async () => {
+    const { branches, commits } = snapshotEnvelope.parse(
+      await (await post({ op: "snapshot", path: fixture.repository })).json(),
+    ).data;
+    const inspector = commits.find(
+      (commit) =>
+        commit.oid ===
+        branches.find(
+          (branch) =>
+            branch.reference === "refs/remotes/origin/feat/remote-inspector",
+        )?.oid,
+    );
+    const added = commits.find(
+      (commit) =>
+        commit.subject === "feat(history): add bounded repository history",
+    );
+    if (!inspector || !added) throw new Error("Fixture commits are missing");
+    const read = async (op: "fileHistory" | "blame", file: string) =>
+      (
+        await post({ op, path: fixture.repository, oid: inspector.oid, file })
+      ).json();
+    expect(
+      answer("fileHistory", fileHistorySchema)
+        .parse(await read("fileHistory", "history.ts"))
+        .data.map(({ commit, path }) => [commit.oid, path]),
+    ).toEqual([
+      [inspector.oid, "history.ts"],
+      [added.oid, "history.ts"],
+    ]);
+    const blame = answer("blame", blameSchema).parse(
+      await read("blame", "history.ts"),
+    ).data;
+    if (blame.kind !== "text") throw new Error("Expected text blame");
+    expect(blame.contents).toBe(
+      [
+        "export const historyLimit = 200;",
+        'export const historyOrder = "first parent";',
+        "export const historyIncludesRemotes = true;",
+        "",
+      ].join("\n"),
+    );
+    expect(
+      blame.ranges.map(({ oid, start, lines, author, summary }) => [
+        oid,
+        start,
+        lines,
+        author,
+        summary,
+      ]),
+    ).toEqual([
+      [added.oid, 1, 1, "N Allen", added.subject],
+      [inspector.oid, 2, 1, "N Allen", inspector.subject],
+      [added.oid, 3, 1, "N Allen", added.subject],
+    ]);
+    expect(
+      answer("blame", blameSchema).parse(await read("blame", "assets/icon.png"))
+        .data,
+    ).toEqual({ kind: "binary" });
+    const failure = z.object({
+      ok: z.literal(false),
+      error: repositoryErrorSchema,
+    });
+    expect(failure.parse(await read("blame", "graph.ts")).error.kind).toBe(
+      "unsupportedPath",
+    );
+    expect(
+      (
+        await rejected({
+          op: "blame",
+          path: fixture.repository,
+          oid: inspector.oid,
+          file: "history.ts",
+          comparison: single(inspector.oid),
+        })
+      ).status,
+    ).toBe(400);
   });
 
   it("counts root, merge, and binary changes against the inspector's diff base", async () => {
@@ -796,7 +876,7 @@ describe("real Rust transport contract", () => {
     ).toEqual({
       status: 400,
       error:
-        "unknown variant `notAnOperation`, expected one of `snapshot`, `refs`, `commitDetail`, `lineStats`, `filePatch`, `overview`, `fastForward`, `worktreeStatus`, `worktreePatch` at line 1 column 22",
+        "unknown variant `notAnOperation`, expected one of `snapshot`, `refs`, `commitDetail`, `lineStats`, `filePatch`, `fileHistory`, `blame`, `overview`, `fastForward`, `worktreeStatus`, `worktreePatch` at line 1 column 22",
     });
     expect(
       await rejected({ op: "commitDetail", path: fixture.repository }),

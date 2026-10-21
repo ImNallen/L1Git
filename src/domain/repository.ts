@@ -116,6 +116,31 @@ export const filePatchSchema = z.discriminatedUnion("kind", [
     bytes: z.number().int().positive(),
   }),
 ]);
+export const fileHistorySchema = z.array(
+  z.strictObject({ commit: commitSchema, path: z.string() }),
+);
+export const blameRangeSchema = z.strictObject({
+  oid: oidSchema,
+  start: z.number().int().positive(),
+  lines: z.number().int().positive(),
+  author: z.string(),
+  email: z.string(),
+  timestamp: z.number().int(),
+  summary: z.string(),
+});
+export const blameSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("text"),
+    contents: z.string(),
+    lossy: z.boolean(),
+    ranges: z.array(blameRangeSchema),
+  }),
+  z.strictObject({ kind: z.literal("binary") }),
+  z.strictObject({
+    kind: z.literal("tooLarge"),
+    bytes: z.number().int().positive(),
+  }),
+]);
 export const lineStatsSchema = z.array(
   z.object({
     oid: oidSchema,
@@ -226,6 +251,9 @@ export type ChangeStatus = z.infer<typeof changeStatusSchema>;
 export type CommitDetail = z.infer<typeof detailSchema>;
 export type ChangedFile = CommitDetail["files"][number];
 export type FilePatch = z.infer<typeof filePatchSchema>;
+export type FileRevision = z.infer<typeof fileHistorySchema>[number];
+export type BlameRange = z.infer<typeof blameRangeSchema>;
+export type Blame = z.infer<typeof blameSchema>;
 export type LineStats = z.infer<typeof lineStatsSchema>[number];
 export type Sides = z.infer<typeof sidesSchema>;
 export type SubmoduleState = z.infer<typeof submoduleStateSchema>;
