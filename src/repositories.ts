@@ -16,89 +16,113 @@ import type { Oid, RepositoryRoot } from "./domain/repository";
 export const native = isTauri();
 export const macNative = native && navigator.userAgent.includes("Mac");
 
-async function call<T>(
-  command: string,
-  endpoint: string,
-  args: Record<string, unknown>,
-  schema: z.ZodType<T>,
-): Promise<T> {
-  if (native) return schema.parse(await invoke<unknown>(command, args));
+type RepositoryRequest =
+  | { op: "snapshot"; path: string }
+  | { op: "refs"; path: RepositoryRoot }
+  | { op: "commitDetail"; path: string; oid: Oid }
+  | { op: "lineStats"; path: RepositoryRoot; oids: Oid[] }
+  | { op: "filePatch"; path: string; oid: Oid; file: string }
+  | { op: "overview"; path: RepositoryRoot; mode: FetchMode }
+  | { op: "fastForward"; path: RepositoryRoot; advances: Advance[] };
+
+const responseSchema = z.discriminatedUnion("op", [
+  z.object({ op: z.literal("snapshot"), data: snapshotSchema }),
+  z.object({ op: z.literal("refs"), data: refsSchema }),
+  z.object({ op: z.literal("commitDetail"), data: detailSchema }),
+  z.object({ op: z.literal("lineStats"), data: lineStatsSchema }),
+  z.object({ op: z.literal("filePatch"), data: filePatchSchema }),
+  z.object({ op: z.literal("overview"), data: overviewSchema }),
+  z.object({ op: z.literal("fastForward"), data: fastForwardReportSchema }),
+]);
+const envelopeSchema = z.discriminatedUnion("ok", [
+  z.object({ ok: z.literal(true) }),
+  z.object({ ok: z.literal(false), error: repositoryErrorSchema }),
+]);
+const rejectionSchema = z.object({ error: z.string() });
+
+type RepositoryResponse = z.infer<typeof responseSchema>;
+type Answer<R extends RepositoryRequest> = Extract<
+  RepositoryResponse,
+  { op: R["op"] }
+>;
+
+async function send(request: RepositoryRequest): Promise<unknown> {
+  if (native) return invoke<unknown>("repository_run", { request });
   let response: Response;
   try {
-    response = await fetch(endpoint, {
+    response = await fetch("/api/run", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(args),
+      body: JSON.stringify(request),
     });
   } catch {
     throw new Error(
       "The development bridge is unavailable. Start pnpm dev and try again.",
     );
   }
+  if (response.status === 400) {
+    const rejection = rejectionSchema.safeParse(
+      await response.json().catch(() => null),
+    );
+    if (rejection.success)
+      throw new Error(
+        `The development bridge rejected the request. ${rejection.data.error}`,
+      );
+  }
   if (!response.ok)
     throw new Error(
       "The development bridge rejected the request. Check that pnpm dev is running on this port.",
     );
-  const envelope = z.discriminatedUnion("ok", [
-    z.object({ ok: z.literal(true), data: schema }),
-    z.object({ ok: z.literal(false), error: repositoryErrorSchema }),
-  ]);
-  const parsed = envelope.parse(await response.json());
-  if (!parsed.ok) throw parsed.error;
-  return parsed.data;
+  const body: unknown = await response.json();
+  const envelope = envelopeSchema.parse(body);
+  if (!envelope.ok) throw envelope.error;
+  return body;
 }
 
-export function snapshot(path: string) {
-  return call("repository_snapshot", "/api/snapshot", { path }, snapshotSchema);
+function answers<R extends RepositoryRequest>(
+  request: R,
+  response: RepositoryResponse,
+): response is Answer<R> {
+  return response.op === request.op;
 }
 
-export function refs(path: RepositoryRoot) {
-  return call("repository_refs", "/api/refs", { path }, refsSchema);
+async function run<R extends RepositoryRequest>(
+  request: R,
+): Promise<Answer<R>> {
+  const response = responseSchema.parse(await send(request));
+  if (!answers(request, response))
+    throw new Error(
+      `L1 Git's core answered ${response.op} to a ${request.op} request.`,
+    );
+  return response;
 }
 
-export function commitDetail(path: string, oid: Oid) {
-  return call(
-    "repository_commit_detail",
-    "/api/commit-detail",
-    { path, oid },
-    detailSchema,
-  );
+export async function snapshot(path: string) {
+  return (await run({ op: "snapshot", path })).data;
 }
 
-export function lineStats(path: RepositoryRoot, oids: Oid[]) {
-  return call(
-    "repository_line_stats",
-    "/api/line-stats",
-    { path, oids },
-    lineStatsSchema,
-  );
+export async function refs(path: RepositoryRoot) {
+  return (await run({ op: "refs", path })).data;
 }
 
-export function filePatch(path: string, oid: Oid, file: string) {
-  return call(
-    "repository_file_patch",
-    "/api/file-patch",
-    { path, oid, file },
-    filePatchSchema,
-  );
+export async function commitDetail(path: string, oid: Oid) {
+  return (await run({ op: "commitDetail", path, oid })).data;
 }
 
-export function overview(path: RepositoryRoot, mode: FetchMode) {
-  return call(
-    "repository_overview",
-    "/api/overview",
-    { path, mode },
-    overviewSchema,
-  );
+export async function lineStats(path: RepositoryRoot, oids: Oid[]) {
+  return (await run({ op: "lineStats", path, oids })).data;
 }
 
-export function fastForward(path: RepositoryRoot, advances: Advance[]) {
-  return call(
-    "repository_fast_forward",
-    "/api/fast-forward",
-    { path, advances },
-    fastForwardReportSchema,
-  );
+export async function filePatch(path: string, oid: Oid, file: string) {
+  return (await run({ op: "filePatch", path, oid, file })).data;
+}
+
+export async function overview(path: RepositoryRoot, mode: FetchMode) {
+  return (await run({ op: "overview", path, mode })).data;
+}
+
+export async function fastForward(path: RepositoryRoot, advances: Advance[]) {
+  return (await run({ op: "fastForward", path, advances })).data;
 }
 
 export async function chooseDirectory(): Promise<string | null> {

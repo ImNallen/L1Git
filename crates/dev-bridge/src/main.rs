@@ -1,54 +1,9 @@
-use l1_git_core::{
-    Advance, Coordinator, FetchMode, commit_detail, file_patch, line_stats, refs, snapshot,
-};
-use serde::Deserialize;
+use l1_git_core::{Coordinator, run};
 use serde_json::json;
 use std::{io::Read, sync::Arc, thread};
 use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
 
 const BODY_LIMIT: u64 = 64 * 1024;
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct SnapshotRequest {
-    path: String,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct DetailRequest {
-    path: String,
-    oid: String,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct LineStatsRequest {
-    path: String,
-    oids: Vec<String>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct FilePatchRequest {
-    path: String,
-    oid: String,
-    file: String,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct OverviewRequest {
-    path: String,
-    mode: FetchMode,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct FastForwardRequest {
-    path: String,
-    advances: Vec<Advance>,
-}
 
 fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let port: u16 = std::env::var("L1GIT_BRIDGE_PORT")
@@ -108,36 +63,20 @@ fn handle(mut request: Request, origins: &[String], coordinator: &Coordinator) {
         );
         return;
     }
-    let result = match request.url() {
-        "/api/snapshot" => serde_json::from_slice::<SnapshotRequest>(&bytes)
-            .map(|input| snapshot(&input.path).map(|data| json!(data))),
-        "/api/refs" => serde_json::from_slice::<SnapshotRequest>(&bytes)
-            .map(|input| refs(&input.path).map(|data| json!(data))),
-        "/api/commit-detail" => serde_json::from_slice::<DetailRequest>(&bytes)
-            .map(|input| commit_detail(&input.path, &input.oid).map(|data| json!(data))),
-        "/api/line-stats" => serde_json::from_slice::<LineStatsRequest>(&bytes)
-            .map(|input| line_stats(&input.path, &input.oids).map(|data| json!(data))),
-        "/api/file-patch" => serde_json::from_slice::<FilePatchRequest>(&bytes)
-            .map(|input| file_patch(&input.path, &input.oid, &input.file).map(|data| json!(data))),
-        "/api/overview" => serde_json::from_slice::<OverviewRequest>(&bytes).map(|input| {
-            coordinator
-                .overview(&input.path, input.mode)
-                .map(|data| json!(data))
-        }),
-        "/api/fast-forward" => serde_json::from_slice::<FastForwardRequest>(&bytes).map(|input| {
-            coordinator
-                .fast_forward(&input.path, &input.advances)
-                .map(|data| json!(data))
-        }),
-        _ => {
-            respond(request, 404, json!({"error": "Unknown operation."}));
-            return;
+    if request.url() != "/api/run" {
+        respond(request, 404, json!({"error": "Unknown route."}));
+        return;
+    }
+    match serde_json::from_slice::<l1_git_core::Request>(&bytes)
+        .map(|input| run(coordinator, input))
+    {
+        Ok(Ok(response)) => {
+            let mut body = json!(response);
+            body["ok"] = json!(true);
+            respond(request, 200, body)
         }
-    };
-    match result {
-        Ok(Ok(data)) => respond(request, 200, json!({"ok": true, "data": data})),
         Ok(Err(error)) => respond(request, 200, json!({"ok": false, "error": error})),
-        Err(_) => respond(request, 400, json!({"error": "Invalid request."})),
+        Err(error) => respond(request, 400, json!({"error": error.to_string()})),
     }
 }
 

@@ -39,29 +39,26 @@ let fixture: z.infer<typeof fixtureSchema>;
 let bridge: ChildProcess;
 let endpoint: string;
 const origin = "http://127.0.0.1:1422";
-const snapshotEnvelope = z.object({
-  ok: z.literal(true),
-  data: snapshotSchema,
-});
-const refsEnvelope = z.object({
-  ok: z.literal(true),
-  data: refsSchema.strict(),
-});
-const overviewEnvelope = z.object({
-  ok: z.literal(true),
-  data: overviewSchema,
-});
-const fastForwardEnvelope = z.object({
-  ok: z.literal(true),
-  data: fastForwardReportSchema,
-});
+const answer = <T extends z.ZodType>(op: string, data: T) =>
+  z.object({ ok: z.literal(true), op: z.literal(op), data });
+const rejected = async (body: unknown) => {
+  const response = await post(body);
+  return {
+    status: response.status,
+    error: z.object({ error: z.string() }).parse(await response.json()).error,
+  };
+};
+const snapshotEnvelope = answer("snapshot", snapshotSchema);
+const refsEnvelope = answer("refs", refsSchema.strict());
+const overviewEnvelope = answer("overview", overviewSchema);
+const fastForwardEnvelope = answer("fastForward", fastForwardReportSchema);
 
 async function post(
-  operation: string,
   body: unknown,
   requestOrigin: string | null = origin,
+  route = "/api/run",
 ) {
-  return fetch(`${endpoint}/api/${operation}`, {
+  return fetch(`${endpoint}${route}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -100,7 +97,7 @@ beforeAll(async () => {
   });
   for (let attempt = 0; attempt < 50; attempt++) {
     try {
-      await post("snapshot", { path: fixture.unborn });
+      await post({ op: "snapshot", path: fixture.unborn });
       return;
     } catch {
       await setTimeout(50);
@@ -119,7 +116,7 @@ afterAll(async () => {
 
 describe("real Rust transport contract", () => {
   it("parses a real repository with every branch's history and reads first-parent merge details", async () => {
-    const response = await post("snapshot", { path: fixture.repository });
+    const response = await post({ op: "snapshot", path: fixture.repository });
     const snapshot = snapshotEnvelope.parse(await response.json()).data;
     expect(snapshot.name).toBe("l1-demo");
     expect(snapshot.head.kind).toBe("attached");
@@ -171,16 +168,15 @@ describe("real Rust transport contract", () => {
       "feat(inspector): show commit message and changed paths",
     );
     if (!inspector) throw new Error("Fixture remote commit is missing");
-    const inspectorDetail = z
-      .object({ ok: z.literal(true), data: detailSchema })
-      .parse(
-        await (
-          await post("commit-detail", {
-            path: fixture.repository,
-            oid: inspector.oid,
-          })
-        ).json(),
-      ).data;
+    const inspectorDetail = answer("commitDetail", detailSchema).parse(
+      await (
+        await post({
+          op: "commitDetail",
+          path: fixture.repository,
+          oid: inspector.oid,
+        })
+      ).json(),
+    ).data;
     expect(inspectorDetail.files).toEqual([
       { path: "assets/icon.png", status: "A" },
       { path: "graph.ts", status: "D" },
@@ -194,9 +190,10 @@ describe("real Rust transport contract", () => {
     );
     expect(merge?.subject).toBe("Merge branch feat/history");
     if (!merge) throw new Error("Fixture merge is missing");
-    const detail = z.object({ ok: z.literal(true), data: detailSchema }).parse(
+    const detail = answer("commitDetail", detailSchema).parse(
       await (
-        await post("commit-detail", {
+        await post({
+          op: "commitDetail",
           path: fixture.repository,
           oid: merge.oid,
         })
@@ -211,7 +208,7 @@ describe("real Rust transport contract", () => {
 
   it("reads text, binary, and root file patches and rejects unchanged paths", async () => {
     const { branches, commits } = snapshotEnvelope.parse(
-      await (await post("snapshot", { path: fixture.repository })).json(),
+      await (await post({ op: "snapshot", path: fixture.repository })).json(),
     ).data;
     const remoteTip = branches.find(
       (branch) =>
@@ -222,9 +219,9 @@ describe("real Rust transport contract", () => {
     if (!inspector || !root) throw new Error("Fixture commits are missing");
     const patch = async (oid: string, file: string) =>
       (
-        await post("file-patch", { path: fixture.repository, oid, file })
+        await post({ op: "filePatch", path: fixture.repository, oid, file })
       ).json();
-    const success = z.object({ ok: z.literal(true), data: filePatchSchema });
+    const success = answer("filePatch", filePatchSchema);
     expect(
       success.parse(await patch(inspector.oid, "history.ts")).data,
     ).toEqual({
@@ -272,7 +269,7 @@ describe("real Rust transport contract", () => {
 
   it("counts root, merge, and binary changes against the inspector's diff base", async () => {
     const { commits } = snapshotEnvelope.parse(
-      await (await post("snapshot", { path: fixture.repository })).json(),
+      await (await post({ op: "snapshot", path: fixture.repository })).json(),
     ).data;
     const oid = (subject: string) =>
       commits.find((commit) => commit.subject === subject)?.oid;
@@ -281,14 +278,13 @@ describe("real Rust transport contract", () => {
       oid("Merge branch feat/history"),
       oid("feat(inspector): show commit message and changed paths"),
     ];
-    const response = await post("line-stats", {
+    const response = await post({
+      op: "lineStats",
       path: fixture.repository,
       oids: requested,
     });
     expect(
-      z
-        .object({ ok: z.literal(true), data: lineStatsSchema })
-        .parse(await response.json()).data,
+      answer("lineStats", lineStatsSchema).parse(await response.json()).data,
     ).toEqual([
       { oid: requested[0], added: 1, deleted: 0 },
       { oid: requested[1], added: 4, deleted: 0 },
@@ -299,10 +295,10 @@ describe("real Rust transport contract", () => {
   it("reads the same root, name, HEAD, and branches as the snapshot without history", async () => {
     for (const path of [fixture.repository, fixture.unborn, fixture.detached]) {
       const snapshot = snapshotEnvelope.parse(
-        await (await post("snapshot", { path })).json(),
+        await (await post({ op: "snapshot", path })).json(),
       ).data;
       const refs = refsEnvelope.parse(
-        await (await post("refs", { path })).json(),
+        await (await post({ op: "refs", path })).json(),
       ).data;
       expect(refs).toEqual({
         root: snapshot.root,
@@ -312,7 +308,7 @@ describe("real Rust transport contract", () => {
       });
     }
     const refs = refsEnvelope.parse(
-      await (await post("refs", { path: fixture.repository })).json(),
+      await (await post({ op: "refs", path: fixture.repository })).json(),
     ).data;
     expect(refs.name).toBe("l1-demo");
     expect(refs.branches.map((branch) => branch.reference)).toEqual([
@@ -326,14 +322,14 @@ describe("real Rust transport contract", () => {
     expect(
       z
         .object({ ok: z.literal(false), error: repositoryErrorSchema })
-        .parse(await (await post("refs", { path: fixture.remote })).json())
+        .parse(await (await post({ op: "refs", path: fixture.remote })).json())
         .error.kind,
     ).toBe("bareRepository");
   });
 
   it("reports empty, detached, bare, and missing states through the same contract", async () => {
     const unborn = snapshotEnvelope.parse(
-      await (await post("snapshot", { path: fixture.unborn })).json(),
+      await (await post({ op: "snapshot", path: fixture.unborn })).json(),
     ).data;
     expect(unborn.head).toEqual({
       kind: "unborn",
@@ -341,7 +337,7 @@ describe("real Rust transport contract", () => {
     });
     expect(unborn.commits).toEqual([]);
     const detached = snapshotEnvelope.parse(
-      await (await post("snapshot", { path: fixture.detached })).json(),
+      await (await post({ op: "snapshot", path: fixture.detached })).json(),
     ).data;
     expect(detached.head.kind).toBe("detached");
     expect(detached.root).not.toBe(unborn.root);
@@ -351,19 +347,19 @@ describe("real Rust transport contract", () => {
     });
     expect(
       failure.parse(
-        await (await post("snapshot", { path: fixture.remote })).json(),
+        await (await post({ op: "snapshot", path: fixture.remote })).json(),
       ).error.kind,
     ).toBe("bareRepository");
     expect(
       failure.parse(
         await (
-          await post("snapshot", { path: `${fixture.root}/missing` })
+          await post({ op: "snapshot", path: `${fixture.root}/missing` })
         ).json(),
       ).error.kind,
     ).toBe("missingPath");
   });
 
-  it("rejects other origins, absent origins, unknown commands, and malformed requests", async () => {
+  it("rejects other origins, absent origins, unknown operations, and malformed requests", async () => {
     for (const operation of ["snapshot", "refs"])
       for (const requestOrigin of [
         null,
@@ -371,19 +367,39 @@ describe("real Rust transport contract", () => {
         "http://127.0.0.1:9999",
       ]) {
         const response = await post(
-          operation,
-          { path: fixture.repository },
+          { op: operation, path: fixture.repository },
           requestOrigin,
         );
         expect(response.status).toBe(403);
         expect(response.headers.get("access-control-allow-origin")).toBeNull();
       }
-    expect((await post("checkout", {})).status).toBe(404);
-    for (const operation of ["snapshot", "refs"])
-      expect(
-        (await post(operation, { path: fixture.repository, unexpected: true }))
-          .status,
-      ).toBe(400);
+    expect(
+      await rejected({ op: "notAnOperation", path: fixture.repository }),
+    ).toEqual({
+      status: 400,
+      error:
+        "unknown variant `notAnOperation`, expected one of `snapshot`, `refs`, `commitDetail`, `lineStats`, `filePatch`, `overview`, `fastForward` at line 1 column 22",
+    });
+    expect(
+      await rejected({ op: "commitDetail", path: fixture.repository }),
+    ).toEqual({ status: 400, error: "missing field `oid`" });
+    expect(
+      (await post({ path: fixture.repository }, origin, "/api/snapshot"))
+        .status,
+    ).toBe(404);
+    expect(
+      await rejected({ op: "snapshot", path: fixture.repository, extra: 1 }),
+    ).toEqual({ status: 400, error: "unknown field `extra`, expected `path`" });
+    expect(
+      await rejected({
+        op: "refs",
+        path: fixture.repository,
+        unexpected: true,
+      }),
+    ).toEqual({
+      status: 400,
+      error: "unknown field `unexpected`, expected `path`",
+    });
   });
 });
 
@@ -411,7 +427,7 @@ describe("real Rust fetch and fast-forward contract", () => {
 
     const local = overviewEnvelope.parse(
       await (
-        await post("overview", { path: sync.repository, mode: "local" })
+        await post({ op: "overview", path: sync.repository, mode: "local" })
       ).json(),
     ).data;
     expect(local.root).toBe(repository);
@@ -452,7 +468,7 @@ describe("real Rust fetch and fast-forward contract", () => {
 
     const fetched = overviewEnvelope.parse(
       await (
-        await post("overview", { path: sync.repository, mode: "remote" })
+        await post({ op: "overview", path: sync.repository, mode: "remote" })
       ).json(),
     ).data;
     expect(fetched.fetch?.changed).toBe(true);
@@ -487,7 +503,8 @@ describe("real Rust fetch and fast-forward contract", () => {
 
     const updated = fastForwardEnvelope.parse(
       await (
-        await post("fast-forward", {
+        await post({
+          op: "fastForward",
           path: sync.repository,
           advances: [
             ...readyAdvances(fetched),
@@ -537,7 +554,7 @@ describe("real Rust fetch and fast-forward contract", () => {
   it("fetches the reader fixture without contacting GitHub", async () => {
     const fetched = overviewEnvelope.parse(
       await (
-        await post("overview", { path: fixture.repository, mode: "remote" })
+        await post({ op: "overview", path: fixture.repository, mode: "remote" })
       ).json(),
     ).data;
     expect(fetched.fetch?.remotes).toEqual([
@@ -546,22 +563,34 @@ describe("real Rust fetch and fast-forward contract", () => {
     ]);
   });
 
-  it("rejects other origins and unexpected fields on both new routes", async () => {
-    const bodies = {
-      overview: { path: fixture.sync.repository, mode: "local" },
-      "fast-forward": { path: fixture.sync.repository, advances: [] },
-    };
-    for (const [operation, body] of Object.entries(bodies)) {
-      const foreign = await post(operation, body, "https://example.test");
+  it("rejects other origins and unexpected fields on fetch and fast-forward", async () => {
+    const cases = [
+      {
+        body: { op: "overview", path: fixture.sync.repository, mode: "local" },
+        error: "unknown field `unexpected`, expected `path` or `mode`",
+      },
+      {
+        body: {
+          op: "fastForward",
+          path: fixture.sync.repository,
+          advances: [],
+        },
+        error: "unknown field `unexpected`, expected `path` or `advances`",
+      },
+    ];
+    for (const { body, error } of cases) {
+      const foreign = await post(body, "https://example.test");
       expect(foreign.status).toBe(403);
       expect(foreign.headers.get("access-control-allow-origin")).toBeNull();
-      expect(
-        (await post(operation, { ...body, unexpected: true })).status,
-      ).toBe(400);
+      expect(await rejected({ ...body, unexpected: true })).toEqual({
+        status: 400,
+        error,
+      });
     }
     expect(
       (
-        await post("fast-forward", {
+        await post({
+          op: "fastForward",
           path: fixture.sync.repository,
           advances: [
             {
@@ -587,7 +616,7 @@ describe("real Rust fetch and fast-forward contract", () => {
     git(slow, "config", "remote.origin.uploadpack", uploadPack);
 
     const started = performance.now();
-    const fetching = post("overview", { path: slow, mode: "remote" }).then(
+    const fetching = post({ op: "overview", path: slow, mode: "remote" }).then(
       async (response) => ({
         overview: overviewEnvelope.parse(await response.json()).data,
         finishedAt: performance.now(),
@@ -595,7 +624,7 @@ describe("real Rust fetch and fast-forward contract", () => {
     );
     await setTimeout(200);
     const read = snapshotEnvelope.parse(
-      await (await post("snapshot", { path: fixture.repository })).json(),
+      await (await post({ op: "snapshot", path: fixture.repository })).json(),
     ).data;
     const readFinishedAt = performance.now();
     const fetched = await fetching;
