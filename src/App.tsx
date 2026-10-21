@@ -556,25 +556,28 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     </button>
   );
 
+  // A cached snapshot can predate the branch, tag, or stash clicked in the
+  // sidebar, so pending selections wait for the reread to finish.
+  const reread = workspace.kind === "ready" ? workspace.snapshot : null;
   useEffect(() => {
     if (jump === null) return;
     if (app.activeRoot !== jump.root) setJump(null);
-    else if (jump.pending && snapshot?.root === jump.root) {
-      const target = listedRef(snapshot, jump.reference);
+    else if (jump.pending && reread?.root === jump.root) {
+      const target = listedRef(reread, jump.reference);
       if (target && visibleOids.has(target.oid))
         app.select({ kind: "commit", oid: target.oid });
       setJump({ ...jump, pending: false, seq: jump.seq + 1 });
     }
-  }, [jump, snapshot, visibleOids, app.activeRoot, app.select]);
+  }, [jump, reread, visibleOids, app.activeRoot, app.select]);
   useEffect(() => {
     if (pendingStash === null) return;
     if (app.activeRoot !== pendingStash.root) setPendingStash(null);
-    else if (snapshot?.root === pendingStash.root) {
-      if (snapshot.stashes.some((stash) => stash.oid === pendingStash.oid))
+    else if (reread?.root === pendingStash.root) {
+      if (reread.stashes.some((stash) => stash.oid === pendingStash.oid))
         app.select({ kind: "commit", oid: pendingStash.oid });
       setPendingStash(null);
     }
-  }, [pendingStash, snapshot, app.activeRoot, app.select]);
+  }, [pendingStash, reread, app.activeRoot, app.select]);
   useEffect(() => {
     function keyboard(event: KeyboardEvent) {
       const { context, commands, palette } = keys.current;

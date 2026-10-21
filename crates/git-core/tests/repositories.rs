@@ -385,6 +385,72 @@ fn reads_tags_stashes_and_mapped_submodules_and_keeps_stashes_out_of_history() {
     );
 }
 
+fn map_module(fixture: &Fixture, mapped: &str, gitlink: &str) {
+    fs::write(
+        fixture.repo.join(".gitmodules"),
+        format!("[submodule \"module\"]\n\tpath = {mapped}\n\turl = ./module\n"),
+    )
+    .unwrap();
+    git(&fixture.repo, &["add", ".gitmodules"]);
+    git(
+        &fixture.repo,
+        &[
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            &format!("160000,{},{gitlink}", "1".repeat(40)),
+        ],
+    );
+    git(&fixture.repo, &["commit", "-m", "map module"]);
+}
+
+#[test]
+fn reads_refs_without_stashes_or_submodules_that_git_cannot_read() {
+    let fixture = Fixture::new();
+    fixture.commit("notes.txt", "one\n", "initial");
+    map_module(&fixture, "module", "module");
+    fs::write(fixture.repo.join("notes.txt"), "two\n").unwrap();
+    git(&fixture.repo, &["stash", "push", "-m", "lost"]);
+    let stash = git(&fixture.repo, &["rev-parse", "stash@{0}"]);
+    fs::remove_file(
+        fixture
+            .repo
+            .join(".git/objects")
+            .join(&stash[..2])
+            .join(&stash[2..]),
+    )
+    .unwrap();
+    let result = refs(fixture.path()).unwrap();
+    assert_eq!(result.stashes, []);
+    assert_eq!(result.submodules.len(), 1);
+    assert_eq!(snapshot(fixture.path()).unwrap().stashes, []);
+    fs::write(fixture.repo.join(".git/index"), "not an index").unwrap();
+    let result = refs(fixture.path()).unwrap();
+    assert_eq!(result.submodules, []);
+    assert_eq!(result.branches.len(), 1);
+}
+
+#[test]
+fn lists_only_mapped_gitlinks_and_reads_the_map_from_the_index_when_sparse() {
+    let fixture = Fixture::new();
+    fixture.commit("notes.txt", "one\n", "initial");
+    map_module(&fixture, "vendor", "vendor/nested");
+    assert_eq!(refs(fixture.path()).unwrap().submodules, []);
+    map_module(&fixture, "module", "module");
+    git(
+        &fixture.repo,
+        &["update-index", "--skip-worktree", ".gitmodules"],
+    );
+    fs::remove_file(fixture.repo.join(".gitmodules")).unwrap();
+    assert_eq!(
+        refs(fixture.path()).unwrap().submodules,
+        [Submodule {
+            path: "module".into(),
+            oid: "1".repeat(40),
+        }]
+    );
+}
+
 #[test]
 fn reads_a_conflicted_submodule_at_the_commit_head_records() {
     let fixture = Fixture::new();

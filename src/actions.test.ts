@@ -264,6 +264,9 @@ describe("command palette", () => {
     filterPalette(items, "origin/main")[0]?.run();
     filterPalette(items, "v1.0")[0]?.run();
     filterPalette(items, "try a retry")[0]?.run();
+    expect(filterPalette(items, "stash@{0}").map((item) => item.title)).toEqual(
+      ["On main: try a retry"],
+    );
     filterPalette(items, "sync")[0]?.run();
     filterPalette(items, "fetch")[0]?.run();
     expect(run.jumpToRef).toHaveBeenCalledWith("refs/remotes/origin/main");

@@ -366,6 +366,8 @@ export type PaletteItem = {
   kind: PaletteKind;
   title: string;
   detail?: string;
+  /** Other names the search matches, ranked after the title. */
+  aliases?: readonly string[];
   shortcut?: string;
   run: () => void;
 };
@@ -420,10 +422,11 @@ export function paletteItems(
     ),
     ...(refs?.stashes ?? []).map(
       (stash): PaletteItem => ({
-        id: `stash:${stash.oid}`,
+        id: `stash:${stash.name}`,
         kind: "stash",
         title: stash.message,
         detail: stash.name,
+        aliases: [stash.name],
         run: () => commands.showStash(stash),
       }),
     ),
@@ -472,8 +475,14 @@ export function filterPalette(
   if (needle === "") return items;
   const ranked: { item: PaletteItem; score: number; index: number }[] = [];
   items.forEach((item, index) => {
-    const score = rank(item.title, needle);
-    if (score !== null) ranked.push({ item, score, index });
+    const scores = [item.title, ...(item.aliases ?? [])].flatMap(
+      (name, position) => {
+        const score = rank(name, needle);
+        return score === null ? [] : [score + position * 0.5];
+      },
+    );
+    if (scores.length > 0)
+      ranked.push({ item, score: Math.min(...scores), index });
   });
   ranked.sort(
     (left, right) =>

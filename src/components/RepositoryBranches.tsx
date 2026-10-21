@@ -180,7 +180,7 @@ export function RepositoryBranches({
     const selected = selectedStash === stash.oid;
     return (
       <button
-        key={stash.oid}
+        key={stash.name}
         className={`branch-row stash-row ${selected ? "selected" : ""}`}
         onClick={() => onStash(stash)}
         title={`${stash.name} · ${stash.message} · Show changes`}

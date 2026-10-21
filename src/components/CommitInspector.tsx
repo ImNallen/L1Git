@@ -297,6 +297,14 @@ export function CommitInspector({
 
   const target = detail?.target.kind === "commit" ? detail.target : null;
   const handle = target && githubHandle(target.commit.email);
+  const stashed = target
+    ? snapshot.stashes.filter((stash) => stash.oid === target.commit.oid)
+    : [];
+  // A stash's other parents hold its index and untracked files, not history.
+  const parents =
+    stashed.length > 0
+      ? (target?.commit.parents.slice(0, 1) ?? [])
+      : (target?.commit.parents ?? []);
   return (
     <InspectorFrame
       toggleButton={toggleButton}
@@ -341,13 +349,11 @@ export function CommitInspector({
                   {branch.name}
                 </span>
               ))}
-            {snapshot.stashes
-              .filter((stash) => stash.oid === target.commit.oid)
-              .map((stash) => (
-                <span className="ref-badge stash" key={stash.oid}>
-                  {stash.name}
-                </span>
-              ))}
+            {stashed.map((stash) => (
+              <span className="ref-badge stash" key={stash.name}>
+                {stash.name}
+              </span>
+            ))}
           </div>
           <dl className="commit-metadata">
             <div className="meta-row">
@@ -397,7 +403,7 @@ export function CommitInspector({
             </div>
             <div className="meta-row">
               <dt className="visually-hidden">
-                {target.commit.parents.length === 1 ? "Parent" : "Parents"}
+                {parents.length === 1 ? "Parent" : "Parents"}
               </dt>
               <dd>
                 <span className="meta-icon" aria-hidden="true">
@@ -405,9 +411,9 @@ export function CommitInspector({
                 </span>
                 <span className="meta-lines">
                   <span className="meta-primary parents">
-                    {target.commit.parents.length === 0
+                    {parents.length === 0
                       ? "Root commit"
-                      : target.commit.parents.map((parent) => (
+                      : parents.map((parent) => (
                           <button
                             className="sha-chip"
                             key={parent}
@@ -422,11 +428,13 @@ export function CommitInspector({
                         ))}
                   </span>
                   <span className="meta-secondary">
-                    {target.commit.parents.length === 0
+                    {parents.length === 0
                       ? "No parent"
-                      : target.commit.parents.length === 1
-                        ? "Parent"
-                        : `Merge of ${target.commit.parents.length} parents`}
+                      : stashed.length > 0
+                        ? "Stashed on this commit"
+                        : parents.length === 1
+                          ? "Parent"
+                          : `Merge of ${parents.length} parents`}
                   </span>
                 </span>
               </dd>

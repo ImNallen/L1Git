@@ -336,8 +336,8 @@ fn read_refs(
         head,
         branches,
         tags: tags?,
-        stashes: stashes?,
-        submodules: submodules?,
+        stashes: stashes.unwrap_or_default(),
+        submodules: submodules.unwrap_or_default(),
     };
     Ok((refs, remotes))
 }
@@ -388,15 +388,17 @@ fn stashes(root: &Path, deadline: Deadline) -> Result<Vec<Stash>, RepositoryErro
 /// Lists the gitlinks in the index that `.gitmodules` maps. `git submodule
 /// status` would fail the whole read on one unmapped gitlink.
 fn submodules(root: &Path, deadline: Deadline) -> Result<Vec<Submodule>, RepositoryError> {
-    if !root.join(".gitmodules").is_file() {
-        return Ok(Vec::new());
-    }
+    // A sparse checkout can leave `.gitmodules` only in the index.
+    let source = if root.join(".gitmodules").is_file() {
+        "--file=.gitmodules"
+    } else {
+        "--blob=:.gitmodules"
+    };
     let mapped = git::run(
         root,
         &[
             "config",
-            "--file",
-            ".gitmodules",
+            source,
             "-z",
             "--get-regexp",
             r"^submodule\..*\.path$",
@@ -406,17 +408,21 @@ fn submodules(root: &Path, deadline: Deadline) -> Result<Vec<Submodule>, Reposit
     if !mapped.status.success() {
         return Ok(Vec::new());
     }
-    let pathspecs: Vec<_> = mapped
+    let paths: Vec<_> = mapped
         .stdout
         .split(|byte| *byte == 0)
         .filter_map(|entry| {
             let start = entry.iter().position(|byte| *byte == b'\n')? + 1;
-            Some(format!(":(literal){}", git::text(&entry[start..])))
+            Some(git::text(&entry[start..]))
         })
         .collect();
-    if pathspecs.is_empty() {
+    if paths.is_empty() {
         return Ok(Vec::new());
     }
+    let pathspecs: Vec<_> = paths
+        .iter()
+        .map(|path| format!(":(literal){path}"))
+        .collect();
     let mut args = vec!["ls-files", "-z", "--stage", "--"];
     args.extend(pathspecs.iter().map(String::as_str));
     let mut submodules = Vec::new();
@@ -432,7 +438,8 @@ fn submodules(root: &Path, deadline: Deadline) -> Result<Vec<Submodule>, Reposit
             return Err(git::malformed());
         };
         // A conflicted path has no stage 0, and stage 2 is what HEAD records.
-        if mode == "160000" && (stage == "0" || stage == "2") {
+        let mapped = paths.iter().any(|mapped| mapped == path);
+        if mode == "160000" && (stage == "0" || stage == "2") && mapped {
             submodules.push(Submodule {
                 path: path.into(),
                 oid: oid.into(),
