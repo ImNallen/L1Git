@@ -108,17 +108,8 @@
 .history-table:focus {
   outline: none;
 }
-.history-table:focus-visible tbody tr.selected {
-  outline: 2px solid var(--focus);
-  outline-offset: -2px;
-}
-.history:has(.history-table:focus-visible)::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 3;
-  border: 2px solid var(--focus);
-  pointer-events: none;
+.history-table:focus-within tr.selected td {
+  background: color-mix(in srgb, var(--primary-bg) 16%, var(--row-selected));
 }
 .commit-description {
   min-width: 0;
