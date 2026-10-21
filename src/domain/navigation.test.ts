@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { buildGraph } from "./graph";
-import { historyAction, navigate, nextRow, revealRow } from "./navigation";
+import {
+  historyAction,
+  navigate,
+  landingFromHidden,
+  nextRow,
+  revealRow,
+} from "./navigation";
 import type { HistoryKey, Move, Trail } from "./navigation";
 import { oidSchema } from "./repository";
 import type { Oid } from "./repository";
@@ -340,5 +346,32 @@ describe("revealing a row", () => {
     expect(revealRow(10, 36, 0, 360)).toBe(36);
     expect(revealRow(2, 36, 180, 360)).toBe(72);
     expect(revealRow(9, 36, 10, 360)).toBe(10);
+  });
+});
+
+describe("moving from a selection a rule hides", () => {
+  const shown = new Set([merge, t1, t0, root]);
+
+  it("lands on the nearest shown row below for Down and Shift+Down", () => {
+    expect(landingFromHidden(history, shown, f2, "down")).toBe(t1);
+    expect(landingFromHidden(history, shown, f1, "parent")).toBe(t0);
+  });
+
+  it("lands on the nearest shown row above for Up and Shift+Up", () => {
+    expect(landingFromHidden(history, shown, f1, "up")).toBe(t1);
+    expect(landingFromHidden(history, shown, f2, "child")).toBe(merge);
+  });
+
+  it("falls back to the other side at either end", () => {
+    const oldest = new Set([merge]);
+    expect(landingFromHidden(history, oldest, f2, "down")).toBe(merge);
+    const newest = new Set([root]);
+    expect(landingFromHidden(history, newest, f2, "up")).toBe(root);
+  });
+
+  it("leaves shown, unloaded, and whole-history moves to navigate", () => {
+    expect(landingFromHidden(history, shown, t1, "down")).toBeNull();
+    expect(landingFromHidden(history, shown, oid("9"), "down")).toBeNull();
+    expect(landingFromHidden(history, shown, f2, "last")).toBeNull();
   });
 });

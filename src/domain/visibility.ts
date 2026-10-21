@@ -1,4 +1,10 @@
-import type { Commit, FullRef, Oid, RepositorySnapshot } from "./repository";
+import type {
+  Branch,
+  Commit,
+  FullRef,
+  Oid,
+  RepositorySnapshot,
+} from "./repository";
 
 export type VisibilityRule =
   | { kind: "none" }
@@ -37,6 +43,19 @@ export function revealBranch(
       ? rule
       : toggleRule(rule, "solo", reference);
   return rule.refs.has(reference) ? toggleRule(rule, "hide", reference) : rule;
+}
+
+export function pruneRule(
+  rule: VisibilityRule,
+  branches: readonly Pick<Branch, "reference">[],
+): VisibilityRule {
+  if (rule.kind === "none") return rule;
+  const live = new Set(branches.map((branch) => branch.reference));
+  const refs = new Set(
+    [...rule.refs].filter((reference) => live.has(reference)),
+  );
+  if (refs.size === rule.refs.size) return rule;
+  return refs.size === 0 ? NO_RULE : { kind: rule.kind, refs };
 }
 
 type Refs = Pick<

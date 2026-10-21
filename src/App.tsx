@@ -31,7 +31,8 @@ import { RepositoryTree } from "./components/RepositoryTree";
 import { trunkTips } from "./domain/highlight";
 import { readyAdvances } from "./domain/overview";
 import type { Branch, FullRef, Oid, RepositoryRoot } from "./domain/repository";
-import { NO_RULE, revealBranch, visibleCommits } from "./domain/visibility";
+import { NO_RULE, visibleCommits } from "./domain/visibility";
+import type { VisibilityRule } from "./domain/visibility";
 import { useExpandedRepositories } from "./expandedRepositories";
 import { useFetchSettings } from "./fetchSettings";
 import { useHistoryColumns } from "./historyColumns";
@@ -105,17 +106,39 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     expansion.persistenceError ??
     historyColumns.persistenceError ??
     visibility.persistenceError;
-  const rule = snapshot ? visibility.ruleFor(snapshot.root) : NO_RULE;
-  const visible = useMemo(
-    () => (snapshot ? visibleCommits(snapshot.commits, snapshot, rule) : []),
-    [snapshot, rule],
-  );
-  const shows = (oid: Oid) => visible.some((commit) => commit.oid === oid);
   const branchRefs = useRepositoryRefs(
     expansion.expanded,
     snapshot,
     overviewStore,
   );
+  const rule = snapshot ? visibility.ruleFor(snapshot.root) : NO_RULE;
+  const visible = useMemo(
+    () => (snapshot ? visibleCommits(snapshot.commits, snapshot, rule) : []),
+    [snapshot, rule],
+  );
+  const loaded = useMemo(
+    () => new Set(snapshot?.commits.map((commit) => commit.oid)),
+    [snapshot],
+  );
+  const visibleOids = useMemo(
+    () =>
+      visible === snapshot?.commits
+        ? loaded
+        : new Set(visible.map((commit) => commit.oid)),
+    [visible, snapshot, loaded],
+  );
+  const [sidebarJump, setSidebarJump] = useState<{
+    root: RepositoryRoot;
+    reference: FullRef;
+  } | null>(null);
+  const { prune } = visibility;
+  useEffect(() => {
+    if (snapshot) prune(snapshot.root, snapshot.branches);
+  }, [snapshot, prune]);
+  useEffect(() => {
+    for (const [root, state] of branchRefs.refs)
+      if (state.kind === "ready") prune(root, state.refs.branches);
+  }, [branchRefs.refs, prune]);
   const inspectorVisible = Boolean(shown && inspectorOpen);
   const activePath =
     shown?.root ?? (workspace.kind === "error" ? workspace.path : null);
@@ -146,11 +169,15 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
           (branch) => branch.reference === jumpedReference,
         ) ?? null)
       : null;
-  const jumpedUnloaded =
+  const jumpedUnloaded = jumped !== null && !loaded.has(jumped.oid);
+  const hiddenJump =
     jumped !== null &&
-    snapshot !== null &&
-    !snapshot.commits.some((commit) => commit.oid === jumped.oid);
-  const jumpedHidden = jumped !== null && !jumpedUnloaded && !shows(jumped.oid);
+    sidebarJump?.root === snapshot?.root &&
+    sidebarJump?.reference === jumped.reference &&
+    !jumpedUnloaded &&
+    !visibleOids.has(jumped.oid)
+      ? jumped
+      : null;
   const refreshRef = useRef(app.refresh);
   const reloadRefsRef = useRef(branchRefs.reload);
   useEffect(() => {
@@ -190,7 +217,8 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     closeFile();
     const pending = root !== snapshot?.root;
     if (pending) showRepository(root);
-    else if (shows(branch.oid)) setSelectedOid(branch.oid);
+    else if (visibleOids.has(branch.oid)) setSelectedOid(branch.oid);
+    setSidebarJump({ root, reference: branch.reference });
     setLastBranch((previous) => new Map(previous).set(root, branch.reference));
     setJump((previous) => ({
       root,
@@ -199,11 +227,17 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       pending,
     }));
   }
+  function select(oid: Oid) {
+    setSidebarJump(null);
+    setSelectedOid(oid);
+  }
+  function setRule(root: RepositoryRoot, next: VisibilityRule) {
+    setSidebarJump(null);
+    visibility.setRule(root, next);
+  }
   function showBranch(root: RepositoryRoot, branch: Branch) {
-    visibility.setRule(
-      root,
-      revealBranch(visibility.ruleFor(root), branch.reference),
-    );
+    setSidebarJump(null);
+    visibility.reveal(root, branch.reference);
     setSelectedOid(branch.oid);
     setJump((previous) => ({
       root,
@@ -211,6 +245,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       seq: (previous?.seq ?? 0) + 1,
       pending: false,
     }));
+    historyRef.current?.focus();
   }
   async function addRepository(path: string, signal: AbortSignal) {
     const added = await app.addRepository(path, signal);
@@ -256,11 +291,10 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       const branch = snapshot.branches.find(
         (branch) => branch.reference === jump.reference,
       );
-      if (branch && visible.some((commit) => commit.oid === branch.oid))
-        setSelectedOid(branch.oid);
+      if (branch && visibleOids.has(branch.oid)) setSelectedOid(branch.oid);
       setJump({ ...jump, pending: false, seq: jump.seq + 1 });
     }
-  }, [jump, snapshot, visible, app.activeRoot, setSelectedOid]);
+  }, [jump, snapshot, visibleOids, app.activeRoot, setSelectedOid]);
   useEffect(() => {
     function keyboard(event: KeyboardEvent) {
       if (screen === "settings") {
@@ -342,7 +376,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
             }
             onJump={jumpTo}
             ruleFor={visibility.ruleFor}
-            onRule={visibility.setRule}
+            onRule={setRule}
             onRemove={(root) => {
               app.removeRepository(root);
               expansion.setExpanded(root, false);
@@ -473,17 +507,17 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                   <span>{warning}</span>
                 </div>
               ))}
-            {jumped && jumpedHidden && snapshot && (
+            {hiddenJump && snapshot && (
               <div className="notice info-notice" role="status">
                 <EyeOff size={14} />
                 <span>
-                  {jumped.name}{" "}
+                  {hiddenJump.name}{" "}
                   {rule.kind === "solo"
                     ? "is outside the soloed branches."
                     : "is hidden in the graph."}
                 </span>
-                <button onClick={() => showBranch(snapshot.root, jumped)}>
-                  Show {jumped.name}
+                <button onClick={() => showBranch(snapshot.root, hiddenJump)}>
+                  Show {hiddenJump.name}
                 </button>
               </div>
             )}
@@ -506,7 +540,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                     rule={rule}
                     selectedOid={app.selectedOid}
                     revealSeq={jump?.seq ?? 0}
-                    onSelect={app.setSelectedOid}
+                    onSelect={select}
                     onOpenFirstFile={app.openFirstFile}
                     onCancelOpen={app.cancelOpenFirstFile}
                     scrollTopOf={app.scrollTopOf}
@@ -611,7 +645,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                     root={snapshot.root}
                     selectedOid={app.selectedOid}
                     snapshot={snapshot}
-                    onSelect={app.setSelectedOid}
+                    onSelect={select}
                     selectedFile={fileOpen ? fileDiff.path : null}
                     onSelectFile={app.openFile}
                     toggleButton={inspectorToggle}

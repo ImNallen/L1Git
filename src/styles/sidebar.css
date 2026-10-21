@@ -218,6 +218,24 @@ input::placeholder {
 .branch-item.soloed > .branch-visibility {
   color: var(--blue);
 }
+.rule-cue {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--text-faint);
+}
+.rule-cue.solo {
+  color: var(--blue);
+}
+.repository-tree button:focus-visible {
+  outline: none;
+  background: color-mix(in srgb, var(--primary-bg) 16%, var(--row-selected));
+}
+.repository-tree .branch-row.selected:focus-visible {
+  background: color-mix(in srgb, var(--primary-bg) 16%, var(--nav-selected-bg));
+}
+.repository-tree .branch-row.head:not(.selected):focus-visible {
+  background: color-mix(in srgb, var(--primary-bg) 16%, var(--success-bg));
+}
 .branch-head {
   font-size: 8px;
   letter-spacing: 0.5px;

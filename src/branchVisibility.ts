@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { z } from "zod";
 import { refSchema, rootSchema } from "./domain/repository";
-import type { RepositoryRoot } from "./domain/repository";
-import { NO_RULE } from "./domain/visibility";
+import type { Branch, FullRef, RepositoryRoot } from "./domain/repository";
+import { NO_RULE, pruneRule, revealBranch } from "./domain/visibility";
 import type { VisibilityRule } from "./domain/visibility";
 
 export const VISIBILITY_KEY = "l1git.visibility.v1";
@@ -71,22 +71,43 @@ export function useBranchVisibility() {
     }
   });
   const [persistenceError, setPersistenceError] = useState<string | null>(null);
-
-  function setRule(root: RepositoryRoot, rule: VisibilityRule) {
-    const next = new Map(rules);
-    if (rule.kind === "none") next.delete(root);
-    else next.set(root, rule);
-    setRules(next);
+  const saved = useRef(rules);
+  useEffect(() => {
+    if (saved.current === rules) return;
+    saved.current = rules;
     try {
-      setPersistenceError(persistVisibility(localStorage, next));
+      setPersistenceError(persistVisibility(localStorage, rules));
     } catch {
       setPersistenceError(unsaved);
     }
-  }
+  }, [rules]);
+
+  const update = useCallback(
+    (root: RepositoryRoot, change: (rule: VisibilityRule) => VisibilityRule) =>
+      setRules((previous) => {
+        const current = previous.get(root) ?? NO_RULE;
+        const next = change(current);
+        if (next === current) return previous;
+        const updated = new Map(previous);
+        if (next.kind === "none") updated.delete(root);
+        else updated.set(root, next);
+        return updated;
+      }),
+    [],
+  );
+  const prune = useCallback(
+    (root: RepositoryRoot, branches: readonly Branch[]) =>
+      update(root, (rule) => pruneRule(rule, branches)),
+    [update],
+  );
 
   return {
     ruleFor: (root: RepositoryRoot) => rules.get(root) ?? NO_RULE,
-    setRule,
+    setRule: (root: RepositoryRoot, rule: VisibilityRule) =>
+      update(root, () => rule),
+    reveal: (root: RepositoryRoot, reference: FullRef) =>
+      update(root, (rule) => revealBranch(rule, reference)),
+    prune,
     persistenceError,
   };
 }

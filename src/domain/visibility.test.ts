@@ -4,6 +4,7 @@ import type { Branch, FullRef, RepositorySnapshot } from "./repository";
 import {
   NO_RULE,
   branchVisibility,
+  pruneRule,
   revealBranch,
   toggleRule,
   visibleCommits,
@@ -145,5 +146,18 @@ describe("branch visibility", () => {
     expect(revealBranch(rule("solo", "main"), ref("feat/history"))).toEqual(
       rule("solo", "main", "feat/history"),
     );
+  });
+
+  it("drops refs that no longer exist and keeps an unchanged rule as is", () => {
+    const branches = refs.branches;
+    const live = rule("hide", "main", "feat/history");
+    expect(pruneRule(live, branches)).toBe(live);
+    expect(pruneRule(rule("hide", "main", "gone"), branches)).toEqual(
+      rule("hide", "main"),
+    );
+    expect(pruneRule(rule("solo", "gone", "also-gone"), branches)).toBe(
+      NO_RULE,
+    );
+    expect(pruneRule(NO_RULE, branches)).toBe(NO_RULE);
   });
 });

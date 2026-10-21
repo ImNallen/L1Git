@@ -25,7 +25,12 @@ import { buildGraph } from "../domain/graph";
 import type { GraphRow } from "../domain/graph";
 import { highlightBranch } from "../domain/highlight";
 import type { RowHighlight } from "../domain/highlight";
-import { historyAction, navigate, revealRow } from "../domain/navigation";
+import {
+  historyAction,
+  navigate,
+  landingFromHidden,
+  revealRow,
+} from "../domain/navigation";
 import type { HistoryAction, Trail } from "../domain/navigation";
 import { refLabels } from "../domain/refs";
 import type { RefLabel } from "../domain/refs";
@@ -337,7 +342,7 @@ function MoreRefs({ labels, lane }: { labels: RefLabel[]; lane: number }) {
   );
 }
 
-export type HistoryHandle = { openSearch: () => void };
+export type HistoryHandle = { openSearch: () => void; focus: () => void };
 
 type Search = { root: RepositoryRoot; query: string };
 
@@ -577,6 +582,9 @@ export function History({
   }, [selectedOid]);
 
   useImperativeHandle(ref, () => ({
+    focus() {
+      tableRef.current?.focus({ preventScroll: true });
+    },
     openSearch() {
       const scroller = scrollRef.current;
       const atBottom =
@@ -634,13 +642,16 @@ export function History({
         setColumnMenu({ x: pane.left + 14, y: header.bottom });
       return;
     }
-    const next = navigate(
-      commits,
-      graph.rows,
+    const landing = landingFromHidden(
+      snapshot.commits,
+      known,
       selectedOid,
       action,
-      trail.current,
     );
+    const next =
+      landing === null
+        ? navigate(commits, graph.rows, selectedOid, action, trail.current)
+        : { oid: landing, trail: null };
     trail.current = next.trail;
     const scroller = scrollRef.current;
     if (next.oid === null || !scroller) return;

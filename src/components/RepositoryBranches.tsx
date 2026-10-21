@@ -72,6 +72,27 @@ export function RepositoryBranches({
   const localShown = local.filter(matches);
   const remoteShown = remote.filter(matches);
   const headReference = head.kind === "attached" ? head.reference : null;
+  const ruled =
+    rule.kind === "none"
+      ? []
+      : branches.filter((branch) => rule.refs.has(branch.reference));
+
+  function ruleCue(holds: (branch: Branch) => boolean) {
+    if (rule.kind === "none" || !ruled.some(holds)) return null;
+    const label =
+      rule.kind === "hide" ? "Holds hidden branches" : "Holds soloed branches";
+    const Icon = rule.kind === "hide" ? EyeOff : Focus;
+    return (
+      <span
+        className={`rule-cue ${rule.kind}`}
+        role="img"
+        aria-label={label}
+        title={label}
+      >
+        <Icon size={12} />
+      </span>
+    );
+  }
 
   function section(kind: Branch["kind"]) {
     const key = `${root}:${kind}`;
@@ -108,6 +129,10 @@ export function RepositoryBranches({
                 {open ? <FolderOpen size={14} /> : <Folder size={14} />}
                 <span>{folder.name}</span>
                 <span className="count">{folder.count}</span>
+                {!open &&
+                  ruleCue(
+                    (branch) => branch.kind === kind && holds(branch.name),
+                  )}
               </button>
               {open && tree(folder, depth + 1)}
             </Fragment>
@@ -205,6 +230,7 @@ export function RepositoryBranches({
         <Laptop size={14} />
         <span>Local</span>
         <span className="count">{local.length}</span>
+        {!localSection.open && ruleCue((branch) => branch.kind === "local")}
       </button>
       {localSection.open && (
         <div>
@@ -234,6 +260,7 @@ export function RepositoryBranches({
         <Cloud size={14} />
         <span>Remote</span>
         <span className="count">{remote.length}</span>
+        {!remoteSection.open && ruleCue((branch) => branch.kind === "remote")}
       </button>
       {remoteSection.open && (
         <div>
