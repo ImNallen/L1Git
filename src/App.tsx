@@ -136,7 +136,11 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   const settingsRef = useRef<HTMLButtonElement>(null);
   const historyRef = useRef<HistoryHandle>(null);
   const fileDiffRef = useRef<FileDiffHandle>(null);
-  const gridFocusRoot = useRef<RepositoryRoot | null>(null);
+  const gridFocus = useRef<{
+    root: RepositoryRoot;
+    from: Element | null;
+    cancel: AbortController;
+  } | null>(null);
   const leaveSettings = useCallback(() => {
     flushSync(() => setScreen("repository"));
     (sidebarOpen ? settingsRef : sidebarToggleRef).current?.focus();
@@ -281,8 +285,12 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       }),
     [overviewStore, app.activeRoot],
   );
+  function cancelGridFocus() {
+    gridFocus.current?.cancel.abort();
+    gridFocus.current = null;
+  }
   function showRepository(root: RepositoryRoot) {
-    gridFocusRoot.current = null;
+    cancelGridFocus();
     setSidebarJump(null);
     setScreen("repository");
     expansion.setExpanded(root, true);
@@ -378,7 +386,14 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     },
     openRepository: (root) => {
       showRepository(root);
-      if (root !== snapshot?.root) gridFocusRoot.current = root;
+      if (root === snapshot?.root) return;
+      const cancel = new AbortController();
+      for (const type of ["pointerdown", "keydown"])
+        window.addEventListener(type, cancelGridFocus, {
+          capture: true,
+          signal: cancel.signal,
+        });
+      gridFocus.current = { root, from: focusedElement(), cancel };
     },
     jumpToBranch: (reference) => {
       const branch = snapshot?.branches.find(
@@ -445,10 +460,20 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     });
   };
   useEffect(() => {
-    if (gridFocusRoot.current === null) return;
-    if (snapshot?.root === gridFocusRoot.current) historyRef.current?.focus();
-    else if (workspace.kind !== "error") return;
-    gridFocusRoot.current = null;
+    const pending = gridFocus.current;
+    if (pending === null) return;
+    if (snapshot?.root === pending.root) {
+      const focused = focusedElement();
+      if (
+        !keys.current.palette &&
+        (focused === pending.from ||
+          focused === document.body ||
+          focused === sidebarToggleRef.current ||
+          focused?.closest(".history-table"))
+      )
+        historyRef.current?.focus();
+    } else if (workspace.kind !== "error") return;
+    cancelGridFocus();
   }, [snapshot?.root, workspace.kind]);
   async function addRepository(path: string, signal: AbortSignal) {
     const added = await app.addRepository(path, signal);
