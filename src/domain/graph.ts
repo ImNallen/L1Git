@@ -17,10 +17,12 @@ export type GraphRow = {
   parents: { oid: Oid; from: number; to: number }[];
 };
 
+export type Graph = { rows: Map<RowId, GraphRow>; lanes: number };
+
 export function buildGraph(
   nodes: readonly GraphNode[],
   squashes: readonly Squash[] = [],
-): { rows: Map<RowId, GraphRow>; lanes: number } {
+): Graph {
   const squashed = new Map<RowId, Oid[]>();
   for (const { commit, tip } of squashes) {
     squashed.set(commit, [...(squashed.get(commit) ?? []), tip]);

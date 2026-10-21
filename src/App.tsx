@@ -52,8 +52,10 @@ import type { HistoryHandle } from "./components/History";
 import { PaneDivider } from "./components/PaneDivider";
 import { RepositoryTree } from "./components/RepositoryTree";
 import { swapEnds } from "./domain/comparison";
+import { buildGraph } from "./domain/graph";
 import { trunkTips } from "./domain/highlight";
 import { readyAdvances } from "./domain/overview";
+import { refLabels } from "./domain/refs";
 import type {
   Branch,
   FullRef,
@@ -223,6 +225,28 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
         : new Set(visible.map((commit) => commit.oid)),
     [visible, snapshot, loaded],
   );
+  const graph = useMemo(
+    () =>
+      buildGraph(
+        rows,
+        visible === snapshot?.commits
+          ? snapshot.squashes
+          : snapshot?.squashes.filter(
+              (squash) =>
+                visibleOids.has(squash.commit) && visibleOids.has(squash.tip),
+            ),
+      ),
+    [rows, visible, visibleOids, snapshot],
+  );
+  const labels = useMemo(
+    () => (snapshot ? refLabels(snapshot) : null),
+    [snapshot],
+  );
+  const selectedOid = selected?.kind === "commit" ? selected.oid : null;
+  const selectedRefs =
+    selectedOid === null ? [] : (labels?.get(selectedOid) ?? []);
+  const selectedLane =
+    selectedOid === null ? null : (graph.rows.get(selectedOid)?.lane ?? null);
   const shows = useCallback((oid: Oid) => visibleOids.has(oid), [visibleOids]);
   const selectCommit = useCallback(
     (oid: Oid) => select({ kind: "commit", oid }),
@@ -813,6 +837,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                     visibleCommits={visible}
                     visibleOids={visibleOids}
                     rows={rows}
+                    graph={graph}
                     rule={rule}
                     selection={app.selection}
                     compare={app.compare}
@@ -933,6 +958,8 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                     compare={app.compare}
                     comparison={app.comparison}
                     snapshot={snapshot}
+                    refs={selectedRefs}
+                    lane={selectedLane}
                     onSelect={select}
                     onSwap={app.swapCompare}
                     selectedFile={fileOpen ? fileDiff : null}

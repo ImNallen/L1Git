@@ -30,10 +30,12 @@ import type {
   WorktreeChanges,
   WorktreeGroup,
 } from "../domain/worktree";
+import type { RefLabel } from "../domain/refs";
 import type { Selection } from "../domain/selection";
 import { relativeTime } from "../domain/time";
 import type { DetailState } from "../useWorkspace";
 import { ChangedFileTree, changeStatuses } from "./ChangedFileTree";
+import { RefBadge } from "./History";
 
 type Props = {
   state: DetailState;
@@ -42,6 +44,9 @@ type Props = {
   compare: Compare | null;
   comparison: Comparison | null;
   snapshot: RepositorySnapshot;
+  refs: readonly RefLabel[];
+  /** The selected commit's graph lane, null when a rule hides its row or it is outside the loaded history. */
+  lane: number | null;
   onSelect: (selection: Selection) => void;
   onSwap: () => void;
   selectedFile: OpenedFile | null;
@@ -122,6 +127,8 @@ export function CommitInspector({
   compare,
   comparison,
   snapshot,
+  refs,
+  lane,
   onSelect,
   onSwap,
   selectedFile,
@@ -339,16 +346,9 @@ export function CommitInspector({
             body={target.message.split("\n").slice(1).join("\n").trim()}
           />
           <div className="inspector-refs">
-            {snapshot.branches
-              .filter((branch) => branch.oid === target.commit.oid)
-              .map((branch) => (
-                <span
-                  className={`ref-badge ${branch.kind}`}
-                  key={branch.reference}
-                >
-                  {branch.name}
-                </span>
-              ))}
+            {refs.map((label, index) => (
+              <RefBadge key={index} label={label} lane={lane} />
+            ))}
             {stashed.map((stash) => (
               <span className="ref-badge stash" key={stash.name}>
                 {stash.name}
