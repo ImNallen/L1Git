@@ -20,10 +20,14 @@
   font-size: 12px;
   text-align: left;
 }
-.context-menu [role^="menuitem"]:hover,
-.context-menu [role^="menuitem"]:focus-visible {
+.context-menu [role^="menuitem"]:hover {
   background: var(--row-hover);
+}
+.context-menu [role^="menuitem"]:focus-visible,
+.context-menu [role^="menuitem"]:focus-visible:hover {
   outline: none;
+  background: color-mix(in srgb, var(--primary-bg) 10%, var(--panel-raised));
+  box-shadow: inset 2px 0 0 var(--blue);
 }
 .context-menu svg {
   flex-shrink: 0;

@@ -2,7 +2,6 @@ import type { RowId } from "./graph";
 import type { Oid, RepositoryRoot, RepositorySnapshot } from "./repository";
 import { selectedRowId } from "./selection";
 import type { Selection } from "./selection";
-import type { HistoryRow } from "./worktree";
 
 export type Comparison = {
   base: { kind: "firstParent" } | { kind: "commit"; oid: Oid };
@@ -29,7 +28,7 @@ export function sameComparison(left: Comparison, right: Comparison): boolean {
 }
 
 export function compareRows(
-  rows: readonly HistoryRow[],
+  loaded: readonly { oid: Oid }[],
   root: RepositoryRoot,
   anchor: Selection,
   other: Selection,
@@ -40,7 +39,8 @@ export function compareRows(
   if (anchor.kind === "commit" && other.kind === "worktree")
     return { root, anchor, base: anchor.oid, target: other };
   if (anchor.kind !== "commit" || other.kind !== "commit") return null;
-  const position = (oid: Oid) => rows.findIndex((row) => row.id === oid);
+  const position = (oid: Oid) =>
+    loaded.findIndex((commit) => commit.oid === oid);
   const otherIsOlder = position(other.oid) > position(anchor.oid);
   return otherIsOlder
     ? { root, anchor, base: other.oid, target: anchor }

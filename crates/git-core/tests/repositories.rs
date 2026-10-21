@@ -692,9 +692,12 @@ fn rejects_a_worktree_target_without_a_base_commit_or_from_another_repository() 
         },
     };
     assert!(matches!(
-        commit_detail(fixture.path(), &worktree(Base::FirstParent, fixture.path()))
-            .unwrap_err()
-            .kind,
+        commit_detail(
+            fixture.path(),
+            &worktree(Base::FirstParent {}, fixture.path())
+        )
+        .unwrap_err()
+        .kind,
         ErrorKind::InvalidOid
     ));
     assert!(matches!(

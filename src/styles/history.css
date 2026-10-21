@@ -304,3 +304,8 @@
 .history-table tr.compared td {
   background: var(--row-selected);
 }
+.pick-mark {
+  flex-shrink: 0;
+  margin-right: 6px;
+  color: var(--muted);
+}

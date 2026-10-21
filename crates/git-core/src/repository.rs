@@ -660,8 +660,8 @@ fn ends(root: &Path, comparison: &Comparison, deadline: Deadline) -> Result<Ends
         (base, Target::Commit { oid }) => {
             let target = read_commit(root, oid, deadline)?;
             let base = match base {
-                Base::FirstParent if target.parents.is_empty() => BaseDetail::EmptyTree,
-                Base::FirstParent => BaseDetail::FirstParent,
+                Base::FirstParent {} if target.parents.is_empty() => BaseDetail::EmptyTree,
+                Base::FirstParent {} => BaseDetail::FirstParent,
                 Base::Commit { oid } => BaseDetail::Commit {
                     commit: read_commit(root, oid, deadline)?,
                 },
@@ -672,7 +672,7 @@ fn ends(root: &Path, comparison: &Comparison, deadline: Deadline) -> Result<Ends
             base: read_commit(root, oid, deadline)?,
             root: worktree_root(root, worktree, deadline)?,
         }),
-        (Base::FirstParent, Target::Worktree { .. }) => Err(RepositoryError::new(
+        (Base::FirstParent {}, Target::Worktree { .. }) => Err(RepositoryError::new(
             ErrorKind::InvalidOid,
             "Choose a commit to compare the working copy with.",
         )),
@@ -954,7 +954,7 @@ pub(crate) fn line_stats_within(
 fn unchanged_path(comparison: &Comparison) -> RepositoryError {
     RepositoryError::new(
         ErrorKind::UnchangedPath,
-        if comparison.base == Base::FirstParent {
+        if matches!(comparison.base, Base::FirstParent {}) {
             "This file did not change in the selected commit. Choose one of its changed paths."
         } else {
             "This file is the same at both ends of the comparison. Choose one of its changed paths."

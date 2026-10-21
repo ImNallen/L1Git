@@ -132,6 +132,7 @@ export function CommitInspector({
   onRefreshChanges,
 }: Props) {
   const [copy, setCopy] = useState<"idle" | "copied" | "failed">("idle");
+  const [changesOpen, setChangesOpen] = useState(true);
   useEffect(() => {
     setCopy("idle");
   }, [selection]);
@@ -282,6 +283,8 @@ export function CommitInspector({
                   ? "No changes between this commit and the working copy."
                   : "No changes between these commits."
               }
+              open={changesOpen}
+              onToggle={() => setChangesOpen(!changesOpen)}
               selectedFile={selectedFile}
               onSelectFile={onSelectFile}
             />
@@ -427,6 +430,8 @@ export function CommitInspector({
             treeKey={target.commit.oid}
             title={`${detail.base.kind === "emptyTree" ? "Compared with the empty tree" : "Compared with the first parent"}. Renames appear as added and deleted paths.`}
             empty="No paths changed against this base."
+            open={changesOpen}
+            onToggle={() => setChangesOpen(!changesOpen)}
             selectedFile={selectedFile}
             onSelectFile={onSelectFile}
           />
@@ -459,7 +464,7 @@ function CompareEnd({
             {commit.subject || "(no subject)"}
           </span>
           <span className="meta-secondary parents">
-            {label}
+            <span aria-hidden="true">{label}</span>
             <button
               className="sha-chip"
               title={`Open ${commit.oid}`}
@@ -480,6 +485,8 @@ function ChangedFiles({
   treeKey,
   title,
   empty,
+  open,
+  onToggle,
   selectedFile,
   onSelectFile,
 }: {
@@ -487,17 +494,18 @@ function ChangedFiles({
   treeKey: string;
   title: string;
   empty: string;
+  open: boolean;
+  onToggle: () => void;
   selectedFile: OpenedFile | null;
   onSelectFile: (path: string, side: ListSide | null) => void;
 }) {
-  const [open, setOpen] = useState(true);
   return (
     <>
       <button
         className="changed-files-heading"
         aria-expanded={open}
         aria-controls="changed-files"
-        onClick={() => setOpen(!open)}
+        onClick={onToggle}
         title={title}
       >
         <span className="changed-files-title">
@@ -530,7 +538,7 @@ function ChangedFiles({
         <div id="changed-files" className="changed-files">
           {files.length > 0 ? (
             <ChangedFileTree
-              key={treeKey}
+              key={`${treeKey}\0${files.map((file) => `${file.status}:${file.path}`).join("\0")}`}
               files={files.map((file) => ({
                 path: file.path,
                 status: changeStatuses[file.status].gitStatus,

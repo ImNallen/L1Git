@@ -132,7 +132,7 @@ pub struct Comparison {
 impl Comparison {
     pub fn commit(oid: impl Into<String>) -> Self {
         Self {
-            base: Base::FirstParent,
+            base: Base::FirstParent {},
             target: Target::Commit { oid: oid.into() },
         }
     }
@@ -148,7 +148,7 @@ impl Comparison {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
 pub enum Base {
-    FirstParent,
+    FirstParent {},
     Commit { oid: String },
 }
 

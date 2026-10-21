@@ -310,6 +310,19 @@ describe("real Rust transport contract", () => {
       status: 400,
       error: expect.stringContaining("unknown field `extra`") as string,
     });
+    expect(
+      await rejected({
+        op: "commitDetail",
+        path: fixture.repository,
+        comparison: {
+          base: { kind: "firstParent", oid: root.oid },
+          target: { kind: "commit", oid: merge.oid },
+        },
+      }),
+    ).toEqual({
+      status: 400,
+      error: expect.stringContaining("unknown field `oid`") as string,
+    });
   });
 
   it("reads text, binary, and root file patches and rejects unchanged paths", async () => {

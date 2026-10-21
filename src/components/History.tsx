@@ -570,28 +570,35 @@ export function History({
     setMenu({ x: event.clientX, y: event.clientY, commit: null });
   }
 
-  function clickRow(event: MouseEvent, row: HistoryRow) {
-    const picked = rowSelection(row);
-    const anchor = compare?.anchor ?? selection;
-    const next =
-      anchor !== null && (mac ? event.metaKey : event.ctrlKey)
-        ? compareRows(rows, snapshot.root, anchor, picked)
-        : null;
-    if (next) onCompare(next);
-    else onSelect(picked);
-    tableRef.current?.focus({ preventScroll: true });
-  }
-
-  const [mark, setMark] = useState<{
+  const [pick, setPick] = useState<{
     root: RepositoryRoot;
     oid: Oid;
   } | null>(null);
 
+  function startCompare(next: Compare) {
+    setPick(null);
+    onCompare(next);
+  }
+
+  function clickRow(event: MouseEvent, row: HistoryRow) {
+    const clicked = rowSelection(row);
+    const anchor = compare?.anchor ?? selection;
+    const modifier = mac
+      ? event.metaKey && !event.ctrlKey
+      : event.ctrlKey && !event.metaKey;
+    const next =
+      anchor !== null && modifier
+        ? compareRows(snapshot.commits, snapshot.root, anchor, clicked)
+        : null;
+    if (next) startCompare(next);
+    else onSelect(clicked);
+    tableRef.current?.focus({ preventScroll: true });
+  }
+
   function compareWithWorkingCopy(oid: Oid) {
-    const commit: Selection = { kind: "commit", oid };
-    onCompare({
+    startCompare({
       root: snapshot.root,
-      anchor: commit,
+      anchor: { kind: "commit", oid },
       base: oid,
       target: { kind: "worktree", root: snapshot.root },
     });
@@ -830,14 +837,10 @@ export function History({
       ? rowId(selectedId)
       : undefined;
   const menuCommit = menu?.commit ?? null;
-  const markedCommit =
-    mark?.root === snapshot.root
-      ? commits.find((commit) => commit.oid === mark.oid)
+  const picked =
+    pick?.root === snapshot.root
+      ? commits.find((commit) => commit.oid === pick.oid)
       : undefined;
-  const marked = markedCommit && {
-    oid: markedCommit.oid,
-    subject: markedCommit.subject,
-  };
 
   return (
     <section
@@ -919,6 +922,13 @@ export function History({
                 : comparedId === entry.id
                   ? "compared"
                   : null;
+              const isPick = picked?.oid === entry.id;
+              const note =
+                ring === "compared"
+                  ? "Compared with the selected row"
+                  : isPick
+                    ? "Picked for comparison"
+                    : null;
               const lit = searching
                 ? entry.kind === "commit" && matches.has(entry.id)
                 : highlight?.commits.has(entry.id);
@@ -935,7 +945,7 @@ export function History({
                     .join(" ") || undefined,
                 style: { gridTemplateColumns: layout.template },
                 "aria-rowindex": first + offset + 2,
-                "aria-selected": ring !== null,
+                "aria-selected": selected,
                 onClick: (event: MouseEvent) => clickRow(event, entry),
                 onContextMenu: (event: MouseEvent) => {
                   event.preventDefault();
@@ -954,6 +964,7 @@ export function History({
                 return (
                   <tr key={entry.id} {...rowProps}>
                     <td role="gridcell" className="ref-cell">
+                      {note && <span className="visually-hidden">{note}</span>}
                       <span className="ref-badges">
                         <span
                           className="ref-badge worktree"
@@ -999,6 +1010,7 @@ export function History({
               return (
                 <tr key={commit.oid} {...rowProps}>
                   <td role="gridcell" className="ref-cell">
+                    {note && <span className="visually-hidden">{note}</span>}
                     {label && (
                       <span
                         className="ref-badges"
@@ -1034,6 +1046,13 @@ export function History({
                       tabIndex={-1}
                       aria-label={`${commit.subject}, ${commit.author}, ${commit.oid.slice(0, 7)}`}
                     >
+                      {isPick && (
+                        <Pin
+                          className="pick-mark"
+                          size={12}
+                          aria-hidden="true"
+                        />
+                      )}
                       <span className="commit-subject" title={commit.subject}>
                         {commit.subject || "(no subject)"}
                       </span>
@@ -1094,39 +1113,45 @@ export function History({
                 <GitCompareArrows size={14} />
                 <span>Compare with working copy</span>
               </button>
-              {marked && marked.oid !== menuCommit ? (
+              {picked && picked.oid !== menuCommit && (
                 <button
                   role="menuitem"
-                  title={marked.subject}
+                  title={picked.subject}
                   onClick={() => {
                     const next = compareRows(
-                      rows,
+                      snapshot.commits,
                       snapshot.root,
                       { kind: "commit", oid: menuCommit },
-                      { kind: "commit", oid: marked.oid },
+                      { kind: "commit", oid: picked.oid },
                     );
-                    if (next) onCompare(next);
-                    setMark(null);
+                    if (next) startCompare(next);
                     closeMenu();
                     tableRef.current?.focus({ preventScroll: true });
                   }}
                 >
                   <GitCompareArrows size={14} />
-                  <span>Compare with {marked.oid.slice(0, 7)}</span>
-                </button>
-              ) : (
-                <button
-                  role="menuitem"
-                  onClick={() => {
-                    setMark({ root: snapshot.root, oid: menuCommit });
-                    closeMenu();
-                    tableRef.current?.focus({ preventScroll: true });
-                  }}
-                >
-                  <Pin size={14} />
-                  <span>Pick for comparison</span>
+                  <span>Compare with {picked.oid.slice(0, 7)}</span>
                 </button>
               )}
+              <button
+                role="menuitem"
+                onClick={() => {
+                  setPick(
+                    picked?.oid === menuCommit
+                      ? null
+                      : { root: snapshot.root, oid: menuCommit },
+                  );
+                  closeMenu();
+                  tableRef.current?.focus({ preventScroll: true });
+                }}
+              >
+                <Pin size={14} />
+                <span>
+                  {picked?.oid === menuCommit
+                    ? "Clear pick"
+                    : "Pick for comparison"}
+                </span>
+              </button>
               <div className="menu-heading" role="presentation">
                 Columns
               </div>
