@@ -9,6 +9,32 @@
 .history[hidden] {
   display: none;
 }
+.history-search {
+  height: 36px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px 0 14px;
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+  background: var(--panel-header);
+}
+.history-search input {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  margin-left: 4px;
+  background: none;
+  border: none;
+  font-size: 12px;
+}
+.history-search-count {
+  font-size: 11px;
+  white-space: nowrap;
+  margin-right: 4px;
+  font-variant-numeric: tabular-nums;
+}
 .history-scroll {
   flex: 1;
   min-height: 0;
@@ -151,10 +177,10 @@
   gap: 4px;
   min-width: 0;
 }
-.ref-cell,
+.ref-cell > *,
 .commit-description,
-.text-cell,
-.changes-cell,
+.text-cell > *,
+.changes-cell > *,
 .graph-node,
 .graph-cell path {
   transition: opacity 120ms ease-out;
@@ -162,7 +188,13 @@
 .history-table.highlighting
   tbody
   tr:not(.lit)
-  :is(.ref-cell, .commit-description, .text-cell, .changes-cell, .graph-node),
+  :is(
+    .ref-cell > *,
+    .commit-description,
+    .text-cell > *,
+    .changes-cell > *,
+    .graph-node
+  ),
 .graph-cell path.dim {
   opacity: 0.3;
 }

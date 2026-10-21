@@ -23,6 +23,7 @@ import { CommitInspector, InspectorFrame } from "./components/CommitInspector";
 import { FileDiffPane } from "./components/FileDiffPane";
 import type { DiffStyle } from "./components/FileDiffPane";
 import { History, HistoryPlaceholder } from "./components/History";
+import type { HistoryHandle } from "./components/History";
 import { PaneDivider } from "./components/PaneDivider";
 import { RepositoryTree } from "./components/RepositoryTree";
 import { trunkTips } from "./domain/highlight";
@@ -32,7 +33,7 @@ import { useExpandedRepositories } from "./expandedRepositories";
 import { useFetchSettings } from "./fetchSettings";
 import { useHistoryColumns } from "./historyColumns";
 import { repositoryWarnings, useOverview } from "./overview";
-import { macNative } from "./repositories";
+import { mac, macNative } from "./repositories";
 import { useRepositoryRefs } from "./useRepositoryRefs";
 import { useWorkspace } from "./useWorkspace";
 
@@ -80,6 +81,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   const sidebarToggleRef = useRef<HTMLButtonElement>(null);
   const inspectorToggleRef = useRef<HTMLButtonElement>(null);
   const settingsRef = useRef<HTMLButtonElement>(null);
+  const historyRef = useRef<HistoryHandle>(null);
   const leaveSettings = useCallback(() => {
     flushSync(() => setScreen("repository"));
     (sidebarOpen ? settingsRef : sidebarToggleRef).current?.focus();
@@ -252,8 +254,21 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
         event.preventDefault();
         setAdding(true);
       }
-      if (screen !== "repository") return;
-      if (!adding && fileOpen && event.key === "Escape") closeFile();
+      if (screen !== "repository" || adding) return;
+      if (fileOpen && event.key === "Escape") closeFile();
+      if (
+        !fileOpen &&
+        historyRef.current &&
+        (mac
+          ? event.metaKey && !event.ctrlKey
+          : event.ctrlKey && !event.metaKey) &&
+        !event.shiftKey &&
+        !event.altKey &&
+        event.key.toLowerCase() === "f"
+      ) {
+        event.preventDefault();
+        historyRef.current.openSearch();
+      }
     }
     window.addEventListener("keydown", keyboard);
     return () => window.removeEventListener("keydown", keyboard);
@@ -447,6 +462,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
               {snapshot ? (
                 <>
                   <History
+                    ref={historyRef}
                     snapshot={snapshot}
                     selectedOid={app.selectedOid}
                     revealSeq={jump?.seq ?? 0}

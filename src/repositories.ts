@@ -16,7 +16,8 @@ import {
 import type { Oid, RepositoryRoot, Side } from "./domain/repository";
 
 export const native = isTauri();
-export const macNative = native && navigator.userAgent.includes("Mac");
+export const mac = navigator.userAgent.includes("Mac");
+export const macNative = native && mac;
 
 type RepositoryRequest =
   | { op: "snapshot"; path: string }

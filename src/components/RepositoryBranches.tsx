@@ -12,6 +12,7 @@ import {
 import { branchTree } from "../domain/branchTree";
 import type { BranchTree } from "../domain/branchTree";
 import type { Branch, FullRef, RepositoryRefs } from "../domain/repository";
+import { normalizeSearch } from "../domain/search";
 import type { RootSync } from "../overview";
 import { SyncCounts } from "./SyncCounts";
 
@@ -46,7 +47,7 @@ export function RepositoryBranches({
   onJump,
 }: Props) {
   const matches = (branch: Branch) =>
-    repositoryMatches || branch.name.toLocaleLowerCase().includes(search);
+    repositoryMatches || normalizeSearch(branch.name).includes(search);
   const local = branches.filter((branch) => branch.kind === "local");
   const remote = branches.filter((branch) => branch.kind === "remote");
   const localShown = local.filter(matches);
