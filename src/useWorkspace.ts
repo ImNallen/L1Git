@@ -18,10 +18,11 @@ import {
   restoreSelection,
 } from "./domain/revisit";
 import type { RepositoryView, SnapshotCache } from "./domain/revisit";
+import { sameSelection } from "./domain/selection";
+import type { Selection } from "./domain/selection";
 import type {
   CommitDetail,
   FilePatch,
-  Oid,
   Problem,
   RepositoryRoot,
   RepositorySnapshot,
@@ -50,15 +51,29 @@ export type Workspace =
   | ReadyWorkspace;
 export type DetailState =
   | { kind: "empty" }
-  | { kind: "loading"; root: RepositoryRoot; oid: Oid }
-  | { kind: "ready"; root: RepositoryRoot; oid: Oid; detail: CommitDetail }
-  | { kind: "error"; root: RepositoryRoot; oid: Oid; error: Problem };
+  | { kind: "loading"; root: RepositoryRoot; selection: Selection }
+  | {
+      kind: "ready";
+      root: RepositoryRoot;
+      selection: Selection;
+      detail: CommitDetail;
+    }
+  | {
+      kind: "error";
+      root: RepositoryRoot;
+      selection: Selection;
+      error: Problem;
+    };
 /** `superseded` means another repository opened while this one was read. */
 export type Added =
   | { kind: "opened"; root: RepositoryRoot }
   | { kind: "superseded" }
   | { kind: "failed"; problem: Problem };
-type FileKey = { root: RepositoryRoot; oid: Oid; path: string };
+type FileKey = { root: RepositoryRoot; selection: Selection; path: string };
+type CommitKey = {
+  root: RepositoryRoot;
+  selection: Extract<Selection, { kind: "commit" }>;
+};
 export type FileDiffState =
   | { kind: "closed" }
   | ({ kind: "loading" } & FileKey)
@@ -81,7 +96,7 @@ export function useWorkspace() {
   const catalogRef = useRef(catalog);
   const [persistenceError, setPersistenceError] = useState(saved.error);
   const [workspace, setWorkspace] = useState<Workspace>({ kind: "empty" });
-  const [selectedOid, setSelectedOid] = useState<Oid | null>(null);
+  const [selection, setSelection] = useState<Selection | null>(null);
   const [detail, setDetail] = useState<DetailState>({ kind: "empty" });
   const [detailAttempt, setDetailAttempt] = useState(0);
   const [fileDiff, setFileDiff] = useState<FileDiffState>({ kind: "closed" });
@@ -119,7 +134,7 @@ export function useWorkspace() {
     (snapshot: RepositorySnapshot, rememberRepository: boolean) => {
       snapshots.current = cacheSnapshot(snapshots.current, snapshot);
       setWorkspace({ kind: "ready", snapshot, error: null });
-      setSelectedOid((selected) => restoreSelection(snapshot, selected));
+      setSelection((selected) => restoreSelection(snapshot, selected));
       if (rememberRepository) save(remember(catalogRef.current, snapshot));
     },
     [save],
@@ -128,7 +143,7 @@ export function useWorkspace() {
   const selectRepository = useCallback(
     async (path: RepositoryRoot) => {
       const id = ++requestId.current;
-      const remembered = views.current.get(path)?.selectedOid ?? null;
+      const remembered = views.current.get(path)?.selection ?? null;
       const cached = snapshots.current.get(path);
       const previous: ReadyWorkspace | null = cached
         ? { kind: "ready", snapshot: cached, error: null }
@@ -136,13 +151,13 @@ export function useWorkspace() {
       if (previous) {
         snapshots.current = cacheSnapshot(snapshots.current, previous.snapshot);
         setWorkspace({ kind: "loading", path, previous });
-        setSelectedOid(restoreSelection(previous.snapshot, remembered));
+        setSelection(restoreSelection(previous.snapshot, remembered));
       } else {
         const name =
           catalogRef.current.entries.find((entry) => entry.root === path)
             ?.name ?? path;
         setWorkspace({ kind: "opening", path, name });
-        setSelectedOid(remembered);
+        setSelection(remembered);
       }
       try {
         const snapshot = await repositories.snapshot(path);
@@ -177,7 +192,7 @@ export function useWorkspace() {
       if (id !== requestId.current || signal.aborted)
         return { kind: "superseded" };
       requestId.current++;
-      setSelectedOid(views.current.get(snapshot.root)?.selectedOid ?? null);
+      setSelection(views.current.get(snapshot.root)?.selection ?? null);
       accept(snapshot, true);
       return { kind: "opened", root: snapshot.root };
     } catch (error) {
@@ -213,7 +228,7 @@ export function useWorkspace() {
     ) {
       requestId.current++;
       setWorkspace({ kind: "empty" });
-      setSelectedOid(null);
+      setSelection(null);
     }
   };
 
@@ -221,9 +236,9 @@ export function useWorkspace() {
     if (root === null) return;
     views.current.set(root, {
       ...(views.current.get(root) ?? emptyView),
-      selectedOid,
+      selection,
     });
-  }, [root, selectedOid]);
+  }, [root, selection]);
 
   const scrollTopOf = useCallback(
     (root: RepositoryRoot) => views.current.get(root)?.scrollTop ?? 0,
@@ -240,46 +255,55 @@ export function useWorkspace() {
   );
 
   const [detailReader] = useState(() =>
-    latestReader<{ root: RepositoryRoot; oid: Oid }, CommitDetail>({
-      read: (key) => repositories.commitDetail(key.root, key.oid),
+    latestReader<CommitKey, CommitDetail>({
+      read: (key) => repositories.commitDetail(key.root, key.selection.oid),
       deliver: (key, outcome) =>
         setDetail(
           outcome.ok
             ? { kind: "ready", ...key, detail: outcome.value }
             : { kind: "error", ...key, error: problemFrom(outcome.error) },
         ),
-      same: (left, right) => left.root === right.root && left.oid === right.oid,
+      same: (left, right) =>
+        left.root === right.root && left.selection.oid === right.selection.oid,
       stallMs: 1000,
       maxReads: 2,
     }),
   );
 
   useEffect(() => {
-    if (root === null || selectedOid === null) {
+    if (root === null || selection?.kind !== "commit") {
       detailReader.want(null);
       setDetail({ kind: "empty" });
       return;
     }
-    detailReader.want({ root, oid: selectedOid });
-    setDetail({ kind: "loading", root, oid: selectedOid });
-  }, [root, selectedOid, detailAttempt, detailReader]);
+    detailReader.want({ root, selection });
+    setDetail({ kind: "loading", root, selection });
+  }, [root, selection, detailAttempt, detailReader]);
 
   useEffect(() => {
     setFileDiff({ kind: "closed" });
-  }, [root, selectedOid]);
+  }, [root, selection]);
 
   const closeFile = useCallback(() => setFileDiff({ kind: "closed" }), []);
 
+  const select = useCallback(
+    (next: Selection) =>
+      setSelection((previous) =>
+        sameSelection(previous, next) ? previous : next,
+      ),
+    [],
+  );
+
   const openFile = (path: string) => {
-    if (root === null || selectedOid === null) return;
-    const key: FileKey = { root, oid: selectedOid, path };
+    if (root === null || selection?.kind !== "commit") return;
+    const key: FileKey = { root, selection, path };
     const pending = (state: FileDiffState) =>
       state.kind === "loading" &&
       state.root === key.root &&
-      state.oid === key.oid &&
+      sameSelection(state.selection, key.selection) &&
       state.path === key.path;
     setFileDiff({ kind: "loading", ...key });
-    void repositories.filePatch(key.root, key.oid, key.path).then(
+    void repositories.filePatch(key.root, selection.oid, key.path).then(
       (patch) =>
         setFileDiff((state) =>
           pending(state) ? { kind: "ready", ...key, patch } : state,
@@ -295,7 +319,10 @@ export function useWorkspace() {
 
   useEffect(() => {
     if (pendingOpen === null) return;
-    if (pendingOpen.root !== root || pendingOpen.oid !== selectedOid) {
+    if (
+      pendingOpen.root !== root ||
+      !sameSelection(pendingOpen.selection, selection)
+    ) {
       setPendingOpen(null);
       return;
     }
@@ -303,30 +330,30 @@ export function useWorkspace() {
       detail.kind === "empty" ||
       detail.kind === "loading" ||
       detail.root !== root ||
-      detail.oid !== selectedOid
+      !sameSelection(detail.selection, selection)
     )
       return;
     setPendingOpen(null);
     if (detail.kind === "error") return;
     const path = firstChangedPath(detail.detail.files);
     if (path !== undefined) openFile(path);
-  }, [pendingOpen, detail, root, selectedOid]);
+  }, [pendingOpen, detail, root, selection]);
 
   return {
     workspace,
     current,
     catalog,
     persistenceError,
-    selectedOid,
-    setSelectedOid,
+    selection,
+    select,
     detail,
     retryDetail: () => setDetailAttempt((attempt) => attempt + 1),
     fileDiff,
     openFile,
     cancelOpenFirstFile: () => setPendingOpen(null),
     openFirstFile: () => {
-      if (root !== null && selectedOid !== null)
-        setPendingOpen({ root, oid: selectedOid });
+      if (root !== null && selection !== null)
+        setPendingOpen({ root, selection });
     },
     closeFile,
     selectRepository,

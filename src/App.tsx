@@ -30,7 +30,9 @@ import { PaneDivider } from "./components/PaneDivider";
 import { RepositoryTree } from "./components/RepositoryTree";
 import { trunkTips } from "./domain/highlight";
 import { readyAdvances } from "./domain/overview";
-import type { Branch, FullRef, Oid, RepositoryRoot } from "./domain/repository";
+import type { Branch, FullRef, RepositoryRoot } from "./domain/repository";
+import { sameSelection } from "./domain/selection";
+import type { Selection } from "./domain/selection";
 import { NO_RULE, visibleCommits } from "./domain/visibility";
 import type { VisibilityRule } from "./domain/visibility";
 import { useExpandedRepositories } from "./expandedRepositories";
@@ -90,7 +92,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     flushSync(() => setScreen("repository"));
     (sidebarOpen ? settingsRef : sidebarToggleRef).current?.focus();
   }, [sidebarOpen]);
-  const { workspace, current, fileDiff, closeFile, setSelectedOid } = app;
+  const { workspace, current, fileDiff, closeFile } = app;
   const fileOpen = fileDiff.kind !== "closed";
   const busy = workspace.kind === "loading" || workspace.kind === "opening";
   const snapshot = current?.snapshot ?? null;
@@ -212,7 +214,8 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     closeFile();
     const pending = root !== snapshot?.root;
     if (pending) showRepository(root);
-    else if (visibleOids.has(branch.oid)) setSelectedOid(branch.oid);
+    else if (visibleOids.has(branch.oid))
+      app.select({ kind: "commit", oid: branch.oid });
     setSidebarJump({ root, reference: branch.reference });
     setLastBranch((previous) => new Map(previous).set(root, branch.reference));
     setJump((previous) => ({
@@ -222,9 +225,9 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       pending,
     }));
   }
-  function select(oid: Oid) {
+  function select(next: Selection) {
     setSidebarJump(null);
-    setSelectedOid(oid);
+    app.select(next);
   }
   function setRule(root: RepositoryRoot, next: VisibilityRule) {
     setSidebarJump(null);
@@ -233,7 +236,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   function showBranch(root: RepositoryRoot, branch: Branch) {
     setSidebarJump(null);
     visibility.reveal(root, branch.reference);
-    setSelectedOid(branch.oid);
+    app.select({ kind: "commit", oid: branch.oid });
     setJump((previous) => ({
       root,
       reference: branch.reference,
@@ -289,10 +292,11 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       const branch = snapshot.branches.find(
         (branch) => branch.reference === jump.reference,
       );
-      if (branch && visibleOids.has(branch.oid)) setSelectedOid(branch.oid);
+      if (branch && visibleOids.has(branch.oid))
+        app.select({ kind: "commit", oid: branch.oid });
       setJump({ ...jump, pending: false, seq: jump.seq + 1 });
     }
-  }, [jump, snapshot, visibleOids, app.activeRoot, setSelectedOid]);
+  }, [jump, snapshot, visibleOids, app.activeRoot, app.select]);
   useEffect(() => {
     function keyboard(event: KeyboardEvent) {
       if (screen === "settings") {
@@ -363,7 +367,9 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
             refs={branchRefs.refs}
             activePath={screen === "repository" ? activePath : null}
             highlighted={
-              snapshot && jumped !== null && jumped.oid === app.selectedOid
+              snapshot &&
+              jumped !== null &&
+              sameSelection(app.selection, { kind: "commit", oid: jumped.oid })
                 ? { root: snapshot.root, reference: jumped.reference }
                 : null
             }
@@ -537,7 +543,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                     visibleCommits={visible}
                     visibleOids={visibleOids}
                     rule={rule}
-                    selectedOid={app.selectedOid}
+                    selection={app.selection}
                     revealSeq={jump?.seq ?? 0}
                     onSelect={select}
                     onOpenFirstFile={app.openFirstFile}
@@ -642,7 +648,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                   <CommitInspector
                     state={app.detail}
                     root={snapshot.root}
-                    selectedOid={app.selectedOid}
+                    selection={app.selection}
                     snapshot={snapshot}
                     onSelect={select}
                     selectedFile={fileOpen ? fileDiff.path : null}

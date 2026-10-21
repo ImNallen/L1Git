@@ -1,4 +1,5 @@
-import type { Oid, RepositoryRoot, RepositorySnapshot } from "./repository";
+import type { RepositoryRoot, RepositorySnapshot } from "./repository";
+import type { Selection } from "./selection";
 
 /** A snapshot can hold 50,000 commits, so only a few stay in memory. */
 export const SNAPSHOT_CACHE_SIZE = 8;
@@ -7,9 +8,9 @@ export const SNAPSHOT_CACHE_SIZE = 8;
 export type SnapshotCache = ReadonlyMap<RepositoryRoot, RepositorySnapshot>;
 
 /** What a repository showed when it was last open. */
-export type RepositoryView = { selectedOid: Oid | null; scrollTop: number };
+export type RepositoryView = { selection: Selection | null; scrollTop: number };
 
-export const emptyView: RepositoryView = { selectedOid: null, scrollTop: 0 };
+export const emptyView: RepositoryView = { selection: null, scrollTop: 0 };
 
 export function cacheSnapshot(
   cache: SnapshotCache,
@@ -35,12 +36,19 @@ export function evictSnapshot(
   return next;
 }
 
-/** The remembered commit if the snapshot still has it, else the newest. */
+/** The remembered selection if the snapshot still has it, else the newest commit. */
 export function restoreSelection(
-  snapshot: Pick<RepositorySnapshot, "commits">,
-  remembered: Oid | null,
-): Oid | null {
-  return snapshot.commits.some((commit) => commit.oid === remembered)
-    ? remembered
-    : (snapshot.commits[0]?.oid ?? null);
+  snapshot: Pick<RepositorySnapshot, "commits" | "worktrees">,
+  remembered: Selection | null,
+): Selection | null {
+  const kept =
+    remembered?.kind === "commit"
+      ? snapshot.commits.some((commit) => commit.oid === remembered.oid)
+      : remembered?.kind === "worktree" &&
+        snapshot.worktrees.some(
+          (worktree) => worktree.root === remembered.root,
+        );
+  if (kept) return remembered;
+  const newest = snapshot.commits[0];
+  return newest ? { kind: "commit", oid: newest.oid } : null;
 }

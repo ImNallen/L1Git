@@ -2,19 +2,30 @@ import { describe, expect, it } from "vitest";
 import { oidSchema, rootSchema, snapshotSchema } from "./repository";
 import { cacheSnapshot, evictSnapshot, restoreSelection } from "./revisit";
 import type { SnapshotCache } from "./revisit";
+import type { Selection } from "./selection";
 
 const a = oidSchema.parse("a".repeat(40));
 const b = oidSchema.parse("b".repeat(40));
 const gone = oidSchema.parse("c".repeat(40));
 
-function snapshot(root: string, oids: string[] = [], observedAt = 0) {
+function snapshot(
+  root: string,
+  oids: string[] = [],
+  observedAt = 0,
+  worktrees: string[] = [],
+) {
   return snapshotSchema.parse({
     root,
     name: root.slice(1),
     head: { kind: "unborn", reference: "refs/heads/main" },
     branches: [],
     tags: [],
-    worktrees: [],
+    worktrees: worktrees.map((worktree) => ({
+      root: worktree,
+      name: worktree.slice(1),
+      head: { kind: "unborn", reference: "refs/heads/main" },
+      current: false,
+    })),
     remotes: [],
     commits: oids.map((oid) => ({
       oid,
@@ -74,13 +85,41 @@ describe("snapshot cache", () => {
 });
 
 describe("restored selection", () => {
+  const commit = (oid: typeof a): Selection => ({ kind: "commit", oid });
+  const worktree = (root: string): Selection => ({
+    kind: "worktree",
+    root: rootSchema.parse(root),
+  });
+
   it("keeps a remembered commit that is still in the snapshot", () => {
-    expect(restoreSelection(snapshot("/a", [a, b]), b)).toBe(b);
+    const remembered = commit(b);
+    expect(restoreSelection(snapshot("/a", [a, b]), remembered)).toBe(
+      remembered,
+    );
   });
 
   it("falls back to the newest commit", () => {
-    expect(restoreSelection(snapshot("/a", [a, b]), gone)).toBe(a);
-    expect(restoreSelection(snapshot("/a", [a, b]), null)).toBe(a);
-    expect(restoreSelection(snapshot("/a"), b)).toBe(null);
+    expect(restoreSelection(snapshot("/a", [a, b]), commit(gone))).toEqual(
+      commit(a),
+    );
+    expect(restoreSelection(snapshot("/a", [a, b]), null)).toEqual(commit(a));
+    expect(restoreSelection(snapshot("/a"), commit(b))).toBe(null);
+  });
+
+  it("keeps a remembered worktree that the snapshot still lists", () => {
+    const remembered = worktree("/a-feature");
+    expect(
+      restoreSelection(snapshot("/a", [a, b], 0, ["/a-feature"]), remembered),
+    ).toBe(remembered);
+  });
+
+  it("falls back to the newest commit when a remembered worktree is gone", () => {
+    expect(
+      restoreSelection(
+        snapshot("/a", [a, b], 0, ["/a-other"]),
+        worktree("/a-feature"),
+      ),
+    ).toEqual(commit(a));
+    expect(restoreSelection(snapshot("/a"), worktree("/a-feature"))).toBe(null);
   });
 });
