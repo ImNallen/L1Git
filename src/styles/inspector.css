@@ -106,9 +106,11 @@
   overflow-wrap: anywhere;
   max-width: 100%;
 }
-.inspector-refs .ref-badge.stash {
+.inspector-refs .ref-badge:is(.stash, .off-graph) {
   color: var(--text-secondary);
   border: 1px solid var(--border-control);
+}
+.inspector-refs .ref-badge.stash {
   font-family: var(--mono);
 }
 .commit-metadata {

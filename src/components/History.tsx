@@ -26,8 +26,7 @@ import { mac } from "../repositories";
 import { compareRows, comparedRowId } from "../domain/comparison";
 import type { Compare } from "../domain/comparison";
 import { diffstatBlocks } from "../domain/diffstat";
-import { buildGraph } from "../domain/graph";
-import type { GraphRow, RowId } from "../domain/graph";
+import type { Graph, GraphRow, RowId } from "../domain/graph";
 import { highlightBranch } from "../domain/highlight";
 import type { RowHighlight } from "../domain/highlight";
 import {
@@ -357,12 +356,18 @@ function badge(label: RefLabel): { Icon: LucideIcon; title: string } {
   }
 }
 
-function RefBadge({ label, lane }: { label: RefLabel; lane: number }) {
+export function RefBadge({
+  label,
+  lane,
+}: {
+  label: RefLabel;
+  lane: number | null;
+}) {
   const { Icon, title } = badge(label);
   return (
     <span
-      className={`ref-badge ${label.kind}`}
-      style={{ background: color(lane) }}
+      className={`ref-badge ${label.kind}${lane === null ? " off-graph" : ""}`}
+      style={lane === null ? undefined : { background: color(lane) }}
       title={title}
     >
       <Icon size={11} />
@@ -434,6 +439,7 @@ type Props = {
   visibleCommits: readonly Commit[];
   visibleOids: ReadonlySet<Oid>;
   rows: readonly HistoryRow[];
+  graph: Graph;
   rule: VisibilityRule;
   selection: Selection | null;
   compare: Compare | null;
@@ -460,6 +466,7 @@ export function History({
   visibleCommits: commits,
   visibleOids: known,
   rows,
+  graph,
   rule,
   selection,
   compare,
@@ -480,18 +487,6 @@ export function History({
   const selectedOid = selection?.kind === "commit" ? selection.oid : null;
   const selectedId = selectedRowId(selection);
   const comparedId = compare && comparedRowId(compare);
-  const graph = useMemo(
-    () =>
-      buildGraph(
-        rows,
-        commits === snapshot.commits
-          ? snapshot.squashes
-          : snapshot.squashes.filter(
-              (squash) => known.has(squash.commit) && known.has(squash.tip),
-            ),
-      ),
-    [rows, commits, known, snapshot.commits, snapshot.squashes],
-  );
   const labels = useMemo(
     () =>
       refLabels({
