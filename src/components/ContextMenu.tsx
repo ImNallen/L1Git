@@ -24,7 +24,7 @@ export function ContextMenu({
   y: number;
   label: string;
   ignoreScrollIn?: RefObject<HTMLElement | null>;
-  onClose: () => void;
+  onClose: (options: { returnFocus: boolean }) => void;
   children: ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -43,7 +43,7 @@ export function ContextMenu({
     menu.querySelector<HTMLElement>(ITEMS)?.focus();
   }, [x, y]);
   useEffect(() => {
-    const close = () => onCloseRef.current();
+    const close = () => onCloseRef.current({ returnFocus: true });
     const scrolled = (event: Event) => {
       if (
         !(event.target instanceof Node) ||
@@ -62,12 +62,18 @@ export function ContextMenu({
         close();
       }
     };
+    const closeOnFocusLeave = (event: FocusEvent) => {
+      if (event.target instanceof Node && !ref.current?.contains(event.target))
+        onCloseRef.current({ returnFocus: false });
+    };
+    window.addEventListener("focusin", closeOnFocusLeave, true);
     window.addEventListener("pointerdown", outside, true);
     window.addEventListener("keydown", key, true);
     window.addEventListener("scroll", scrolled, true);
     window.addEventListener("resize", close);
     window.addEventListener("blur", close);
     return () => {
+      window.removeEventListener("focusin", closeOnFocusLeave, true);
       window.removeEventListener("pointerdown", outside, true);
       window.removeEventListener("keydown", key, true);
       window.removeEventListener("scroll", scrolled, true);

@@ -417,7 +417,14 @@ function MoreRefs({ labels, lane }: { labels: RefLabel[]; lane: number }) {
   );
 }
 
-export type HistoryHandle = { openSearch: () => void; focus: () => void };
+export type HistoryHandle = {
+  openSearch: () => void;
+  focus: () => void;
+  picked: () => Oid | null;
+  pick: (oid: Oid | null) => void;
+  compareWithPick: (oid: Oid) => void;
+  compareWithWorkingCopy: (oid: Oid) => void;
+};
 
 type Search = { root: RepositoryRoot; query: string };
 
@@ -595,6 +602,17 @@ export function History({
     tableRef.current?.focus({ preventScroll: true });
   }
 
+  function compareWithPick(oid: Oid) {
+    if (!picked) return;
+    const next = compareRows(
+      snapshot.commits,
+      snapshot.root,
+      { kind: "commit", oid },
+      { kind: "commit", oid: picked.oid },
+    );
+    if (next) startCompare(next);
+  }
+
   function compareWithWorkingCopy(oid: Oid) {
     startCompare({
       root: snapshot.root,
@@ -700,6 +718,10 @@ export function History({
   }, [selectedId]);
 
   useImperativeHandle(ref, () => ({
+    picked: () => picked?.oid ?? null,
+    pick: (oid) => setPick(oid && { root: snapshot.root, oid }),
+    compareWithPick,
+    compareWithWorkingCopy,
     focus() {
       tableRef.current?.focus({ preventScroll: true });
     },
@@ -1095,9 +1117,9 @@ export function History({
           y={menu.y}
           label={menuCommit ? "Commit" : "History columns"}
           ignoreScrollIn={scrollRef}
-          onClose={() => {
+          onClose={({ returnFocus }) => {
             closeMenu();
-            tableRef.current?.focus({ preventScroll: true });
+            if (returnFocus) tableRef.current?.focus({ preventScroll: true });
           }}
         >
           {menuCommit && (
@@ -1118,13 +1140,7 @@ export function History({
                   role="menuitem"
                   title={picked.subject}
                   onClick={() => {
-                    const next = compareRows(
-                      snapshot.commits,
-                      snapshot.root,
-                      { kind: "commit", oid: menuCommit },
-                      { kind: "commit", oid: picked.oid },
-                    );
-                    if (next) startCompare(next);
+                    compareWithPick(menuCommit);
                     closeMenu();
                     tableRef.current?.focus({ preventScroll: true });
                   }}
