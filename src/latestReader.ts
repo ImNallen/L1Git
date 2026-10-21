@@ -1,8 +1,8 @@
-export type ReadOutcome<Value> =
+type ReadOutcome<Value> =
   | { ok: true; value: Value }
   | { ok: false; error: unknown };
 
-type Read<Key> = { key: Key; stalled: boolean };
+type InFlight<Key> = { key: Key; stalled: boolean };
 
 export function latestReader<Key, Value>({
   read,
@@ -18,19 +18,22 @@ export function latestReader<Key, Value>({
   maxReads: number;
 }): { want: (key: Key | null) => void } {
   let newest: Key | null = null;
-  let settled = false;
-  let latest: Read<Key> | null = null;
-  const running = new Set<Read<Key>>();
+  // A stalled read keeps its slot because backend reads cannot be cancelled, and
+  // that bounds the reads a hung backend can pile up. `delivered` marks the newest
+  // key as answered so the pump after delivery does not start another read.
+  let delivered = false;
+  let latest: InFlight<Key> | null = null;
+  const running = new Set<InFlight<Key>>();
 
   function pump() {
     const key = newest;
-    if (key === null || settled) return;
+    if (key === null || delivered) return;
     const newestInFlight =
       latest !== null && running.has(latest) && same(latest.key, key);
     const oneStillWorking = [...running].some((current) => !current.stalled);
     const atCap = running.size >= maxReads;
     if (newestInFlight || oneStillWorking || atCap) return;
-    const current: Read<Key> = { key, stalled: false };
+    const current: InFlight<Key> = { key, stalled: false };
     latest = current;
     running.add(current);
     const timer = setTimeout(() => {
@@ -43,12 +46,18 @@ export function latestReader<Key, Value>({
       const stillWanted =
         current === latest && newest !== null && same(newest, key);
       if (stillWanted) {
-        settled = true;
+        delivered = true;
         deliver(key, outcome);
       }
       pump();
     };
-    read(key).then(
+    let reading: Promise<Value>;
+    try {
+      reading = read(key);
+    } catch (error: unknown) {
+      reading = Promise.reject(error);
+    }
+    reading.then(
       (value) => finish({ ok: true, value }),
       (error: unknown) => finish({ ok: false, error }),
     );
@@ -57,7 +66,7 @@ export function latestReader<Key, Value>({
   return {
     want(key) {
       newest = key;
-      settled = false;
+      delivered = false;
       pump();
     },
   };

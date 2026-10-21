@@ -112,6 +112,29 @@ describe("latest reader", () => {
     expect(delivered).toEqual(["a=detail a"]);
   });
 
+  it("settles a read that throws before it returns a promise as an error", async () => {
+    const reads: string[] = [];
+    const delivered: string[] = [];
+    const reader = latestReader<string, string>({
+      read: (key) => {
+        reads.push(key);
+        if (key === "broken") throw new Error("spawn failed");
+        return Promise.resolve(`detail ${key}`);
+      },
+      deliver: (key, outcome) =>
+        delivered.push(`${key}=${outcome.ok ? outcome.value : "error"}`),
+      same: (left, right) => left === right,
+      stallMs: 1000,
+      maxReads: 2,
+    });
+    reader.want("broken");
+    for (let tick = 0; tick < 4; tick++) await Promise.resolve();
+    reader.want("next");
+    for (let tick = 0; tick < 4; tick++) await Promise.resolve();
+    expect(reads).toEqual(["broken", "next"]);
+    expect(delivered).toEqual(["broken=error", "next=detail next"]);
+  });
+
   it("delivers nothing after the wanted key is cleared", async () => {
     const { reader, delivered, finish } = controlled();
     reader.want("a");
