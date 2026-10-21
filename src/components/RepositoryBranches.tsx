@@ -46,6 +46,8 @@ declare module "react" {
 }
 
 const tagOrder = new Intl.Collator(undefined, { numeric: true });
+/** Git starts each stash message with the branch it was made on, which the title keeps. */
+const stashPrefix = /^(?:WIP on|On) [^:]*: /;
 
 type Props = {
   refs: RepositoryRefs;
@@ -185,7 +187,7 @@ export function RepositoryBranches({
         aria-current={selected ? "true" : undefined}
       >
         <Archive size={14} />
-        <span>{stash.message}</span>
+        <span>{stash.message.replace(stashPrefix, "")}</span>
         <small className="ref-detail">{stash.name}</small>
       </button>
     );
