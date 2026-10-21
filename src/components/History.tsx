@@ -37,6 +37,8 @@ import {
 } from "../domain/search";
 import { SHORT_OID_MIN_LENGTH, uniqueShortOids } from "../domain/shortOid";
 import { relativeTime } from "../domain/time";
+import { branchVisibility } from "../domain/visibility";
+import type { VisibilityRule } from "../domain/visibility";
 import type {
   Commit,
   LineStats,
@@ -342,6 +344,9 @@ type Search = { root: RepositoryRoot; query: string };
 type Props = {
   ref?: Ref<HistoryHandle>;
   snapshot: RepositorySnapshot;
+  /** The commits `rule` leaves visible, in history order. */
+  commits: readonly Commit[];
+  rule: VisibilityRule;
   selectedOid: Oid | null;
   revealSeq: number;
   onSelect: (oid: Oid) => void;
@@ -361,6 +366,8 @@ type Props = {
 export function History({
   ref,
   snapshot,
+  commits,
+  rule,
   selectedOid,
   revealSeq,
   onSelect,
@@ -374,16 +381,32 @@ export function History({
   visibleColumns,
   onToggleColumn,
 }: Props) {
-  const graph = useMemo(
-    () => buildGraph(snapshot.commits, snapshot.squashes),
-    [snapshot.commits, snapshot.squashes],
-  );
   const known = useMemo(
-    () => new Set(snapshot.commits.map((commit) => commit.oid)),
-    [snapshot.commits],
+    () => new Set(commits.map((commit) => commit.oid)),
+    [commits],
   );
-  const labels = useMemo(() => refLabels(snapshot), [snapshot]);
-  const commits = snapshot.commits;
+  const graph = useMemo(
+    () =>
+      buildGraph(
+        commits,
+        commits === snapshot.commits
+          ? snapshot.squashes
+          : snapshot.squashes.filter(
+              (squash) => known.has(squash.commit) && known.has(squash.tip),
+            ),
+      ),
+    [commits, known, snapshot.commits, snapshot.squashes],
+  );
+  const labels = useMemo(
+    () =>
+      refLabels({
+        ...snapshot,
+        branches: snapshot.branches.filter(
+          (branch) => branchVisibility(rule, branch.reference) !== "hidden",
+        ),
+      }),
+    [snapshot, rule],
+  );
   const [search, setSearch] = useState<Search | null>(null);
   const searchInput = useRef<HTMLInputElement>(null);
   if (search && search.root !== snapshot.root) setSearch(null);
@@ -399,8 +422,8 @@ export function History({
     () =>
       hovered === null || searching
         ? null
-        : highlightBranch(snapshot.commits, graph.rows, hovered, trunk),
-    [snapshot.commits, graph.rows, hovered, trunk, searching],
+        : highlightBranch(commits, graph.rows, hovered, trunk),
+    [commits, graph.rows, hovered, trunk, searching],
   );
   const hover = (oid: Oid) => {
     window.clearTimeout(hoverTimer.current);
@@ -416,7 +439,7 @@ export function History({
   useEffect(() => () => window.clearTimeout(hoverTimer.current), []);
   // A refresh can move or drop the hovered tip without unmounting its badge
   // under a still pointer, so no mouseleave arrives to clear it.
-  useLayoutEffect(unhover, [snapshot]);
+  useLayoutEffect(unhover, [snapshot, commits]);
   const commitsRef = useRef(commits);
   const rootRef = useRef(snapshot.root);
   const revealed = useRef<{
@@ -439,9 +462,9 @@ export function History({
   const short = useMemo(
     () =>
       shaShown
-        ? uniqueShortOids(commits.map((commit) => commit.oid))
+        ? uniqueShortOids(snapshot.commits.map((commit) => commit.oid))
         : new Map<Oid, string>(),
-    [commits, shaShown],
+    [snapshot.commits, shaShown],
   );
   const shaLength = useMemo(
     () =>
@@ -528,6 +551,14 @@ export function History({
       commitsRef.current.findIndex((commit) => commit.oid === selectedOid),
     );
   }, [snapshot.root, scrollTopOf, selectedOid, revealSeq, hidden]);
+
+  const ruleShown = useRef({ root: snapshot.root, rule });
+  useLayoutEffect(() => {
+    const last = ruleShown.current;
+    ruleShown.current = { root: snapshot.root, rule };
+    if (last.root === snapshot.root && last.rule !== rule)
+      revealCentered(commits.findIndex((commit) => commit.oid === selectedOid));
+  }, [snapshot.root, rule, commits, selectedOid]);
 
   useLayoutEffect(
     function refocusWhenDiffCloses() {

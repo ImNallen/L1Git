@@ -1,9 +1,16 @@
 import { Fragment } from "react";
+import type {
+  KeyboardEvent as ReactKeyboardEvent,
+  MouseEvent as ReactMouseEvent,
+} from "react";
 import {
   ChevronDown,
   ChevronRight,
   CircleCheck,
   Cloud,
+  Eye,
+  EyeOff,
+  Focus,
   Folder,
   FolderOpen,
   GitBranch,
@@ -13,7 +20,10 @@ import { branchTree } from "../domain/branchTree";
 import type { BranchTree } from "../domain/branchTree";
 import type { Branch, FullRef, RepositoryRefs } from "../domain/repository";
 import { normalizeSearch } from "../domain/search";
+import { branchVisibility, toggleRule } from "../domain/visibility";
+import type { VisibilityRule } from "../domain/visibility";
 import type { RootSync } from "../overview";
+import { opensMenu } from "./ContextMenu";
 import { SyncCounts } from "./SyncCounts";
 
 declare module "react" {
@@ -34,6 +44,12 @@ type Props = {
   overrides: ReadonlyMap<string, boolean>;
   onOverride: (key: string, open: boolean) => void;
   onJump: (branch: Branch) => void;
+  rule: VisibilityRule;
+  onRule: (rule: VisibilityRule) => void;
+  onMenu: (
+    event: ReactMouseEvent<HTMLElement> | ReactKeyboardEvent<HTMLElement>,
+    branch: Branch,
+  ) => void;
 };
 
 export function RepositoryBranches({
@@ -45,6 +61,9 @@ export function RepositoryBranches({
   overrides,
   onOverride,
   onJump,
+  rule,
+  onRule,
+  onMenu,
 }: Props) {
   const matches = (branch: Branch) =>
     repositoryMatches || normalizeSearch(branch.name).includes(search);
@@ -112,24 +131,60 @@ export function RepositoryBranches({
         ? Cloud
         : GitBranch;
     const selected = highlighted === branch.reference;
+    const state = branchVisibility(rule, branch.reference);
+    const toggle =
+      state === "soloed" || (state === "shown" && rule.kind === "solo")
+        ? {
+            kind: "solo" as const,
+            Icon: Focus,
+            label: `${state === "soloed" ? "Stop soloing" : "Solo"} ${branch.name}`,
+          }
+        : {
+            kind: "hide" as const,
+            Icon: state === "hidden" ? EyeOff : Eye,
+            label: `${state === "hidden" ? "Show" : "Hide"} ${branch.name}`,
+          };
     return (
-      <button
-        className={`branch-row ${selected ? "selected" : ""} ${checkedOut ? "head" : ""}`}
-        key={branch.reference}
-        style={{ "--depth": depth }}
-        onClick={() => onJump(branch)}
-        title={`${branch.reference}${branch.kind === "local" && branch.upstream ? ` · Tracks ${branch.upstream}` : ""} · Show in graph`}
-        aria-current={selected ? "true" : undefined}
-      >
-        <BranchIcon size={14} />
-        <span>{branch.name.slice(branch.name.lastIndexOf("/") + 1)}</span>
-        {checkedOut && (
-          <span className="branch-head" aria-label="Checked-out branch">
-            HEAD
-          </span>
-        )}
-        {counts && <SyncCounts divergence={counts} />}
-      </button>
+      <div className={`branch-item ${state}`} key={branch.reference}>
+        <button
+          className={`branch-row ${selected ? "selected" : ""} ${checkedOut ? "head" : ""}`}
+          style={{ "--depth": depth }}
+          onClick={() => onJump(branch)}
+          onContextMenu={(event) => onMenu(event, branch)}
+          onKeyDown={(event) => {
+            if (opensMenu(event)) onMenu(event, branch);
+          }}
+          title={`${branch.reference}${branch.kind === "local" && branch.upstream ? ` · Tracks ${branch.upstream}` : ""} · Show in graph`}
+          aria-current={selected ? "true" : undefined}
+          aria-description={
+            state === "shown"
+              ? undefined
+              : state === "hidden"
+                ? "Hidden in the graph"
+                : "Soloed in the graph"
+          }
+        >
+          <BranchIcon size={14} />
+          <span>{branch.name.slice(branch.name.lastIndexOf("/") + 1)}</span>
+          {checkedOut && (
+            <span className="branch-head" aria-label="Checked-out branch">
+              HEAD
+            </span>
+          )}
+          {counts && <SyncCounts divergence={counts} />}
+        </button>
+        <button
+          className="branch-visibility"
+          tabIndex={-1}
+          aria-label={toggle.label}
+          title={toggle.label}
+          onClick={() =>
+            onRule(toggleRule(rule, toggle.kind, branch.reference))
+          }
+        >
+          <toggle.Icon size={13} />
+        </button>
+      </div>
     );
   }
 

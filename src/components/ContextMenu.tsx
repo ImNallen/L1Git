@@ -1,8 +1,16 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { ReactNode, RefObject } from "react";
+import type {
+  KeyboardEvent as ReactKeyboardEvent,
+  ReactNode,
+  RefObject,
+} from "react";
 import { createPortal } from "react-dom";
 
 const ITEMS = "[role=menuitem], [role=menuitemcheckbox]";
+
+export function opensMenu(event: ReactKeyboardEvent): boolean {
+  return event.key === "ContextMenu" || (event.shiftKey && event.key === "F10");
+}
 
 export function ContextMenu({
   x,

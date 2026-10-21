@@ -3,6 +3,7 @@ import { flushSync } from "react-dom";
 import {
   ArrowLeft,
   CloudDownload,
+  EyeOff,
   FastForward,
   FolderGit2,
   Info,
@@ -15,6 +16,7 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import { useAppearance } from "./appearance";
+import { useBranchVisibility } from "./branchVisibility";
 import type { ThemeSettings } from "./themes/catalog";
 import { AppearanceSettings } from "./components/AppearanceSettings";
 import { AddRepositoryDialog } from "./components/AddRepositoryDialog";
@@ -28,7 +30,8 @@ import { PaneDivider } from "./components/PaneDivider";
 import { RepositoryTree } from "./components/RepositoryTree";
 import { trunkTips } from "./domain/highlight";
 import { readyAdvances } from "./domain/overview";
-import type { Branch, FullRef, RepositoryRoot } from "./domain/repository";
+import type { Branch, FullRef, Oid, RepositoryRoot } from "./domain/repository";
+import { NO_RULE, revealBranch, visibleCommits } from "./domain/visibility";
 import { useExpandedRepositories } from "./expandedRepositories";
 import { useFetchSettings } from "./fetchSettings";
 import { useHistoryColumns } from "./historyColumns";
@@ -96,10 +99,18 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     : opening && { root: opening.path, name: opening.name };
   const expansion = useExpandedRepositories(app.catalog);
   const historyColumns = useHistoryColumns();
+  const visibility = useBranchVisibility();
   const persistenceError =
     app.persistenceError ??
     expansion.persistenceError ??
-    historyColumns.persistenceError;
+    historyColumns.persistenceError ??
+    visibility.persistenceError;
+  const rule = snapshot ? visibility.ruleFor(snapshot.root) : NO_RULE;
+  const visible = useMemo(
+    () => (snapshot ? visibleCommits(snapshot.commits, snapshot, rule) : []),
+    [snapshot, rule],
+  );
+  const shows = (oid: Oid) => visible.some((commit) => commit.oid === oid);
   const branchRefs = useRepositoryRefs(
     expansion.expanded,
     snapshot,
@@ -139,6 +150,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     jumped !== null &&
     snapshot !== null &&
     !snapshot.commits.some((commit) => commit.oid === jumped.oid);
+  const jumpedHidden = jumped !== null && !jumpedUnloaded && !shows(jumped.oid);
   const refreshRef = useRef(app.refresh);
   const reloadRefsRef = useRef(branchRefs.reload);
   useEffect(() => {
@@ -178,14 +190,26 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     closeFile();
     const pending = root !== snapshot?.root;
     if (pending) showRepository(root);
-    else if (snapshot.commits.some((commit) => commit.oid === branch.oid))
-      setSelectedOid(branch.oid);
+    else if (shows(branch.oid)) setSelectedOid(branch.oid);
     setLastBranch((previous) => new Map(previous).set(root, branch.reference));
     setJump((previous) => ({
       root,
       reference: branch.reference,
       seq: (previous?.seq ?? 0) + 1,
       pending,
+    }));
+  }
+  function showBranch(root: RepositoryRoot, branch: Branch) {
+    visibility.setRule(
+      root,
+      revealBranch(visibility.ruleFor(root), branch.reference),
+    );
+    setSelectedOid(branch.oid);
+    setJump((previous) => ({
+      root,
+      reference: branch.reference,
+      seq: (previous?.seq ?? 0) + 1,
+      pending: false,
     }));
   }
   async function addRepository(path: string, signal: AbortSignal) {
@@ -232,14 +256,11 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       const branch = snapshot.branches.find(
         (branch) => branch.reference === jump.reference,
       );
-      if (
-        branch &&
-        snapshot.commits.some((commit) => commit.oid === branch.oid)
-      )
+      if (branch && visible.some((commit) => commit.oid === branch.oid))
         setSelectedOid(branch.oid);
       setJump({ ...jump, pending: false, seq: jump.seq + 1 });
     }
-  }, [jump, snapshot, app.activeRoot, setSelectedOid]);
+  }, [jump, snapshot, visible, app.activeRoot, setSelectedOid]);
   useEffect(() => {
     function keyboard(event: KeyboardEvent) {
       if (screen === "settings") {
@@ -320,9 +341,12 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
               expansion.setExpanded(root, !expansion.expanded.has(root))
             }
             onJump={jumpTo}
+            ruleFor={visibility.ruleFor}
+            onRule={visibility.setRule}
             onRemove={(root) => {
               app.removeRepository(root);
               expansion.setExpanded(root, false);
+              visibility.setRule(root, NO_RULE);
               setLastBranch((previous) => {
                 const next = new Map(previous);
                 next.delete(root);
@@ -449,6 +473,20 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                   <span>{warning}</span>
                 </div>
               ))}
+            {jumped && jumpedHidden && snapshot && (
+              <div className="notice info-notice" role="status">
+                <EyeOff size={14} />
+                <span>
+                  {jumped.name}{" "}
+                  {rule.kind === "solo"
+                    ? "is outside the soloed branches."
+                    : "is hidden in the graph."}
+                </span>
+                <button onClick={() => showBranch(snapshot.root, jumped)}>
+                  Show {jumped.name}
+                </button>
+              </div>
+            )}
             {jumped && jumpedUnloaded && snapshot && (
               <div className="notice info-notice" role="status">
                 <Info size={14} />
@@ -464,6 +502,8 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                   <History
                     ref={historyRef}
                     snapshot={snapshot}
+                    commits={visible}
+                    rule={rule}
                     selectedOid={app.selectedOid}
                     revealSeq={jump?.seq ?? 0}
                     onSelect={app.setSelectedOid}

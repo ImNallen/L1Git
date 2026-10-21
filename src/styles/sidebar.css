@@ -178,6 +178,46 @@ input::placeholder {
 .branch-row.head:not(.selected) > svg {
   color: var(--success);
 }
+.branch-item {
+  position: relative;
+}
+.branch-item > .branch-row {
+  padding-right: 34px;
+}
+.branch-item:hover > .branch-row:not(.selected, .head) {
+  background: var(--row-hover);
+}
+.branch-item.hidden > .branch-row {
+  color: var(--text-dim);
+}
+.branch-visibility {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  color: var(--muted);
+  opacity: 0;
+}
+.branch-item:hover > .branch-visibility,
+.branch-item.hidden > .branch-visibility,
+.branch-item.soloed > .branch-visibility {
+  opacity: 1;
+}
+.branch-visibility:hover {
+  background: var(--control-hover);
+  color: var(--text-secondary);
+}
+.branch-item.hidden > .branch-visibility {
+  color: var(--text-faint);
+}
+.branch-item.soloed > .branch-visibility {
+  color: var(--blue);
+}
 .branch-head {
   font-size: 8px;
   letter-spacing: 0.5px;
