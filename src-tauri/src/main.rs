@@ -20,6 +20,9 @@ async fn repository_run(
 }
 
 fn main() {
+    if let Err(error) = l1_git_core::stop_git_on_exit_signals() {
+        eprintln!("L1 Git cannot stop Git when a signal ends it: {error}");
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(Arc::new(Coordinator::default()))

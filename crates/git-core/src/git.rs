@@ -5,7 +5,7 @@ use std::{
     process::{Child, ChildStderr, Command, ExitStatus, Stdio},
     sync::{
         Mutex, MutexGuard, PoisonError,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         mpsc,
     },
     thread,
@@ -181,13 +181,13 @@ fn execute(
     let mut child = Group::spawn(command)?;
     // Writing from another thread keeps a full stdout pipe from blocking Git.
     let writer = child
-        .0
+        .child
         .stdin
         .take()
         .zip(input)
         .map(|(mut stdin, input)| thread::spawn(move || stdin.write_all(&input)));
-    let stderr = Stderr::drain(child.0.stderr.take());
-    let Some(mut pipe) = child.0.stdout.take() else {
+    let stderr = Stderr::drain(child.child.stderr.take());
+    let Some(mut pipe) = child.child.stdout.take() else {
         child.stop();
         return Err(read_failed());
     };
@@ -468,6 +468,7 @@ const LAST_EXIT_POLL: Duration = Duration::from_millis(1);
 const INHERITED_STDERR_WAIT: Duration = Duration::from_secs(1);
 const TERMINATE_GRACE: Duration = Duration::from_secs(2);
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(1);
+const SPAWN_POLL: Duration = Duration::from_micros(100);
 
 /// A process that Git starts, such as a clean filter, can keep stderr open
 /// after Git exits.
@@ -515,7 +516,7 @@ pub(crate) fn mutate(
         .stderr(Stdio::piped());
     let started = Instant::now();
     let mut child = Group::spawn(command)?;
-    let stderr = Stderr::drain(child.0.stderr.take());
+    let stderr = Stderr::drain(child.child.stderr.take());
     let failed = |error: io::Error| {
         RepositoryError::new(ErrorKind::GitFailed, format!("Could not run Git: {error}"))
     };
@@ -551,19 +552,40 @@ pub(crate) fn mutate(
 /// reaped, so a listed pid always names that command's group.
 static RUNNING: Mutex<Vec<u32>> = Mutex::new(Vec::new());
 static STOPPING: AtomicBool = AtomicBool::new(false);
+/// Commands between the `STOPPING` check and their entry in `RUNNING`.
+static SPAWNING: AtomicUsize = AtomicUsize::new(0);
 
 fn running() -> MutexGuard<'static, Vec<u32>> {
     RUNNING.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+struct Spawning;
+
+impl Spawning {
+    fn enter() -> Self {
+        SPAWNING.fetch_add(1, Ordering::SeqCst);
+        Self
+    }
+}
+
+impl Drop for Spawning {
+    fn drop(&mut self) {
+        SPAWNING.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
 /// A Git command in its own process group, so a deadline or `stop_all_git`
 /// stops every process it started, such as a clean filter.
-struct Group(Child);
+struct Group {
+    child: Child,
+    reaped: bool,
+}
 
 impl Group {
-    /// Refuses to start once `stop_all_git` has begun, and stops a command
-    /// that started while it began.
+    /// Refuses to start once `stop_all_git` has begun. `stop_all_git` waits for
+    /// a command that passed the check to be listed, so it reaches it.
     fn spawn(mut command: Command) -> Result<Self, RepositoryError> {
+        let spawning = Spawning::enter();
         if STOPPING.load(Ordering::SeqCst) {
             return Err(quitting());
         }
@@ -571,7 +593,11 @@ impl Group {
         std::os::unix::process::CommandExt::process_group(&mut command, 0);
         let child = command.spawn().map_err(spawn_error)?;
         running().push(child.id());
-        let group = Self(child);
+        drop(spawning);
+        let group = Self {
+            child,
+            reaped: false,
+        };
         if STOPPING.load(Ordering::SeqCst) {
             group.stop();
             return Err(quitting());
@@ -579,29 +605,20 @@ impl Group {
         Ok(group)
     }
 
-    /// Leaves the command unreaped, so its pid keeps naming its group.
-    #[cfg(unix)]
+    /// An error means the pid may no longer be this command's, so the caller
+    /// must not signal it.
     fn exited(&mut self) -> io::Result<bool> {
-        // SAFETY: `siginfo_t` is plain data that waitid(2) only writes to.
-        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
-        // SAFETY: `info` is a valid, writable `siginfo_t` for the whole call.
-        let status = unsafe {
-            libc::waitid(
-                libc::P_PID,
-                self.0.id(),
-                &mut info,
-                libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
-            )
-        };
-        if status != 0 {
-            return Err(io::Error::last_os_error());
+        if self.reaped {
+            return Err(io::Error::from(io::ErrorKind::NotFound));
         }
-        Ok(info.si_signo != 0)
-    }
-
-    #[cfg(not(unix))]
-    fn exited(&mut self) -> io::Result<bool> {
-        Ok(self.0.try_wait()?.is_some())
+        #[cfg(unix)]
+        {
+            child_exited(self.child.id())
+        }
+        #[cfg(not(unix))]
+        {
+            Ok(self.child.try_wait()?.is_some())
+        }
     }
 
     fn exited_within(&mut self, grace: Duration) -> bool {
@@ -617,58 +634,121 @@ impl Group {
         }
     }
 
+    fn signal(&mut self, signal: Signal) {
+        if self.exited().is_ok() {
+            signal_group(self.child.id(), signal);
+        }
+    }
+
+    fn wait(mut self) -> io::Result<ExitStatus> {
+        self.reap()
+    }
+
     /// After `stop_all_git` starts, a command that exited still has its group
     /// killed, so nothing it started outlives the process.
-    fn wait(mut self) -> io::Result<ExitStatus> {
+    fn reap(&mut self) -> io::Result<ExitStatus> {
         if STOPPING.load(Ordering::SeqCst) {
-            signal_group(self.0.id(), Signal::Kill);
+            self.signal(Signal::Kill);
         }
         self.unlist();
-        self.0.wait()
+        self.reaped = true;
+        self.child.wait()
     }
 
     fn unlist(&self) {
-        let pid = self.0.id();
+        let pid = self.child.id();
         running().retain(|listed| *listed != pid);
     }
 
     /// Git deletes its lock files on SIGTERM but cannot on SIGKILL. SIGKILL
     /// then reaches every process Git started, including one that ignores
-    /// SIGTERM. A process stuck in the kernel survives SIGKILL, so another
-    /// thread reaps it.
-    fn stop(mut self) {
-        signal_group(self.0.id(), Signal::Terminate);
+    /// SIGTERM. Returns whether Git exited.
+    fn halt(&mut self) -> bool {
+        self.signal(Signal::Terminate);
         let exited = self.exited_within(TERMINATE_GRACE);
-        signal_group(self.0.id(), Signal::Kill);
+        self.signal(Signal::Kill);
         #[cfg(not(unix))]
-        let _ = self.0.kill();
-        if exited || self.exited_within(TERMINATE_GRACE) {
-            let _ = self.wait();
+        let _ = self.child.kill();
+        exited || self.exited_within(TERMINATE_GRACE)
+    }
+
+    /// A process stuck in the kernel survives SIGKILL, so another thread
+    /// reaps it.
+    fn stop(mut self) {
+        if self.halt() {
+            let _ = self.reap();
         } else {
             thread::spawn(move || self.wait());
         }
     }
 }
 
+/// A command dropped without `wait` or `stop`, as during a panic, is stopped
+/// so it never runs outside `stop_all_git`.
 impl Drop for Group {
     fn drop(&mut self) {
-        self.unlist();
+        if self.reaped {
+            return;
+        }
+        if matches!(self.exited(), Ok(false)) && !self.halt() {
+            self.unlist();
+            return;
+        }
+        let _ = self.reap();
     }
 }
 
+/// Leaves the child unreaped, so its pid keeps naming its group. An error,
+/// such as ECHILD after another reaper took it, means the pid is no longer
+/// known to be this process's child.
+#[cfg(unix)]
+fn child_exited(pid: u32) -> io::Result<bool> {
+    // SAFETY: `siginfo_t` is plain data that waitid(2) only writes to.
+    let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+    // SAFETY: `info` is a valid, writable `siginfo_t` for the whole call.
+    let status = unsafe {
+        libc::waitid(
+            libc::P_PID,
+            pid,
+            &mut info,
+            libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+        )
+    };
+    if status != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(info.si_signo != 0)
+}
+
+#[cfg(not(unix))]
+fn child_exited(_pid: u32) -> io::Result<bool> {
+    Ok(false)
+}
+
 /// Stops every Git command L1 Git started that is still running, for a
-/// process that is about to exit.
+/// process that is about to exit. No Git command starts after it begins.
 pub fn stop_all_git() {
     STOPPING.store(true, Ordering::SeqCst);
-    for pid in running().iter() {
-        signal_group(*pid, Signal::Terminate);
+    let asked = Instant::now();
+    while SPAWNING.load(Ordering::SeqCst) > 0 && asked.elapsed() < SHUTDOWN_GRACE {
+        thread::sleep(SPAWN_POLL);
     }
+    signal_listed(Signal::Terminate);
     let asked = Instant::now();
     while !running().is_empty() && asked.elapsed() < SHUTDOWN_GRACE {
         thread::sleep(POLL);
     }
+    signal_listed(Signal::Kill);
+}
+
+/// A listed pid is unreaped, because `Group` unlists it before reaping and
+/// cannot while this holds the lock. The check also skips a child the system
+/// reaped on its own.
+fn signal_listed(signal: Signal) {
     for pid in running().iter() {
-        signal_group(*pid, Signal::Kill);
+        if child_exited(*pid).is_ok() {
+            signal_group(*pid, signal);
+        }
     }
 }
 
@@ -678,9 +758,9 @@ enum Signal {
     Kill,
 }
 
-/// Callers hold a pid that is unreaped or listed in `RUNNING`, so it cannot
-/// name another process group. A group below 2 would make kill(2) signal the
-/// caller's own group or every process.
+/// Callers first check that the pid is still this process's unreaped child,
+/// so it names the group that child leads. A group below 2 would make kill(2)
+/// signal the caller's own group or every process.
 #[cfg(unix)]
 fn signal_group(pid: u32, signal: Signal) {
     let Ok(group @ 2..) = i32::try_from(pid) else {

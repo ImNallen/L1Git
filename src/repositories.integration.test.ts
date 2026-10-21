@@ -1062,8 +1062,10 @@ describe("real Rust read deadlines", () => {
       const exited = once(hungBridge.bridge, "exit");
       const interrupted = performance.now();
       hungBridge.bridge.kill("SIGINT");
-      expect(await exited).toEqual([130, null]);
+      expect(await exited).toEqual([null, "SIGINT"]);
       expect(performance.now() - interrupted).toBeLessThan(1000);
+      for (let attempt = 0; attempt < 20 && alive(pid); attempt++)
+        await setTimeout(25);
       expect(alive(pid)).toBe(false);
     } finally {
       if (
