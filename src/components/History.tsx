@@ -40,7 +40,7 @@ import {
   matchCount,
   stepMatch,
 } from "../domain/search";
-import { rowSelection, selectedRowId } from "../domain/selection";
+import { historyPlace, rowSelection, selectedRowId } from "../domain/selection";
 import type { Selection } from "../domain/selection";
 import { changeSummary } from "../domain/worktree";
 import type { HistoryRow, WorktreeRow } from "../domain/worktree";
@@ -701,7 +701,7 @@ export function History({
     const landing = landingFromHidden(
       snapshot.commits,
       known,
-      selectedOid,
+      historyPlace(selection, snapshot.worktrees),
       action,
     );
     const next =
