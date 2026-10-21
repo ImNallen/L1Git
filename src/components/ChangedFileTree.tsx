@@ -30,13 +30,13 @@ type Props = {
 
 const ITEM_HEIGHT = FILE_TREE_DENSITY_PRESETS.compact.itemHeight;
 
-const keyboardFocusOnly = `
+export const keyboardFocusOnly = `
   [data-type="item"]:focus-visible {
     background-color: color-mix(in srgb, var(--primary-bg) 10%, var(--canvas));
     box-shadow: inset 2px 0 0 var(--blue);
   }
   [data-type="item"][data-item-selected="true"]:focus-visible {
-    background-color: var(--trees-selected-bg);
+    background-color: color-mix(in srgb, var(--primary-bg) 10%, var(--nav-selected-bg));
   }
 `;
 
