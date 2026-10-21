@@ -195,3 +195,33 @@ fn a_filter_that_leaves_stderr_open_stalls_neither_status_nor_a_tracked_patch() 
         "{patch}"
     );
 }
+
+#[test]
+fn file_history_and_blame_stop_at_their_deadlines() {
+    let repository = Repository::with_filter("cat");
+    let oid = fs::read_to_string(repository.root.join(".git/refs/heads/main")).unwrap();
+    let coordinator = Coordinator::default().cap_reads(Duration::from_millis(1));
+    let (path, oid, file) = (
+        repository.path(),
+        oid.trim().to_owned(),
+        "tracked.filtered".to_owned(),
+    );
+    for (request, subject) in [
+        (
+            Request::FileHistory {
+                path: path.clone(),
+                oid: oid.clone(),
+                file: file.clone(),
+            },
+            "Reading this file's history took longer than 1 ms",
+        ),
+        (
+            Request::Blame { path, oid, file },
+            "Reading this file's blame took longer than 1 ms",
+        ),
+    ] {
+        let error = run(&coordinator, request).unwrap_err();
+        assert!(matches!(error.kind, ErrorKind::TimedOut), "{error:?}");
+        assert!(error.message.starts_with(subject), "{}", error.message);
+    }
+}

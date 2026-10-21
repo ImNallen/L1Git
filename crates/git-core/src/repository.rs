@@ -16,7 +16,7 @@ use std::{
 pub const HISTORY_LIMIT: usize = 50_000;
 pub const PATCH_LIMIT: usize = 1024 * 1024;
 pub const LINE_STATS_LIMIT: usize = 500;
-const COMMIT_FORMAT: &str = "--format=%H%x00%P%x00%s%x00%an%x00%ae%x00%at";
+pub(crate) const COMMIT_FORMAT: &str = "--format=%H%x00%P%x00%s%x00%an%x00%ae%x00%at";
 const SQUASH_SCAN_LIMIT: usize = 2000;
 const SQUASH_BRANCH_LIMIT: usize = 1000;
 
@@ -258,7 +258,7 @@ fn worktrees(root: &Path, deadline: Deadline) -> Result<Vec<Worktree>, Repositor
     Ok(worktrees)
 }
 
-fn parse_commits(output: &[u8]) -> Result<Vec<Commit>, RepositoryError> {
+pub(crate) fn parse_commits(output: &[u8]) -> Result<Vec<Commit>, RepositoryError> {
     let output = output.strip_suffix(&[0]).unwrap_or(output);
     if output.is_empty() {
         return Ok(Vec::new());
@@ -612,6 +612,23 @@ fn patch_ids(
 }
 
 fn read_commit(root: &Path, oid: &str, deadline: Deadline) -> Result<Commit, RepositoryError> {
+    verify_commit(root, oid, deadline)?;
+    let output = git::read(
+        root,
+        &["log", "-1", COMMIT_FORMAT, "-z", oid, "--"],
+        deadline,
+    )?;
+    parse_commits(&output)?
+        .into_iter()
+        .next()
+        .ok_or_else(git::malformed)
+}
+
+pub(crate) fn verify_commit(
+    root: &Path,
+    oid: &str,
+    deadline: Deadline,
+) -> Result<(), RepositoryError> {
     if !matches!(oid.len(), 40 | 64) || !oid.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return Err(RepositoryError::new(
             ErrorKind::InvalidOid,
@@ -629,15 +646,7 @@ fn read_commit(root: &Path, oid: &str, deadline: Deadline) -> Result<Commit, Rep
             "This commit is no longer available. Refresh the repository.",
         ));
     }
-    let output = git::read(
-        root,
-        &["log", "-1", COMMIT_FORMAT, "-z", oid, "--"],
-        deadline,
-    )?;
-    parse_commits(&output)?
-        .into_iter()
-        .next()
-        .ok_or_else(git::malformed)
+    Ok(())
 }
 
 enum Ends {

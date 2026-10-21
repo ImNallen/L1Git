@@ -1,9 +1,9 @@
 use l1_git_core::{
-    Base, BaseDetail, Branch, ChangeStatus, Comparison, Conflict, ErrorKind, FilePatch,
-    HISTORY_LIMIT, Head, LINE_STATS_LIMIT, LineStats, MoveSide, Moved, RepositoryRefs, Side, Sides,
-    Squash, StatusEntry, SubmoduleState, Tag, Target, TargetDetail, Worktree, WorktreePatch,
-    WorktreeStatus, commit_detail, file_patch, line_stats, refs, snapshot, worktree_patch,
-    worktree_status,
+    Base, BaseDetail, Blame, BlameRange, Branch, ChangeStatus, Comparison, Conflict, ErrorKind,
+    FilePatch, HISTORY_LIMIT, Head, LINE_STATS_LIMIT, LineStats, MoveSide, Moved, RepositoryRefs,
+    Side, Sides, Squash, StatusEntry, SubmoduleState, Tag, Target, TargetDetail, Worktree,
+    WorktreePatch, WorktreeStatus, blame, commit_detail, file_history, file_patch, line_stats,
+    refs, snapshot, worktree_patch, worktree_status,
 };
 use std::{
     fs,
@@ -769,6 +769,243 @@ fn file_patch_reports_binary_and_oversized_files_without_patch_text() {
         file_patch(fixture.path(), &Comparison::commit(&oid), "large.txt").unwrap(),
         FilePatch::TooLarge { bytes: 1_190_129 }
     );
+}
+
+#[test]
+fn file_history_follows_a_rename_and_names_the_path_in_each_commit() {
+    let fixture = Fixture::new();
+    fixture.commit("old.txt", "one\n", "add old");
+    fixture.commit("other.txt", "other\n", "touch another file");
+    fixture.commit("old.txt", "one\ntwo\n", "edit old");
+    git(&fixture.repo, &["mv", "old.txt", "new.txt"]);
+    git(&fixture.repo, &["commit", "-m", "rename"]);
+    let tip = fixture.commit("new.txt", "one\ntwo\nthree\n", "edit new");
+    let history = file_history(fixture.path(), &tip, "new.txt").unwrap();
+    let oids: Vec<_> = history.iter().map(|r| r.commit.oid.as_str()).collect();
+    assert_eq!(
+        oids,
+        [
+            "61efd688e8086e1e99772b245bb30d20ce5f319e",
+            "7d7f7a24dd7f5cd415bab006a874e80bedcfb36d",
+            "f83e54f247619626054bca27eca8f21e53dfad68",
+            "90221ff9945e6c07dde9f7660f4202dd7756403e",
+        ]
+    );
+    let named: Vec<_> = history
+        .iter()
+        .map(|r| (r.commit.subject.as_str(), r.path.as_str()))
+        .collect();
+    assert_eq!(
+        named,
+        [
+            ("edit new", "new.txt"),
+            ("rename", "new.txt"),
+            ("edit old", "old.txt"),
+            ("add old", "old.txt"),
+        ]
+    );
+    let older = oids[2];
+    assert_eq!(
+        file_history(fixture.path(), older, "old.txt")
+            .unwrap()
+            .len(),
+        2
+    );
+}
+
+#[test]
+fn file_history_rejects_an_unknown_commit_and_an_empty_path() {
+    let fixture = Fixture::new();
+    let oid = fixture.commit("a.txt", "a\n", "initial");
+    assert!(matches!(
+        file_history(fixture.path(), &"0".repeat(40), "a.txt")
+            .unwrap_err()
+            .kind,
+        ErrorKind::InvalidOid
+    ));
+    assert!(matches!(
+        file_history(fixture.path(), "HEAD", "a.txt")
+            .unwrap_err()
+            .kind,
+        ErrorKind::InvalidOid
+    ));
+    assert!(matches!(
+        file_history(fixture.path(), &oid, "").unwrap_err().kind,
+        ErrorKind::UnsupportedPath
+    ));
+}
+
+#[test]
+fn blame_reads_ranges_for_a_file_edited_by_two_authors() {
+    let fixture = Fixture::new();
+    let first = fixture.commit("story.txt", "a\nb\nc\nd\n", "write story");
+    fs::write(fixture.repo.join("story.txt"), "a\nB\nC\nd\ne\n").unwrap();
+    git_dated(
+        &fixture.repo,
+        &[
+            "commit",
+            "-am",
+            "revise story",
+            "--author=Bo <bo@example.test>",
+        ],
+        b"",
+        "1700086400 +0000",
+    );
+    let second = git(&fixture.repo, &["rev-parse", "HEAD"]);
+    let Blame::Text {
+        contents,
+        lossy,
+        ranges,
+    } = blame(fixture.path(), &second, "story.txt").unwrap()
+    else {
+        panic!("expected text");
+    };
+    assert_eq!(contents, "a\nB\nC\nd\ne\n");
+    assert!(!lossy);
+    let range =
+        |oid: &str, start, lines, author: &str, email: &str, timestamp, summary: &str| BlameRange {
+            oid: oid.to_owned(),
+            start,
+            lines,
+            author: author.into(),
+            email: email.into(),
+            timestamp,
+            summary: summary.into(),
+        };
+    let ada = |start, lines| {
+        range(
+            &first,
+            start,
+            lines,
+            "Ada",
+            "ada@example.test",
+            1_700_000_000,
+            "write story",
+        )
+    };
+    let bo = |start, lines| {
+        range(
+            &second,
+            start,
+            lines,
+            "Bo",
+            "bo@example.test",
+            1_700_086_400,
+            "revise story",
+        )
+    };
+    assert_eq!(ranges, vec![ada(1, 1), bo(2, 2), ada(4, 1), bo(5, 1)]);
+}
+
+#[test]
+fn blame_ignores_a_configured_ignore_revs_file() {
+    let fixture = Fixture::new();
+    let oid = fixture.commit("a.txt", "a\n", "initial");
+    git(
+        &fixture.repo,
+        &["config", "blame.ignoreRevsFile", "missing-revs.txt"],
+    );
+    let Blame::Text { ranges, .. } = blame(fixture.path(), &oid, "a.txt").unwrap() else {
+        panic!("expected text");
+    };
+    assert_eq!(ranges.len(), 1);
+}
+
+#[test]
+fn blame_names_authors_as_the_history_does_and_reads_an_empty_file() {
+    let fixture = Fixture::new();
+    fixture.commit(
+        ".mailmap",
+        "Mapped <mapped@example.test> <ada@example.test>\n",
+        "map",
+    );
+    let oid = fixture.commit("empty.txt", "", "empty");
+    let Blame::Text {
+        contents, ranges, ..
+    } = blame(fixture.path(), &oid, ".mailmap").unwrap()
+    else {
+        panic!("expected text");
+    };
+    assert_eq!(
+        contents,
+        "Mapped <mapped@example.test> <ada@example.test>\n"
+    );
+    let commit = snapshot(fixture.path())
+        .unwrap()
+        .commits
+        .into_iter()
+        .find(|commit| commit.oid == ranges[0].oid)
+        .unwrap();
+    assert_eq!(
+        (ranges[0].author.as_str(), ranges[0].email.as_str()),
+        (commit.author.as_str(), commit.email.as_str())
+    );
+    assert_eq!(ranges[0].author, "Ada");
+    assert_eq!(
+        blame(fixture.path(), &oid, "empty.txt").unwrap(),
+        Blame::Text {
+            contents: String::new(),
+            lossy: false,
+            ranges: Vec::new(),
+        }
+    );
+}
+
+#[test]
+fn blame_keeps_a_missing_final_newline() {
+    let fixture = Fixture::new();
+    let oid = fixture.commit("tail.txt", "one\ntwo", "no final newline");
+    let Blame::Text { contents, .. } = blame(fixture.path(), &oid, "tail.txt").unwrap() else {
+        panic!("expected text");
+    };
+    assert_eq!(contents, "one\ntwo");
+}
+
+#[test]
+fn blame_reports_binary_oversized_missing_and_submodule_paths() {
+    let fixture = Fixture::new();
+    fs::write(
+        fixture.repo.join("logo.png"),
+        [0x89, b'P', b'N', b'G', 0, 1, 2],
+    )
+    .unwrap();
+    let large = "0123456789abcde\n".repeat(70_000);
+    fs::write(fixture.repo.join("large.txt"), &large).unwrap();
+    git(&fixture.repo, &["add", "logo.png", "large.txt"]);
+    git(&fixture.repo, &["commit", "-m", "assets"]);
+    let oid = git(&fixture.repo, &["rev-parse", "HEAD"]);
+    git(
+        &fixture.repo,
+        &[
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            &format!("160000,{oid},vendor"),
+        ],
+    );
+    git(&fixture.repo, &["commit", "-m", "submodule"]);
+    let with_submodule = git(&fixture.repo, &["rev-parse", "HEAD"]);
+    assert_eq!(
+        blame(fixture.path(), &oid, "logo.png").unwrap(),
+        Blame::Binary
+    );
+    assert_eq!(
+        blame(fixture.path(), &oid, "large.txt").unwrap(),
+        Blame::TooLarge { bytes: 1_120_000 }
+    );
+    for (commit, path) in [
+        (&oid, "missing.txt"),
+        (&oid, ""),
+        (&with_submodule, "vendor"),
+    ] {
+        assert!(
+            matches!(
+                blame(fixture.path(), commit, path).unwrap_err().kind,
+                ErrorKind::UnsupportedPath
+            ),
+            "{path:?}"
+        );
+    }
 }
 
 #[test]

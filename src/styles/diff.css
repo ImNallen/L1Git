@@ -100,3 +100,110 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+.file-history {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.file-history-list {
+  flex: 0 0 auto;
+  max-height: 38%;
+  overflow: auto;
+  border-bottom: 1px solid var(--border);
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar) var(--panel-raised);
+}
+.file-history-list:focus {
+  outline: none;
+}
+.file-revision {
+  height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.file-revision:hover {
+  background: var(--row-hover);
+}
+.file-revision[aria-selected="true"] {
+  background: var(--row-selected);
+}
+.file-history-list:focus-visible .file-revision[aria-selected="true"] {
+  background: color-mix(in srgb, var(--primary-bg) 16%, var(--row-selected));
+  box-shadow: inset 2px 0 0 var(--primary-bg);
+}
+.file-revision-oid,
+.file-revision-path {
+  flex-shrink: 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.file-revision-path {
+  max-width: 30%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-revision-subject {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+.file-revision-author,
+.file-revision-age {
+  flex-shrink: 0;
+  color: var(--text-dim);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.blame-entry {
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 3px 14px;
+  border-top: 1px solid var(--border);
+  background: color-mix(
+    in srgb,
+    var(--diffs-fg, var(--text-strong)) 5%,
+    var(--diffs-bg, var(--panel-raised))
+  );
+  font-family: "Inter Variable", Inter, sans-serif;
+  font-size: 11px;
+  text-align: left;
+  color: var(--text-dim);
+}
+.blame-entry:hover:not(:disabled) {
+  background: var(--row-hover);
+}
+.blame-entry:focus-visible {
+  outline: none;
+  background: color-mix(in srgb, var(--primary-bg) 16%, var(--row-selected));
+  box-shadow: inset 2px 0 0 var(--primary-bg);
+}
+.blame-author {
+  flex-shrink: 0;
+  color: var(--text-strong);
+  font-weight: 500;
+}
+.blame-age,
+.blame-oid {
+  flex-shrink: 0;
+}
+.blame-oid {
+  font-family: var(--mono);
+}
+.blame-summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

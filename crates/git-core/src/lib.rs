@@ -1,4 +1,5 @@
 mod exit_signals;
+mod file_history;
 mod git;
 mod model;
 mod remotes;
@@ -9,6 +10,7 @@ mod sync;
 mod untracked;
 
 pub use exit_signals::{OnQuit, stop_git_on_exit_signals};
+pub use file_history::{blame, file_history};
 pub use git::stop_all_git;
 pub use model::*;
 pub use repository::{

@@ -30,7 +30,7 @@ import { PaneDivider } from "./components/PaneDivider";
 import { RepositoryTree } from "./components/RepositoryTree";
 import { trunkTips } from "./domain/highlight";
 import { readyAdvances } from "./domain/overview";
-import type { Branch, FullRef, RepositoryRoot } from "./domain/repository";
+import type { Branch, FullRef, Oid, RepositoryRoot } from "./domain/repository";
 import { sameSelection } from "./domain/selection";
 import type { Compare } from "./domain/comparison";
 import type { Selection } from "./domain/selection";
@@ -148,6 +148,11 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
         ? loaded
         : new Set(visible.map((commit) => commit.oid)),
     [visible, snapshot, loaded],
+  );
+  const shows = useCallback((oid: Oid) => visibleOids.has(oid), [visibleOids]);
+  const selectCommit = useCallback(
+    (oid: Oid) => select({ kind: "commit", oid }),
+    [select],
   );
   const [sidebarJump, setSidebarJump] = useState<{
     root: RepositoryRoot;
@@ -604,6 +609,8 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                         app.refreshChanges();
                         app.openFile(fileDiff.path, fileDiff.side);
                       }}
+                      selectable={shows}
+                      onSelectCommit={selectCommit}
                     />
                   )}
                 </>

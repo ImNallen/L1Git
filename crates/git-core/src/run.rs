@@ -1,7 +1,8 @@
 use crate::{
-    Advance, CommitDetail, Comparison, Coordinator, FastForwardReport, FetchMode, FilePatch,
-    LineStats, RepositoryError, RepositoryOverview, RepositoryRefs, RepositorySnapshot, Side,
-    WorktreePatch, WorktreeStatus,
+    Advance, Blame, CommitDetail, Comparison, Coordinator, FastForwardReport, FetchMode, FilePatch,
+    FileRevision, LineStats, RepositoryError, RepositoryOverview, RepositoryRefs,
+    RepositorySnapshot, Side, WorktreePatch, WorktreeStatus,
+    file_history::{blame_within, file_history_within},
     git::LocalRead,
     repository::{
         commit_detail_within, file_patch_within, line_stats_within, refs_within, snapshot_within,
@@ -32,6 +33,16 @@ pub enum Request {
         comparison: Comparison,
         file: String,
     },
+    FileHistory {
+        path: String,
+        oid: String,
+        file: String,
+    },
+    Blame {
+        path: String,
+        oid: String,
+        file: String,
+    },
     Overview {
         path: String,
         mode: FetchMode,
@@ -58,6 +69,8 @@ pub enum Response {
     CommitDetail(CommitDetail),
     LineStats(Vec<LineStats>),
     FilePatch(FilePatch),
+    FileHistory(Vec<FileRevision>),
+    Blame(Blame),
     Overview(RepositoryOverview),
     FastForward(FastForwardReport),
     WorktreeStatus(WorktreeStatus),
@@ -90,6 +103,18 @@ pub fn run(coordinator: &Coordinator, request: Request) -> Result<Response, Repo
             &comparison,
             &file,
             deadline(LocalRead::FilePatch),
+        )?),
+        Request::FileHistory { path, oid, file } => Response::FileHistory(file_history_within(
+            &path,
+            &oid,
+            &file,
+            deadline(LocalRead::FileHistory),
+        )?),
+        Request::Blame { path, oid, file } => Response::Blame(blame_within(
+            &path,
+            &oid,
+            &file,
+            deadline(LocalRead::Blame),
         )?),
         Request::Overview { path, mode } => Response::Overview(coordinator.overview(&path, mode)?),
         Request::FastForward { path, advances } => {
