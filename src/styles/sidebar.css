@@ -344,7 +344,7 @@ input::placeholder {
   display: none;
 }
 
-.sidebar {
+.app {
   --focus-bar: var(--blue);
   --focus-tint: color-mix(in srgb, var(--primary-bg) 10%, var(--sidebar));
 }
@@ -365,8 +365,22 @@ input::placeholder {
 .sidebar .branch-item:hover > .branch-row:focus-visible:not(.selected, .head) {
   background: var(--focus-tint);
 }
+.sidebar .settings-nav-item[aria-current="page"]:focus-visible,
+.sidebar
+  .settings-nav-item[aria-current="page"]:focus-visible:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--primary-bg) 10%, var(--nav-selected-bg));
+}
+.sidebar-toggle:focus-visible,
+.sidebar-toggle:focus-visible:hover:not(:disabled) {
+  outline: none;
+  background: var(--focus-tint);
+}
 .sidebar .icon-button:focus-visible,
 .sidebar .icon-button:focus-visible:hover:not(:disabled),
+.sidebar-toggle:focus-visible,
+.sidebar-toggle:focus-visible:hover:not(:disabled),
+.sidebar-bottom button:focus-visible,
+.sidebar-bottom button:focus-visible:hover:not(:disabled),
 .sidebar .repository-toggle:focus-visible,
 .sidebar .repository-toggle:focus-visible:hover:not(:disabled),
 .sidebar-empty button:focus-visible,

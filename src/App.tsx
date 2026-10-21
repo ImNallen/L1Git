@@ -39,7 +39,7 @@ import { useHistoryColumns } from "./historyColumns";
 import { repositoryWarnings, useOverview } from "./overview";
 import { mac, macNative } from "./repositories";
 import { useRepositoryRefs } from "./useRepositoryRefs";
-import { freshSnapshot, useWorkspace } from "./useWorkspace";
+import { useWorkspace } from "./useWorkspace";
 
 type AppScreen = "repository" | "settings";
 type SettingsSection = "appearance" | "fetching";
@@ -108,8 +108,8 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     visibility.persistenceError;
   const branchRefs = useRepositoryRefs(
     expansion.expanded,
+    workspace,
     snapshot,
-    freshSnapshot(workspace),
     overviewStore,
     visibility.prune,
   );
@@ -244,13 +244,16 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   }
   async function addRepository(path: string, signal: AbortSignal) {
     const added = await app.addRepository(path, signal);
-    if (added.kind === "opened") expansion.setExpanded(added.root, true);
+    if (added.kind === "opened") {
+      setSidebarJump(null);
+      expansion.setExpanded(added.root, true);
+    }
     return added.kind === "failed" ? added.problem : null;
   }
   const sidebarToggle = (
     <button
       ref={sidebarToggleRef}
-      className={`icon-button ${sidebarOpen ? "toggled" : ""}`}
+      className={`icon-button sidebar-toggle ${sidebarOpen ? "toggled" : ""}`}
       aria-label="Toggle sidebar"
       title="Toggle sidebar"
       aria-pressed={sidebarOpen}
