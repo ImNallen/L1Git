@@ -69,11 +69,10 @@ export type Workspace =
   | { kind: "loading"; path: RepositoryRoot; previous: ReadyWorkspace }
   | { kind: "error"; path: RepositoryRoot; error: Problem }
   | ReadyWorkspace;
-/** `reads` counts the target worktree's status reads, so a newer one wins. */
 type DetailKey = {
   root: RepositoryRoot;
   comparison: Comparison;
-  reads: number;
+  targetStatusReads: number;
 };
 export type DetailState =
   | { kind: "empty" }
@@ -364,14 +363,14 @@ export function useWorkspace() {
         ),
       same: (left, right) =>
         left.root === right.root &&
-        left.reads === right.reads &&
+        left.targetStatusReads === right.targetStatusReads &&
         sameComparison(left.comparison, right.comparison),
       stallMs: 1000,
       maxReads: 2,
     }),
   );
 
-  const targetReads =
+  const targetStatusReads =
     comparison?.target.kind === "worktree"
       ? (statusReads.get(comparison.target.root) ?? 0)
       : 0;
@@ -381,15 +380,15 @@ export function useWorkspace() {
       setDetail({ kind: "empty" });
       return;
     }
-    detailReader.want({ root, comparison, reads: targetReads });
+    detailReader.want({ root, comparison, targetStatusReads });
     setDetail((shown) =>
       shown.kind === "ready" &&
       shown.root === root &&
       sameComparison(shown.comparison, comparison)
         ? shown
-        : { kind: "loading", root, comparison, reads: targetReads },
+        : { kind: "loading", root, comparison, targetStatusReads },
     );
-  }, [root, comparison, detailAttempt, detailReader, targetReads]);
+  }, [root, comparison, detailAttempt, detailReader, targetStatusReads]);
 
   useEffect(() => {
     setFileDiff({ kind: "closed" });
