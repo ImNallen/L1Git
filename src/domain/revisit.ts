@@ -36,7 +36,6 @@ export function evictSnapshot(
   return next;
 }
 
-/** The remembered selection if the snapshot still has it, else the newest commit. */
 export function restoreSelection(
   snapshot: Pick<RepositorySnapshot, "commits" | "worktrees">,
   remembered: Selection | null,
