@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import type { ReactNode, RefObject } from "react";
 import { createPortal } from "react-dom";
 
 const ITEMS = "[role=menuitem], [role=menuitemcheckbox]";
@@ -8,13 +8,15 @@ export function ContextMenu({
   x,
   y,
   label,
+  ignoreScrollIn,
   onClose,
   children,
 }: {
   x: number;
   y: number;
   label: string;
-  onClose: (refocus: boolean) => void;
+  ignoreScrollIn?: RefObject<HTMLElement | null>;
+  onClose: () => void;
   children: ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -33,7 +35,14 @@ export function ContextMenu({
     menu.querySelector<HTMLElement>(ITEMS)?.focus();
   }, [x, y]);
   useEffect(() => {
-    const close = () => onCloseRef.current(false);
+    const close = () => onCloseRef.current();
+    const scrolled = (event: Event) => {
+      if (
+        !(event.target instanceof Node) ||
+        !ignoreScrollIn?.current?.contains(event.target)
+      )
+        close();
+    };
     const outside = (event: PointerEvent) => {
       if (!ref.current?.contains(event.target as Node)) close();
     };
@@ -42,22 +51,22 @@ export function ContextMenu({
       if (event.key === "Escape" || event.key === "Tab") {
         event.preventDefault();
         event.stopPropagation();
-        onCloseRef.current(true);
+        close();
       }
     };
     window.addEventListener("pointerdown", outside, true);
     window.addEventListener("keydown", key, true);
-    window.addEventListener("scroll", close, true);
+    window.addEventListener("scroll", scrolled, true);
     window.addEventListener("resize", close);
     window.addEventListener("blur", close);
     return () => {
       window.removeEventListener("pointerdown", outside, true);
       window.removeEventListener("keydown", key, true);
-      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("scroll", scrolled, true);
       window.removeEventListener("resize", close);
       window.removeEventListener("blur", close);
     };
-  }, []);
+  }, [ignoreScrollIn]);
   return createPortal(
     <div
       ref={ref}

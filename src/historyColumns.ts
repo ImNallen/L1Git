@@ -6,7 +6,7 @@ export const COLUMNS_KEY = "l1git.columns.v1";
 export const historyColumns = [
   { id: "author", label: "Author", width: 120 },
   { id: "date", label: "Date", width: 96 },
-  { id: "sha", label: "SHA", width: 64 },
+  { id: "sha", label: "SHA" },
   { id: "changes", label: "Changes", width: 160 },
 ] as const;
 export type ColumnId = (typeof historyColumns)[number]["id"];
@@ -24,25 +24,34 @@ const columnsSchema = z.object({
 const REF_WIDTH = 200;
 const MESSAGE_MIN_WIDTH = 260;
 const CROWDED_MESSAGE_MIN_WIDTH = 160;
+// JetBrains Mono advances 0.6em per character, and .sha-cell sets it at 11px with 8px of right padding.
+const SHA_CHAR_WIDTH = 6.6;
+const SHA_PADDING = 8;
 
 export function columnLayout(
   graphWidth: number,
   visible: ReadonlySet<ColumnId>,
+  shaLength: number,
 ) {
   const columns = historyColumns.filter((column) => visible.has(column.id));
   const message = columns.some((column) => column.id !== "changes")
     ? CROWDED_MESSAGE_MIN_WIDTH
     : MESSAGE_MIN_WIDTH;
+  const widths = columns.map((column) =>
+    column.id === "sha"
+      ? Math.ceil(shaLength * SHA_CHAR_WIDTH) + SHA_PADDING
+      : column.width,
+  );
   return {
     columns,
     template: [
       `${REF_WIDTH}px`,
       `${graphWidth}px`,
       `minmax(${message}px, 1fr)`,
-      ...columns.map((column) => `${column.width}px`),
+      ...widths.map((width) => `${width}px`),
     ].join(" "),
-    minWidth: columns.reduce(
-      (width, column) => width + column.width,
+    minWidth: widths.reduce(
+      (total, width) => total + width,
       REF_WIDTH + graphWidth + message,
     ),
   };

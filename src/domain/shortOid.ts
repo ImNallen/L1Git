@@ -1,6 +1,6 @@
 import type { Oid } from "./repository";
 
-const MIN_LENGTH = 7;
+export const SHORT_OID_MIN_LENGTH = 7;
 
 function sharedLength(a: string | undefined, b: string | undefined): number {
   if (a === undefined || b === undefined) return 0;
@@ -19,9 +19,12 @@ export function uniqueShortOids(
       sharedLength(oid, sorted[index - 1]),
       sharedLength(oid, sorted[index + 1]),
     );
-    lengths.set(oid, Math.max(MIN_LENGTH, shared + 1));
+    lengths.set(oid, Math.max(SHORT_OID_MIN_LENGTH, shared + 1));
   });
   return new Map(
-    oids.map((oid) => [oid, oid.slice(0, lengths.get(oid) ?? MIN_LENGTH)]),
+    oids.map((oid) => [
+      oid,
+      oid.slice(0, lengths.get(oid) ?? SHORT_OID_MIN_LENGTH),
+    ]),
   );
 }

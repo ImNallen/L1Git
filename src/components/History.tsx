@@ -28,7 +28,7 @@ import { historyAction, navigate, revealRow } from "../domain/navigation";
 import type { HistoryAction, Trail } from "../domain/navigation";
 import { refLabels } from "../domain/refs";
 import type { RefLabel } from "../domain/refs";
-import { uniqueShortOids } from "../domain/shortOid";
+import { SHORT_OID_MIN_LENGTH, uniqueShortOids } from "../domain/shortOid";
 import { relativeTime } from "../domain/time";
 import type {
   Commit,
@@ -48,7 +48,6 @@ const HIGHLIGHT_DELAY = 400;
 const color = (lane: number) => `var(--graph-lane-${(lane % 6) + 1})`;
 const x = (lane: number) => 14 + lane * 24;
 const NO_COMMITS: readonly Commit[] = [];
-const FIXED_COLUMNS = 3;
 
 function GraphCell({
   row,
@@ -416,6 +415,14 @@ export function History({
         : new Map<Oid, string>(),
     [commits, shaShown],
   );
+  const shaLength = useMemo(
+    () =>
+      [...short.values()].reduce(
+        (longest, prefix) => Math.max(longest, prefix.length),
+        SHORT_OID_MIN_LENGTH,
+      ),
+    [short],
+  );
 
   function openColumnMenu(event: MouseEvent) {
     event.preventDefault();
@@ -549,10 +556,11 @@ export function History({
     visibleColumns.has("changes") ? visible : NO_COMMITS,
   );
   const graphWidth = Math.max(48, graph.lanes * 24 + 10);
-  const layout = columnLayout(graphWidth, visibleColumns);
+  const layout = columnLayout(graphWidth, visibleColumns, shaLength);
   function revealColumn(id: ColumnId | null) {
     const index = layout.columns.findIndex((column) => column.id === id);
-    const cell = headRef.current?.rows[0]?.cells[FIXED_COLUMNS + index];
+    const cells = headRef.current?.rows[0]?.cells;
+    const cell = cells?.[cells.length - layout.columns.length + index];
     const scroller = scrollRef.current;
     if (index < 0 || !cell || !scroller) return;
     const { left, right } = cell.getBoundingClientRect();
@@ -724,9 +732,10 @@ export function History({
           x={columnMenu.x}
           y={columnMenu.y}
           label="History columns"
-          onClose={(refocus) => {
+          ignoreScrollIn={scrollRef}
+          onClose={() => {
             setColumnMenu(null);
-            if (refocus) tableRef.current?.focus({ preventScroll: true });
+            tableRef.current?.focus({ preventScroll: true });
             revealColumn(revealOnClose.current);
             revealOnClose.current = null;
           }}

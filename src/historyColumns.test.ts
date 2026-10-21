@@ -10,7 +10,7 @@ import type { ColumnId } from "./historyColumns";
 
 describe("history column layout", () => {
   it("lays out only the Changes column by default", () => {
-    const layout = columnLayout(58, new Set<ColumnId>(["changes"]));
+    const layout = columnLayout(58, new Set<ColumnId>(["changes"]), 7);
     expect(layout.template).toBe("200px 58px minmax(260px, 1fr) 160px");
     expect(layout.minWidth).toBe(678);
   });
@@ -19,11 +19,12 @@ describe("history column layout", () => {
     const layout = columnLayout(
       106,
       new Set<ColumnId>(["changes", "sha", "author", "date"]),
+      7,
     );
     expect(layout.template).toBe(
-      "200px 106px minmax(160px, 1fr) 120px 96px 64px 160px",
+      "200px 106px minmax(160px, 1fr) 120px 96px 55px 160px",
     );
-    expect(layout.minWidth).toBe(906);
+    expect(layout.minWidth).toBe(897);
     expect(layout.columns.map((column) => column.label)).toEqual([
       "Author",
       "Date",
@@ -32,14 +33,20 @@ describe("history column layout", () => {
     ]);
   });
 
+  it("widens SHA to fit the longest unique prefix", () => {
+    const layout = columnLayout(58, new Set<ColumnId>(["sha"]), 10);
+    expect(layout.template).toBe("200px 58px minmax(160px, 1fr) 74px");
+    expect(layout.minWidth).toBe(492);
+  });
+
   it("narrows the message minimum once a column besides Changes is on", () => {
-    const layout = columnLayout(82, new Set<ColumnId>(["author"]));
+    const layout = columnLayout(82, new Set<ColumnId>(["author"]), 7);
     expect(layout.template).toBe("200px 82px minmax(160px, 1fr) 120px");
     expect(layout.minWidth).toBe(562);
   });
 
   it("keeps only the fixed columns when every optional column is off", () => {
-    expect(columnLayout(48, new Set()).template).toBe(
+    expect(columnLayout(48, new Set(), 7).template).toBe(
       "200px 48px minmax(260px, 1fr)",
     );
   });

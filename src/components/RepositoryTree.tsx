@@ -201,12 +201,11 @@ export function RepositoryTree({
           x={menu.x}
           y={menu.y}
           label={`${menu.entry.name} actions`}
-          onClose={(refocus) => {
+          onClose={() => {
             setMenu(null);
-            if (refocus)
-              menu.trigger
-                .querySelector<HTMLElement>(".repository-open")
-                ?.focus();
+            menu.trigger
+              .querySelector<HTMLElement>(".repository-open")
+              ?.focus();
           }}
         >
           <button
