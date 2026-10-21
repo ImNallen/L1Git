@@ -7,6 +7,7 @@ mod status;
 mod sync;
 mod untracked;
 
+pub use git::stop_all_git;
 pub use model::*;
 pub use repository::{
     HISTORY_LIMIT, LINE_STATS_LIMIT, PATCH_LIMIT, commit_detail, file_patch, line_stats, refs,

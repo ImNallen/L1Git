@@ -4,6 +4,7 @@ import { once } from "node:events";
 import {
   chmodSync,
   mkdirSync,
+  readFileSync,
   realpathSync,
   rmSync,
   writeFileSync,
@@ -1007,5 +1008,58 @@ describe("real Rust read deadlines", () => {
       slowBridge.bridge.kill();
       await once(slowBridge.bridge, "exit");
     }
+  }, 20_000);
+
+  it("stops a hung read's Git when the bridge gets Ctrl-C", async () => {
+    const snapshot = snapshotEnvelope.parse(
+      await (await post({ op: "snapshot", path: fixture.repository })).json(),
+    ).data;
+    const slow = snapshot.commits[2];
+    if (!slow) throw new Error("The fixture needs three commits");
+    const real = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+    const bin = join(fixture.root, "hung-git-bin");
+    const pids = join(fixture.root, "hung-git-pids");
+    mkdirSync(bin);
+    writeFileSync(
+      join(bin, "git"),
+      `#!/bin/sh\nfor arg in "$@"; do [ "$arg" = ${slow.oid} ] && { echo $$ >> '${pids}'; exec sleep 60; }; done\nexec '${real}' "$@"\n`,
+    );
+    chmodSync(join(bin, "git"), 0o755);
+    const hungBridge = await startBridge({
+      PATH: `${bin}:${process.env.PATH ?? ""}`,
+    });
+    void fetch(`${hungBridge.endpoint}/api/run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: origin },
+      body: JSON.stringify({
+        op: "commitDetail",
+        path: fixture.repository,
+        oid: slow.oid,
+      }),
+    }).catch(() => undefined);
+    const alive = (pid: number) => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    let pid = Number.NaN;
+    for (let attempt = 0; attempt < 100 && Number.isNaN(pid); attempt++) {
+      await setTimeout(50);
+      try {
+        pid = Number.parseInt(readFileSync(pids, "utf8"), 10);
+      } catch {
+        pid = Number.NaN;
+      }
+    }
+    expect(alive(pid)).toBe(true);
+    const exited = once(hungBridge.bridge, "exit");
+    hungBridge.bridge.kill("SIGINT");
+    expect(await exited).toEqual([130, null]);
+    for (let attempt = 0; attempt < 20 && alive(pid); attempt++)
+      await setTimeout(50);
+    expect(alive(pid)).toBe(false);
   }, 20_000);
 });

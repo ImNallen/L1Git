@@ -53,7 +53,7 @@ pub(super) fn advance(
     root: &Path,
     request: &Advance,
     deadline: Duration,
-    reads: Deadline,
+    reads: &mut Deadline,
 ) -> Result<AdvanceOutcome, RepositoryError> {
     let Advance {
         reference,
@@ -70,7 +70,9 @@ pub(super) fn advance(
                 from,
                 to,
             };
-            match git::mutate(root, mutation, deadline)? {
+            let finished = git::mutate(root, mutation, deadline)?;
+            *reads = reads.renewed();
+            match finished {
                 Finished::Succeeded => None,
                 Finished::Failed { stderr } if stderr.contains("but expected") => {
                     Some(SkipReason::Changed)
@@ -78,17 +80,17 @@ pub(super) fn advance(
                 finished => Some(failed(finished)),
             }
         }
-        Plan::Merge { worktree }
-            if !still_checked_out(worktree, reference, from, reads.renewed())? =>
-        {
+        Plan::Merge { worktree } if !still_checked_out(worktree, reference, from, *reads)? => {
             Some(SkipReason::Changed)
         }
         Plan::Merge { worktree } => {
-            match git::mutate(
+            let finished = git::mutate(
                 Path::new(worktree),
                 Mutation::MergeFastForward { to },
                 deadline,
-            )? {
+            )?;
+            *reads = reads.renewed();
+            match finished {
                 Finished::Succeeded => None,
                 Finished::Failed { stderr } if stderr.contains("would be overwritten") => {
                     Some(SkipReason::Dirty {
@@ -105,7 +107,7 @@ pub(super) fn advance(
         }
     };
     let reason = match reason {
-        None if !is_at(root, reference, to, reads.renewed())? => Some(SkipReason::Changed),
+        None if !is_at(root, reference, to, *reads)? => Some(SkipReason::Changed),
         reason => reason,
     };
     Ok(match reason {

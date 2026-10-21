@@ -3,7 +3,11 @@ use std::{
     io::{self, Read, Write},
     path::Path,
     process::{Child, ChildStderr, Command, ExitStatus, Stdio},
-    sync::mpsc,
+    sync::{
+        Mutex, MutexGuard, PoisonError,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -56,7 +60,9 @@ fn spawn_error(error: io::Error) -> RepositoryError {
 }
 
 /// Every local read L1 Git serves. Each gets one deadline for all of its Git
-/// commands, at least 10 times its slowest run on the large fixture.
+/// commands, about 100 times or more its run time on the large fixture.
+/// Branch status starts its deadline again after a fetch, probe, ref move, or
+/// merge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LocalRead {
     Snapshot,
@@ -113,8 +119,9 @@ impl Deadline {
         }
     }
 
-    /// The same read with its full budget again, for reads that follow a fetch,
-    /// a merge, or a probe, which have their own deadlines.
+    /// The same read with its full budget again. Branch status renews only
+    /// after a fetch, probe, ref move, or merge, which have their own
+    /// deadlines, or after waiting for another fetch of the repository.
     pub(crate) fn renewed(self) -> Self {
         Self::start(self.read, self.budget)
     }
@@ -163,18 +170,17 @@ fn execute(
         })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    #[cfg(unix)]
-    std::os::unix::process::CommandExt::process_group(&mut command, 0);
-    let mut child = command.spawn().map_err(spawn_error)?;
+    let mut child = Group::spawn(command)?;
     // Writing from another thread keeps a full stdout pipe from blocking Git.
     let writer = child
+        .0
         .stdin
         .take()
         .zip(input)
         .map(|(mut stdin, input)| thread::spawn(move || stdin.write_all(&input)));
-    let stderr = Stderr::drain(child.stderr.take());
-    let Some(mut pipe) = child.stdout.take() else {
-        stop(child);
+    let stderr = Stderr::drain(child.0.stderr.take());
+    let Some(mut pipe) = child.0.stdout.take() else {
+        child.stop();
         return Err(read_failed());
     };
     let (sender, receiver) = mpsc::channel();
@@ -184,24 +190,28 @@ fn execute(
     let stdout = match receiver.recv_timeout(deadline.remaining()) {
         Ok(Ok(stdout)) => stdout,
         Ok(Err(_)) => {
-            stop(child);
+            child.stop();
             return Err(read_failed());
         }
         Err(_) => {
-            stop(child);
+            child.stop();
             return Err(deadline.expired());
         }
     };
+    let mut pause = FIRST_EXIT_POLL;
     let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) if deadline.remaining().is_zero() => {
-                stop(child);
+        match child.exited() {
+            Ok(true) => break child.wait().map_err(|_| read_failed())?,
+            Ok(false) if deadline.remaining().is_zero() => {
+                child.stop();
                 return Err(deadline.expired());
             }
-            Ok(None) => thread::sleep(EXIT_POLL),
+            Ok(false) => {
+                thread::sleep(pause);
+                pause = (pause * 2).min(LAST_EXIT_POLL);
+            }
             Err(_) => {
-                stop(child);
+                child.stop();
                 return Err(read_failed());
             }
         }
@@ -445,9 +455,11 @@ pub(crate) enum Finished {
 
 const STDERR_CAP: u64 = 64 * 1024;
 const POLL: Duration = Duration::from_millis(10);
-const EXIT_POLL: Duration = Duration::from_millis(1);
+const FIRST_EXIT_POLL: Duration = Duration::from_micros(50);
+const LAST_EXIT_POLL: Duration = Duration::from_millis(1);
 const INHERITED_STDERR_WAIT: Duration = Duration::from_secs(1);
 const TERMINATE_GRACE: Duration = Duration::from_secs(2);
+const SHUTDOWN_GRACE: Duration = Duration::from_secs(1);
 
 /// A process that Git starts, such as a clean filter, can keep stderr open
 /// after Git exits.
@@ -493,15 +505,15 @@ pub(crate) fn mutate(
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
-    #[cfg(unix)]
-    std::os::unix::process::CommandExt::process_group(&mut command, 0);
     let started = Instant::now();
-    let mut child = command.spawn().map_err(spawn_error)?;
-    let stderr = Stderr::drain(child.stderr.take());
+    let mut child = Group::spawn(command)?;
+    let stderr = Stderr::drain(child.0.stderr.take());
+    let failed = |error: io::Error| {
+        RepositoryError::new(ErrorKind::GitFailed, format!("Could not run Git: {error}"))
+    };
     loop {
-        if let Some(status) = child.try_wait().map_err(|error| {
-            RepositoryError::new(ErrorKind::GitFailed, format!("Could not run Git: {error}"))
-        })? {
+        if child.exited().map_err(failed)? {
+            let status = child.wait().map_err(failed)?;
             let stderr = stderr.after_exit();
             return Ok(if status.success() {
                 Finished::Succeeded
@@ -512,69 +524,151 @@ pub(crate) fn mutate(
             });
         }
         if started.elapsed() >= deadline {
-            stop(child);
+            child.stop();
             return Ok(Finished::TimedOut);
         }
         thread::sleep(POLL);
     }
 }
 
-/// Git deletes its lock files on SIGTERM but cannot on SIGKILL. SIGKILL then
-/// reaches every process Git started, including one that ignores SIGTERM. A
-/// process stuck in the kernel survives SIGKILL, so another thread reaps it.
-#[cfg(unix)]
-fn stop(mut child: Child) {
-    signal_group(&mut child, libc::SIGTERM);
-    let exited = exited_within(&child, TERMINATE_GRACE);
-    signal_group(&mut child, libc::SIGKILL);
-    if exited || exited_within(&child, TERMINATE_GRACE) {
-        let _ = child.wait();
-    } else {
-        thread::spawn(move || child.wait());
-    }
+/// The process group of every Git command that has not been reaped. Each
+/// command leads its own group, and its pid cannot be reused until it is
+/// reaped, so a listed pid always names that command's group.
+static RUNNING: Mutex<Vec<u32>> = Mutex::new(Vec::new());
+static STOPPING: AtomicBool = AtomicBool::new(false);
+
+fn running() -> MutexGuard<'static, Vec<u32>> {
+    RUNNING.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// Leaves the child unreaped, so its pid keeps naming its process group.
-#[cfg(unix)]
-fn exited_within(child: &Child, grace: Duration) -> bool {
-    let asked = Instant::now();
-    loop {
+/// A Git command in its own process group, so a deadline or `stop_all_git`
+/// stops every process it started, such as a clean filter.
+struct Group(Child);
+
+impl Group {
+    fn spawn(mut command: Command) -> Result<Self, RepositoryError> {
+        #[cfg(unix)]
+        std::os::unix::process::CommandExt::process_group(&mut command, 0);
+        let child = command.spawn().map_err(spawn_error)?;
+        running().push(child.id());
+        Ok(Self(child))
+    }
+
+    /// Leaves the command unreaped, so its pid keeps naming its group.
+    #[cfg(unix)]
+    fn exited(&mut self) -> io::Result<bool> {
         // SAFETY: `siginfo_t` is plain data that waitid(2) only writes to.
         let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
         // SAFETY: `info` is a valid, writable `siginfo_t` for the whole call.
         let status = unsafe {
             libc::waitid(
                 libc::P_PID,
-                child.id(),
+                self.0.id(),
                 &mut info,
                 libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
             )
         };
-        if status != 0 || info.si_signo != 0 {
-            return true;
+        if status != 0 {
+            return Err(io::Error::last_os_error());
         }
-        if asked.elapsed() >= grace {
-            return false;
+        Ok(info.si_signo != 0)
+    }
+
+    #[cfg(not(unix))]
+    fn exited(&mut self) -> io::Result<bool> {
+        Ok(self.0.try_wait()?.is_some())
+    }
+
+    fn exited_within(&mut self, grace: Duration) -> bool {
+        let asked = Instant::now();
+        loop {
+            if !matches!(self.exited(), Ok(false)) {
+                return true;
+            }
+            if asked.elapsed() >= grace {
+                return false;
+            }
+            thread::sleep(POLL);
         }
-        thread::sleep(POLL);
+    }
+
+    /// After `stop_all_git` starts, a command that exited still has its group
+    /// killed, so nothing it started outlives the process.
+    fn wait(mut self) -> io::Result<ExitStatus> {
+        if STOPPING.load(Ordering::SeqCst) {
+            signal_group(self.0.id(), Signal::Kill);
+        }
+        self.unlist();
+        self.0.wait()
+    }
+
+    fn unlist(&self) {
+        let pid = self.0.id();
+        running().retain(|listed| *listed != pid);
+    }
+
+    /// Git deletes its lock files on SIGTERM but cannot on SIGKILL. SIGKILL
+    /// then reaches every process Git started, including one that ignores
+    /// SIGTERM. A process stuck in the kernel survives SIGKILL, so another
+    /// thread reaps it.
+    fn stop(mut self) {
+        signal_group(self.0.id(), Signal::Terminate);
+        let exited = self.exited_within(TERMINATE_GRACE);
+        signal_group(self.0.id(), Signal::Kill);
+        #[cfg(not(unix))]
+        let _ = self.0.kill();
+        if exited || self.exited_within(TERMINATE_GRACE) {
+            let _ = self.wait();
+        } else {
+            thread::spawn(move || self.wait());
+        }
     }
 }
 
+impl Drop for Group {
+    fn drop(&mut self) {
+        self.unlist();
+    }
+}
+
+/// Stops every Git command L1 Git started that is still running, for a
+/// process that is about to exit.
+pub fn stop_all_git() {
+    STOPPING.store(true, Ordering::SeqCst);
+    for pid in running().iter() {
+        signal_group(*pid, Signal::Terminate);
+    }
+    let asked = Instant::now();
+    while !running().is_empty() && asked.elapsed() < SHUTDOWN_GRACE {
+        thread::sleep(POLL);
+    }
+    for pid in running().iter() {
+        signal_group(*pid, Signal::Kill);
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Signal {
+    Terminate,
+    Kill,
+}
+
+/// Callers hold a pid that is unreaped or listed in `RUNNING`, so it cannot
+/// name another process group.
 #[cfg(unix)]
-fn signal_group(child: &mut Child, signal: libc::c_int) {
-    let Ok(group) = i32::try_from(child.id()) else {
-        let _ = child.kill();
+fn signal_group(pid: u32, signal: Signal) {
+    let Ok(group) = i32::try_from(pid) else {
         return;
     };
-    // SAFETY: kill(2) takes no pointers. The group id is the pid of a child we have
-    // not reaped yet, so it cannot name another process group.
+    let signal = match signal {
+        Signal::Terminate => libc::SIGTERM,
+        Signal::Kill => libc::SIGKILL,
+    };
+    // SAFETY: kill(2) takes no pointers.
     unsafe {
         libc::kill(-group, signal);
     }
 }
 
 #[cfg(not(unix))]
-fn stop(mut child: Child) {
-    let _ = child.kill();
-    thread::spawn(move || child.wait());
-}
+fn signal_group(_pid: u32, _signal: Signal) {}

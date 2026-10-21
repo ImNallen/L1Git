@@ -68,7 +68,8 @@ impl Coordinator {
         }
     }
 
-    /// Lowers every local read's deadline to at most `cap`.
+    /// Lowers every local read's deadline to at most `cap`. Only tests and the
+    /// development bridge use it.
     pub fn cap_reads(self, cap: Duration) -> Self {
         Self {
             read_cap: Some(cap),
@@ -133,21 +134,23 @@ impl Coordinator {
         let deadline = self.limits.local_deadline;
         let gate = self.gate(&repository.common_dir);
         let _gate = lock_ignoring_poison(&gate);
+        let mut reads = reads.renewed();
         let outcomes = advances
             .iter()
             .map(|request| {
-                advance::advance(&repository.root, request, deadline, reads.renewed())
-                    .unwrap_or_else(|error| AdvanceOutcome::Skipped {
+                advance::advance(&repository.root, request, deadline, &mut reads).unwrap_or_else(
+                    |error| AdvanceOutcome::Skipped {
                         reference: request.reference.clone(),
                         reason: SkipReason::Failed {
                             message: error.message,
                         },
-                    })
+                    },
+                )
             })
             .collect();
         Ok(FastForwardReport {
             outcomes,
-            overview: read::read(&repository, None, deadline, reads.renewed())?,
+            overview: read::read(&repository, None, deadline, reads)?,
         })
     }
 

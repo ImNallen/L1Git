@@ -24,6 +24,11 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .manage(Arc::new(Coordinator::default()))
         .invoke_handler(tauri::generate_handler![repository_run])
-        .run(tauri::generate_context!())
-        .expect("L1 Git could not start");
+        .build(tauri::generate_context!())
+        .expect("L1 Git could not start")
+        .run(|_, event| {
+            if let tauri::RunEvent::Exit = event {
+                l1_git_core::stop_all_git();
+            }
+        });
 }

@@ -6,6 +6,8 @@ use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
 const BODY_LIMIT: u64 = 64 * 1024;
 
 fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    #[cfg(unix)]
+    stop_git_on_exit_signals();
     let port: u16 = std::env::var("L1GIT_BRIDGE_PORT")
         .unwrap_or_else(|_| "9417".into())
         .parse()?;
@@ -28,6 +30,31 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         thread::spawn(move || handle(request, &origins, &coordinator));
     }
     Ok(())
+}
+
+/// Git commands run in their own process groups, so Ctrl-C in a terminal does
+/// not reach them. Blocking the signals here, before any other thread starts,
+/// leaves them to one thread. Child processes start with no signals blocked.
+#[cfg(unix)]
+fn stop_git_on_exit_signals() {
+    // SAFETY: `sigset_t` is plain data that the calls below initialize.
+    let mut signals: libc::sigset_t = unsafe { std::mem::zeroed() };
+    // SAFETY: each call gets a valid, writable `sigset_t`, and the old mask is
+    // not requested.
+    unsafe {
+        libc::sigemptyset(&mut signals);
+        for signal in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP] {
+            libc::sigaddset(&mut signals, signal);
+        }
+        libc::pthread_sigmask(libc::SIG_BLOCK, &signals, std::ptr::null_mut());
+    }
+    thread::spawn(move || {
+        let mut signal = 0;
+        // SAFETY: both pointers are valid for the whole call.
+        unsafe { libc::sigwait(&signals, &mut signal) };
+        l1_git_core::stop_all_git();
+        std::process::exit(128 + signal);
+    });
 }
 
 fn handle(mut request: Request, origins: &[String], coordinator: &Coordinator) {

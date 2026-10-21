@@ -482,7 +482,11 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                   <div className="empty-icon error-icon">
                     <TriangleAlert size={32} />
                   </div>
-                  <h1>Could not open this repository</h1>
+                  <h1>
+                    {workspace.error.kind === "timedOut"
+                      ? "Reading this repository took too long"
+                      : "Could not open this repository"}
+                  </h1>
                   <p className="path-label">{workspace.path}</p>
                   <p role="alert">{workspace.error.message}</p>
                   <div className="empty-actions">

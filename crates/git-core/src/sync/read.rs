@@ -100,7 +100,7 @@ pub(super) fn read(
     repository: &Repository,
     fetch: Option<FetchSummary>,
     deadline: Duration,
-    reads: Deadline,
+    mut reads: Deadline,
 ) -> Result<RepositoryOverview, RepositoryError> {
     let root = &repository.root;
     let rows = rows(root, &["refs/heads/", "refs/remotes/"], reads)?;
@@ -134,15 +134,7 @@ pub(super) fn read(
             oid,
             checked_out_at,
             state,
-        } = local(
-            root,
-            &reference,
-            row,
-            &tips,
-            detached,
-            deadline,
-            reads.renewed(),
-        )?;
+        } = local(root, &reference, row, &tips, detached, deadline, &mut reads)?;
         branches.push(BranchStatus {
             name: reference.name().to_owned(),
             reference,
@@ -175,9 +167,9 @@ pub(super) fn branch(
     root: &Path,
     reference: &BranchRef,
     deadline: Duration,
-    reads: Deadline,
+    reads: &mut Deadline,
 ) -> Result<Option<Local>, RepositoryError> {
-    let rows = rows(root, &[reference.as_str()], reads)?;
+    let rows = rows(root, &[reference.as_str()], *reads)?;
     let Some((reference, row)) = rows
         .iter()
         .filter_map(local_ref)
@@ -185,7 +177,7 @@ pub(super) fn branch(
     else {
         return Ok(None);
     };
-    let detached = has_detached_worktree(root, reads)?;
+    let detached = has_detached_worktree(root, *reads)?;
     local(
         root,
         &reference,
@@ -220,13 +212,13 @@ fn local(
     tips: &HashMap<&str, &str>,
     detached: bool,
     deadline: Duration,
-    reads: Deadline,
+    reads: &mut Deadline,
 ) -> Result<Local, RepositoryError> {
     let oid = Oid::try_from(row.oid.clone()).map_err(|_| git::malformed())?;
     let track = parse_track(&row.track).ok_or_else(git::malformed)?;
     let target = match track {
         Track::Counts { ahead: 0, behind } if behind > 0 => {
-            upstream_oid(root, &row.upstream, tips, reads)?
+            upstream_oid(root, &row.upstream, tips, *reads)?
         }
         _ => None,
     };
@@ -239,12 +231,16 @@ fn local(
         let checkout = match checked_out_at.take() {
             Some(worktree) => Checkout::At(worktree),
             None if !detached => Checkout::Nowhere,
-            None => hidden_checkout(root, reference, target, deadline)?,
+            None => {
+                let checkout = hidden_checkout(root, reference, target, deadline)?;
+                *reads = reads.renewed();
+                checkout
+            }
         };
         match checkout {
             Checkout::Nowhere => {}
             Checkout::At(worktree) => {
-                *blocker = blocker_for(reference, &occupant(&worktree, reads.renewed())?);
+                *blocker = blocker_for(reference, &occupant(&worktree, *reads)?);
                 checked_out_at = Some(worktree);
             }
             Checkout::Unverified(message) => *blocker = Some(Blocker::Unverified { message }),
