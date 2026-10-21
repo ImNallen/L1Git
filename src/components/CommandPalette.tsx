@@ -19,9 +19,11 @@ export function CommandPalette({ items, onClose, onRun }: Props) {
   const dialog = useRef<HTMLDialogElement>(null);
   const list = useRef<HTMLUListElement>(null);
   const [query, setQuery] = useState("");
-  const [active, setActive] = useState(0);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const pressedBackdrop = useRef(false);
   const results = useMemo(() => filterPalette(items, query), [items, query]);
-  const current = Math.min(active, results.length - 1);
+  const found = results.findIndex((item) => item.id === activeId);
+  const current = found >= 0 ? found : results.length > 0 ? 0 : -1;
   useEffect(() => {
     dialog.current?.showModal();
   }, []);
@@ -32,8 +34,8 @@ export function CommandPalette({ items, onClose, onRun }: Props) {
   }, [current, results]);
 
   const move = (step: number) => {
-    if (results.length === 0) return;
-    setActive((current + step + results.length) % results.length);
+    const next = results[(current + step + results.length) % results.length];
+    if (next) setActiveId(next.id);
   };
 
   return (
@@ -45,8 +47,13 @@ export function CommandPalette({ items, onClose, onRun }: Props) {
         event.preventDefault();
         onClose();
       }}
+      onClose={onClose}
+      onPointerDown={(event) => {
+        pressedBackdrop.current = event.target === event.currentTarget;
+      }}
       onClick={(event) => {
-        if (event.target === event.currentTarget) onClose();
+        if (event.target === event.currentTarget && pressedBackdrop.current)
+          onClose();
       }}
     >
       <div className="command-palette-input">
@@ -55,8 +62,10 @@ export function CommandPalette({ items, onClose, onRun }: Props) {
           autoFocus
           role="combobox"
           aria-label="Search actions, repositories, and branches"
-          aria-expanded="true"
-          aria-controls="command-palette-results"
+          aria-expanded={results.length > 0}
+          aria-controls={
+            results.length > 0 ? "command-palette-results" : undefined
+          }
           aria-activedescendant={
             current >= 0 ? `command-palette-${current}` : undefined
           }
@@ -66,16 +75,14 @@ export function CommandPalette({ items, onClose, onRun }: Props) {
           value={query}
           onChange={(event) => {
             setQuery(event.target.value);
-            setActive(0);
+            setActiveId(null);
           }}
           onKeyDown={(event) => {
+            if (event.nativeEvent.isComposing) return;
             if (event.key === "ArrowDown" || event.key === "ArrowUp") {
               event.preventDefault();
               move(event.key === "ArrowDown" ? 1 : -1);
-            } else if (
-              event.key === "Enter" &&
-              !event.nativeEvent.isComposing
-            ) {
+            } else if (event.key === "Enter") {
               event.preventDefault();
               const item = results[current];
               if (item) onRun(item);
@@ -102,7 +109,7 @@ export function CommandPalette({ items, onClose, onRun }: Props) {
               role="option"
               aria-selected={index === current}
               onMouseMove={() => {
-                if (index !== current) setActive(index);
+                if (index !== current) setActiveId(item.id);
               }}
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => onRun(item)}
@@ -122,16 +129,5 @@ export function CommandPalette({ items, onClose, onRun }: Props) {
         </ul>
       )}
     </dialog>
-  );
-}
-
-const TEXT_INPUTS = new Set(["text", "search", "url", "email", "password"]);
-
-export function typingIn(target: EventTarget | null): boolean {
-  return (
-    target instanceof HTMLElement &&
-    (target.isContentEditable ||
-      target instanceof HTMLTextAreaElement ||
-      (target instanceof HTMLInputElement && TEXT_INPUTS.has(target.type)))
   );
 }

@@ -1117,9 +1117,9 @@ export function History({
           y={menu.y}
           label={menuCommit ? "Commit" : "History columns"}
           ignoreScrollIn={scrollRef}
-          onClose={() => {
+          onClose={({ returnFocus }) => {
             closeMenu();
-            tableRef.current?.focus({ preventScroll: true });
+            if (returnFocus) tableRef.current?.focus({ preventScroll: true });
           }}
         >
           {menuCommit && (

@@ -23,7 +23,7 @@ Open L1 Git with a fresh profile or origin. The empty screen and toolbar both ex
 11. Open the palette and press Up once. Confirm the last item is highlighted and scrolled into view, then press Down to wrap to the first. Type `zzqx` and confirm the palette says nothing matches.
 12. Press Escape, then open the palette again and click outside it. Confirm both close it, run nothing, and return focus to where it was.
 13. Open **Settings** from the palette and confirm **Appearance** shows. Open the palette there and confirm it lists only **Toggle sidebar**, **Open Fetching settings**, and **Back to repository**. Press Escape once to close the palette and once more to leave Settings.
-14. Focus the sidebar's **Search** field and press Cmd/Ctrl+P. Confirm that neither the palette nor a print dialog opens.
+14. Focus the sidebar field named **Filter repositories and branches** and press Cmd/Ctrl+P. Confirm that neither the palette nor a print dialog opens.
 
 ## Gotchas
 

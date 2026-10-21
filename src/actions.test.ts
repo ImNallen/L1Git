@@ -1,5 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
-import { filterPalette, paletteItems, shortcutAction } from "./actions";
+import {
+  claimedWhilePaletteOpen,
+  filterPalette,
+  matchesShortcut,
+  PALETTE_SHORTCUT,
+  paletteItems,
+  shortcutAction,
+  typingIn,
+} from "./actions";
 import type { ActionContext, Commands } from "./actions";
 import type { FullRef, Oid, RepositoryRoot } from "./domain/repository";
 
@@ -137,7 +145,11 @@ describe("command palette", () => {
       selection: { kind: "commit", oid: "a".repeat(40) as Oid },
       compare: { swappable: true },
       file: { hasCommit: false },
-      sidebarBranch: { name: "feature/fetch-retry", visibility: "hidden" },
+      sidebarBranch: {
+        name: "feature/fetch-retry",
+        visibility: "hidden",
+        outOfView: false,
+      },
       rule: "hide",
     };
     expect(titles(comparing, "")).toEqual([
@@ -167,7 +179,7 @@ describe("command palette", () => {
       ...repositoryScreen,
       repository: { fetching: false, idle: true, ready: 1 },
       file: { hasCommit: true },
-      sidebarBranch: { name: "main", visibility: "soloed" },
+      sidebarBranch: { name: "main", visibility: "soloed", outOfView: false },
       rule: "solo",
     };
     expect(titles(ready, "o")).toContain("Fast-forward (1)");
@@ -181,6 +193,27 @@ describe("command palette", () => {
     expect(titles(ready, "solo")).toEqual([
       "Stop soloing main",
       "Show file history",
+    ]);
+  });
+
+  it("only shows a branch whose hidden notice is up", () => {
+    const notice = (rule: ActionContext["rule"]): ActionContext => ({
+      ...repositoryScreen,
+      sidebarBranch: {
+        name: "feature/fetch-retry",
+        visibility: rule === "hide" ? "hidden" : "shown",
+        outOfView: true,
+      },
+      rule,
+    });
+    expect(titles(notice("hide"), "feature/fetch-retry")).toEqual([
+      "feature/fetch-retry",
+      "Show feature/fetch-retry",
+      "Solo feature/fetch-retry",
+    ]);
+    expect(titles(notice("solo"), "feature/fetch-retry")).toEqual([
+      "feature/fetch-retry",
+      "Show feature/fetch-retry",
     ]);
   });
 
@@ -304,5 +337,61 @@ describe("shortcuts", () => {
     const settings: ActionContext = { ...repositoryScreen, screen: "settings" };
     expect(id(settings, key("Escape"))).toBe("leaveSettings");
     expect(id({ ...settings, dialogOpen: true }, key("Escape"))).toBeNull();
+  });
+});
+
+describe("palette shortcut", () => {
+  it("opens with Cmd+P on macOS and Ctrl+P elsewhere", () => {
+    expect(
+      matchesShortcut(PALETTE_SHORTCUT, key("p", { metaKey: true }), true),
+    ).toBe(true);
+    expect(
+      matchesShortcut(PALETTE_SHORTCUT, key("p", { ctrlKey: true }), true),
+    ).toBe(false);
+    expect(
+      matchesShortcut(PALETTE_SHORTCUT, key("p", { ctrlKey: true }), false),
+    ).toBe(true);
+    expect(
+      matchesShortcut(PALETTE_SHORTCUT, key("p", { metaKey: true }), false),
+    ).toBe(false);
+    expect(
+      matchesShortcut(
+        PALETTE_SHORTCUT,
+        key("P", { metaKey: true, shiftKey: true }),
+        true,
+      ),
+    ).toBe(false);
+    expect(matchesShortcut(PALETTE_SHORTCUT, key("p"), true)).toBe(false);
+  });
+
+  it("claims the app's own modified shortcuts while it is open", () => {
+    expect(claimedWhilePaletteOpen(key("o", { metaKey: true }), true)).toBe(
+      true,
+    );
+    expect(claimedWhilePaletteOpen(key("o", { ctrlKey: true }), false)).toBe(
+      true,
+    );
+    expect(claimedWhilePaletteOpen(key("f", { metaKey: true }), true)).toBe(
+      true,
+    );
+    expect(claimedWhilePaletteOpen(key("f", { ctrlKey: true }), false)).toBe(
+      true,
+    );
+    expect(claimedWhilePaletteOpen(key("f", { ctrlKey: true }), true)).toBe(
+      false,
+    );
+    expect(claimedWhilePaletteOpen(key("Escape"), true)).toBe(false);
+    expect(claimedWhilePaletteOpen(key("ArrowDown"), true)).toBe(false);
+  });
+
+  it("stays out of text fields", () => {
+    expect(typingIn({ tagName: "INPUT", type: "text" })).toBe(true);
+    expect(typingIn({ tagName: "INPUT", type: "search" })).toBe(true);
+    expect(typingIn({ tagName: "TEXTAREA" })).toBe(true);
+    expect(typingIn({ tagName: "DIV", isContentEditable: true })).toBe(true);
+    expect(typingIn({ tagName: "INPUT", type: "radio" })).toBe(false);
+    expect(typingIn({ tagName: "INPUT", type: "color" })).toBe(false);
+    expect(typingIn({ tagName: "TABLE" })).toBe(false);
+    expect(typingIn(null)).toBe(false);
   });
 });

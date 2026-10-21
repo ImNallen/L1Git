@@ -111,9 +111,9 @@ export function RepositoryTree({
     if (open) openMenu(event, { kind: "repository", entry }, open);
   }
 
-  function closeMenu() {
+  function closeMenu({ returnFocus } = { returnFocus: true }) {
     setMenu(null);
-    menu?.focus.focus({ preventScroll: true });
+    if (returnFocus) menu?.focus.focus({ preventScroll: true });
   }
 
   function menuItems(target: NonNullable<typeof menu>["target"]) {

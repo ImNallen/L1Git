@@ -23,10 +23,12 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import {
+  claimedWhilePaletteOpen,
   matchesShortcut,
   PALETTE_SHORTCUT,
   paletteItems,
   shortcutAction,
+  typingIn,
 } from "./actions";
 import type {
   ActionContext,
@@ -40,7 +42,7 @@ import { useBranchVisibility } from "./branchVisibility";
 import type { ThemeSettings } from "./themes/catalog";
 import { AppearanceSettings } from "./components/AppearanceSettings";
 import { AddRepositoryDialog } from "./components/AddRepositoryDialog";
-import { CommandPalette, typingIn } from "./components/CommandPalette";
+import { CommandPalette } from "./components/CommandPalette";
 import { FetchSettings } from "./components/FetchSettings";
 import { CommitInspector, InspectorFrame } from "./components/CommitInspector";
 import { FileDiffPane, revisionOf } from "./components/FileDiffPane";
@@ -82,6 +84,15 @@ type Jump = {
   seq: number;
   pending: boolean;
 };
+function shownElement(element: Element | null): element is HTMLElement {
+  return (
+    element instanceof HTMLElement &&
+    element !== document.body &&
+    element.isConnected &&
+    element.getClientRects().length > 0
+  );
+}
+
 const settingsSections = [
   { section: "appearance", label: "Appearance", Icon: Palette },
   { section: "fetching", label: "Fetching", Icon: CloudDownload },
@@ -345,7 +356,8 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     swapCompare: app.swapCompare,
     endCompare,
     toggleHide: () => {
-      if (snapshot && ruledBranch)
+      if (snapshot && hiddenJump) showBranch(snapshot.root, hiddenJump);
+      else if (snapshot && ruledBranch)
         setRule(snapshot.root, toggleRule(rule, "hide", ruledBranch.reference));
     },
     toggleSolo: () => {
@@ -385,6 +397,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     sidebarBranch: ruledBranch && {
       name: ruledBranch.name,
       visibility: branchVisibility(rule, ruledBranch.reference),
+      outOfView: hiddenJump !== null,
     },
     rule: rule.kind,
   };
@@ -396,13 +409,26 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     paletteReturn.current = document.activeElement;
     setPalette({ picked: historyRef.current?.picked() ?? null });
   }, []);
+  const settleFocus = useRef(false);
+  const focusFallback = () => {
+    historyRef.current?.focus();
+    if (!shownElement(document.activeElement))
+      sidebarToggleRef.current?.focus();
+  };
+  useLayoutEffect(() => {
+    if (!settleFocus.current) return;
+    settleFocus.current = false;
+    if (!shownElement(document.activeElement)) focusFallback();
+  });
   const closePalette = () => {
     flushSync(() => setPalette(null));
-    if (paletteReturn.current instanceof HTMLElement)
-      paletteReturn.current.focus({ preventScroll: true });
+    const back = paletteReturn.current;
+    if (shownElement(back)) back.focus({ preventScroll: true });
+    else focusFallback();
   };
   const runItem = (item: PaletteItem) => {
     closePalette();
+    settleFocus.current = true;
     item.run();
   };
   async function addRepository(path: string, signal: AbortSignal) {
@@ -464,10 +490,15 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       const dialogOpen = document.querySelector("dialog[open]") !== null;
       if (matchesShortcut(PALETTE_SHORTCUT, event, mac)) {
         event.preventDefault();
-        if (!dialogOpen && !typingIn(event.target)) openPalette();
+        const target =
+          event.target instanceof HTMLElement ? event.target : null;
+        if (!dialogOpen && !typingIn(target)) openPalette();
         return;
       }
-      if (palette) return;
+      if (palette) {
+        if (claimedWhilePaletteOpen(event, mac)) event.preventDefault();
+        return;
+      }
       const action = shortcutAction({ ...context, dialogOpen }, event, mac);
       if (action === null) return;
       event.preventDefault();

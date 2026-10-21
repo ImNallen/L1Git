@@ -19,7 +19,11 @@ export type ActionContext = {
   selection: Selection | null;
   picked: Oid | null;
   compare: { swappable: boolean } | null;
-  sidebarBranch: { name: string; visibility: BranchVisibility } | null;
+  sidebarBranch: {
+    name: string;
+    visibility: BranchVisibility;
+    outOfView: boolean;
+  } | null;
   rule: VisibilityRule["kind"];
 };
 
@@ -206,7 +210,7 @@ export const actions: readonly Action[] = [
   {
     id: "toggleHide",
     title: (context) =>
-      `${context.sidebarBranch?.visibility === "hidden" ? "Show" : "Hide"} ${branchName(context)}`,
+      `${context.sidebarBranch?.visibility === "hidden" || context.sidebarBranch?.outOfView ? "Show" : "Hide"} ${branchName(context)}`,
     available: (context) =>
       onRepository(context) && context.sidebarBranch !== null,
     run: (commands) => commands.toggleHide(),
@@ -216,7 +220,9 @@ export const actions: readonly Action[] = [
     title: (context) =>
       `${context.sidebarBranch?.visibility === "soloed" ? "Stop soloing" : "Solo"} ${branchName(context)}`,
     available: (context) =>
-      onRepository(context) && context.sidebarBranch !== null,
+      onRepository(context) &&
+      context.sidebarBranch !== null &&
+      !(context.sidebarBranch.outOfView && context.rule === "solo"),
     run: (commands) => commands.toggleSolo(),
   },
   {
@@ -316,6 +322,32 @@ export function shortcutAction(
         matchesShortcut(action.shortcut, event, mac) &&
         action.available(context),
     ) ?? null
+  );
+}
+
+export function claimedWhilePaletteOpen(event: Key, mac: boolean): boolean {
+  return actions.some(
+    ({ shortcut }) =>
+      shortcut !== undefined &&
+      shortcut.modifier !== "unchecked" &&
+      matchesShortcut(shortcut, event, mac),
+  );
+}
+
+const TEXT_INPUTS = new Set(["text", "search", "url", "email", "password"]);
+
+export function typingIn(
+  target: {
+    tagName: string;
+    type?: string;
+    isContentEditable?: boolean;
+  } | null,
+): boolean {
+  if (target === null) return false;
+  return (
+    target.isContentEditable === true ||
+    target.tagName === "TEXTAREA" ||
+    (target.tagName === "INPUT" && TEXT_INPUTS.has(target.type ?? "text"))
   );
 }
 
