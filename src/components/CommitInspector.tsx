@@ -16,6 +16,8 @@ import type {
   RepositoryRoot,
   RepositorySnapshot,
 } from "../domain/repository";
+import { sameSelection } from "../domain/selection";
+import type { Selection } from "../domain/selection";
 import { relativeTime } from "../domain/time";
 import type { DetailState } from "../useWorkspace";
 import { ChangedFileTree, changeStatuses } from "./ChangedFileTree";
@@ -23,9 +25,9 @@ import { ChangedFileTree, changeStatuses } from "./ChangedFileTree";
 type Props = {
   state: DetailState;
   root: RepositoryRoot;
-  selectedOid: Oid | null;
+  selection: Selection | null;
   snapshot: RepositorySnapshot;
-  onSelect: (oid: Oid) => void;
+  onSelect: (selection: Selection) => void;
   selectedFile: string | null;
   onSelectFile: (path: string) => void;
   toggleButton: ReactNode;
@@ -98,7 +100,7 @@ function CommitMessage({ body }: { body: string }) {
 export function CommitInspector({
   state,
   root,
-  selectedOid,
+  selection,
   snapshot,
   onSelect,
   selectedFile,
@@ -110,19 +112,23 @@ export function CommitInspector({
   const [changesOpen, setChangesOpen] = useState(true);
   useEffect(() => {
     setCopy("idle");
-  }, [selectedOid]);
+  }, [selection]);
   useEffect(() => {
     if (copy !== "copied") return;
     const timer = window.setTimeout(() => setCopy("idle"), 1500);
     return () => window.clearTimeout(timer);
   }, [copy]);
   const detail =
-    state.kind === "ready" && state.root === root && state.oid === selectedOid
+    state.kind === "ready" &&
+    state.root === root &&
+    sameSelection(state.selection, selection)
       ? state.detail
       : null;
   const handle = detail && githubHandle(detail.commit.email);
   const error =
-    state.kind === "error" && state.root === root && state.oid === selectedOid
+    state.kind === "error" &&
+    state.root === root &&
+    sameSelection(state.selection, selection)
       ? state.error
       : null;
 
@@ -243,7 +249,9 @@ export function CommitInspector({
                             className="sha-chip"
                             key={parent}
                             title={`Open parent ${parent}`}
-                            onClick={() => onSelect(parent)}
+                            onClick={() =>
+                              onSelect({ kind: "commit", oid: parent })
+                            }
                           >
                             <code>{parent.slice(0, 7)}</code>
                             <ArrowUpRight size={12} />
@@ -322,7 +330,7 @@ export function CommitInspector({
         </div>
       ) : (
         <div className="inspector-empty">
-          {selectedOid ? (
+          {selection ? (
             <>
               <LoaderCircle size={23} className="spin" />
               <p>Reading commit…</p>

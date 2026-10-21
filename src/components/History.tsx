@@ -40,6 +40,7 @@ import {
   matchCount,
   stepMatch,
 } from "../domain/search";
+import type { Selection } from "../domain/selection";
 import { SHORT_OID_MIN_LENGTH, uniqueShortOids } from "../domain/shortOid";
 import { relativeTime } from "../domain/time";
 import { branchVisibility } from "../domain/visibility";
@@ -352,9 +353,9 @@ type Props = {
   visibleCommits: readonly Commit[];
   visibleOids: ReadonlySet<Oid>;
   rule: VisibilityRule;
-  selectedOid: Oid | null;
+  selection: Selection | null;
   revealSeq: number;
-  onSelect: (oid: Oid) => void;
+  onSelect: (selection: Selection) => void;
   onOpenFirstFile: () => void;
   onCancelOpen: () => void;
   /** Where the history of `root` was scrolled when it was last shown. */
@@ -374,7 +375,7 @@ export function History({
   visibleCommits: commits,
   visibleOids: known,
   rule,
-  selectedOid,
+  selection,
   revealSeq,
   onSelect,
   onOpenFirstFile,
@@ -387,6 +388,7 @@ export function History({
   visibleColumns,
   onToggleColumn,
 }: Props) {
+  const selectedOid = selection?.kind === "commit" ? selection.oid : null;
   const graph = useMemo(
     () =>
       buildGraph(
@@ -621,7 +623,7 @@ export function History({
     const oid = stepMatch(snapshot.commits, matches, selectedOid, by);
     if (oid === null) return;
     revealCentered(commits.findIndex((commit) => commit.oid === oid));
-    onSelect(oid);
+    onSelect({ kind: "commit", oid });
   }
 
   function closeColumnMenu() {
@@ -661,7 +663,7 @@ export function History({
       scroller.clientHeight - header,
     );
     setViewport({ top: scroller.scrollTop, height: scroller.clientHeight });
-    onSelect(next.oid);
+    onSelect({ kind: "commit", oid: next.oid });
   }
 
   const first = Math.min(
@@ -794,7 +796,7 @@ export function History({
                   aria-rowindex={first + offset + 2}
                   aria-selected={selected}
                   onClick={() => {
-                    onSelect(commit.oid);
+                    onSelect({ kind: "commit", oid: commit.oid });
                     tableRef.current?.focus({ preventScroll: true });
                   }}
                 >
