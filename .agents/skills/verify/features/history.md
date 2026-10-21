@@ -2,7 +2,7 @@
 
 ## Sub-features
 
-Local and remote branch sections, branch filtering, the full graph of every branch, squash-merge edges, ref labels beside the graph, per-commit line changes, branch highlight on ref hover, author nodes, jumping to a branch tip from the sidebar, windowed rows, loaded-history search, and local refresh.
+Local and remote branch sections, branch filtering, the full graph of every branch, squash-merge edges, ref labels beside the graph, per-commit line changes, keyboard movement, branch highlight on ref hover, author nodes, jumping to a branch tip from the sidebar, windowed rows, loaded-history search, and local refresh.
 
 ## How to get to it (user POV)
 
@@ -24,7 +24,15 @@ Add the fixture's `repository` path. L1 Git opens on the repository screen. Expa
 12. Switch rapidly between saved repositories. Confirm the final view belongs to the last selected root.
 13. Read the **Changes** column. Each row shows green `+N`, red `−N`, and five diffstat blocks, and its accessible name reads `N lines added, N lines deleted`. Compare at least the root commit, the merge, and `feat(inspector): show commit message and changed paths` with the line totals of `git -C <repository> diff --numstat <first-parent> <oid>`, using the empty tree `4b825dc642cb6eb9a060e54bf8d69288fbee4904` as the root commit's base. Binary files count as 0 lines. In the fixture the root reads `+1 −0`, the merge `+4 −0`, and the inspector commit `+4 −2`. In a long history, scroll quickly and confirm the cells fill in once scrolling stops, with one `/api/run` request with `op: "lineStats"` instead of one per frame.
 
-To check scrolling, use a repository with more commits than fit on screen. Scroll the history away from a branch tip, then select that branch in the sidebar. Confirm the history scrolls so the tip row sits near the middle. Selecting a row that is already visible never scrolls. Only the visible rows and a small margin exist in the DOM, and the table reports the full count in `aria-rowcount`.
+14. Click the root commit, then press Up. Confirm the history has focus, its `grid` reports the selected row in `aria-activedescendant`, the inspector follows, and the selected row has an accent tint with no border around the row or the pane.
+15. Press K and J, then turn on Caps Lock and press them again. Confirm they move like Up and Down. Press Home, then End, then Cmd+Up and Cmd+Down, then Ctrl+Home and Ctrl+End. Confirm they select the newest and the root commit.
+16. Select `Merge branch feat/history` and press Shift+Down. Confirm the selection moves to its first parent, the `v0.1.0` commit, skipping the two `feat/history` commits. Press Shift+J for `docs: start the local Git fixture`, then Shift+K and Shift+Up. Confirm the selection returns through `v0.1.0` to the merge.
+17. Select the `feat/history` tip and press Shift+Down twice. Confirm the selection moves to `feat(history): add bounded repository history`, then to `docs: start the local Git fixture`. Press Shift+Up twice and confirm it retraces to the `feat/history` tip. Click `docs: start the local Git fixture` and press Shift+Up. Confirm it follows the straight graph line to `v0.1.0`.
+18. Press Enter on a commit with changes. Confirm the first path in the inspector's tree opens as a diff with focus on **Back to history**, and Escape returns to the history with focus and the same commit selected. Click a file in the inspector's tree, press Escape, and confirm focus is back on the history and Down moves the selection.
+19. Click a row, then press Down. Confirm the selected row looks the same after the click and after the key. Press Tab until focus is in the inspector, and confirm the selected row returns to the plain selection color.
+20. Press Tab from the sidebar and confirm the history is one Tab stop. Focus **Filter repositories and branches**, type `jk`, and confirm the letters appear and the selection does not move.
+
+To check scrolling, use a repository with more commits than fit on screen. Scroll the history away from a branch tip, then select that branch in the sidebar. Confirm the history scrolls so the tip row sits near the middle. Selecting a row that is already visible never scrolls. On the large fixture, press End and confirm the oldest loaded commit is selected and visible, then hold Down and confirm the selected row stays in view, scrolling one row at a time. Only the visible rows and a small margin exist in the DOM, and the table reports the full count in `aria-rowcount`.
 
 ## Gotchas
 

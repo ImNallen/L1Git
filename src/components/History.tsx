@@ -15,6 +15,8 @@ import { buildGraph } from "../domain/graph";
 import type { GraphRow } from "../domain/graph";
 import { highlightBranch } from "../domain/highlight";
 import type { RowHighlight } from "../domain/highlight";
+import { historyAction, navigate, revealRow } from "../domain/navigation";
+import type { HistoryAction, Trail } from "../domain/navigation";
 import { refLabels } from "../domain/refs";
 import type { RefLabel } from "../domain/refs";
 import type {
@@ -131,12 +133,17 @@ function GraphCell({
 }
 
 function ChangesCell({ stats }: { stats: LineStats | undefined }) {
-  if (!stats) return <td className="changes-cell" />;
+  if (!stats) return <td role="gridcell" className="changes-cell" />;
   const { added, deleted } = stats;
   const lines = (count: number) => `${count} line${count === 1 ? "" : "s"}`;
   const label = `${lines(added)} added, ${lines(deleted)} deleted`;
   return (
-    <td className="changes-cell" aria-label={label} title={label}>
+    <td
+      role="gridcell"
+      className="changes-cell"
+      aria-label={label}
+      title={label}
+    >
       <span className="change-stat added">+{added.toLocaleString()}</span>
       <span className="change-stat deleted">
         {"\u2212"}
@@ -214,12 +221,9 @@ function MoreRefs({ labels, lane }: { labels: RefLabel[]; lane: number }) {
       <span
         className="ref-badge more-refs"
         style={{ background: color(lane) }}
-        tabIndex={0}
         aria-label={`${labels.length} more: ${labels.map(labelName).join(", ")}`}
         onMouseEnter={open}
-        onFocus={open}
         onMouseLeave={() => setAnchor(null)}
-        onBlur={() => setAnchor(null)}
       >
         +{labels.length}
       </span>
@@ -245,6 +249,8 @@ type Props = {
   selectedOid: Oid | null;
   revealSeq: number;
   onSelect: (oid: Oid) => void;
+  onOpenFirstFile: () => void;
+  onCancelOpen: () => void;
   /** Where the history of `root` was scrolled when it was last shown. */
   scrollTopOf: (root: RepositoryRoot) => number;
   onScroll: (root: RepositoryRoot, scrollTop: number) => void;
@@ -259,6 +265,8 @@ export function History({
   selectedOid,
   revealSeq,
   onSelect,
+  onOpenFirstFile,
+  onCancelOpen,
   scrollTopOf,
   onScroll,
   busy,
@@ -308,6 +316,9 @@ export function History({
   } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const headRef = useRef<HTMLTableSectionElement>(null);
+  const tableRef = useRef<HTMLTableElement>(null);
+  const trail = useRef<Trail | null>(null);
+  const wasHidden = useRef(hidden);
   const [viewport, setViewport] = useState({ top: 0, height: 0 });
 
   useLayoutEffect(() => {
@@ -374,6 +385,47 @@ export function History({
     setViewport({ top: scroller.scrollTop, height: scroller.clientHeight });
   }, [snapshot.root, scrollTopOf, selectedOid, revealSeq, hidden]);
 
+  useLayoutEffect(
+    function refocusWhenDiffCloses() {
+      const shown = wasHidden.current && !hidden;
+      wasHidden.current = hidden;
+      if (shown && !document.activeElement?.closest(".sidebar, dialog"))
+        tableRef.current?.focus({ preventScroll: true });
+    },
+    [hidden],
+  );
+
+  useEffect(() => {
+    trail.current = null;
+  }, [snapshot.root]);
+  useEffect(() => {
+    if (trail.current?.end !== selectedOid) trail.current = null;
+  }, [selectedOid]);
+
+  function run(action: HistoryAction) {
+    if (action === "open") return onOpenFirstFile();
+    if (action === "cancel") return onCancelOpen();
+    const next = navigate(
+      commits,
+      graph.rows,
+      selectedOid,
+      action,
+      trail.current,
+    );
+    trail.current = next.trail;
+    const scroller = scrollRef.current;
+    if (next.oid === null || !scroller) return;
+    const header = headRef.current?.offsetHeight ?? 0;
+    scroller.scrollTop = revealRow(
+      commits.findIndex((commit) => commit.oid === next.oid),
+      ROW_HEIGHT,
+      scroller.scrollTop,
+      scroller.clientHeight - header,
+    );
+    setViewport({ top: scroller.scrollTop, height: scroller.clientHeight });
+    onSelect(next.oid);
+  }
+
   const first = Math.min(
     commits.length,
     Math.max(0, Math.floor(viewport.top / ROW_HEIGHT) - OVERSCAN),
@@ -389,6 +441,10 @@ export function History({
   const lineStats = useLineStats(snapshot.root, visible);
   const graphWidth = Math.max(48, graph.lanes * 24 + 10);
   const columns = `200px ${graphWidth}px minmax(260px, 1fr) 160px`;
+  const active =
+    selectedOid !== null && visible.some((commit) => commit.oid === selectedOid)
+      ? rowId(selectedOid)
+      : undefined;
 
   return (
     <section
@@ -399,16 +455,43 @@ export function History({
     >
       <div className="history-scroll" ref={scrollRef}>
         <table
+          ref={tableRef}
           className={`history-table${highlight ? " highlighting" : ""}`}
           style={{ minWidth: graphWidth + 620 }}
+          role="grid"
+          tabIndex={0}
+          aria-label="Commits"
           aria-rowcount={commits.length + 1}
+          aria-activedescendant={active}
+          onKeyDown={(event) => {
+            const action = historyAction(event.nativeEvent);
+            if (action === null) return;
+            event.preventDefault();
+            run(action);
+          }}
+          onBlur={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget))
+              onCancelOpen();
+          }}
         >
           <thead ref={headRef}>
-            <tr style={{ gridTemplateColumns: columns }} aria-rowindex={1}>
-              <th scope="col">Branch / Tag</th>
-              <th scope="col">Graph</th>
-              <th scope="col">Commit message</th>
-              <th scope="col">Changes</th>
+            <tr
+              role="row"
+              style={{ gridTemplateColumns: columns }}
+              aria-rowindex={1}
+            >
+              <th role="columnheader" scope="col">
+                Branch / Tag
+              </th>
+              <th role="columnheader" scope="col">
+                Graph
+              </th>
+              <th role="columnheader" scope="col">
+                Commit message
+              </th>
+              <th role="columnheader" scope="col">
+                Changes
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -423,6 +506,8 @@ export function History({
               return (
                 <tr
                   key={commit.oid}
+                  id={rowId(commit.oid)}
+                  role="row"
                   className={
                     [selected && "selected", lit && "lit"]
                       .filter(Boolean)
@@ -430,9 +515,13 @@ export function History({
                   }
                   style={{ gridTemplateColumns: columns }}
                   aria-rowindex={first + offset + 2}
-                  onClick={() => onSelect(commit.oid)}
+                  aria-selected={selected}
+                  onClick={() => {
+                    onSelect(commit.oid);
+                    tableRef.current?.focus({ preventScroll: true });
+                  }}
                 >
-                  <td className="ref-cell">
+                  <td role="gridcell" className="ref-cell">
                     {label && (
                       <span
                         className="ref-badges"
@@ -446,7 +535,7 @@ export function History({
                       </span>
                     )}
                   </td>
-                  <td>
+                  <td role="gridcell">
                     {row && (
                       <GraphCell
                         row={row}
@@ -458,11 +547,11 @@ export function History({
                       />
                     )}
                   </td>
-                  <td>
+                  <td role="gridcell">
                     <button
                       className="commit-description"
+                      tabIndex={-1}
                       aria-label={`${commit.subject}, ${commit.author}, ${commit.oid.slice(0, 7)}`}
-                      aria-pressed={selected}
                     >
                       <span className="commit-subject" title={commit.subject}>
                         {commit.subject || "(no subject)"}
@@ -494,6 +583,10 @@ export function History({
       </div>
     </section>
   );
+}
+
+function rowId(oid: Oid): string {
+  return `history-row-${oid}`;
 }
 
 /** Holds the history pane while a repository opens for the first time. */

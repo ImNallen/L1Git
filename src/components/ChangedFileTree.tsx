@@ -1,6 +1,11 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { GitStatus } from "@pierre/trees";
 import { FileTree, useFileTree } from "@pierre/trees/react";
+import {
+  changedFileTreeInput,
+  flattenEmptyDirectories,
+  initialExpansion,
+} from "../domain/changedFiles";
 import type { ChangeStatus, ChangedFile } from "../domain/repository";
 
 export const changeStatuses = {
@@ -24,14 +29,15 @@ export function ChangedFileTree({ files, selectedPath, onSelectFile }: Props) {
   useEffect(() => {
     onSelectFileRef.current = onSelectFile;
   });
+  const [preparedInput] = useState(() => changedFileTreeInput(files));
   const { model } = useFileTree({
-    paths: files.map((file) => file.path),
+    preparedInput,
     gitStatus: files.map((file) => ({
       path: file.path,
       status: changeStatuses[file.status].gitStatus,
     })),
-    initialExpansion: "open",
-    flattenEmptyDirectories: true,
+    initialExpansion,
+    flattenEmptyDirectories,
     density: "compact",
     onSelectionChange: ([path, ...rest]) => {
       if (

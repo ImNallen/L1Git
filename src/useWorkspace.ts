@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as repositories from "./repositories";
+import { firstChangedPath } from "./domain/changedFiles";
+import { latestReader } from "./latestReader";
 import {
   emptyCatalog,
   forget,
@@ -77,6 +79,9 @@ export function useWorkspace() {
   const [detail, setDetail] = useState<DetailState>({ kind: "empty" });
   const [detailAttempt, setDetailAttempt] = useState(0);
   const [fileDiff, setFileDiff] = useState<FileDiffState>({ kind: "closed" });
+  const [pendingOpen, setPendingOpen] = useState<Omit<FileKey, "path"> | null>(
+    null,
+  );
   const requestId = useRef(0);
   const snapshots = useRef<SnapshotCache>(new Map());
   const views = useRef(new Map<RepositoryRoot, RepositoryView>());
@@ -228,32 +233,30 @@ export function useWorkspace() {
     [],
   );
 
+  const [detailReader] = useState(() =>
+    latestReader<{ root: RepositoryRoot; oid: Oid }, CommitDetail>({
+      read: (key) => repositories.commitDetail(key.root, key.oid),
+      deliver: (key, outcome) =>
+        setDetail(
+          outcome.ok
+            ? { kind: "ready", ...key, detail: outcome.value }
+            : { kind: "error", ...key, error: problemFrom(outcome.error) },
+        ),
+      same: (left, right) => left.root === right.root && left.oid === right.oid,
+      stallMs: 1000,
+      maxReads: 2,
+    }),
+  );
+
   useEffect(() => {
     if (root === null || selectedOid === null) {
+      detailReader.want(null);
       setDetail({ kind: "empty" });
       return;
     }
-    let cancelled = false;
+    detailReader.want({ root, oid: selectedOid });
     setDetail({ kind: "loading", root, oid: selectedOid });
-    void repositories.commitDetail(root, selectedOid).then(
-      (detail) => {
-        if (!cancelled)
-          setDetail({ kind: "ready", root, oid: selectedOid, detail });
-      },
-      (error: unknown) => {
-        if (!cancelled)
-          setDetail({
-            kind: "error",
-            root,
-            oid: selectedOid,
-            error: problemFrom(error),
-          });
-      },
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, [root, selectedOid, detailAttempt]);
+  }, [root, selectedOid, detailAttempt, detailReader]);
 
   useEffect(() => {
     setFileDiff({ kind: "closed" });
@@ -284,6 +287,25 @@ export function useWorkspace() {
     );
   };
 
+  useEffect(() => {
+    if (pendingOpen === null) return;
+    if (pendingOpen.root !== root || pendingOpen.oid !== selectedOid) {
+      setPendingOpen(null);
+      return;
+    }
+    if (
+      detail.kind === "empty" ||
+      detail.kind === "loading" ||
+      detail.root !== root ||
+      detail.oid !== selectedOid
+    )
+      return;
+    setPendingOpen(null);
+    if (detail.kind === "error") return;
+    const path = firstChangedPath(detail.detail.files);
+    if (path !== undefined) openFile(path);
+  }, [pendingOpen, detail, root, selectedOid]);
+
   return {
     workspace,
     current,
@@ -295,6 +317,11 @@ export function useWorkspace() {
     retryDetail: () => setDetailAttempt((attempt) => attempt + 1),
     fileDiff,
     openFile,
+    cancelOpenFirstFile: () => setPendingOpen(null),
+    openFirstFile: () => {
+      if (root !== null && selectedOid !== null)
+        setPendingOpen({ root, oid: selectedOid });
+    },
     closeFile,
     selectRepository,
     addRepository,

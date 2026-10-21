@@ -105,6 +105,12 @@
 .history-table tr.selected td {
   background: var(--row-selected);
 }
+.history-table:focus {
+  outline: none;
+}
+.history-table:focus-within tr.selected td {
+  background: color-mix(in srgb, var(--primary-bg) 16%, var(--row-selected));
+}
 .commit-description {
   min-width: 0;
   width: 100%;
