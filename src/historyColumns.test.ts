@@ -22,9 +22,9 @@ describe("history column layout", () => {
       7,
     );
     expect(layout.template).toBe(
-      "200px 106px minmax(160px, 1fr) 120px 96px 55px 160px",
+      "200px 106px minmax(160px, 1fr) 120px 96px 56px 160px",
     );
-    expect(layout.minWidth).toBe(897);
+    expect(layout.minWidth).toBe(898);
     expect(layout.columns.map((column) => column.label)).toEqual([
       "Author",
       "Date",
@@ -33,10 +33,13 @@ describe("history column layout", () => {
     ]);
   });
 
-  it("widens SHA to fit the longest unique prefix", () => {
-    const layout = columnLayout(58, new Set<ColumnId>(["sha"]), 10);
-    expect(layout.template).toBe("200px 58px minmax(160px, 1fr) 74px");
-    expect(layout.minWidth).toBe(492);
+  it.each([
+    [8, "62px", 480],
+    [10, "75px", 493],
+  ])("widens SHA to fit a %i-character prefix", (length, width, minWidth) => {
+    const layout = columnLayout(58, new Set<ColumnId>(["sha"]), length);
+    expect(layout.template).toBe(`200px 58px minmax(160px, 1fr) ${width}`);
+    expect(layout.minWidth).toBe(minWidth);
   });
 
   it("narrows the message minimum once a column besides Changes is on", () => {

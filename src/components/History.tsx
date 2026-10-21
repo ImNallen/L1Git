@@ -515,7 +515,9 @@ export function History({
     if (action === "cancel") return onCancelOpen();
     if (action === "columns") {
       const header = headRef.current?.getBoundingClientRect();
-      if (header) setColumnMenu({ x: header.left + 14, y: header.bottom });
+      const pane = scrollRef.current?.getBoundingClientRect();
+      if (header && pane)
+        setColumnMenu({ x: pane.left + 14, y: header.bottom });
       return;
     }
     const next = navigate(

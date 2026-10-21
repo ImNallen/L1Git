@@ -4,3 +4,4 @@ target/
 .DS_Store
 *.local
 src-tauri/gen/
+*.tsbuildinfo

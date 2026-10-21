@@ -205,7 +205,7 @@ export function RepositoryTree({
             setMenu(null);
             menu.trigger
               .querySelector<HTMLElement>(".repository-open")
-              ?.focus();
+              ?.focus({ preventScroll: true });
           }}
         >
           <button
