@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { flushSync } from "react-dom";
 import {
   ArrowLeft,
@@ -15,26 +22,46 @@ import {
   Plus,
   TriangleAlert,
 } from "lucide-react";
+import {
+  matchesShortcut,
+  PALETTE_SHORTCUT,
+  paletteItems,
+  shortcutAction,
+} from "./actions";
+import type {
+  ActionContext,
+  Commands,
+  PaletteItem,
+  Screen,
+  SettingsSection,
+} from "./actions";
 import { useAppearance } from "./appearance";
 import { useBranchVisibility } from "./branchVisibility";
 import type { ThemeSettings } from "./themes/catalog";
 import { AppearanceSettings } from "./components/AppearanceSettings";
 import { AddRepositoryDialog } from "./components/AddRepositoryDialog";
+import { CommandPalette, typingIn } from "./components/CommandPalette";
 import { FetchSettings } from "./components/FetchSettings";
 import { CommitInspector, InspectorFrame } from "./components/CommitInspector";
-import { FileDiffPane } from "./components/FileDiffPane";
-import type { DiffStyle } from "./components/FileDiffPane";
+import { FileDiffPane, revisionOf } from "./components/FileDiffPane";
+import type { DiffStyle, FileDiffHandle } from "./components/FileDiffPane";
 import { History, HistoryPlaceholder } from "./components/History";
 import type { HistoryHandle } from "./components/History";
 import { PaneDivider } from "./components/PaneDivider";
 import { RepositoryTree } from "./components/RepositoryTree";
+import { swapEnds } from "./domain/comparison";
 import { trunkTips } from "./domain/highlight";
 import { readyAdvances } from "./domain/overview";
 import type { Branch, FullRef, Oid, RepositoryRoot } from "./domain/repository";
 import { sameSelection } from "./domain/selection";
 import type { Compare } from "./domain/comparison";
 import type { Selection } from "./domain/selection";
-import { NO_RULE, visibleCommits } from "./domain/visibility";
+import {
+  branchVisibility,
+  NO_RULE,
+  toggleRule,
+  visibleCommits,
+} from "./domain/visibility";
 import type { VisibilityRule } from "./domain/visibility";
 import { historyRows } from "./domain/worktree";
 import { useExpandedRepositories } from "./expandedRepositories";
@@ -45,8 +72,6 @@ import { mac, macNative } from "./repositories";
 import { useRepositoryRefs } from "./useRepositoryRefs";
 import { useWorkspace } from "./useWorkspace";
 
-type AppScreen = "repository" | "settings";
-type SettingsSection = "appearance" | "fetching";
 /**
  * A branch jump. `pending` waits for the snapshot of `root` to load, then a
  * new `seq` reveals the branch after the history restores its scroll.
@@ -65,7 +90,7 @@ const settingsSections = [
 export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   const appearance = useAppearance(initialTheme);
   const app = useWorkspace();
-  const [screen, setScreen] = useState<AppScreen>("repository");
+  const [screen, setScreen] = useState<Screen>("repository");
   const [settingsSection, setSettingsSection] =
     useState<SettingsSection>("appearance");
   const fetchSettings = useFetchSettings();
@@ -74,6 +99,8 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     fetchSettings.intervalMinutes,
   );
   const [adding, setAdding] = useState(false);
+  const [palette, setPalette] = useState<{ picked: Oid | null } | null>(null);
+  const paletteReturn = useRef<Element | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [inspectorOpen, setInspectorOpen] = useState(
     () => window.innerWidth >= 1100,
@@ -90,6 +117,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   const inspectorToggleRef = useRef<HTMLButtonElement>(null);
   const settingsRef = useRef<HTMLButtonElement>(null);
   const historyRef = useRef<HistoryHandle>(null);
+  const fileDiffRef = useRef<FileDiffHandle>(null);
   const leaveSettings = useCallback(() => {
     flushSync(() => setScreen("repository"));
     (sidebarOpen ? settingsRef : sidebarToggleRef).current?.focus();
@@ -197,6 +225,10 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     !visibleOids.has(jumped.oid)
       ? jumped
       : null;
+  const highlighted =
+    jumped !== null &&
+    sameSelection(app.selection, { kind: "commit", oid: jumped.oid });
+  const ruledBranch = jumped && (highlighted || hiddenJump) ? jumped : null;
   const refreshRef = useRef(app.refresh);
   const reloadRefsRef = useRef(branchRefs.reload);
   useEffect(() => {
@@ -279,6 +311,100 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     }));
     historyRef.current?.focus();
   }
+  const commands: Commands = {
+    addRepository: () => setAdding(true),
+    openSettings: (section) => {
+      if (section) setSettingsSection(section);
+      setScreen("settings");
+    },
+    leaveSettings,
+    toggleSidebar: () => setSidebarOpen((open) => !open),
+    toggleInspector: () => setInspectorOpen((open) => !open),
+    fetch: () => {
+      if (openRepository) void overviewStore.fetch(openRepository.commonDir);
+    },
+    fastForward: () => {
+      if (openRepository)
+        void overviewStore.updateAll(openRepository.commonDir);
+    },
+    search: () => historyRef.current?.openSearch(),
+    closeFile,
+    showFile: (view) => fileDiffRef.current?.show(view),
+    compareWithWorkingCopy: () => {
+      if (selected?.kind === "commit")
+        historyRef.current?.compareWithWorkingCopy(selected.oid);
+    },
+    compareWithPick: () => {
+      if (selected?.kind === "commit")
+        historyRef.current?.compareWithPick(selected.oid);
+    },
+    pick: () => {
+      if (selected?.kind === "commit") historyRef.current?.pick(selected.oid);
+    },
+    clearPick: () => historyRef.current?.pick(null),
+    swapCompare: app.swapCompare,
+    endCompare,
+    toggleHide: () => {
+      if (snapshot && ruledBranch)
+        setRule(snapshot.root, toggleRule(rule, "hide", ruledBranch.reference));
+    },
+    toggleSolo: () => {
+      if (snapshot && ruledBranch)
+        setRule(snapshot.root, toggleRule(rule, "solo", ruledBranch.reference));
+    },
+    showAllBranches: () => {
+      if (snapshot) setRule(snapshot.root, NO_RULE);
+    },
+    openRepository: showRepository,
+    jumpToBranch: (reference) => {
+      const branch = snapshot?.branches.find(
+        (branch) => branch.reference === reference,
+      );
+      if (snapshot && branch) jumpTo(snapshot.root, branch);
+    },
+  };
+  const context: ActionContext = {
+    screen,
+    section: settingsSection,
+    dialogOpen: false,
+    adding,
+    searchable: snapshot !== null,
+    inspectable: shown !== null,
+    repository: openRepository && {
+      fetching: openFetching,
+      idle: openRepository.activity.kind === "idle",
+      ready: openReady,
+    },
+    file:
+      fileDiff.kind === "closed"
+        ? null
+        : { hasCommit: revisionOf(fileDiff) !== null },
+    selection: selected,
+    picked: palette?.picked ?? null,
+    compare: app.compare && { swappable: swapEnds(app.compare) !== null },
+    sidebarBranch: ruledBranch && {
+      name: ruledBranch.name,
+      visibility: branchVisibility(rule, ruledBranch.reference),
+    },
+    rule: rule.kind,
+  };
+  const keys = useRef({ context, commands, palette: palette !== null });
+  useLayoutEffect(() => {
+    keys.current = { context, commands, palette: palette !== null };
+  });
+  const openPalette = useCallback(() => {
+    paletteReturn.current = document.activeElement;
+    setPalette({ picked: historyRef.current?.picked() ?? null });
+  }, []);
+  const closePalette = () => {
+    flushSync(() => setPalette(null));
+    if (paletteReturn.current instanceof HTMLElement)
+      paletteReturn.current.focus({ preventScroll: true });
+  };
+  const runItem = (item: PaletteItem) => {
+    closePalette();
+    item.run();
+  };
   async function addRepository(path: string, signal: AbortSignal) {
     const added = await app.addRepository(path, signal);
     if (added.kind === "opened") {
@@ -295,7 +421,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       title="Toggle sidebar"
       aria-pressed={sidebarOpen}
       onClick={() => {
-        flushSync(() => setSidebarOpen((open) => !open));
+        flushSync(commands.toggleSidebar);
         sidebarToggleRef.current?.focus();
       }}
     >
@@ -311,7 +437,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       title="Toggle commit inspector"
       aria-pressed={inspectorVisible}
       onClick={() => {
-        flushSync(() => setInspectorOpen((open) => !open));
+        flushSync(commands.toggleInspector);
         inspectorToggleRef.current?.focus();
       }}
     >
@@ -333,37 +459,23 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   }, [jump, snapshot, visibleOids, app.activeRoot, app.select]);
   useEffect(() => {
     function keyboard(event: KeyboardEvent) {
-      if (screen === "settings") {
-        // A modal dialog owns Escape, even when its focused control was disabled and dropped focus.
-        if (event.key === "Escape" && !document.querySelector("dialog[open]")) {
-          event.preventDefault();
-          leaveSettings();
-        }
+      const { context, commands, palette } = keys.current;
+      // A modal dialog owns Escape, even when its focused control was disabled and dropped focus.
+      const dialogOpen = document.querySelector("dialog[open]") !== null;
+      if (matchesShortcut(PALETTE_SHORTCUT, event, mac)) {
+        event.preventDefault();
+        if (!dialogOpen && !typingIn(event.target)) openPalette();
         return;
       }
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "o") {
-        event.preventDefault();
-        setAdding(true);
-      }
-      if (screen !== "repository" || adding) return;
-      if (fileOpen && event.key === "Escape") closeFile();
-      if (
-        !fileOpen &&
-        historyRef.current &&
-        (mac
-          ? event.metaKey && !event.ctrlKey
-          : event.ctrlKey && !event.metaKey) &&
-        !event.shiftKey &&
-        !event.altKey &&
-        event.key.toLowerCase() === "f"
-      ) {
-        event.preventDefault();
-        historyRef.current.openSearch();
-      }
+      if (palette) return;
+      const action = shortcutAction({ ...context, dialogOpen }, event, mac);
+      if (action === null) return;
+      event.preventDefault();
+      action.run(commands);
     }
     window.addEventListener("keydown", keyboard);
     return () => window.removeEventListener("keydown", keyboard);
-  }, [adding, fileOpen, closeFile, screen, leaveSettings]);
+  }, [openPalette]);
   useEffect(() => {
     const media = window.matchMedia("(max-width: 1099px)");
     const narrow = () => {
@@ -401,9 +513,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
             refs={branchRefs.refs}
             activePath={screen === "repository" ? activePath : null}
             highlighted={
-              snapshot &&
-              jumped !== null &&
-              sameSelection(app.selection, { kind: "commit", oid: jumped.oid })
+              snapshot && jumped && highlighted
                 ? { root: snapshot.root, reference: jumped.reference }
                 : null
             }
@@ -425,7 +535,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                 return next;
               });
             }}
-            onAdd={() => setAdding(true)}
+            onAdd={commands.addRepository}
           />
         </div>
         {screen === "settings" && (
@@ -454,7 +564,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
               className="icon-button"
               aria-label="Settings"
               title="Settings"
-              onClick={() => setScreen("settings")}
+              onClick={() => commands.openSettings()}
             >
               <Settings size={16} />
             </button>
@@ -490,9 +600,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                   <button
                     className="button secondary"
                     disabled={openFetching}
-                    onClick={() =>
-                      void overviewStore.fetch(openRepository.commonDir)
-                    }
+                    onClick={commands.fetch}
                     title="Download new commits from this repository's remotes."
                   >
                     {openFetching ? (
@@ -507,9 +615,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                   <button
                     className="button secondary"
                     disabled={openRepository.activity.kind !== "idle"}
-                    onClick={() =>
-                      void overviewStore.updateAll(openRepository.commonDir)
-                    }
+                    onClick={commands.fastForward}
                     title={`Fast-forward ${openReady === 1 ? "1 branch that is" : `${openReady} branches that are`} behind and clean. Never merges or rebases.`}
                   >
                     {openRepository.activity.kind === "updating" ? (
@@ -596,6 +702,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                   />
                   {fileDiff.kind !== "closed" && (
                     <FileDiffPane
+                      ref={fileDiffRef}
                       state={fileDiff}
                       diffStyle={diffStyle}
                       theme={appearance.variant.appearance}
@@ -748,6 +855,19 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
           </>
         )}
       </main>
+      {palette && (
+        <CommandPalette
+          items={paletteItems(
+            context,
+            commands,
+            mac,
+            app.catalog.entries,
+            snapshot?.branches ?? [],
+          )}
+          onClose={closePalette}
+          onRun={runItem}
+        />
+      )}
       {adding && (
         <AddRepositoryDialog
           onAdd={addRepository}

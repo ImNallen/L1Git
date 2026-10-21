@@ -1,0 +1,427 @@
+import { normalizeSearch } from "./domain/search";
+import type { FullRef, Oid, RepositoryRoot } from "./domain/repository";
+import type { Selection } from "./domain/selection";
+import type { BranchVisibility, VisibilityRule } from "./domain/visibility";
+
+export type Screen = "repository" | "settings";
+export type SettingsSection = "appearance" | "fetching";
+export type FileView = "unified" | "split" | "history" | "blame";
+
+export type ActionContext = {
+  screen: Screen;
+  section: SettingsSection;
+  dialogOpen: boolean;
+  adding: boolean;
+  searchable: boolean;
+  inspectable: boolean;
+  repository: { fetching: boolean; idle: boolean; ready: number } | null;
+  file: { hasCommit: boolean } | null;
+  selection: Selection | null;
+  picked: Oid | null;
+  compare: { swappable: boolean } | null;
+  sidebarBranch: { name: string; visibility: BranchVisibility } | null;
+  rule: VisibilityRule["kind"];
+};
+
+export type Commands = {
+  addRepository: () => void;
+  openSettings: (section?: SettingsSection) => void;
+  leaveSettings: () => void;
+  toggleSidebar: () => void;
+  toggleInspector: () => void;
+  fetch: () => void;
+  fastForward: () => void;
+  search: () => void;
+  closeFile: () => void;
+  showFile: (view: FileView) => void;
+  compareWithWorkingCopy: () => void;
+  compareWithPick: () => void;
+  pick: () => void;
+  clearPick: () => void;
+  swapCompare: () => void;
+  endCompare: () => void;
+  toggleHide: () => void;
+  toggleSolo: () => void;
+  showAllBranches: () => void;
+  openRepository: (root: RepositoryRoot) => void;
+  jumpToBranch: (reference: FullRef) => void;
+};
+
+export type Shortcut = {
+  key: string;
+  modifier: "platform" | "cmdOrCtrl" | "unchecked";
+};
+
+export type ActionId =
+  | "fetch"
+  | "fastForward"
+  | "search"
+  | "closeFile"
+  | "unifiedDiff"
+  | "splitDiff"
+  | "fileHistory"
+  | "blame"
+  | "compareWithWorkingCopy"
+  | "compareWithPick"
+  | "pick"
+  | "clearPick"
+  | "swapCompare"
+  | "endCompare"
+  | "toggleHide"
+  | "toggleSolo"
+  | "showAllBranches"
+  | "addRepository"
+  | "toggleSidebar"
+  | "toggleInspector"
+  | "openSettings"
+  | "appearanceSettings"
+  | "fetchingSettings"
+  | "leaveSettings";
+
+export type Action = {
+  id: ActionId;
+  title: string | ((context: ActionContext) => string);
+  shortcut?: Shortcut;
+  available: (context: ActionContext) => boolean;
+  run: (commands: Commands) => void;
+};
+
+const onRepository = (context: ActionContext) =>
+  context.screen === "repository";
+const keysFree = (context: ActionContext) =>
+  onRepository(context) && !context.adding;
+const fileOpen = (context: ActionContext) =>
+  onRepository(context) && context.file !== null;
+const withRevision = (context: ActionContext) =>
+  onRepository(context) && context.file?.hasCommit === true;
+const branchName = (context: ActionContext) =>
+  context.sidebarBranch?.name ?? "";
+
+export const PALETTE_SHORTCUT: Shortcut = { key: "p", modifier: "platform" };
+
+export const actions: readonly Action[] = [
+  {
+    id: "fetch",
+    title: "Fetch",
+    available: (context) =>
+      onRepository(context) &&
+      context.repository !== null &&
+      !context.repository.fetching,
+    run: (commands) => commands.fetch(),
+  },
+  {
+    id: "fastForward",
+    title: (context) => `Fast-forward (${context.repository?.ready ?? 0})`,
+    available: (context) =>
+      onRepository(context) &&
+      context.repository !== null &&
+      context.repository.idle &&
+      context.repository.ready > 0,
+    run: (commands) => commands.fastForward(),
+  },
+  {
+    id: "search",
+    title: "Search history",
+    shortcut: { key: "f", modifier: "platform" },
+    available: (context) =>
+      keysFree(context) && context.file === null && context.searchable,
+    run: (commands) => commands.search(),
+  },
+  {
+    id: "closeFile",
+    title: "Back to history",
+    shortcut: { key: "Escape", modifier: "unchecked" },
+    available: (context) => keysFree(context) && context.file !== null,
+    run: (commands) => commands.closeFile(),
+  },
+  {
+    id: "unifiedDiff",
+    title: "Show unified diff",
+    available: fileOpen,
+    run: (commands) => commands.showFile("unified"),
+  },
+  {
+    id: "splitDiff",
+    title: "Show split diff",
+    available: fileOpen,
+    run: (commands) => commands.showFile("split"),
+  },
+  {
+    id: "fileHistory",
+    title: "Show file history",
+    available: withRevision,
+    run: (commands) => commands.showFile("history"),
+  },
+  {
+    id: "blame",
+    title: "Show blame",
+    available: withRevision,
+    run: (commands) => commands.showFile("blame"),
+  },
+  {
+    id: "compareWithWorkingCopy",
+    title: "Compare with working copy",
+    available: (context) =>
+      onRepository(context) && context.selection?.kind === "commit",
+    run: (commands) => commands.compareWithWorkingCopy(),
+  },
+  {
+    id: "compareWithPick",
+    title: (context) => `Compare with ${context.picked?.slice(0, 7) ?? ""}`,
+    available: (context) =>
+      onRepository(context) &&
+      context.picked !== null &&
+      context.selection?.kind === "commit" &&
+      context.selection.oid !== context.picked,
+    run: (commands) => commands.compareWithPick(),
+  },
+  {
+    id: "pick",
+    title: "Pick for comparison",
+    available: (context) =>
+      onRepository(context) &&
+      context.selection?.kind === "commit" &&
+      context.selection.oid !== context.picked,
+    run: (commands) => commands.pick(),
+  },
+  {
+    id: "clearPick",
+    title: "Clear pick",
+    available: (context) => onRepository(context) && context.picked !== null,
+    run: (commands) => commands.clearPick(),
+  },
+  {
+    id: "swapCompare",
+    title: "Swap compared commits",
+    available: (context) =>
+      onRepository(context) && context.compare?.swappable === true,
+    run: (commands) => commands.swapCompare(),
+  },
+  {
+    id: "endCompare",
+    title: "Stop comparing",
+    available: (context) => onRepository(context) && context.compare !== null,
+    run: (commands) => commands.endCompare(),
+  },
+  {
+    id: "toggleHide",
+    title: (context) =>
+      `${context.sidebarBranch?.visibility === "hidden" ? "Show" : "Hide"} ${branchName(context)}`,
+    available: (context) =>
+      onRepository(context) && context.sidebarBranch !== null,
+    run: (commands) => commands.toggleHide(),
+  },
+  {
+    id: "toggleSolo",
+    title: (context) =>
+      `${context.sidebarBranch?.visibility === "soloed" ? "Stop soloing" : "Solo"} ${branchName(context)}`,
+    available: (context) =>
+      onRepository(context) && context.sidebarBranch !== null,
+    run: (commands) => commands.toggleSolo(),
+  },
+  {
+    id: "showAllBranches",
+    title: "Show all branches",
+    available: (context) => onRepository(context) && context.rule !== "none",
+    run: (commands) => commands.showAllBranches(),
+  },
+  {
+    id: "addRepository",
+    title: "Add repository",
+    shortcut: { key: "o", modifier: "cmdOrCtrl" },
+    available: onRepository,
+    run: (commands) => commands.addRepository(),
+  },
+  {
+    id: "toggleSidebar",
+    title: "Toggle sidebar",
+    available: () => true,
+    run: (commands) => commands.toggleSidebar(),
+  },
+  {
+    id: "toggleInspector",
+    title: "Toggle commit inspector",
+    available: (context) => onRepository(context) && context.inspectable,
+    run: (commands) => commands.toggleInspector(),
+  },
+  {
+    id: "openSettings",
+    title: "Open Settings",
+    available: onRepository,
+    run: (commands) => commands.openSettings(),
+  },
+  {
+    id: "appearanceSettings",
+    title: "Open Appearance settings",
+    available: (context) =>
+      onRepository(context) || context.section !== "appearance",
+    run: (commands) => commands.openSettings("appearance"),
+  },
+  {
+    id: "fetchingSettings",
+    title: "Open Fetching settings",
+    available: (context) =>
+      onRepository(context) || context.section !== "fetching",
+    run: (commands) => commands.openSettings("fetching"),
+  },
+  {
+    id: "leaveSettings",
+    title: "Back to repository",
+    shortcut: { key: "Escape", modifier: "unchecked" },
+    available: (context) =>
+      context.screen === "settings" && !context.dialogOpen,
+    run: (commands) => commands.leaveSettings(),
+  },
+];
+
+export function availableActions(context: ActionContext): Action[] {
+  return actions.filter((action) => action.available(context));
+}
+
+export function titleOf(action: Action, context: ActionContext): string {
+  return typeof action.title === "string"
+    ? action.title
+    : action.title(context);
+}
+
+type Key = Pick<
+  KeyboardEvent,
+  "key" | "metaKey" | "ctrlKey" | "shiftKey" | "altKey"
+>;
+
+export function matchesShortcut(
+  shortcut: Shortcut,
+  event: Key,
+  mac: boolean,
+): boolean {
+  if (event.key.toLowerCase() !== shortcut.key.toLowerCase()) return false;
+  if (shortcut.modifier === "unchecked") return true;
+  if (shortcut.modifier === "cmdOrCtrl") return event.metaKey || event.ctrlKey;
+  return (
+    (mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey) &&
+    !event.shiftKey &&
+    !event.altKey
+  );
+}
+
+export function shortcutAction(
+  context: ActionContext,
+  event: Key,
+  mac: boolean,
+): Action | null {
+  return (
+    actions.find(
+      (action) =>
+        action.shortcut !== undefined &&
+        matchesShortcut(action.shortcut, event, mac) &&
+        action.available(context),
+    ) ?? null
+  );
+}
+
+export function shortcutLabel(shortcut: Shortcut, mac: boolean): string {
+  if (shortcut.modifier === "unchecked")
+    return shortcut.key === "Escape" ? "Esc" : shortcut.key;
+  const key = shortcut.key.toUpperCase();
+  return mac ? `⌘${key}` : `Ctrl+${key}`;
+}
+
+export type PaletteKind = "action" | "repository" | "branch";
+
+export type PaletteItem = {
+  id: string;
+  kind: PaletteKind;
+  title: string;
+  detail?: string;
+  shortcut?: string;
+  run: () => void;
+};
+
+export function paletteItems(
+  context: ActionContext,
+  commands: Commands,
+  mac: boolean,
+  repositories: readonly { root: RepositoryRoot; name: string }[],
+  branches: readonly { reference: FullRef; name: string }[],
+): PaletteItem[] {
+  const listed: PaletteItem[] = availableActions(context).map((action) => ({
+    id: `action:${action.id}`,
+    kind: "action",
+    title: titleOf(action, context),
+    shortcut: action.shortcut && shortcutLabel(action.shortcut, mac),
+    run: () => action.run(commands),
+  }));
+  if (!onRepository(context)) return listed;
+  return [
+    ...listed,
+    ...repositories.map(
+      (repository): PaletteItem => ({
+        id: `repository:${repository.root}`,
+        kind: "repository",
+        title: repository.name,
+        detail: repository.root,
+        run: () => commands.openRepository(repository.root),
+      }),
+    ),
+    ...branches.map(
+      (branch): PaletteItem => ({
+        id: `branch:${branch.reference}`,
+        kind: "branch",
+        title: branch.name,
+        run: () => commands.jumpToBranch(branch.reference),
+      }),
+    ),
+  ];
+}
+
+const WORD = /[\p{L}\p{N}]/u;
+const PREFIX = 0;
+const WORD_START = 1;
+const SUBSTRING = 2;
+const IN_ORDER = 3;
+
+function rank(title: string, query: string): number | null {
+  const text = normalizeSearch(title);
+  let at = text.indexOf(query);
+  if (at === 0) return PREFIX;
+  if (at > 0) {
+    for (; at > 0; at = text.indexOf(query, at + 1))
+      if (!WORD.test(text.charAt(at - 1))) return WORD_START;
+    return SUBSTRING;
+  }
+  let first = -1;
+  let next = 0;
+  for (const char of query) {
+    const found = text.indexOf(char, next);
+    if (found < 0) return null;
+    if (first < 0) first = found;
+    next = found + char.length;
+  }
+  return IN_ORDER + (next - first) / (text.length + 1);
+}
+
+const KIND_ORDER: Record<PaletteKind, number> = {
+  action: 0,
+  repository: 1,
+  branch: 2,
+};
+
+export function filterPalette(
+  items: readonly PaletteItem[],
+  query: string,
+): readonly PaletteItem[] {
+  const needle = normalizeSearch(query.trim());
+  if (needle === "") return items;
+  const ranked: { item: PaletteItem; score: number; index: number }[] = [];
+  items.forEach((item, index) => {
+    const score = rank(item.title, needle);
+    if (score !== null) ranked.push({ item, score, index });
+  });
+  ranked.sort(
+    (left, right) =>
+      left.score - right.score ||
+      KIND_ORDER[left.item.kind] - KIND_ORDER[right.item.kind] ||
+      left.index - right.index,
+  );
+  return ranked.map(({ item }) => item);
+}

@@ -1,4 +1,5 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
+import type { Ref } from "react";
 import { ArrowLeft, FileX2, LoaderCircle, TriangleAlert } from "lucide-react";
 import type { Appearance } from "../themes/palette";
 import type { Oid, SubmoduleState } from "../domain/repository";
@@ -12,7 +13,9 @@ import type { Revision } from "./FileRevisions";
 
 export type { DiffStyle };
 
-type View = DiffStyle | "history" | "blame";
+export type View = DiffStyle | "history" | "blame";
+
+export type FileDiffHandle = { show: (view: View) => void };
 
 const VIEWS: { view: View; label: string }[] = [
   { view: "unified", label: "Unified" },
@@ -22,6 +25,7 @@ const VIEWS: { view: View; label: string }[] = [
 ];
 
 type Props = {
+  ref?: Ref<FileDiffHandle>;
   state: Exclude<FileDiffState, { kind: "closed" }>;
   diffStyle: DiffStyle;
   theme: Appearance;
@@ -36,7 +40,7 @@ type Props = {
 };
 
 /** History and blame read the file in the target commit, which a worktree does not have. */
-function revisionOf(state: Props["state"]): Revision | null {
+export function revisionOf(state: Props["state"]): Revision | null {
   if (state.side !== null || state.comparison.target.kind !== "commit")
     return null;
   return {
@@ -47,6 +51,7 @@ function revisionOf(state: Props["state"]): Revision | null {
 }
 
 export function FileDiffPane({
+  ref,
   state,
   diffStyle,
   theme,
@@ -78,6 +83,7 @@ export function FileDiffPane({
       onDiffStyle(next);
     }
   };
+  useImperativeHandle(ref, () => ({ show: choose }));
   const look = { diffStyle, theme, painted };
   return (
     <section className="file-diff" aria-label={`Changes to ${state.path}`}>
