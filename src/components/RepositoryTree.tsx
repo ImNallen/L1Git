@@ -16,7 +16,15 @@ import {
 } from "lucide-react";
 import type { RecentRepository } from "../domain/recents";
 import { normalizeSearch } from "../domain/search";
-import type { Branch, FullRef, RepositoryRoot } from "../domain/repository";
+import type {
+  Branch,
+  FullRef,
+  Oid,
+  RepositoryRefs,
+  RepositoryRoot,
+  Stash,
+  Tag,
+} from "../domain/repository";
 import { NO_RULE, branchVisibility, toggleRule } from "../domain/visibility";
 import type { VisibilityRule } from "../domain/visibility";
 import type { RootSync } from "../overview";
@@ -30,12 +38,14 @@ type Props = {
   expanded: ReadonlySet<RepositoryRoot>;
   refs: ReadonlyMap<RepositoryRoot, RefsState>;
   activePath: string | null;
-  /** The branch last jumped to in the open repository. */
+  /** The branch or tag last jumped to in the open repository. */
   highlighted: { root: RepositoryRoot; reference: FullRef } | null;
+  selectedStash: { root: RepositoryRoot; oid: Oid } | null;
   sync: ReadonlyMap<RepositoryRoot, RootSync>;
   onSelect: (root: RepositoryRoot) => void;
   onToggle: (root: RepositoryRoot) => void;
-  onJump: (root: RepositoryRoot, branch: Branch) => void;
+  onJump: (root: RepositoryRoot, target: Branch | Tag) => void;
+  onStash: (root: RepositoryRoot, stash: Stash) => void;
   ruleFor: (root: RepositoryRoot) => VisibilityRule;
   onRule: (root: RepositoryRoot, rule: VisibilityRule) => void;
   onRemove: (root: RepositoryRoot) => void;
@@ -48,10 +58,12 @@ export function RepositoryTree({
   refs,
   activePath,
   highlighted,
+  selectedStash,
   sync,
   onSelect,
   onToggle,
   onJump,
+  onStash,
   ruleFor,
   onRule,
   onRemove,
@@ -76,13 +88,26 @@ export function RepositoryTree({
     const state = expanded.has(root) ? refs.get(root) : undefined;
     return state?.kind === "ready" ? state.refs : null;
   };
-  const entriesShown = entries.filter(
-    (entry) =>
+  const refMatches = ({
+    branches,
+    tags,
+    stashes,
+    submodules,
+  }: RepositoryRefs) =>
+    [
+      ...branches.map((branch) => branch.name),
+      ...tags.map((tag) => tag.name),
+      ...stashes.flatMap((stash) => [stash.message, stash.name]),
+      ...submodules.map((submodule) => submodule.path),
+    ].some(matches);
+  const entriesShown = entries.filter((entry) => {
+    const refs = loaded(entry.root);
+    return (
       matches(entry.name) ||
       matches(entry.root) ||
-      (loaded(entry.root)?.branches.some((branch) => matches(branch.name)) ??
-        false),
-  );
+      (refs !== null && refMatches(refs))
+    );
+  });
 
   function openMenu(
     event: ReactMouseEvent<HTMLElement> | ReactKeyboardEvent<HTMLElement>,
@@ -182,12 +207,16 @@ export function RepositoryTree({
         highlighted={
           highlighted?.root === entry.root ? highlighted.reference : null
         }
+        selectedStash={
+          selectedStash?.root === entry.root ? selectedStash.oid : null
+        }
         sync={sync.get(entry.root)}
         overrides={overrides}
         onOverride={(key, open) =>
           setOverrides((previous) => new Map(previous).set(key, open))
         }
-        onJump={(branch) => onJump(entry.root, branch)}
+        onJump={(target) => onJump(entry.root, target)}
+        onStash={(stash) => onStash(entry.root, stash)}
         rule={ruleFor(entry.root)}
         onRule={(rule) => onRule(entry.root, rule)}
         onMenu={(event, branch) =>

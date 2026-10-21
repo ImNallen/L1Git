@@ -20,12 +20,13 @@ const branch = (name: string): Branch => ({
   upstream: null,
 });
 const head = { kind: "detached" as const, oid };
+const noRefs = { tags: [], stashes: [], submodules: [] };
 const cached: RepositorySnapshot = {
   root,
   name: "l1-demo",
   head,
   branches: [branch("main")],
-  tags: [],
+  ...noRefs,
   worktrees: [],
   remotes: [],
   commits: [],
@@ -46,6 +47,7 @@ describe("the open repository's branches", () => {
             name: "l1-demo",
             head,
             branches: [branch("main"), branch("zz-race")],
+            ...noRefs,
           },
         },
       ],
@@ -116,6 +118,7 @@ describe("branches reported for pruning", () => {
     name: "repo",
     head,
     branches: names.map(branch),
+    ...noRefs,
   });
   const settled = () => new Promise((resolve) => setTimeout(resolve));
 
@@ -126,6 +129,32 @@ describe("branches reported for pruning", () => {
     expect(store.states().has(root)).toBe(false);
     store.acceptFresh(ready(fresh));
     store.acceptFresh(ready(fresh));
+    expect(reported).toEqual([[root, ["main", "zz-race"]]]);
+  });
+
+  it("keeps a fresh snapshot's tags, stashes, and submodules, and reports only its branches", () => {
+    const { store, reported } = harness();
+    const tagged: RepositorySnapshot = {
+      ...fresh,
+      tags: [{ reference: refSchema.parse("refs/tags/v1"), name: "v1", oid }],
+      stashes: [
+        { name: "stash@{0}", oid, message: "On main: wip", timestamp: 1 },
+      ],
+      submodules: [{ path: "vendor/lib", oid }],
+    };
+    store.acceptFresh(ready(tagged));
+    expect(store.states().get(root)).toEqual({
+      kind: "ready",
+      refs: {
+        root,
+        name: "l1-demo",
+        head,
+        branches: tagged.branches,
+        tags: tagged.tags,
+        stashes: tagged.stashes,
+        submodules: tagged.submodules,
+      },
+    });
     expect(reported).toEqual([[root, ["main", "zz-race"]]]);
   });
 

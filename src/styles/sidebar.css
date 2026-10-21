@@ -231,6 +231,19 @@ input::placeholder {
   letter-spacing: 0.5px;
   color: var(--accent-muted);
 }
+.stash-row > span:first-of-type {
+  font-family: inherit;
+  font-size: 12px;
+}
+.ref-detail {
+  flex-shrink: 0;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 10px;
+}
+.branch-row.static:hover {
+  background: none;
+}
 .unborn {
   color: var(--text-icon);
 }

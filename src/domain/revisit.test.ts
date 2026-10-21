@@ -22,6 +22,8 @@ function snapshot(
     head: { kind: "unborn", reference: "refs/heads/main" },
     branches: [],
     tags: [],
+    stashes: [],
+    submodules: [],
     worktrees: worktrees.map((worktree) => ({
       root: worktree,
       name: worktree.slice(1),
@@ -98,6 +100,18 @@ describe("restored selection", () => {
     const remembered = commit(b);
     expect(restoreSelection(snapshot("/a", [a, b]), remembered, none)).toBe(
       remembered,
+    );
+  });
+
+  it("keeps a remembered stash that the snapshot still lists", () => {
+    const listed = {
+      ...snapshot("/a", [a]),
+      stashes: [{ name: "stash@{0}", oid: b, message: "", timestamp: 0 }],
+    };
+    const remembered = commit(b);
+    expect(restoreSelection(listed, remembered, none)).toBe(remembered);
+    expect(restoreSelection(snapshot("/a", [a]), remembered, none)).toEqual(
+      commit(a),
     );
   });
 

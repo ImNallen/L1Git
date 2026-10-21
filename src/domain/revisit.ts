@@ -1,4 +1,5 @@
 import type { RepositoryRoot, RepositorySnapshot } from "./repository";
+import { listsCommit } from "./selection";
 import type { Selection } from "./selection";
 import { hasRow } from "./worktree";
 import type { ChangesByWorktree } from "./worktree";
@@ -39,7 +40,7 @@ export function evictSnapshot(
 }
 
 export function restoreSelection(
-  snapshot: Pick<RepositorySnapshot, "commits" | "worktrees">,
+  snapshot: Pick<RepositorySnapshot, "commits" | "stashes" | "worktrees">,
   remembered: Selection | null,
   changes: ChangesByWorktree,
 ): Selection | null {
@@ -50,9 +51,7 @@ export function restoreSelection(
   if (remembered === null) return fallback;
   switch (remembered.kind) {
     case "commit":
-      return snapshot.commits.some((commit) => commit.oid === remembered.oid)
-        ? remembered
-        : fallback;
+      return listsCommit(snapshot, remembered.oid) ? remembered : fallback;
     case "worktree": {
       const found = changes.get(remembered.root);
       const notKnownClean = found === undefined || hasRow(found);

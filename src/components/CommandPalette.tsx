@@ -13,6 +13,8 @@ const KIND_LABEL = {
   action: null,
   repository: "Repository",
   branch: "Branch",
+  tag: "Tag",
+  stash: "Stash",
 } as const;
 
 export function CommandPalette({ items, onClose, onRun }: Props) {
@@ -61,7 +63,7 @@ export function CommandPalette({ items, onClose, onRun }: Props) {
         <input
           autoFocus
           role="combobox"
-          aria-label="Search actions, repositories, and branches"
+          aria-label="Search actions, repositories, and refs"
           aria-expanded={results.length > 0}
           aria-controls={
             results.length > 0 ? "command-palette-results" : undefined
@@ -69,7 +71,7 @@ export function CommandPalette({ items, onClose, onRun }: Props) {
           aria-activedescendant={
             current >= 0 ? `command-palette-${current}` : undefined
           }
-          placeholder="Search actions, repositories, and branches"
+          placeholder="Search actions, repositories, and refs"
           spellCheck={false}
           autoComplete="off"
           value={query}

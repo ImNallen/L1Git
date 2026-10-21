@@ -1,9 +1,9 @@
 use l1_git_core::{
     Base, BaseDetail, Blame, BlameRange, Branch, ChangeStatus, Comparison, Conflict, ErrorKind,
     FilePatch, HISTORY_LIMIT, Head, LINE_STATS_LIMIT, LineStats, MoveSide, Moved, RepositoryRefs,
-    Side, Sides, Squash, StatusEntry, SubmoduleState, Tag, Target, TargetDetail, Worktree,
-    WorktreePatch, WorktreeStatus, blame, commit_detail, file_history, file_patch, line_stats,
-    refs, snapshot, worktree_patch, worktree_status,
+    Side, Sides, Squash, Stash, StatusEntry, Submodule, SubmoduleState, Tag, Target, TargetDetail,
+    Worktree, WorktreePatch, WorktreeStatus, blame, commit_detail, file_history, file_patch,
+    line_stats, refs, snapshot, worktree_patch, worktree_status,
 };
 use std::{
     fs,
@@ -190,6 +190,9 @@ fn reads_refs_without_history_matching_the_snapshot() {
                     remote: "origin".into(),
                 },
             ],
+            tags: vec![],
+            stashes: vec![],
+            submodules: vec![],
         }
     );
     let snapshot = snapshot(fixture.path()).unwrap();
@@ -284,6 +287,136 @@ fn reads_tags_at_their_peeled_commits_and_includes_tag_only_history() {
             .map(|commit| commit.oid.as_str())
             .collect::<Vec<_>>(),
         [tagged.as_str(), initial.as_str()]
+    );
+}
+
+#[test]
+fn reads_tags_stashes_and_mapped_submodules_and_keeps_stashes_out_of_history() {
+    let fixture = Fixture::new();
+    let initial = fixture.commit("notes.txt", "one\n", "initial");
+    let source = fixture._directory.path().join("source");
+    fs::create_dir(&source).unwrap();
+    git(&source, &["init", "--initial-branch=main"]);
+    fs::write(source.join("inner.txt"), "inner\n").unwrap();
+    git(&source, &["add", "inner.txt"]);
+    git(&source, &["commit", "-m", "inner"]);
+    let inner = git(&source, &["rev-parse", "HEAD"]);
+    git(
+        &fixture.repo,
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            "--quiet",
+            source.to_str().unwrap(),
+            "libs/inner module",
+        ],
+    );
+    let orphan = fixture.repo.join("orphan");
+    fs::create_dir(&orphan).unwrap();
+    git(&orphan, &["init", "--initial-branch=main"]);
+    git(&orphan, &["commit", "--allow-empty", "-m", "orphan"]);
+    git(&fixture.repo, &["add", "orphan"]);
+    git(&fixture.repo, &["commit", "-m", "add modules"]);
+    let modules = git(&fixture.repo, &["rev-parse", "HEAD"]);
+    git(
+        &fixture.repo,
+        &["tag", "-a", "-m", "release", "v1.0", &initial],
+    );
+    git(&fixture.repo, &["tag", "nightly"]);
+    fs::write(fixture.repo.join("notes.txt"), "two\n").unwrap();
+    git(&fixture.repo, &["stash", "push", "-m", "first stash"]);
+    fs::write(fixture.repo.join("notes.txt"), "three\n").unwrap();
+    git(&fixture.repo, &["stash", "push", "-m", "second stash"]);
+    let stash = |name: &str| git(&fixture.repo, &["rev-parse", name]);
+    let result = refs(fixture.path()).unwrap();
+    assert_eq!(
+        result.tags,
+        [
+            Tag {
+                reference: "refs/tags/nightly".into(),
+                name: "nightly".into(),
+                oid: modules.clone(),
+            },
+            Tag {
+                reference: "refs/tags/v1.0".into(),
+                name: "v1.0".into(),
+                oid: initial.clone(),
+            },
+        ]
+    );
+    assert_eq!(
+        result.stashes,
+        [
+            Stash {
+                name: "stash@{0}".into(),
+                oid: stash("stash@{0}"),
+                message: "On main: second stash".into(),
+                timestamp: 1_700_000_000,
+            },
+            Stash {
+                name: "stash@{1}".into(),
+                oid: stash("stash@{1}"),
+                message: "On main: first stash".into(),
+                timestamp: 1_700_000_000,
+            },
+        ]
+    );
+    assert_eq!(
+        result.submodules,
+        [Submodule {
+            path: "libs/inner module".into(),
+            oid: inner,
+        }]
+    );
+    let snapshot = snapshot(fixture.path()).unwrap();
+    assert_eq!(
+        (snapshot.tags, snapshot.stashes, snapshot.submodules),
+        (result.tags, result.stashes, result.submodules)
+    );
+    assert_eq!(
+        snapshot
+            .commits
+            .iter()
+            .map(|commit| commit.oid.as_str())
+            .collect::<Vec<_>>(),
+        [modules.as_str(), initial.as_str()]
+    );
+}
+
+#[test]
+fn reads_a_conflicted_submodule_at_the_commit_head_records() {
+    let fixture = Fixture::new();
+    fixture.commit(
+        ".gitmodules",
+        "[submodule \"module\"]\n\tpath = module\n\turl = ./module\n",
+        "map module",
+    );
+    let record = |oid: &str, message: &str| {
+        git(
+            &fixture.repo,
+            &[
+                "update-index",
+                "--add",
+                "--cacheinfo",
+                &format!("160000,{oid},module"),
+            ],
+        );
+        git(&fixture.repo, &["commit", "-m", message]);
+    };
+    record(&"1".repeat(40), "base");
+    git(&fixture.repo, &["switch", "-c", "other"]);
+    record(&"2".repeat(40), "theirs");
+    git(&fixture.repo, &["switch", "main"]);
+    record(&"3".repeat(40), "ours");
+    merge(&fixture, "other");
+    assert_eq!(
+        refs(fixture.path()).unwrap().submodules,
+        [Submodule {
+            path: "module".into(),
+            oid: "3".repeat(40),
+        }]
     );
 }
 

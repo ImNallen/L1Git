@@ -328,7 +328,7 @@ export function CommitInspector({
           <h2>{target.commit.subject || "(no subject)"}</h2>
           <CommitMessage
             key={`message:${target.commit.oid}`}
-            body={target.message.slice(target.message.indexOf("\n") + 1).trim()}
+            body={target.message.split("\n").slice(1).join("\n").trim()}
           />
           <div className="inspector-refs">
             {snapshot.branches
@@ -339,6 +339,13 @@ export function CommitInspector({
                   key={branch.reference}
                 >
                   {branch.name}
+                </span>
+              ))}
+            {snapshot.stashes
+              .filter((stash) => stash.oid === target.commit.oid)
+              .map((stash) => (
+                <span className="ref-badge stash" key={stash.oid}>
+                  {stash.name}
                 </span>
               ))}
           </div>

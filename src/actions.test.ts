@@ -49,7 +49,8 @@ function commands(): Commands {
     toggleSolo: vi.fn(),
     showAllBranches: vi.fn(),
     openRepository: vi.fn(),
-    jumpToBranch: vi.fn(),
+    jumpToRef: vi.fn(),
+    showStash: vi.fn(),
   };
 }
 
@@ -57,6 +58,12 @@ const repositories = [
   { root: "/work/l1-demo" as RepositoryRoot, name: "l1-demo" },
   { root: "/work/sync" as RepositoryRoot, name: "sync" },
 ];
+const stash = {
+  name: "stash@{0}",
+  oid: "c".repeat(40) as Oid,
+  message: "On main: try a retry",
+  timestamp: 0,
+};
 const branches = [
   { reference: "refs/heads/main" as FullRef, name: "main" },
   {
@@ -69,9 +76,19 @@ const branches = [
   },
 ];
 
+const refs = {
+  branches,
+  tags: [{ reference: "refs/tags/v1.0.0" as FullRef, name: "v1.0.0" }],
+  stashes: [stash],
+};
+
 function titles(context: ActionContext, query: string, mac = true) {
   return filterPalette(
-    paletteItems(context, commands(), mac, repositories, branches),
+    paletteItems(context, commands(), mac, repositories, {
+      branches,
+      tags: [],
+      stashes: [],
+    }),
     query,
   ).map((item) => item.title);
 }
@@ -243,24 +260,22 @@ describe("command palette", () => {
 
   it("runs the command an item names", () => {
     const run = commands();
-    const items = paletteItems(
-      repositoryScreen,
-      run,
-      true,
-      repositories,
-      branches,
-    );
+    const items = paletteItems(repositoryScreen, run, true, repositories, refs);
     filterPalette(items, "origin/main")[0]?.run();
+    filterPalette(items, "v1.0")[0]?.run();
+    filterPalette(items, "try a retry")[0]?.run();
     filterPalette(items, "sync")[0]?.run();
     filterPalette(items, "fetch")[0]?.run();
-    expect(run.jumpToBranch).toHaveBeenCalledWith("refs/remotes/origin/main");
+    expect(run.jumpToRef).toHaveBeenCalledWith("refs/remotes/origin/main");
+    expect(run.jumpToRef).toHaveBeenCalledWith("refs/tags/v1.0.0");
+    expect(run.showStash).toHaveBeenCalledWith(stash);
     expect(run.openRepository).toHaveBeenCalledWith("/work/sync");
     expect(run.fetch).toHaveBeenCalledOnce();
   });
 
   it("labels shortcuts for the platform", () => {
-    const items = paletteItems(repositoryScreen, commands(), true, [], []);
-    const other = paletteItems(repositoryScreen, commands(), false, [], []);
+    const items = paletteItems(repositoryScreen, commands(), true, [], null);
+    const other = paletteItems(repositoryScreen, commands(), false, [], null);
     const shortcut = (list: typeof items, title: string) =>
       list.find((item) => item.title === title)?.shortcut;
     expect(shortcut(items, "Add repository")).toBe("⌘O");
@@ -272,7 +287,7 @@ describe("command palette", () => {
           commands(),
           true,
           [],
-          [],
+          null,
         ),
         "Back to history",
       ),

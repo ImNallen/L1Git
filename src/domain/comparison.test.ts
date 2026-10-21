@@ -101,9 +101,24 @@ describe("comparing history rows", () => {
     const pair = compareRows(loaded, root, commit(older), commit(newer));
     if (!pair) throw new Error("expected a comparison");
     const commits = loaded;
-    expect(compareListed({ commits, worktrees: [] }, pair)).toBe(true);
+    expect(compareListed({ commits, stashes: [], worktrees: [] }, pair)).toBe(
+      true,
+    );
     expect(
-      compareListed({ commits: commits.slice(0, 1), worktrees: [] }, pair),
+      compareListed(
+        { commits: commits.slice(0, 1), stashes: [], worktrees: [] },
+        pair,
+      ),
     ).toBe(false);
+  });
+
+  it("keeps a comparison that ends at a listed stash", () => {
+    const stash = { name: "stash@{0}", oid: newer, message: "", timestamp: 0 };
+    const pair = compareRows(loaded, root, commit(older), commit(newer));
+    if (!pair) throw new Error("expected a comparison");
+    const commits = loaded.filter((commit) => commit.oid !== newer);
+    expect(
+      compareListed({ commits, stashes: [stash], worktrees: [] }, pair),
+    ).toBe(true);
   });
 });

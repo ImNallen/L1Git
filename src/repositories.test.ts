@@ -44,6 +44,9 @@ describe("native transport", () => {
         name: "l1-demo",
         head: { kind: "detached", oid },
         branches: [],
+        tags: [],
+        stashes: [],
+        submodules: [],
       },
     });
     await expect(lineStats(root, [oid])).rejects.toThrow(

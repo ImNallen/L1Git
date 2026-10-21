@@ -36,6 +36,24 @@ pub struct Tag {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct Stash {
+    /// The reflog selector, such as `stash@{0}`.
+    pub name: String,
+    pub oid: String,
+    pub message: String,
+    pub timestamp: i64,
+}
+
+/// A submodule and the commit the superproject's index records for it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Submodule {
+    pub path: String,
+    pub oid: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct Worktree {
     pub root: String,
     pub name: String,
@@ -76,7 +94,7 @@ pub struct Squash {
     pub commit: String,
 }
 
-/// The branch list of a repository without its history, for sidebar rows.
+/// The refs of a repository without its history, for sidebar rows.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct RepositoryRefs {
@@ -84,6 +102,11 @@ pub struct RepositoryRefs {
     pub name: String,
     pub head: Head,
     pub branches: Vec<Branch>,
+    /// Tags that point at commits, sorted by ref name.
+    pub tags: Vec<Tag>,
+    /// Newest first. The history never includes them.
+    pub stashes: Vec<Stash>,
+    pub submodules: Vec<Submodule>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -93,8 +116,9 @@ pub struct RepositorySnapshot {
     pub name: String,
     pub head: Head,
     pub branches: Vec<Branch>,
-    /// Tags that point at commits, sorted by ref name.
     pub tags: Vec<Tag>,
+    pub stashes: Vec<Stash>,
+    pub submodules: Vec<Submodule>,
     /// Every worktree of the repository except bare and prunable entries.
     pub worktrees: Vec<Worktree>,
     pub remotes: Vec<Remote>,

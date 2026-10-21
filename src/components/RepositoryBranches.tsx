@@ -1,9 +1,11 @@
 import { Fragment } from "react";
 import type {
   KeyboardEvent as ReactKeyboardEvent,
+  ReactNode,
   MouseEvent as ReactMouseEvent,
 } from "react";
 import {
+  Archive,
   ChevronDown,
   ChevronRight,
   CircleCheck,
@@ -15,10 +17,21 @@ import {
   FolderOpen,
   GitBranch,
   Laptop,
+  Package,
+  Tag as TagIcon,
+  Tags,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { branchTree } from "../domain/branchTree";
 import type { BranchTree } from "../domain/branchTree";
-import type { Branch, FullRef, RepositoryRefs } from "../domain/repository";
+import type {
+  Branch,
+  FullRef,
+  Oid,
+  RepositoryRefs,
+  Stash,
+  Tag,
+} from "../domain/repository";
 import { normalizeSearch } from "../domain/search";
 import { branchVisibility, toggleRule } from "../domain/visibility";
 import type { VisibilityRule } from "../domain/visibility";
@@ -32,6 +45,8 @@ declare module "react" {
   }
 }
 
+const tagOrder = new Intl.Collator(undefined, { numeric: true });
+
 type Props = {
   refs: RepositoryRefs;
   /** Lowercased sidebar search. Empty shows every branch. */
@@ -39,11 +54,13 @@ type Props = {
   /** When the repository itself matches the search, all its branches show. */
   repositoryMatches: boolean;
   highlighted: FullRef | null;
+  selectedStash: Oid | null;
   sync: RootSync | undefined;
   /** Explicit open states keyed by `${root}:${section}` and `${root}:${section}:${folder}`. */
   overrides: ReadonlyMap<string, boolean>;
   onOverride: (key: string, open: boolean) => void;
-  onJump: (branch: Branch) => void;
+  onJump: (target: Branch | Tag) => void;
+  onStash: (stash: Stash) => void;
   rule: VisibilityRule;
   onRule: (rule: VisibilityRule) => void;
   onMenu: (
@@ -53,24 +70,36 @@ type Props = {
 };
 
 export function RepositoryBranches({
-  refs: { root, head, branches },
+  refs: { root, head, branches, tags, stashes, submodules },
   search,
   repositoryMatches,
   highlighted,
+  selectedStash,
   sync,
   overrides,
   onOverride,
   onJump,
+  onStash,
   rule,
   onRule,
   onMenu,
 }: Props) {
-  const matches = (branch: Branch) =>
-    repositoryMatches || normalizeSearch(branch.name).includes(search);
+  const matches = (...values: string[]) =>
+    repositoryMatches ||
+    values.some((value) => normalizeSearch(value).includes(search));
   const local = branches.filter((branch) => branch.kind === "local");
   const remote = branches.filter((branch) => branch.kind === "remote");
-  const localShown = local.filter(matches);
-  const remoteShown = remote.filter(matches);
+  const localShown = local.filter((branch) => matches(branch.name));
+  const remoteShown = remote.filter((branch) => matches(branch.name));
+  const tagsShown = tags
+    .filter((tag) => matches(tag.name))
+    .sort((left, right) => tagOrder.compare(left.name, right.name));
+  const stashesShown = stashes.filter((stash) =>
+    matches(stash.message, stash.name),
+  );
+  const submodulesShown = submodules.filter((submodule) =>
+    matches(submodule.path),
+  );
   const headReference = head.kind === "attached" ? head.reference : null;
   const ruled =
     rule.kind === "none"
@@ -94,10 +123,72 @@ export function RepositoryBranches({
     );
   }
 
-  function section(kind: Branch["kind"]) {
+  function section(kind: string) {
     const key = `${root}:${kind}`;
     const open = overrides.get(key) ?? true;
     return { key, open, toggle: () => onOverride(key, !open) };
+  }
+
+  function refSection(
+    kind: string,
+    label: string,
+    Icon: LucideIcon,
+    total: number,
+    rows: ReactNode[],
+  ) {
+    if (total === 0) return null;
+    const { open, toggle } = section(kind);
+    return (
+      <>
+        <button className="tree-section" aria-expanded={open} onClick={toggle}>
+          {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+          <Icon size={14} />
+          <span>{label}</span>
+          <span className="count">{total}</span>
+        </button>
+        {open && (
+          <div>
+            {rows}
+            {rows.length === 0 && (
+              <p className="tree-hint">No matching {label.toLowerCase()}</p>
+            )}
+          </div>
+        )}
+      </>
+    );
+  }
+
+  function tagRow(tag: Tag) {
+    const selected = highlighted === tag.reference;
+    return (
+      <button
+        key={tag.reference}
+        className={`branch-row ${selected ? "selected" : ""}`}
+        onClick={() => onJump(tag)}
+        title={`${tag.reference} · Show in graph`}
+        aria-current={selected ? "true" : undefined}
+      >
+        <TagIcon size={14} />
+        <span>{tag.name}</span>
+      </button>
+    );
+  }
+
+  function stashRow(stash: Stash) {
+    const selected = selectedStash === stash.oid;
+    return (
+      <button
+        key={stash.oid}
+        className={`branch-row stash-row ${selected ? "selected" : ""}`}
+        onClick={() => onStash(stash)}
+        title={`${stash.name} · ${stash.message} · Show changes`}
+        aria-current={selected ? "true" : undefined}
+      >
+        <Archive size={14} />
+        <span>{stash.message}</span>
+        <small className="ref-detail">{stash.name}</small>
+      </button>
+    );
   }
 
   function branchList(kind: Branch["kind"], shown: Branch[]) {
@@ -272,6 +363,31 @@ export function RepositoryBranches({
             <p className="tree-hint">No matching remote branches</p>
           )}
         </div>
+      )}
+      {refSection("tag", "Tags", Tags, tags.length, tagsShown.map(tagRow))}
+      {refSection(
+        "stash",
+        "Stashes",
+        Archive,
+        stashes.length,
+        stashesShown.map(stashRow),
+      )}
+      {refSection(
+        "submodule",
+        "Submodules",
+        Package,
+        submodules.length,
+        submodulesShown.map((submodule) => (
+          <div
+            key={submodule.path}
+            className="branch-row static"
+            title={`${submodule.path} · Records ${submodule.oid}`}
+          >
+            <Package size={14} />
+            <span>{submodule.path}</span>
+            <small className="ref-detail">{submodule.oid.slice(0, 7)}</small>
+          </div>
+        )),
       )}
     </div>
   );
