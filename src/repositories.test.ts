@@ -90,6 +90,17 @@ describe("bridge transport", () => {
     await expect(refs(root)).rejects.toEqual(error);
   });
 
+  it("throws a timed-out read as a repository error", async () => {
+    const { commitDetail } = await load(false);
+    const error = {
+      kind: "timedOut",
+      message:
+        "Reading this commit took longer than 20 s, so L1 Git stopped Git. Retry. If it happens again, check for a slow disk or a Git filter that does not finish.",
+    };
+    reply(200, { ok: false, error });
+    await expect(commitDetail(root, oid)).rejects.toEqual(error);
+  });
+
   it("names the bridge's reason for a 400", async () => {
     const { commitDetail } = await load(false);
     reply(400, { error: "missing field `oid`" });

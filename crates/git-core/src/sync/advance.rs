@@ -4,7 +4,7 @@ use super::{
 };
 use crate::{
     Advance, AdvanceOutcome, Blocker, BranchRef, BranchState, Oid, RepositoryError, SkipReason,
-    git::{self, Finished, Mutation},
+    git::{self, Deadline, Finished, Mutation},
 };
 use std::{path::Path, time::Duration};
 
@@ -53,13 +53,14 @@ pub(super) fn advance(
     root: &Path,
     request: &Advance,
     deadline: Duration,
+    reads: &mut Deadline,
 ) -> Result<AdvanceOutcome, RepositoryError> {
     let Advance {
         reference,
         from,
         to,
     } = request;
-    let current = read::branch(root, reference, deadline)?;
+    let current = read::branch(root, reference, deadline, reads)?;
     let reason = match plan(request, current.as_ref()) {
         Plan::Done => None,
         Plan::Skip(reason) => Some(reason),
@@ -69,7 +70,9 @@ pub(super) fn advance(
                 from,
                 to,
             };
-            match git::mutate(root, mutation, deadline)? {
+            let finished = git::mutate(root, mutation, deadline)?;
+            *reads = reads.renewed();
+            match finished {
                 Finished::Succeeded => None,
                 Finished::Failed { stderr } if stderr.contains("but expected") => {
                     Some(SkipReason::Changed)
@@ -77,15 +80,17 @@ pub(super) fn advance(
                 finished => Some(failed(finished)),
             }
         }
-        Plan::Merge { worktree } if !still_checked_out(worktree, reference, from)? => {
+        Plan::Merge { worktree } if !still_checked_out(worktree, reference, from, *reads)? => {
             Some(SkipReason::Changed)
         }
         Plan::Merge { worktree } => {
-            match git::mutate(
+            let finished = git::mutate(
                 Path::new(worktree),
                 Mutation::MergeFastForward { to },
                 deadline,
-            )? {
+            )?;
+            *reads = reads.renewed();
+            match finished {
                 Finished::Succeeded => None,
                 Finished::Failed { stderr } if stderr.contains("would be overwritten") => {
                     Some(SkipReason::Dirty {
@@ -102,7 +107,7 @@ pub(super) fn advance(
         }
     };
     let reason = match reason {
-        None if !is_at(root, reference, to)? => Some(SkipReason::Changed),
+        None if !is_at(root, reference, to, *reads)? => Some(SkipReason::Changed),
         reason => reason,
     };
     Ok(match reason {
@@ -123,19 +128,27 @@ fn still_checked_out(
     worktree: &str,
     reference: &BranchRef,
     from: &Oid,
+    reads: Deadline,
 ) -> Result<bool, RepositoryError> {
     let output = git::run(
         Path::new(worktree),
         &["rev-parse", "HEAD", "--symbolic-full-name", "HEAD"],
+        reads,
     )?;
     Ok(output.status.success()
         && git::text(&output.stdout) == format!("{}\n{}\n", from.as_str(), reference.as_str()))
 }
 
-fn is_at(root: &Path, reference: &BranchRef, to: &Oid) -> Result<bool, RepositoryError> {
+fn is_at(
+    root: &Path,
+    reference: &BranchRef,
+    to: &Oid,
+    reads: Deadline,
+) -> Result<bool, RepositoryError> {
     let output = git::run(
         root,
         &["rev-parse", "--verify", "--quiet", reference.as_str()],
+        reads,
     )?;
     Ok(output.status.success() && git::line(&output.stdout) == to.as_str())
 }

@@ -1,15 +1,19 @@
-use crate::{GitHubRepository, Remote, RepositoryError, git};
+use crate::{
+    GitHubRepository, Remote, RepositoryError,
+    git::{self, Deadline},
+};
 use std::path::Path;
 use url::Url;
 
-pub(crate) fn read(path: &Path) -> Result<Vec<Remote>, RepositoryError> {
-    let names = git::read(path, &["remote"])?;
+pub(crate) fn read(path: &Path, deadline: Deadline) -> Result<Vec<Remote>, RepositoryError> {
+    let names = git::read(path, &["remote"], deadline)?;
     git::text(&names)
         .lines()
         .map(|name| {
             let output = git::run(
                 path,
                 &["config", "--null", "--get", &format!("remote.{name}.url")],
+                deadline,
             )?;
             let raw = git::text(output.stdout.strip_suffix(&[0]).unwrap_or(&output.stdout));
             let (url, github) = display_url(&raw);

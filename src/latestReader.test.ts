@@ -99,6 +99,20 @@ describe("latest reader", () => {
     expect(reads()).toEqual(["a", "b", "e"]);
   });
 
+  it("frees a hung read's slot when the backend times it out", async () => {
+    const { reader, reads, delivered, fail, finish } = controlled();
+    for (const key of ["a", "b", "c"]) {
+      reader.want(key);
+      vi.advanceTimersByTime(1000);
+    }
+    expect(reads()).toEqual(["a", "b"]);
+    await fail(0);
+    expect(reads()).toEqual(["a", "b", "c"]);
+    await fail(1);
+    await finish(2);
+    expect(delivered).toEqual(["c=detail c"]);
+  });
+
   it("ignores a stalled read of a key that a newer read of it replaced", async () => {
     const { reader, reads, delivered, finish, fail } = controlled();
     reader.want("a");

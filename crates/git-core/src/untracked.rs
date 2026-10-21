@@ -1,5 +1,7 @@
 use crate::{
-    ErrorKind, FilePatch, PATCH_LIMIT, RepositoryError, WorktreePatch, git, repository::text_patch,
+    ErrorKind, FilePatch, PATCH_LIMIT, RepositoryError, WorktreePatch,
+    git::{self, Deadline},
+    repository::text_patch,
 };
 use std::{
     fs,
@@ -8,7 +10,11 @@ use std::{
 };
 
 /// Reads without following links first, so Git's diff can be checked against worktree bytes.
-pub(crate) fn untracked(root: &Path, file: &str) -> Result<Option<WorktreePatch>, RepositoryError> {
+pub(crate) fn untracked(
+    root: &Path,
+    file: &str,
+    deadline: Deadline,
+) -> Result<Option<WorktreePatch>, RepositoryError> {
     let found = match open_without_following_links(root, file) {
         Ok(found) => found,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -18,9 +24,9 @@ pub(crate) fn untracked(root: &Path, file: &str) -> Result<Option<WorktreePatch>
         Found::File {
             file: handle,
             executable,
-        } => regular(root, file, handle, executable)?,
+        } => regular(root, file, handle, executable, deadline)?,
         Found::Link(target) => {
-            let oid = hash(root, &["--no-filters"], target.clone())?;
+            let oid = hash(root, &["--no-filters"], target.clone(), deadline)?;
             text_patch(&link_patch(file, &oid, &target))
         }
         Found::Directory if file.ends_with('/') => {
@@ -63,6 +69,7 @@ fn regular(
     file: &str,
     mut handle: fs::File,
     executable: bool,
+    deadline: Deadline,
 ) -> Result<FilePatch, RepositoryError> {
     let size = handle.metadata().map_err(unreadable)?.len();
     if size > PATCH_LIMIT as u64 {
@@ -80,8 +87,6 @@ fn regular(
     }
     // Git reads standard input for a bare `-`.
     let given = if file == "-" { "./-" } else { file };
-    // A file swapped for a FIFO after the read above blocks this diff until
-    // local Git reads get a deadline.
     let run = git::run_capped(
         root,
         &[
@@ -100,12 +105,14 @@ fn regular(
             given,
         ],
         PATCH_LIMIT,
+        deadline,
     )?;
     if !matches!(run.code, Some(0 | 1)) {
-        return Err(if run.stderr.is_empty() {
+        let stderr = run.stderr();
+        return Err(if stderr.is_empty() {
             git::read_failed()
         } else {
-            RepositoryError::new(ErrorKind::GitFailed, run.stderr)
+            RepositoryError::new(ErrorKind::GitFailed, stderr)
         });
     }
     let patch = match run.stdout {
@@ -113,7 +120,12 @@ fn regular(
         git::Capped::Over(bytes) => return Ok(FilePatch::TooLarge { bytes }),
     };
     let read_nothing = read_without_links.is_empty();
-    let oid = hash(root, &[&format!("--path={file}")], read_without_links)?;
+    let oid = hash(
+        root,
+        &[&format!("--path={file}")],
+        read_without_links,
+        deadline,
+    )?;
     let read_mode = if executable { "100755" } else { "100644" };
     let body = patch
         .strip_prefix(header(given, read_mode, &oid).as_bytes())
@@ -134,10 +146,10 @@ fn regular(
     let shown = added(hunk).ok_or_else(changed)?;
     // Git shows no lines for an empty file, even when a clean filter adds some.
     let hidden = read_nothing && shown.is_empty();
-    if !hidden && hash(root, &["--no-filters"], shown)? != oid {
+    if !hidden && hash(root, &["--no-filters"], shown, deadline)? != oid {
         return Err(changed());
     }
-    let mode = if executable && file_mode(root)? {
+    let mode = if executable && file_mode(root, deadline)? {
         "100755"
     } else {
         "100644"
@@ -150,16 +162,27 @@ fn regular(
     Ok(text_patch(&patch))
 }
 
-fn hash(root: &Path, options: &[&str], content: Vec<u8>) -> Result<String, RepositoryError> {
+fn hash(
+    root: &Path,
+    options: &[&str],
+    content: Vec<u8>,
+    deadline: Deadline,
+) -> Result<String, RepositoryError> {
     let mut args = vec!["-c", "core.safecrlf=false", "hash-object", "--stdin"];
     args.extend(options);
-    Ok(git::line(&git::read_with_input(root, &args, content)?))
+    Ok(git::line(&git::read_with_input(
+        root, &args, content, deadline,
+    )?))
 }
 
 /// `git diff --no-index` prints the executable bit even where `core.fileMode`
 /// tells `git add` to ignore it.
-fn file_mode(root: &Path) -> Result<bool, RepositoryError> {
-    let output = git::run(root, &["config", "--type=bool", "--get", "core.fileMode"])?;
+fn file_mode(root: &Path, deadline: Deadline) -> Result<bool, RepositoryError> {
+    let output = git::run(
+        root,
+        &["config", "--type=bool", "--get", "core.fileMode"],
+        deadline,
+    )?;
     match output.status.code() {
         Some(0) => Ok(output.stdout != b"false\n"),
         Some(1) => Ok(true),

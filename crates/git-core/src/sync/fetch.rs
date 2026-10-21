@@ -1,14 +1,18 @@
 use super::{now, stderr};
 use crate::{
     FetchFailure, FetchOutcome, FetchSummary, RemoteFetch, RepositoryError,
-    git::{self, Finished, Mutation},
+    git::{self, Deadline, Finished, Mutation},
 };
 use std::{collections::HashSet, path::Path, time::Duration};
 
-pub(super) fn fetch_all(root: &Path, deadline: Duration) -> Result<FetchSummary, RepositoryError> {
-    let before = tips(root)?;
-    let names = git::read(root, &["remote"])?;
-    let skipped = skipped_remotes(root)?;
+pub(super) fn fetch_all(
+    root: &Path,
+    deadline: Duration,
+    reads: Deadline,
+) -> Result<FetchSummary, RepositoryError> {
+    let before = tips(root, reads)?;
+    let names = git::read(root, &["remote"], reads)?;
+    let skipped = skipped_remotes(root, reads)?;
     let remotes = git::text(&names)
         .lines()
         .map(|remote| {
@@ -25,7 +29,7 @@ pub(super) fn fetch_all(root: &Path, deadline: Duration) -> Result<FetchSummary,
         .collect::<Result<_, RepositoryError>>()?;
     Ok(FetchSummary {
         at: now(),
-        changed: tips(root)? != before,
+        changed: tips(root, reads.renewed())? != before,
         coalesced: false,
         remotes,
     })
@@ -51,7 +55,7 @@ fn fetch(root: &Path, remote: &str, deadline: Duration) -> Result<FetchOutcome, 
 }
 
 /// The remotes `git fetch --all` leaves out.
-fn skipped_remotes(root: &Path) -> Result<HashSet<String>, RepositoryError> {
+fn skipped_remotes(root: &Path, reads: Deadline) -> Result<HashSet<String>, RepositoryError> {
     let output = git::run(
         root,
         &[
@@ -60,6 +64,7 @@ fn skipped_remotes(root: &Path) -> Result<HashSet<String>, RepositoryError> {
             "--get-regexp",
             r"^remote\..*\.(skipfetchall|skipdefaultupdate)$",
         ],
+        reads,
     )?;
     Ok(git::text(&output.stdout)
         .lines()
@@ -71,7 +76,7 @@ fn skipped_remotes(root: &Path) -> Result<HashSet<String>, RepositoryError> {
         .collect())
 }
 
-fn tips(root: &Path) -> Result<Vec<u8>, RepositoryError> {
+fn tips(root: &Path, reads: Deadline) -> Result<Vec<u8>, RepositoryError> {
     git::read(
         root,
         &[
@@ -80,5 +85,6 @@ fn tips(root: &Path) -> Result<Vec<u8>, RepositoryError> {
             "refs/heads/",
             "refs/remotes/",
         ],
+        reads,
     )
 }

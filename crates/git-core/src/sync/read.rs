@@ -2,7 +2,7 @@ use super::{now, stderr};
 use crate::{
     Blocker, BranchRef, BranchRole, BranchState, BranchStatus, ErrorKind, FetchSummary, Oid,
     RepositoryError, RepositoryOverview,
-    git::{self, Finished, Mutation},
+    git::{self, Deadline, Finished, Mutation},
     repository,
 };
 use std::{
@@ -30,11 +30,12 @@ pub(super) struct Repository {
     pub common_dir: PathBuf,
 }
 
-pub(super) fn open(path: &str) -> Result<Repository, RepositoryError> {
-    let root = repository::root(path)?;
+pub(super) fn open(path: &str, reads: Deadline) -> Result<Repository, RepositoryError> {
+    let root = repository::root(path, reads)?;
     let output = git::read(
         &root,
         &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+        reads,
     )?;
     let common_dir = Path::new(&git::line(&output)).canonicalize().map_err(|_| {
         RepositoryError::new(
@@ -67,14 +68,14 @@ struct Row {
     symref: String,
 }
 
-fn rows(root: &Path, patterns: &[&str]) -> Result<Vec<Row>, RepositoryError> {
+fn rows(root: &Path, patterns: &[&str], reads: Deadline) -> Result<Vec<Row>, RepositoryError> {
     let mut args = vec![
         "for-each-ref",
         "--sort=refname",
         "--format=%(refname)%00%(objectname)%00%(upstream)%00%(upstream:track,nobracket)%00%(worktreepath)%00%(symref)%00",
     ];
     args.extend(patterns);
-    let output = git::read(root, &args)?;
+    let output = git::read(root, &args, reads)?;
     records(&output)
         .filter_map(|row| {
             let fields: Vec<_> = row.split(|byte| *byte == 0).collect();
@@ -99,9 +100,10 @@ pub(super) fn read(
     repository: &Repository,
     fetch: Option<FetchSummary>,
     deadline: Duration,
+    mut reads: Deadline,
 ) -> Result<RepositoryOverview, RepositoryError> {
     let root = &repository.root;
-    let rows = rows(root, &["refs/heads/", "refs/remotes/"])?;
+    let rows = rows(root, &["refs/heads/", "refs/remotes/"], reads)?;
     let tips: HashMap<&str, &str> = rows
         .iter()
         .map(|row| (row.reference.as_str(), row.oid.as_str()))
@@ -125,14 +127,14 @@ pub(super) fn read(
             .collect::<Vec<_>>(),
         &remote_heads,
     );
-    let detached = has_detached_worktree(root)?;
+    let detached = has_detached_worktree(root, reads)?;
     let mut branches = Vec::with_capacity(locals.len());
     for ((reference, row), role) in locals.into_iter().zip(roles) {
         let Local {
             oid,
             checked_out_at,
             state,
-        } = local(root, &reference, row, &tips, detached, deadline)?;
+        } = local(root, &reference, row, &tips, detached, deadline, &mut reads)?;
         branches.push(BranchStatus {
             name: reference.name().to_owned(),
             reference,
@@ -165,8 +167,9 @@ pub(super) fn branch(
     root: &Path,
     reference: &BranchRef,
     deadline: Duration,
+    reads: &mut Deadline,
 ) -> Result<Option<Local>, RepositoryError> {
-    let rows = rows(root, &[reference.as_str()])?;
+    let rows = rows(root, &[reference.as_str()], *reads)?;
     let Some((reference, row)) = rows
         .iter()
         .filter_map(local_ref)
@@ -174,8 +177,17 @@ pub(super) fn branch(
     else {
         return Ok(None);
     };
-    let detached = has_detached_worktree(root)?;
-    local(root, &reference, row, &HashMap::new(), detached, deadline).map(Some)
+    let detached = has_detached_worktree(root, *reads)?;
+    local(
+        root,
+        &reference,
+        row,
+        &HashMap::new(),
+        detached,
+        deadline,
+        reads,
+    )
+    .map(Some)
 }
 
 /// A symbolic `refs/heads/*` is skipped because `update-ref` would move the
@@ -200,12 +212,13 @@ fn local(
     tips: &HashMap<&str, &str>,
     detached: bool,
     deadline: Duration,
+    reads: &mut Deadline,
 ) -> Result<Local, RepositoryError> {
     let oid = Oid::try_from(row.oid.clone()).map_err(|_| git::malformed())?;
     let track = parse_track(&row.track).ok_or_else(git::malformed)?;
     let target = match track {
         Track::Counts { ahead: 0, behind } if behind > 0 => {
-            upstream_oid(root, &row.upstream, tips)?
+            upstream_oid(root, &row.upstream, tips, *reads)?
         }
         _ => None,
     };
@@ -218,12 +231,16 @@ fn local(
         let checkout = match checked_out_at.take() {
             Some(worktree) => Checkout::At(worktree),
             None if !detached => Checkout::Nowhere,
-            None => hidden_checkout(root, reference, target, deadline)?,
+            None => {
+                let checkout = hidden_checkout(root, reference, target, deadline)?;
+                *reads = reads.renewed();
+                checkout
+            }
         };
         match checkout {
             Checkout::Nowhere => {}
             Checkout::At(worktree) => {
-                *blocker = blocker_for(reference, &occupant(&worktree)?);
+                *blocker = blocker_for(reference, &occupant(&worktree, *reads)?);
                 checked_out_at = Some(worktree);
             }
             Checkout::Unverified(message) => *blocker = Some(Blocker::Unverified { message }),
@@ -242,6 +259,7 @@ fn upstream_oid(
     root: &Path,
     upstream: &str,
     tips: &HashMap<&str, &str>,
+    reads: Deadline,
 ) -> Result<Option<Oid>, RepositoryError> {
     let tip = match tips.get(upstream) {
         Some(tip) => (*tip).to_owned(),
@@ -254,6 +272,7 @@ fn upstream_oid(
                     "--quiet",
                     &format!("{upstream}^{{commit}}"),
                 ],
+                reads,
             )?;
             if !output.status.success() {
                 return Ok(None);
@@ -363,8 +382,8 @@ fn roles(branches: &[(&str, &str)], remote_heads: &[(&str, &str)]) -> Vec<Branch
 
 /// Rebase and bisect detach HEAD, so only a detached worktree can hide a
 /// checked-out branch from `%(worktreepath)`.
-fn has_detached_worktree(root: &Path) -> Result<bool, RepositoryError> {
-    let output = git::run(root, &["worktree", "list", "--porcelain", "-z"])?;
+fn has_detached_worktree(root: &Path, reads: Deadline) -> Result<bool, RepositoryError> {
+    let output = git::run(root, &["worktree", "list", "--porcelain", "-z"], reads)?;
     Ok(!output.status.success()
         || output
             .stdout
@@ -418,17 +437,18 @@ struct Occupant {
     dirty: bool,
 }
 
-fn occupant(worktree: &str) -> Result<Occupant, RepositoryError> {
+fn occupant(worktree: &str, reads: Deadline) -> Result<Occupant, RepositoryError> {
     let path = Path::new(worktree);
-    let head = git::run(path, &["symbolic-ref", "--quiet", "HEAD"])?;
+    let head = git::run(path, &["symbolic-ref", "--quiet", "HEAD"], reads)?;
     let mut pending = vec!["rev-parse", "--path-format=absolute"];
     for operation in OPERATION_STATE {
         pending.extend(["--git-path", operation]);
     }
-    let pending = git::run(path, &pending)?;
+    let pending = git::run(path, &pending, reads)?;
     let status = git::run(
         path,
         &["status", "--porcelain=v1", "-z", "--untracked-files=no"],
+        reads,
     )?;
     Ok(Occupant {
         worktree: worktree.to_owned(),

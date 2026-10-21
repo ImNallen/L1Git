@@ -192,6 +192,7 @@ export const repositoryErrorSchema = z.object({
     "unchangedPath",
     "unsupportedPath",
     "unreadablePath",
+    "timedOut",
   ]),
   message: z.string(),
 });

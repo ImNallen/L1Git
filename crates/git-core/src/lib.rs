@@ -1,3 +1,4 @@
+mod exit_signals;
 mod git;
 mod model;
 mod remotes;
@@ -7,6 +8,8 @@ mod status;
 mod sync;
 mod untracked;
 
+pub use exit_signals::{OnQuit, stop_git_on_exit_signals};
+pub use git::stop_all_git;
 pub use model::*;
 pub use repository::{
     HISTORY_LIMIT, LINE_STATS_LIMIT, PATCH_LIMIT, commit_detail, file_patch, line_stats, refs,

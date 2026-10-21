@@ -4,6 +4,7 @@ import { once } from "node:events";
 import {
   chmodSync,
   mkdirSync,
+  readFileSync,
   realpathSync,
   rmSync,
   writeFileSync,
@@ -84,14 +85,7 @@ async function post(
   });
 }
 
-beforeAll(async () => {
-  fixture = fixtureSchema.parse(
-    JSON.parse(
-      execFileSync(process.execPath, ["scripts/create-fixture.mjs"], {
-        encoding: "utf8",
-      }),
-    ),
-  );
+async function startBridge(env: Record<string, string>) {
   const server = createServer();
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
@@ -102,24 +96,38 @@ beforeAll(async () => {
   await new Promise<void>((resolve, reject) =>
     server.close((error) => (error ? reject(error) : resolve())),
   );
-  endpoint = `http://127.0.0.1:${port}`;
-  bridge = spawn("./target/debug/l1-git-dev-bridge", [], {
-    env: {
-      ...process.env,
-      L1GIT_BRIDGE_PORT: String(port),
-      L1GIT_DEV_PORT: "1422",
-    },
-    stdio: "ignore",
-  });
+  const started = {
+    endpoint: `http://127.0.0.1:${port}`,
+    bridge: spawn("./target/debug/l1-git-dev-bridge", [], {
+      env: {
+        ...process.env,
+        ...env,
+        L1GIT_BRIDGE_PORT: String(port),
+        L1GIT_DEV_PORT: "1422",
+      },
+      stdio: "ignore",
+    }),
+  };
   for (let attempt = 0; attempt < 50; attempt++) {
     try {
-      await post({ op: "snapshot", path: fixture.unborn });
-      return;
+      await fetch(`${started.endpoint}/api/run`, { method: "POST" });
+      return started;
     } catch {
       await setTimeout(50);
     }
   }
   throw new Error("The real development bridge did not start");
+}
+
+beforeAll(async () => {
+  fixture = fixtureSchema.parse(
+    JSON.parse(
+      execFileSync(process.execPath, ["scripts/create-fixture.mjs"], {
+        encoding: "utf8",
+      }),
+    ),
+  );
+  ({ bridge, endpoint } = await startBridge({}));
 }, 20_000);
 
 afterAll(async () => {
@@ -945,4 +953,136 @@ describe("real Rust fetch and fast-forward contract", () => {
     expect(fetched.finishedAt - started).toBeGreaterThanOrEqual(2000);
     expect(fetched.finishedAt - readFinishedAt).toBeGreaterThan(500);
   });
+});
+
+describe("real Rust read deadlines", () => {
+  it("returns timedOut for a commit read that hangs and still reads other commits", async () => {
+    const snapshot = snapshotEnvelope.parse(
+      await (await post({ op: "snapshot", path: fixture.repository })).json(),
+    ).data;
+    const [slow, other] = snapshot.commits;
+    if (!slow || !other) throw new Error("The fixture needs two commits");
+    const real = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+    const bin = join(fixture.root, "slow-git-bin");
+    const masks = join(fixture.root, "slow-git-masks");
+    mkdirSync(bin);
+    writeFileSync(
+      join(bin, "git"),
+      `#!/bin/sh\nfor arg in "$@"; do [ "$arg" = ${slow.oid} ] && { perl -MPOSIX -e 'my $s = POSIX::SigSet->new; sigprocmask(SIG_BLOCK, POSIX::SigSet->new, $s); print join(",", grep { $s->ismember($_) } 1, 2, 15), "\\n"' >> '${masks}'; exec sleep 30; }; done\nexec '${real}' "$@"\n`,
+    );
+    chmodSync(join(bin, "git"), 0o755);
+    const slowBridge = await startBridge({
+      PATH: `${bin}:${process.env.PATH ?? ""}`,
+      L1GIT_READ_DEADLINE_MS: "1000",
+    });
+    const read = async (oid: string) =>
+      (
+        await fetch(`${slowBridge.endpoint}/api/run`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Origin: origin },
+          body: JSON.stringify({
+            op: "commitDetail",
+            path: fixture.repository,
+            oid,
+          }),
+        })
+      ).json();
+    try {
+      const started = performance.now();
+      const failed = z
+        .object({ ok: z.literal(false), error: repositoryErrorSchema })
+        .strict()
+        .parse(await read(slow.oid));
+      const elapsed = performance.now() - started;
+      expect(failed.error).toEqual({
+        kind: "timedOut",
+        message:
+          "Reading this commit took longer than 1 s, so L1 Git stopped Git. Retry. If it happens again, check for a slow disk or a Git filter that does not finish.",
+      });
+      expect(readFileSync(masks, "utf8")).toBe("\n");
+      expect(elapsed).toBeGreaterThanOrEqual(1000);
+      expect(elapsed).toBeLessThan(2000);
+      const detail = answer("commitDetail", detailSchema).parse(
+        await read(other.oid),
+      ).data;
+      expect(detail.commit.oid).toBe(other.oid);
+    } finally {
+      slowBridge.bridge.kill();
+      await once(slowBridge.bridge, "exit");
+    }
+  }, 20_000);
+
+  it("stops a hung read's Git when the bridge gets Ctrl-C", async () => {
+    const snapshot = snapshotEnvelope.parse(
+      await (await post({ op: "snapshot", path: fixture.repository })).json(),
+    ).data;
+    const slow = snapshot.commits[2];
+    if (!slow) throw new Error("The fixture needs three commits");
+    const real = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+    const bin = join(fixture.root, "hung-git-bin");
+    const pids = join(fixture.root, "hung-git-pids");
+    mkdirSync(bin);
+    writeFileSync(
+      join(bin, "git"),
+      `#!/bin/sh\nfor arg in "$@"; do [ "$arg" = ${slow.oid} ] && { echo $$ >> '${pids}'; exec sleep 60; }; done\nexec '${real}' "$@"\n`,
+    );
+    chmodSync(join(bin, "git"), 0o755);
+    const alive = (pid: number) => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    const hungBridge = await startBridge({
+      PATH: `${bin}:${process.env.PATH ?? ""}`,
+    });
+    let pid = Number.NaN;
+    try {
+      void fetch(`${hungBridge.endpoint}/api/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Origin: origin },
+        body: JSON.stringify({
+          op: "commitDetail",
+          path: fixture.repository,
+          oid: slow.oid,
+        }),
+      }).catch(() => undefined);
+      for (let attempt = 0; attempt < 100 && Number.isNaN(pid); attempt++) {
+        await setTimeout(50);
+        try {
+          pid = Number.parseInt(readFileSync(pids, "utf8"), 10);
+        } catch {
+          pid = Number.NaN;
+        }
+      }
+      expect(pid).toBeGreaterThan(1);
+      expect(alive(pid)).toBe(true);
+      const exited = once(hungBridge.bridge, "exit");
+      const interrupted = performance.now();
+      hungBridge.bridge.kill("SIGINT");
+      expect(await exited).toEqual([null, "SIGINT"]);
+      expect(performance.now() - interrupted).toBeLessThan(1000);
+      for (let attempt = 0; attempt < 20 && alive(pid); attempt++)
+        await setTimeout(25);
+      expect(alive(pid)).toBe(false);
+    } finally {
+      if (
+        hungBridge.bridge.exitCode === null &&
+        hungBridge.bridge.signalCode === null
+      ) {
+        hungBridge.bridge.kill("SIGKILL");
+        await once(hungBridge.bridge, "exit");
+      }
+      const ownSleep =
+        Number.isInteger(pid) &&
+        pid > 1 &&
+        alive(pid) &&
+        execFileSync("ps", ["-o", "command=", "-p", String(pid)], {
+          encoding: "utf8",
+        }).trim() === "sleep 60";
+      if (ownSleep) process.kill(pid, "SIGKILL");
+    }
+  }, 20_000);
 });
