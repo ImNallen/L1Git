@@ -438,12 +438,16 @@ export function useWorkspace() {
         setFileDiff((state) =>
           pending(state) ? { kind: "ready", ...key, patch } : state,
         ),
-      (error: unknown) =>
+      (error: unknown) => {
+        const problem = problemFrom(error);
         setFileDiff((state) =>
-          pending(state)
-            ? { kind: "error", ...key, error: problemFrom(error) }
-            : state,
-        ),
+          !pending(state)
+            ? state
+            : keepShown && problem.kind === "unchangedPath"
+              ? { kind: "closed" }
+              : { kind: "error", ...key, error: problem },
+        );
+      },
     );
   };
 
