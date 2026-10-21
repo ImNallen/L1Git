@@ -6,7 +6,7 @@ use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
 const BODY_LIMIT: u64 = 64 * 1024;
 
 fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    l1_git_core::stop_git_on_exit_signals()?;
+    l1_git_core::stop_git_on_exit_signals(l1_git_core::OnQuit::Raise)?;
     let port: u16 = std::env::var("L1GIT_BRIDGE_PORT")
         .unwrap_or_else(|_| "9417".into())
         .parse()?;

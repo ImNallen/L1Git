@@ -1,14 +1,25 @@
 use std::io;
 
+/// What SIGQUIT does once Git is stopped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OnQuit {
+    /// Dies by SIGQUIT, as a command-line program should.
+    Raise,
+    /// Exits with status 131. A macOS app that dies by SIGQUIT is reported as
+    /// a crash.
+    Exit,
+}
+
 /// Stops Git before SIGINT, SIGTERM, SIGHUP, or SIGQUIT ends this process.
 /// Git runs in its own process groups, so a signal sent to a terminal's group
 /// never reaches it. The handler only writes the signal to a pipe. A thread
 /// reads it, runs `stop_all_git`, and raises the signal again with its default
-/// action, so a parent sees this process die by that signal. No signal is
-/// blocked, so Git starts with none blocked, and a signal ignored when this
-/// process started, as under `nohup`, stays ignored.
+/// action, so a parent sees this process die by that signal, except as
+/// `quit` says for SIGQUIT. No signal is blocked, so Git starts with none
+/// blocked, and a signal ignored when this process started, as under `nohup`,
+/// stays ignored.
 #[cfg(unix)]
-pub fn stop_git_on_exit_signals() -> io::Result<()> {
+pub fn stop_git_on_exit_signals(quit: OnQuit) -> io::Result<()> {
     use std::{fs::File, io::Read, os::fd::FromRawFd, thread};
 
     let mut ends = [0; 2];
@@ -36,6 +47,9 @@ pub fn stop_git_on_exit_signals() -> io::Result<()> {
         }
         crate::stop_all_git();
         let signal = libc::c_int::from(signal[0]);
+        if signal == libc::SIGQUIT && quit == OnQuit::Exit {
+            std::process::exit(128 + signal);
+        }
         // SAFETY: signal(2) and raise(3) take no pointers. The default action
         // of each handled signal ends the process.
         unsafe {
@@ -68,7 +82,7 @@ pub fn stop_git_on_exit_signals() -> io::Result<()> {
 }
 
 #[cfg(not(unix))]
-pub fn stop_git_on_exit_signals() -> io::Result<()> {
+pub fn stop_git_on_exit_signals(_quit: OnQuit) -> io::Result<()> {
     Ok(())
 }
 

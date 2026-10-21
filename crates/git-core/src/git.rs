@@ -647,10 +647,10 @@ impl Group {
     /// After `stop_all_git` starts, a command that exited still has its group
     /// killed, so nothing it started outlives the process.
     fn reap(&mut self) -> io::Result<ExitStatus> {
+        self.unlist();
         if STOPPING.load(Ordering::SeqCst) {
             self.signal(Signal::Kill);
         }
-        self.unlist();
         self.reaped = true;
         self.child.wait()
     }
@@ -726,7 +726,10 @@ fn child_exited(_pid: u32) -> io::Result<bool> {
 }
 
 /// Stops every Git command L1 Git started that is still running, for a
-/// process that is about to exit. No Git command starts after it begins.
+/// process that is about to exit. A command checked before it began is
+/// waited for, for up to 1 s, so it is listed and stopped. Later commands are
+/// refused. It can block for about 2 s when a command is slow to start and
+/// another ignores SIGTERM.
 pub fn stop_all_git() {
     STOPPING.store(true, Ordering::SeqCst);
     let asked = Instant::now();

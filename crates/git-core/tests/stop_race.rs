@@ -73,12 +73,12 @@ fn stop_all_git_reaches_a_command_that_is_starting() {
             .env("PATH", &path)
             .status()
             .unwrap();
-        assert!(status.success(), "round {round}: {status}");
         thread::sleep(Duration::from_millis(300));
         for pid in alive_sleeps(&pids) {
             Command::new("kill").args(["-9", &pid]).status().unwrap();
             survivors.push(format!("round {round}: {pid}"));
         }
+        assert!(status.success(), "round {round}: {status}");
     }
     assert!(
         survivors.is_empty(),
