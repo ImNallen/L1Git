@@ -561,8 +561,9 @@ export function History({
   const layout = columnLayout(graphWidth, visibleColumns, shaLength);
   function revealColumn(id: ColumnId | null) {
     const index = layout.columns.findIndex((column) => column.id === id);
-    const cells = headRef.current?.rows[0]?.cells;
-    const cell = cells?.[cells.length - layout.columns.length + index];
+    const headerCells = headRef.current?.rows[0]?.cells;
+    const cell =
+      headerCells?.[headerCells.length - layout.columns.length + index];
     const scroller = scrollRef.current;
     if (index < 0 || !cell || !scroller) return;
     const { left, right } = cell.getBoundingClientRect();
