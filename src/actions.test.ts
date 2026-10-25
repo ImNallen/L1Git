@@ -25,6 +25,10 @@ const repositoryScreen: ActionContext = {
   compare: null,
   sidebarBranch: null,
   rule: "none",
+  worktree: null,
+  history: { undo: null, redo: null },
+  writing: false,
+  typing: false,
 };
 
 function commands(): Commands {
@@ -51,6 +55,10 @@ function commands(): Commands {
     openRepository: vi.fn(),
     jumpToRef: vi.fn(),
     showStash: vi.fn(),
+    stageAll: vi.fn(),
+    unstageAll: vi.fn(),
+    undo: vi.fn(),
+    redo: vi.fn(),
   };
 }
 
@@ -355,6 +363,75 @@ describe("shortcuts", () => {
     const settings: ActionContext = { ...repositoryScreen, screen: "settings" };
     expect(id(settings, key("Escape"))).toBe("leaveSettings");
     expect(id({ ...settings, dialogOpen: true }, key("Escape"))).toBeNull();
+  });
+});
+
+describe("staging and undo", () => {
+  const id = (context: ActionContext, event: ReturnType<typeof key>) =>
+    shortcutAction(context, event, true)?.id ?? null;
+  const history: ActionContext = {
+    ...repositoryScreen,
+    history: { undo: "Stage README.md", redo: "Unstage 2 files" },
+  };
+
+  it("offers Undo and Redo only with an entry, titled with its label", () => {
+    expect(titles(repositoryScreen, "undo")).toEqual([]);
+    expect(titles(repositoryScreen, "redo")).toEqual([]);
+    expect(titles(history, "undo")).toEqual(["Undo Stage README.md"]);
+    expect(titles(history, "redo")).toEqual(["Redo Unstage 2 files"]);
+    expect(titles({ ...history, writing: true }, "undo")).toEqual([]);
+    expect(titles({ ...history, writing: true }, "redo")).toEqual([]);
+  });
+
+  it("offers Stage all and Unstage all only for a list with files", () => {
+    const unstaged: ActionContext = {
+      ...repositoryScreen,
+      worktree: { unstaged: 2, staged: 0 },
+    };
+    expect(titles(unstaged, "stage all")).toEqual(["Stage all"]);
+    expect(
+      titles({ ...unstaged, worktree: { unstaged: 0, staged: 1 } }, "stage"),
+    ).toEqual(["Unstage all"]);
+    expect(titles({ ...unstaged, writing: true }, "stage")).toEqual([]);
+    expect(titles(repositoryScreen, "stage")).toEqual([]);
+  });
+
+  it("undoes with Cmd+Z and redoes with Cmd+Shift+Z", () => {
+    expect(id(history, key("z", { metaKey: true }))).toBe("undo");
+    expect(id(history, key("Z", { metaKey: true, shiftKey: true }))).toBe(
+      "redo",
+    );
+    expect(
+      shortcutAction(history, key("z", { ctrlKey: true }), false)?.id,
+    ).toBe("undo");
+    expect(id(repositoryScreen, key("z", { metaKey: true }))).toBeNull();
+  });
+
+  it("leaves Cmd+Z to a text field, a dialog, or the palette", () => {
+    expect(id({ ...history, typing: true }, key("z", { metaKey: true }))).toBe(
+      null,
+    );
+    expect(
+      id(
+        { ...history, typing: true },
+        key("Z", { metaKey: true, shiftKey: true }),
+      ),
+    ).toBeNull();
+    expect(
+      id({ ...history, dialogOpen: true }, key("z", { metaKey: true })),
+    ).toBeNull();
+    expect(claimedWhilePaletteOpen(key("z", { metaKey: true }), true)).toBe(
+      false,
+    );
+  });
+
+  it("labels the redo shortcut with Shift", () => {
+    const shortcut = (mac: boolean) =>
+      paletteItems(history, commands(), mac, [], null).find(
+        (item) => item.title === "Redo Unstage 2 files",
+      )?.shortcut;
+    expect(shortcut(true)).toBe("⇧⌘Z");
+    expect(shortcut(false)).toBe("Ctrl+Shift+Z");
   });
 });
 

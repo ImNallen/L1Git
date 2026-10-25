@@ -86,6 +86,15 @@ export type WorktreeGroup = {
   files: WorktreeFile[];
 };
 
+export const listWrites: Record<
+  ListSide,
+  { kind: "stageFiles" | "unstageFiles"; row: string; all: string | null }
+> = {
+  conflict: { kind: "stageFiles", row: "Mark resolved", all: null },
+  unstaged: { kind: "stageFiles", row: "Stage", all: "Stage all" },
+  staged: { kind: "unstageFiles", row: "Unstage", all: "Unstage all" },
+};
+
 export const treeStatus = {
   A: "added",
   D: "deleted",
@@ -155,16 +164,24 @@ export function firstWorktreeFile(
   return null;
 }
 
+export type DiffAfter =
+  | { kind: "reread" }
+  | { kind: "follow"; side: ListSide }
+  | { kind: "close" };
+
 export function openDiffAfter(
   entries: readonly StatusEntry[],
   path: string,
   side: ListSide,
-): "reread" | "close" {
-  const listed = worktreeGroups(entries).some(
-    (group) =>
-      group.side === side && group.files.some((file) => file.path === path),
-  );
-  return listed ? "reread" : "close";
+): DiffAfter {
+  const sides = worktreeGroups(entries)
+    .filter((group) => group.files.some((file) => file.path === path))
+    .map((group) => group.side);
+  if (sides.includes(side)) return { kind: "reread" };
+  const [other] = sides;
+  return other === undefined
+    ? { kind: "close" }
+    : { kind: "follow", side: other };
 }
 
 const summaryOrder = [

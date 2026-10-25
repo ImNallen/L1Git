@@ -28,3 +28,17 @@ export function firstChangedPath(
   const first = changedFileTreeInput(files).paths.at(0);
   return first === undefined ? undefined : changedPathAt(files, first);
 }
+
+export function pathsUnder(
+  files: readonly { path: string }[],
+  item: { kind: "file" | "directory"; path: string },
+): string[] {
+  const shown = treePath(item.path);
+  if (item.kind === "file") {
+    const path = changedPathAt(files, shown);
+    return path === undefined ? [] : [path];
+  }
+  return files
+    .filter((file) => treePath(file.path).startsWith(`${shown}/`))
+    .map((file) => file.path);
+}

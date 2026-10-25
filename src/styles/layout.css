@@ -114,6 +114,18 @@
   white-space: nowrap;
   text-decoration: underline;
 }
+.notice button + button {
+  margin-left: 0;
+}
+.notice .notice-dismiss {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 4px;
+  color: inherit;
+}
+.notice span + .notice-dismiss {
+  margin-left: auto;
+}
 .workspace-panes {
   display: flex;
   flex: 1;

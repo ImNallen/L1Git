@@ -184,16 +184,32 @@ describe("an open worktree diff after a status change", () => {
   ];
 
   it("rereads a path that its side still lists", () => {
-    expect(openDiffAfter(entries, "edited.txt", "unstaged")).toBe("reread");
-    expect(openDiffAfter(entries, "staged.txt", "staged")).toBe("reread");
-    expect(openDiffAfter(entries, "clash.txt", "conflict")).toBe("reread");
+    const reread = { kind: "reread" };
+    expect(openDiffAfter(entries, "edited.txt", "unstaged")).toEqual(reread);
+    expect(openDiffAfter(entries, "staged.txt", "staged")).toEqual(reread);
+    expect(openDiffAfter(entries, "clash.txt", "conflict")).toEqual(reread);
+    const both = [
+      ordinary("README.md", { kind: "both", staged: "M", unstaged: "M" }),
+    ];
+    expect(openDiffAfter(both, "README.md", "unstaged")).toEqual(reread);
+    expect(openDiffAfter(both, "README.md", "staged")).toEqual(reread);
   });
 
-  it("closes a path that its side no longer lists", () => {
-    expect(openDiffAfter(entries, "gone.txt", "unstaged")).toBe("close");
-    expect(openDiffAfter(entries, "clash.txt", "unstaged")).toBe("close");
-    expect(openDiffAfter(entries, "staged.txt", "unstaged")).toBe("close");
-    expect(openDiffAfter(entries, "edited.txt", "staged")).toBe("close");
+  it("follows a path that left its side for the other", () => {
+    expect(openDiffAfter(entries, "staged.txt", "unstaged")).toEqual({
+      kind: "follow",
+      side: "staged",
+    });
+    expect(openDiffAfter(entries, "edited.txt", "staged")).toEqual({
+      kind: "follow",
+      side: "unstaged",
+    });
+  });
+
+  it("closes a path that no side lists", () => {
+    expect(openDiffAfter(entries, "gone.txt", "unstaged")).toEqual({
+      kind: "close",
+    });
   });
 });
 

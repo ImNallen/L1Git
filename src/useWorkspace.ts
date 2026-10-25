@@ -343,7 +343,7 @@ export function useWorkspace() {
   const worktreeKey = worktrees?.map((worktree) => worktree.root).join("\0");
   useEffect(() => {
     for (const worktree of worktreesRef.current ?? [])
-      readStatus(worktree.root);
+      void readStatus(worktree.root);
   }, [worktreeKey, changesAttempt, readStatus]);
 
   useEffect(() => {
@@ -420,8 +420,7 @@ export function useWorkspace() {
       read === fileRead.current &&
       state.kind !== "closed" &&
       state.root === key.root &&
-      state.path === key.path &&
-      state.side === key.side;
+      state.path === key.path;
     if (!keepShown) setFileDiff({ kind: "loading", ...key });
     const reading: Promise<WorktreePatch> =
       key.side === null
@@ -461,12 +460,18 @@ export function useWorkspace() {
         return;
       }
       if (fileDiff.selection.root !== worktree) return;
-      if (
-        openDiffAfter(next.status.entries, fileDiff.path, fileDiff.side) ===
-        "close"
-      )
-        setFileDiff({ kind: "closed" });
-      else openFile(fileDiff.path, fileDiff.side, true);
+      const after = openDiffAfter(
+        next.status.entries,
+        fileDiff.path,
+        fileDiff.side,
+      );
+      if (after.kind === "close") setFileDiff({ kind: "closed" });
+      else
+        openFile(
+          fileDiff.path,
+          after.kind === "follow" ? after.side : fileDiff.side,
+          true,
+        );
     };
   });
 
@@ -541,6 +546,7 @@ export function useWorkspace() {
     detail,
     changes,
     refreshChanges: () => setChangesAttempt((attempt) => attempt + 1),
+    rereadWorktree: readStatus,
     retryDetail: () => setDetailAttempt((attempt) => attempt + 1),
     fileDiff,
     openFile,

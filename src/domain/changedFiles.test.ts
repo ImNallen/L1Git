@@ -3,6 +3,7 @@ import {
   changedFileTreeInput,
   changedPathAt,
   firstChangedPath,
+  pathsUnder,
 } from "./changedFiles";
 
 describe("changed file tree input", () => {
@@ -14,5 +15,28 @@ describe("changed file tree input", () => {
     expect(changedPathAt(files, "src/a.ts")).toBe("src/a.ts");
     expect(changedPathAt(files, "src/")).toBeUndefined();
     expect(firstChangedPath([{ path: "nested/" }])).toBe("nested/");
+  });
+});
+
+describe("paths under a tree row", () => {
+  const files = [
+    { path: "src/ui/a.ts" },
+    { path: "src/ui/b.ts" },
+    { path: "src-old.ts" },
+    { path: "nested/" },
+  ];
+
+  it("lists a file row's own path and every listed path in a folder", () => {
+    expect(pathsUnder(files, { kind: "file", path: "nested" })).toEqual([
+      "nested/",
+    ]);
+    expect(pathsUnder(files, { kind: "directory", path: "src" })).toEqual([
+      "src/ui/a.ts",
+      "src/ui/b.ts",
+    ]);
+    expect(pathsUnder(files, { kind: "directory", path: "src/ui/" })).toEqual([
+      "src/ui/a.ts",
+      "src/ui/b.ts",
+    ]);
   });
 });

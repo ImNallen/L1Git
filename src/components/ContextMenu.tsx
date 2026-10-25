@@ -86,6 +86,7 @@ export function ContextMenu({
       ref={ref}
       className="context-menu"
       role="menu"
+      data-file-tree-context-menu-root="true"
       aria-label={label}
       style={position}
       onContextMenu={(event) => event.preventDefault()}
