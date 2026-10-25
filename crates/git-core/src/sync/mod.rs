@@ -1,12 +1,11 @@
 mod advance;
 mod fetch;
 mod read;
-mod stderr;
 
 use crate::{
     Advance, AdvanceOutcome, FastForwardReport, FetchMode, FetchSummary, RepositoryError,
     RepositoryOverview, SkipReason,
-    git::{Deadline, LocalRead},
+    git::{Deadline, LocalRead, LocalWrite, WriteDeadline},
 };
 use std::{
     collections::HashMap,
@@ -37,14 +36,25 @@ impl Default for Limits {
     }
 }
 
-/// Owns every Git command that contacts a remote or moves a ref. Keep one per
-/// process. It runs at most one fetch or fast-forward per repository at a time
-/// and at most `network_slots` fetches at once. Local reads take no lock.
+/// Owns every Git command that contacts a remote, moves a ref, or writes, and
+/// the undo history. Keep one per process. Per Git common dir it runs at most
+/// one fetch or fast-forward at a time (the gate) and at most one write, undo,
+/// redo, or fast-forward ref move at a time (the write lock). A write never
+/// takes the gate, so it never waits for a fetch. At most `network_slots`
+/// fetches run at once. Local reads take no lock.
 pub struct Coordinator {
     limits: Limits,
     read_cap: Option<Duration>,
-    gates: Mutex<HashMap<PathBuf, Arc<Mutex<Gate>>>>,
+    write_cap: Option<Duration>,
+    undo_dir: PathBuf,
+    repositories: Mutex<HashMap<PathBuf, Arc<Locks>>>,
     slots: Semaphore,
+}
+
+#[derive(Default)]
+struct Locks {
+    gate: Mutex<Gate>,
+    write: Mutex<()>,
 }
 
 #[derive(Default)]
@@ -52,18 +62,16 @@ struct Gate {
     last_fetch: Option<(Instant, FetchSummary)>,
 }
 
-impl Default for Coordinator {
-    fn default() -> Self {
-        Self::new(Limits::default())
-    }
-}
-
 impl Coordinator {
-    pub fn new(limits: Limits) -> Self {
+    /// `undo_dir` holds one undo store per repository. Nothing is created
+    /// there until the first write.
+    pub fn new(limits: Limits, undo_dir: impl Into<PathBuf>) -> Self {
         Self {
             limits,
             read_cap: None,
-            gates: Mutex::default(),
+            write_cap: None,
+            undo_dir: undo_dir.into(),
+            repositories: Mutex::default(),
             slots: Semaphore::new(limits.network_slots),
         }
     }
@@ -77,9 +85,30 @@ impl Coordinator {
         }
     }
 
+    /// Lowers every write's deadline to at most `cap`.
+    pub fn cap_writes(self, cap: Duration) -> Self {
+        Self {
+            write_cap: Some(cap),
+            ..self
+        }
+    }
+
     pub(crate) fn deadline(&self, read: LocalRead) -> Deadline {
-        let budget = read.budget();
-        Deadline::start(read, self.read_cap.map_or(budget, |cap| cap.min(budget)))
+        Deadline::start(read, capped(read.budget(), self.read_cap))
+    }
+
+    pub(crate) fn write_deadline(&self, write: LocalWrite) -> WriteDeadline {
+        WriteDeadline::start(write, capped(write.budget(), self.write_cap))
+    }
+
+    pub(crate) fn undo_dir(&self) -> &Path {
+        &self.undo_dir
+    }
+
+    pub(crate) fn writing<T>(&self, common_dir: &Path, work: impl FnOnce() -> T) -> T {
+        let locks = self.locks(common_dir);
+        let _write = lock_ignoring_poison(&locks.write);
+        work()
     }
 
     /// The local branches of the repository containing `path`. With
@@ -97,8 +126,8 @@ impl Coordinator {
         if mode == FetchMode::Local {
             return read::read(&repository, None, deadline, reads);
         }
-        let gate = self.gate(&repository.common_dir);
-        let mut gate = lock_ignoring_poison(&gate);
+        let locks = self.locks(&repository.common_dir);
+        let mut gate = lock_ignoring_poison(&locks.gate);
         let summary = match &gate.last_fetch {
             Some((finished, summary)) if *finished > requested => FetchSummary {
                 coalesced: true,
@@ -121,9 +150,10 @@ impl Coordinator {
     }
 
     /// Fast-forwards each requested branch in order, then rereads the repository
-    /// before another fetch or fast-forward can start. A branch already at `to`
-    /// counts as advanced, so a retry is harmless. An error moving one branch is
-    /// reported as that branch's outcome.
+    /// before another fetch or fast-forward can start. Each branch moves under
+    /// the write lock, so it never interleaves with a write. A branch already at
+    /// `to` counts as advanced, so a retry is harmless. An error moving one
+    /// branch is reported as that branch's outcome.
     pub fn fast_forward(
         &self,
         path: &str,
@@ -132,12 +162,13 @@ impl Coordinator {
         let reads = self.deadline(LocalRead::BranchStatus);
         let repository = read::open(path, reads)?;
         let deadline = self.limits.local_deadline;
-        let gate = self.gate(&repository.common_dir);
-        let _gate = lock_ignoring_poison(&gate);
+        let locks = self.locks(&repository.common_dir);
+        let _gate = lock_ignoring_poison(&locks.gate);
         let mut reads = reads.renewed();
         let outcomes = advances
             .iter()
             .map(|request| {
+                let _write = lock_ignoring_poison(&locks.write);
                 advance::advance(&repository.root, request, deadline, &mut reads).unwrap_or_else(
                     |error| AdvanceOutcome::Skipped {
                         reference: request.reference.clone(),
@@ -154,13 +185,17 @@ impl Coordinator {
         })
     }
 
-    fn gate(&self, common_dir: &Path) -> Arc<Mutex<Gate>> {
+    fn locks(&self, common_dir: &Path) -> Arc<Locks> {
         Arc::clone(
-            lock_ignoring_poison(&self.gates)
+            lock_ignoring_poison(&self.repositories)
                 .entry(common_dir.to_owned())
                 .or_default(),
         )
     }
+}
+
+fn capped(budget: Duration, cap: Option<Duration>) -> Duration {
+    cap.map_or(budget, |cap| cap.min(budget))
 }
 
 fn lock_ignoring_poison<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {

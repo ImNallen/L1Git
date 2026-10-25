@@ -1,9 +1,9 @@
-use super::{now, stderr};
+use super::now;
 use crate::{
     Blocker, BranchRef, BranchRole, BranchState, BranchStatus, ErrorKind, FetchSummary, Oid,
     RepositoryError, RepositoryOverview,
     git::{self, Deadline, Finished, Mutation},
-    repository,
+    repository, stderr,
 };
 use std::{
     collections::HashMap,
@@ -37,12 +37,7 @@ pub(super) fn open(path: &str, reads: Deadline) -> Result<Repository, Repository
         &["rev-parse", "--path-format=absolute", "--git-common-dir"],
         reads,
     )?;
-    let common_dir = Path::new(&git::line(&output)).canonicalize().map_err(|_| {
-        RepositoryError::new(
-            ErrorKind::MissingPath,
-            "The repository moved while opening. Choose its current folder.",
-        )
-    })?;
+    let common_dir = repository::canonical(&git::line(&output))?;
     Ok(Repository { root, common_dir })
 }
 

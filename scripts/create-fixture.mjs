@@ -39,6 +39,11 @@ function git(path, ...args) {
   if (result.status !== 0) throw new Error(result.stderr || "Git failed");
   return result.stdout.trim();
 }
+function identify(path) {
+  git(path, "config", "user.name", "N Allen");
+  git(path, "config", "user.email", "nallen@example.test");
+  git(path, "config", "commit.gpgSign", "false");
+}
 function commitIn(worktree, message, files) {
   for (const [file, contents] of Object.entries(files)) {
     const path = join(worktree, file);
@@ -59,7 +64,9 @@ mkdirSync(repository);
 mkdirSync(remote);
 mkdirSync(unborn);
 git(remote, "init", "--bare", "--initial-branch=main");
+identify(remote);
 git(repository, "init", "--initial-branch=main");
+identify(repository);
 git(repository, "config", "core.hooksPath", "/dev/null");
 commit("docs: start the local Git fixture", { "README.md": "# L1 demo\n" });
 git(repository, "checkout", "-b", "feat/history");
@@ -134,6 +141,7 @@ git(repository, "config", "remote.github.skipFetchAll", "true");
 git(repository, "worktree", "add", "--detach", detached, "feat/history");
 git(repository, "tag", "-a", "-m", "First fixture release", "v0.1.0", theme);
 git(unborn, "init", "--initial-branch=main");
+identify(unborn);
 
 const sync = {
   repository: join(root, "sync-demo"),
@@ -144,7 +152,9 @@ const sync = {
 mkdirSync(sync.repository);
 mkdirSync(sync.remote);
 git(sync.remote, "init", "--bare", "--initial-branch=main");
+identify(sync.remote);
 git(sync.repository, "init", "--initial-branch=main");
+identify(sync.repository);
 git(sync.repository, "config", "core.hooksPath", "/dev/null");
 commitIn(sync.repository, "docs: start the sync fixture", {
   "README.md": "# Sync demo\n",
@@ -162,6 +172,7 @@ git(
   "feat/diverged",
 );
 git(root, "clone", sync.remote, sync.colleague);
+identify(sync.colleague);
 git(sync.colleague, "config", "core.hooksPath", "/dev/null");
 commitIn(sync.colleague, "feat: colleague work on main", {
   "main.txt": "from a colleague\n",

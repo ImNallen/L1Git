@@ -259,6 +259,11 @@ appendFileSync(
   [
     "[core]",
     "\thooksPath = /dev/null",
+    "[user]",
+    "\tname = N Allen",
+    "\temail = nallen@example.test",
+    "[commit]",
+    "\tgpgSign = false",
     '[remote "origin"]',
     "\turl = git@github.com:l1-family/l1-git.git",
     "\tfetch = +refs/heads/*:refs/remotes/origin/*",

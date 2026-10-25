@@ -5,6 +5,7 @@ import { fastForwardReportSchema, overviewSchema } from "./domain/overview";
 import type { Comparison } from "./domain/comparison";
 import type { Advance, FetchMode } from "./domain/overview";
 import {
+  appliedSchema,
   blameSchema,
   detailSchema,
   fileHistorySchema,
@@ -13,10 +14,18 @@ import {
   refsSchema,
   repositoryErrorSchema,
   snapshotSchema,
+  undoHistorySchema,
   worktreePatchSchema,
   worktreeStatusSchema,
 } from "./domain/repository";
-import type { Oid, RepositoryRoot, Side } from "./domain/repository";
+import type {
+  EntryId,
+  Expect,
+  Oid,
+  Operation,
+  RepositoryRoot,
+  Side,
+} from "./domain/repository";
 
 export const native = isTauri();
 export const mac = navigator.userAgent.includes("Mac");
@@ -33,7 +42,11 @@ type RepositoryRequest =
   | { op: "overview"; path: RepositoryRoot; mode: FetchMode }
   | { op: "fastForward"; path: RepositoryRoot; advances: Advance[] }
   | { op: "worktreeStatus"; path: RepositoryRoot }
-  | { op: "worktreePatch"; path: RepositoryRoot; file: string; side: Side };
+  | { op: "worktreePatch"; path: RepositoryRoot; file: string; side: Side }
+  | { op: "write"; path: RepositoryRoot; operation: Operation; expect: Expect }
+  | { op: "undo"; path: RepositoryRoot; id: EntryId }
+  | { op: "redo"; path: RepositoryRoot; id: EntryId }
+  | { op: "undoHistory"; path: RepositoryRoot };
 
 const responseSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("snapshot"), data: snapshotSchema }),
@@ -47,7 +60,14 @@ const responseSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("fastForward"), data: fastForwardReportSchema }),
   z.object({ op: z.literal("worktreeStatus"), data: worktreeStatusSchema }),
   z.object({ op: z.literal("worktreePatch"), data: worktreePatchSchema }),
+  z.object({ op: z.literal("write"), data: appliedSchema }),
+  z.object({ op: z.literal("undo"), data: appliedSchema }),
+  z.object({ op: z.literal("redo"), data: appliedSchema }),
+  z.object({ op: z.literal("undoHistory"), data: undoHistorySchema }),
 ]);
+export const requestOps = responseSchema.options.map(
+  (option) => option.shape.op.value,
+);
 const envelopeSchema = z.discriminatedUnion("ok", [
   z.object({ ok: z.literal(true) }),
   z.object({ ok: z.literal(false), error: repositoryErrorSchema }),
@@ -165,6 +185,26 @@ export async function worktreePatch(
   side: Side,
 ) {
   return (await run({ op: "worktreePatch", path, file, side })).data;
+}
+
+export async function write(
+  path: RepositoryRoot,
+  operation: Operation,
+  expect: Expect,
+) {
+  return (await run({ op: "write", path, operation, expect })).data;
+}
+
+export async function undo(path: RepositoryRoot, id: EntryId) {
+  return (await run({ op: "undo", path, id })).data;
+}
+
+export async function redo(path: RepositoryRoot, id: EntryId) {
+  return (await run({ op: "redo", path, id })).data;
+}
+
+export async function undoHistory(path: RepositoryRoot) {
+  return (await run({ op: "undoHistory", path })).data;
 }
 
 export async function chooseDirectory(): Promise<string | null> {

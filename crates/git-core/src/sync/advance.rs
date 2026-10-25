@@ -1,10 +1,8 @@
-use super::{
-    read::{self, Local},
-    stderr,
-};
+use super::read::{self, Local};
 use crate::{
     Advance, AdvanceOutcome, Blocker, BranchRef, BranchState, Oid, RepositoryError, SkipReason,
     git::{self, Deadline, Finished, Mutation},
+    stderr,
 };
 use std::{path::Path, time::Duration};
 

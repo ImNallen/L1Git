@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
 pub enum Head {
     Attached { reference: String, oid: String },
     Unborn { reference: String },
@@ -268,12 +268,15 @@ pub struct WorktreeStatus {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
 pub enum StatusEntry {
     Ordinary {
         path: String,
         submodule: Option<SubmoduleState>,
         sides: Sides,
+        /// `None` when the index deletes the path or holds it with
+        /// `git add -N`, which Git reports as zeros.
+        index: Option<IndexObject>,
     },
     Renamed {
         path: String,
@@ -286,6 +289,7 @@ pub enum StatusEntry {
         path: String,
         conflict: Conflict,
         submodule: Option<SubmoduleState>,
+        stages: Stages,
     },
     Untracked {
         path: String,
@@ -293,7 +297,7 @@ pub enum StatusEntry {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
 pub enum Sides {
     Staged {
         staged: ChangeStatus,
@@ -309,11 +313,18 @@ pub enum Sides {
 
 /// A move between the index and the working tree comes from a path added with
 /// `git add -N`, and its index side never carries a separate change.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
 pub enum MoveSide {
-    Staged { unstaged: Option<ChangeStatus> },
-    Unstaged,
+    /// `index` is the entry of `path`. A rename's original has none. A copy's
+    /// original keeps its own, which this record does not carry.
+    Staged {
+        unstaged: Option<ChangeStatus>,
+        index: IndexObject,
+    },
+    /// `path` is held with `git add -N`, and `original` is the entry of the
+    /// original path.
+    Unstaged { original: IndexObject },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -324,11 +335,56 @@ pub enum Moved {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SubmoduleState {
     pub commit_changed: bool,
     pub modified: bool,
     pub untracked: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub enum Mode {
+    #[serde(rename = "100644")]
+    File,
+    #[serde(rename = "100755")]
+    Executable,
+    #[serde(rename = "120000")]
+    Symlink,
+    #[serde(rename = "160000")]
+    Submodule,
+}
+
+impl Mode {
+    pub(crate) fn parse(octal: &[u8]) -> Option<Self> {
+        [Self::File, Self::Executable, Self::Symlink, Self::Submodule]
+            .into_iter()
+            .find(|mode| mode.octal().as_bytes() == octal)
+    }
+
+    pub(crate) const fn octal(self) -> &'static str {
+        match self {
+            Self::File => "100644",
+            Self::Executable => "100755",
+            Self::Symlink => "120000",
+            Self::Submodule => "160000",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(deny_unknown_fields)]
+pub struct IndexObject {
+    pub mode: Mode,
+    pub oid: Oid,
+}
+
+/// Stages 1 to 3 of an unmerged path. A side that deleted the path has none.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct Stages {
+    pub base: Option<IndexObject>,
+    pub ours: Option<IndexObject>,
+    pub theirs: Option<IndexObject>,
 }
 
 /// `Staged` compares HEAD, or the empty tree before the first commit, with the
@@ -371,7 +427,7 @@ pub enum Conflict {
 }
 
 /// A full 40- or 64-digit lowercase object id.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub struct Oid(String);
 
@@ -632,7 +688,7 @@ pub enum SkipReason {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum ErrorKind {
     MissingPath,
@@ -646,6 +702,12 @@ pub enum ErrorKind {
     UnsupportedPath,
     UnreadablePath,
     TimedOut,
+    /// The repository no longer matches what the request says the user saw.
+    StaleView,
+    /// Another Git process holds a lock the write needs.
+    LockHeld,
+    HookFailed,
+    Conflict,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

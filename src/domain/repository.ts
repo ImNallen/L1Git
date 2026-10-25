@@ -177,12 +177,23 @@ export const submoduleStateSchema = z.strictObject({
   modified: z.boolean(),
   untracked: z.boolean(),
 });
+export const modeSchema = z.enum(["100644", "100755", "120000", "160000"]);
+export const indexObjectSchema = z.strictObject({
+  mode: modeSchema,
+  oid: oidSchema,
+});
+export const stagesSchema = z.strictObject({
+  base: indexObjectSchema.nullable(),
+  ours: indexObjectSchema.nullable(),
+  theirs: indexObjectSchema.nullable(),
+});
 export const moveSideSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("staged"),
     unstaged: changeStatusSchema.nullable(),
+    index: indexObjectSchema,
   }),
-  z.strictObject({ kind: z.literal("unstaged") }),
+  z.strictObject({ kind: z.literal("unstaged"), original: indexObjectSchema }),
 ]);
 export const conflictSchema = z.enum([
   "bothDeleted",
@@ -199,6 +210,7 @@ export const statusEntrySchema = z.discriminatedUnion("kind", [
     path: z.string(),
     submodule: submoduleStateSchema.nullable(),
     sides: sidesSchema,
+    index: indexObjectSchema.nullable(),
   }),
   z.strictObject({
     kind: z.literal("renamed"),
@@ -213,6 +225,7 @@ export const statusEntrySchema = z.discriminatedUnion("kind", [
     path: z.string(),
     conflict: conflictSchema,
     submodule: submoduleStateSchema.nullable(),
+    stages: stagesSchema,
   }),
   z.strictObject({ kind: z.literal("untracked"), path: z.string() }),
 ]);
@@ -234,6 +247,30 @@ export const worktreePatchSchema = z.discriminatedUnion("kind", [
     diff: filePatchSchema.nullable(),
   }),
 ]);
+export const entryIdSchema = z
+  .string()
+  .regex(/^[0-9a-f]{16}$/)
+  .brand<"EntryId">();
+export const operationSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("stageFiles"),
+    entries: z.array(statusEntrySchema),
+  }),
+  z.strictObject({
+    kind: z.literal("unstageFiles"),
+    entries: z.array(statusEntrySchema),
+  }),
+]);
+export const expectSchema = z.strictObject({ head: headSchema });
+export const appliedSchema = z.strictObject({
+  id: entryIdSchema,
+  root: rootSchema,
+  operation: operationSchema,
+});
+export const undoHistorySchema = z.strictObject({
+  undo: appliedSchema.nullable(),
+  redo: appliedSchema.nullable(),
+});
 export const repositoryErrorSchema = z.object({
   kind: z.enum([
     "missingPath",
@@ -247,6 +284,10 @@ export const repositoryErrorSchema = z.object({
     "unsupportedPath",
     "unreadablePath",
     "timedOut",
+    "staleView",
+    "lockHeld",
+    "hookFailed",
+    "conflict",
   ]),
   message: z.string(),
 });
@@ -274,12 +315,19 @@ export type Blame = z.infer<typeof blameSchema>;
 export type LineStats = z.infer<typeof lineStatsSchema>[number];
 export type Sides = z.infer<typeof sidesSchema>;
 export type SubmoduleState = z.infer<typeof submoduleStateSchema>;
+export type IndexObject = z.infer<typeof indexObjectSchema>;
+export type Stages = z.infer<typeof stagesSchema>;
 export type MoveSide = z.infer<typeof moveSideSchema>;
 export type Conflict = z.infer<typeof conflictSchema>;
 export type StatusEntry = z.infer<typeof statusEntrySchema>;
 export type WorktreeStatus = z.infer<typeof worktreeStatusSchema>;
 export type Side = z.infer<typeof sideSchema>;
 export type WorktreePatch = z.infer<typeof worktreePatchSchema>;
+export type EntryId = z.infer<typeof entryIdSchema>;
+export type Operation = z.infer<typeof operationSchema>;
+export type Expect = z.infer<typeof expectSchema>;
+export type Applied = z.infer<typeof appliedSchema>;
+export type UndoHistory = z.infer<typeof undoHistorySchema>;
 export type Problem =
   | z.infer<typeof repositoryErrorSchema>
   | { kind: "transport" | "persistence"; message: string };

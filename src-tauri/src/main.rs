@@ -1,5 +1,6 @@
-use l1_git_core::{Coordinator, ErrorKind, RepositoryError, Request, Response};
+use l1_git_core::{Coordinator, ErrorKind, Limits, RepositoryError, Request, Response};
 use std::sync::Arc;
+use tauri::Manager;
 
 fn worker_error() -> RepositoryError {
     RepositoryError {
@@ -25,7 +26,11 @@ fn main() {
     }
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .manage(Arc::new(Coordinator::default()))
+        .setup(|app| {
+            let undo_dir = app.path().app_data_dir()?.join("undo");
+            app.manage(Arc::new(Coordinator::new(Limits::default(), undo_dir)));
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![repository_run])
         .build(tauri::generate_context!())
         .expect("L1 Git could not start")

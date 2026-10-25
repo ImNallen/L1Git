@@ -1,11 +1,12 @@
 use crate::{FetchFailure, remotes::display_url};
 
 const SUMMARY_LINES: usize = 2;
+pub(crate) const LOCK_HELD: &str = ".lock': File exists.";
 const SUMMARY_CHARS: usize = 300;
 
-pub(super) fn classify(stderr: &str) -> FetchFailure {
+pub(crate) fn classify(stderr: &str) -> FetchFailure {
     let has = |needles: &[&str]| needles.iter().any(|needle| stderr.contains(needle));
-    if has(&["cannot lock ref", ".lock': File exists", "Unable to create"]) {
+    if has(&["cannot lock ref", LOCK_HELD, "Unable to create"]) {
         FetchFailure::Busy
     } else if has(&[
         "Permission denied (",
@@ -36,7 +37,7 @@ pub(super) fn classify(stderr: &str) -> FetchFailure {
     }
 }
 
-pub(super) fn summarize(stderr: &str) -> String {
+pub(crate) fn summarize(stderr: &str) -> String {
     let summary = stderr
         .lines()
         .map(str::trim)

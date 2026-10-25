@@ -1,9 +1,9 @@
 use l1_git_core::{
     Base, BaseDetail, Blame, BlameRange, Branch, ChangeStatus, Comparison, Conflict, ErrorKind,
-    FilePatch, HISTORY_LIMIT, Head, LINE_STATS_LIMIT, LineStats, MoveSide, Moved, RepositoryRefs,
-    Side, Sides, Squash, Stash, StatusEntry, Submodule, SubmoduleState, Tag, Target, TargetDetail,
-    Worktree, WorktreePatch, WorktreeStatus, blame, commit_detail, file_history, file_patch,
-    line_stats, refs, snapshot, worktree_patch, worktree_status,
+    FilePatch, HISTORY_LIMIT, Head, IndexObject, LINE_STATS_LIMIT, LineStats, MoveSide, Moved, Oid,
+    RepositoryRefs, Side, Sides, Squash, Stages, Stash, StatusEntry, Submodule, SubmoduleState,
+    Tag, Target, TargetDetail, Worktree, WorktreePatch, WorktreeStatus, blame, commit_detail,
+    file_history, file_patch, line_stats, refs, snapshot, worktree_patch, worktree_status,
 };
 use std::{
     fs,
@@ -1463,11 +1463,34 @@ fn rejects_missing_invalid_and_bare_repositories_and_invalid_oids() {
     }
 }
 
-fn ordinary(path: &str, sides: Sides) -> StatusEntry {
+fn staged_at(repo: &Path, path: &str, stage: char) -> Option<IndexObject> {
+    git(
+        repo,
+        &["--literal-pathspecs", "ls-files", "-s", "-z", "--", path],
+    )
+    .split('\0')
+    .find_map(|record| {
+        let (entry, name) = record.split_once('\t')?;
+        let [mode, oid, at] = entry.split(' ').collect::<Vec<_>>()[..] else {
+            panic!("{record}");
+        };
+        (name == path && at.starts_with(stage)).then(|| IndexObject {
+            mode: serde_json::from_value(mode.into()).unwrap(),
+            oid: Oid::try_from(oid.to_owned()).unwrap(),
+        })
+    })
+}
+
+fn index_at(repo: &Path, path: &str) -> Option<IndexObject> {
+    staged_at(repo, path, '0')
+}
+
+fn ordinary(repo: &Path, path: &str, sides: Sides) -> StatusEntry {
     StatusEntry::Ordinary {
         path: path.into(),
         submodule: None,
         sides,
+        index: index_at(repo, path),
     }
 }
 
@@ -1475,11 +1498,16 @@ fn untracked(path: &str) -> StatusEntry {
     StatusEntry::Untracked { path: path.into() }
 }
 
-fn unmerged(path: &str, conflict: Conflict) -> StatusEntry {
+fn unmerged(repo: &Path, path: &str, conflict: Conflict) -> StatusEntry {
     StatusEntry::Unmerged {
         path: path.into(),
         conflict,
         submodule: None,
+        stages: Stages {
+            base: staged_at(repo, path, '1'),
+            ours: staged_at(repo, path, '2'),
+            theirs: staged_at(repo, path, '3'),
+        },
     }
 }
 
@@ -1558,6 +1586,7 @@ fn worktree_status_tags_staged_unstaged_renamed_and_untracked_paths() {
             },
             entries: vec![
                 ordinary(
+                    &fixture.repo,
                     "both.txt",
                     Sides::Both {
                         staged: ChangeStatus::Modified,
@@ -1565,6 +1594,7 @@ fn worktree_status_tags_staged_unstaged_renamed_and_untracked_paths() {
                     }
                 ),
                 ordinary(
+                    &fixture.repo,
                     "line\nbreak.txt",
                     Sides::Unstaged {
                         unstaged: ChangeStatus::Modified,
@@ -1577,15 +1607,18 @@ fn worktree_status_tags_staged_unstaged_renamed_and_untracked_paths() {
                     submodule: None,
                     side: MoveSide::Staged {
                         unstaged: Some(ChangeStatus::Modified),
+                        index: index_at(&fixture.repo, "new name.txt").unwrap(),
                     },
                 },
                 ordinary(
+                    &fixture.repo,
                     "staged.txt",
                     Sides::Staged {
                         staged: ChangeStatus::Modified,
                     }
                 ),
                 ordinary(
+                    &fixture.repo,
                     "unstaged.txt",
                     Sides::Unstaged {
                         unstaged: ChangeStatus::Modified,
@@ -1627,13 +1660,13 @@ fn worktree_status_and_patch_read_every_conflict_kind() {
     assert_eq!(
         worktree_status(fixture.path()).unwrap().entries,
         vec![
-            unmerged("both added.txt", Conflict::BothAdded),
-            unmerged("gone.txt", Conflict::BothDeleted),
-            unmerged("kept by them.txt", Conflict::DeletedByUs),
-            unmerged("kept by us.txt", Conflict::DeletedByThem),
-            unmerged("ours.txt", Conflict::AddedByUs),
-            unmerged("shared.txt", Conflict::BothModified),
-            unmerged("theirs.txt", Conflict::AddedByThem),
+            unmerged(&fixture.repo, "both added.txt", Conflict::BothAdded),
+            unmerged(&fixture.repo, "gone.txt", Conflict::BothDeleted),
+            unmerged(&fixture.repo, "kept by them.txt", Conflict::DeletedByUs),
+            unmerged(&fixture.repo, "kept by us.txt", Conflict::DeletedByThem),
+            unmerged(&fixture.repo, "ours.txt", Conflict::AddedByUs),
+            unmerged(&fixture.repo, "shared.txt", Conflict::BothModified),
+            unmerged(&fixture.repo, "theirs.txt", Conflict::AddedByThem),
         ]
     );
     let expected = [
@@ -1743,6 +1776,7 @@ fn worktree_status_reads_head_from_the_real_ref() {
             },
             entries: vec![
                 ordinary(
+                    &unborn,
                     "added.txt",
                     Sides::Staged {
                         staged: ChangeStatus::Added,
@@ -1864,7 +1898,9 @@ fn worktree_status_and_patch_read_a_move_added_with_intent_to_add() {
             original: "old.txt".into(),
             how: Moved::Renamed,
             submodule: None,
-            side: MoveSide::Unstaged,
+            side: MoveSide::Unstaged {
+                original: index_at(&fixture.repo, "old.txt").unwrap(),
+            },
         }]
     );
     assert_eq!(
@@ -2046,6 +2082,7 @@ fn worktree_patch_marks_submodules_with_a_notice() {
             sides: Sides::Unstaged {
                 unstaged: ChangeStatus::Modified,
             },
+            index: index_at(&fixture.repo, "module"),
         }]
     );
     assert_eq!(
@@ -2348,6 +2385,7 @@ fn worktree_patch_shows_only_the_copy_for_a_copied_entry() {
         worktree_status(fixture.path()).unwrap().entries,
         vec![
             ordinary(
+                &fixture.repo,
                 "s",
                 Sides::Staged {
                     staged: ChangeStatus::Modified,
@@ -2358,7 +2396,10 @@ fn worktree_patch_shows_only_the_copy_for_a_copied_entry() {
                 original: "s".into(),
                 how: Moved::Copied,
                 submodule: None,
-                side: MoveSide::Staged { unstaged: None },
+                side: MoveSide::Staged {
+                    unstaged: None,
+                    index: index_at(&fixture.repo, "t").unwrap(),
+                },
             },
         ]
     );
@@ -2556,12 +2597,14 @@ fn worktree_patch_shows_both_sections_of_a_type_change_on_either_side() {
         worktree_status(fixture.path()).unwrap().entries,
         vec![
             ordinary(
+                &fixture.repo,
                 "staged",
                 Sides::Staged {
                     staged: ChangeStatus::TypeChanged,
                 }
             ),
             ordinary(
+                &fixture.repo,
                 "unstaged",
                 Sides::Unstaged {
                     unstaged: ChangeStatus::TypeChanged,
