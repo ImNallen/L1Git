@@ -1,5 +1,5 @@
 use super::{Capped, Deadline, Work, base, execute, text, too_old};
-use crate::{ErrorKind, RepositoryError, stderr};
+use crate::{ErrorKind, RepositoryError, StaleReason, stderr, write::Txn};
 use std::{ffi::OsStr, path::Path, time::Duration};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -81,18 +81,53 @@ pub(crate) struct Write<'a> {
 const WRITE_STDOUT_CAP: usize = 1024 * 1024;
 
 impl<'a> Write<'a> {
-    pub(crate) fn new(dir: &'a Path, args: &[&'a str]) -> Self {
+    /// A Git command of the write that `txn` holds. It needs the transaction,
+    /// so no Git write runs outside one, and it always runs on the
+    /// transaction's private copy of the index, so it cannot reach the index
+    /// before the write is recorded. Hooks are off, because Git would run
+    /// `post-index-change` against the copy.
+    pub(crate) fn new(txn: &'a Txn<'_>, dir: &'a Path, args: &[&'a str]) -> Self {
+        let mut all = vec!["-c", "core.hooksPath=/dev/null"];
+        all.extend(args);
         Self {
             dir,
-            args: args.to_vec(),
+            args: all,
+            env: vec![("GIT_INDEX_FILE", txn.copy().as_os_str())],
+            input: None,
+            cap: Some(WRITE_STDOUT_CAP),
+        }
+    }
+
+    /// Git's `post-index-change` hook, run as `git add` runs it: from the
+    /// worktree root, against the real index, once `txn` replaced it.
+    pub(crate) fn post_index_change(txn: &'a Txn<'_>, skip_worktree: bool) -> Self {
+        Self {
+            dir: txn.root(),
+            args: vec![
+                "hook",
+                "run",
+                "--ignore-missing",
+                "post-index-change",
+                "--",
+                "0",
+                if skip_worktree { "1" } else { "0" },
+            ],
             env: Vec::new(),
             input: None,
             cap: Some(WRITE_STDOUT_CAP),
         }
     }
 
-    pub(crate) fn env(mut self, key: &'static str, value: &'a OsStr) -> Self {
-        self.env.push((key, value));
+    /// Writes new objects to `objects` instead of the repository.
+    pub(crate) fn objects(mut self, objects: &'a Path) -> Self {
+        self.env.push(("GIT_OBJECT_DIRECTORY", objects.as_os_str()));
+        self
+    }
+
+    /// Reads objects from `objects` as well as the repository.
+    pub(crate) fn alternates(mut self, objects: &'a Path) -> Self {
+        self.env
+            .push(("GIT_ALTERNATE_OBJECT_DIRECTORIES", objects.as_os_str()));
         self
     }
 
@@ -155,8 +190,7 @@ impl Wrote {
         if let Some(error) = too_old(self.code, &self.stderr) {
             return error;
         }
-        let first = self.stderr.lines().next().unwrap_or_default();
-        if first.ends_with(stderr::LOCK_HELD) {
+        if self.stderr.contains(stderr::LOCK_HELD) {
             return RepositoryError::new(
                 ErrorKind::LockHeld,
                 format!(
@@ -167,8 +201,8 @@ impl Wrote {
             );
         }
         if self.stderr.contains("did not match any files") {
-            return RepositoryError::new(
-                ErrorKind::StaleView,
+            return RepositoryError::stale(
+                StaleReason::PathChanged,
                 format!(
                     "A path changed since L1 Git read it. {} Refresh and try again.",
                     self.write.left_behind()

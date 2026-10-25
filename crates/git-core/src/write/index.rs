@@ -1,15 +1,15 @@
-use super::{Change, Direction, Expect, Pending, Repo, Session, stale, store};
+use super::{Change, Direction, Expect, Repo, store, txn::Txn};
 use crate::{
     ChangeStatus, ErrorKind, Head, IndexObject, Mode, MoveSide, Moved, Oid, RepositoryError, Sides,
-    Stages, StatusEntry,
-    git::{self, HeldIndexLock, Write, WriteDeadline, Wrote},
+    Stages, StaleReason, StatusEntry,
+    git::{self, Write, WriteDeadline},
     status,
 };
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs, io,
-    path::{Path, PathBuf},
+    path::Path,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -58,6 +58,13 @@ impl IndexChange {
             .filter_map(stored)
             .collect();
         objects.into_iter().cloned().collect()
+    }
+
+    pub(super) fn touches_skip_worktree(&self) -> bool {
+        self.paths
+            .iter()
+            .flat_map(|path| path.before.iter().chain(&path.after))
+            .any(|entry| entry.skip_worktree)
     }
 }
 
@@ -175,13 +182,6 @@ impl Plan {
         }
         Ok(plan)
     }
-
-    fn absent(&self) -> impl Iterator<Item = &str> {
-        self.touched
-            .iter()
-            .filter(|path| self.claims.get(*path) == Some(&Seen::Absent))
-            .map(String::as_str)
-    }
 }
 
 fn checked(path: &str, command: Command) -> Result<(), RepositoryError> {
@@ -189,7 +189,10 @@ fn checked(path: &str, command: Command) -> Result<(), RepositoryError> {
     if path.contains(['\0', char::REPLACEMENT_CHARACTER]) {
         return Err(RepositoryError::new(
             ErrorKind::UnsupportedPath,
-            "L1 Git cannot stage file names that are not valid UTF-8.",
+            format!(
+                "L1 Git cannot {} file names that are not valid UTF-8.",
+                command.verb()
+            ),
         ));
     }
     if command == Command::Stage && path.ends_with('/') {
@@ -339,49 +342,51 @@ fn touched(command: Command, entry: &StatusEntry) -> Result<Vec<&str>, Repositor
     }
 }
 
-pub(super) fn edit<'s>(
-    session: &'s Session,
+pub(super) fn edit(
+    txn: &Txn<'_>,
     expect: &Expect,
     command: Command,
     entries: &[StatusEntry],
-) -> Result<Pending<'s>, RepositoryError> {
+) -> Result<Change, RepositoryError> {
     let plan = Plan::new(command, entries)?;
-    let txn = Txn::begin(&session.repo, session.deadline)?;
-    let head = session.repo.head(session.deadline)?;
+    let head = txn.repo().head(txn.deadline())?;
     if head != expect.head {
-        return Err(stale(
+        return Err(RepositoryError::stale(
+            StaleReason::HeadMoved,
             "HEAD moved since L1 Git read this worktree. Refresh and try again.",
         ));
     }
-    let ancestors = txn.file_ancestors(plan.absent())?;
-    let paths: Vec<&str> = plan
-        .claims
-        .keys()
-        .chain(&plan.touched)
-        .chain(&ancestors)
-        .map(String::as_str)
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect();
-    let before = txn.read(&paths)?;
+    let paths = with_file_ancestors(txn, plan.claims.keys().map(String::as_str))?;
+    let before = read(txn, &paths)?;
     for (path, seen) in &plan.claims {
         if !seen.matches(at(&before, path)) {
-            return Err(stale(format!(
-                "{path} changed since L1 Git read it. Refresh and try again."
-            )));
+            return Err(RepositoryError::stale(
+                StaleReason::PathChanged,
+                format!("{path} changed since L1 Git read it. Refresh and try again."),
+            ));
         }
     }
-    txn.git(
-        command.args(),
-        nul_separated(plan.touched.iter().map(String::as_str)),
-    )?
-    .succeeded()?;
-    let after = txn.read(&paths)?;
+    txn.git(command.args())
+        .input(nul_separated(plan.touched.iter().map(String::as_str)))
+        .run(txn.deadline())?
+        .succeeded()?;
+    let after = read(txn, &paths)?;
     let change = between(head, before, after)?;
-    Ok(Pending {
-        change: Change::Index(change),
-        publish: Box::new(move || txn.publish()),
-    })
+    if let Some(other) = change
+        .paths
+        .iter()
+        .find(|path| !plan.claims.contains_key(&path.path))
+    {
+        return Err(RepositoryError::stale(
+            StaleReason::PathNotChosen,
+            format!(
+                "Git would also {} {}, which was not chosen. Refresh, choose it too, and try again.",
+                command.verb(),
+                other.path
+            ),
+        ));
+    }
+    Ok(Change::Index(change))
 }
 
 fn between(head: Head, before: Rows, mut after: Rows) -> Result<IndexChange, RepositoryError> {
@@ -411,34 +416,30 @@ fn between(head: Head, before: Rows, mut after: Rows) -> Result<IndexChange, Rep
     Ok(IndexChange { head, paths })
 }
 
+/// Puts the recorded entries of `direction`'s target into the copy. Returns
+/// whether the copy changed: a repeated step finds the index already there.
 pub(super) fn restore(
-    session: &Session,
+    txn: &Txn<'_>,
     entry: &store::EntryObjects,
     change: &IndexChange,
     direction: Direction,
-) -> Result<(), RepositoryError> {
-    let repo = &session.repo;
-    let deadline = session.deadline;
-    let txn = Txn::begin(repo, deadline)?;
-    if repo.head(deadline)? != change.head {
-        return Err(stale(
+) -> Result<bool, RepositoryError> {
+    if txn.repo().head(txn.deadline())? != change.head {
+        return Err(RepositoryError::stale(
+            StaleReason::HeadMoved,
             "HEAD moved after this change, so L1 Git cannot undo or redo it exactly. Refresh.",
         ));
     }
     let recorded: BTreeSet<&str> = change.paths.iter().map(|path| path.path.as_str()).collect();
-    let ancestors = txn.file_ancestors(recorded.iter().copied())?;
-    let paths: Vec<&str> = recorded
-        .iter()
-        .copied()
-        .chain(ancestors.iter().map(String::as_str))
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect();
-    let current = txn.read(&paths)?;
+    let paths = with_file_ancestors(txn, recorded.iter().copied())?;
+    let current = read(txn, &paths)?;
     let changed_since = |path: &str| {
-        stale(format!(
-            "{path} changed after this change, so L1 Git cannot undo or redo it without losing that edit. Refresh."
-        ))
+        RepositoryError::stale(
+            StaleReason::PathChanged,
+            format!(
+                "{path} changed after this change, so L1 Git cannot undo or redo it without losing that edit. Refresh."
+            ),
+        )
     };
     if let Some(other) = unrecorded(&current, &recorded) {
         return Err(changed_since(other));
@@ -456,15 +457,15 @@ pub(super) fn restore(
         pending.push((path.path.as_str(), to));
     }
     if pending.is_empty() {
-        return Ok(());
+        return Ok(false);
     }
     let objects: BTreeSet<&Oid> = pending
         .iter()
         .flat_map(|(_, to)| to.iter().filter_map(stored))
         .collect();
-    entry.bring_back(repo, objects.into_iter().cloned().collect(), deadline)?;
-    txn.put(&pending)?;
-    let written = txn.read(&paths)?;
+    entry.bring_back(txn, objects.into_iter().cloned().collect())?;
+    put(txn, &pending)?;
+    let written = read(txn, &paths)?;
     let inexact = unrecorded(&written, &recorded).or_else(|| {
         change
             .paths
@@ -473,11 +474,32 @@ pub(super) fn restore(
             .map(|path| path.path.as_str())
     });
     if let Some(path) = inexact {
-        return Err(stale(format!(
-            "{path} did not come back exactly, so L1 Git left the index unchanged. Refresh."
-        )));
+        return Err(RepositoryError::stale(
+            StaleReason::PathChanged,
+            format!(
+                "{path} did not come back exactly, so L1 Git left the index unchanged. Refresh."
+            ),
+        ));
     }
-    txn.publish()
+    Ok(true)
+}
+
+/// Whether the worktree's index holds what the change wrote, read without a
+/// lock. A crash can leave a write recorded but never published.
+pub(super) fn landed(
+    repo: &Repo,
+    change: &IndexChange,
+    deadline: WriteDeadline,
+) -> Result<bool, RepositoryError> {
+    if repo.head(deadline)? != change.head {
+        return Ok(false);
+    }
+    let paths: Vec<&str> = change.paths.iter().map(|path| path.path.as_str()).collect();
+    let rows = rows(&paths, |args| git::read(&repo.root, args, deadline.reads()))?;
+    Ok(change
+        .paths
+        .iter()
+        .all(|path| at(&rows, &path.path) == path.after))
 }
 
 fn unrecorded<'r>(rows: &'r Rows, recorded: &BTreeSet<&str>) -> Option<&'r str> {
@@ -499,260 +521,167 @@ fn nul_separated<'p>(paths: impl IntoIterator<Item = &'p str>) -> Vec<u8> {
         .collect()
 }
 
-struct Txn<'r> {
-    repo: &'r Repo,
-    lock: PathBuf,
-    copy: PathBuf,
-    deadline: WriteDeadline,
-    published: bool,
-    _held: HeldIndexLock,
-}
-
-const PREFIX: &str = "l1git-";
 /// Paths per `ls-files` call, so one argument list stays far below the
 /// system's limit.
 const PATHS_PER_READ: usize = 1000;
 
-impl<'r> Txn<'r> {
-    fn begin(repo: &'r Repo, deadline: WriteDeadline) -> Result<Self, RepositoryError> {
-        let lock = repo.index.with_extension("lock");
-        match fs::File::options().write(true).create_new(true).open(&lock) {
-            Ok(_) => {}
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-                return Err(RepositoryError::new(
-                    ErrorKind::LockHeld,
-                    format!(
-                        "Another Git process is changing this worktree's index, so {} exists. Wait for it to finish, then try again. If no Git process is running, delete that file.",
-                        lock.display()
-                    ),
-                ));
-            }
-            Err(error) => {
-                return Err(RepositoryError::new(
-                    ErrorKind::GitFailed,
-                    format!("L1 Git could not lock the index: {error}"),
-                ));
-            }
-        }
-        let txn = Self {
-            repo,
-            copy: repo
-                .git_dir
-                .join(format!("{PREFIX}index.{}", std::process::id())),
-            lock,
-            deadline,
-            published: false,
-            _held: HeldIndexLock::begin(),
-        };
-        txn.sweep();
-        match fs::copy(&repo.index, &txn.copy) {
-            Ok(_) => Ok(txn),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(txn),
-            Err(error) => Err(RepositoryError::new(
-                ErrorKind::GitFailed,
-                format!("L1 Git could not copy the index: {error}"),
-            )),
-        }
-    }
-
-    fn sweep(&self) {
-        let Ok(names) = fs::read_dir(&self.repo.git_dir) else {
-            return;
-        };
-        for name in names.flatten() {
-            if name.file_name().to_string_lossy().starts_with(PREFIX) {
-                let path = name.path();
-                let _ = fs::remove_file(&path).or_else(|_| fs::remove_dir_all(&path));
+/// The index entries at `paths` and below them, keyed by exact path.
+fn rows(
+    paths: &[&str],
+    mut ls_files: impl FnMut(&[&str]) -> Result<Vec<u8>, RepositoryError>,
+) -> Result<Rows, RepositoryError> {
+    let mut rows = Rows::new();
+    for chunk in paths.chunks(PATHS_PER_READ) {
+        let mut args = vec![
+            "--literal-pathspecs",
+            "ls-files",
+            "--stage",
+            "--debug",
+            "-z",
+            "--",
+        ];
+        args.extend(chunk);
+        for (path, entry) in parse_debug(&ls_files(&args)?)? {
+            let entries = rows.entry(path).or_default();
+            if !entries.contains(&entry) {
+                entries.push(entry);
             }
         }
     }
-
-    fn command<'a>(&'a self, dir: &'a Path, args: &[&'a str]) -> Write<'a> {
-        Write::new(dir, args).env("GIT_INDEX_FILE", self.copy.as_os_str())
-    }
-
-    fn git(&self, args: &[&str], input: Vec<u8>) -> Result<Wrote, RepositoryError> {
-        self.command(&self.repo.root, args)
-            .input(input)
-            .run(self.deadline)
-    }
-
-    fn read(&self, paths: &[&str]) -> Result<Rows, RepositoryError> {
-        let mut rows = Rows::new();
-        for chunk in paths.chunks(PATHS_PER_READ) {
-            let mut args = vec![
-                "--literal-pathspecs",
-                "ls-files",
-                "--stage",
-                "--debug",
-                "-z",
-                "--",
-            ];
-            args.extend(chunk);
-            let output = self
-                .command(&self.repo.root, &args)
-                .uncapped()
-                .run(self.deadline)?
-                .succeeded()?;
-            for (path, entry) in parse_debug(&output)? {
-                let entries = rows.entry(path).or_default();
-                if !entries.contains(&entry) {
-                    entries.push(entry);
-                }
-            }
-        }
-        Ok(rows)
-    }
-
-    /// Parent folders of `paths` that the index holds as files. `git add`
-    /// replaces such an entry without a word.
-    fn file_ancestors<'p>(
-        &self,
-        paths: impl Iterator<Item = &'p str>,
-    ) -> Result<Vec<String>, RepositoryError> {
-        let ancestors: BTreeSet<&str> = paths
-            .flat_map(|path| path.match_indices('/').map(move |(at, _)| &path[..at]))
-            .collect();
-        if ancestors.is_empty() {
-            return Ok(Vec::new());
-        }
-        let input: Vec<u8> = ancestors
-            .iter()
-            .flat_map(|path| format!(":{path}\0").into_bytes())
-            .collect();
-        let output = self
-            .command(
-                &self.repo.root,
-                &["cat-file", "--batch-check=%(objecttype)", "-z"],
-            )
-            .input(input)
-            .uncapped()
-            .run(self.deadline)?
-            .succeeded()?;
-        Ok(ancestors
-            .into_iter()
-            .zip(output.split(|byte| *byte == b'\n'))
-            .filter(|(_, kind)| !kind.ends_with(b"missing"))
-            .map(|(path, _)| path.to_owned())
-            .collect())
-    }
-
-    fn put(&self, targets: &[(&str, &[IndexEntry])]) -> Result<(), RepositoryError> {
-        let repo = self.repo;
-        let mut info = Vec::new();
-        for (path, _) in targets {
-            info.extend(format!("0 {}\t{path}\0", repo.null_oid).bytes());
-        }
-        for (path, entries) in targets {
-            for entry in entries.iter().filter(|entry| !entry.intent_to_add) {
-                info.extend(
-                    format!(
-                        "{} {} {}\t{path}\0",
-                        entry.mode.octal(),
-                        entry.oid.as_str(),
-                        entry.stage
-                    )
-                    .bytes(),
-                );
-            }
-        }
-        self.git(&["update-index", "-z", "--index-info"], info)?
-            .succeeded()?;
-        let intent: Vec<(&str, Mode)> = targets
-            .iter()
-            .filter_map(|(path, entries)| {
-                let entry = entries.iter().find(|entry| entry.intent_to_add)?;
-                Some((*path, entry.mode))
-            })
-            .collect();
-        if !intent.is_empty() {
-            self.add_intent(&intent)?;
-        }
-        let skipped = nul_separated(
-            targets
-                .iter()
-                .filter(|(_, entries)| entries.iter().any(|entry| entry.skip_worktree))
-                .map(|(path, _)| *path),
-        );
-        if !skipped.is_empty() {
-            self.git(
-                &["update-index", "-z", "--skip-worktree", "--stdin"],
-                skipped,
-            )?
-            .succeeded()?;
-        }
-        Ok(())
-    }
-
-    /// `git add -N` needs a file at the path, which may be gone from the
-    /// worktree. So Git adds placeholders of the recorded mode from a private
-    /// work tree, and the worktree is never touched.
-    fn add_intent(&self, targets: &[(&str, Mode)]) -> Result<(), RepositoryError> {
-        let repo = self.repo;
-        let tree = repo
-            .git_dir
-            .join(format!("{PREFIX}intent.{}", std::process::id()));
-        let _ = fs::remove_dir_all(&tree);
-        let result = placeholders(&tree, targets).and_then(|()| {
-            let git_dir = format!("--git-dir={}", repo.git_dir.display());
-            let work_tree = format!("--work-tree={}", tree.display());
-            self.command(
-                &tree,
-                &[
-                    &git_dir,
-                    &work_tree,
-                    "-c",
-                    "core.fsmonitor=false",
-                    "--literal-pathspecs",
-                    "add",
-                    "--intent-to-add",
-                    "--force",
-                    "--pathspec-from-file=-",
-                    "--pathspec-file-nul",
-                ],
-            )
-            .input(nul_separated(targets.iter().map(|(path, _)| *path)))
-            .run(self.deadline)?
-            .succeeded()
-            .map(drop)
-        });
-        let _ = fs::remove_dir_all(&tree);
-        result
-    }
-
-    fn publish(mut self) -> Result<(), RepositoryError> {
-        let renamed = if self.copy.exists() {
-            fs::rename(&self.copy, &self.lock)
-                .and_then(|()| fs::rename(&self.lock, &self.repo.index))
-        } else {
-            fs::remove_file(&self.lock)
-        };
-        renamed.map_err(|error| {
-            RepositoryError::new(
-                ErrorKind::GitFailed,
-                format!("L1 Git could not replace the index, so it is unchanged: {error}"),
-            )
-        })?;
-        self.published = true;
-        Ok(())
-    }
+    Ok(rows)
 }
 
-impl Drop for Txn<'_> {
-    fn drop(&mut self) {
-        if self.published {
-            return;
-        }
-        let mut copy_lock = self.copy.clone().into_os_string();
-        copy_lock.push(".lock");
-        for path in [
-            self.copy.as_path(),
-            Path::new(&copy_lock),
-            self.lock.as_path(),
-        ] {
-            let _ = fs::remove_file(path);
+fn read(txn: &Txn<'_>, paths: &[String]) -> Result<Rows, RepositoryError> {
+    let paths: Vec<&str> = paths.iter().map(String::as_str).collect();
+    rows(&paths, |args| {
+        txn.git(args).uncapped().run(txn.deadline())?.succeeded()
+    })
+}
+
+/// `paths` and every folder above them that the copy holds as a file, at
+/// any stage. Git replaces such an entry without a word when it adds a path
+/// below it. Each folder is looked up by exact name with `:<stage>:<path>`,
+/// and a name is found unless Git echoes it back as missing, so no answer
+/// is matched to a question by its position.
+fn with_file_ancestors<'p>(
+    txn: &Txn<'_>,
+    paths: impl Iterator<Item = &'p str> + Clone,
+) -> Result<Vec<String>, RepositoryError> {
+    let folders: BTreeSet<&str> = paths
+        .clone()
+        .flat_map(|path| path.match_indices('/').map(move |(at, _)| &path[..at]))
+        .collect();
+    let mut all: BTreeSet<String> = paths.map(str::to_owned).collect();
+    if folders.is_empty() {
+        return Ok(all.into_iter().collect());
+    }
+    fn names(folder: &str) -> impl Iterator<Item = String> + '_ {
+        (0..=3).map(move |stage| format!(":{stage}:{folder}"))
+    }
+    let input: Vec<u8> = folders
+        .iter()
+        .flat_map(|folder| names(folder))
+        .flat_map(|name| name.into_bytes().into_iter().chain([0]))
+        .collect();
+    let output = txn
+        .git(&["cat-file", "--batch-check=%(objectname)", "-Z"])
+        .input(input)
+        .uncapped()
+        .run(txn.deadline())?
+        .succeeded()?;
+    let missing: BTreeSet<&[u8]> = output
+        .split(|byte| *byte == 0)
+        .filter_map(|answer| answer.strip_suffix(b" missing"))
+        .collect();
+    all.extend(
+        folders
+            .into_iter()
+            .filter(|folder| names(folder).any(|name| !missing.contains(name.as_bytes())))
+            .map(str::to_owned),
+    );
+    Ok(all.into_iter().collect())
+}
+
+fn put(txn: &Txn<'_>, targets: &[(&str, &[IndexEntry])]) -> Result<(), RepositoryError> {
+    let null_oid = &txn.repo().null_oid;
+    let mut info = Vec::new();
+    for (path, _) in targets {
+        info.extend(format!("0 {null_oid}\t{path}\0").bytes());
+    }
+    for (path, entries) in targets {
+        for entry in entries.iter().filter(|entry| !entry.intent_to_add) {
+            info.extend(
+                format!(
+                    "{} {} {}\t{path}\0",
+                    entry.mode.octal(),
+                    entry.oid.as_str(),
+                    entry.stage
+                )
+                .bytes(),
+            );
         }
     }
+    txn.git(&["update-index", "-z", "--index-info"])
+        .input(info)
+        .run(txn.deadline())?
+        .succeeded()?;
+    let intent: Vec<(&str, Mode)> = targets
+        .iter()
+        .filter_map(|(path, entries)| {
+            let entry = entries.iter().find(|entry| entry.intent_to_add)?;
+            Some((*path, entry.mode))
+        })
+        .collect();
+    if !intent.is_empty() {
+        add_intent(txn, &intent)?;
+    }
+    let skipped = nul_separated(
+        targets
+            .iter()
+            .filter(|(_, entries)| entries.iter().any(|entry| entry.skip_worktree))
+            .map(|(path, _)| *path),
+    );
+    if !skipped.is_empty() {
+        txn.git(&["update-index", "-z", "--skip-worktree", "--stdin"])
+            .input(skipped)
+            .run(txn.deadline())?
+            .succeeded()?;
+    }
+    Ok(())
+}
+
+/// `git add -N` needs a file at the path, which may be gone from the
+/// worktree. So Git adds placeholders of the recorded mode from a private
+/// work tree, and the worktree is never touched.
+fn add_intent(txn: &Txn<'_>, targets: &[(&str, Mode)]) -> Result<(), RepositoryError> {
+    let tree = txn.scratch("intent");
+    let _ = fs::remove_dir_all(&tree);
+    let result = placeholders(&tree, targets).and_then(|()| {
+        let git_dir = format!("--git-dir={}", txn.repo().git_dir.display());
+        let work_tree = format!("--work-tree={}", tree.display());
+        Write::new(
+            txn,
+            &tree,
+            &[
+                &git_dir,
+                &work_tree,
+                "-c",
+                "core.fsmonitor=false",
+                "--literal-pathspecs",
+                "add",
+                "--intent-to-add",
+                "--force",
+                "--pathspec-from-file=-",
+                "--pathspec-file-nul",
+            ],
+        )
+        .input(nul_separated(targets.iter().map(|(path, _)| *path)))
+        .run(txn.deadline())?
+        .succeeded()
+        .map(drop)
+    });
+    let _ = fs::remove_dir_all(&tree);
+    result
 }
 
 fn placeholders(tree: &Path, targets: &[(&str, Mode)]) -> Result<(), RepositoryError> {

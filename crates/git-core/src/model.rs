@@ -272,22 +272,26 @@ pub struct WorktreeStatus {
 pub enum StatusEntry {
     Ordinary {
         path: String,
+        #[serde(deserialize_with = "Option::deserialize")]
         submodule: Option<SubmoduleState>,
         sides: Sides,
         /// `None` when the index deletes the path or holds it with
         /// `git add -N`, which Git reports as zeros.
+        #[serde(deserialize_with = "Option::deserialize")]
         index: Option<IndexObject>,
     },
     Renamed {
         path: String,
         original: String,
         how: Moved,
+        #[serde(deserialize_with = "Option::deserialize")]
         submodule: Option<SubmoduleState>,
         side: MoveSide,
     },
     Unmerged {
         path: String,
         conflict: Conflict,
+        #[serde(deserialize_with = "Option::deserialize")]
         submodule: Option<SubmoduleState>,
         stages: Stages,
     },
@@ -319,6 +323,7 @@ pub enum MoveSide {
     /// `index` is the entry of `path`. A rename's original has none. A copy's
     /// original keeps its own, which this record does not carry.
     Staged {
+        #[serde(deserialize_with = "Option::deserialize")]
         unstaged: Option<ChangeStatus>,
         index: IndexObject,
     },
@@ -382,8 +387,11 @@ pub struct IndexObject {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Stages {
+    #[serde(deserialize_with = "Option::deserialize")]
     pub base: Option<IndexObject>,
+    #[serde(deserialize_with = "Option::deserialize")]
     pub ours: Option<IndexObject>,
+    #[serde(deserialize_with = "Option::deserialize")]
     pub theirs: Option<IndexObject>,
 }
 
@@ -689,7 +697,7 @@ pub enum SkipReason {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(tag = "kind", rename_all = "camelCase")]
 pub enum ErrorKind {
     MissingPath,
     NotRepository,
@@ -703,15 +711,31 @@ pub enum ErrorKind {
     UnreadablePath,
     TimedOut,
     /// The repository no longer matches what the request says the user saw.
-    StaleView,
+    StaleView {
+        reason: StaleReason,
+    },
     /// Another Git process holds a lock the write needs.
     LockHeld,
     HookFailed,
     Conflict,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum StaleReason {
+    /// HEAD is not the commit the request or the undo entry names.
+    HeadMoved,
+    /// A path's index entries differ from the request or the undo entry.
+    PathChanged,
+    /// Git would also change a path the request does not name.
+    PathNotChosen,
+    /// The entry is not the next one to undo or redo.
+    HistoryChanged,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RepositoryError {
+    #[serde(flatten)]
     pub kind: ErrorKind,
     pub message: String,
 }
@@ -722,6 +746,10 @@ impl RepositoryError {
             kind,
             message: message.into(),
         }
+    }
+
+    pub(crate) fn stale(reason: StaleReason, message: impl Into<String>) -> Self {
+        Self::new(ErrorKind::StaleView { reason }, message)
     }
 }
 

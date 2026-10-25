@@ -5,6 +5,7 @@
 
 mod index;
 mod store;
+mod txn;
 
 use crate::{
     Coordinator, ErrorKind, Head, Oid, RepositoryError, StatusEntry,
@@ -17,7 +18,8 @@ use std::{
     path::PathBuf,
     time::{SystemTime, UNIX_EPOCH},
 };
-use store::{LockedStore, Position, Store};
+use store::{LockedStore, Log, Position, Store};
+pub(crate) use txn::Txn;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(
@@ -77,17 +79,14 @@ impl EntryId {
 }
 
 impl TryFrom<String> for EntryId {
-    type Error = RepositoryError;
+    type Error = &'static str;
     fn try_from(value: String) -> Result<Self, Self::Error> {
         if let Ok(id) = u64::from_str_radix(&value, 16)
             && Self(id).to_string() == value
         {
             return Ok(Self(id));
         }
-        Err(RepositoryError::new(
-            ErrorKind::StaleView,
-            "Use an undo entry id that L1 Git gave.",
-        ))
+        Err("Use an undo entry id that L1 Git gave.")
     }
 }
 
@@ -116,14 +115,30 @@ impl Change {
         }
     }
 
+    /// Puts the target state of `direction` into the transaction's copy, and
+    /// says whether that changed anything.
     fn restore(
         &self,
-        session: &Session,
+        txn: &Txn<'_>,
         entry: &store::EntryObjects,
         direction: Direction,
-    ) -> Result<(), RepositoryError> {
+    ) -> Result<bool, RepositoryError> {
         match self {
-            Self::Index(change) => index::restore(session, entry, change, direction),
+            Self::Index(change) => index::restore(txn, entry, change, direction),
+        }
+    }
+
+    /// Whether the repository holds what the write wrote, for a write that
+    /// a crash left recorded but maybe never published.
+    fn landed(&self, repo: &Repo, deadline: WriteDeadline) -> Result<bool, RepositoryError> {
+        match self {
+            Self::Index(change) => index::landed(repo, change, deadline),
+        }
+    }
+
+    fn touches_skip_worktree(&self) -> bool {
+        match self {
+            Self::Index(change) => change.touches_skip_worktree(),
         }
     }
 }
@@ -143,11 +158,6 @@ impl Direction {
     }
 }
 
-struct Pending<'s> {
-    change: Change,
-    publish: Box<dyn FnOnce() -> Result<(), RepositoryError> + 's>,
-}
-
 impl Operation {
     fn local_write(&self) -> LocalWrite {
         match self {
@@ -156,17 +166,16 @@ impl Operation {
         }
     }
 
-    fn apply<'s>(
-        &self,
-        session: &'s Session,
-        expect: &Expect,
-    ) -> Result<Pending<'s>, RepositoryError> {
+    /// Runs the write on the transaction's copy of the index and returns what
+    /// it changed. It cannot publish: only the transaction's commit does,
+    /// after the store records the change.
+    fn apply(&self, txn: &Txn<'_>, expect: &Expect) -> Result<Change, RepositoryError> {
         match self {
             Self::StageFiles { entries } => {
-                index::edit(session, expect, index::Command::Stage, entries)
+                index::edit(txn, expect, index::Command::Stage, entries)
             }
             Self::UnstageFiles { entries } => {
-                index::edit(session, expect, index::Command::Unstage, entries)
+                index::edit(txn, expect, index::Command::Unstage, entries)
             }
         }
     }
@@ -228,15 +237,6 @@ impl Repo {
     }
 }
 
-struct Session {
-    repo: Repo,
-    deadline: WriteDeadline,
-}
-
-fn stale(message: impl Into<String>) -> RepositoryError {
-    RepositoryError::new(ErrorKind::StaleView, message)
-}
-
 impl Coordinator {
     pub fn write(
         &self,
@@ -244,11 +244,15 @@ impl Coordinator {
         operation: &Operation,
         expect: &Expect,
     ) -> Result<Applied, RepositoryError> {
-        self.locked(path, operation.local_write(), |repo, store, deadline| {
-            let session = Session { repo, deadline };
-            let pending = operation.apply(&session, expect)?;
-            store.record(&session, operation, pending)
-        })
+        self.locked(
+            path,
+            operation.local_write(),
+            |repo, store, log, deadline| {
+                let txn = Txn::begin(&repo, deadline)?;
+                let change = operation.apply(&txn, expect)?;
+                txn.commit_write(store, &log, operation, &change)
+            },
+        )
     }
 
     /// Undoes `id` if it is the next entry to undo. If it is the next entry
@@ -266,7 +270,7 @@ impl Coordinator {
     /// The next entry to undo and the next to redo. Takes no lock.
     pub fn undo_history(&self, path: &str) -> Result<UndoHistory, RepositoryError> {
         let repo = Repo::open(path, self.deadline(LocalRead::UndoHistory))?;
-        let store = Store::open(self.undo_dir(), &repo.common_dir);
+        let store = Store::open(self.undo_dir(), &repo.common_dir)?;
         let log = store.log()?;
         let applied = |id: Option<EntryId>| id.map(|id| store.applied(id)).transpose();
         Ok(UndoHistory {
@@ -279,14 +283,16 @@ impl Coordinator {
         &self,
         path: &str,
         write: LocalWrite,
-        work: impl FnOnce(Repo, &LockedStore, WriteDeadline) -> Result<T, RepositoryError>,
+        work: impl FnOnce(Repo, &LockedStore, Log, WriteDeadline) -> Result<T, RepositoryError>,
     ) -> Result<T, RepositoryError> {
         let deadline = self.write_deadline(write);
         let repo = Repo::open(path, deadline.reads())?;
         let common_dir = repo.common_dir.clone();
         self.writing(&common_dir, || {
             let store = LockedStore::lock(self.undo_dir(), &common_dir, deadline.reads())?;
-            work(repo, &store, deadline.renewed())
+            let deadline = deadline.renewed();
+            let log = store.settled_log(deadline)?;
+            work(repo, &store, log, deadline)
         })
     }
 
@@ -296,17 +302,12 @@ impl Coordinator {
         id: EntryId,
         direction: Direction,
     ) -> Result<Applied, RepositoryError> {
-        self.locked(path, direction.write(), |opened, store, deadline| {
-            let log = store.log()?;
-            match log.position(id, direction) {
-                Position::Next => {}
+        self.locked(path, direction.write(), |opened, store, log, deadline| {
+            let step = match log.position(id, direction) {
+                Position::Next(step) => step,
                 Position::AlreadyDone => return store.applied(id),
-                Position::Elsewhere => {
-                    return Err(stale(
-                        "The undo history changed since L1 Git showed it. Refresh and try again.",
-                    ));
-                }
-            }
+                Position::Elsewhere => return Err(store::history_changed()),
+            };
             let (applied, change) = store.record_of(id)?;
             let repo = if applied.root == opened.root() {
                 opened
@@ -323,9 +324,12 @@ impl Coordinator {
                 }
                 repo
             };
-            let session = Session { repo, deadline };
-            change.restore(&session, &store.entry(id), direction)?;
-            store.save(&log.stepped(direction))?;
+            let txn = Txn::begin(&repo, deadline)?;
+            if change.restore(&txn, &store.entry(id), direction)? {
+                txn.commit_step(store, step, &change)?;
+            } else {
+                store.save(step.log())?;
+            }
             Ok(applied)
         })
     }

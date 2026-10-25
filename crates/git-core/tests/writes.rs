@@ -1,6 +1,6 @@
 use l1_git_core::{
-    Applied, Coordinator, ErrorKind, Expect, Limits, Operation, RepositoryError, StatusEntry,
-    UndoHistory, worktree_status,
+    Applied, Coordinator, ErrorKind, Expect, Limits, Operation, RepositoryError, StaleReason,
+    StatusEntry, UndoHistory, worktree_status,
 };
 use std::{
     fs,
@@ -8,6 +8,19 @@ use std::{
     process::{Command, Stdio},
 };
 use tempfile::TempDir;
+
+const HEAD_MOVED: ErrorKind = ErrorKind::StaleView {
+    reason: StaleReason::HeadMoved,
+};
+const PATH_CHANGED: ErrorKind = ErrorKind::StaleView {
+    reason: StaleReason::PathChanged,
+};
+const NOT_CHOSEN: ErrorKind = ErrorKind::StaleView {
+    reason: StaleReason::PathNotChosen,
+};
+const HISTORY_CHANGED: ErrorKind = ErrorKind::StaleView {
+    reason: StaleReason::HistoryChanged,
+};
 
 fn git_output(path: &Path, args: &[&str]) -> std::process::Output {
     let mut command = Command::new("git");
@@ -317,7 +330,7 @@ fn refuses_a_view_that_changed_and_then_writes_the_fresh_one_once() {
     let staged_by_terminal = repo.index();
     assert_eq!(
         kind(coordinator.write(repo.path(), &write, &expect)),
-        ErrorKind::StaleView
+        PATH_CHANGED
     );
     assert_eq!(repo.index(), staged_by_terminal);
     repo.git(&["reset", "--quiet", "README.md"]);
@@ -325,7 +338,7 @@ fn refuses_a_view_that_changed_and_then_writes_the_fresh_one_once() {
     repo.git(&["commit", "--quiet", "--allow-empty", "-m", "moves HEAD"]);
     assert_eq!(
         kind(coordinator.write(repo.path(), &write, &expect)),
-        ErrorKind::StaleView
+        HEAD_MOVED
     );
 
     let (fresh, expect) = entries(&repo, &["README.md"]);
@@ -334,7 +347,7 @@ fn refuses_a_view_that_changed_and_then_writes_the_fresh_one_once() {
     let staged = repo.index();
     assert_eq!(
         kind(coordinator.write(repo.path(), &write, &expect)),
-        ErrorKind::StaleView
+        PATH_CHANGED
     );
     assert_eq!(repo.index(), staged);
     assert_eq!(repo.status(), ["M  README.md", " M other.txt"]);
@@ -351,7 +364,7 @@ fn an_undo_refuses_to_replace_a_file_or_folder_staged_after_the_write() {
     let descendant_staged = repo.index();
     assert_eq!(
         kind(coordinator.undo(repo.path(), deletion.id)),
-        ErrorKind::StaleView
+        PATH_CHANGED
     );
     assert_eq!(repo.index(), descendant_staged);
 
@@ -364,7 +377,7 @@ fn an_undo_refuses_to_replace_a_file_or_folder_staged_after_the_write() {
     let ancestor_staged = repo.index();
     assert_eq!(
         kind(coordinator.undo(repo.path(), unstaged.id)),
-        ErrorKind::StaleView
+        PATH_CHANGED
     );
     assert_eq!(repo.index(), ancestor_staged);
     assert!(repo.git_dir_leftovers().is_empty());
@@ -381,15 +394,12 @@ fn an_undo_refuses_a_path_changed_after_the_write_and_names_entries_by_id() {
     assert!(second.id > first.id);
     assert_eq!(
         kind(coordinator.undo(repo.path(), first.id)),
-        ErrorKind::StaleView
+        HISTORY_CHANGED
     );
     repo.put("b.txt", "b3\n");
     repo.git(&["add", "b.txt"]);
     let edited = repo.index();
-    assert_eq!(
-        kind(coordinator.undo(repo.path(), second.id)),
-        ErrorKind::StaleView
-    );
+    assert_eq!(kind(coordinator.undo(repo.path(), second.id)), PATH_CHANGED);
     assert_eq!(repo.index(), edited);
     let history = coordinator.undo_history(repo.path()).unwrap();
     assert_eq!(history.undo, Some(second));
@@ -456,7 +466,7 @@ fn keeps_one_hundred_entries_and_drops_the_oldest_and_the_redo_side() {
     assert_eq!(entries_dir(), 100);
     assert_eq!(
         kind(coordinator.redo(repo.path(), first.id)),
-        ErrorKind::StaleView
+        HISTORY_CHANGED
     );
     let newest = coordinator.undo_history(repo.path()).unwrap().undo.unwrap();
     coordinator.undo(repo.path(), newest.id).unwrap();
@@ -502,7 +512,7 @@ fn stages_a_file_a_folder_replaced_only_with_the_paths_git_also_changes() {
     for chosen in [&["a/b"][..], &["d"], &["a", "d/x"]] {
         assert_eq!(
             kind(stage(&coordinator, &repo, chosen)),
-            ErrorKind::StaleView,
+            NOT_CHOSEN,
             "{chosen:?}"
         );
         assert_eq!(repo.index(), untouched);
@@ -526,7 +536,7 @@ fn finds_the_file_above_a_chosen_path_whatever_the_names_hold() {
     for chosen in [&["a\nb/c", "z/x"][..], &["0:z/x"]] {
         assert_eq!(
             kind(stage(&coordinator, &repo, chosen)),
-            ErrorKind::StaleView,
+            NOT_CHOSEN,
             "{chosen:?}"
         );
         assert_eq!(repo.index(), untouched);
@@ -544,7 +554,7 @@ fn finds_the_file_above_a_chosen_path_whatever_the_names_hold() {
     let ancestor_staged = repo.index();
     assert_eq!(
         kind(coordinator.undo(repo.path(), unstaged.id)),
-        ErrorKind::StaleView
+        PATH_CHANGED
     );
     assert_eq!(repo.index(), ancestor_staged);
 }
@@ -570,10 +580,10 @@ fn refuses_to_drop_a_file_entry_restaged_above_a_chosen_path() {
         .filter(|entry| entry_path(entry) == "z/x")
         .cloned()
         .collect();
-    for entries in [only_inside, seen] {
+    for (entries, refused) in [(only_inside, NOT_CHOSEN), (seen, PATH_CHANGED)] {
         assert_eq!(
             kind(coordinator.write(repo.path(), &Operation::StageFiles { entries }, &expect)),
-            ErrorKind::StaleView
+            refused
         );
         assert_eq!(repo.index(), restaged);
     }
@@ -586,10 +596,7 @@ fn refuses_to_stage_a_deleted_file_that_is_now_a_folder_of_unchosen_files() {
     fs::remove_file(repo.root.join("z")).unwrap();
     repo.put("z/x", "not chosen\n");
     let untouched = repo.index();
-    assert_eq!(
-        kind(stage(&coordinator, &repo, &["z"])),
-        ErrorKind::StaleView
-    );
+    assert_eq!(kind(stage(&coordinator, &repo, &["z"])), NOT_CHOSEN);
     assert_eq!(repo.index(), untouched);
     assert_eq!(repo.status(), [" D z", "?? z/x"]);
 }
@@ -618,7 +625,7 @@ fn a_new_repository_at_the_same_path_starts_with_an_empty_history() {
     );
     assert_eq!(
         kind(coordinator.redo(repo.path(), applied.id)),
-        ErrorKind::StaleView
+        HISTORY_CHANGED
     );
     assert_eq!(repo.index(), fresh);
     assert!(
@@ -747,10 +754,7 @@ fn runs_post_index_change_once_against_the_published_index_and_only_then() {
 
     fs::remove_file(repo.root.join("z")).unwrap();
     repo.put("z/x", "not chosen\n");
-    assert_eq!(
-        kind(stage(&coordinator, &repo, &["z"])),
-        ErrorKind::StaleView
-    );
+    assert_eq!(kind(stage(&coordinator, &repo, &["z"])), NOT_CHOSEN);
     assert_eq!(runs(), [run(two), run(one)].concat());
 
     repo.put("g", "intent\n");

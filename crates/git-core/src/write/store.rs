@@ -1,7 +1,7 @@
-use super::{Applied, Change, Direction, EntryId, Operation, Pending, Repo, Session};
+use super::{Applied, Change, Direction, EntryId, Operation, Repo, txn::Txn};
 use crate::{
-    ErrorKind, Oid, RepositoryError,
-    git::{Deadline, Write, WriteDeadline},
+    ErrorKind, Oid, RepositoryError, StaleReason,
+    git::{Deadline, WriteDeadline},
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -10,16 +10,17 @@ use std::{
     ops::Deref,
     path::{Path, PathBuf},
     thread,
-    time::Duration,
+    time::{Duration, UNIX_EPOCH},
 };
 
 const MAX_ENTRIES: usize = 100;
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
 const LOCK_POLL: Duration = Duration::from_millis(10);
 
 pub(super) struct Store {
     dir: PathBuf,
     common_dir: String,
+    repository: Identity,
 }
 
 pub(super) struct LockedStore {
@@ -27,24 +28,68 @@ pub(super) struct LockedStore {
     _lock: File,
 }
 
+/// The Git common directory as the file system knows it. A repository
+/// deleted and created again at the same path gets a new one, so its history
+/// never reaches the new repository.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct Identity {
+    device: u64,
+    inode: u64,
+    created: Option<u64>,
+}
+
+impl Identity {
+    fn of(common_dir: &Path) -> Result<Self, RepositoryError> {
+        let metadata = fs::metadata(common_dir).map_err(unreadable)?;
+        let created = metadata
+            .created()
+            .ok()
+            .and_then(|created| created.duration_since(UNIX_EPOCH).ok())
+            .and_then(|since| u64::try_from(since.as_nanos()).ok());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            Ok(Self {
+                device: metadata.dev(),
+                inode: metadata.ino(),
+                created,
+            })
+        }
+        #[cfg(not(unix))]
+        {
+            Ok(Self {
+                device: 0,
+                inode: 0,
+                created,
+            })
+        }
+    }
+}
+
 impl Store {
-    pub(super) fn open(undo_dir: &Path, common_dir: &Path) -> Self {
-        Self {
+    pub(super) fn open(undo_dir: &Path, common_dir: &Path) -> Result<Self, RepositoryError> {
+        Ok(Self {
             dir: undo_dir.join(
                 sha1_smol::Sha1::from(common_dir.as_os_str().as_encoded_bytes())
                     .digest()
                     .to_string(),
             ),
             common_dir: common_dir.to_string_lossy().into_owned(),
-        }
+            repository: Identity::of(common_dir)?,
+        })
     }
 
+    /// The history of this repository. A log that an earlier repository at
+    /// the same path left reads as empty.
     pub(super) fn log(&self) -> Result<Log, RepositoryError> {
         let empty = Log {
             version: VERSION,
             common_dir: self.common_dir.clone(),
+            repository: self.repository.clone(),
             entries: Vec::new(),
             undone: 0,
+            pending: None,
         };
         let bytes = match fs::read(self.dir.join("log.json")) {
             Ok(bytes) => bytes,
@@ -57,6 +102,9 @@ impl Store {
             || log.undone > log.entries.len()
         {
             return Err(self.damaged());
+        }
+        if log.repository != self.repository {
+            return Ok(empty);
         }
         Ok(log)
     }
@@ -83,10 +131,7 @@ impl Store {
     ) -> Result<T, RepositoryError> {
         let bytes = fs::read(self.entry_dir(id).join(name)).map_err(|error| {
             if error.kind() == io::ErrorKind::NotFound {
-                RepositoryError::new(
-                    ErrorKind::StaleView,
-                    "The undo history changed since L1 Git showed it. Refresh and try again.",
-                )
+                history_changed()
             } else {
                 unreadable(error)
             }
@@ -105,6 +150,13 @@ impl Store {
     }
 }
 
+pub(super) fn history_changed() -> RepositoryError {
+    RepositoryError::stale(
+        StaleReason::HistoryChanged,
+        "The undo history changed since L1 Git showed it. Refresh and try again.",
+    )
+}
+
 impl LockedStore {
     pub(super) fn lock(
         undo_dir: &Path,
@@ -112,7 +164,7 @@ impl LockedStore {
         deadline: Deadline,
     ) -> Result<Self, RepositoryError> {
         private_dir(undo_dir)?;
-        let store = Store::open(undo_dir, common_dir);
+        let store = Store::open(undo_dir, common_dir)?;
         fs::create_dir_all(store.dir.join("entries")).map_err(unwritable)?;
         let lock = File::options()
             .create(true)
@@ -138,6 +190,37 @@ impl LockedStore {
         Ok(Self { store, _lock: lock })
     }
 
+    /// The log with a write that a crash left between its record and its
+    /// publish settled: kept when the index holds what the write wrote,
+    /// dropped otherwise.
+    pub(super) fn settled_log(&self, deadline: WriteDeadline) -> Result<Log, RepositoryError> {
+        let log = self.log()?;
+        let Some(id) = log.pending else {
+            return Ok(log);
+        };
+        let settled = if self.landed(id, deadline)? {
+            log.pushed(id)
+        } else {
+            log.without_pending()
+        };
+        self.save(&settled)?;
+        self.forget(&settled);
+        Ok(settled)
+    }
+
+    fn landed(&self, id: EntryId, deadline: WriteDeadline) -> Result<bool, RepositoryError> {
+        let Ok((applied, change)) = self.record_of(id) else {
+            return Ok(false);
+        };
+        let Ok(repo) = Repo::open(&applied.root, deadline.reads()) else {
+            return Ok(false);
+        };
+        if repo.common_dir.to_string_lossy() != self.common_dir {
+            return Ok(false);
+        }
+        change.landed(&repo, deadline)
+    }
+
     pub(super) fn save(&self, log: &Log) -> Result<(), RepositoryError> {
         let temporary = self.dir.join("log.json.new");
         let bytes = serde_json::to_vec(log).map_err(|error| unwritable(io::Error::other(error)))?;
@@ -152,17 +235,19 @@ impl LockedStore {
         }
     }
 
+    /// Writes the entry and saves the log with the entry pending, so the
+    /// history names the write before the index changes.
     pub(super) fn record(
         &self,
-        session: &Session,
+        txn: &Txn<'_>,
+        log: &Log,
         operation: &Operation,
-        pending: Pending<'_>,
-    ) -> Result<Applied, RepositoryError> {
-        let log = self.log()?;
+        change: &Change,
+    ) -> Result<Recorded<'_>, RepositoryError> {
         let id = EntryId::after(log.entries.last().copied());
         let applied = Applied {
             id,
-            root: session.repo.root(),
+            root: txn.repo().root(),
             operation: operation.clone(),
         };
         let mut entry = NewEntry {
@@ -170,19 +255,18 @@ impl LockedStore {
             kept: false,
         };
         fs::create_dir(&entry.dir).map_err(unwritable)?;
-        self.entry(id)
-            .keep(&session.repo, &pending.change.objects(), session.deadline)?;
+        self.entry(id).keep(txn, &change.objects())?;
         self.write(id, "applied.json", &applied)?;
-        self.write(id, "change.json", &pending.change)?;
-        let next = log.pushed(id);
-        self.save(&next)?;
-        if let Err(error) = (pending.publish)() {
-            entry.kept = self.save(&log).is_err();
-            return Err(error);
-        }
+        self.write(id, "change.json", change)?;
+        let pending = log.with_pending(id);
+        self.save(&pending)?;
         entry.kept = true;
-        self.forget(&next);
-        Ok(applied)
+        Ok(Recorded {
+            store: self,
+            log: pending,
+            applied,
+            entry,
+        })
     }
 
     fn forget(&self, log: &Log) {
@@ -191,7 +275,7 @@ impl LockedStore {
         };
         for name in names.flatten() {
             let listed = EntryId::try_from(name.file_name().to_string_lossy().into_owned())
-                .is_ok_and(|id| log.entries.contains(&id));
+                .is_ok_and(|id| log.entries.contains(&id) || log.pending == Some(id));
             if !listed {
                 let _ = fs::remove_dir_all(name.path());
             }
@@ -218,6 +302,39 @@ impl Deref for LockedStore {
     }
 }
 
+/// A write the log names as pending. Dropped unconfirmed, as when the index
+/// could not be replaced, it takes the write back out of the log.
+pub(super) struct Recorded<'s> {
+    store: &'s LockedStore,
+    log: Log,
+    applied: Applied,
+    entry: NewEntry,
+}
+
+impl Recorded<'_> {
+    /// Marks the write done once the index holds it. If the log cannot be
+    /// saved, it stays pending, and the next locked request keeps it,
+    /// because the index holds what it wrote.
+    pub(super) fn confirm(mut self) -> Applied {
+        let id = self.applied.id;
+        let done = self.log.pushed(id);
+        if self.store.save(&done).is_ok() {
+            self.store.forget(&done);
+        }
+        self.log = done;
+        self.entry.kept = true;
+        self.applied.clone()
+    }
+}
+
+impl Drop for Recorded<'_> {
+    fn drop(&mut self) {
+        if self.log.pending.is_some() {
+            self.entry.kept = self.store.save(&self.log.without_pending()).is_err();
+        }
+    }
+}
+
 struct NewEntry {
     dir: PathBuf,
     kept: bool,
@@ -236,14 +353,29 @@ impl Drop for NewEntry {
 pub(super) struct Log {
     version: u32,
     common_dir: String,
+    repository: Identity,
     entries: Vec<EntryId>,
     undone: usize,
+    /// A write recorded but not yet known to have reached the index.
+    pending: Option<EntryId>,
 }
 
+/// Where an entry sits for one direction. Only `Next` carries the log a
+/// step leaves, so only the entry the log names next can be stepped.
 pub(super) enum Position {
-    Next,
+    Next(Step),
     AlreadyDone,
     Elsewhere,
+}
+
+pub(super) struct Step {
+    log: Log,
+}
+
+impl Step {
+    pub(super) const fn log(&self) -> &Log {
+        &self.log
+    }
 }
 
 impl Log {
@@ -263,7 +395,9 @@ impl Log {
             Direction::Redo => (self.next_redo(), self.next_undo()),
         };
         if next == Some(id) {
-            Position::Next
+            Position::Next(Step {
+                log: self.stepped(direction),
+            })
         } else if done == Some(id) {
             Position::AlreadyDone
         } else {
@@ -271,7 +405,7 @@ impl Log {
         }
     }
 
-    pub(super) fn stepped(&self, direction: Direction) -> Self {
+    fn stepped(&self, direction: Direction) -> Self {
         let undone = match direction {
             Direction::Undo => self.undone + 1,
             Direction::Redo => self.undone - 1,
@@ -282,6 +416,22 @@ impl Log {
         }
     }
 
+    fn with_pending(&self, id: EntryId) -> Self {
+        Self {
+            pending: Some(id),
+            ..self.clone()
+        }
+    }
+
+    fn without_pending(&self) -> Self {
+        Self {
+            pending: None,
+            ..self.clone()
+        }
+    }
+
+    /// The log after `id` is done: the redo entries go, and past the cap the
+    /// oldest.
     fn pushed(&self, id: EntryId) -> Self {
         let mut entries = self.entries[..self.entries.len() - self.undone].to_vec();
         entries.push(id);
@@ -289,6 +439,7 @@ impl Log {
         Self {
             entries: entries.split_off(over),
             undone: 0,
+            pending: None,
             ..self.clone()
         }
     }
@@ -299,58 +450,56 @@ pub(super) struct EntryObjects {
 }
 
 impl EntryObjects {
-    fn keep(
-        &self,
-        repo: &Repo,
-        oids: &[Oid],
-        deadline: WriteDeadline,
-    ) -> Result<(), RepositoryError> {
+    fn keep(&self, txn: &Txn<'_>, oids: &[Oid]) -> Result<(), RepositoryError> {
         if oids.is_empty() {
             return Ok(());
         }
         let pack = self.objects.join("pack");
         fs::create_dir_all(&pack).map_err(unwritable)?;
-        let base = pack.join("pack");
-        Write::new(&repo.root, &["pack-objects", "-q", &base.to_string_lossy()])
-            .env("GIT_OBJECT_DIRECTORY", self.objects.as_os_str())
-            .env("GIT_ALTERNATE_OBJECT_DIRECTORIES", repo.objects.as_os_str())
+        let base = pack.join("pack").to_string_lossy().into_owned();
+        txn.git(&["pack-objects", "-q", &base])
+            .objects(&self.objects)
+            .alternates(&txn.repo().objects)
             .input(lines(oids))
-            .run(deadline)?
+            .run(txn.deadline())?
             .succeeded()?;
         Ok(())
     }
 
     /// Copies back whichever of `oids` the repository lacks, as after a
     /// `gc --prune=now` there, because `update-index --index-info` accepts an
-    /// object that does not exist and would leave a broken index.
-    pub(super) fn bring_back(
-        &self,
-        repo: &Repo,
-        oids: Vec<Oid>,
-        deadline: WriteDeadline,
-    ) -> Result<(), RepositoryError> {
+    /// object that does not exist and would leave a broken index. Git names
+    /// each missing object in its answer, so the answer is read by name.
+    pub(super) fn bring_back(&self, txn: &Txn<'_>, oids: Vec<Oid>) -> Result<(), RepositoryError> {
         if oids.is_empty() {
             return Ok(());
         }
-        let found = Write::new(&repo.root, &["cat-file", "--batch-check=%(objectname)"])
+        let found = txn
+            .git(&["cat-file", "--batch-check=%(objectname)"])
             .input(lines(&oids))
             .uncapped()
-            .run(deadline)?
+            .run(txn.deadline())?
             .succeeded()?;
-        let missing: Vec<Oid> = oids
-            .into_iter()
-            .zip(found.split(|byte| *byte == b'\n'))
-            .filter(|(_, line)| line.ends_with(b" missing"))
-            .map(|(oid, _)| oid)
+        let missing: Vec<Oid> = found
+            .split(|byte| *byte == b'\n')
+            .filter_map(|answer| answer.strip_suffix(b" missing"))
+            .filter_map(|name| oids.iter().find(|oid| oid.as_str().as_bytes() == name))
+            .cloned()
             .collect();
         if missing.is_empty() {
             return Ok(());
         }
-        let base = repo.objects.join("pack").join("pack");
-        Write::new(&repo.root, &["pack-objects", "-q", &base.to_string_lossy()])
-            .env("GIT_ALTERNATE_OBJECT_DIRECTORIES", self.objects.as_os_str())
+        let base = txn
+            .repo()
+            .objects
+            .join("pack")
+            .join("pack")
+            .to_string_lossy()
+            .into_owned();
+        txn.git(&["pack-objects", "-q", &base])
+            .alternates(&self.objects)
             .input(lines(&missing))
-            .run(deadline)?
+            .run(txn.deadline())?
             .succeeded()?;
         Ok(())
     }
@@ -413,8 +562,14 @@ mod tests {
         Log {
             version: VERSION,
             common_dir: String::new(),
+            repository: Identity {
+                device: 0,
+                inode: 0,
+                created: None,
+            },
             entries: (1..=entries).map(EntryId).collect(),
             undone,
+            pending: None,
         }
     }
 
@@ -441,7 +596,7 @@ mod tests {
         ));
         assert!(matches!(
             history.position(EntryId(2), Direction::Undo),
-            Position::Next
+            Position::Next(_)
         ));
         assert!(matches!(
             history.position(EntryId(1), Direction::Redo),

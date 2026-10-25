@@ -1,6 +1,6 @@
 mod write;
 
-pub(crate) use write::{LocalWrite, Write, WriteDeadline, Wrote};
+pub(crate) use write::{LocalWrite, Write, WriteDeadline};
 
 use crate::{BranchRef, ErrorKind, Oid, RepositoryError};
 use std::{
@@ -610,9 +610,17 @@ static HELD_INDEX_LOCKS: AtomicUsize = AtomicUsize::new(0);
 pub(crate) struct HeldIndexLock;
 
 impl HeldIndexLock {
-    pub(crate) fn begin() -> Self {
+    /// Counts the transaction before it takes the index lock, and refuses
+    /// once `stop_all_git` has begun. `stop_all_git` sets `STOPPING` before
+    /// it reads the count, so it either waits for this transaction or this
+    /// transaction sees it quitting and takes no lock.
+    pub(crate) fn begin() -> Result<Self, RepositoryError> {
         HELD_INDEX_LOCKS.fetch_add(1, Ordering::SeqCst);
-        Self
+        let held = Self;
+        if STOPPING.load(Ordering::SeqCst) {
+            return Err(quitting());
+        }
+        Ok(held)
     }
 }
 
@@ -796,7 +804,7 @@ fn child_exited(_pid: u32) -> io::Result<bool> {
 /// process that is about to exit. A command checked before it began is
 /// waited for, for up to 1 s, so it is listed and stopped. Later commands are
 /// refused. Then it waits up to 1 s for index transactions to remove their
-/// locks. It can block for about 3 s when a command is slow to start and
+/// locks, and later transactions take none. It can block for about 3 s when a command is slow to start and
 /// another ignores SIGTERM.
 pub fn stop_all_git() {
     STOPPING.store(true, Ordering::SeqCst);

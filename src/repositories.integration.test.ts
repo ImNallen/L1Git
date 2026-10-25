@@ -958,7 +958,10 @@ describe("real Rust transport contract", () => {
     const unreadable = z
       .strictObject({
         ok: z.literal(false),
-        error: repositoryErrorSchema.strict(),
+        error: z.strictObject({
+          kind: z.literal("unreadablePath"),
+          message: z.string(),
+        }),
       })
       .parse(await request("locked.txt")).error;
     chmodSync(join(kinds, "locked.txt"), 0o644);
@@ -1143,9 +1146,11 @@ describe("real Rust writes, undo, and redo", () => {
     const request = await stage(path);
     git(path, "add", "README.md");
     const staged = git(path, "ls-files", "--stage");
-    expect(failure.parse(await (await post(request)).json()).error.kind).toBe(
-      "staleView",
-    );
+    expect(failure.parse(await (await post(request)).json()).error).toEqual({
+      kind: "staleView",
+      reason: "pathChanged",
+      message: expect.any(String),
+    });
     expect(git(path, "ls-files", "--stage")).toBe(staged);
     git(path, "reset", "--quiet", "README.md");
     const applied = writeEnvelope.parse(
@@ -1161,8 +1166,12 @@ describe("real Rust writes, undo, and redo", () => {
     expect(
       failure.parse(
         await (await post({ op: "redo", path, id: "0000000000000001" })).json(),
-      ).error.kind,
-    ).toBe("staleView");
+      ).error,
+    ).toEqual({
+      kind: "staleView",
+      reason: "historyChanged",
+      message: expect.any(String),
+    });
   });
 
   it("rejects unknown fields in a write, an entry, and an undo", async () => {

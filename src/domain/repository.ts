@@ -271,26 +271,37 @@ export const undoHistorySchema = z.strictObject({
   undo: appliedSchema.nullable(),
   redo: appliedSchema.nullable(),
 });
-export const repositoryErrorSchema = z.object({
-  kind: z.enum([
-    "missingPath",
-    "notRepository",
-    "bareRepository",
-    "gitMissing",
-    "gitFailed",
-    "invalidRef",
-    "invalidOid",
-    "unchangedPath",
-    "unsupportedPath",
-    "unreadablePath",
-    "timedOut",
-    "staleView",
-    "lockHeld",
-    "hookFailed",
-    "conflict",
-  ]),
-  message: z.string(),
-});
+export const repositoryErrorSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("staleView"),
+    reason: z.enum([
+      "headMoved",
+      "pathChanged",
+      "pathNotChosen",
+      "historyChanged",
+    ]),
+    message: z.string(),
+  }),
+  z.object({
+    kind: z.enum([
+      "missingPath",
+      "notRepository",
+      "bareRepository",
+      "gitMissing",
+      "gitFailed",
+      "invalidRef",
+      "invalidOid",
+      "unchangedPath",
+      "unsupportedPath",
+      "unreadablePath",
+      "timedOut",
+      "lockHeld",
+      "hookFailed",
+      "conflict",
+    ]),
+    message: z.string(),
+  }),
+]);
 
 export type RepositoryRoot = z.infer<typeof rootSchema>;
 export type Oid = z.infer<typeof oidSchema>;
