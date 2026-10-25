@@ -186,3 +186,19 @@ impl Wrote {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reports_a_held_lock_wherever_git_names_it() {
+        let wrote = Wrote {
+            write: LocalWrite::StageFiles,
+            code: Some(128),
+            stdout: Vec::new(),
+            stderr: "warning: in the working copy of 'f', LF will be replaced by CRLF\nfatal: Unable to create '/r/.git/index.lock': File exists.\n\nAnother git process seems to be running in this repository.\n".into(),
+        };
+        assert_eq!(wrote.failed().kind, ErrorKind::LockHeld);
+    }
+}

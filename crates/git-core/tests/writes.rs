@@ -1,6 +1,6 @@
 use l1_git_core::{
     Applied, Coordinator, ErrorKind, Expect, Limits, Operation, RepositoryError, StatusEntry,
-    worktree_status,
+    UndoHistory, worktree_status,
 };
 use std::{
     fs,
@@ -35,6 +35,19 @@ fn git(path: &Path, args: &[&str]) -> String {
     String::from_utf8(output.stdout).unwrap()
 }
 
+fn init(root: &Path) {
+    fs::create_dir(root).unwrap();
+    git(root, &["init", "--quiet", "--initial-branch=main"]);
+    for (key, value) in [
+        ("user.name", "Ada"),
+        ("user.email", "ada@example.test"),
+        ("commit.gpgSign", "false"),
+        ("core.hooksPath", "/dev/null"),
+    ] {
+        git(root, &["config", key, value]);
+    }
+}
+
 struct Repo {
     directory: TempDir,
     root: PathBuf,
@@ -48,16 +61,7 @@ impl Repo {
             .canonicalize()
             .unwrap()
             .join("repo with spaces");
-        fs::create_dir(&root).unwrap();
-        git(&root, &["init", "--quiet", "--initial-branch=main"]);
-        for (key, value) in [
-            ("user.name", "Ada"),
-            ("user.email", "ada@example.test"),
-            ("commit.gpgSign", "false"),
-            ("core.hooksPath", "/dev/null"),
-        ] {
-            git(&root, &["config", key, value]);
-        }
+        init(&root);
         Self { directory, root }
     }
 
@@ -487,17 +491,283 @@ fn undoes_intent_to_add_even_after_its_file_is_gone() {
 }
 
 #[test]
-fn records_the_file_a_new_folder_replaces_so_undo_restores_it() {
+fn stages_a_file_a_folder_replaced_only_with_the_paths_git_also_changes() {
     let repo = Repo::committed(&[("a", "file\n"), ("d/x", "tracked\n")]);
     let coordinator = repo.coordinator();
     fs::remove_file(repo.root.join("a")).unwrap();
     repo.put("a/b", "inside\n");
     fs::remove_dir_all(repo.root.join("d")).unwrap();
     repo.put("d", "now a file\n");
+    let untouched = repo.index();
+    for chosen in [&["a/b"][..], &["d"], &["a", "d/x"]] {
+        assert_eq!(
+            kind(stage(&coordinator, &repo, chosen)),
+            ErrorKind::StaleView,
+            "{chosen:?}"
+        );
+        assert_eq!(repo.index(), untouched);
+    }
     round_trip(&coordinator, &repo, || {
-        stage(&coordinator, &repo, &["a/b", "d"]).unwrap()
+        stage(&coordinator, &repo, &["a", "a/b", "d", "d/x"]).unwrap()
     });
     assert_eq!(repo.status(), ["D  a", "A  a/b", "A  d", "D  d/x"]);
+}
+
+#[test]
+fn finds_the_file_above_a_chosen_path_whatever_the_names_hold() {
+    let repo = Repo::committed(&[("z", "file\n"), ("0:z", "file\n")]);
+    let coordinator = repo.coordinator();
+    for folder in ["z", "0:z"] {
+        fs::remove_file(repo.root.join(folder)).unwrap();
+        repo.put(&format!("{folder}/x"), "inside\n");
+    }
+    repo.put("a\nb/c", "newline folder\n");
+    let untouched = repo.index();
+    for chosen in [&["a\nb/c", "z/x"][..], &["0:z/x"]] {
+        assert_eq!(
+            kind(stage(&coordinator, &repo, chosen)),
+            ErrorKind::StaleView,
+            "{chosen:?}"
+        );
+        assert_eq!(repo.index(), untouched);
+    }
+    round_trip(&coordinator, &repo, || {
+        stage(&coordinator, &repo, &["a\nb/c", "z", "z/x", "0:z", "0:z/x"]).unwrap()
+    });
+
+    repo.put("0:a/b", "added\n");
+    repo.git(&["add", "0:a/b"]);
+    let unstaged = unstage(&coordinator, &repo, &["0:a/b"]).unwrap();
+    fs::remove_dir_all(repo.root.join("0:a")).unwrap();
+    repo.put("0:a", "now a file\n");
+    repo.git(&["add", "0:a"]);
+    let ancestor_staged = repo.index();
+    assert_eq!(
+        kind(coordinator.undo(repo.path(), unstaged.id)),
+        ErrorKind::StaleView
+    );
+    assert_eq!(repo.index(), ancestor_staged);
+}
+
+#[test]
+fn refuses_to_drop_a_file_entry_restaged_above_a_chosen_path() {
+    let repo = Repo::committed(&[("z", "file\n")]);
+    let coordinator = repo.coordinator();
+    fs::remove_file(repo.root.join("z")).unwrap();
+    repo.put("z/x", "inside\n");
+    let (seen, expect) = entries(&repo, &["z", "z/x"]);
+    let restaged = repo.directory.path().join("restaged");
+    fs::write(&restaged, "restaged by another tool\n").unwrap();
+    let blob = repo.git(&["hash-object", "-w", restaged.to_str().unwrap()]);
+    repo.git(&[
+        "update-index",
+        "--cacheinfo",
+        &format!("100644,{},z", blob.trim()),
+    ]);
+    let restaged = repo.index();
+    let only_inside = seen
+        .iter()
+        .filter(|entry| entry_path(entry) == "z/x")
+        .cloned()
+        .collect();
+    for entries in [only_inside, seen] {
+        assert_eq!(
+            kind(coordinator.write(repo.path(), &Operation::StageFiles { entries }, &expect)),
+            ErrorKind::StaleView
+        );
+        assert_eq!(repo.index(), restaged);
+    }
+}
+
+#[test]
+fn refuses_to_stage_a_deleted_file_that_is_now_a_folder_of_unchosen_files() {
+    let repo = Repo::committed(&[("z", "file\n")]);
+    let coordinator = repo.coordinator();
+    fs::remove_file(repo.root.join("z")).unwrap();
+    repo.put("z/x", "not chosen\n");
+    let untouched = repo.index();
+    assert_eq!(
+        kind(stage(&coordinator, &repo, &["z"])),
+        ErrorKind::StaleView
+    );
+    assert_eq!(repo.index(), untouched);
+    assert_eq!(repo.status(), [" D z", "?? z/x"]);
+}
+
+#[test]
+fn a_new_repository_at_the_same_path_starts_with_an_empty_history() {
+    let repo = Repo::committed(&[("f", "one\n")]);
+    let coordinator = repo.coordinator();
+    repo.put("f", "secret from the old repository\n");
+    let applied = stage(&coordinator, &repo, &["f"]).unwrap();
+    let secret = repo.git(&["rev-parse", ":f"]);
+    coordinator.undo(repo.path(), applied.id).unwrap();
+
+    fs::remove_dir_all(&repo.root).unwrap();
+    init(&repo.root);
+    repo.put("f", "one\n");
+    repo.git(&["add", "f"]);
+    repo.git(&["commit", "--quiet", "-m", "initial"]);
+    let fresh = repo.index();
+    assert_eq!(
+        coordinator.undo_history(repo.path()).unwrap(),
+        UndoHistory {
+            undo: None,
+            redo: None
+        }
+    );
+    assert_eq!(
+        kind(coordinator.redo(repo.path(), applied.id)),
+        ErrorKind::StaleView
+    );
+    assert_eq!(repo.index(), fresh);
+    assert!(
+        !git_output(&repo.root, &["cat-file", "-e", secret.trim()])
+            .status
+            .success()
+    );
+}
+
+#[test]
+fn a_write_entry_carries_every_field_that_worktree_status_sends() {
+    let index = serde_json::json!({
+        "mode": "100644",
+        "oid": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+    });
+    let entries = [
+        serde_json::json!({
+            "kind": "ordinary",
+            "path": "f",
+            "submodule": null,
+            "sides": { "kind": "unstaged", "unstaged": "M" },
+            "index": index,
+        }),
+        serde_json::json!({
+            "kind": "renamed",
+            "path": "new",
+            "original": "old",
+            "how": "renamed",
+            "submodule": null,
+            "side": { "kind": "staged", "unstaged": null, "index": index },
+        }),
+        serde_json::json!({
+            "kind": "unmerged",
+            "path": "f",
+            "conflict": "bothAdded",
+            "submodule": null,
+            "stages": { "base": null, "ours": index, "theirs": index },
+        }),
+    ];
+    let parse = |entry: &serde_json::Value| {
+        serde_json::from_value::<Operation>(serde_json::json!({
+            "kind": "stageFiles",
+            "entries": [entry],
+        }))
+    };
+    let optional = [
+        &["submodule", "index"][..],
+        &["submodule", "side.unstaged"],
+        &["submodule", "stages.base"],
+    ];
+    for (entry, fields) in entries.iter().zip(optional) {
+        assert!(parse(entry).is_ok(), "{entry}");
+        for field in fields {
+            let mut missing = entry.clone();
+            match field.split_once('.') {
+                Some((outer, inner)) => missing[outer].as_object_mut().unwrap().remove(inner),
+                None => missing.as_object_mut().unwrap().remove(*field),
+            };
+            assert!(
+                parse(&missing).is_err(),
+                "accepted {missing} without {field}"
+            );
+        }
+    }
+}
+
+#[test]
+fn names_the_unstage_it_refuses_for_a_name_that_is_not_utf8() {
+    let repo = Repo::committed(&[("f", "one\n")]);
+    let coordinator = repo.coordinator();
+    let (_, expect) = entries(&repo, &[]);
+    let entry: StatusEntry = serde_json::from_value(serde_json::json!({
+        "kind": "ordinary",
+        "path": "caf\u{FFFD}",
+        "submodule": null,
+        "sides": { "kind": "staged", "staged": "A" },
+        "index": {
+            "mode": "100644",
+            "oid": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+        },
+    }))
+    .unwrap();
+    let refused = coordinator
+        .write(
+            repo.path(),
+            &Operation::UnstageFiles {
+                entries: vec![entry],
+            },
+            &expect,
+        )
+        .unwrap_err();
+    assert_eq!(refused.kind, ErrorKind::UnsupportedPath);
+    assert!(refused.message.contains("unstage"), "{}", refused.message);
+}
+
+#[cfg(unix)]
+#[test]
+fn runs_post_index_change_once_against_the_published_index_and_only_then() {
+    use std::os::unix::fs::PermissionsExt;
+    let repo = Repo::committed(&[("f", "one\n"), ("z", "file\n")]);
+    let coordinator = repo.coordinator();
+    let hooks = repo.directory.path().join("hooks");
+    let log = repo.directory.path().join("hook.log");
+    fs::create_dir(&hooks).unwrap();
+    let hook = hooks.join("post-index-change");
+    fs::write(
+        &hook,
+        format!(
+            "#!/bin/sh\nprintf '%s %s|%s|%s|%s|%s\\n' \"$1\" \"$2\" \"$(pwd -P)\" \"${{GIT_INDEX_FILE-unset}}\" \"${{GIT_LITERAL_PATHSPECS-unset}}\" \"$(env -u GIT_INDEX_FILE git ls-files --stage -- f g)\" >> '{}'\n",
+            log.display()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+    repo.git(&["config", "core.hooksPath", hooks.to_str().unwrap()]);
+    let runs = || fs::read_to_string(&log).unwrap_or_default();
+    let run = |index: &str| format!("0 0|{}|unset|unset|{index}\n", repo.path());
+
+    repo.put("f", "two\n");
+    let one = "100644 5626abf0f72e58d7a153368ba57db4c673c0e171 0\tf";
+    let two = "100644 f719efd430d52bcfc8566a43b2eb655688d38871 0\tf";
+    let applied = stage(&coordinator, &repo, &["f"]).unwrap();
+    assert_eq!(runs(), run(two));
+    coordinator.undo(repo.path(), applied.id).unwrap();
+    assert_eq!(runs(), [run(two), run(one)].concat());
+
+    fs::remove_file(repo.root.join("z")).unwrap();
+    repo.put("z/x", "not chosen\n");
+    assert_eq!(
+        kind(stage(&coordinator, &repo, &["z"])),
+        ErrorKind::StaleView
+    );
+    assert_eq!(runs(), [run(two), run(one)].concat());
+
+    repo.put("g", "intent\n");
+    repo.git(&["add", "--intent-to-add", "g"]);
+    fs::remove_file(&log).unwrap();
+    let staged = stage(&coordinator, &repo, &["g"]).unwrap();
+    coordinator.undo(repo.path(), staged.id).unwrap();
+    let intent = "100644 e69de29bb2d1d6434b8b29ae775ad8c2e48c5391 0\tg";
+    let added = "100644 434930e2d2c24dcd4e5c5bb00d3058a2704d9f24 0\tg";
+    assert_eq!(
+        runs(),
+        [
+            run(&format!("{one}\n{added}")),
+            run(&format!("{one}\n{intent}"))
+        ]
+        .concat()
+    );
 }
 
 #[test]
@@ -609,4 +879,69 @@ fn stages_a_submodule_commit_and_undoes_it_without_copying_the_commit() {
         repo.git(&["rev-parse", ":sub"]),
         git(&sub, &["rev-parse", "HEAD"])
     );
+}
+
+#[test]
+fn stages_a_same_size_edit_that_git_can_see_only_by_its_contents() {
+    let repo = Repo::new();
+    let coordinator = repo.coordinator();
+    let minute_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(60);
+    let backdate = |path: &str| {
+        fs::File::options()
+            .write(true)
+            .open(repo.root.join(path))
+            .unwrap()
+            .set_modified(minute_ago)
+            .unwrap();
+    };
+    repo.put("f", "one\n");
+    backdate("f");
+    repo.git(&["add", "f"]);
+    repo.git(&["commit", "--quiet", "-m", "initial"]);
+    repo.git(&["config", "core.trustctime", "false"]);
+    repo.put("f", "two\n");
+    backdate("f");
+    backdate(".git/index");
+    stage(&coordinator, &repo, &["f"]).unwrap();
+    assert_eq!(repo.status(), ["M  f"]);
+}
+
+#[test]
+fn says_why_a_view_is_stale_in_a_field() {
+    let reason = |result: Result<Applied, RepositoryError>| {
+        let error = serde_json::to_value(result.unwrap_err()).unwrap();
+        assert_eq!(error["kind"], "staleView", "{error}");
+        error["reason"].as_str().unwrap_or_default().to_owned()
+    };
+    let repo = Repo::committed(&[("f", "one\n"), ("z", "file\n")]);
+    let coordinator = repo.coordinator();
+    repo.put("f", "two\n");
+    let (seen, expect) = entries(&repo, &["f"]);
+    let write = Operation::StageFiles { entries: seen };
+    repo.git(&["add", "f"]);
+    assert_eq!(
+        reason(coordinator.write(repo.path(), &write, &expect)),
+        "pathChanged"
+    );
+    repo.git(&["commit", "--quiet", "-m", "moves HEAD"]);
+    repo.put("f", "three\n");
+    let (seen, _) = entries(&repo, &["f"]);
+    assert_eq!(
+        reason(coordinator.write(
+            repo.path(),
+            &Operation::StageFiles { entries: seen },
+            &expect
+        )),
+        "headMoved"
+    );
+    let first = stage(&coordinator, &repo, &["f"]).unwrap();
+    repo.put("f", "four\n");
+    stage(&coordinator, &repo, &["f"]).unwrap();
+    assert_eq!(
+        reason(coordinator.undo(repo.path(), first.id)),
+        "historyChanged"
+    );
+    fs::remove_file(repo.root.join("z")).unwrap();
+    repo.put("z/x", "not chosen\n");
+    assert_eq!(reason(stage(&coordinator, &repo, &["z"])), "pathNotChosen");
 }
