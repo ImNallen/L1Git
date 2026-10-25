@@ -425,8 +425,24 @@ pub(super) fn restore(
             "HEAD moved after this change, so L1 Git cannot undo or redo it exactly. Refresh.",
         ));
     }
-    let paths: Vec<&str> = change.paths.iter().map(|path| path.path.as_str()).collect();
+    let recorded: BTreeSet<&str> = change.paths.iter().map(|path| path.path.as_str()).collect();
+    let ancestors = txn.file_ancestors(recorded.iter().copied())?;
+    let paths: Vec<&str> = recorded
+        .iter()
+        .copied()
+        .chain(ancestors.iter().map(String::as_str))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
     let current = txn.read(&paths)?;
+    let changed_since = |path: &str| {
+        stale(format!(
+            "{path} changed after this change, so L1 Git cannot undo or redo it without losing that edit. Refresh."
+        ))
+    };
+    if let Some(other) = unrecorded(&current, &recorded) {
+        return Err(changed_since(other));
+    }
     let mut pending = Vec::new();
     for path in &change.paths {
         let (from, to) = path.source_and_target(direction);
@@ -435,10 +451,7 @@ pub(super) fn restore(
             continue;
         }
         if now != from {
-            return Err(stale(format!(
-                "{} changed after this change, so L1 Git cannot undo or redo it without losing that edit. Refresh.",
-                path.path
-            )));
+            return Err(changed_since(&path.path));
         }
         pending.push((path.path.as_str(), to));
     }
@@ -451,14 +464,26 @@ pub(super) fn restore(
         .collect();
     entry.bring_back(repo, objects.into_iter().cloned().collect(), deadline)?;
     txn.put(&pending)?;
-    let paths: Vec<&str> = pending.iter().map(|(path, _)| *path).collect();
     let written = txn.read(&paths)?;
-    if let Some((path, _)) = pending.iter().find(|(path, to)| at(&written, path) != *to) {
+    let inexact = unrecorded(&written, &recorded).or_else(|| {
+        change
+            .paths
+            .iter()
+            .find(|path| at(&written, &path.path) != path.source_and_target(direction).1)
+            .map(|path| path.path.as_str())
+    });
+    if let Some(path) = inexact {
         return Err(stale(format!(
             "{path} did not come back exactly, so L1 Git left the index unchanged. Refresh."
         )));
     }
     txn.publish()
+}
+
+fn unrecorded<'r>(rows: &'r Rows, recorded: &BTreeSet<&str>) -> Option<&'r str> {
+    rows.keys()
+        .map(String::as_str)
+        .find(|path| !recorded.contains(path))
 }
 
 type Rows = BTreeMap<String, Vec<IndexEntry>>;

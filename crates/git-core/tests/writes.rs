@@ -337,6 +337,36 @@ fn refuses_a_view_that_changed_and_then_writes_the_fresh_one_once() {
 }
 
 #[test]
+fn an_undo_refuses_to_replace_a_file_or_folder_staged_after_the_write() {
+    let repo = Repo::committed(&[("f", "file\n"), ("keep.txt", "keep\n")]);
+    let coordinator = repo.coordinator();
+    fs::remove_file(repo.root.join("f")).unwrap();
+    let deletion = stage(&coordinator, &repo, &["f"]).unwrap();
+    repo.put("f/new", "staged elsewhere\n");
+    repo.git(&["add", "f/new"]);
+    let descendant_staged = repo.index();
+    assert_eq!(
+        kind(coordinator.undo(repo.path(), deletion.id)),
+        ErrorKind::StaleView
+    );
+    assert_eq!(repo.index(), descendant_staged);
+
+    repo.put("a/b", "added\n");
+    repo.git(&["add", "a/b"]);
+    let unstaged = unstage(&coordinator, &repo, &["a/b"]).unwrap();
+    fs::remove_dir_all(repo.root.join("a")).unwrap();
+    repo.put("a", "now a file\n");
+    repo.git(&["add", "a"]);
+    let ancestor_staged = repo.index();
+    assert_eq!(
+        kind(coordinator.undo(repo.path(), unstaged.id)),
+        ErrorKind::StaleView
+    );
+    assert_eq!(repo.index(), ancestor_staged);
+    assert!(repo.git_dir_leftovers().is_empty());
+}
+
+#[test]
 fn an_undo_refuses_a_path_changed_after_the_write_and_names_entries_by_id() {
     let repo = Repo::committed(&[("a.txt", "a\n"), ("b.txt", "b\n")]);
     let coordinator = repo.coordinator();
