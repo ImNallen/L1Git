@@ -35,6 +35,7 @@ import {
   worktreePatchSchema,
   worktreeStatusSchema,
 } from "./domain/repository";
+import type { WorktreeStatus } from "./domain/repository";
 import { requestOps } from "./repositories";
 
 const fixtureSchema = z.object({
@@ -1024,25 +1025,86 @@ describe("real Rust writes, undo, and redo", () => {
   const failure = z
     .object({ ok: z.literal(false), error: repositoryErrorSchema })
     .strict();
-  let clones = 0;
-  const clone = () => {
-    const path = join(fixture.root, `writes ${clones++}`);
-    git(fixture.root, "clone", "--quiet", fixture.repository, path);
-    writeFileSync(join(path, "README.md"), "# L1 demo\n\nEdited.\n");
+  let repositories = 0;
+  const scratch = () => join(fixture.root, `writes ${repositories++}`);
+  const configure = (path: string) => {
+    for (const [key, value] of Object.entries({
+      "user.name": "Ada",
+      "user.email": "ada@example.test",
+      "commit.gpgSign": "false",
+      "core.hooksPath": "/dev/null",
+    }))
+      git(path, "config", key, value);
     return realpathSync(path);
   };
-  const stage = async (path: string) => {
-    const status = worktreeStatusEnvelope.parse(
+  const clone = () => {
+    const path = scratch();
+    git(fixture.root, "clone", "--quiet", fixture.repository, path);
+    writeFileSync(join(path, "README.md"), "# L1 demo\n\nEdited.\n");
+    return configure(path);
+  };
+  const init = (path = scratch()) => {
+    mkdirSync(path, { recursive: true });
+    git(path, "init", "--quiet", "--initial-branch=main");
+    return configure(path);
+  };
+  const committed = (files: Record<string, string>) => {
+    const path = init();
+    for (const [file, contents] of Object.entries(files))
+      writeFileSync(join(path, file), contents);
+    git(path, "add", "--all");
+    git(path, "commit", "--quiet", "-m", "initial");
+    return path;
+  };
+  const view = async (path: string) =>
+    worktreeStatusEnvelope.parse(
       await (await post({ op: "worktreeStatus", path })).json(),
     ).data;
-    return {
-      op: "write",
-      path,
-      operation: { kind: "stageFiles", entries: status.entries },
-      expect: { head: status.head },
-    };
-  };
+  const write = (
+    path: string,
+    kind: "stageFiles" | "unstageFiles",
+    status: WorktreeStatus,
+  ) => ({
+    op: "write",
+    path,
+    operation: { kind, entries: status.entries },
+    expect: { head: status.head },
+  });
+  const stage = async (path: string) =>
+    write(path, "stageFiles", await view(path));
   const porcelain = (path: string) => git(path, "status", "--porcelain");
+  const index = (path: string) =>
+    git(path, "ls-files", "--stage", "--debug")
+      .split("\n")
+      .filter((line) => !line.startsWith("  ") || line.includes("flags:"))
+      .map((line) => line.split("flags:").pop()?.trim())
+      .join("\n");
+  const roundTrip = async (
+    request: ReturnType<typeof write>,
+    written: () => void,
+  ) => {
+    const before = index(request.path);
+    const applied = writeEnvelope.parse(
+      await (await post(request)).json(),
+    ).data;
+    expect(applied).toEqual({
+      id: expect.any(String),
+      root: request.path,
+      operation: request.operation,
+    });
+    written();
+    expect(
+      undoEnvelope.parse(
+        await (
+          await post({ op: "undo", path: request.path, id: applied.id })
+        ).json(),
+      ).data,
+    ).toEqual(applied);
+    expect(
+      index(request.path),
+      "the undo puts back every index entry and flag the write replaced",
+    ).toBe(before);
+  };
 
   it("stages a file, undoes it, and redoes it", async () => {
     const path = clone();
@@ -1126,6 +1188,237 @@ describe("real Rust writes, undo, and redo", () => {
       status: 400,
       error: "unknown field `extra`, expected `path` or `id`",
     });
+    expect(porcelain(path)).toBe(" M README.md\n");
+  });
+
+  it("unstages a staged rename and stages one held with intent-to-add, and undoes each", async () => {
+    const path = committed({ "old.txt": "one\ntwo\nthree\n" });
+    git(path, "mv", "old.txt", "new.txt");
+    expect(porcelain(path)).toBe("R  old.txt -> new.txt\n");
+    const staged = await view(path);
+    expect(staged.entries).toMatchObject([
+      {
+        kind: "renamed",
+        path: "new.txt",
+        original: "old.txt",
+        how: "renamed",
+        side: {
+          kind: "staged",
+          unstaged: null,
+          index: indexAt(path, "new.txt"),
+        },
+      },
+    ]);
+    await roundTrip(write(path, "unstageFiles", staged), () =>
+      expect(porcelain(path)).toBe(" D old.txt\n?? new.txt\n"),
+    );
+
+    git(path, "reset", "--quiet");
+    git(path, "add", "--intent-to-add", "new.txt");
+    expect(porcelain(path)).toBe(" R old.txt -> new.txt\n");
+    const held = await view(path);
+    expect(held.entries).toMatchObject([
+      {
+        kind: "renamed",
+        path: "new.txt",
+        original: "old.txt",
+        side: { kind: "unstaged", original: indexAt(path, "old.txt") },
+      },
+    ]);
+    await roundTrip(write(path, "stageFiles", held), () =>
+      expect(porcelain(path)).toBe("R  old.txt -> new.txt\n"),
+    );
+  });
+
+  it("stages a conflict that both sides added without a base, and undoes it", async () => {
+    const path = committed({ "kept.txt": "kept\n" });
+    git(path, "switch", "--quiet", "-c", "theirs");
+    writeFileSync(join(path, "both.txt"), "theirs\n");
+    git(path, "add", "both.txt");
+    git(path, "commit", "--quiet", "-m", "theirs");
+    git(path, "switch", "--quiet", "main");
+    writeFileSync(join(path, "both.txt"), "ours\n");
+    git(path, "add", "both.txt");
+    git(path, "commit", "--quiet", "-m", "ours");
+    expect(() => git(path, "merge", "--quiet", "theirs")).toThrow();
+    expect(porcelain(path)).toBe("AA both.txt\n");
+    const status = await view(path);
+    expect(status.entries).toEqual([
+      {
+        kind: "unmerged",
+        path: "both.txt",
+        conflict: "bothAdded",
+        submodule: null,
+        stages: {
+          base: null,
+          ours: indexAt(path, "both.txt", "2"),
+          theirs: indexAt(path, "both.txt", "3"),
+        },
+      },
+    ]);
+    await roundTrip(write(path, "stageFiles", status), () => {
+      expect(porcelain(path)).toBe("M  both.txt\n");
+      expect(git(path, "ls-files", "--stage", "both.txt")).toMatch(
+        /^100644 [0-9a-f]{40} 0\tboth.txt\n$/,
+      );
+    });
+    expect(porcelain(path)).toBe("AA both.txt\n");
+  });
+
+  it("stages an untracked file and an intent-to-add file, and undoes both", async () => {
+    const path = committed({ "kept.txt": "kept\n" });
+    writeFileSync(join(path, "new.txt"), "new\n");
+    writeFileSync(join(path, "planned.txt"), "planned\n");
+    git(path, "add", "--intent-to-add", "planned.txt");
+    expect(porcelain(path)).toBe(" A planned.txt\n?? new.txt\n");
+    const status = await view(path);
+    expect(status.entries).toEqual([
+      {
+        kind: "ordinary",
+        path: "planned.txt",
+        submodule: null,
+        sides: { kind: "unstaged", unstaged: "A" },
+        index: null,
+      },
+      { kind: "untracked", path: "new.txt" },
+    ]);
+    await roundTrip(write(path, "stageFiles", status), () =>
+      expect(porcelain(path)).toBe("A  new.txt\nA  planned.txt\n"),
+    );
+    expect(porcelain(path)).toBe(" A planned.txt\n?? new.txt\n");
+  });
+
+  it("stages a submodule whose commit moved, and undoes it", async () => {
+    const path = committed({ "kept.txt": "kept\n" });
+    const sub = init(join(path, "sub"));
+    git(sub, "commit", "--quiet", "--allow-empty", "-m", "first");
+    git(path, "add", "--no-warn-embedded-repo", "sub");
+    git(path, "commit", "--quiet", "-m", "add sub");
+    git(sub, "commit", "--quiet", "--allow-empty", "-m", "second");
+    expect(porcelain(path)).toBe(" M sub\n");
+    const status = await view(path);
+    expect(status.entries).toEqual([
+      {
+        kind: "ordinary",
+        path: "sub",
+        submodule: { commitChanged: true, modified: false, untracked: false },
+        sides: { kind: "unstaged", unstaged: "M" },
+        index: indexAt(path, "sub"),
+      },
+    ]);
+    await roundTrip(write(path, "stageFiles", status), () => {
+      expect(porcelain(path)).toBe("M  sub\n");
+      expect(indexAt(path, "sub")).toEqual({
+        mode: "160000",
+        oid: git(sub, "rev-parse", "HEAD").trim(),
+      });
+    });
+  });
+
+  it("stages and unstages on an unborn HEAD and stages on a detached one, and undoes each", async () => {
+    const unborn = init();
+    writeFileSync(join(unborn, "first.txt"), "first\n");
+    const untracked = await view(unborn);
+    expect(untracked.head).toEqual({
+      kind: "unborn",
+      reference: "refs/heads/main",
+    });
+    await roundTrip(write(unborn, "stageFiles", untracked), () =>
+      expect(porcelain(unborn)).toBe("A  first.txt\n"),
+    );
+    git(unborn, "add", "first.txt");
+    const added = await view(unborn);
+    expect(added.head).toEqual(untracked.head);
+    await roundTrip(write(unborn, "unstageFiles", added), () =>
+      expect(porcelain(unborn)).toBe("?? first.txt\n"),
+    );
+
+    const detached = clone();
+    git(detached, "switch", "--quiet", "--detach");
+    const status = await view(detached);
+    expect(status.head).toEqual({
+      kind: "detached",
+      oid: git(detached, "rev-parse", "HEAD").trim(),
+    });
+    await roundTrip(write(detached, "stageFiles", status), () =>
+      expect(porcelain(detached)).toBe("M  README.md\n"),
+    );
+  });
+
+  it("answers lockHeld and unchangedPath and leaves the lock and the index alone", async () => {
+    const path = clone();
+    const request = await stage(path);
+    const unstaged = index(path);
+    const lock = join(path, ".git", "index.lock");
+    writeFileSync(lock, "held");
+    expect(failure.parse(await (await post(request)).json()).error.kind).toBe(
+      "lockHeld",
+    );
+    expect(
+      readFileSync(lock, "utf8"),
+      "another process's lock stays as it was",
+    ).toBe("held");
+    expect(index(path)).toBe(unstaged);
+    rmSync(lock);
+    const applied = writeEnvelope.parse(
+      await (await post(request)).json(),
+    ).data;
+    expect(porcelain(path)).toBe("M  README.md\n");
+
+    const staged = index(path);
+    const again = await stage(path);
+    for (const unchanged of [
+      again,
+      { ...again, operation: { kind: "stageFiles", entries: [] } },
+    ])
+      expect(
+        failure.parse(await (await post(unchanged)).json()).error.kind,
+      ).toBe("unchangedPath");
+    expect(index(path)).toBe(staged);
+    expect(
+      historyEnvelope.parse(
+        await (await post({ op: "undoHistory", path })).json(),
+      ).data,
+      "a write that changes nothing records nothing",
+    ).toEqual({ undo: applied, redo: null });
+  });
+
+  it("rejects a write entry that omits its index or its submodule", async () => {
+    const path = clone();
+    const request = await stage(path);
+    expect(request.operation.entries).toMatchObject([
+      {
+        kind: "ordinary",
+        submodule: null,
+        index: indexAt(path, "README.md"),
+      },
+    ]);
+    const before = index(path);
+    for (const field of ["index", "submodule"]) {
+      const response = await post({
+        ...request,
+        operation: {
+          kind: "stageFiles",
+          entries: request.operation.entries.map((entry) =>
+            Object.fromEntries(
+              Object.entries(entry).filter(([key]) => key !== field),
+            ),
+          ),
+        },
+      });
+      expect(
+        { status: response.status, body: await response.json() },
+        `a write entry without \`${field}\` is malformed`,
+      ).toEqual({
+        status: 400,
+        body: {
+          error: expect.stringMatching(
+            new RegExp(`missing field \`${field}\``),
+          ),
+        },
+      });
+      expect(index(path)).toBe(before);
+    }
     expect(porcelain(path)).toBe(" M README.md\n");
   });
 });
