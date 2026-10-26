@@ -1401,7 +1401,9 @@ describe("real Rust writes, undo, and redo", () => {
       failure.parse(await (await post(request)).json()).error;
     git(path, "add", "README.md");
     const pathChanged = await refusal(seen);
+    const commit = await commitRequest(path, "commit", "Mine\n");
     git(path, "reset", "--quiet", "README.md");
+    const stagedChanged = await refusal(commit);
     git(path, "commit", "--quiet", "--allow-empty", "-m", "moves HEAD");
     const headMoved = await refusal(seen);
     rmSync(join(path, "z"));
@@ -1419,9 +1421,16 @@ describe("real Rust writes, undo, and redo", () => {
       id: "0000000000000001",
     });
     const stale = { kind: "staleView", message: expect.any(String) };
-    expect([headMoved, pathChanged, pathNotChosen, historyChanged]).toEqual([
+    expect([
+      headMoved,
+      pathChanged,
+      stagedChanged,
+      pathNotChosen,
+      historyChanged,
+    ]).toEqual([
       { ...stale, reason: "headMoved" },
       { ...stale, reason: "pathChanged" },
+      { ...stale, reason: "stagedChanged" },
       { ...stale, reason: "pathNotChosen", paths: ["z/x"] },
       { ...stale, reason: "historyChanged" },
     ]);
