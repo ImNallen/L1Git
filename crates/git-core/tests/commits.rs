@@ -572,7 +572,8 @@ fn a_hook_that_prints_a_lot_shows_what_it_printed_last() {
         "{}",
         &output[output.len().saturating_sub(200)..]
     );
-    assert!(output.len() <= 64 * 1024, "{}", output.len());
+    assert!(output.starts_with('…'), "the cut is marked");
+    assert_eq!(output.len(), 64 * 1024 + "…".len());
 }
 
 #[test]

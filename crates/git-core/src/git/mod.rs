@@ -530,7 +530,7 @@ impl Stderr {
         let (sender, receiver) = mpsc::channel();
         if let Some(mut pipe) = pipe {
             thread::spawn(move || {
-                let _ = sender.send(last_whole_lines(&mut pipe, STDERR_CAP));
+                let _ = sender.send(last_bytes(&mut pipe, STDERR_CAP));
             });
         }
         Self(receiver)
@@ -543,7 +543,9 @@ impl Stderr {
     }
 }
 
-fn last_whole_lines(pipe: &mut impl Read, cap: usize) -> Vec<u8> {
+/// Keeps the last `cap` bytes, from a character boundary, and marks a cut
+/// with `…`.
+fn last_bytes(pipe: &mut impl Read, cap: usize) -> Vec<u8> {
     let mut kept = Vec::new();
     let mut chunk = [0; 8192];
     let mut cut = false;
@@ -563,10 +565,14 @@ fn last_whole_lines(pipe: &mut impl Read, cap: usize) -> Vec<u8> {
         kept.drain(..kept.len() - cap);
         cut = true;
     }
-    if cut && let Some(newline) = kept.iter().position(|byte| *byte == b'\n') {
-        kept.drain(..=newline);
+    if !cut {
+        return kept;
     }
-    kept
+    let start = kept
+        .iter()
+        .position(|byte| byte & 0xC0 != 0x80)
+        .unwrap_or(kept.len());
+    ["…".as_bytes(), &kept[start..]].concat()
 }
 
 pub(crate) fn mutate(
@@ -890,7 +896,7 @@ mod tests {
     use super::*;
 
     fn kept(printed: &str, cap: usize) -> String {
-        String::from_utf8(last_whole_lines(&mut printed.as_bytes(), cap)).unwrap()
+        String::from_utf8(last_bytes(&mut printed.as_bytes(), cap)).unwrap()
     }
 
     #[test]
