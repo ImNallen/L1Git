@@ -353,10 +353,11 @@ fn refused(wrote: &Wrote, trace: &Trace) -> RepositoryError {
     let printed = format!("{said}\n{}", git::text(wrote.stdout()));
     if let Some(hook) = trace.failed_hook() {
         return RepositoryError::new(
-            ErrorKind::HookFailed,
+            ErrorKind::HookFailed {
+                output: said.to_owned(),
+            },
             format!("The {hook} hook stopped the commit, so Git made no commit."),
-        )
-        .with_output(said);
+        );
     }
     let has = |needles: &[&str]| needles.iter().any(|needle| printed.contains(needle));
     if has(&[
@@ -366,10 +367,11 @@ fn refused(wrote: &Wrote, trace: &Trace) -> RepositoryError {
         "no name was given",
     ]) {
         return RepositoryError::new(
-            ErrorKind::MissingIdentity,
+            ErrorKind::MissingIdentity {
+                output: said.to_owned(),
+            },
             "Git does not know your name and email, so it made no commit. Set them with the commands below, then try again.",
-        )
-        .with_output(said);
+        );
     }
     if has(&[
         "nothing to commit",

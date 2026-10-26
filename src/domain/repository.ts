@@ -328,13 +328,15 @@ export const repositoryErrorSchema = z.union([
       "unreadablePath",
       "timedOut",
       "lockHeld",
-      "hookFailed",
       "conflict",
-      "missingIdentity",
       "raced",
     ]),
     message: z.string(),
-    output: z.string().optional(),
+  }),
+  z.object({
+    kind: z.enum(["hookFailed", "missingIdentity"]),
+    message: z.string(),
+    output: z.string(),
   }),
 ]);
 

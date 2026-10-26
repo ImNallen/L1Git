@@ -361,8 +361,10 @@ fn a_failing_hook_answers_hook_failed_with_its_output_and_changes_nothing() {
             name,
             "echo 'lint failed: TODO'\necho oops >&2\nexit 1\n",
         );
-        let error = refused(repo.write(Kind::Commit, "Hooked\n"), ErrorKind::HookFailed);
-        let output = error.output.unwrap_or_default();
+        let error = repo.write(Kind::Commit, "Hooked\n").unwrap_err();
+        let ErrorKind::HookFailed { output } = &error.kind else {
+            panic!("{error:?}");
+        };
         assert!(output.contains("lint failed: TODO"), "{output}");
         assert!(output.contains("oops"), "{output}");
         assert!(error.message.contains(name), "{}", error.message);
@@ -380,9 +382,13 @@ fn a_missing_identity_answers_missing_identity() {
     repo.staged_edit("a.txt", "two\n");
     repo.git(&["config", "user.useConfigOnly", "true"]);
     repo.git(&["config", "user.name", ""]);
-    let error = refused(
-        repo.write(Kind::Commit, "Who\n"),
-        ErrorKind::MissingIdentity,
+    let error = repo.write(Kind::Commit, "Who\n").unwrap_err();
+    let ErrorKind::MissingIdentity { output } = &error.kind else {
+        panic!("{error:?}");
+    };
+    assert!(
+        output.contains("no name was given") || output.contains("empty ident name"),
+        "{output}"
     );
     assert!(error.message.contains("name"), "{}", error.message);
     assert_eq!(repo.status(), "M  a.txt\n");

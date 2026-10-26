@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { LoaderCircle, TriangleAlert } from "lucide-react";
 import * as repositories from "../repositories";
-import { clearDraft, useCommitDraft } from "../commitDrafts";
+import { amendsHead, clearSubmitted, useCommitDraft } from "../commitDrafts";
 import {
   identityCommands,
   loadMessage,
@@ -42,11 +42,23 @@ export function CommitBox({
   onCommit: (worktree: RepositoryRoot, write: Write) => Promise<Outcome>;
 }) {
   const { root, head } = status;
-  const [{ draft, amend }, setDraft] = useCommitDraft(root);
+  const [current, setDraft] = useCommitDraft(root);
+  const { draft, amend } = current;
   const [loading, setLoading] = useState(false);
   const [problem, setProblem] = useState<Problem | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const amending = amend !== null;
+  const stale = amend !== null && !amendsHead(current, head);
+  useEffect(() => {
+    if (!stale) return;
+    setDraft({ draft: amend.draftAside, amend: null });
+    setProblem({
+      kind: "staleView",
+      reason: "headMoved",
+      message:
+        "HEAD moved since L1 Git loaded its message, so Amend is off again and your draft is back.",
+    });
+  }, [stale, amend, setDraft]);
   const ready =
     draft.summary.trim() !== "" &&
     (staged > 0 || amending) &&
@@ -64,7 +76,10 @@ export function CommitBox({
     setLoading(true);
     try {
       const loaded = loadMessage(await commitMessage(root, head.oid));
-      setDraft({ draft: loaded.draft, amend: { draftAside: draft, loaded } });
+      setDraft({
+        draft: loaded.draft,
+        amend: { draftAside: draft, loaded, head: head.oid },
+      });
     } catch (error) {
       setProblem(problemFrom(error));
     } finally {
@@ -73,7 +88,8 @@ export function CommitBox({
   }
 
   async function submit() {
-    if (!ready) return;
+    if (!ready || stale) return;
+    const sent = current;
     const kind = !amending ? "commit" : staged > 0 ? "amend" : "editMessage";
     const message = messageFor(draft, amend?.loaded ?? null);
     setSubmitting(true);
@@ -82,11 +98,11 @@ export function CommitBox({
     setSubmitting(false);
     if (outcome.kind === "busy") return;
     if (outcome.kind === "applied") {
-      clearDraft(root);
+      clearSubmitted(root, sent);
       return;
     }
     const { problem } = outcome;
-    if (problem.kind === "raced") clearDraft(root);
+    if (problem.kind === "raced") clearSubmitted(root, sent);
     if (problem.kind === "hookFailed" || problem.kind === "missingIdentity")
       setProblem(problem);
   }
@@ -170,7 +186,7 @@ export function CommitBox({
 }
 
 function CommitProblem({ problem }: { problem: Problem }) {
-  const output = "output" in problem ? (problem.output ?? "") : "";
+  const output = "output" in problem ? problem.output : "";
   const commands =
     problem.kind === "missingIdentity" ? identityCommands(output) : [];
   if (problem.kind === "hookFailed")

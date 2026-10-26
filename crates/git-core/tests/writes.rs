@@ -1257,7 +1257,6 @@ fn sends_a_stale_view_with_its_reason_and_other_errors_without_one() {
     let stale = RepositoryError {
         kind: PATH_CHANGED,
         message: "f changed.".into(),
-        output: None,
     };
     assert_eq!(
         serde_json::to_value(&stale).unwrap(),
@@ -1274,7 +1273,6 @@ fn sends_a_stale_view_with_its_reason_and_other_errors_without_one() {
     let held = RepositoryError {
         kind: ErrorKind::LockHeld,
         message: "held".into(),
-        output: None,
     };
     assert_eq!(
         serde_json::to_value(&held).unwrap(),

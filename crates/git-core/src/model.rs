@@ -754,13 +754,19 @@ pub enum ErrorKind {
     },
     /// Another Git process holds a lock the write needs.
     LockHeld,
-    /// A hook stopped the write. `output` holds what it printed.
-    HookFailed,
+    /// A hook stopped the write.
+    HookFailed {
+        /// What Git and the hook printed, up to 64 KiB.
+        output: String,
+    },
     /// A merge, rebase, cherry-pick, revert, or am is unfinished, or a path
     /// is unmerged.
     Conflict,
     /// Git cannot tell who the author or committer is.
-    MissingIdentity,
+    MissingIdentity {
+        /// Git's advice, which names the `git config` commands to run.
+        output: String,
+    },
     /// The commit landed, but another process moved HEAD or its branch at
     /// the same time, so it sits somewhere other than the user saw.
     Raced,
@@ -786,8 +792,6 @@ pub struct RepositoryError {
     #[serde(flatten)]
     pub kind: ErrorKind,
     pub message: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub output: Option<String>,
 }
 
 impl RepositoryError {
@@ -795,14 +799,6 @@ impl RepositoryError {
         Self {
             kind,
             message: message.into(),
-            output: None,
-        }
-    }
-
-    pub(crate) fn with_output(self, output: impl Into<String>) -> Self {
-        Self {
-            output: Some(output.into()),
-            ..self
         }
     }
 
