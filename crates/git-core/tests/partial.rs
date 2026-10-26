@@ -524,6 +524,40 @@ fn no_eof_newline_both_sides_unstage_first_line_change_keep_eof_change() {
     assert_eq!(repo.index_blob("f.txt"), bytes("a\nb\nc\nd"));
 }
 
+fn blank_context() -> Repo {
+    let repo = Repo::new(
+        &[("f.txt", b"a\n\nb\nc\n")],
+        &[("diff.suppressBlankEmpty", "true")],
+    );
+    repo.write("f.txt", "A\n\nB\nc\n");
+    assert!(
+        repo.shown("f.txt", Side::Unstaged).contains("+A\n\n-b\n"),
+        "Git prints the blank context line as an empty line"
+    );
+    repo
+}
+
+#[test]
+fn suppress_blank_empty_stage_lines_keeps_the_empty_context_line() {
+    let repo = blank_context();
+    repo.stage_lines("f.txt", &[d(1), a(1)]).unwrap();
+    assert_eq!(repo.index_blob("f.txt"), bytes("A\n\nb\nc\n"));
+}
+
+#[test]
+fn suppress_blank_empty_stage_hunk() {
+    let repo = blank_context();
+    repo.stage_hunk("f.txt", 0).unwrap();
+    assert_eq!(repo.index_blob("f.txt"), bytes("A\n\nB\nc\n"));
+}
+
+#[test]
+fn suppress_blank_empty_discard_hunk() {
+    let repo = blank_context();
+    repo.discard_hunk("f.txt", 0).unwrap();
+    assert_eq!(repo.worktree("f.txt"), bytes("a\n\nb\nc\n"));
+}
+
 fn crlf() -> String {
     lines(30).replace('\n', "\r\n")
 }
