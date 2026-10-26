@@ -417,7 +417,6 @@ fn place_step(
 ) -> Result<(), RepositoryError> {
     let root = &txn.repo().root;
     let files = entry.files();
-    remove_copies_beside(root, entry.id(), change);
     let paths: Vec<&str> = change.paths.iter().map(|path| path.path.as_str()).collect();
     let stats = guard(txn, &paths)?;
     let mut pending = Vec::new();

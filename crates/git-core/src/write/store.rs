@@ -200,18 +200,29 @@ impl LockedStore {
         opened: &Repo,
         deadline: WriteDeadline,
     ) -> Result<Log, RepositoryError> {
-        let log = self.log()?;
-        let Some(id) = log.pending else {
-            return Ok(log);
-        };
-        let settled = if self.landed(id, opened, deadline)? {
-            log.pushed(id)
-        } else {
-            log.without_pending()
-        };
-        self.save(&settled)?;
-        self.forget(&settled);
-        Ok(settled)
+        let mut log = self.log()?;
+        if let Some(id) = log.pending {
+            log = if self.landed(id, opened, deadline)? {
+                log.pushed(id)
+            } else {
+                log.without_pending()
+            };
+            self.save(&log)?;
+            self.forget(&log);
+        }
+        for id in [log.next_undo(), log.next_redo()].into_iter().flatten() {
+            self.remove_copies_beside(id);
+        }
+        Ok(log)
+    }
+
+    /// A discard, undo, or redo stopped by a crash leaves its entry next in
+    /// the log, and no step runs while this store is locked, so a copy named
+    /// for that entry beside one of its paths is a leftover.
+    fn remove_copies_beside(&self, id: EntryId) {
+        if let Ok((applied, change)) = self.record_of(id) {
+            change.remove_copies_beside(&applied);
+        }
     }
 
     fn landed(
@@ -224,7 +235,6 @@ impl LockedStore {
             return Ok(false);
         };
         if change.keeps_overwritten_files() {
-            change.remove_copies_beside(&applied);
             return Ok(true);
         }
         if applied.root == opened.root() {
