@@ -311,27 +311,18 @@ fn refuses_a_stale_staged_list_or_a_moved_head() {
 }
 
 #[test]
-fn reports_a_race_that_moved_head_to_another_branch_and_offers_undo() {
+fn a_commit_that_lands_on_a_branch_l1_git_did_not_check_has_no_undo_entry() {
     let repo = Repo::born();
     repo.git(&["branch", "other"]);
     let parent = repo.head();
-    let hooks = repo.directory.path().join("hooks");
-    fs::create_dir(&hooks).unwrap();
-    hook(
-        &hooks,
-        "pre-commit",
-        "git symbolic-ref HEAD refs/heads/other\n",
-    );
-    repo.git(&["config", "core.hooksPath", hooks.to_str().unwrap()]);
+    repo.hook("pre-commit", "git symbolic-ref HEAD refs/heads/other\n");
     repo.staged_edit("a.txt", "two\n");
     let error = refused(repo.write(Kind::Commit, "Raced\n"), ErrorKind::Raced);
-    assert!(error.message.contains("other"), "{}", error.message);
+    let made = repo.git(&["rev-parse", "other"]);
+    assert!(error.message.contains(&made[..7]), "{}", error.message);
     assert_eq!(repo.git(&["rev-parse", "main"]).trim(), parent);
-    repo.git(&["config", "core.hooksPath", "/dev/null"]);
-    let history = repo.coordinator().undo_history(repo.path()).unwrap();
-    let entry = history.undo.expect("the raced commit can be undone");
-    repo.undo(&entry);
-    assert_eq!(repo.git(&["rev-parse", "other"]).trim(), parent);
+    assert_eq!(repo.git(&["log", "-1", "--format=%s", "other"]), "Raced\n");
+    assert!(repo.undo_entry().is_none());
 }
 
 fn hook(dir: &Path, name: &str, body: &str) {
@@ -441,22 +432,18 @@ fn undo_refuses_after_head_moved_and_during_a_merge() {
 }
 
 #[test]
-fn a_commit_git_made_before_it_died_keeps_its_undo_entry() {
+fn a_commit_git_was_killed_after_making_is_not_reported_as_made() {
     let repo = Repo::born();
-    let parent = repo.head();
-    let hooks = repo.directory.path().join("hooks");
-    fs::create_dir(&hooks).unwrap();
-    hook(&hooks, "post-commit", "kill -9 $PPID\n");
-    repo.git(&["config", "core.hooksPath", hooks.to_str().unwrap()]);
+    repo.hook("post-commit", "kill -9 $PPID\n");
     repo.staged_edit("a.txt", "two\n");
-    let applied = repo
-        .write(Kind::Commit, "Landed\n")
-        .expect("the ref moved, so the commit counts");
+    let error = refused(repo.write(Kind::Commit, "Landed\n"), ErrorKind::GitFailed);
+    assert!(
+        error.message.contains("check the history"),
+        "{}",
+        error.message
+    );
     assert_eq!(repo.git(&["log", "-1", "--format=%s"]), "Landed\n");
-    repo.git(&["config", "core.hooksPath", "/dev/null"]);
-    repo.undo(&applied);
-    assert_eq!(repo.head(), parent);
-    assert_eq!(repo.status(), "M  a.txt\n");
+    assert!(repo.undo_entry().is_none());
 }
 
 #[test]

@@ -66,6 +66,25 @@ impl Target {
         })
     }
 
+    /// Whether the ref L1 Git checked before the commit points at `made`,
+    /// which only the process that made the commit could have set.
+    fn holds(
+        &self,
+        repo: &Repo,
+        deadline: WriteDeadline,
+        made: &Oid,
+    ) -> Result<bool, RepositoryError> {
+        Ok(match self {
+            Self::Branch(reference) => resolve(repo, deadline, reference)?.as_ref() == Some(made),
+            Self::Detached => {
+                repo.head(deadline)?
+                    == Head::Detached {
+                        oid: made.as_str().to_owned(),
+                    }
+            }
+        })
+    }
+
     fn name(&self) -> &str {
         match self {
             Self::Branch(reference) => reference.strip_prefix("refs/heads/").unwrap_or(reference),
@@ -151,62 +170,48 @@ pub(super) fn commit(
     };
     let (applied, recorded) = store.record_intent(repo, log, operation)?;
     let trace = Trace::create()?;
-    let ran = txn
+    let wrote = txn
         .commit(kind.flags(), message)
         .trace2_event(&trace.0)
-        .run(deadline);
+        .run(deadline)?;
     let txn = txn.renewed();
     let deadline = deadline.renewed();
-    let landed = Landed::read(repo, deadline, &head)?;
-    let succeeded = matches!(&ran, Ok(wrote) if wrote.code() == Some(0));
-    let made = match landed.made.clone() {
-        Some(made) if succeeded => Some(made),
-        Some(made)
-            if trace.failed_hook().is_none()
-                && landed.target == Target::of(&head)
-                && parents(repo, deadline, &made)? == expected_parents =>
-        {
-            Some(made)
-        }
-        _ => None,
-    };
-    let Some(made) = made else {
-        return Err(match ran {
-            Ok(wrote) if !succeeded => refused(&wrote, &trace),
-            Ok(_) => RepositoryError::stale(
-                StaleReason::HeadMoved,
-                "HEAD moved while Git was committing. Refresh.",
-            ),
-            Err(error) => error,
-        });
-    };
+    if wrote.code() != Some(0) {
+        return Err(refused(&wrote, &trace));
+    }
+    let made = printed(repo, deadline, wrote.stdout())?;
+    let target = Target::of(&head);
+    if !target.holds(repo, deadline, &made)? {
+        return Err(elsewhere(&made, &target));
+    }
+    if before.as_ref() == Some(&made) {
+        return Err(RepositoryError::new(
+            ErrorKind::UnchangedPath,
+            "Nothing changed. Git made the same commit as HEAD, because the message, the files, and the second it ran are the same.",
+        ));
+    }
     let made_parents = parents(repo, deadline, &made)?;
     let (change, race) = if matches!(kind, Kind::New(_)) {
         let parent = made_parents.first();
-        let raced = landed.target != Target::of(&head) || made_parents != expected_parents;
         (
-            RefChange::new(landed.target.at(parent)?, landed.head.clone(), None)?,
-            raced.then(|| commit_race(&made, &landed.target, parent)),
+            RefChange::new(target.at(parent)?, target.at(Some(&made))?, None)?,
+            (made_parents != expected_parents).then(|| commit_race(&made, &target, parent)),
         )
     } else {
-        let replaced = if landed.target == Target::of(&head) {
-            previous(repo, deadline, &landed.target, &made)?
-        } else {
-            None
-        };
+        let replaced = previous(repo, deadline, &target, &made)?;
         let before = match (&replaced, &before) {
             (None, Some(before)) if made_parents == expected_parents => before.clone(),
             (Some(replaced), _) if parents(repo, deadline, replaced)? == made_parents => {
                 replaced.clone()
             }
-            _ => return Err(amend_race(&made, &landed.target)),
+            _ => return Err(amend_race(&made, &target)),
         };
-        let race = (replaced.is_some() && Some(&before) != oid(&head).as_ref())
-            .then(|| amend_race_undoable(&made, &before, &landed.target));
+        let race = (Some(&before) != oid(&head).as_ref())
+            .then(|| amend_race_undoable(&made, &before, &target));
         (
             RefChange::new(
-                landed.target.at(Some(&before))?,
-                landed.head.clone(),
+                target.at(Some(&before))?,
+                target.at(Some(&made))?,
                 Some(before),
             )?,
             race,
@@ -226,21 +231,49 @@ pub(super) fn commit(
     race.map_or(Ok(applied), Err)
 }
 
-/// Git moves the ref before `post-commit` runs, so a commit can land even
-/// when Git fails or is stopped afterwards.
-struct Landed {
-    head: Head,
-    target: Target,
-    made: Option<Oid>,
+/// Git prints `[<branch> <abbreviated oid>] <subject>` once it has moved the
+/// branch and run `post-commit`. The branch there is HEAD's when Git prints,
+/// which another process may have switched, so only the OID is read.
+fn printed(repo: &Repo, deadline: WriteDeadline, stdout: &[u8]) -> Result<Oid, RepositoryError> {
+    let line = git::text(
+        stdout
+            .split(|byte| *byte == b'\n')
+            .next()
+            .unwrap_or_default(),
+    );
+    line.split(' ')
+        .find_map(|token| {
+            token
+                .strip_suffix(']')
+                .filter(|hex| hex.len() >= 4 && hex.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        })
+        .map(|abbreviated| resolve(repo, deadline, abbreviated))
+        .transpose()?
+        .flatten()
+        .ok_or_else(|| {
+            RepositoryError::new(
+                ErrorKind::GitFailed,
+                "Git finished, but L1 Git could not read which commit it made, so it has no undo entry for it. Check the history.",
+            )
+        })
 }
 
-impl Landed {
-    fn read(repo: &Repo, deadline: WriteDeadline, before: &Head) -> Result<Self, RepositoryError> {
-        let head = repo.head(deadline)?;
-        let target = Target::of(&head);
-        let made = oid(&head).filter(|now| Some(now) != oid(before).as_ref());
-        Ok(Self { head, target, made })
+fn resolve(
+    repo: &Repo,
+    deadline: WriteDeadline,
+    name: &str,
+) -> Result<Option<Oid>, RepositoryError> {
+    let ran = git::run(
+        &repo.root,
+        &["rev-parse", "-q", "--verify", &format!("{name}^{{commit}}")],
+        deadline.reads(),
+    )?;
+    if !ran.status.success() {
+        return Ok(None);
     }
+    Oid::try_from(git::line(&ran.stdout))
+        .map(Some)
+        .map_err(|_| git::malformed())
 }
 
 fn previous(
@@ -281,6 +314,18 @@ fn commit_race(made: &Oid, target: &Target, parent: Option<&Oid>) -> RepositoryE
         ErrorKind::Raced,
         format!(
             "Another process moved HEAD while Git committed, so the commit {} landed on {} after {after} instead of after what L1 Git showed. Undo moves {} back to {after}.",
+            short(made),
+            target.name(),
+            target.name(),
+        ),
+    )
+}
+
+fn elsewhere(made: &Oid, target: &Target) -> RepositoryError {
+    RepositoryError::new(
+        ErrorKind::Raced,
+        format!(
+            "Git made the commit {}, but another process moved HEAD or {} while Git committed, so {} does not point at it. L1 Git cannot undo it. Git's reflog names it.",
             short(made),
             target.name(),
             target.name(),
@@ -399,6 +444,15 @@ fn refused(wrote: &Wrote, trace: &Trace) -> RepositoryError {
         return RepositoryError::stale(
             StaleReason::HeadMoved,
             "HEAD moved while Git was committing, so Git made no commit. Refresh.",
+        );
+    }
+    if wrote.code().is_none() || said.contains("repository has been updated") {
+        return RepositoryError::new(
+            ErrorKind::GitFailed,
+            format!(
+                "Git stopped before it finished, and it may have made the commit first. L1 Git has no undo entry for it, so check the history. Git said: {}",
+                stderr::summarize(said)
+            ),
         );
     }
     RepositoryError::new(
