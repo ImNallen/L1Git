@@ -40,6 +40,17 @@ impl DiscardChange {
 }
 
 impl Discarded {
+    fn held(&self) -> String {
+        let path = &self.path;
+        match &self.before {
+            Content::Absent => format!("{path} did not exist"),
+            Content::File { copy, .. } => format!("{path} matched the copy {copy}"),
+            Content::Symlink { target } => {
+                format!("{path} was a link to {}", String::from_utf8_lossy(target))
+            }
+        }
+    }
+
     const fn source_and_target(&self, direction: Direction) -> (&Content, &Content) {
         match direction {
             Direction::Undo => (&self.after, &self.before),
@@ -319,24 +330,50 @@ pub(super) fn discard(
             Ok(())
         })
         .err();
-    if placed == 0
-        && let Some(error) = failure
-    {
-        return Err(error);
+    let Some(refusal) = failure else {
+        refresh(&txn, &rows, &discard.tracked());
+        let published = txn.commit_recorded(recorded, &Change::Discard(discard));
+        return Ok((applied, published.ok()));
+    };
+    if placed == 0 {
+        return Err(refusal);
     }
     discard.paths.truncate(placed);
-    refresh(&txn, &rows, &discard.tracked());
-    let published = txn.commit_recorded(recorded, &Change::Discard(discard));
-    match failure {
-        None => Ok((applied, published.ok())),
-        Some(error) => Err(RepositoryError::new(
-            error.kind,
+    let done = match recorded.replace(&Change::Discard(discard.clone())) {
+        Ok(()) => {
+            "The files L1 Git already discarded stay discarded, and Undo puts them back.".to_owned()
+        }
+        Err(unsaved) => {
+            let entry = store.entry(applied.id);
+            if place_step(&txn, &rows, &entry, &discard, Direction::Undo).is_ok() {
+                return Err(stopped(refusal, &store::unwritable(unsaved).message));
+            }
+            let files = entry.files();
+            let kept: Vec<String> = discard
+                .paths
+                .iter()
+                .filter(|path| {
+                    !holds(&repo.root, &path.path, &path.before, &files).unwrap_or(false)
+                })
+                .map(Discarded::held)
+                .collect();
             format!(
-                "{}. The files L1 Git already discarded stay discarded, and Undo puts them back.",
-                error.message.trim_end_matches('.')
-            ),
-        )),
-    }
+                "L1 Git could not write its undo history ({unsaved}) or put back what it discarded, so Undo cannot restore it. Before the discard, {}. The copies are in {}.",
+                kept.join(", "),
+                files.display()
+            )
+        }
+    };
+    refresh(&txn, &rows, &discard.tracked());
+    let _ = txn.commit_recorded(recorded, &Change::Discard(discard));
+    Err(stopped(refusal, &done))
+}
+
+fn stopped(error: RepositoryError, done: &str) -> RepositoryError {
+    RepositoryError::new(
+        error.kind,
+        format!("{}. {done}", error.message.trim_end_matches('.')),
+    )
 }
 
 pub(super) fn step(

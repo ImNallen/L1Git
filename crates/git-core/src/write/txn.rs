@@ -205,8 +205,8 @@ impl<'r> Txn<'r> {
         change: &Change,
     ) -> Result<Published, RepositoryError> {
         let published = self.publish(change);
-        let saved = recorded.confirm_as(change);
-        saved.and(published)
+        recorded.confirm();
+        published
     }
 
     /// Replaces the index with an undo or redo of the entry the log names

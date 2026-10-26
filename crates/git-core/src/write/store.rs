@@ -378,13 +378,14 @@ impl LockedStore {
         name: &str,
         value: &impl Serialize,
     ) -> Result<(), RepositoryError> {
-        let bytes =
-            serde_json::to_vec(value).map_err(|error| unwritable(io::Error::other(error)))?;
+        self.write_file(id, name, value).map_err(unwritable)
+    }
+
+    fn write_file(&self, id: EntryId, name: &str, value: &impl Serialize) -> io::Result<()> {
+        let bytes = serde_json::to_vec(value).map_err(io::Error::other)?;
         let file = self.entry_dir(id).join(name);
         let temporary = self.entry_dir(id).join(format!("{name}.new"));
-        fs::write(&temporary, bytes)
-            .and_then(|()| fs::rename(&temporary, file))
-            .map_err(unwritable)
+        fs::write(&temporary, bytes).and_then(|()| fs::rename(&temporary, file))
     }
 }
 
@@ -415,10 +416,8 @@ impl Recorded<'_> {
         Ok(())
     }
 
-    pub(super) fn confirm_as(self, change: &Change) -> Result<(), RepositoryError> {
-        let saved = self.store.write(self.id, "change.json", change);
-        self.confirm();
-        saved
+    pub(super) fn replace(&self, change: &Change) -> io::Result<()> {
+        self.store.write_file(self.id, "change.json", change)
     }
 
     /// Marks the write done once the index holds it. If the log cannot be
@@ -708,7 +707,7 @@ fn private_dir(dir: &Path) -> Result<(), RepositoryError> {
     }
 }
 
-fn unwritable(error: io::Error) -> RepositoryError {
+pub(super) fn unwritable(error: io::Error) -> RepositoryError {
     RepositoryError::new(
         ErrorKind::GitFailed,
         format!("L1 Git could not write its undo history, so it made no change: {error}"),
