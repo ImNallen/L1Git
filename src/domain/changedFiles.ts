@@ -29,6 +29,17 @@ export function firstChangedPath(
   return first === undefined ? undefined : changedPathAt(files, first);
 }
 
+export function listsRow(
+  files: readonly { path: string }[],
+  row: string,
+): boolean {
+  return files.some((file) =>
+    row.endsWith("/")
+      ? treePath(file.path).startsWith(row)
+      : treePath(file.path) === row,
+  );
+}
+
 export function pathsUnder(
   files: readonly { path: string }[],
   item: { kind: "file" | "directory"; path: string },

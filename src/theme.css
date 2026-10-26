@@ -186,7 +186,8 @@ input,
 select {
   -webkit-app-region: no-drag;
 }
-button:disabled {
+button:disabled,
+button[aria-disabled="true"] {
   opacity: 0.45;
   cursor: default;
 }
@@ -216,7 +217,7 @@ select:focus-visible,
   outline: 2px solid var(--focus);
   outline-offset: -2px;
 }
-button:hover:not(:disabled) {
+button:hover:not(:disabled, [aria-disabled="true"]) {
   color: var(--text-hover);
 }
 ::selection {

@@ -53,7 +53,7 @@ input::placeholder {
   padding: 0;
   color: var(--text-icon);
 }
-.icon-button:hover:not(:disabled) {
+.icon-button:hover:not(:disabled, [aria-disabled="true"]) {
   background: var(--control-hover);
 }
 .icon-button.toggled {

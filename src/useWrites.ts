@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as repositories from "./repositories";
-import { describe } from "./domain/operations";
+import { describe, nextEntry, rereadsRepository } from "./domain/operations";
 import type {
+  History,
   HistoryEntry,
   Step,
   Write,
@@ -17,19 +18,26 @@ import type {
 import { oneReadPerKey } from "./oneReadPerKey";
 
 export type Writes = {
-  history: Record<Step, HistoryEntry | null> | null;
+  history: History;
   running: { action: "write" | Step; label: string } | null;
   notice: WriteNotice | null;
 };
 
-const idle: Writes = { history: null, running: null, notice: null };
+const idle: Writes = {
+  history: { kind: "unread" },
+  running: null,
+  notice: null,
+};
 
 const labelled = (applied: Applied | null): HistoryEntry | null =>
   applied && { ...applied, label: describe(applied.operation) };
 
 export function useWrites(
   root: RepositoryRoot | null,
-  reread: (worktree: RepositoryRoot) => Promise<void>,
+  reread: {
+    worktree: (worktree: RepositoryRoot) => Promise<void>;
+    repository: () => void;
+  },
 ) {
   const [byRoot, setByRoot] = useState<ReadonlyMap<RepositoryRoot, Writes>>(
     new Map(),
@@ -50,8 +58,15 @@ export function useWrites(
       repositories
         .undoHistory(repository)
         .then(
-          ({ undo, redo }) => ({ undo: labelled(undo), redo: labelled(redo) }),
-          () => null,
+          ({ undo, redo }): History => ({
+            kind: "read",
+            undo: labelled(undo),
+            redo: labelled(redo),
+          }),
+          (error): History => ({
+            kind: "unreadable",
+            problem: problemFrom(error),
+          }),
         )
         .then((history) =>
           update(repository, (writes) => ({ ...writes, history })),
@@ -76,7 +91,6 @@ export function useWrites(
     update(repository, (writes) => ({
       ...writes,
       running: { action, label },
-      notice: null,
     }));
     let outcome: { applied: Applied } | { problem: Problem };
     try {
@@ -85,10 +99,12 @@ export function useWrites(
       outcome = { problem: problemFrom(error) };
     }
     const changed = "applied" in outcome ? outcome.applied.root : worktree;
+    if ("problem" in outcome && rereadsRepository(outcome.problem))
+      reread.repository();
     await Promise.all([
       readHistory(repository),
-      reread(worktree),
-      changed === worktree ? null : reread(changed),
+      reread.worktree(worktree),
+      changed === worktree ? null : reread.worktree(changed),
     ]);
     inFlight.current.delete(repository);
     const notice: WriteNotice | null =
@@ -104,8 +120,8 @@ export function useWrites(
   const writes = (root === null ? undefined : byRoot.get(root)) ?? idle;
 
   function step(action: Step) {
-    const entry = writes.history?.[action];
-    if (root === null || !entry) return Promise.resolve(false);
+    const entry = nextEntry(writes.history, action);
+    if (root === null || entry === null) return Promise.resolve(false);
     const { id } = entry;
     return run({ action, entry: id }, entry.label, entry.root, () =>
       repositories[action](root, id),

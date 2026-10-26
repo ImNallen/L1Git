@@ -25,8 +25,11 @@ export const changeStatuses = {
 
 export type RowAction = {
   label: string;
-  run: (paths: string[]) => void;
+  disabled: boolean;
+  run: (paths: string[], row: string) => void;
 };
+
+export const focusedRow = '[data-type="item"][tabindex="0"]';
 
 type Props = {
   files: readonly { path: string; status: GitStatus }[];
@@ -115,13 +118,11 @@ export function ChangedFileTree({
       onFocused?.();
       return;
     }
-    model.focusPath(treePath(refocusPath));
+    model.focusPath(refocusPath);
     const frame = requestAnimationFrame(() => {
       model
         .getFileTreeContainer()
-        ?.shadowRoot?.querySelector<HTMLElement>(
-          '[data-type="item"][tabindex="0"]',
-        )
+        ?.shadowRoot?.querySelector<HTMLElement>(focusedRow)
         ?.focus();
       onFocused?.();
     });
@@ -144,9 +145,11 @@ export function ChangedFileTree({
           >
             <button
               role="menuitem"
+              aria-disabled={action.disabled}
               onClick={() => {
+                if (action.disabled) return;
                 context.close();
-                action.run(pathsUnder(files, item));
+                action.run(pathsUnder(files, item), item.path);
               }}
             >
               {action.label}

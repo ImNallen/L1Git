@@ -20,7 +20,7 @@
   font-size: 12px;
   text-align: left;
 }
-.context-menu [role^="menuitem"]:hover {
+.context-menu [role^="menuitem"]:hover:not([aria-disabled="true"]) {
   background: var(--row-hover);
 }
 .context-menu [role^="menuitem"]:focus-visible,

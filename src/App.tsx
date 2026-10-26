@@ -55,7 +55,7 @@ import type { HistoryHandle } from "./components/History";
 import { PaneDivider } from "./components/PaneDivider";
 import { RepositoryTree } from "./components/RepositoryTree";
 import { UndoButtons, WriteNoticeRow } from "./components/UndoControls";
-import { writeFor } from "./domain/operations";
+import { nextEntry, writeFor } from "./domain/operations";
 import type { FileWrite } from "./domain/operations";
 import { swapEnds } from "./domain/comparison";
 import { buildGraph } from "./domain/graph";
@@ -221,7 +221,16 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
         changes: app.changes.get(listedWorktree.root),
       }
     : null;
-  const writes = useWrites(snapshot?.root ?? null, app.rereadWorktree);
+  const refreshRef = useRef(app.refresh);
+  const reloadRefsRef = useRef(branchRefs.reload);
+  const rereadOutsideChanges = useCallback(() => {
+    void refreshRef.current();
+    reloadRefsRef.current();
+  }, []);
+  const writes = useWrites(snapshot?.root ?? null, {
+    worktree: app.rereadWorktree,
+    repository: rereadOutsideChanges,
+  });
   function writeFiles(
     root: RepositoryRoot,
     kind: FileWrite,
@@ -348,8 +357,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     snapshot.stashes.some((stash) => stash.oid === selected.oid)
       ? { root: snapshot.root, oid: selected.oid }
       : null;
-  const refreshRef = useRef(app.refresh);
-  const reloadRefsRef = useRef(branchRefs.reload);
   useEffect(() => {
     refreshRef.current = () => {
       app.refreshChanges();
@@ -364,8 +371,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     const reread = () => {
       if (document.hidden || performance.now() - last < 1000) return;
       last = performance.now();
-      void refreshRef.current();
-      reloadRefsRef.current();
+      rereadOutsideChanges();
     };
     window.addEventListener("focus", reread);
     document.addEventListener("visibilitychange", reread);
@@ -373,7 +379,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       window.removeEventListener("focus", reread);
       document.removeEventListener("visibilitychange", reread);
     };
-  }, []);
+  }, [rereadOutsideChanges]);
   useEffect(
     () =>
       overviewStore.onRefsChanged((roots) => {
@@ -543,8 +549,8 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       staged: selectedLists.get("staged")?.length ?? 0,
     },
     history: {
-      undo: writes.history?.undo?.label ?? null,
-      redo: writes.history?.redo?.label ?? null,
+      undo: nextEntry(writes.history, "undo")?.label ?? null,
+      redo: nextEntry(writes.history, "redo")?.label ?? null,
     },
     writing: writes.running !== null,
     typing: false,
