@@ -59,7 +59,7 @@ import { PaneDivider } from "./components/PaneDivider";
 import { RepositoryTree } from "./components/RepositoryTree";
 import { UndoButtons, WriteNoticeRow } from "./components/UndoControls";
 import { discardChoice, nextEntry, writeFor } from "./domain/operations";
-import type { FileWrite } from "./domain/operations";
+import type { FileWrite, Write } from "./domain/operations";
 import { swapEnds } from "./domain/comparison";
 import { buildGraph } from "./domain/graph";
 import { trunkTips } from "./domain/highlight";
@@ -157,6 +157,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   const [lostFocusChecks, checkLostFocus] = useState(0);
   const [discarding, setDiscarding] = useState<{
     root: RepositoryRoot;
+    write: Write;
     paths: string[];
     skipped: number;
     returnFocus?: () => void;
@@ -262,8 +263,8 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     const changes = app.changes.get(root);
     if (changes?.kind !== "ready") return;
     const choice = discardChoice(changes.status, paths);
-    if (choice.paths.length > 0)
-      setDiscarding({ root, ...choice, returnFocus });
+    const write = writeFor("discard", changes.status, choice.paths);
+    if (write !== null) setDiscarding({ root, write, ...choice, returnFocus });
   }
   const rootChanges = snapshot ? app.changes.get(snapshot.root) : undefined;
   const headStatus = rootChanges?.kind === "ready" ? rootChanges.status : null;
@@ -1193,9 +1194,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
         <DiscardDialog
           paths={discarding.paths}
           skipped={discarding.skipped}
-          onDiscard={() =>
-            void writeFiles(discarding.root, "discard", discarding.paths)
-          }
+          onDiscard={() => void writes.write(discarding.root, discarding.write)}
           onClose={() => {
             setDiscarding(null);
             discarding.returnFocus?.();

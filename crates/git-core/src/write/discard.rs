@@ -285,7 +285,7 @@ pub(super) fn discard(
         return Err(RepositoryError::new(
             error.kind,
             format!(
-                "{} The files L1 Git already discarded stay discarded, and Undo puts them back.",
+                "{}. The files L1 Git already discarded stay discarded, and Undo puts them back.",
                 error.message
             ),
         ));
@@ -528,9 +528,34 @@ fn place(
         Content::File { .. } | Content::Symlink { .. } => file
             .parent()
             .map_or(Ok(()), fs::create_dir_all)
-            .and_then(|()| fs::rename(prepared, &file)),
+            .and_then(|()| match fs::rename(prepared, &file) {
+                Err(error) if error.kind() == io::ErrorKind::CrossesDevices => {
+                    rename_across(prepared, &file)
+                }
+                other => other,
+            }),
     };
     placed.map_err(|error| failed(path, &error))
+}
+
+/// A linked worktree can live on another file system than its Git dir, so
+/// the prepared file is copied beside the path first and renamed from there.
+fn rename_across(prepared: &Path, file: &Path) -> io::Result<()> {
+    let mut name = std::ffi::OsString::from(".l1git-");
+    name.push(std::process::id().to_string());
+    name.push("-");
+    name.push(file.file_name().unwrap_or_default());
+    let beside = file.with_file_name(name);
+    let copied = if fs::symlink_metadata(prepared)?.is_symlink() {
+        fs::read_link(prepared).and_then(|target| symlink(&link_bytes(target), &beside))
+    } else {
+        fs::copy(prepared, &beside).map(drop)
+    };
+    let renamed = copied.and_then(|()| fs::rename(&beside, file));
+    if renamed.is_err() {
+        let _ = fs::remove_file(&beside);
+    }
+    renamed
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
