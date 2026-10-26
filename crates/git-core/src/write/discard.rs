@@ -286,24 +286,66 @@ pub(super) fn discard(
             .run(deadline)?
             .succeeded()?;
     }
+    let landings: Vec<Landing<'_>> = targets
+        .iter()
+        .zip(stats)
+        .map(|(target, stat)| Landing {
+            path: target.path,
+            stat,
+            after: match target.seen {
+                Seen::Tracked(_) => After::Checkout,
+                Seen::Untracked => After::Absent,
+            },
+        })
+        .collect();
+    land(txn, store, log, operation, &rows, &checkout, &landings)
+}
+
+/// What a discarded path holds afterward.
+enum After {
+    Absent,
+    /// The file at `<checkout>/<path>`.
+    Checkout,
+}
+
+struct Landing<'p> {
+    path: &'p str,
+    /// What `guard` saw, which the path must still match when its turn
+    /// comes.
+    stat: Option<Stat>,
+    after: After,
+}
+
+/// Records each path's file before and after, then places each after file
+/// in turn, and stops at the first path that changed since its stat.
+fn land(
+    txn: Txn<'_>,
+    store: &LockedStore,
+    log: &Log,
+    operation: &Operation,
+    rows: &index::Rows,
+    checkout: &Path,
+    landings: &[Landing<'_>],
+) -> Result<(Applied, Option<Published>), RepositoryError> {
+    let root = &txn.repo().root;
     let (applied, mut discard, recorded) = store.record_with(&txn, log, operation, |entry| {
         let files = entry.files();
         store::private_folder()
             .create(&files)
             .map_err(|error| failed("the undo history", &error))?;
-        let paths = targets
+        let paths = landings
             .iter()
             .enumerate()
-            .map(|(at, target)| {
-                let before = capture(&repo.root, target.path, &files, format!("{at}.before"))?;
-                let after = match target.seen {
-                    Seen::Tracked(_) => {
-                        capture(&checkout, target.path, &files, format!("{at}.after"))?
+            .map(|(at, landing)| {
+                let before = capture(root, landing.path, &files, format!("{at}.before"))?;
+                let after = match landing.after {
+                    After::Checkout => {
+                        capture(checkout, landing.path, &files, format!("{at}.after"))?
                     }
-                    Seen::Untracked => Content::Absent,
+                    After::Absent => Content::Absent,
                 };
                 Ok(Discarded {
-                    path: target.path.to_owned(),
+                    path: landing.path.to_owned(),
                     before,
                     after,
                 })
@@ -315,12 +357,12 @@ pub(super) fn discard(
     let failure: Option<RepositoryError> = discard
         .paths
         .iter()
-        .zip(&stats)
-        .try_for_each(|(discarded, stat)| {
+        .zip(landings)
+        .try_for_each(|(discarded, landing)| {
             before_placing(&discarded.path);
-            unchanged(&repo.root, &discarded.path, stat)?;
+            unchanged(root, &discarded.path, &landing.stat)?;
             place(
-                &repo.root,
+                root,
                 applied.id,
                 &discarded.path,
                 &discarded.after,
@@ -331,7 +373,7 @@ pub(super) fn discard(
         })
         .err();
     let Some(refusal) = failure else {
-        refresh(&txn, &rows, &discard.tracked());
+        refresh(&txn, rows, &discard.tracked());
         let published = txn.commit_recorded(recorded, &Change::Discard(discard));
         return Ok((applied, published.ok()));
     };
@@ -345,16 +387,14 @@ pub(super) fn discard(
         }
         Err(unsaved) => {
             let entry = store.entry(applied.id);
-            if place_step(&txn, &rows, &entry, &discard, Direction::Undo).is_ok() {
+            if place_step(&txn, rows, &entry, &discard, Direction::Undo).is_ok() {
                 return Err(stopped(refusal, &store::unwritable(unsaved).message));
             }
             let files = entry.files();
             let kept: Vec<String> = discard
                 .paths
                 .iter()
-                .filter(|path| {
-                    !holds(&repo.root, &path.path, &path.before, &files).unwrap_or(false)
-                })
+                .filter(|path| !holds(root, &path.path, &path.before, &files).unwrap_or(false))
                 .map(Discarded::held)
                 .collect();
             format!(
@@ -364,7 +404,7 @@ pub(super) fn discard(
             )
         }
     };
-    refresh(&txn, &rows, &discard.tracked());
+    refresh(&txn, rows, &discard.tracked());
     let _ = txn.commit_recorded(recorded, &Change::Discard(discard));
     Err(stopped(refusal, &done))
 }

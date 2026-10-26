@@ -57,21 +57,18 @@ impl IndexChange {
         head: Head,
         before: &Rows,
         after: &Rows,
-        command: Command,
-        plan: &Plan,
+        verb: &str,
+        claimed: &BTreeSet<&str>,
     ) -> Result<Self, RepositoryError> {
-        let unchosen = unnamed(&differences(before, after), |path| {
-            plan.claims.contains_key(path)
-        });
+        let unchosen = unnamed(&differences(before, after), |path| claimed.contains(path));
         if !unchosen.is_empty() {
-            return Err(not_chosen(command, plan, unchosen));
+            return Err(not_chosen(verb, claimed, unchosen));
         }
-        let paths: Vec<PathChange> = plan
-            .claims
-            .keys()
+        let paths: Vec<PathChange> = claimed
+            .iter()
             .filter(|path| at(before, path) != at(after, path))
             .map(|path| PathChange {
-                path: path.clone(),
+                path: (*path).to_owned(),
                 before: at(before, path).to_vec(),
                 after: at(after, path).to_vec(),
             })
@@ -385,6 +382,45 @@ pub(super) fn edit<'r>(
     entries: &[StatusEntry],
 ) -> Result<(Txn<'r>, Change), RepositoryError> {
     let plan = Plan::new(command, entries)?;
+    let claimed = plan.claims.keys().map(String::as_str).collect();
+    guarded(
+        repo,
+        deadline,
+        expect,
+        command.verb(),
+        &claimed,
+        |txn, before| {
+            for (path, seen) in &plan.claims {
+                if shows_non_utf8(&repo.root, before, path) {
+                    return Err(not_utf8(command, path));
+                }
+                if !seen.matches(at(before, path)) {
+                    return Err(RepositoryError::stale(
+                        StaleReason::PathChanged,
+                        format!("{path} changed since L1 Git read it. Refresh and try again."),
+                    ));
+                }
+            }
+            txn.git(command.args())
+                .input(nul_separated(plan.touched.iter().map(String::as_str)))
+                .run(deadline)?
+                .succeeded()?;
+            Ok(())
+        },
+    )
+}
+
+/// Every index write: lock, check HEAD, read the private index, let `run`
+/// change it, read it again, and keep the change only if it touches nothing
+/// but `claimed`.
+fn guarded<'r>(
+    repo: &'r Repo,
+    deadline: WriteDeadline,
+    expect: &Expect,
+    verb: &str,
+    claimed: &BTreeSet<&str>,
+    run: impl FnOnce(&Txn<'r>, &Rows) -> Result<(), RepositoryError>,
+) -> Result<(Txn<'r>, Change), RepositoryError> {
     let txn = Txn::begin(repo, deadline)?;
     let head = repo.head(deadline)?;
     if head != expect.head {
@@ -394,23 +430,9 @@ pub(super) fn edit<'r>(
         ));
     }
     let before = read(&txn)?;
-    for (path, seen) in &plan.claims {
-        if shows_non_utf8(&repo.root, &before, path) {
-            return Err(not_utf8(command, path));
-        }
-        if !seen.matches(at(&before, path)) {
-            return Err(RepositoryError::stale(
-                StaleReason::PathChanged,
-                format!("{path} changed since L1 Git read it. Refresh and try again."),
-            ));
-        }
-    }
-    txn.git(command.args())
-        .input(nul_separated(plan.touched.iter().map(String::as_str)))
-        .run(deadline)?
-        .succeeded()?;
+    run(&txn, &before)?;
     let after = read(&txn)?;
-    let change = IndexChange::between(head, &before, &after, command, &plan)?;
+    let change = IndexChange::between(head, &before, &after, verb, claimed)?;
     Ok((txn, Change::Index(change)))
 }
 
@@ -423,10 +445,9 @@ fn respelled<'p>(named: impl IntoIterator<Item = &'p str>, path: &str) -> Option
         .find(|named| *named != path && named.eq_ignore_ascii_case(path))
 }
 
-fn not_chosen(command: Command, plan: &Plan, unchosen: Vec<String>) -> RepositoryError {
-    let verb = command.verb();
+fn not_chosen(verb: &str, claimed: &BTreeSet<&str>, unchosen: Vec<String>) -> RepositoryError {
     for path in &unchosen {
-        if let Some(chosen) = respelled(plan.claims.keys().map(String::as_str), path) {
+        if let Some(chosen) = respelled(claimed.iter().copied(), path) {
             return RepositoryError::new(
                 ErrorKind::UnsupportedPath,
                 format!(
