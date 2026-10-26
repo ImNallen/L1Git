@@ -900,12 +900,13 @@ pub(super) fn step(
     let mut current = listing.slots_like(from)?;
     let txn = RefTxn::begin(repo, deadline)?;
     let transition = Transition::between(from, to)?;
-    let creates = matches!(transition, Transition::Create(_));
-    if creates || guarded(&current) != guarded(to) {
+    if let Transition::Create(slot) = transition
+        && guarded(&current) != guarded(from)
+    {
+        return Err(exists_again(&slot.branch, &format!("{step} this change")));
+    }
+    if guarded(&current) != guarded(to) {
         if guarded(&current) != guarded(from) {
-            if let Transition::Create(slot) = transition {
-                return Err(exists_again(&slot.branch, &format!("{step} this change")));
-            }
             let names: Vec<_> = from.iter().map(|slot| slot.branch.name()).collect();
             return Err(RepositoryError::stale(
                 StaleReason::BranchChanged,

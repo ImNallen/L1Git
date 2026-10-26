@@ -504,18 +504,7 @@ fn refuse_taking_untracked(
     to: &str,
     reads: Deadline,
 ) -> Result<(), RepositoryError> {
-    let sparse = git::read(
-        &repo.root,
-        &[
-            "config",
-            "--get",
-            "--type=bool",
-            "--default=false",
-            "core.sparseCheckout",
-        ],
-        reads,
-    )?;
-    if sparse != b"true\n" {
+    if !git::config_flag(&repo.root, "core.sparseCheckout", false, reads)? {
         return Ok(());
     }
     let added = names(
