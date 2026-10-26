@@ -4,6 +4,7 @@ use l1_git_core::{
 };
 use std::{
     fs,
+    os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     process::{Command, Stdio},
 };
@@ -351,4 +352,125 @@ fn undo_of_a_create_finds_the_tag_already_gone_and_keeps_its_object_for_redo() {
         "{}",
         error.message
     );
+}
+
+#[test]
+fn refuses_to_tag_a_tree_a_blob_or_a_tag_object() {
+    let repo = Repo::new();
+    repo.git(&["tag", "-a", "-m", "Release", "v1"]);
+    fs::write(repo.root.join("notes.txt"), "notes\n").unwrap();
+    let blob = repo.git(&["hash-object", "-w", "notes.txt"]);
+    let before = repo.state();
+    for at in ["HEAD^{tree}", blob.as_str(), "refs/tags/v1"] {
+        for message in [None, Some("annotated")] {
+            let error = repo.create("t", at, message).unwrap_err();
+            assert_eq!(error.kind, ErrorKind::InvalidOid, "{at}: {}", error.message);
+            assert!(
+                error.message.ends_with("is not a commit."),
+                "{}",
+                error.message
+            );
+        }
+    }
+    assert_eq!(repo.state(), before);
+    repo.no_entry();
+}
+
+#[test]
+fn signs_an_annotated_tag_when_tag_force_sign_annotated_asks() {
+    let repo = Repo::new();
+    let gpg = repo.root.parent().unwrap().join("gpg");
+    fs::write(
+        &gpg,
+        "#!/bin/sh\ncat >/dev/null\necho '[GNUPG:] SIG_CREATED D 1 8 00 1700000000 FAKE' >&2\nprintf -- '-----BEGIN PGP SIGNATURE-----\\n\\nZmFrZQ==\\n-----END PGP SIGNATURE-----\\n'\n",
+    )
+    .unwrap();
+    fs::set_permissions(&gpg, fs::Permissions::from_mode(0o755)).unwrap();
+    repo.git(&["config", "tag.forceSignAnnotated", "true"]);
+    repo.git(&["config", "gpg.program", gpg.to_str().unwrap()]);
+
+    repo.create("v1", "HEAD", Some("Release")).unwrap();
+    let object = repo.git(&["cat-file", "-p", "v1"]);
+    assert!(
+        object.contains("\nRelease\n-----BEGIN PGP SIGNATURE-----\n"),
+        "{object}"
+    );
+    repo.create("v2", "HEAD", None).unwrap();
+    assert_eq!(repo.git(&["cat-file", "-t", "v2"]), "commit");
+}
+
+#[test]
+fn a_message_of_only_whitespace_makes_a_lightweight_tag() {
+    let repo = Repo::new();
+    let before = repo.state();
+    let applied = repo.create("v1", "HEAD", Some(" \n\t\n")).unwrap();
+    assert_eq!(repo.git(&["cat-file", "-t", "v1"]), "commit");
+    repo.round_trip(&before, &applied);
+}
+
+#[test]
+fn refuses_a_case_twin_where_the_disk_folds_case_whatever_core_ignorecase_says() {
+    let repo = Repo::new();
+    if !repo.root.join(".git/REFS").exists() {
+        return;
+    }
+    repo.git(&["config", "core.ignorecase", "false"]);
+    repo.git(&["tag", "packed"]);
+    repo.git(&["pack-refs", "--all"]);
+    repo.git(&["tag", "loose"]);
+    let before = repo.state();
+    for name in ["PACKED", "Loose"] {
+        for message in [None, Some("annotated")] {
+            let error = repo.create(name, "HEAD", message).unwrap_err();
+            assert_eq!(error.kind, ErrorKind::InvalidRef, "{}", error.message);
+            assert!(
+                error.message.contains("does not tell names apart by case"),
+                "{}",
+                error.message
+            );
+        }
+    }
+    assert_eq!(repo.state(), before);
+    repo.no_entry();
+}
+
+#[test]
+fn a_decomposed_name_is_created_and_compared_as_git_stores_it() {
+    let repo = Repo::new();
+    repo.git(&["config", "core.precomposeunicode", "true"]);
+    let decomposed = "va\u{308}st";
+    let stored = if cfg!(target_os = "macos") {
+        "v\u{e4}st"
+    } else {
+        decomposed
+    };
+    for (suffix, message) in [("light", None), ("annotated", Some("Release"))] {
+        let before = repo.state();
+        let applied = repo
+            .create(&format!("{decomposed}-{suffix}"), "HEAD", message)
+            .unwrap();
+        assert!(
+            repo.state()
+                .contains(&format!("refs/tags/{stored}-{suffix} ")),
+            "{}",
+            repo.state()
+        );
+        repo.round_trip(&before, &applied);
+    }
+
+    repo.git(&["tag", stored]);
+    let before = repo.state();
+    for message in [None, Some("annotated")] {
+        let error = repo.create(decomposed, "HEAD", message).unwrap_err();
+        assert_eq!(error.kind, ErrorKind::InvalidRef, "{}", error.message);
+        assert_eq!(
+            error.message,
+            format!("A tag named '{stored}' already exists.")
+        );
+        let error = repo
+            .create(&format!("{decomposed}/rc"), "HEAD", message)
+            .unwrap_err();
+        assert_eq!(error.kind, ErrorKind::InvalidRef, "{}", error.message);
+    }
+    assert_eq!(repo.state(), before);
 }
