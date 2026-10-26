@@ -60,11 +60,9 @@ impl IndexChange {
         command: Command,
         plan: &Plan,
     ) -> Result<Self, RepositoryError> {
-        let unchosen: Vec<String> = differences(before, after)
-            .into_iter()
-            .filter(|path| !str::from_utf8(path).is_ok_and(|path| plan.claims.contains_key(path)))
-            .map(git::text)
-            .collect();
+        let unchosen = unnamed(&differences(before, after), |path| {
+            plan.claims.contains_key(path)
+        });
         if !unchosen.is_empty() {
             return Err(not_chosen(command, plan, unchosen));
         }
@@ -549,12 +547,9 @@ pub(super) fn restore(
     }
     let differ = differences(&expected, &written);
     let recorded = || change.paths.iter().map(|recorded| recorded.path.as_str());
-    if let Some(path) = differ
-        .iter()
-        .map(|path| git::text(path))
-        .find(|path| !recorded().any(|recorded| recorded == path))
+    if let Some(path) = unnamed(&differ, |path| recorded().any(|recorded| recorded == path)).first()
     {
-        if let Some(named) = respelled(recorded(), &path) {
+        if let Some(named) = respelled(recorded(), path) {
             return Err(RepositoryError::stale(
                 StaleReason::PathChanged,
                 format!(
@@ -562,7 +557,7 @@ pub(super) fn restore(
                 ),
             ));
         }
-        return Err(changed_since(&path));
+        return Err(changed_since(path));
     }
     if let Some(path) = differ.first() {
         let path = git::text(path);
@@ -623,6 +618,14 @@ fn differences<'r>(before: &'r Rows, after: &'r Rows) -> Vec<&'r [u8]> {
     }
 }
 
+fn unnamed(changed: &[&[u8]], named: impl Fn(&str) -> bool) -> Vec<String> {
+    changed
+        .iter()
+        .filter(|path| !str::from_utf8(path).is_ok_and(&named))
+        .map(|path| git::text(path))
+        .collect()
+}
+
 fn nul_separated<'p>(paths: impl IntoIterator<Item = &'p str>) -> Vec<u8> {
     paths
         .into_iter()
@@ -672,23 +675,29 @@ fn put(txn: &Txn<'_>, targets: &[(&str, &[IndexEntry])]) -> Result<(), Repositor
     if !intent.is_empty() {
         add_intent(txn, &intent)?;
     }
-    let flags: [(fn(&IndexEntry) -> bool, &str); 2] = [
-        (|entry| entry.skip_worktree, "--skip-worktree"),
-        (|entry| entry.assume_unchanged, "--assume-unchanged"),
-    ];
-    for (marked, flag) in flags {
-        let paths = nul_separated(
-            targets
-                .iter()
-                .filter(|(_, entries)| entries.iter().any(marked))
-                .map(|(path, _)| *path),
-        );
-        if !paths.is_empty() {
-            txn.git(&["update-index", "-z", flag, "--stdin"])
-                .input(paths)
-                .run(txn.deadline())?
-                .succeeded()?;
-        }
+    mark(txn, targets, "--skip-worktree", |entry| entry.skip_worktree)?;
+    mark(txn, targets, "--assume-unchanged", |entry| {
+        entry.assume_unchanged
+    })
+}
+
+fn mark(
+    txn: &Txn<'_>,
+    targets: &[(&str, &[IndexEntry])],
+    flag: &str,
+    marked: impl Fn(&IndexEntry) -> bool,
+) -> Result<(), RepositoryError> {
+    let paths = nul_separated(
+        targets
+            .iter()
+            .filter(|(_, entries)| entries.iter().any(&marked))
+            .map(|(path, _)| *path),
+    );
+    if !paths.is_empty() {
+        txn.git(&["update-index", "-z", flag, "--stdin"])
+            .input(paths)
+            .run(txn.deadline())?
+            .succeeded()?;
     }
     Ok(())
 }

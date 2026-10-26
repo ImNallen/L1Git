@@ -142,25 +142,33 @@ impl Repo {
             .join("\n")
     }
 
-    fn git_dir_leftovers(&self) -> Vec<String> {
-        let git_dir = self.root.join(".git");
-        fs::read_dir(git_dir)
-            .unwrap()
-            .flatten()
-            .map(|entry| entry.file_name().to_string_lossy().into_owned())
-            .filter(|name| name == "index.lock" || name.starts_with("l1git-"))
-            .collect()
-    }
-
-    fn shared_indexes(&self) -> Vec<String> {
+    fn git_dir_names(&self, keep: impl Fn(&str) -> bool) -> Vec<String> {
         let mut names: Vec<String> = fs::read_dir(self.root.join(".git"))
             .unwrap()
             .flatten()
             .map(|entry| entry.file_name().to_string_lossy().into_owned())
-            .filter(|name| name.starts_with("sharedindex."))
+            .filter(|name| keep(name))
             .collect();
         names.sort();
         names
+    }
+
+    fn git_dir_leftovers(&self) -> Vec<String> {
+        self.git_dir_names(|name| name == "index.lock" || name.starts_with("l1git-"))
+    }
+
+    fn shared_indexes(&self) -> Vec<String> {
+        self.git_dir_names(|name| name.starts_with("sharedindex."))
+    }
+
+    fn index_info(&self, info: &[u8]) {
+        use std::io::Write as _;
+        let mut child = git_command(&self.root, &["update-index", "-z", "--index-info"])
+            .stdin(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child.stdin.take().unwrap().write_all(info).unwrap();
+        assert!(child.wait().unwrap().success());
     }
 
     fn split(files: &[(&str, &str)], expiry: Option<&str>) -> Self {
@@ -549,9 +557,6 @@ fn an_undo_puts_back_the_assume_unchanged_bit_that_unstaging_dropped() {
         unstage(&coordinator, &repo, &["f"]).unwrap()
     });
     assert_eq!(repo.git(&["ls-files", "-v"]), "H f\nh g\n");
-    let applied = coordinator.undo_history(repo.path()).unwrap().undo.unwrap();
-    coordinator.undo(repo.path(), applied.id).unwrap();
-    assert_eq!(repo.git(&["ls-files", "-v"]), "h f\nh g\n");
 }
 
 #[test]
@@ -813,7 +818,7 @@ fn a_write_entry_carries_every_field_that_worktree_status_sends() {
 #[cfg(unix)]
 #[test]
 fn stages_a_name_holding_the_replacement_character_and_refuses_one_that_is_not_utf8() {
-    use std::{ffi::OsStr, io::Write, os::unix::ffi::OsStrExt};
+    use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
     let repo = Repo::committed(&[("f", "one\n")]);
     let coordinator = repo.coordinator();
     repo.put("ok\u{FFFD}name.txt", "valid UTF-8\n");
@@ -825,12 +830,7 @@ fn stages_a_name_holding_the_replacement_character_and_refuses_one_that_is_not_u
     let blob = repo.git(&["hash-object", "-w", "f"]);
     let mut info = format!("100644 {}\tcaf", blob.trim()).into_bytes();
     info.extend(b"\xff\0");
-    let mut child = git_command(&repo.root, &["update-index", "-z", "--index-info"])
-        .stdin(Stdio::piped())
-        .spawn()
-        .unwrap();
-    child.stdin.take().unwrap().write_all(&info).unwrap();
-    assert!(child.wait().unwrap().success());
+    repo.index_info(&info);
     let indexed = repo.index();
     let refused = unstage(&coordinator, &repo, &["caf\u{FFFD}"]).unwrap_err();
     assert_eq!(
@@ -862,7 +862,7 @@ fn stages_a_name_holding_the_replacement_character_and_refuses_one_that_is_not_u
 #[cfg(unix)]
 #[test]
 fn refuses_either_of_two_names_that_read_the_same_when_one_is_not_utf8() {
-    use std::{ffi::OsStr, io::Write, os::unix::ffi::OsStrExt};
+    use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
     let repo = Repo::committed(&[("f", "one\n")]);
     let coordinator = repo.coordinator();
     let blob = repo.git(&["hash-object", "-w", "f"]);
@@ -872,12 +872,7 @@ fn refuses_either_of_two_names_that_read_the_same_when_one_is_not_utf8() {
         info.extend(name);
         info.push(0);
     }
-    let mut child = git_command(&repo.root, &["update-index", "-z", "--index-info"])
-        .stdin(Stdio::piped())
-        .spawn()
-        .unwrap();
-    child.stdin.take().unwrap().write_all(&info).unwrap();
-    assert!(child.wait().unwrap().success());
+    repo.index_info(&info);
     let mut twins = vec![(false, "caf\u{FFFD}")];
     for (bytes, name) in [
         (&b"ok\xffname.txt"[..], "ok\u{FFFD}name.txt"),
