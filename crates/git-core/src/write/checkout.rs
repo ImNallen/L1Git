@@ -57,6 +57,7 @@ struct Switch {
     from_name: String,
     args: Vec<String>,
     created: Option<NewBranch>,
+    reverse: &'static str,
 }
 
 pub(super) fn checkout(
@@ -166,6 +167,7 @@ impl Switch {
                     from_name: from,
                     args: vec!["--detach".to_owned(), oid.as_str().to_owned()],
                     created: None,
+                    reverse: "Undo",
                 })
             }
             Start::Local { reference, oid } => {
@@ -214,6 +216,7 @@ impl Switch {
                         branch,
                         before: slot.config,
                     }),
+                    reverse: "Undo",
                 })
             }
         }
@@ -251,6 +254,7 @@ impl Switch {
             from_name: from,
             args: vec!["--no-guess".to_owned(), "--".to_owned(), name.to_owned()],
             created: None,
+            reverse: "Undo",
         })
     }
 
@@ -261,8 +265,12 @@ impl Switch {
         from: &Head,
         to: &Head,
         remake: Option<&MadeBranch>,
-        step: &str,
+        direction: Direction,
     ) -> Result<Self, RepositoryError> {
+        let (step, reverse) = match direction {
+            Direction::Undo => ("undo", "Redo"),
+            Direction::Redo => ("redo", "Undo"),
+        };
         let reads = runner.deadline().reads();
         let tip = oid(to).ok_or_else(git::malformed)?;
         let mut args = Vec::new();
@@ -315,6 +323,7 @@ impl Switch {
             from_name: shown(from),
             args,
             created,
+            reverse,
         })
     }
 }
@@ -604,21 +613,30 @@ fn switch(
     }
     let refused = refusal(ran);
     if Stat::of(&repo.index).ok() == index {
-        return Outcome::Failed(refused);
+        // Git refuses for these before it writes any file.
+        if matches!(refused.kind, ErrorKind::Conflict | ErrorKind::LockHeld) {
+            return Outcome::Failed(refused);
+        }
+        return Outcome::Failed(RepositoryError::new(
+            refused.kind,
+            format!(
+                "HEAD did not move. If Git changed some files before it stopped, they show as changes. Discard them to put them back. {}",
+                refused.message
+            ),
+        ));
     }
-    let put_back = put_back(txn, repo, from, planned);
-    Outcome::Failed(match put_back {
+    Outcome::Failed(match put_back(txn, repo, from, planned) {
         Ok(()) => RepositoryError::new(
             refused.kind,
             format!(
-                "{} Git had changed the files first, and L1 Git put them back, so nothing changed.",
+                "HEAD did not move. Git had changed the files first, and L1 Git put them back, so nothing changed. {}",
                 refused.message
             ),
         ),
         Err(error) => RepositoryError::new(
             ErrorKind::GitFailed,
             format!(
-                "Git changed the files to {}'s version but could not move HEAD, so they show as changes, and L1 Git could not put them back: {} {} Check out {} again once the cause is fixed.",
+                "Git changed the files to {}'s version but could not move HEAD, and L1 Git could not put them back, so they show as staged changes: {} {} To put them back, unstage the files that {} changes, then discard them.",
                 planned.to_name, error.message, refused.message, planned.to_name
             ),
         ),
@@ -661,32 +679,31 @@ fn after_trouble(planned: &Switch, ran: Result<Wrote, RepositoryError>) -> Optio
                 output: wrote.stderr().to_owned(),
             },
             format!(
-                "Git checked out {}, but the post-checkout hook failed. Undo puts back {}.",
-                planned.to_name, planned.from_name
+                "Git checked out {}, but the post-checkout hook failed. {} puts back {}.",
+                planned.to_name, planned.reverse, planned.from_name
             ),
         )),
-        Err(error) => Some(RepositoryError::new(
-            error.kind,
-            format!(
-                "Git checked out {}, but it was stopped before it finished. {}",
-                planned.to_name, error.message
-            ),
-        )),
+        Err(error) => {
+            let stopped = if matches!(error.kind, ErrorKind::TimedOut) {
+                "ran past its deadline, so L1 Git stopped it and its hooks. Check for a hook that does not finish."
+            } else {
+                "was stopped before its hooks finished."
+            };
+            Some(RepositoryError::new(
+                error.kind,
+                format!(
+                    "Git checked out {}, but it {stopped} {} puts back {}.",
+                    planned.to_name, planned.reverse, planned.from_name
+                ),
+            ))
+        }
     }
 }
 
 fn refusal(ran: Result<Wrote, RepositoryError>) -> RepositoryError {
     let wrote = match ran {
         Ok(wrote) => wrote,
-        Err(error) => {
-            return RepositoryError::new(
-                error.kind,
-                format!(
-                    "Git stopped before it finished, and HEAD did not move. If Git changed some files first, they show as changes. Discard them to put them back. {}",
-                    error.message
-                ),
-            );
-        }
+        Err(error) => return error,
     };
     let said = wrote.stderr();
     if wrote.code() == Some(1)
@@ -714,12 +731,7 @@ fn refusal(ran: Result<Wrote, RepositoryError>) -> RepositoryError {
             ),
         );
     }
-    RepositoryError::new(
-        ErrorKind::GitFailed,
-        format!(
-            "HEAD did not move. If Git changed some files before it stopped, they show as changes. Discard them to put them back. Git said: {summary}"
-        ),
-    )
+    RepositoryError::new(ErrorKind::GitFailed, format!("Git said: {summary}"))
 }
 
 fn in_the_way(said: &str) -> String {
@@ -868,7 +880,7 @@ pub(super) fn step(
             refuse_unmaking(repo, made, &tip, deadline.reads())?;
         }
         let remake = created.as_ref().filter(|_| direction == Direction::Redo);
-        let planned = Switch::to_recorded(repo, entry, runner, from, to, remake, name)?;
+        let planned = Switch::to_recorded(repo, entry, runner, from, to, remake, direction)?;
         let left = oid(from).ok_or_else(git::malformed)?;
         refuse_absorbing(repo, &left, to, &planned.to_name, deadline.reads())?;
         if matches!(from, Head::Detached { .. }) {
@@ -879,10 +891,14 @@ pub(super) fn step(
                 after: now,
                 trouble: reached,
             } if now == *to => trouble = reached,
-            Outcome::Reached {
-                trouble: reached, ..
-            } => {
-                return Err(reached.unwrap_or_else(|| raced(&planned)));
+            Outcome::Reached { .. } => {
+                return Err(RepositoryError::new(
+                    ErrorKind::Raced,
+                    format!(
+                        "{} moved while Git checked it out, so HEAD is not at the commit this checkout recorded, and L1 Git cannot {name} it exactly. Refresh.",
+                        planned.to_name
+                    ),
+                ));
             }
             Outcome::Failed(error) | Outcome::Unread(error) => return Err(error),
         }
