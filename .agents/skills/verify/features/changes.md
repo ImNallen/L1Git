@@ -34,9 +34,9 @@ Before and after each step, record `git -C <worktree> status --porcelain` and `g
 20. Stage a file and show the box. Run `git commit --allow-empty -m other` in a terminal without focusing the app, then click **Commit**. Confirm the notice starts `Could not commit` and says the staged files changed, the lists reread, and only the terminal's commit changed Git.
 21. Stop the bridge with `kill "$(lsof -ti tcp:<bridge port> -sTCP:LISTEN)"`. From the checkout, start the binary that `pnpm bridge` built with `HOME` set to an empty folder: `HOME=<empty folder> L1GIT_DEV_PORT=<dev port> L1GIT_BRIDGE_PORT=<bridge port> L1GIT_UNDO_DIR=<undo dir> ./target/debug/l1-git-dev-bridge`. `pnpm bridge` cannot run with that `HOME`, because Cargo looks for its toolchain there. Wait for `L1 Git development bridge on` and reload the page. In a clone, run `git config user.useConfigOnly true`, `git config --unset user.name`, and `git config --unset user.email`. Stage a file, type a summary, and click **Commit**. Confirm the box shows the two `git config` commands and nothing changed. Afterwards, stop that bridge and start `pnpm bridge` again as in step 13.
 
-21. Record `git ls-files -s` and copy `README.md` with `cp -p`. Right-click `README.md` under **Unstaged** and choose **Discard changes…**. Confirm the dialog asks `Discard changes to README.md?`, lists `README.md`, and that **Cancel** has focus. Press Escape and confirm focus returns to the row. Open it again and click **Discard changes**. Confirm the worktree row disappears and the only change is ` M README.md` leaving the status. Focus the history and press Cmd+Z. Confirm the notice reads `Undid Discard README.md` and `cmp` finds the file identical to the copy.
-22. Open the dialog again, run `git add README.md` in a terminal, then confirm. Confirm the notice starts `Could not discard README.md.`, says a chosen file changed, and only the terminal's staging changed Git.
-23. In a clone, set up a lossy clean filter, an LFS-style filter, an `eol=crlf` file with LF bytes, a file whose size changes on checkout under `core.autocrlf=input`, an executable bit turned on, a retargeted symlink, and an untracked file. Run this in the clone, with `F` set to an empty folder outside it:
+22. Record `git ls-files -s` and copy `README.md` with `cp -p`. Right-click `README.md` under **Unstaged** and choose **Discard changes…**. Confirm the dialog asks `Discard changes to README.md?`, lists `README.md`, and that **Cancel** has focus. Press Escape and confirm focus returns to the row. Open it again and click **Discard changes**. Confirm the worktree row disappears and the only change is ` M README.md` leaving the status. Focus the history and press Cmd+Z. Confirm the notice reads `Undid Discard README.md` and `cmp` finds the file identical to the copy.
+23. Open the dialog again, run `git add README.md` in a terminal, then confirm. Confirm the notice reads `Could not discard README.md. README.md changed since L1 Git read it. Refresh and try again.` and only the terminal's staging changed Git.
+24. In a clone, set up a lossy clean filter, an LFS-style filter, an `eol=crlf` file with LF bytes, a file whose size changes on checkout under `core.autocrlf=input`, an executable bit turned on, a retargeted symlink, and an untracked file. Run this in the clone, with `F` set to an empty folder outside it:
 
     ```sh
     cat > "$F/fakelfs-clean" <<'EOS'
@@ -62,10 +62,10 @@ Before and after each step, record `git -C <worktree> status --porcelain` and `g
     ```
 
     Copy the seven paths with `cp -pR`. Click **Discard all…** and confirm. Confirm `git status --porcelain` is empty. `r.txt` checks out 4 bytes over an index entry that recorded 6, so a discard that only refreshes stat data leaves it ` M` with an empty diff. Click **Undo**. Confirm `cmp` matches every file, `stat -f %Lp` every mode, and `readlink` the link. Click **Redo** and confirm the status is empty again.
-24. Discard a file, write new text into it in a terminal, then click **Undo**. Confirm the notice says the file was edited since, the file keeps the terminal's text, and nothing else changed.
-25. In a clone, edit twelve files and click **Discard all…**. Confirm the dialog lists ten paths and `and 2 more`.
-26. In a clone, add an untracked nested repository and change a submodule. Confirm neither row offers **Discard changes…** and that **Discard all…** says how many items it leaves.
-27. Open the palette with unstaged files. Confirm **Discard all changes…** shows only when the selected worktree has a file L1 Git can discard, and that it opens the same dialog.
+25. Discard a file, write new text into it in a terminal, then click **Undo**. Confirm the notice names the file and says it changed after the discard, the file keeps the terminal's text, and nothing else changed.
+26. In a clone, edit twelve files and click **Discard all…**. Confirm the dialog lists ten paths and `and 2 more`.
+27. In a clone, add an untracked nested repository and change a submodule. Confirm neither row offers **Discard changes…** and that **Discard all…** says how many items it leaves.
+28. Open the palette with unstaged files. Confirm **Discard all changes…** shows only when the selected worktree has a file L1 Git can discard, and that it opens the same dialog.
 
 ## Gotchas
 
