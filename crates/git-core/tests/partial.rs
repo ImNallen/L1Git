@@ -234,9 +234,10 @@ fn bytes(text: &str) -> Option<Vec<u8>> {
     Some(text.as_bytes().to_vec())
 }
 
-fn refused(result: Result<Applied, RepositoryError>, kind: &ErrorKind) {
+fn refused(result: Result<Applied, RepositoryError>, kind: &ErrorKind) -> String {
     let error = result.expect_err("the write should refuse");
     assert_eq!(&error.kind, kind, "{}", error.message);
+    error.message
 }
 
 fn bare_apply(repo: &Repo, args: &[&str], patch: &[u8]) -> Output {
@@ -501,10 +502,11 @@ fn no_eof_newline_no_guard_git_apply_accepts_context_without_newline_followed_by
 #[test]
 fn no_eof_newline_builder_refuses_picking_the_appended_line_without_its_newline_fix() {
     let repo = appended();
-    let error = repo.stage_lines("f.txt", &[a(4)]).unwrap_err();
-    assert_eq!(error.kind, ErrorKind::UnsupportedPath);
     assert_eq!(
-        error.message,
+        refused(
+            repo.stage_lines("f.txt", &[a(4)]),
+            &ErrorKind::UnsupportedPath
+        ),
         "L1 Git cannot stage only these lines of f.txt, because line 3 of the old file has no newline at its end and a chosen line would follow it. Include the change to that line, or stage the whole file."
     );
     assert_eq!(repo.index_blob("f.txt"), bytes("a\nb\nc"));
@@ -542,15 +544,13 @@ fn blank_context() -> Repo {
 #[test]
 fn a_hunk_past_the_last_names_how_many_hunks_there_are() {
     let repo = appended();
-    let error = repo.stage_hunk("f.txt", 1).unwrap_err();
-    assert_eq!(error.kind, ErrorKind::UnchangedPath);
     assert_eq!(
-        error.message,
+        refused(repo.stage_hunk("f.txt", 1), &ErrorKind::UnchangedPath),
         "The diff of f.txt has 1 hunk, so it has no hunk 1, counting from 0."
     );
     let repo = middle_stage();
     assert_eq!(
-        repo.stage_hunk("f.txt", 3).unwrap_err().message,
+        refused(repo.stage_hunk("f.txt", 3), &ErrorKind::UnchangedPath),
         "The diff of f.txt has 3 hunks, so it has no hunk 3, counting from 0."
     );
 }
