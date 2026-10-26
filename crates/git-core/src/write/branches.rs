@@ -480,12 +480,7 @@ pub(super) fn create(
             ),
         ));
     }
-    let upstream = match at {
-        Start::Remote { reference, .. } if tracks(writing.repo, name, reference, reads)? => {
-            Some(format!("--set-upstream-to={}", reference.as_str()))
-        }
-        Start::Commit { .. } | Start::Local { .. } | Start::Remote { .. } => None,
-    };
+    let upstream = Upstream::of(writing.repo, name, at, reads)?;
     let reflog = format!("branch: Created from {}", at.name());
     record_around(writing, vec![before], None, |txn| {
         let mut moves = vec![Move {
@@ -495,30 +490,174 @@ pub(super) fn create(
         }];
         moves.extend(at.verified());
         refs::transact(txn, &moves, &reflog).map_err(as_branch_changed)?;
-        if let Some(upstream) = &upstream {
-            txn.branch(&[upstream, "--", name])
-                .run(txn.runner().deadline())?;
-        }
-        Ok(())
+        upstream
+            .as_ref()
+            .map_or(Ok(()), |upstream| upstream.set(txn, name))
     })
 }
 
-fn tracks(
-    repo: &Repo,
-    name: &str,
-    start: &RemoteRef,
-    reads: Deadline,
-) -> Result<bool, RepositoryError> {
-    let ran = git::run(
-        &repo.root,
-        &["config", "--get", "branch.autoSetupMerge"],
-        reads,
-    )?;
-    Ok(match git::line(&ran.stdout).to_lowercase().as_str() {
-        "false" | "no" | "off" | "0" | "inherit" => false,
-        "simple" => start.as_str().ends_with(&format!("/{name}")),
-        _ => true,
-    })
+enum Track {
+    Never,
+    Remote,
+    Always,
+    Inherit,
+    Simple,
+}
+
+/// The upstream `git branch` gives a new branch. Git's `setup_tracking`
+/// picks it from `branch.autoSetupMerge` and `branch.autoSetupRebase`.
+struct Upstream {
+    remote: String,
+    merges: Vec<String>,
+    rebase: bool,
+}
+
+impl Upstream {
+    fn of(
+        repo: &Repo,
+        name: &str,
+        at: &Start,
+        reads: Deadline,
+    ) -> Result<Option<Self>, RepositoryError> {
+        let Some(start) = at.reference() else {
+            return Ok(None);
+        };
+        let config = config(repo, &[], reads)?;
+        let last = |key: &str| values(&config, key).last().copied();
+        let track = match last("branch.autosetupmerge") {
+            None => Track::Remote,
+            Some("always") => Track::Always,
+            Some("inherit") => Track::Inherit,
+            Some("simple") => Track::Simple,
+            Some(_) => {
+                let read = ["config", "--type=bool", "--get", "branch.autoSetupMerge"];
+                match git::line(&git::read(&repo.root, &read, reads)?).as_str() {
+                    "false" => Track::Never,
+                    _ => Track::Remote,
+                }
+            }
+        };
+        let upstream = |remote: Option<&str>, merges: Vec<String>| Self {
+            remote: remote.unwrap_or(".").to_owned(),
+            rebase: match last("branch.autosetuprebase") {
+                Some("always") => true,
+                Some("local") => remote.is_none(),
+                Some("remote") => remote.is_some(),
+                _ => false,
+            },
+            merges,
+        };
+        let shown = short(start);
+        let tracked = match (track, at) {
+            (Track::Never, _) => None,
+            (Track::Inherit, Start::Local { .. }) => {
+                let merges: Vec<_> = values(&config, &format!("branch.{shown}.merge"))
+                    .into_iter()
+                    .map(str::to_owned)
+                    .collect();
+                last(&format!("branch.{shown}.remote"))
+                    .filter(|_| !merges.is_empty())
+                    .map(|remote| upstream(Some(remote), merges))
+            }
+            (Track::Inherit, _) => None,
+            (track, _) => match fetched_into(&config, start)[..] {
+                [] => (matches!(track, Track::Always) && matches!(at, Start::Local { .. }))
+                    .then(|| upstream(None, vec![start.to_owned()])),
+                [(remote, ref source)] => (!matches!(track, Track::Simple)
+                    || *source == format!("refs/heads/{name}"))
+                .then(|| upstream(Some(remote), vec![source.clone()])),
+                _ => {
+                    return Err(RepositoryError::new(
+                        ErrorKind::InvalidRef,
+                        format!(
+                            "More than one remote's fetch refspec maps to {shown}, so Git would not set the new branch's upstream. Give each remote its own refs/remotes/ folder, then try again."
+                        ),
+                    ));
+                }
+            },
+        };
+        if let Some(upstream) = &tracked
+            && upstream.rebase
+            && upstream.merges.len() > 1
+        {
+            return Err(RepositoryError::new(
+                ErrorKind::InvalidRef,
+                format!(
+                    "{shown} has more than one upstream, and Git does not give a new branch more than one when branch.autoSetupRebase asks it to rebase. Start the branch from a commit instead."
+                ),
+            ));
+        }
+        Ok(tracked)
+    }
+
+    fn set(&self, txn: &RefTxn<'_>, name: &str) -> Result<(), RepositoryError> {
+        let runner = txn.runner();
+        let deadline = runner.deadline();
+        let what = "set the branch's upstream";
+        let key = |field: &str| format!("branch.{name}.{field}");
+        let run = |args: &[&str]| {
+            let mut all = vec!["config", "--local"];
+            all.extend(args);
+            runner.git(&all).run(deadline)
+        };
+        finished(&run(&["--", &key("remote"), &self.remote])?, what)?;
+        run(&["--unset-all", "--", &key("merge")])?;
+        for merge in &self.merges {
+            finished(&run(&["--add", "--", &key("merge"), merge])?, what)?;
+        }
+        if self.rebase {
+            finished(&run(&["--", &key("rebase"), "true"])?, what)?;
+        }
+        Ok(())
+    }
+}
+
+/// Each remote whose fetch refspecs map `reference`, with the ref on the
+/// remote it maps from, the first per remote, as Git's
+/// `remote_find_tracking` reads them.
+fn fetched_into<'c>(config: &'c [(String, String)], reference: &str) -> Vec<(&'c str, String)> {
+    let mut found: Vec<(&str, String)> = Vec::new();
+    for (key, value) in config {
+        let Some(remote) = key
+            .strip_prefix("remote.")
+            .and_then(|key| key.strip_suffix(".fetch"))
+        else {
+            continue;
+        };
+        let Some((source, destination)) = value.strip_prefix('+').unwrap_or(value).split_once(':')
+        else {
+            continue;
+        };
+        let mapped = match (source.split_once('*'), destination.split_once('*')) {
+            (Some((head, tail)), Some((prefix, suffix))) => reference
+                .strip_prefix(prefix)
+                .and_then(|rest| rest.strip_suffix(suffix))
+                .map(|matched| format!("{head}{matched}{tail}")),
+            (None, None) => (destination == reference).then(|| source.to_owned()),
+            _ => None,
+        };
+        if let Some(mapped) = mapped
+            && found.iter().all(|(seen, _)| *seen != remote)
+        {
+            found.push((remote, mapped));
+        }
+    }
+    found
+}
+
+fn values<'c>(config: &'c [(String, String)], key: &str) -> Vec<&'c str> {
+    config
+        .iter()
+        .filter(|(name, _)| name == key)
+        .map(|(_, value)| value.as_str())
+        .collect()
+}
+
+fn short(reference: &str) -> &str {
+    reference
+        .strip_prefix("refs/heads/")
+        .or_else(|| reference.strip_prefix("refs/remotes/"))
+        .unwrap_or(reference)
 }
 
 pub(super) fn rename(

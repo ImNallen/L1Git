@@ -130,7 +130,7 @@ function NameBranchDialog({
         <h1 id={titleId}>{creating ? "New branch" : `Rename ${ask.name}`}</h1>
         <p>
           {ask.kind === "create"
-            ? `The branch starts at ${ask.from}${ask.at.kind === "remote" ? `, and Git sets ${ask.from} as its upstream` : ""}.`
+            ? `The branch starts at ${ask.from}${ask.at.kind === "commit" ? "" : ", and Git sets its upstream as git branch would"}.`
             : "Git renames the branch, moves its settings, and updates every worktree that has it checked out. You can undo this."}
         </p>
         <label htmlFor={`${titleId}-name`}>Branch name</label>
