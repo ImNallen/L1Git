@@ -556,6 +556,16 @@ fn a_hunk_past_the_last_names_how_many_hunks_there_are() {
 }
 
 #[test]
+fn suppress_blank_empty_patches_keep_the_space_before_a_blank_context_line() {
+    let repo = blank_context();
+    let unstaged = repo.shown("f.txt", Side::Unstaged);
+    assert!(unstaged.contains("+A\n \n-b\n"), "{unstaged}");
+    repo.git(&["add", "f.txt"]);
+    let staged = repo.shown("f.txt", Side::Staged);
+    assert!(staged.contains("+A\n \n-b\n"), "{staged}");
+}
+
+#[test]
 fn suppress_blank_empty_stage_lines_keeps_the_empty_context_line() {
     let repo = blank_context();
     repo.stage_lines("f.txt", &[d(1), a(1)]).unwrap();
