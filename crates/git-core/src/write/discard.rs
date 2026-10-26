@@ -166,7 +166,7 @@ fn target(entry: &StatusEntry) -> Result<Target<'_>, RepositoryError> {
     }
 }
 
-pub(super) fn added_with_intent(path: &str) -> RepositoryError {
+fn added_with_intent(path: &str) -> RepositoryError {
     unsupported(format!(
         "{path} was added with git add -N. Unstage it first, then discard it."
     ))
@@ -325,7 +325,7 @@ pub(super) fn discard_part(
     let prepared = part.read(&txn)?;
     let scratch = Scratch::new(&txn)?;
     let checkout = scratch.0.join("checkout");
-    let after = if partial::revert(&txn, &rows, part, &prepared, &checkout)? {
+    let after = if partial::revert(&txn, &rows, part, prepared, &checkout)? {
         if let Some(stat) = &stat {
             set_permissions(&checkout.join(path), stat.mode & 0o7777)
                 .map_err(|error| failed(path, &error))?;

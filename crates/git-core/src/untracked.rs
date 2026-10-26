@@ -149,7 +149,9 @@ fn regular(
     if !hidden && hash(root, &["--no-filters"], shown, deadline)? != oid {
         return Err(changed());
     }
-    let mode = if executable && file_mode(root, deadline)? {
+    // `git diff --no-index` prints the executable bit even where
+    // `core.fileMode` tells `git add` to ignore it.
+    let mode = if executable && git::config_flag(root, "core.fileMode", true, deadline)? {
         "100755"
     } else {
         "100644"
@@ -173,21 +175,6 @@ fn hash(
     Ok(git::line(&git::read_with_input(
         root, &args, content, deadline,
     )?))
-}
-
-/// `git diff --no-index` prints the executable bit even where `core.fileMode`
-/// tells `git add` to ignore it.
-fn file_mode(root: &Path, deadline: Deadline) -> Result<bool, RepositoryError> {
-    let output = git::run(
-        root,
-        &["config", "--type=bool", "--get", "core.fileMode"],
-        deadline,
-    )?;
-    match output.status.code() {
-        Some(0) => Ok(output.stdout != b"false\n"),
-        Some(1) => Ok(true),
-        _ => Err(git::malformed()),
-    }
 }
 
 const NO_NEWLINE: &[u8] = b"\\ No newline at end of file\n";

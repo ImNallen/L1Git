@@ -251,9 +251,6 @@ impl<'o> Part<'o> {
             } => Err(self.cannot(&format!(
                 "Git shows it as a move from {original}, which git add -N started"
             ))),
-            StatusEntry::Ordinary { index: None, .. } if self.action == Action::Discard => {
-                Err(discard::added_with_intent(self.path))
-            }
             StatusEntry::Ordinary { .. }
             | StatusEntry::Renamed { .. }
             | StatusEntry::Unmerged { .. }
@@ -311,7 +308,7 @@ pub(super) fn revert(
     txn: &Txn<'_>,
     rows: &Rows,
     part: &Part<'_>,
-    prepared: &Prepared,
+    prepared: Prepared,
     checkout: &Path,
 ) -> Result<bool, RepositoryError> {
     let scratch = txn.scratch_index("partial")?;
@@ -331,11 +328,11 @@ pub(super) fn revert(
             .succeeded()?;
     }
     for (apply, patch) in [
-        (Apply::Forward, &prepared.fresh),
-        (Apply::Reverse, &prepared.patch),
+        (Apply::Forward, prepared.fresh),
+        (Apply::Reverse, prepared.patch),
     ] {
         txn.git_on(&scratch, apply.args())
-            .input(patch.clone())
+            .input(patch)
             .run(deadline)?
             .succeeded()?;
     }
@@ -1357,25 +1354,6 @@ mod tests {
         ] {
             assert_eq!(kind(part.prepare(fresh)), ErrorKind::UnsupportedPath);
         }
-    }
-
-    #[test]
-    fn refuses_to_discard_part_of_an_intent_to_add_file_but_stages_part_of_one() {
-        let added = StatusEntry::Ordinary {
-            path: "f".to_owned(),
-            submodule: None,
-            sides: Sides::Unstaged {
-                unstaged: ChangeStatus::Added,
-            },
-            index: None,
-        };
-        let discard = Part::new(Action::Discard, "f", Picks::Hunk(0), CREATION).unwrap();
-        assert_eq!(
-            kind(discard.prepare(read(added.clone(), text(CREATION)))),
-            ErrorKind::UnsupportedPath
-        );
-        let stage = Part::new(Action::Stage, "f", Picks::Hunk(0), CREATION).unwrap();
-        assert!(stage.prepare(read(added, text(CREATION))).is_ok());
     }
 
     #[test]

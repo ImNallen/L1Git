@@ -323,6 +323,21 @@ pub(crate) fn run(path: &Path, args: &[&str], deadline: Deadline) -> Result<Exit
     whole(execute(command(path, args), deadline, None, None)?)
 }
 
+/// A boolean config value, or `unset` when no config sets `key`.
+pub(crate) fn config_flag(
+    path: &Path,
+    key: &str,
+    unset: bool,
+    deadline: Deadline,
+) -> Result<bool, RepositoryError> {
+    let output = run(path, &["config", "--type=bool", "--get", key], deadline)?;
+    match output.status.code() {
+        Some(0) => Ok(output.stdout == b"true\n"),
+        Some(1) => Ok(unset),
+        _ => Err(malformed()),
+    }
+}
+
 /// `base()` passes `--no-lazy-fetch`, which Git before 2.45 rejects.
 fn too_old(code: Option<i32>, stderr: &str) -> Option<RepositoryError> {
     (code == Some(129) && stderr.contains("no-lazy-fetch")).then(|| {

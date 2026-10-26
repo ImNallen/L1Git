@@ -458,17 +458,12 @@ fn one_spelling(txn: &Txn<'_>, before: &Rows, path: &str) -> Result<(), Reposito
     let Some(spelled) = folder_spelled_otherwise(before, path) else {
         return Ok(());
     };
-    let config = git::run(
+    if !git::config_flag(
         &txn.repo().root,
-        &["config", "--type=bool", "--get", "core.ignorecase"],
+        "core.ignorecase",
+        false,
         txn.deadline().reads(),
-    )?;
-    let ignores_case = match config.status.code() {
-        Some(0) => config.stdout == b"true\n",
-        Some(1) => false,
-        _ => return Err(git::malformed()),
-    };
-    if !ignores_case {
+    )? {
         return Ok(());
     }
     Err(RepositoryError::new(
