@@ -193,16 +193,19 @@ impl Change {
         }
     }
 
-    /// A discard may have changed files before L1 Git stopped, and its entry
-    /// holds the only copy of what they held, so a pending one is always
-    /// kept, without the copies a stopped placement left beside its paths.
-    fn kept_after_a_stop(&self, applied: &Applied) -> bool {
+    const fn keeps_overwritten_files(&self) -> bool {
+        match self {
+            Self::Discard(_) => true,
+            Self::Index(_) | Self::Ref(_) => false,
+        }
+    }
+
+    fn remove_copies_beside(&self, applied: &Applied) {
         match self {
             Self::Discard(change) => {
-                discard::sweep(Path::new(&applied.root), applied.id, change);
-                true
+                discard::remove_copies_beside(Path::new(&applied.root), applied.id, change);
             }
-            Self::Index(_) | Self::Ref(_) => false,
+            Self::Index(_) | Self::Ref(_) => {}
         }
     }
 

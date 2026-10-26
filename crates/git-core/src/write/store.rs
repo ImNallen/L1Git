@@ -223,7 +223,8 @@ impl LockedStore {
         let Ok((applied, change)) = self.record_of(id) else {
             return Ok(false);
         };
-        if change.kept_after_a_stop(&applied) {
+        if change.keeps_overwritten_files() {
+            change.remove_copies_beside(&applied);
             return Ok(true);
         }
         if applied.root == opened.root() {
@@ -404,11 +405,10 @@ impl Recorded<'_> {
         Ok(())
     }
 
-    /// Confirms the write with `change`, which names only what the write
-    /// reached. If `change` cannot be saved, the first record stays.
-    pub(super) fn confirm_as(self, change: &Change) {
-        let _ = self.store.write(self.id, "change.json", change);
+    pub(super) fn confirm_as(self, change: &Change) -> Result<(), RepositoryError> {
+        let saved = self.store.write(self.id, "change.json", change);
         self.confirm();
+        saved
     }
 
     /// Marks the write done once the index holds it. If the log cannot be
@@ -663,8 +663,6 @@ fn lines(oids: &[Oid]) -> Vec<u8> {
         .collect()
 }
 
-/// Discarded files can hold secrets, so every folder of the history is
-/// private, even inside an undo folder that others can read.
 pub(super) fn private_folder() -> fs::DirBuilder {
     let mut builder = fs::DirBuilder::new();
     #[cfg(unix)]

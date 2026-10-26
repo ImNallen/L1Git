@@ -190,12 +190,7 @@ fn targets(entries: &[StatusEntry]) -> Result<Vec<Target<'_>>, RepositoryError> 
 /// limit.
 const PATHS_PER_READ: usize = 1000;
 
-/// Each entry must be one that Git reports now, with the same index object
-/// and the same deleted-or-present side, so a request cannot name a file
-/// that changed, or one that Git ignores or hides from status. Status shows
-/// a deleted intent-to-add file with the empty blob, so the index's flags
-/// catch that one.
-fn listed(
+fn reported_now(
     root: &Path,
     targets: &[Target<'_>],
     deadline: WriteDeadline,
@@ -203,7 +198,7 @@ fn listed(
     for chunk in targets.chunks(PATHS_PER_READ) {
         let paths: Vec<&str> = chunk.iter().map(|target| target.path).collect();
         let (fresh, _) =
-            status::entries_of(root, status::Untracked::All, &paths, deadline.reads())?;
+            status::entries_of(root, status::Untracked::All, Some(&paths), deadline.reads())?;
         let now: BTreeMap<&str, Target<'_>> = fresh
             .iter()
             .filter_map(|entry| target(entry).ok())
@@ -253,6 +248,8 @@ pub(super) fn discard(
     let paths: Vec<&str> = targets.iter().map(|target| target.path).collect();
     let rows = index::read(&txn)?;
     let stats = guard(&txn, &paths)?;
+    // Status shows a deleted intent-to-add file with the empty blob, so only
+    // the index's flags catch that one.
     if let Some(target) = targets.iter().find(|target| {
         index::at(&rows, target.path)
             .iter()
@@ -260,7 +257,7 @@ pub(super) fn discard(
     }) {
         return Err(added_with_intent(target.path));
     }
-    listed(&repo.root, &targets, deadline)?;
+    reported_now(&repo.root, &targets, deadline)?;
     let scratch = Scratch::new(&txn)?;
     let tracked: Vec<&str> = targets
         .iter()
@@ -309,7 +306,7 @@ pub(super) fn discard(
         .iter()
         .zip(&stats)
         .try_for_each(|(discarded, stat)| {
-            turn(&discarded.path);
+            before_placing(&discarded.path);
             unchanged(&repo.root, &discarded.path, stat)?;
             place(
                 &repo.root,
@@ -405,7 +402,7 @@ fn place_step(
 ) -> Result<(), RepositoryError> {
     let root = &txn.repo().root;
     let files = entry.files();
-    sweep(root, entry.id(), change);
+    remove_copies_beside(root, entry.id(), change);
     let paths: Vec<&str> = change.paths.iter().map(|path| path.path.as_str()).collect();
     let stats = guard(txn, &paths)?;
     let mut pending = Vec::new();
@@ -443,7 +440,7 @@ fn place_step(
         .iter()
         .zip(&prepared)
         .try_for_each(|((discarded, to, stat), temporary)| {
-            turn(&discarded.path);
+            before_placing(&discarded.path);
             unchanged(root, &discarded.path, stat)?;
             place(root, entry.id(), &discarded.path, to, temporary)
         })
@@ -454,14 +451,12 @@ type Hook = Box<dyn FnMut(&str)>;
 
 #[cfg(test)]
 thread_local! {
-    static TURN: std::cell::RefCell<Option<Hook>> = const { std::cell::RefCell::new(None) };
+    static BEFORE_PLACING: std::cell::RefCell<Option<Hook>> = const { std::cell::RefCell::new(None) };
 }
 
-/// Runs right before a discard, undo, or redo turns to `path`, so a test can
-/// write to it as an editor would while earlier paths change.
 #[cfg(test)]
-fn turn(path: &str) {
-    TURN.with_borrow_mut(|hook| {
+fn before_placing(path: &str) {
+    BEFORE_PLACING.with_borrow_mut(|hook| {
         if let Some(hook) = hook {
             hook(path);
         }
@@ -469,7 +464,7 @@ fn turn(path: &str) {
 }
 
 #[cfg(not(test))]
-const fn turn(_path: &str) {}
+const fn before_placing(_path: &str) {}
 
 struct Scratch(PathBuf);
 
@@ -496,8 +491,7 @@ fn guard(txn: &Txn<'_>, paths: &[&str]) -> Result<Vec<Option<Stat>>, RepositoryE
 
 /// A case-insensitive disk opens a tracked file through any spelling of its
 /// name, whatever `core.ignorecase` says, so a chosen path can be another
-/// name for a tracked file. Git's case-insensitive pathspecs list the
-/// candidates, and the file system decides by identity.
+/// name for a tracked file.
 fn no_other_names(
     txn: &Txn<'_>,
     paths: &[&str],
@@ -620,8 +614,6 @@ fn capture(
     captured.map_err(|error| failed(path, &error))
 }
 
-/// The copy is the user's only remaining copy of the bytes, so it is created
-/// readable by its owner alone, whatever the file's own permissions were.
 fn copy_private(from: &Path, to: &Path) -> io::Result<()> {
     let mut options = fs::OpenOptions::new();
     options.write(true).create_new(true);
@@ -699,7 +691,7 @@ fn place(
             .map_or(Ok(()), fs::create_dir_all)
             .and_then(|()| match fs::rename(prepared, &file) {
                 Err(error) if error.kind() == io::ErrorKind::CrossesDevices => {
-                    rename_across(prepared, &file, &beside(id, &file))
+                    rename_across(prepared, &file, &copy_beside(id, &file))
                 }
                 other => other,
             }),
@@ -722,18 +714,15 @@ fn rename_across(prepared: &Path, file: &Path, beside: &Path) -> io::Result<()> 
     renamed
 }
 
-/// The copy a placement across file systems makes beside `file`. It is named
-/// for the entry, so a stop between the copy and the rename leaves a file
-/// that the entry's next settle, undo, or redo can prove is its own.
-fn beside(id: EntryId, file: &Path) -> PathBuf {
+fn copy_beside(id: EntryId, file: &Path) -> PathBuf {
     let mut name = std::ffi::OsString::from(format!(".l1git-{id}-"));
     name.push(file.file_name().unwrap_or_default());
     file.with_file_name(name)
 }
 
-pub(super) fn sweep(root: &Path, id: EntryId, change: &DiscardChange) {
+pub(super) fn remove_copies_beside(root: &Path, id: EntryId, change: &DiscardChange) {
     for discarded in &change.paths {
-        let _ = fs::remove_file(beside(id, &root.join(&discarded.path)));
+        let _ = fs::remove_file(copy_beside(id, &root.join(&discarded.path)));
     }
 }
 
@@ -937,7 +926,7 @@ mod tests {
 
     fn editing<T>(file: PathBuf, editor: Editor, run: impl FnOnce() -> T) -> T {
         let name = file.file_name().unwrap().to_string_lossy().into_owned();
-        TURN.set(Some(Box::new(move |path| {
+        BEFORE_PLACING.set(Some(Box::new(move |path| {
             if path == name {
                 match editor {
                     Editor::InPlace => fs::write(&file, "editor\n").unwrap(),
@@ -950,7 +939,7 @@ mod tests {
             }
         })));
         let result = run();
-        TURN.set(None);
+        BEFORE_PLACING.set(None);
         result
     }
 

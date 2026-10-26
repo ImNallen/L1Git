@@ -42,15 +42,13 @@ pub(crate) fn entries(
     untracked: Untracked,
     deadline: Deadline,
 ) -> Result<(Vec<StatusEntry>, StagedStamp), RepositoryError> {
-    entries_of(root, untracked, &[], deadline)
+    entries_of(root, untracked, None, deadline)
 }
 
-/// The status of `paths` alone, or of the whole worktree when `paths` is
-/// empty.
 pub(crate) fn entries_of(
     root: &Path,
     untracked: Untracked,
-    paths: &[&str],
+    only: Option<&[&str]>,
     deadline: Deadline,
 ) -> Result<(Vec<StatusEntry>, StagedStamp), RepositoryError> {
     let mut args = vec![
@@ -64,7 +62,7 @@ pub(crate) fn entries_of(
             Untracked::No => "--untracked-files=no",
         },
     ];
-    if !paths.is_empty() {
+    if let Some(paths) = only {
         args.push("--");
         args.extend(paths);
     }
