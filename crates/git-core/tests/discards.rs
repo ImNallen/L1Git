@@ -669,6 +669,69 @@ fn refuses_an_untracked_name_that_is_a_tracked_file_on_a_case_insensitive_disk()
 }
 
 #[test]
+fn a_discard_and_its_undo_and_redo_leave_every_index_flag_when_git_ignores_stat() {
+    let repo = Repo::new(&[("f", "one\n"), ("g", "one\n")]);
+    repo.git(&["config", "core.ignoreStat", "true"]);
+    repo.put("f", "two\n");
+    let flags = repo.git(&["ls-files", "-v"]);
+    assert_eq!(flags, "H f\nH g\n");
+    let edited = (repo.disk(), repo.status());
+    assert_eq!(edited.1, " M f\n");
+
+    let applied = repo.discard(&["f"]).unwrap();
+    let discarded = (repo.disk(), repo.status());
+    assert_eq!(
+        (repo.git(&["ls-files", "-v"]), discarded.1.as_str()),
+        (flags.clone(), "")
+    );
+    repo.coordinator().undo(repo.path(), applied.id).unwrap();
+    assert_eq!(
+        (repo.git(&["ls-files", "-v"]), (repo.disk(), repo.status())),
+        (flags.clone(), edited)
+    );
+    repo.coordinator().redo(repo.path(), applied.id).unwrap();
+    assert_eq!(
+        (repo.git(&["ls-files", "-v"]), (repo.disk(), repo.status())),
+        (flags, discarded)
+    );
+    repo.put("f", "three\n");
+    assert_eq!(
+        repo.status(),
+        " M f\n",
+        "an edit after the redo still shows"
+    );
+}
+
+#[test]
+fn a_discard_and_its_undo_and_redo_keep_assume_unchanged_bits() {
+    let repo = Repo::new(&[("f", "one\n"), ("marked", "one\n")]);
+    repo.git(&["update-index", "--assume-unchanged", "marked"]);
+    repo.put("f", "two\n");
+    let applied = repo.discard(&["f"]).unwrap();
+    assert_eq!(repo.git(&["ls-files", "-v"]), "H f\nh marked\n");
+
+    repo.git(&["update-index", "--assume-unchanged", "f"]);
+    repo.coordinator().undo(repo.path(), applied.id).unwrap();
+    assert_eq!(
+        (
+            repo.git(&["ls-files", "-v"]),
+            fs::read_to_string(repo.root.join("f")).unwrap()
+        ),
+        ("h f\nh marked\n".to_owned(), "two\n".to_owned())
+    );
+    repo.coordinator().redo(repo.path(), applied.id).unwrap();
+    assert_eq!(
+        (
+            repo.git(&["ls-files", "-v"]),
+            fs::read_to_string(repo.root.join("f")).unwrap()
+        ),
+        ("h f\nh marked\n".to_owned(), "one\n".to_owned())
+    );
+    repo.git(&["update-index", "--no-assume-unchanged", "f", "marked"]);
+    assert_eq!(repo.status(), "");
+}
+
+#[test]
 fn runs_post_index_change_once_saying_the_worktree_changed() {
     let repo = Repo::new(&[("f", "one\n")]);
     let hooks = repo.directory.path().join("hooks");
