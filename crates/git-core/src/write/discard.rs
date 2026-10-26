@@ -253,12 +253,7 @@ pub(super) fn discard(
 ) -> Result<(Applied, Option<Published>), RepositoryError> {
     let targets = targets(entries)?;
     let txn = Txn::begin(repo, deadline)?;
-    if repo.head(deadline)? != expect.head {
-        return Err(RepositoryError::stale(
-            StaleReason::HeadMoved,
-            "HEAD moved since L1 Git read this worktree. Refresh and try again.",
-        ));
-    }
+    repo.head_as_seen(expect, deadline)?;
     let paths: Vec<&str> = targets.iter().map(|target| target.path).collect();
     let rows = index::read(&txn)?;
     let stats = guard(&repo.root, &rows, &paths)?;
@@ -280,9 +275,7 @@ pub(super) fn discard(
         .collect();
     let checkout = scratch.0.join("checkout");
     if !tracked.is_empty() {
-        let mut prefix = checkout.clone().into_os_string();
-        prefix.push("/");
-        let prefix = format!("--prefix={}", prefix.to_string_lossy());
+        let prefix = checkout_prefix(&checkout);
         txn.git(&["checkout-index", &prefix, "-f", "-z", "--stdin"])
             .lazy_fetch_unprompted()
             .input(index::nul_separated(tracked.iter().copied()))
@@ -318,12 +311,7 @@ pub(super) fn discard_part(
 ) -> Result<(Applied, Option<Published>), RepositoryError> {
     let path = part.path();
     let txn = Txn::begin(repo, deadline)?;
-    if repo.head(deadline)? != expect.head {
-        return Err(RepositoryError::stale(
-            StaleReason::HeadMoved,
-            "HEAD moved since L1 Git read this worktree. Refresh and try again.",
-        ));
-    }
+    repo.head_as_seen(expect, deadline)?;
     let rows = index::read(&txn)?;
     let [stat]: [Option<Stat>; 1] = guard(&repo.root, &rows, &[path])?
         .try_into()
@@ -355,6 +343,13 @@ pub(super) fn discard_part(
         &checkout,
         &[Landing { path, stat, after }],
     )
+}
+
+/// `checkout-index` writes each path below `checkout`.
+pub(super) fn checkout_prefix(checkout: &Path) -> String {
+    let mut prefix = checkout.as_os_str().to_owned();
+    prefix.push("/");
+    format!("--prefix={}", prefix.to_string_lossy())
 }
 
 /// What a discarded path holds afterward.

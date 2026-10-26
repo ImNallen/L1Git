@@ -12,7 +12,7 @@ mod store;
 mod txn;
 
 use crate::{
-    Coordinator, ErrorKind, Head, RepositoryError, StagedStamp, StatusEntry,
+    Coordinator, ErrorKind, Head, RepositoryError, StagedStamp, StaleReason, StatusEntry,
     git::{self, Deadline, LocalRead, LocalWrite, WriteDeadline},
     repository,
 };
@@ -417,6 +417,22 @@ impl Repo {
 
     fn head(&self, deadline: WriteDeadline) -> Result<Head, RepositoryError> {
         repository::head(&self.root, deadline.reads())
+    }
+
+    /// HEAD, unless it moved since the view the request was made from.
+    fn head_as_seen(
+        &self,
+        expect: &Expect,
+        deadline: WriteDeadline,
+    ) -> Result<Head, RepositoryError> {
+        let head = self.head(deadline)?;
+        if head != expect.head {
+            return Err(RepositoryError::stale(
+                StaleReason::HeadMoved,
+                "HEAD moved since L1 Git read this worktree. Refresh and try again.",
+            ));
+        }
+        Ok(head)
     }
 
     fn worktree(&self, root: &str, deadline: Deadline) -> Result<Self, RepositoryError> {

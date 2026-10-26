@@ -262,11 +262,10 @@ impl<'o> Part<'o> {
     }
 
     fn cannot(&self, because: &str) -> RepositoryError {
-        let verb = self.action.verb();
         unsupported(format!(
-            "L1 Git cannot {verb} part of {}, because {because}. {} the whole file instead.",
-            self.path,
-            capitalized(verb)
+            "L1 Git can only {} all of {}, because {because}.",
+            self.action.verb(),
+            self.path
         ))
     }
 
@@ -350,9 +349,7 @@ pub(super) fn revert(
     if listed.is_empty() {
         return Ok(false);
     }
-    let mut prefix = checkout.as_os_str().to_owned();
-    prefix.push("/");
-    let prefix = format!("--prefix={}", prefix.to_string_lossy());
+    let prefix = discard::checkout_prefix(checkout);
     txn.git_on(
         &scratch,
         &["checkout-index", &prefix, "-f", "-z", "--stdin"],
@@ -372,14 +369,6 @@ fn changed() -> RepositoryError {
 
 fn unsupported(message: String) -> RepositoryError {
     RepositoryError::new(ErrorKind::UnsupportedPath, message)
-}
-
-fn capitalized(verb: &str) -> String {
-    let mut letters = verb.chars();
-    letters
-        .next()
-        .map(|first| first.to_ascii_uppercase().to_string() + letters.as_str())
-        .unwrap_or_default()
 }
 
 /// Keeps the picked lines of `patch` and turns the rest into context or
