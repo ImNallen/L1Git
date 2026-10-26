@@ -153,7 +153,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   const [adding, setAdding] = useState(false);
   const [editingMessage, setEditingMessage] = useState(false);
   const [headOf, setHeadOf] = useState<RepositoryRoot | null>(null);
-  const [committed, setCommitted] = useState(0);
+  const [lostFocusChecks, checkLostFocus] = useState(0);
   const [palette, setPalette] = useState<{ picked: Oid | null } | null>(null);
   const paletteReturn = useRef<Element | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -682,10 +682,9 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       app.select({ kind: "commit", oid: reread.head.oid });
     setHeadOf(null);
   }, [headOf, reread, app.select]);
-  // A commit that cleans the worktree removes the box that held focus.
   useEffect(() => {
-    if (committed > 0 && !shownElement(focusedElement())) focusFallback();
-  }, [committed]);
+    if (lostFocusChecks > 0 && !shownElement(focusedElement())) focusFallback();
+  }, [lostFocusChecks]);
   useEffect(() => {
     if (pendingStash === null) return;
     if (app.activeRoot !== pendingStash.root) setPendingStash(null);
@@ -1084,7 +1083,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                       write: writeFiles,
                       commit: async (worktree, write) => {
                         const outcome = await writes.write(worktree, write);
-                        setCommitted((count) => count + 1);
+                        checkLostFocus((count) => count + 1);
                         return outcome;
                       },
                     }}

@@ -530,7 +530,7 @@ impl Stderr {
         let (sender, receiver) = mpsc::channel();
         if let Some(mut pipe) = pipe {
             thread::spawn(move || {
-                let _ = sender.send(tail(&mut pipe, STDERR_CAP));
+                let _ = sender.send(last_whole_lines(&mut pipe, STDERR_CAP));
             });
         }
         Self(receiver)
@@ -543,9 +543,7 @@ impl Stderr {
     }
 }
 
-/// Git and hooks print their errors last, so a long stderr keeps its last
-/// `cap` bytes from the first whole line.
-fn tail(pipe: &mut impl Read, cap: usize) -> Vec<u8> {
+fn last_whole_lines(pipe: &mut impl Read, cap: usize) -> Vec<u8> {
     let mut kept = Vec::new();
     let mut chunk = [0; 8192];
     let mut cut = false;

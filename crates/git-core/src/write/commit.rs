@@ -61,9 +61,11 @@ impl Target {
         })
     }
 
-    /// Where the ref L1 Git checked before the commit points now. A detached
-    /// HEAD that another process attached to a branch points nowhere.
-    fn oid(&self, repo: &Repo, deadline: WriteDeadline) -> Result<Option<Oid>, RepositoryError> {
+    fn current(
+        &self,
+        repo: &Repo,
+        deadline: WriteDeadline,
+    ) -> Result<Option<Oid>, RepositoryError> {
         match self {
             Self::Branch(reference) => resolve(repo, deadline, reference),
             Self::Detached => Ok(match repo.head(deadline)? {
@@ -157,7 +159,7 @@ pub(super) fn commit(
         }
     };
     let (applied, recorded) = store.record_intent(repo, log, operation)?;
-    let trace = Trace::create(store.trace_file())?;
+    let trace = Trace::create(store)?;
     let wrote = txn
         .commit(kind.flags(), message)
         .trace2_event(&trace.0)
@@ -175,7 +177,7 @@ pub(super) fn commit(
     })?;
     let target = Target::of(&head);
     let Some(made) = target
-        .oid(repo, deadline)?
+        .current(repo, deadline)?
         .filter(|now| now.as_str().starts_with(&printed))
     else {
         return Err(elsewhere(&printed, &target));
@@ -443,9 +445,6 @@ fn refused(wrote: &Wrote, trace: &Trace) -> RepositoryError {
     )
 }
 
-/// `GIT_TRACE2_EVENT`'s file, in the repository's undo store. Only the
-/// holder of the store's lock writes it, so a file already there was left by
-/// a run that crashed.
 struct Trace(PathBuf);
 
 #[derive(Deserialize)]
@@ -472,7 +471,8 @@ fn stops_commit(name: &str, argv: &[String]) -> bool {
 }
 
 impl Trace {
-    fn create(path: PathBuf) -> Result<Self, RepositoryError> {
+    fn create(store: &LockedStore) -> Result<Self, RepositoryError> {
+        let path = store.trace_file();
         let unprepared = |error: io::Error| {
             RepositoryError::new(
                 ErrorKind::GitFailed,

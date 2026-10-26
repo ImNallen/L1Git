@@ -196,7 +196,6 @@ export function CommitBox({
   );
 }
 
-/** What Git printed when a hook or a missing identity stopped a commit. */
 export function commitOutput(problem: Problem) {
   const output = "output" in problem ? problem.output : "";
   if (problem.kind === "hookFailed")

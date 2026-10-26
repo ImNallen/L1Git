@@ -43,8 +43,8 @@ export function identityCommands(output: string): string[] {
 export type MessageField = "summary" | "description";
 
 /**
- * Only Cmd or Ctrl+Enter submits. A plain Enter in the one-line summary
- * would submit its form, so it is suppressed there.
+ * A plain Enter in a one-line input submits its form, so the summary
+ * suppresses it.
  */
 export function enterAction(
   key: {
