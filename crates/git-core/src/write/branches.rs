@@ -45,21 +45,20 @@ impl Start {
         }
     }
 
-    fn name(&self) -> &str {
+    fn reference(&self) -> Option<&str> {
         match self {
-            Self::Commit { oid } => oid.as_str(),
-            Self::Local { reference, .. } => reference.as_str(),
-            Self::Remote { reference, .. } => reference.as_str(),
+            Self::Commit { .. } => None,
+            Self::Local { reference, .. } => Some(reference.as_str()),
+            Self::Remote { reference, .. } => Some(reference.as_str()),
         }
     }
 
+    fn name(&self) -> &str {
+        self.reference().unwrap_or(self.oid().as_str())
+    }
+
     fn verified(&self) -> Option<Move> {
-        let reference = match self {
-            Self::Commit { .. } => return None,
-            Self::Local { reference, .. } => reference.as_str(),
-            Self::Remote { reference, .. } => reference.as_str(),
-        };
-        Some(Move {
+        self.reference().map(|reference| Move {
             name: reference.to_owned(),
             old: Some(self.oid().clone()),
             new: Some(self.oid().clone()),
@@ -67,9 +66,6 @@ impl Start {
     }
 }
 
-/// One branch name as Git holds it: its tip, its config section, and the
-/// worktrees whose HEAD names it. Undo and redo guard the tip and the
-/// worktrees, and put the config back.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct Slot {
@@ -79,7 +75,6 @@ pub(super) struct Slot {
     heads: Vec<String>,
 }
 
-/// One `branch.<name>.<key>` entry. Git reads a key with no value as true.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct Setting {
@@ -87,9 +82,6 @@ pub(super) struct Setting {
     value: String,
 }
 
-/// The branch names a write touched, before it and after it. One slot for a
-/// create or delete, the old and the new name for a rename. `after` is
-/// missing only while the write runs.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct BranchChange {
@@ -130,20 +122,21 @@ impl<'a> Transition<'a> {
     }
 }
 
+struct WorktreeHead {
+    root: String,
+    branch: Option<String>,
+}
+
 struct Listed {
     reference: String,
     oid: String,
     symref: String,
 }
 
-/// Every local branch, the repository's config, and every worktree's HEAD,
-/// read in three Git commands.
 struct Listing {
     branches: Vec<Listed>,
     config: Vec<(String, String)>,
-    /// Each worktree's root as Git prints it, and the branch its HEAD names.
-    /// Prunable and locked worktrees count, as they do for `git branch -d`.
-    worktrees: Vec<(String, Option<String>)>,
+    worktrees: Vec<WorktreeHead>,
 }
 
 impl Listing {
@@ -178,6 +171,7 @@ impl Listing {
                 let text = git::text(record);
                 match text.split_once('\n') {
                     Some((key, value)) => (key.to_owned(), value.to_owned()),
+                    // Git reads a config key with no value as true.
                     None => (text, "true".to_owned()),
                 }
             })
@@ -198,7 +192,10 @@ impl Listing {
                     .iter()
                     .find_map(|field| field.strip_prefix(b"branch "))
                     .map(git::text);
-                Some((git::text(root), branch))
+                Some(WorktreeHead {
+                    root: git::text(root),
+                    branch,
+                })
             })
             .collect();
         Ok(Self {
@@ -238,8 +235,8 @@ impl Listing {
             heads: self
                 .worktrees
                 .iter()
-                .filter(|(_, head)| head.as_deref() == Some(branch.as_str()))
-                .map(|(root, _)| root.clone())
+                .filter(|head| head.branch.as_deref() == Some(branch.as_str()))
+                .map(|head| head.root.clone())
                 .collect(),
         })
     }
@@ -248,8 +245,6 @@ impl Listing {
         slots.iter().map(|slot| self.slot(&slot.branch)).collect()
     }
 
-    /// `update-ref` follows a symbolic ref, so a delete or rename of one
-    /// would change the branch it points at.
     fn refuse_symbolic(&self, branch: &BranchRef) -> Result<(), RepositoryError> {
         match self.listed(branch) {
             Some(listed) if !listed.symref.is_empty() => Err(RepositoryError::new(
@@ -270,9 +265,6 @@ impl Listing {
             .any(|(key, value)| key == "core.ignorecase" && value.eq_ignore_ascii_case("true"))
     }
 
-    /// Refuses a new name that another branch already holds, or that Git
-    /// could not store beside one, as a file beside a folder of the same
-    /// name, or in another case on a disk that ignores case.
     fn refuse_clash(
         &self,
         target: &BranchRef,
@@ -315,8 +307,6 @@ impl Listing {
         Ok(())
     }
 
-    /// Git refuses to delete a branch that a worktree has checked out, or is
-    /// rebasing or bisecting.
     fn refuse_in_use(&self, repo: &Repo, slot: &Slot) -> Result<(), RepositoryError> {
         let name = slot.branch.name();
         if let Some(root) = slot.heads.first() {
@@ -329,7 +319,7 @@ impl Listing {
         }
         if let Some(gitdir) = operation_on(repo, &slot.branch) {
             let root = if gitdir == repo.common_dir {
-                self.worktrees.first().map(|(root, _)| root.clone())
+                self.worktrees.first().map(|head| head.root.clone())
             } else {
                 fs::read_to_string(gitdir.join("gitdir")).ok().map(|file| {
                     Path::new(file.trim_end())
@@ -365,7 +355,6 @@ fn operation_on(repo: &Repo, branch: &BranchRef) -> Option<PathBuf> {
     })
 }
 
-/// The context every branch write shares.
 pub(super) struct Writing<'a> {
     pub(super) repo: &'a Repo,
     pub(super) store: &'a LockedStore,
@@ -383,8 +372,6 @@ fn invalid_name(name: &str) -> RepositoryError {
     )
 }
 
-/// Checks a new name with `git check-ref-format --branch` and answers Git's
-/// reason when it refuses.
 fn new_name(repo: &Repo, name: &str, reads: Deadline) -> Result<BranchRef, RepositoryError> {
     if name.contains('\0') || name.starts_with("refs/") {
         return Err(invalid_name(name));
@@ -463,7 +450,7 @@ pub(super) fn create(
         Start::Commit { .. } | Start::Local { .. } | Start::Remote { .. } => None,
     };
     let reflog = format!("branch: Created from {}", at.name());
-    apply(writing, vec![before], None, |txn| {
+    record_around(writing, vec![before], None, |txn| {
         let mut moves = vec![Move {
             name: branch.as_str().to_owned(),
             old: None,
@@ -479,8 +466,6 @@ pub(super) fn create(
     })
 }
 
-/// Whether `git branch` would set a remote start as the new branch's
-/// upstream under `branch.autoSetupMerge`.
 fn tracks(
     repo: &Repo,
     name: &str,
@@ -547,7 +532,7 @@ pub(super) fn rename(
         ));
     }
     let names = [tip.reference.name(), target.name()];
-    apply(writing, vec![source, left], None, |txn| {
+    record_around(writing, vec![source, left], None, |txn| {
         run_rename(txn, names[0], names[1])
     })
 }
@@ -588,7 +573,7 @@ pub(super) fn delete(writing: &Writing<'_>, tip: &BranchTip) -> Result<Applied, 
     }
     listing.refuse_in_use(writing.repo, &before)?;
     let config = before.config.clone();
-    apply(writing, vec![before], Some(tip), |txn| {
+    record_around(writing, vec![before], Some(tip), |txn| {
         run_delete(txn, tip)?;
         set_config(txn, &tip.reference, &config, &[])
     })
@@ -603,10 +588,7 @@ fn run_delete(txn: &RefTxn<'_>, tip: &BranchTip) -> Result<(), RepositoryError> 
     refs::transact(txn, &[delete], "branch: Deleted by L1 Git").map_err(as_branch_changed)
 }
 
-/// Records the slots before the write, runs it, then records the slots Git
-/// left, whether or not Git finished. A write that stops after Git changed
-/// something keeps its entry, so Undo puts back what Git did.
-fn apply(
+fn record_around(
     writing: &Writing<'_>,
     before: Vec<Slot>,
     packed: Option<&BranchTip>,
@@ -651,8 +633,6 @@ fn apply(
     acted.map(|()| applied)
 }
 
-/// Puts a branch's config section back to `wanted`, entry by entry, in
-/// order.
 fn set_config(
     txn: &RefTxn<'_>,
     branch: &BranchRef,
@@ -686,8 +666,6 @@ fn set_config(
     Ok(())
 }
 
-/// Undoes or redoes a branch write. A step that stopped after Git moved the
-/// ref finds the ref already moved and finishes the config.
 pub(super) fn step(
     repo: &Repo,
     entry: &EntryObjects,
@@ -701,7 +679,7 @@ pub(super) fn step(
         Direction::Redo => (change.before.as_slice(), after),
     };
     let listing = Listing::read(repo, deadline.reads())?;
-    let current = listing.slots_like(from)?;
+    let mut current = listing.slots_like(from)?;
     let txn = RefTxn::begin(repo, deadline)?;
     if guarded(&current) != guarded(to) {
         if guarded(&current) != guarded(from) {
@@ -751,16 +729,14 @@ pub(super) fn step(
                 run_rename(&txn, old.name(), new.name())?;
             }
         }
+        current = Listing::read(repo, deadline.renewed().reads())?.slots_like(to)?;
     }
-    let now = Listing::read(repo, deadline.renewed().reads())?.slots_like(to)?;
-    for (now, wanted) in now.iter().zip(to) {
+    for (now, wanted) in current.iter().zip(to) {
         set_config(&txn, &wanted.branch, &now.config, &wanted.config)?;
     }
     Ok(())
 }
 
-/// What a write that stopped before it was marked done left, or `None` if it
-/// changed nothing.
 pub(super) fn landed(
     repo: &Repo,
     change: &BranchChange,

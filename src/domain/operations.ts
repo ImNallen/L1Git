@@ -120,13 +120,11 @@ export function partWrite(
 export const movesRefs = (operation: Operation) =>
   "message" in operation || isBranchOperation(operation);
 
-/** A branch write the user asked for, before its dialog sends it. */
 export type BranchAsk =
   | { kind: "create"; at: Start; from: string }
   | { kind: "rename"; branch: BranchTip; name: string }
   | { kind: "delete"; branch: BranchTip; name: string };
 
-/** The branch writes a sidebar branch offers: any branch can start one, only a local branch can be renamed or deleted. */
 export function branchAsks(branch: Branch): {
   create: BranchAsk;
   rename: BranchAsk | null;
@@ -155,7 +153,6 @@ export function branchAsks(branch: Branch): {
   };
 }
 
-/** Branch writes guard the tips they name, not HEAD, which the core ignores. */
 export const isBranchOperation = (
   operation: Operation,
 ): operation is BranchOperation =>
@@ -171,7 +168,6 @@ export const branchWrite = (operation: BranchOperation, head: Head): Write => ({
 const branchName = (branch: BranchTip) =>
   branch.reference.replace(/^refs\/heads\//, "");
 
-/** Says which of HEAD and the upstream a branch's tip is not in. */
 export function notMergedInto(
   name: string,
   merged: BranchMerged,

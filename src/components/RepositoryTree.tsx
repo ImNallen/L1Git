@@ -54,10 +54,9 @@ type Props = {
   onRule: (root: RepositoryRoot, rule: VisibilityRule) => void;
   onRemove: (root: RepositoryRoot) => void;
   onAdd: () => void;
-  /** The open repository, the only one whose branches can change, and the worktree each checked-out branch is in. */
   writable: {
     root: RepositoryRoot;
-    checkedOut: ReadonlyMap<FullRef, string>;
+    checkedOutIn: ReadonlyMap<FullRef, string>;
   } | null;
   onBranchAsk: (ask: BranchAsk) => void;
 };
@@ -175,7 +174,7 @@ export function RepositoryTree({
       writable?.root === root
         ? null
         : "Open this repository to change its branches.";
-    const checkedOutIn = writable?.checkedOut.get(branch.reference);
+    const checkedOutIn = writable?.checkedOutIn.get(branch.reference);
     const write = (
       Icon: typeof Plus,
       label: string,

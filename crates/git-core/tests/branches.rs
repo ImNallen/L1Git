@@ -62,8 +62,6 @@ struct Repo {
 }
 
 impl Repo {
-    /// `main` holds `base`, and `topic` adds three commits that only it
-    /// reaches.
     fn new() -> Self {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().canonicalize().unwrap().join("repo");
@@ -154,8 +152,6 @@ impl Repo {
         self.coordinator.redo(self.path(), applied.id)
     }
 
-    /// Refs, every worktree's HEAD, and branch config: what a branch write
-    /// may change.
     fn state(&self) -> String {
         let config = self
             .git(&["config", "--local", "--list"])
@@ -174,10 +170,16 @@ impl Repo {
         .join("\n")
     }
 
-    /// Leaves only what refs reach, as a user's `gc` eventually does.
     fn prune(&self) {
         self.git(&["reflog", "expire", "--expire=now", "--all"]);
         self.git(&["gc", "--quiet", "--prune=now"]);
+    }
+}
+
+impl Repo {
+    fn fetch_prunes(&self, state: &str, reference: &str) -> String {
+        self.git(&["update-ref", "-d", reference]);
+        without(state, reference)
     }
 }
 
@@ -185,8 +187,6 @@ fn kind(result: Result<Applied, RepositoryError>) -> ErrorKind {
     result.unwrap_err().kind
 }
 
-/// Undoes then redoes `applied`, pruning the repository before each step,
-/// and checks each step lands exactly on the state before or after it.
 fn round_trip(repo: &Repo, before: &str, applied: &Applied) {
     let after = repo.state();
     repo.prune();
@@ -380,10 +380,7 @@ fn deletes_merged_and_unmerged_branches_and_undo_brings_back_every_commit() {
             .status
             .success()
     );
-    // The remote ref protected the commits at the delete; a pruning fetch
-    // drops it before the undo.
-    repo.git(&["update-ref", "-d", "refs/remotes/origin/topic"]);
-    let before = without(&before, "refs/remotes/origin/topic");
+    let before = repo.fetch_prunes(&before, "refs/remotes/origin/topic");
     repo.prune();
     assert!(
         !git_output(&repo.root, &["cat-file", "-e", tip.as_str()])

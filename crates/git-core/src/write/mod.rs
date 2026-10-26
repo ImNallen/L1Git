@@ -266,9 +266,6 @@ impl Change {
         }
     }
 
-    /// Branches belong to the whole repository, so their undo runs in
-    /// whichever worktree is open, even after the one the write ran in is
-    /// removed.
     const fn repository_wide(&self) -> bool {
         match self {
             Self::Branch(_) => true,
@@ -352,17 +349,15 @@ impl Operation {
             let (applied, published) = txn.commit_write(store, log, self, &change)?;
             Ok((applied, Some(published)))
         };
+        let writing = branches::Writing {
+            repo,
+            store,
+            log,
+            deadline,
+            operation: self,
+        };
         let branch =
-            |write: &dyn Fn(&branches::Writing<'_>) -> Result<Applied, RepositoryError>| {
-                write(&branches::Writing {
-                    repo,
-                    store,
-                    log,
-                    deadline,
-                    operation: self,
-                })
-                .map(|applied| (applied, None))
-            };
+            |written: Result<Applied, RepositoryError>| written.map(|applied| (applied, None));
         let commit = |kind, message| {
             commit::commit(repo, store, log, deadline, expect, self, kind, message)
                 .map(|applied| (applied, None))
@@ -404,13 +399,9 @@ impl Operation {
             Self::DiscardLines { path, lines, shown } => {
                 discard_part(path, Picks::Lines(lines), shown)
             }
-            Self::CreateBranch { name, at } => {
-                branch(&|writing| branches::create(writing, name, at))
-            }
-            Self::RenameBranch { branch: tip, to } => {
-                branch(&|writing| branches::rename(writing, tip, to))
-            }
-            Self::DeleteBranch { branch: tip } => branch(&|writing| branches::delete(writing, tip)),
+            Self::CreateBranch { name, at } => branch(branches::create(&writing, name, at)),
+            Self::RenameBranch { branch: tip, to } => branch(branches::rename(&writing, tip, to)),
+            Self::DeleteBranch { branch: tip } => branch(branches::delete(&writing, tip)),
         }
     }
 }

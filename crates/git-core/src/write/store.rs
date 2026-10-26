@@ -224,8 +224,6 @@ impl LockedStore {
         }
     }
 
-    /// The record to keep for a write that stopped before it was marked
-    /// done, or `None` if it never reached the repository.
     fn landed(
         &self,
         id: EntryId,
@@ -421,8 +419,6 @@ impl Recorded<'_> {
         self.store.write_file(self.id, "change.json", change)
     }
 
-    /// Leaves the write pending with its objects, for the next locked
-    /// request to settle from what the repository holds.
     pub(super) fn stay_pending(mut self) {
         self.entry.kept = true;
     }
@@ -607,9 +603,8 @@ impl EntryObjects {
         if tips.is_empty() {
             return Ok(());
         }
-        let pack = self.objects.join("pack");
-        fs::create_dir_all(&pack).map_err(unwritable)?;
-        let base = pack.join("pack").to_string_lossy().into_owned();
+        fs::create_dir_all(self.objects.join("pack")).map_err(unwritable)?;
+        let base = pack_base(&self.objects);
         runner
             .git(&["pack-objects", "--revs", "-q", &base])
             .object_directory(&self.objects)
@@ -632,13 +627,7 @@ impl EntryObjects {
         if missing.is_empty() {
             return Ok(());
         }
-        let base = runner
-            .repo()
-            .objects
-            .join("pack")
-            .join("pack")
-            .to_string_lossy()
-            .into_owned();
+        let base = pack_base(&runner.repo().objects);
         runner
             .git(&["pack-objects", "--revs", "-q", &base])
             .alternate_object_directory(&self.objects)
@@ -647,12 +636,7 @@ impl EntryObjects {
             .succeeded()?;
         Ok(())
     }
-}
 
-impl EntryObjects {
-    /// Packs the objects `tip` reaches that no other local branch or tag
-    /// does. Remote-tracking refs and HEADs do not count, because a fetch
-    /// with `--prune` or a checkout can drop them before the undo.
     pub(super) fn keep_branch(
         &self,
         runner: &impl Runner,
@@ -672,8 +656,8 @@ impl EntryObjects {
                 tip.as_str(),
                 "--not",
                 &exclude,
-                "--branches",
-                "--tags",
+                LASTING_REFS[0],
+                LASTING_REFS[1],
             ])
             .uncapped()
             .run(runner.deadline())?
@@ -681,9 +665,8 @@ impl EntryObjects {
         if listed.is_empty() {
             return Ok(());
         }
-        let pack = self.objects.join("pack");
-        fs::create_dir_all(&pack).map_err(unwritable)?;
-        let base = pack.join("pack").to_string_lossy().into_owned();
+        fs::create_dir_all(self.objects.join("pack")).map_err(unwritable)?;
+        let base = pack_base(&self.objects);
         runner
             .git(&["pack-objects", "-q", &base])
             .object_directory(&self.objects)
@@ -694,8 +677,6 @@ impl EntryObjects {
         Ok(())
     }
 
-    /// Copies back the objects `tip` reaches that the repository lacks, from
-    /// this entry's store, before a ref names `tip` again.
     pub(super) fn bring_back_branch(
         &self,
         runner: &impl Runner,
@@ -731,13 +712,7 @@ impl EntryObjects {
         if lacking.is_empty() {
             return Ok(());
         }
-        let base = runner
-            .repo()
-            .objects
-            .join("pack")
-            .join("pack")
-            .to_string_lossy()
-            .into_owned();
+        let base = pack_base(&runner.repo().objects);
         runner
             .git(&["pack-objects", "-q", &base])
             .alternate_object_directory(&self.objects)
@@ -746,6 +721,19 @@ impl EntryObjects {
             .succeeded()?;
         Ok(())
     }
+}
+
+/// The refs whose objects a branch's undo entry need not keep. A fetch with
+/// `--prune` drops remote-tracking refs, and a checkout moves HEAD.
+const LASTING_REFS: [&str; 2] = ["--branches", "--tags"];
+
+/// What `pack-objects` names its pack after in an object directory.
+fn pack_base(objects: &Path) -> String {
+    objects
+        .join("pack")
+        .join("pack")
+        .to_string_lossy()
+        .into_owned()
 }
 
 fn missing(

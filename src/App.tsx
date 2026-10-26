@@ -856,7 +856,9 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
               });
             }}
             onAdd={commands.addRepository}
-            writable={snapshot && { root: snapshot.root, checkedOut }}
+            writable={
+              snapshot && { root: snapshot.root, checkedOutIn: checkedOut }
+            }
             onBranchAsk={setBranchAsk}
           />
         </div>
@@ -1252,7 +1254,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
             if (!shownElement(focusedElement())) focusFallback();
             return outcome;
           }}
-          onNamed={(branch) => jumpTo(snapshot.root, branch)}
+          onNamedBranch={(branch) => jumpTo(snapshot.root, branch)}
           onClose={() => {
             setBranchAsk(null);
             requestAnimationFrame(() => {

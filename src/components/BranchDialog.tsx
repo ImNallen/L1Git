@@ -26,8 +26,7 @@ type Props = {
   root: RepositoryRoot;
   head: Head;
   onWrite: (write: Write) => Promise<Outcome>;
-  /** The branch a create or rename left, so the app can show it. */
-  onNamed: (branch: Branch) => void;
+  onNamedBranch: (branch: Branch) => void;
   onClose: () => void;
 };
 
@@ -43,7 +42,7 @@ function NameBranchDialog({
   ask,
   head,
   onWrite,
-  onNamed,
+  onNamedBranch,
   onClose,
 }: Props & { ask: Exclude<BranchAsk, { kind: "delete" }> }) {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -87,7 +86,7 @@ function NameBranchDialog({
       return;
     }
     close();
-    onNamed({
+    onNamedBranch({
       kind: "local",
       reference: `refs/heads/${name}` as FullRef,
       name,

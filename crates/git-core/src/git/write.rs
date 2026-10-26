@@ -210,8 +210,6 @@ impl<'a> Write<'a> {
         }
     }
 
-    /// Runs `git branch` as the user, so `reference-transaction` hooks run
-    /// and Git writes its own reflog messages.
     pub(crate) fn branch(txn: &'a RefTxn<'_>, args: &[&'a str]) -> Self {
         let mut all = vec!["branch"];
         all.extend(args);
