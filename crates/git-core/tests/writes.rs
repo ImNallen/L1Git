@@ -142,6 +142,29 @@ impl Repo {
             .filter(|name| name == "index.lock" || name.starts_with("l1git-"))
             .collect()
     }
+
+    fn shared_indexes(&self) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(self.root.join(".git"))
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.starts_with("sharedindex."))
+            .collect();
+        names.sort();
+        names
+    }
+
+    fn split(files: &[(&str, &str)], expiry: Option<&str>) -> Self {
+        let repo = Self::committed(files);
+        repo.git(&["config", "core.splitIndex", "true"]);
+        if let Some(expiry) = expiry {
+            repo.git(&["config", "splitIndex.sharedIndexExpire", expiry]);
+        }
+        repo.put("staged", "staged with Git\n");
+        repo.git(&["add", "staged"]);
+        assert_eq!(repo.shared_indexes().len(), 1);
+        repo
+    }
 }
 
 fn entries(repo: &Repo, paths: &[&str]) -> (Vec<StatusEntry>, Expect) {
@@ -507,6 +530,22 @@ fn undoes_intent_to_add_even_after_its_file_is_gone() {
 }
 
 #[test]
+fn an_undo_puts_back_the_assume_unchanged_bit_that_unstaging_dropped() {
+    let repo = Repo::committed(&[("f", "one\n"), ("g", "one\n")]);
+    let coordinator = repo.coordinator();
+    repo.put("f", "two\n");
+    repo.git(&["add", "f"]);
+    repo.git(&["update-index", "--assume-unchanged", "f", "g"]);
+    round_trip(&coordinator, &repo, || {
+        unstage(&coordinator, &repo, &["f"]).unwrap()
+    });
+    assert_eq!(repo.git(&["ls-files", "-v"]), "H f\nh g\n");
+    let applied = coordinator.undo_history(repo.path()).unwrap().undo.unwrap();
+    coordinator.undo(repo.path(), applied.id).unwrap();
+    assert_eq!(repo.git(&["ls-files", "-v"]), "h f\nh g\n");
+}
+
+#[test]
 fn stages_a_file_a_folder_replaced_only_with_the_paths_git_also_changes() {
     let repo = Repo::committed(&[("a", "file\n"), ("d/x", "tracked\n")]);
     let coordinator = repo.coordinator();
@@ -612,6 +651,63 @@ fn refuses_to_stage_a_deleted_file_that_is_now_a_folder_of_unchosen_files() {
     );
     assert_eq!(repo.index(), untouched);
     assert_eq!(repo.status(), [" D z", "?? z/x"]);
+}
+
+#[test]
+fn a_refused_write_leaves_a_split_index_readable_and_a_written_one_round_trips() {
+    for expiry in [Some("now"), None] {
+        let repo = Repo::split(&[("z", "file\n"), ("f", "one\n")], expiry);
+        let coordinator = repo.coordinator();
+        fs::remove_file(repo.root.join("z")).unwrap();
+        repo.put("z/x", "not chosen\n");
+        let (untouched, shared) = (repo.index(), repo.shared_indexes());
+        assert_eq!(
+            kind(stage(&coordinator, &repo, &["z"])),
+            not_chosen(&["z/x"]),
+            "{expiry:?}"
+        );
+        assert_eq!(repo.index(), untouched, "{expiry:?}");
+        assert_eq!(repo.shared_indexes(), shared, "{expiry:?}");
+
+        repo.put("f", "two\n");
+        round_trip(&coordinator, &repo, || {
+            stage(&coordinator, &repo, &["f"]).unwrap()
+        });
+        assert_eq!(
+            repo.status(),
+            ["M  f", "A  staged", " D z", "?? z/x"],
+            "{expiry:?}"
+        );
+        repo.git(&["add", "z", "z/x"]);
+        assert_eq!(
+            repo.status(),
+            ["M  f", "A  staged", "D  z", "A  z/x"],
+            "{expiry:?}"
+        );
+    }
+}
+
+#[test]
+fn a_refused_undo_leaves_a_split_index_readable() {
+    for expiry in [Some("now"), None] {
+        let repo = Repo::split(&[("f", "one\n")], expiry);
+        let coordinator = repo.coordinator();
+        repo.put("n", "new\n");
+        repo.git(&["add", "n"]);
+        let unstaged = unstage(&coordinator, &repo, &["n"]).unwrap();
+        fs::remove_file(repo.root.join("n")).unwrap();
+        repo.put("n/x", "staged with Git\n");
+        repo.git(&["add", "n/x"]);
+        let (staged, shared) = (repo.index(), repo.shared_indexes());
+        assert_eq!(
+            kind(coordinator.undo(repo.path(), unstaged.id)),
+            PATH_CHANGED,
+            "{expiry:?}"
+        );
+        assert_eq!(repo.index(), staged, "{expiry:?}");
+        assert_eq!(repo.shared_indexes(), shared, "{expiry:?}");
+        assert_eq!(repo.status(), ["A  n/x", "A  staged"], "{expiry:?}");
+    }
 }
 
 #[test]
@@ -754,6 +850,73 @@ fn stages_a_name_holding_the_replacement_character_and_refuses_one_that_is_not_u
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn refuses_either_of_two_names_that_read_the_same_when_one_is_not_utf8() {
+    use std::{ffi::OsStr, io::Write, os::unix::ffi::OsStrExt};
+    let repo = Repo::committed(&[("f", "one\n")]);
+    let coordinator = repo.coordinator();
+    let blob = repo.git(&["hash-object", "-w", "f"]);
+    let mut info = Vec::new();
+    for name in [&b"caf\xff"[..], "caf\u{FFFD}".as_bytes()] {
+        info.extend(format!("100644 {}\t", blob.trim()).bytes());
+        info.extend(name);
+        info.push(0);
+    }
+    let mut child = git_command(&repo.root, &["update-index", "-z", "--index-info"])
+        .stdin(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(&info).unwrap();
+    assert!(child.wait().unwrap().success());
+    let mut twins = vec![(false, "caf\u{FFFD}")];
+    for (bytes, name) in [
+        (&b"ok\xffname.txt"[..], "ok\u{FFFD}name.txt"),
+        (b"dir\xff/a.txt", "dir\u{FFFD}/a.txt"),
+    ] {
+        let file = repo.root.join(OsStr::from_bytes(bytes));
+        if fs::create_dir_all(file.parent().unwrap())
+            .and_then(|()| fs::write(file, "not UTF-8\n"))
+            .is_ok()
+        {
+            repo.put(name, "valid UTF-8\n");
+            twins.push((true, name));
+        }
+    }
+    let indexed = repo.index();
+    let status = worktree_status(repo.path()).unwrap();
+    for (staging, name) in twins {
+        let entries: Vec<StatusEntry> = status
+            .entries
+            .iter()
+            .filter(|entry| entry_path(entry) == name)
+            .cloned()
+            .collect();
+        assert_eq!(entries.len(), 2, "{name}");
+        for entry in entries {
+            let entries = vec![entry];
+            let operation = if staging {
+                Operation::StageFiles { entries }
+            } else {
+                Operation::UnstageFiles { entries }
+            };
+            let expect = Expect {
+                head: status.head.clone(),
+            };
+            let refused = coordinator
+                .write(repo.path(), &operation, &expect)
+                .unwrap_err();
+            assert_eq!(
+                refused.kind,
+                ErrorKind::UnsupportedPath,
+                "{name}: {}",
+                refused.message
+            );
+            assert_eq!(repo.index(), indexed, "{name}");
+        }
+    }
+}
+
 #[test]
 fn refuses_to_stage_a_name_that_git_would_spell_in_another_case() {
     let repo = Repo::committed(&[("Dir/a", "one\n")]);
@@ -782,6 +945,32 @@ fn refuses_to_stage_a_name_that_git_would_spell_in_another_case() {
     round_trip(&coordinator, &repo, || {
         stage(&coordinator, &repo, &["Dir/a"]).unwrap()
     });
+}
+
+#[test]
+fn an_undo_that_git_would_put_back_in_another_case_names_both_spellings() {
+    let repo = Repo::committed(&[("k", "k\n")]);
+    let coordinator = repo.coordinator();
+    repo.git(&["config", "core.ignorecase", "true"]);
+    repo.put("dir/b", "b\n");
+    repo.git(&["add", "--intent-to-add", "dir/b"]);
+    let staged = stage(&coordinator, &repo, &["dir/b"]).unwrap();
+    let blob = repo.git(&["rev-parse", "HEAD:k"]);
+    repo.git(&[
+        "update-index",
+        "--add",
+        "--cacheinfo",
+        &format!("100644,{},Dir/z", blob.trim()),
+    ]);
+    let indexed = repo.index();
+    let refused = coordinator.undo(repo.path(), staged.id).unwrap_err();
+    assert_eq!(refused.kind, PATH_CHANGED, "{}", refused.message);
+    assert!(
+        refused.message.contains("dir/b") && refused.message.contains("Dir/b"),
+        "{}",
+        refused.message
+    );
+    assert_eq!(repo.index(), indexed);
 }
 
 #[test]

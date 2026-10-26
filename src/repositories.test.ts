@@ -120,6 +120,22 @@ describe("bridge transport", () => {
     });
   });
 
+  it("rejects a staleView that carries a field its reason does not define", async () => {
+    const { commitDetail } = await load(false);
+    for (const error of [
+      { reason: "pathChanged", paths: ["f"] },
+      { reason: "pathNotChosen", paths: ["f"], path: "f" },
+    ]) {
+      reply(200, {
+        ok: false,
+        error: { kind: "staleView", message: "Refresh.", ...error },
+      });
+      await expect(
+        commitDetail(root, singleCommit(oid)),
+      ).rejects.toHaveProperty("issues");
+    }
+  });
+
   it("names the bridge's reason for a 400", async () => {
     const { commitDetail } = await load(false);
     reply(400, { error: "missing field `comparison`" });
