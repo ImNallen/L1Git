@@ -131,21 +131,26 @@ function Patch({
   }
   const [firstAction] = parts?.actions ?? [];
   const gutterLabel = firstAction && lineLabels[firstAction];
-  useEffect(function nameTheGutterPlus() {
-    if (!gutterLabel) return;
-    for (const host of scroll.current?.querySelectorAll(DIFFS_TAG_NAME) ?? [])
-      host.shadowRoot
-        ?.querySelector(GUTTER_PLUS)
-        ?.setAttribute("aria-label", gutterLabel);
-  });
+  const range = parts?.range;
+  useEffect(
+    function nameTheGutterPlus() {
+      if (!gutterLabel) return;
+      for (const host of scroll.current?.querySelectorAll(DIFFS_TAG_NAME) ?? [])
+        host.shadowRoot
+          ?.querySelector(GUTTER_PLUS)
+          ?.setAttribute("aria-label", gutterLabel);
+    },
+    [gutterLabel, range, options],
+  );
   const pressGutterPlusByKey = (event: MouseEvent) => {
-    const range = latest.current?.range;
+    const chosen = latest.current?.range;
+    if (event.detail !== 0 || !chosen) return;
     const onPlus = event.nativeEvent
       .composedPath()
       .some(
         (target) => target instanceof Element && target.matches(GUTTER_PLUS),
       );
-    if (event.detail === 0 && onPlus && range) gutterFirstAction(range);
+    if (onPlus) gutterFirstAction(chosen);
   };
   useLayoutEffect(
     function refocusTheNextHunkBar() {
