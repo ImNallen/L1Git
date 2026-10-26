@@ -277,6 +277,10 @@ impl LockedStore {
         ))
     }
 
+    pub(super) fn trace_file(&self) -> PathBuf {
+        self.dir.join("trace2.json")
+    }
+
     pub(super) fn record_intent(
         &self,
         repo: &Repo,

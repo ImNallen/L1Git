@@ -10,12 +10,7 @@ use crate::{
     stderr, sync,
 };
 use serde::Deserialize;
-use std::{
-    collections::HashMap,
-    fs, io,
-    path::PathBuf,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::{collections::HashMap, fs, io, path::PathBuf};
 
 #[derive(Clone, Copy)]
 pub(super) enum Kind<'a> {
@@ -169,7 +164,7 @@ pub(super) fn commit(
         }
     };
     let (applied, recorded) = store.record_intent(repo, log, operation)?;
-    let trace = Trace::create()?;
+    let trace = Trace::create(store.trace_file())?;
     let wrote = txn
         .commit(kind.flags(), message)
         .trace2_event(&trace.0)
@@ -461,8 +456,9 @@ fn refused(wrote: &Wrote, trace: &Trace) -> RepositoryError {
     )
 }
 
-/// A private file for `GIT_TRACE2_EVENT`, created here with O_EXCL so
-/// another user cannot point Git's writes elsewhere.
+/// `GIT_TRACE2_EVENT`'s file, in the repository's undo store. Only the
+/// holder of the store's lock writes it, so a file already there was left by
+/// a run that crashed.
 struct Trace(PathBuf);
 
 #[derive(Deserialize)]
@@ -489,22 +485,22 @@ fn stops_commit(name: &str, argv: &[String]) -> bool {
 }
 
 impl Trace {
-    fn create() -> Result<Self, RepositoryError> {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |since| since.as_nanos());
-        let path =
-            std::env::temp_dir().join(format!("l1git-trace2-{}-{nanos}.json", std::process::id()));
-        fs::File::options()
-            .write(true)
-            .create_new(true)
-            .open(&path)
-            .map_err(|error: io::Error| {
-                RepositoryError::new(
-                    ErrorKind::GitFailed,
-                    format!("L1 Git could not prepare the commit, so it made none: {error}"),
-                )
-            })?;
+    fn create(path: PathBuf) -> Result<Self, RepositoryError> {
+        let unprepared = |error: io::Error| {
+            RepositoryError::new(
+                ErrorKind::GitFailed,
+                format!("L1 Git could not prepare the commit, so it made none: {error}"),
+            )
+        };
+        match fs::remove_file(&path) {
+            Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(unprepared(error)),
+            _ => {}
+        }
+        let mut options = fs::File::options();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+        options.open(&path).map_err(unprepared)?;
         Ok(Self(path))
     }
 
