@@ -669,6 +669,88 @@ fn refuses_an_untracked_name_that_is_a_tracked_file_on_a_case_insensitive_disk()
 }
 
 #[test]
+fn refuses_an_untracked_name_that_a_case_insensitive_disk_folds_to_a_tracked_file() {
+    for (tracked, untracked) in [("Ärende.txt", "ärende.txt"), ("Σigma.txt", "σigma.txt")] {
+        for ignorecase in ["true", "false"] {
+            let repo = Repo::new(&[(tracked, "one\n")]);
+            if !repo.root.join(untracked).exists() {
+                return;
+            }
+            repo.git(&["config", "core.ignorecase", ignorecase]);
+            fs::rename(repo.root.join(tracked), repo.root.join(untracked)).unwrap();
+            assert_eq!(repo.unstaged(), [untracked], "{tracked} {ignorecase}");
+            let error = refused(repo.discard(&[untracked]), &ErrorKind::UnsupportedPath);
+            assert!(error.message.contains(tracked), "{}", error.message);
+            assert_eq!(
+                fs::read_to_string(repo.root.join(tracked)).unwrap(),
+                "one\n",
+                "{tracked} {ignorecase}"
+            );
+        }
+    }
+}
+
+#[test]
+fn refuses_an_untracked_name_that_is_a_tracked_file_in_another_unicode_normalization() {
+    let (decomposed, composed) = ("cafe\u{301}.txt", "caf\u{e9}.txt");
+    for (tracked, precompose, untracked) in [
+        (decomposed, "true", composed),
+        (composed, "false", decomposed),
+    ] {
+        let repo = Repo::new(&[]);
+        repo.git(&["config", "core.precomposeunicode", "false"]);
+        repo.put(tracked, "one\n");
+        repo.git(&["add", "--", tracked]);
+        repo.git(&["commit", "--quiet", "-m", "accent"]);
+        if !repo.root.join(untracked).exists() {
+            return;
+        }
+        repo.git(&["config", "core.precomposeunicode", precompose]);
+        fs::rename(repo.root.join(tracked), repo.root.join(untracked)).unwrap();
+        if repo.unstaged() != [untracked] {
+            continue;
+        }
+        let error = refused(repo.discard(&[untracked]), &ErrorKind::UnsupportedPath);
+        assert!(error.message.contains(tracked), "{}", error.message);
+        assert_eq!(
+            fs::read_to_string(repo.root.join(tracked)).unwrap(),
+            "one\n"
+        );
+    }
+}
+
+#[test]
+fn the_next_write_removes_a_copy_that_a_stopped_undo_or_redo_left_beside_a_path() {
+    for stopped in ["undo", "redo"] {
+        let repo = Repo::new(&[("f", "one\n"), ("g", "one\n")]);
+        repo.put("f", "two\n");
+        repo.put("g", "two\n");
+        let coordinator = repo.coordinator();
+        let applied = repo.discard(&["f"]).unwrap();
+        if stopped == "redo" {
+            coordinator.undo(repo.path(), applied.id).unwrap();
+        }
+        let leftover = repo.root.join(format!(".l1git-{}-f", applied.id));
+        fs::write(&leftover, "partial copy\n").unwrap();
+
+        let status = worktree_status(repo.path()).unwrap();
+        let entries = status
+            .entries
+            .into_iter()
+            .filter(|entry| path_of(entry) == "g")
+            .collect();
+        coordinator
+            .write(
+                repo.path(),
+                &Operation::StageFiles { entries },
+                &Expect { head: status.head },
+            )
+            .unwrap();
+        assert!(!leftover.exists(), "a stopped {stopped} left {leftover:?}");
+    }
+}
+
+#[test]
 fn a_discard_and_its_undo_and_redo_leave_every_index_flag_when_git_ignores_stat() {
     let repo = Repo::new(&[("f", "one\n"), ("g", "one\n")]);
     repo.git(&["config", "core.ignoreStat", "true"]);

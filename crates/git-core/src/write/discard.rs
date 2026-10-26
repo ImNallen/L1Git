@@ -853,7 +853,7 @@ mod tests {
     use std::process::Command;
 
     struct Repo {
-        _directory: tempfile::TempDir,
+        directory: tempfile::TempDir,
         root: PathBuf,
         coordinator: Coordinator,
     }
@@ -865,7 +865,7 @@ mod tests {
             fs::create_dir(&root).unwrap();
             let coordinator = Coordinator::new(Limits::default(), directory.path().join("undo"));
             let repo = Self {
-                _directory: directory,
+                directory,
                 root,
                 coordinator,
             };
@@ -915,6 +915,10 @@ mod tests {
             String::from_utf8(output.stdout).unwrap()
         }
 
+        fn undo(&self) -> PathBuf {
+            self.directory.path().join("undo")
+        }
+
         fn request(&self, paths: &[&str]) -> (Operation, Expect) {
             let status = worktree_status(self.path()).unwrap();
             let entries: Vec<StatusEntry> = status
@@ -939,23 +943,46 @@ mod tests {
         Atomic,
     }
 
-    fn editing<T>(file: PathBuf, editor: Editor, run: impl FnOnce() -> T) -> T {
-        let name = file.file_name().unwrap().to_string_lossy().into_owned();
-        BEFORE_PLACING.set(Some(Box::new(move |path| {
-            if path == name {
-                match editor {
-                    Editor::InPlace => fs::write(&file, "editor\n").unwrap(),
-                    Editor::Atomic => {
-                        let saved = file.with_file_name(".editor-save");
-                        fs::write(&saved, "editor\n").unwrap();
-                        fs::rename(&saved, &file).unwrap();
-                    }
-                }
-            }
-        })));
+    fn hooked<T>(hook: impl FnMut(&str) + 'static, run: impl FnOnce() -> T) -> T {
+        BEFORE_PLACING.set(Some(Box::new(hook)));
         let result = run();
         BEFORE_PLACING.set(None);
         result
+    }
+
+    fn editing<T>(file: PathBuf, editor: Editor, run: impl FnOnce() -> T) -> T {
+        let name = file.file_name().unwrap().to_string_lossy().into_owned();
+        hooked(
+            move |path| {
+                if path == name {
+                    match editor {
+                        Editor::InPlace => fs::write(&file, "editor\n").unwrap(),
+                        Editor::Atomic => {
+                            let saved = file.with_file_name(".editor-save");
+                            fs::write(&saved, "editor\n").unwrap();
+                            fs::rename(&saved, &file).unwrap();
+                        }
+                    }
+                }
+            },
+            run,
+        )
+    }
+
+    fn entries(undo: &Path) -> Vec<PathBuf> {
+        fs::read_dir(undo)
+            .unwrap()
+            .filter_map(|store| fs::read_dir(store.unwrap().path().join("entries")).ok())
+            .flatten()
+            .map(|entry| entry.unwrap().path())
+            .collect()
+    }
+
+    fn lock_entries(entries: &[PathBuf], mode: u32) {
+        use std::os::unix::fs::PermissionsExt;
+        for entry in entries {
+            fs::set_permissions(entry, fs::Permissions::from_mode(mode)).unwrap();
+        }
     }
 
     fn stale(error: &RepositoryError) {
@@ -1012,6 +1039,11 @@ mod tests {
             })
             .expect_err("b changed before its turn");
             stale(&error);
+            assert!(
+                error.message.contains("already put back"),
+                "{}",
+                error.message
+            );
             assert_eq!(repo.read("b"), "editor\n", "{editor:?}");
             assert_eq!(repo.read("a"), "two\n", "{editor:?}");
 
@@ -1022,6 +1054,94 @@ mod tests {
             assert!(again.message.starts_with("b changed"), "{}", again.message);
             assert_eq!(repo.read("b"), "editor\n", "{editor:?}");
         }
+    }
+
+    #[test]
+    fn a_discard_that_cannot_record_where_it_stopped_puts_back_what_it_discarded() {
+        let repo = Repo::new(&[("first", "one\n"), ("second", "one\n")]);
+        repo.put("first", "two\n");
+        repo.put("second", "two\n");
+        let (operation, expect) = repo.request(&["first", "second"]);
+        let second = repo.root.join("second");
+        let undo = repo.undo();
+        let locked = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let held = locked.clone();
+        let error = hooked(
+            move |path| {
+                if path == "second" {
+                    fs::write(&second, "editor\n").unwrap();
+                    let entries = entries(&undo);
+                    lock_entries(&entries, 0o500);
+                    held.borrow_mut().extend(entries);
+                }
+            },
+            || repo.coordinator.write(repo.path(), &operation, &expect),
+        )
+        .expect_err("second changed before its turn");
+        lock_entries(&locked.borrow(), 0o700);
+        stale(&error);
+        assert_eq!(repo.read("first"), "two\n", "{}", error.message);
+        assert_eq!(repo.read("second"), "editor\n");
+        let history = repo.coordinator.undo_history(repo.path()).unwrap();
+        assert_eq!((history.undo, history.redo), (None, None));
+    }
+
+    #[test]
+    fn a_discard_that_can_neither_record_where_it_stopped_nor_put_back_names_what_it_kept() {
+        let repo = Repo::new(&[("first", "one\n"), ("second", "one\n")]);
+        repo.put("first", "two\n");
+        repo.put("second", "two\n");
+        let (operation, expect) = repo.request(&["first", "second"]);
+        let (first, second) = (repo.root.join("first"), repo.root.join("second"));
+        let undo = repo.undo();
+        let locked = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let held = locked.clone();
+        let mut turns = 0;
+        let error = hooked(
+            move |path| match path {
+                "second" => {
+                    fs::write(&second, "editor\n").unwrap();
+                    let entries = entries(&undo);
+                    lock_entries(&entries, 0o500);
+                    held.borrow_mut().extend(entries);
+                }
+                "first" => {
+                    turns += 1;
+                    if turns == 2 {
+                        fs::write(&first, "later\n").unwrap();
+                    }
+                }
+                _ => {}
+            },
+            || repo.coordinator.write(repo.path(), &operation, &expect),
+        )
+        .expect_err("second changed before its turn");
+        lock_entries(&locked.borrow(), 0o700);
+        stale(&error);
+        assert_eq!(repo.read("first"), "later\n");
+        assert_eq!(repo.read("second"), "editor\n");
+        let [entry] = &entries(&repo.undo())[..] else {
+            panic!("one entry keeps the discarded bytes");
+        };
+        let files = entry.join("files");
+        assert!(
+            error.message.contains("first") && error.message.contains(&files.display().to_string()),
+            "{}",
+            error.message
+        );
+        assert!(
+            fs::read_dir(&files)
+                .unwrap()
+                .any(|copy| fs::read(copy.unwrap().path()).unwrap() == b"two\n"),
+            "{files:?} keeps what first held"
+        );
+        assert!(
+            repo.coordinator
+                .undo_history(repo.path())
+                .unwrap()
+                .undo
+                .is_some()
+        );
     }
 
     #[test]
