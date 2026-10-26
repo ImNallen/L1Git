@@ -660,6 +660,26 @@ fn redo_refuses_a_branch_made_again_after_undo_whatever_its_tip() {
 }
 
 #[test]
+fn undo_keeps_the_commits_of_a_created_branch_deleted_outside_l1_git() {
+    let repo = Repo::new();
+    let applied = repo.checkout(repo.remote("topic")).unwrap();
+    let tip = repo.oid("refs/heads/topic");
+    let after = repo.state();
+    repo.git(&["switch", "--quiet", "main"]);
+    repo.git(&["branch", "--quiet", "-D", "topic"]);
+    repo.git(&["update-ref", "-d", "refs/remotes/origin/topic"]);
+    repo.undo(&applied).unwrap();
+    repo.prune();
+    assert!(!run_git(&repo.root, &["cat-file", "-e", tip.as_str()]).0);
+    repo.redo(&applied).unwrap();
+    assert_eq!(repo.oid("refs/heads/topic"), tip);
+    assert_eq!(
+        repo.state(),
+        after.replace(&format!("refs/remotes/origin/topic {}\n", tip.as_str()), "")
+    );
+}
+
+#[test]
 fn undo_refuses_when_head_moved_after_the_checkout() {
     let repo = Repo::new();
     let applied = repo.checkout(repo.remote("topic")).unwrap();

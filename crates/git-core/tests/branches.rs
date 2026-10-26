@@ -536,6 +536,30 @@ fn a_step_that_creates_a_branch_refuses_one_made_again_at_the_same_tip() {
 }
 
 #[test]
+fn undo_of_a_create_keeps_the_commits_of_a_branch_deleted_outside_l1_git() {
+    let repo = Repo::new();
+    repo.git(&["switch", "--quiet", "-c", "scratch"]);
+    repo.commit("only on late");
+    let tip = repo.oid("HEAD");
+    repo.git(&["switch", "--quiet", "main"]);
+    repo.git(&["branch", "--quiet", "-D", "scratch"]);
+    let created = repo
+        .create("late", Start::Commit { oid: tip.clone() })
+        .unwrap();
+    repo.git(&["branch", "--quiet", "-D", "late"]);
+    repo.undo(&created).unwrap();
+    repo.prune();
+    assert!(
+        !git_output(&repo.root, &["cat-file", "-e", tip.as_str()])
+            .status
+            .success()
+    );
+    repo.redo(&created).unwrap();
+    assert_eq!(repo.oid("refs/heads/late"), tip);
+    repo.git(&["fsck", "--no-progress", "--connectivity-only"]);
+}
+
+#[test]
 fn refuses_symbolic_branches_and_a_rename_undo_could_not_reverse() {
     let repo = Repo::new();
     repo.git(&["symbolic-ref", "refs/heads/alias", "refs/heads/topic"]);
