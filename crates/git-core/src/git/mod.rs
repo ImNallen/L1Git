@@ -512,7 +512,7 @@ pub(crate) enum Finished {
     TimedOut,
 }
 
-const STDERR_CAP: u64 = 64 * 1024;
+const STDERR_CAP: usize = 64 * 1024;
 const POLL: Duration = Duration::from_millis(10);
 const FIRST_EXIT_POLL: Duration = Duration::from_micros(50);
 const LAST_EXIT_POLL: Duration = Duration::from_millis(1);
@@ -530,10 +530,7 @@ impl Stderr {
         let (sender, receiver) = mpsc::channel();
         if let Some(mut pipe) = pipe {
             thread::spawn(move || {
-                let mut kept = Vec::new();
-                let _ = (&mut pipe).take(STDERR_CAP).read_to_end(&mut kept);
-                let _ = io::copy(&mut pipe, &mut io::sink());
-                let _ = sender.send(kept);
+                let _ = sender.send(tail(&mut pipe, STDERR_CAP));
             });
         }
         Self(receiver)
@@ -544,6 +541,34 @@ impl Stderr {
             .recv_timeout(INHERITED_STDERR_WAIT)
             .unwrap_or_default()
     }
+}
+
+/// Git and hooks print their errors last, so a long stderr keeps its last
+/// `cap` bytes from the first whole line.
+fn tail(pipe: &mut impl Read, cap: usize) -> Vec<u8> {
+    let mut kept = Vec::new();
+    let mut chunk = [0; 8192];
+    let mut cut = false;
+    loop {
+        match pipe.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(read) => kept.extend_from_slice(&chunk[..read]),
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(_) => break,
+        }
+        if kept.len() > 2 * cap {
+            kept.drain(..kept.len() - cap);
+            cut = true;
+        }
+    }
+    if kept.len() > cap {
+        kept.drain(..kept.len() - cap);
+        cut = true;
+    }
+    if cut && let Some(newline) = kept.iter().position(|byte| *byte == b'\n') {
+        kept.drain(..=newline);
+    }
+    kept
 }
 
 pub(crate) fn mutate(
