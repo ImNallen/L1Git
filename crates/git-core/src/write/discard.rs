@@ -487,13 +487,26 @@ fn place_step(
         prepare(to, &files, &temporary).map_err(|error| failed(&discarded.path, &error))?;
         prepared.push(temporary);
     }
+    let mut placed = 0;
     pending
         .iter()
         .zip(&prepared)
         .try_for_each(|((discarded, to, stat), temporary)| {
             before_placing(&discarded.path);
             unchanged(root, &discarded.path, stat)?;
-            place(root, entry.id(), &discarded.path, to, temporary)
+            place(root, entry.id(), &discarded.path, to, temporary)?;
+            placed += 1;
+            Ok(())
+        })
+        .map_err(|error| match (placed, direction) {
+            (0, _) => error,
+            (_, Direction::Undo) => {
+                stopped(error, "The files L1 Git already put back stay put back.")
+            }
+            (_, Direction::Redo) => stopped(
+                error,
+                "The files L1 Git already discarded again stay discarded.",
+            ),
         })
 }
 
