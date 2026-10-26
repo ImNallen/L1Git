@@ -276,12 +276,11 @@ fn raced(kind: Kind<'_>, update: &Update, target: &Target) -> RepositoryError {
 }
 
 fn elsewhere(made: &str, target: &Target) -> RepositoryError {
+    let name = target.name();
     RepositoryError::new(
         ErrorKind::Raced,
         format!(
-            "Git made the commit {made}, but another process moved HEAD or {} while Git committed, so {} does not point at it. L1 Git cannot undo it. Git's reflog names it.",
-            target.name(),
-            target.name(),
+            "Git made the commit {made}, but another process moved HEAD or {name} while Git committed, so {name} does not point at it. L1 Git cannot undo it. Git's reflog names it."
         ),
     )
 }
@@ -397,22 +396,21 @@ struct Event {
 /// `GIT_TRACE_REFS` prints each update of a finished ref transaction as
 /// `<n>: <ref> <old> -> <new> (F=<flags>, T=<type>) "<reflog message>"`.
 fn update_in(line: &str, reference: &str) -> Option<Update> {
-    let words: Vec<&str> = line.split_whitespace().collect();
-    words.windows(6).find_map(|window| {
-        let [index, name, old, "->", new, flags] = window else {
-            return None;
-        };
-        let numbered = index
-            .strip_suffix(':')
-            .is_some_and(|number| !number.is_empty() && number.bytes().all(|b| b.is_ascii_digit()));
-        if !numbered || *name != reference || !flags.starts_with("(F=") {
-            return None;
-        }
-        let old = Oid::try_from((*old).to_owned()).ok()?;
-        Some(Update {
-            old: old.as_str().bytes().any(|byte| byte != b'0').then_some(old),
-            new: Oid::try_from((*new).to_owned()).ok()?,
-        })
+    let (before, after) = line.split_once(" -> ")?;
+    let mut left = before.rsplit(' ');
+    let (old, name, index) = (left.next()?, left.next()?, left.next()?);
+    let mut right = after.split(' ');
+    let (new, flags) = (right.next()?, right.next()?);
+    let numbered = index
+        .strip_suffix(':')
+        .is_some_and(|number| !number.is_empty() && number.bytes().all(|b| b.is_ascii_digit()));
+    if !numbered || name != reference || !flags.starts_with("(F=") {
+        return None;
+    }
+    let old = Oid::try_from(old.to_owned()).ok()?;
+    Some(Update {
+        old: old.as_str().bytes().any(|byte| byte != b'0').then_some(old),
+        new: Oid::try_from(new.to_owned()).ok()?,
     })
 }
 
@@ -508,5 +506,33 @@ mod tests {
         assert!(stops_commit("reference-transaction", &argv("prepared")));
         assert!(!stops_commit("reference-transaction", &argv("aborted")));
         assert!(!stops_commit("post-commit", &[]));
+    }
+
+    #[test]
+    fn reads_a_finished_update_from_gits_ref_trace() {
+        let old = "f0a33e14bc0706ae47638de725ced1a228a023cf";
+        let new = "723013ba8605cd967f18b0301e6cd17c6f9fdd34";
+        let update = |old: &str| Update {
+            old: Oid::try_from(old.to_owned()).ok(),
+            new: Oid::try_from(new.to_owned()).unwrap(),
+        };
+        let line = |name: &str, from: &str| {
+            format!(
+                "12:44:19.503683 refs/debug.c:88         1: {name} {from} -> {new} (F=0xc, T=0x0) \"commit: a -> b\""
+            )
+        };
+        assert_eq!(
+            update_in(&line("refs/heads/main", old), "refs/heads/main"),
+            Some(update(old))
+        );
+        assert_eq!(update_in(&line("refs/heads/main", old), "HEAD"), None);
+        assert_eq!(
+            update_in(&line("refs/heads/main", &"0".repeat(40)), "refs/heads/main"),
+            Some(update("none"))
+        );
+        let reflog = format!(
+            "12:44:19.508030 refs/debug.c:306        reflog_ent HEAD (ret 0): {old} -> {new}, T <t@x> 1793015059 \"commit: c3\""
+        );
+        assert_eq!(update_in(&reflog, "HEAD"), None);
     }
 }
