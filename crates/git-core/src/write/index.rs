@@ -51,6 +51,40 @@ pub(super) struct IndexChange {
 }
 
 impl IndexChange {
+    fn between(
+        head: Head,
+        before: &Rows,
+        after: &Rows,
+        command: Command,
+        plan: &Plan,
+    ) -> Result<Self, RepositoryError> {
+        let unchosen: Vec<String> = differences(before, after)
+            .into_iter()
+            .filter(|path| !str::from_utf8(path).is_ok_and(|path| plan.claims.contains_key(path)))
+            .map(git::text)
+            .collect();
+        if !unchosen.is_empty() {
+            return Err(not_chosen(command, plan, unchosen));
+        }
+        let paths: Vec<PathChange> = plan
+            .claims
+            .keys()
+            .filter(|path| at(before, path) != at(after, path))
+            .map(|path| PathChange {
+                path: path.clone(),
+                before: at(before, path).to_vec(),
+                after: at(after, path).to_vec(),
+            })
+            .collect();
+        if paths.is_empty() {
+            return Err(RepositoryError::new(
+                ErrorKind::UnchangedPath,
+                "Git made no change to the index. Refresh the worktree status.",
+            ));
+        }
+        Ok(Self { head, paths })
+    }
+
     pub(super) fn objects(&self) -> Vec<Oid> {
         let objects: BTreeSet<&Oid> = self
             .paths
@@ -376,36 +410,13 @@ pub(super) fn edit<'r>(
         .run(deadline)?
         .succeeded()?;
     let after = read(&txn)?;
-    let unchosen: Vec<String> = differences(&before, &after)
-        .into_iter()
-        .filter(|path| !str::from_utf8(path).is_ok_and(|path| plan.claims.contains_key(path)))
-        .map(git::text)
-        .collect();
-    if !unchosen.is_empty() {
-        return Err(not_chosen(command, &plan, unchosen));
-    }
-    let paths: Vec<PathChange> = plan
-        .claims
-        .keys()
-        .filter(|path| at(&before, path) != at(&after, path))
-        .map(|path| PathChange {
-            path: path.clone(),
-            before: at(&before, path).to_vec(),
-            after: at(&after, path).to_vec(),
-        })
-        .collect();
-    if paths.is_empty() {
-        return Err(RepositoryError::new(
-            ErrorKind::UnchangedPath,
-            "Git made no change to the index. Refresh the worktree status.",
-        ));
-    }
-    Ok((txn, Change::Index(IndexChange { head, paths })))
+    let change = IndexChange::between(head, &before, &after, command, &plan)?;
+    Ok((txn, Change::Index(change)))
 }
 
-/// Paths Git changed that no entry names. With `core.ignorecase`, Git
-/// stages a new file under the spelling the index already uses for its
-/// folder, so that path differs from a chosen one only in case.
+/// With `core.ignorecase`, Git stages a new file under the spelling the
+/// index already uses for its folder, so that path differs from a chosen one
+/// only in case.
 fn not_chosen(command: Command, plan: &Plan, unchosen: Vec<String>) -> RepositoryError {
     let verb = command.verb();
     for path in &unchosen {
@@ -439,9 +450,6 @@ fn not_utf8(command: Command) -> RepositoryError {
     )
 }
 
-/// Whether `path` is how status shows a name whose bytes are not UTF-8: no
-/// entry or file has its exact bytes, and one whose bytes are not UTF-8
-/// reads as it.
 fn shows_non_utf8(root: &Path, index: &Rows, path: &str) -> bool {
     path.contains(char::REPLACEMENT_CHARACTER)
         && !index.contains_key(path.as_bytes())
@@ -538,9 +546,6 @@ pub(super) fn restore(
     Ok(Restored::Staged)
 }
 
-/// Whether the index holds what the write left at every path it recorded.
-/// The record names every path the write changed, because `edit` refuses
-/// any change Git made elsewhere.
 pub(super) fn landed(
     repo: &Repo,
     change: &IndexChange,
@@ -556,8 +561,6 @@ pub(super) fn landed(
         .all(|path| at(&rows, &path.path) == path.after))
 }
 
-/// Every entry of an index, by the bytes of its path, so a name that is
-/// not UTF-8 never shares a key with another.
 type Rows = BTreeMap<Vec<u8>, Vec<IndexEntry>>;
 
 const LS_FILES: [&str; 4] = ["ls-files", "--stage", "--debug", "-z"];
@@ -566,8 +569,6 @@ fn at<'r>(rows: &'r Rows, path: &str) -> &'r [IndexEntry] {
     rows.get(path.as_bytes()).map_or(&[], Vec::as_slice)
 }
 
-/// The paths whose entries differ between two reads of the whole index, so
-/// a path Git changed cannot go unseen, whatever name it gave it.
 fn differences<'r>(before: &'r Rows, after: &'r Rows) -> Vec<&'r [u8]> {
     let (mut old, mut new) = (before.iter().peekable(), after.iter().peekable());
     let mut changed = Vec::new();
