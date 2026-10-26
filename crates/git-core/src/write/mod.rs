@@ -6,6 +6,7 @@
 mod commit;
 mod discard;
 mod index;
+mod partial;
 mod refs;
 mod store;
 mod txn;
