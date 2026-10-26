@@ -358,21 +358,7 @@ pub(super) fn edit<'r>(
             "HEAD moved since L1 Git read this worktree. Refresh and try again.",
         ));
     }
-    let absent = plan
-        .claims
-        .iter()
-        .filter(|(_, seen)| matches!(seen, Seen::Absent | Seen::Conflict(_)))
-        .map(|(path, _)| path.as_str());
-    let above = files_above(&txn, absent)?;
-    let paths: Vec<&str> = plan
-        .claims
-        .keys()
-        .map(String::as_str)
-        .chain(above)
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect();
-    let before = read(&txn, &paths)?;
+    let before = read(&txn)?;
     for (path, seen) in &plan.claims {
         if !seen.matches(at(&before, path)) {
             return Err(RepositoryError::stale(
@@ -385,50 +371,58 @@ pub(super) fn edit<'r>(
         .input(nul_separated(plan.touched.iter().map(String::as_str)))
         .run(deadline)?
         .succeeded()?;
-    let after = read(&txn, &paths)?;
-    let change = between(head, before, after)?;
-    if let Some(other) = change
-        .paths
-        .iter()
-        .find(|path| !plan.claims.contains_key(&path.path))
-    {
-        return Err(RepositoryError::stale(
-            StaleReason::PathNotChosen,
-            format!(
-                "Git would also {} {}, which was not chosen. Refresh, choose it too, and try again.",
-                command.verb(),
-                other.path
-            ),
-        ));
+    let after = read(&txn)?;
+    let unchosen: Vec<String> = differences(&before, &after)
+        .into_iter()
+        .filter(|path| !str::from_utf8(path).is_ok_and(|path| plan.claims.contains_key(path)))
+        .map(git::text)
+        .collect();
+    if !unchosen.is_empty() {
+        return Err(not_chosen(command, &plan, unchosen));
     }
-    Ok((txn, Change::Index(change)))
-}
-
-fn between(head: Head, before: Rows, mut after: Rows) -> Result<IndexChange, RepositoryError> {
-    let mut paths = Vec::new();
-    for (path, before) in before {
-        let after = after.remove(&path).unwrap_or_default();
-        if before != after {
-            paths.push(PathChange {
-                path,
-                before,
-                after,
-            });
-        }
-    }
-    paths.extend(after.into_iter().map(|(path, after)| PathChange {
-        path,
-        before: Vec::new(),
-        after,
-    }));
-    paths.sort_by(|a, b| a.path.cmp(&b.path));
+    let paths: Vec<PathChange> = plan
+        .claims
+        .keys()
+        .filter(|path| at(&before, path) != at(&after, path))
+        .map(|path| PathChange {
+            path: path.clone(),
+            before: at(&before, path).to_vec(),
+            after: at(&after, path).to_vec(),
+        })
+        .collect();
     if paths.is_empty() {
         return Err(RepositoryError::new(
             ErrorKind::UnchangedPath,
             "Git made no change to the index. Refresh the worktree status.",
         ));
     }
-    Ok(IndexChange { head, paths })
+    Ok((txn, Change::Index(IndexChange { head, paths })))
+}
+
+/// Paths Git changed that no entry names. With `core.ignorecase`, Git
+/// stages a new file under the spelling the index already uses for its
+/// folder, so that path differs from a chosen one only in case.
+fn not_chosen(command: Command, plan: &Plan, unchosen: Vec<String>) -> RepositoryError {
+    let verb = command.verb();
+    for path in &unchosen {
+        if let Some(chosen) = plan
+            .claims
+            .keys()
+            .find(|chosen| chosen.eq_ignore_ascii_case(path))
+        {
+            return RepositoryError::new(
+                ErrorKind::UnsupportedPath,
+                format!(
+                    "Git would {verb} {chosen} as {path}, because this repository ignores case and its index already spells the name that way. Rename it on disk to match, or {verb} it with Git."
+                ),
+            );
+        }
+    }
+    let message = format!(
+        "Git would also {verb} paths you did not choose: {}. Refresh, choose them too, and try again.",
+        unchosen.join(", ")
+    );
+    RepositoryError::stale(StaleReason::PathNotChosen, message)
 }
 
 pub(super) fn restore(
@@ -443,16 +437,7 @@ pub(super) fn restore(
             "HEAD moved after this change, so L1 Git cannot undo or redo it exactly. Refresh.",
         ));
     }
-    let recorded: BTreeSet<&str> = change.paths.iter().map(|path| path.path.as_str()).collect();
-    let above = files_above(txn, recorded.iter().copied())?;
-    let paths: Vec<&str> = recorded
-        .iter()
-        .copied()
-        .chain(above)
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect();
-    let current = read(txn, &paths)?;
+    let current = read(txn)?;
     let changed_since = |path: &str| {
         RepositoryError::stale(
             StaleReason::PathChanged,
@@ -461,9 +446,6 @@ pub(super) fn restore(
             ),
         )
     };
-    if let Some(other) = unrecorded(&current, &recorded) {
-        return Err(changed_since(other));
-    }
     let mut pending = Vec::new();
     for path in &change.paths {
         let (from, to) = path.source_and_target(direction);
@@ -488,15 +470,20 @@ pub(super) fn restore(
         .collect();
     entry.bring_back(txn, &objects)?;
     put(txn, &pending)?;
-    let written = read(txn, &paths)?;
-    let inexact = unrecorded(&written, &recorded).or_else(|| {
-        change
-            .paths
-            .iter()
-            .find(|path| at(&written, &path.path) != path.source_and_target(direction).1)
-            .map(|path| path.path.as_str())
-    });
-    if let Some(path) = inexact {
+    let written = read(txn)?;
+    let mut expected = current;
+    for (path, to) in &pending {
+        if to.is_empty() {
+            expected.remove(path.as_bytes());
+        } else {
+            expected.insert(path.as_bytes().to_vec(), to.to_vec());
+        }
+    }
+    if let Some(path) = differences(&expected, &written).first() {
+        let path = git::text(path);
+        if !change.paths.iter().any(|recorded| recorded.path == path) {
+            return Err(changed_since(&path));
+        }
         return Err(RepositoryError::stale(
             StaleReason::PathChanged,
             format!(
@@ -507,6 +494,9 @@ pub(super) fn restore(
     Ok(Restored::Staged)
 }
 
+/// Whether the index holds what the write left at every path it recorded.
+/// The record names every path the write changed, because `edit` refuses
+/// any change Git made elsewhere.
 pub(super) fn landed(
     repo: &Repo,
     change: &IndexChange,
@@ -515,24 +505,37 @@ pub(super) fn landed(
     if repo.head(deadline)? != change.head {
         return Ok(false);
     }
-    let paths: Vec<&str> = change.paths.iter().map(|path| path.path.as_str()).collect();
-    let rows = rows(&paths, |args| git::read(&repo.root, args, deadline.reads()))?;
+    let rows = parse_debug(&git::read(&repo.root, &LS_FILES, deadline.reads())?)?;
     Ok(change
         .paths
         .iter()
         .all(|path| at(&rows, &path.path) == path.after))
 }
 
-fn unrecorded<'r>(rows: &'r Rows, recorded: &BTreeSet<&str>) -> Option<&'r str> {
-    rows.keys()
-        .map(String::as_str)
-        .find(|path| !recorded.contains(path))
-}
+/// Every entry of an index, by the bytes of its path, so a name that is
+/// not UTF-8 never shares a key with another.
+type Rows = BTreeMap<Vec<u8>, Vec<IndexEntry>>;
 
-type Rows = BTreeMap<String, Vec<IndexEntry>>;
+const LS_FILES: [&str; 4] = ["ls-files", "--stage", "--debug", "-z"];
 
 fn at<'r>(rows: &'r Rows, path: &str) -> &'r [IndexEntry] {
-    rows.get(path).map_or(&[], Vec::as_slice)
+    rows.get(path.as_bytes()).map_or(&[], Vec::as_slice)
+}
+
+/// The paths whose entries differ between two reads of the whole index, so
+/// a path Git changed cannot go unseen, whatever name it gave it.
+fn differences<'r>(before: &'r Rows, after: &'r Rows) -> BTreeSet<&'r [u8]> {
+    before
+        .iter()
+        .filter(|(path, entries)| after.get(*path) != Some(*entries))
+        .map(|(path, _)| path.as_slice())
+        .chain(
+            after
+                .keys()
+                .filter(|path| !before.contains_key(*path))
+                .map(Vec::as_slice),
+        )
+        .collect()
 }
 
 fn nul_separated<'p>(paths: impl IntoIterator<Item = &'p str>) -> Vec<u8> {
@@ -542,75 +545,13 @@ fn nul_separated<'p>(paths: impl IntoIterator<Item = &'p str>) -> Vec<u8> {
         .collect()
 }
 
-/// Paths per `ls-files` call, so one argument list stays far below the
-/// system's limit.
-const PATHS_PER_READ: usize = 1000;
-
-fn rows(
-    paths: &[&str],
-    mut ls_files: impl FnMut(&[&str]) -> Result<Vec<u8>, RepositoryError>,
-) -> Result<Rows, RepositoryError> {
-    let mut rows = Rows::new();
-    for chunk in paths.chunks(PATHS_PER_READ) {
-        let mut args = vec![
-            "--literal-pathspecs",
-            "ls-files",
-            "--stage",
-            "--debug",
-            "-z",
-            "--",
-        ];
-        args.extend(chunk);
-        for (path, entry) in parse_debug(&ls_files(&args)?)? {
-            let entries = rows.entry(path).or_default();
-            if !entries.contains(&entry) {
-                entries.push(entry);
-            }
-        }
-    }
-    Ok(rows)
-}
-
-fn read(txn: &Txn<'_>, paths: &[&str]) -> Result<Rows, RepositoryError> {
-    rows(paths, |args| {
-        txn.git(args).uncapped().run(txn.deadline())?.succeeded()
-    })
-}
-
-/// The folders above `paths` that the copy holds as a file, at any stage.
-/// Git replaces such an entry without a word when it adds a path below it.
-fn files_above<'p>(
-    txn: &Txn<'_>,
-    paths: impl Iterator<Item = &'p str>,
-) -> Result<Vec<&'p str>, RepositoryError> {
-    fn names(folder: &str) -> impl Iterator<Item = String> + '_ {
-        (0..=3).map(move |stage| format!(":{stage}:{folder}"))
-    }
-    let folders: BTreeSet<&str> = paths
-        .flat_map(|path| path.match_indices('/').map(move |(at, _)| &path[..at]))
-        .collect();
-    if folders.is_empty() {
-        return Ok(Vec::new());
-    }
-    let input: Vec<u8> = folders
-        .iter()
-        .flat_map(|folder| names(folder))
-        .flat_map(|name| name.into_bytes().into_iter().chain([0]))
-        .collect();
-    let output = txn
-        .git(&["cat-file", "--batch-check=%(objectname)", "-Z"])
-        .input(input)
-        .uncapped()
-        .run(txn.deadline())?
-        .succeeded()?;
-    let missing: BTreeSet<&[u8]> = output
-        .split(|byte| *byte == 0)
-        .filter_map(|answer| answer.strip_suffix(b" missing"))
-        .collect();
-    Ok(folders
-        .into_iter()
-        .filter(|folder| names(folder).any(|name| !missing.contains(name.as_bytes())))
-        .collect())
+fn read(txn: &Txn<'_>) -> Result<Rows, RepositoryError> {
+    parse_debug(
+        &txn.git(&LS_FILES)
+            .uncapped()
+            .run(txn.deadline())?
+            .succeeded()?,
+    )
 }
 
 fn put(txn: &Txn<'_>, targets: &[(&str, &[IndexEntry])]) -> Result<(), RepositoryError> {
@@ -734,9 +675,9 @@ fn placeholder(file: &Path, _mode: Mode) -> io::Result<()> {
 /// each starting with two spaces and ending in a newline, the last holding
 /// `flags: <hex>`. A path can hold a newline, so only lines that start with
 /// two spaces are debug lines.
-fn parse_debug(output: &[u8]) -> Result<Vec<(String, IndexEntry)>, RepositoryError> {
-    let mut parsed = Vec::new();
-    let mut open: Option<(String, Mode, Oid, u8)> = None;
+fn parse_debug(output: &[u8]) -> Result<Rows, RepositoryError> {
+    let mut rows = Rows::new();
+    let mut open: Option<(&[u8], Mode, Oid, u8)> = None;
     for mut piece in output.split(|byte| *byte == 0) {
         let mut flags = None;
         while let Some(rest) = piece.strip_prefix(b"  ") {
@@ -755,16 +696,13 @@ fn parse_debug(output: &[u8]) -> Result<Vec<(String, IndexEntry)>, RepositoryErr
         }
         if let Some(flags) = flags {
             let (path, mode, oid, stage) = open.take().ok_or_else(git::malformed)?;
-            parsed.push((
-                path,
-                IndexEntry {
-                    mode,
-                    oid,
-                    stage,
-                    intent_to_add: flags & INTENT_TO_ADD != 0,
-                    skip_worktree: flags & SKIP_WORKTREE != 0,
-                },
-            ));
+            rows.entry(path.to_vec()).or_default().push(IndexEntry {
+                mode,
+                oid,
+                stage,
+                intent_to_add: flags & INTENT_TO_ADD != 0,
+                skip_worktree: flags & SKIP_WORKTREE != 0,
+            });
         }
         if piece.is_empty() {
             continue;
@@ -786,12 +724,12 @@ fn parse_debug(output: &[u8]) -> Result<Vec<(String, IndexEntry)>, RepositoryErr
             [digit @ b'0'..=b'3'] => digit - b'0',
             _ => return Err(git::malformed()),
         };
-        open = Some((git::text(&piece[tab + 1..]), mode, oid, stage));
+        open = Some((&piece[tab + 1..], mode, oid, stage));
     }
     if open.is_some() {
         return Err(git::malformed());
     }
-    Ok(parsed)
+    Ok(rows)
 }
 
 #[cfg(test)]
@@ -817,10 +755,10 @@ mod tests {
         let output = format!("100644 {OID} 0\tnew\nline\0{debug}100644 {OID} 1\tx\0{plain}");
         assert_eq!(
             parse_debug(output.as_bytes()).unwrap(),
-            [
-                ("new\nline".to_owned(), entry(0, true)),
-                ("x".to_owned(), entry(1, false)),
-            ]
+            Rows::from([
+                (b"new\nline".to_vec(), vec![entry(0, true)]),
+                (b"x".to_vec(), vec![entry(1, false)]),
+            ])
         );
         assert!(parse_debug(format!("100644 {OID} 0\tx\0").as_bytes()).is_err());
     }
