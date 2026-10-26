@@ -39,3 +39,23 @@ export function identityCommands(output: string): string[] {
     .map((line) => line.trim())
     .filter((line) => line.startsWith("git config "));
 }
+
+export type MessageField = "summary" | "description";
+
+/**
+ * Only Cmd or Ctrl+Enter submits. A plain Enter in the one-line summary
+ * would submit its form, so it is suppressed there.
+ */
+export function enterAction(
+  key: {
+    key: string;
+    metaKey: boolean;
+    ctrlKey: boolean;
+    isComposing: boolean;
+  },
+  field: MessageField,
+): "submit" | "suppress" | "type" {
+  if (key.key !== "Enter" || key.isComposing) return "type";
+  if (key.metaKey || key.ctrlKey) return "submit";
+  return field === "summary" ? "suppress" : "type";
+}

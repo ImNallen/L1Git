@@ -4,10 +4,12 @@ import { LoaderCircle, TriangleAlert } from "lucide-react";
 import * as repositories from "../repositories";
 import { amendsHead, clearSubmitted, useCommitDraft } from "../commitDrafts";
 import {
+  enterAction,
   identityCommands,
   loadMessage,
   messageFor,
 } from "../domain/commitMessage";
+import type { MessageField } from "../domain/commitMessage";
 import { singleCommit } from "../domain/comparison";
 import { commitWrite } from "../domain/operations";
 import type { Write } from "../domain/operations";
@@ -27,8 +29,13 @@ export async function commitMessage(root: RepositoryRoot, oid: Oid) {
 
 export const COMMIT_SUMMARY_ID = "commit-summary";
 
-export const submits = (event: KeyboardEvent) =>
-  event.key === "Enter" && (event.metaKey || event.ctrlKey);
+export const messageKeys =
+  (field: MessageField, submit: () => void) => (event: KeyboardEvent) => {
+    const action = enterAction(event.nativeEvent, field);
+    if (action === "type") return;
+    event.preventDefault();
+    if (action === "submit") submit();
+  };
 
 export function CommitBox({
   status,
@@ -107,11 +114,7 @@ export function CommitBox({
       setProblem(problem);
   }
 
-  const onKeyDown = (event: KeyboardEvent) => {
-    if (!submits(event)) return;
-    event.preventDefault();
-    void submit();
-  };
+  const keys = (field: MessageField) => messageKeys(field, () => void submit());
   const action = amending ? "Amend" : "Commit";
   const hint =
     draft.summary.trim() === ""
@@ -140,7 +143,7 @@ export function CommitBox({
         onChange={(event) =>
           setDraft({ draft: { ...draft, summary: event.target.value }, amend })
         }
-        onKeyDown={onKeyDown}
+        onKeyDown={keys("summary")}
       />
       <textarea
         className="commit-description"
@@ -156,7 +159,7 @@ export function CommitBox({
             amend,
           })
         }
-        onKeyDown={onKeyDown}
+        onKeyDown={keys("description")}
       />
       <div className="commit-actions">
         <label className="commit-amend">
@@ -180,15 +183,22 @@ export function CommitBox({
           {action}
         </button>
       </div>
-      {problem && <CommitProblem problem={problem} />}
+      {problem &&
+        (commitOutput(problem) ?? (
+          <div className="error-message commit-problem" role="alert">
+            <p>
+              <TriangleAlert size={14} />
+              <span>{problem.message}</span>
+            </p>
+          </div>
+        ))}
     </form>
   );
 }
 
-function CommitProblem({ problem }: { problem: Problem }) {
+/** What Git printed when a hook or a missing identity stopped a commit. */
+export function commitOutput(problem: Problem) {
   const output = "output" in problem ? problem.output : "";
-  const commands =
-    problem.kind === "missingIdentity" ? identityCommands(output) : [];
   if (problem.kind === "hookFailed")
     return (
       <div className="error-message commit-problem">
@@ -196,19 +206,13 @@ function CommitProblem({ problem }: { problem: Problem }) {
         <pre className="problem-detail">{output || "Nothing."}</pre>
       </div>
     );
-  if (commands.length > 0)
-    return (
-      <div className="error-message commit-problem">
-        <p>Set your name and email, then commit again:</p>
-        <pre className="problem-detail">{commands.join("\n")}</pre>
-      </div>
-    );
+  const commands =
+    problem.kind === "missingIdentity" ? identityCommands(output) : [];
+  if (commands.length === 0) return null;
   return (
-    <div className="error-message commit-problem" role="alert">
-      <p>
-        <TriangleAlert size={14} />
-        <span>{problem.message}</span>
-      </p>
+    <div className="error-message commit-problem">
+      <p>Set your name and email, then try again:</p>
+      <pre className="problem-detail">{commands.join("\n")}</pre>
     </div>
   );
 }

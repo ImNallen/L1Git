@@ -11,7 +11,7 @@ import type {
   WorktreeStatus,
 } from "../domain/repository";
 import type { Outcome } from "../useWrites";
-import { commitMessage, submits } from "./CommitBox";
+import { commitMessage, commitOutput, messageKeys } from "./CommitBox";
 
 export function EditMessageDialog({
   status,
@@ -123,6 +123,7 @@ export function EditMessageDialog({
               onChange={(event) =>
                 setDraft({ ...draft, summary: event.target.value })
               }
+              onKeyDown={messageKeys("summary", () => void save())}
             />
             <textarea
               className="commit-description"
@@ -134,19 +135,17 @@ export function EditMessageDialog({
               onChange={(event) =>
                 setDraft({ ...draft, description: event.target.value })
               }
-              onKeyDown={(event) => {
-                if (submits(event)) {
-                  event.preventDefault();
-                  void save();
-                }
-              }}
+              onKeyDown={messageKeys("description", () => void save())}
             />
           </div>
         )}
         {problem && (
-          <p className="error-message" role="alert">
-            {problem.message}
-          </p>
+          <>
+            <p className="error-message" role="alert">
+              {problem.message}
+            </p>
+            {commitOutput(problem)}
+          </>
         )}
         <div className="dialog-actions">
           <button type="button" className="button secondary" onClick={onClose}>
