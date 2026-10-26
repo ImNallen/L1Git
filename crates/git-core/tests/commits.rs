@@ -126,6 +126,17 @@ impl Repo {
         self.git(&["for-each-ref", "--format=%(refname) %(objectname)"])
             + &self.git(&["symbolic-ref", "-q", "HEAD"])
     }
+
+    fn hook(&self, name: &str, body: &str) {
+        let hooks = self.directory.path().join("hooks");
+        fs::create_dir_all(&hooks).unwrap();
+        hook(&hooks, name, body);
+        self.git(&["config", "core.hooksPath", hooks.to_str().unwrap()]);
+    }
+
+    fn undo_entry(&self) -> Option<Applied> {
+        self.coordinator().undo_history(self.path()).unwrap().undo
+    }
 }
 
 fn refused(result: Result<Applied, RepositoryError>, kind: ErrorKind) -> RepositoryError {
@@ -500,4 +511,152 @@ fn undo_of_a_commit_moves_only_the_ref_and_runs_its_hooks() {
         fs::read_to_string(&seen).unwrap().contains("committed"),
         "reference-transaction ran"
     );
+}
+
+#[test]
+fn a_commit_git_refused_after_another_process_moved_head_is_not_reported_as_made() {
+    for (kind, parent) in [
+        (Kind::Commit, "HEAD"),
+        (Kind::Amend, "HEAD^"),
+        (Kind::EditMessage, "HEAD^"),
+    ] {
+        let repo = Repo::born();
+        repo.git(&["commit", "--quiet", "--allow-empty", "-m", "second"]);
+        repo.hook(
+            "pre-commit",
+            &format!(
+                "git update-ref refs/heads/main $(git commit-tree 'HEAD^{{tree}}' -p {parent} -m other)\n"
+            ),
+        );
+        repo.staged_edit("a.txt", "two\n");
+        refused(
+            repo.write(kind, "Mine\n"),
+            ErrorKind::StaleView {
+                reason: StaleReason::HeadMoved,
+            },
+        );
+        assert_eq!(repo.git(&["log", "-1", "--format=%s", "main"]), "other\n");
+        assert_eq!(repo.status(), "M  a.txt\n");
+        assert!(repo.undo_entry().is_none(), "nothing of ours to undo");
+    }
+}
+
+#[test]
+fn a_commit_another_process_builds_on_during_post_commit_is_named_and_not_undone() {
+    let repo = Repo::born();
+    repo.hook(
+        "post-commit",
+        "git update-ref refs/heads/main $(git commit-tree 'HEAD^{tree}' -p HEAD -m other)\n",
+    );
+    repo.staged_edit("a.txt", "two\n");
+    let error = refused(repo.write(Kind::Commit, "Mine\n"), ErrorKind::Raced);
+    let mine = repo.git(&["rev-parse", "main^"]);
+    assert_eq!(
+        repo.git(&["log", "-1", "--format=%s", mine.trim()]),
+        "Mine\n"
+    );
+    assert!(error.message.contains(&mine[..7]), "{}", error.message);
+    assert!(
+        repo.undo_entry().is_none(),
+        "undo must not remove the other process's commit"
+    );
+}
+
+#[test]
+fn a_commit_keeps_its_branch_when_head_switches_during_post_commit() {
+    let repo = Repo::born();
+    let parent = repo.head();
+    repo.git(&["branch", "feature"]);
+    repo.hook("post-commit", "git symbolic-ref HEAD refs/heads/feature\n");
+    repo.staged_edit("a.txt", "two\n");
+    let applied = repo
+        .write(Kind::Commit, "Mine\n")
+        .expect("the commit landed on main");
+    assert_eq!(repo.git(&["log", "-1", "--format=%s", "main"]), "Mine\n");
+    repo.git(&["config", "core.hooksPath", "/dev/null"]);
+    refused(
+        repo.coordinator().undo(repo.path(), applied.id),
+        ErrorKind::StaleView {
+            reason: StaleReason::HeadMoved,
+        },
+    );
+    assert_eq!(repo.git(&["rev-parse", "feature"]).trim(), parent);
+    repo.git(&["symbolic-ref", "HEAD", "refs/heads/main"]);
+    repo.undo(&applied);
+    assert_eq!(repo.git(&["rev-parse", "main"]).trim(), parent);
+    assert_eq!(repo.git(&["rev-parse", "feature"]).trim(), parent);
+}
+
+#[test]
+fn a_hook_that_prints_a_lot_shows_what_it_printed_last() {
+    let repo = Repo::born();
+    repo.hook(
+        "pre-commit",
+        "i=0\nwhile [ $i -lt 2000 ]; do echo \"noise line $i ................................................\"; i=$((i+1)); done\necho 'THE REAL ERROR: lint failed'\nexit 1\n",
+    );
+    repo.staged_edit("a.txt", "two\n");
+    let error = repo.write(Kind::Commit, "Loud\n").unwrap_err();
+    let ErrorKind::HookFailed { output } = &error.kind else {
+        panic!("{error:?}");
+    };
+    assert!(
+        output.ends_with("THE REAL ERROR: lint failed\n"),
+        "{}",
+        &output[output.len().saturating_sub(200)..]
+    );
+    assert!(output.len() <= 64 * 1024, "{}", output.len());
+}
+
+#[test]
+fn an_amend_that_makes_the_same_commit_answers_unchanged_and_records_nothing() {
+    let second = || {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    };
+    for _ in 0..5 {
+        let repo = Repo::born();
+        let started = second();
+        repo.git(&["commit", "--quiet", "--allow-empty", "-m", "same"]);
+        let head = repo.head();
+        let result = repo.write(Kind::EditMessage, "same\n");
+        if second() != started {
+            continue;
+        }
+        refused(result, ErrorKind::UnchangedPath);
+        assert_eq!(repo.head(), head);
+        assert!(repo.undo_entry().is_none());
+        return;
+    }
+    panic!("no attempt fit in one second, so Git never made the same commit");
+}
+
+#[test]
+fn the_commit_trace_is_private_and_a_crashed_runs_file_is_replaced() {
+    let repo = Repo::born();
+    let seen = repo.directory.path().join("seen");
+    repo.hook(
+        "pre-commit",
+        &format!(
+            "ls -l \"$GIT_TRACE2_EVENT\" | cut -c1-10 > '{0}'\necho \"$GIT_TRACE2_EVENT\" >> '{0}'\n",
+            seen.display()
+        ),
+    );
+    repo.staged_edit("a.txt", "two\n");
+    repo.write(Kind::Commit, "Traced\n").unwrap();
+    let report = fs::read_to_string(&seen).unwrap();
+    let [mode, trace] = report.lines().collect::<Vec<_>>()[..] else {
+        panic!("{report}");
+    };
+    assert_eq!(mode, "-rw-------");
+    assert!(
+        Path::new(trace).starts_with(repo.directory.path().join("undo")),
+        "{trace}"
+    );
+    assert!(!Path::new(trace).exists(), "{trace}");
+    fs::write(trace, "left by a crash").unwrap();
+    repo.staged_edit("a.txt", "three\n");
+    repo.write(Kind::Commit, "Traced again\n").unwrap();
+    assert!(!Path::new(trace).exists(), "{trace}");
 }
