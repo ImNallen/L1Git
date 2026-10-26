@@ -682,6 +682,7 @@ impl EntryObjects {
         runner: &impl Runner,
         tip: &Oid,
     ) -> Result<(), RepositoryError> {
+        let mut present = runner.git(&["cat-file", "-e", tip.as_str()]);
         let mut list = runner.git(&[
             "rev-list",
             "--objects",
@@ -691,14 +692,22 @@ impl EntryObjects {
             "--all",
         ]);
         if self.objects.exists() {
+            present = present.alternate_object_directory(&self.objects);
             list = list.alternate_object_directory(&self.objects);
+        }
+        let lost = || {
+            RepositoryError::new(
+                ErrorKind::GitFailed,
+                "Git no longer has some of this branch's commits, and L1 Git's undo store does not hold them, so nothing changed. A branch or tag that shared them was likely deleted outside L1 Git and its commits pruned.",
+            )
+        };
+        // rev-list skips a missing tip under --missing=allow-promisor.
+        if present.run(runner.deadline())?.code() != Some(0) {
+            return Err(lost());
         }
         let listed = list.uncapped().run(runner.deadline())?;
         if listed.code() != Some(0) {
-            return Err(RepositoryError::new(
-                ErrorKind::GitFailed,
-                "Git no longer has some of this branch's commits, and L1 Git's undo store does not hold them, so nothing changed. A branch that shared them was likely deleted outside L1 Git and its commits pruned.",
-            ));
+            return Err(lost());
         }
         let reached = listed
             .stdout()
