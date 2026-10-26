@@ -1,5 +1,5 @@
 use super::{
-    Applied, Change, Direction, Expect, Operation, Repo,
+    Applied, Change, Direction, Expect, Operation, Repo, Restored,
     index::{self, IndexEntry},
     store::{EntryObjects, LockedStore, Log},
     txn::{Published, Txn},
@@ -291,18 +291,7 @@ pub(super) fn discard(
             ),
         ));
     }
-    if !tracked.is_empty() {
-        let _ = txn
-            .git(&[
-                "--literal-pathspecs",
-                "add",
-                "--refresh",
-                "--pathspec-from-file=-",
-                "--pathspec-file-nul",
-            ])
-            .input(index::nul_separated(tracked.iter().copied()))
-            .run(deadline);
-    }
+    refresh(&txn, &tracked);
     let published = txn
         .commit_recorded(recorded, &Change::Discard(discard))
         .ok();
@@ -310,6 +299,67 @@ pub(super) fn discard(
 }
 
 pub(super) fn step(
+    txn: &Txn<'_>,
+    entry: &EntryObjects,
+    change: &DiscardChange,
+    direction: Direction,
+) -> Result<Restored, RepositoryError> {
+    place_step(txn, entry, change, direction)?;
+    if direction == Direction::Undo {
+        return Ok(Restored::AlreadyThere);
+    }
+    let tracked: Vec<&str> = change
+        .paths
+        .iter()
+        .filter(|discarded| discarded.after != Content::Absent)
+        .map(|discarded| discarded.path.as_str())
+        .collect();
+    refresh(txn, &tracked);
+    Ok(Restored::Staged)
+}
+
+/// Git trusts an entry's stat data, and when the size it holds differs from
+/// the file's, as after a checkout that converted line endings, it reports
+/// the file modified without reading it, so `add --refresh` alone cannot
+/// clear it. Each entry is written again without stat data first, so Git
+/// compares the content.
+fn refresh(txn: &Txn<'_>, paths: &[&str]) {
+    if paths.is_empty() {
+        return;
+    }
+    if let Ok(rows) = index::read(txn) {
+        let info: Vec<u8> = paths
+            .iter()
+            .filter_map(|path| match index::at(&rows, path) {
+                [entry] if entry.stage == 0 && !entry.intent_to_add && !entry.skip_worktree => {
+                    Some(format!(
+                        "{} {}\t{path}\0",
+                        entry.mode.octal(),
+                        entry.oid.as_str()
+                    ))
+                }
+                _ => None,
+            })
+            .flat_map(String::into_bytes)
+            .collect();
+        let _ = txn
+            .git(&["update-index", "-z", "--index-info"])
+            .input(info)
+            .run(txn.deadline());
+    }
+    let _ = txn
+        .git(&[
+            "--literal-pathspecs",
+            "add",
+            "--refresh",
+            "--pathspec-from-file=-",
+            "--pathspec-file-nul",
+        ])
+        .input(index::nul_separated(paths.iter().copied()))
+        .run(txn.deadline());
+}
+
+fn place_step(
     txn: &Txn<'_>,
     entry: &EntryObjects,
     change: &DiscardChange,

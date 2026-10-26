@@ -20,7 +20,7 @@ pub(super) struct IndexEntry {
     pub(super) oid: Oid,
     pub(super) stage: u8,
     pub(super) intent_to_add: bool,
-    skip_worktree: bool,
+    pub(super) skip_worktree: bool,
     assume_unchanged: bool,
 }
 

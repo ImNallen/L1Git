@@ -175,9 +175,13 @@ impl Change {
             }
             Self::Discard(change) => {
                 let txn = Txn::begin(repo, deadline)?;
-                discard::step(&txn, entry, change, direction)?;
-                store.save(step.log())?;
-                Ok(None)
+                match discard::step(&txn, entry, change, direction)? {
+                    Restored::AlreadyThere => {
+                        store.save(step.log())?;
+                        Ok(None)
+                    }
+                    Restored::Staged => Ok(Some(txn.commit_step(store, step, self)?)),
+                }
             }
         }
     }
