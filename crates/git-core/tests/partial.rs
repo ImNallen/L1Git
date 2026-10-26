@@ -592,6 +592,28 @@ fn crlf_new() -> String {
     )
 }
 
+fn autocrlf_lf_worktree() -> Repo {
+    let repo = Repo::new(
+        &[("f.txt", lines(30).as_bytes())],
+        &[("core.autocrlf", "true")],
+    );
+    repo.write("f.txt", three());
+    repo
+}
+
+#[test]
+fn autocrlf_discard_hunk_rewrites_kept_line_endings_as_git_checkout_p_does() {
+    let repo = autocrlf_lf_worktree();
+    repo.discard_hunk("f.txt", 0).unwrap();
+    let oracle = autocrlf_lf_worktree();
+    oracle.interactive(&["checkout", "-p", "--", "f.txt"], "y\nn\nn\n");
+    assert_eq!(repo.worktree("f.txt"), oracle.worktree("f.txt"));
+    assert_eq!(
+        repo.worktree("f.txt"),
+        bytes(&edit(&three(), &[(3, Some("line 3\n"))], &[]).replace('\n', "\r\n"))
+    );
+}
+
 fn crlf_raw() -> Repo {
     let repo = Repo::new(
         &[("f.txt", crlf().as_bytes())],
