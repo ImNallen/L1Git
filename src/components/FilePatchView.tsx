@@ -250,7 +250,7 @@ function LineBar({
   const count = picks.length;
   const off = busy || count === 0;
   return (
-    <div className="line-bar" role="toolbar" aria-label="Chosen lines">
+    <div className="line-bar" role="group" aria-label="Chosen lines">
       <span className="line-bar-text" role="status">
         {range === null
           ? "Click a line number to choose lines. Shift-click to extend."
