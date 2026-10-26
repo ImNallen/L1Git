@@ -729,6 +729,7 @@ describe("real Rust transport contract", () => {
       ).data,
     ).toEqual({
       root,
+      stagedStamp: expect.stringMatching(/^[0-9a-f]{40}$/),
       head: {
         kind: "attached",
         reference: "refs/heads/main",
@@ -1464,6 +1465,158 @@ describe("real Rust writes, undo, and redo", () => {
       expect(index(path)).toBe(before);
     }
     expect(porcelain(path)).toBe(" M README.md\n");
+  });
+
+  const statusOf = async (path: string) =>
+    worktreeStatusEnvelope.parse(
+      await (await post({ op: "worktreeStatus", path })).json(),
+    ).data;
+  const commitRequest = async (
+    path: string,
+    kind: "commit" | "amend" | "editMessage",
+    message: string,
+  ) => {
+    const status = await statusOf(path);
+    return {
+      op: "write",
+      path,
+      operation:
+        kind === "editMessage"
+          ? { kind, message }
+          : { kind, message, staged: status.stagedStamp },
+      expect: { head: status.head },
+    };
+  };
+  const head = (path: string) => git(path, "rev-parse", "HEAD").trim();
+  const commitFailure = async (request: unknown) =>
+    failure.parse(await (await post(request)).json()).error;
+
+  it("commits the staged files, undoes to the parent with them staged, and redoes to the same commit", async () => {
+    const path = clone();
+    git(path, "add", "README.md");
+    const parent = head(path);
+    const applied = writeEnvelope.parse(
+      await (
+        await post(await commitRequest(path, "commit", "Update readme\n"))
+      ).json(),
+    ).data;
+    const made = head(path);
+    expect(git(path, "log", "-1", "--format=%s%n%P")).toBe(
+      `Update readme\n${parent}\n`,
+    );
+    expect(porcelain(path)).toBe("");
+    undoEnvelope.parse(
+      await (await post({ op: "undo", path, id: applied.id })).json(),
+    );
+    expect(head(path)).toBe(parent);
+    expect(porcelain(path)).toBe("M  README.md\n");
+    redoEnvelope.parse(
+      await (await post({ op: "redo", path, id: applied.id })).json(),
+    );
+    expect(head(path)).toBe(made);
+    expect(porcelain(path)).toBe("");
+  });
+
+  it("amends with the staged files, keeping parents and author, and edits a message alone", async () => {
+    const path = clone();
+    const before = git(path, "log", "-1", "--format=%H%n%P%n%an <%ae> %ad");
+    const [old, parents, author] = before.trim().split("\n");
+    git(path, "add", "README.md");
+    const amended = writeEnvelope.parse(
+      await (
+        await post(await commitRequest(path, "amend", "Amended\n"))
+      ).json(),
+    ).data;
+    expect(git(path, "log", "-1", "--format=%s%n%P%n%an <%ae> %ad")).toBe(
+      `Amended\n${parents}\n${author}\n`,
+    );
+    expect(porcelain(path)).toBe("");
+    undoEnvelope.parse(
+      await (await post({ op: "undo", path, id: amended.id })).json(),
+    );
+    expect(head(path)).toBe(old);
+    expect(porcelain(path)).toBe("M  README.md\n");
+    const tree = git(path, "rev-parse", "HEAD^{tree}");
+    writeEnvelope.parse(
+      await (
+        await post(await commitRequest(path, "editMessage", "Reworded\n"))
+      ).json(),
+    );
+    expect(git(path, "log", "-1", "--format=%s%n%P")).toBe(
+      `Reworded\n${parents}\n`,
+    );
+    expect(git(path, "rev-parse", "HEAD^{tree}")).toBe(tree);
+    expect(porcelain(path)).toBe("M  README.md\n");
+  });
+
+  it("makes a first commit and undoes it back to an unborn HEAD", async () => {
+    const path = init();
+    writeFileSync(join(path, "f"), "first\n");
+    git(path, "add", "f");
+    const applied = writeEnvelope.parse(
+      await (await post(await commitRequest(path, "commit", "First\n"))).json(),
+    ).data;
+    expect(git(path, "log", "--format=%s %P")).toBe("First \n");
+    undoEnvelope.parse(
+      await (await post({ op: "undo", path, id: applied.id })).json(),
+    );
+    expect(() => git(path, "rev-parse", "-q", "--verify", "HEAD")).toThrow();
+    expect(porcelain(path)).toBe("A  f\n");
+  });
+
+  it("refuses a stale staged list, nothing staged, a merge in progress, a failing hook, and a missing identity", async () => {
+    const path = clone();
+    const start = head(path);
+    expect(
+      (await commitFailure(await commitRequest(path, "commit", "A\n"))).kind,
+    ).toBe("unchangedPath");
+    git(path, "add", "README.md");
+    const stale = await commitRequest(path, "commit", "A\n");
+    writeFileSync(join(path, "other.txt"), "other\n");
+    git(path, "add", "other.txt");
+    expect((await commitFailure(stale)).kind).toBe("staleView");
+
+    writeFileSync(join(path, ".git", "MERGE_HEAD"), `${start}\n`);
+    const merging = await commitFailure(
+      await commitRequest(path, "commit", "A\n"),
+    );
+    expect(merging.kind).toBe("conflict");
+    expect(merging.message).toContain("merge");
+    rmSync(join(path, ".git", "MERGE_HEAD"));
+
+    const hooks = scratch();
+    mkdirSync(hooks);
+    writeFileSync(
+      join(hooks, "pre-commit"),
+      "#!/bin/sh\necho 'lint failed: TODO'\nexit 1\n",
+      { mode: 0o755 },
+    );
+    git(path, "config", "core.hooksPath", hooks);
+    const hook = await commitFailure(
+      await commitRequest(path, "commit", "A\n"),
+    );
+    expect(hook.kind).toBe("hookFailed");
+    expect("output" in hook && hook.output).toContain("lint failed: TODO");
+    git(path, "config", "--unset", "core.hooksPath");
+
+    git(path, "config", "user.name", "");
+    expect(
+      (await commitFailure(await commitRequest(path, "commit", "A\n"))).kind,
+    ).toBe("missingIdentity");
+    expect(head(path)).toBe(start);
+  });
+
+  it("rejects an unknown field in a commit", async () => {
+    const path = clone();
+    const request = await commitRequest(path, "commit", "A\n");
+    expect(
+      (
+        await rejected({
+          ...request,
+          operation: { ...request.operation, extra: 1 },
+        })
+      ).status,
+    ).toBe(400);
   });
 });
 

@@ -39,10 +39,12 @@ import type {
 import type { RefLabel } from "../domain/refs";
 import type { Selection } from "../domain/selection";
 import { relativeTime } from "../domain/time";
-import type { FileWrite } from "../domain/operations";
+import type { FileWrite, Write } from "../domain/operations";
 import type { DetailState } from "../useWorkspace";
 import { changedFileTreeInput, listsRow } from "../domain/changedFiles";
+import type { Outcome } from "../useWrites";
 import { ChangedFileTree, changeStatuses } from "./ChangedFileTree";
+import { CommitBox } from "./CommitBox";
 import type { RowAction } from "./ChangedFileTree";
 import { RefBadge } from "./History";
 
@@ -74,6 +76,7 @@ export type WorktreeWrites = {
     kind: FileWrite,
     paths: readonly string[],
   ) => Promise<unknown>;
+  commit: (worktree: RepositoryRoot, write: Write) => Promise<Outcome>;
 };
 
 export function InspectorFrame({
@@ -826,6 +829,16 @@ function WorktreeInspector({
             />
           ))}
         </div>
+      )}
+      {changes?.kind === "ready" && (
+        <CommitBox
+          status={changes.status}
+          staged={
+            groups.find((group) => group.side === "staged")?.files.length ?? 0
+          }
+          busy={writes.busy}
+          onCommit={writes.commit}
+        />
       )}
     </div>
   );

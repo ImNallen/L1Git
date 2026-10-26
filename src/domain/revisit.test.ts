@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { oidSchema, rootSchema, snapshotSchema } from "./repository";
+import {
+  oidSchema,
+  rootSchema,
+  snapshotSchema,
+  stagedStampSchema,
+} from "./repository";
 import { cacheSnapshot, evictSnapshot, restoreSelection } from "./revisit";
 import type { SnapshotCache } from "./revisit";
 import type { Selection } from "./selection";
@@ -155,7 +160,20 @@ describe("restored selection", () => {
     const root = rootSchema.parse("/a-feature");
     const head = listed.worktrees[0]!.head;
     const status = (entries: StatusEntry[]): ChangesByWorktree =>
-      new Map([[root, { kind: "ready", status: { root, head, entries } }]]);
+      new Map([
+        [
+          root,
+          {
+            kind: "ready",
+            status: {
+              root,
+              head,
+              entries,
+              stagedStamp: stagedStampSchema.parse("0".repeat(40)),
+            },
+          },
+        ],
+      ]);
     const failed: ChangesByWorktree = new Map([
       [root, { kind: "error", error: { kind: "timedOut", message: "Slow." } }],
     ]);

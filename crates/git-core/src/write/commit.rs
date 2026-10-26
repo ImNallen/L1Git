@@ -1,0 +1,503 @@
+use super::{
+    Applied, Change, CommitTxn, Expect, Operation, Repo,
+    refs::{RefChange, capitalized, oid},
+    store::{LockedStore, Log},
+};
+use crate::{
+    ErrorKind, Head, Oid, RepositoryError, StagedStamp, StaleReason, StatusEntry,
+    git::{self, WriteDeadline, Wrote},
+    status::{self, Untracked},
+    stderr, sync,
+};
+use serde::Deserialize;
+use std::{
+    collections::HashMap,
+    fs, io,
+    path::PathBuf,
+    time::{SystemTime, UNIX_EPOCH},
+};
+
+#[derive(Clone, Copy)]
+pub(super) enum Kind<'a> {
+    New(&'a StagedStamp),
+    Amend(&'a StagedStamp),
+    EditMessage,
+}
+
+impl Kind<'_> {
+    const fn flags(self) -> &'static [&'static str] {
+        match self {
+            Self::New(_) => &[],
+            Self::Amend(_) => &["--amend"],
+            Self::EditMessage => &["--amend", "--only", "--allow-empty"],
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Target {
+    Branch(String),
+    Detached,
+}
+
+impl Target {
+    fn of(head: &Head) -> Self {
+        match head {
+            Head::Attached { reference, .. } | Head::Unborn { reference } => {
+                Self::Branch(reference.clone())
+            }
+            Head::Detached { .. } => Self::Detached,
+        }
+    }
+
+    fn at(&self, oid: Option<&Oid>) -> Result<Head, RepositoryError> {
+        Ok(match (self, oid) {
+            (Self::Branch(reference), Some(oid)) => Head::Attached {
+                reference: reference.clone(),
+                oid: oid.as_str().to_owned(),
+            },
+            (Self::Branch(reference), None) => Head::Unborn {
+                reference: reference.clone(),
+            },
+            (Self::Detached, Some(oid)) => Head::Detached {
+                oid: oid.as_str().to_owned(),
+            },
+            (Self::Detached, None) => return Err(git::malformed()),
+        })
+    }
+
+    fn name(&self) -> &str {
+        match self {
+            Self::Branch(reference) => reference.strip_prefix("refs/heads/").unwrap_or(reference),
+            Self::Detached => "detached HEAD",
+        }
+    }
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the write's context and its operation's fields"
+)]
+pub(super) fn commit(
+    repo: &Repo,
+    store: &LockedStore,
+    log: &Log,
+    deadline: WriteDeadline,
+    expect: &Expect,
+    operation: &Operation,
+    kind: Kind<'_>,
+    message: &str,
+) -> Result<Applied, RepositoryError> {
+    let txn = CommitTxn::begin(repo, deadline)?;
+    let reads = deadline.reads();
+    if let Some(operation) = sync::in_progress(&repo.root, reads)?
+        .into_iter()
+        .find(|operation| operation.holds_commits())
+    {
+        return Err(RepositoryError::new(
+            ErrorKind::Conflict,
+            format!(
+                "{} is in progress in this worktree. Finish or abort it with Git first. L1 Git does not commit during one, because Undo could not put it back.",
+                capitalized(operation.name())
+            ),
+        ));
+    }
+    if message.trim().is_empty() {
+        return Err(RepositoryError::new(
+            ErrorKind::GitFailed,
+            "Write a commit message. Git refuses an empty one.",
+        ));
+    }
+    if let Kind::New(staged) | Kind::Amend(staged) = kind {
+        let (entries, stamp) = status::entries(&repo.root, Untracked::No, reads)?;
+        if let Some(path) = entries.iter().find_map(|entry| match entry {
+            StatusEntry::Unmerged { path, .. } => Some(path),
+            StatusEntry::Ordinary { .. }
+            | StatusEntry::Renamed { .. }
+            | StatusEntry::Untracked { .. } => None,
+        }) {
+            return Err(RepositoryError::new(
+                ErrorKind::Conflict,
+                format!("{path} has a conflict. Mark it resolved before you commit."),
+            ));
+        }
+        if stamp != *staged {
+            return Err(RepositoryError::stale(
+                StaleReason::StagedChanged,
+                "The staged files changed since L1 Git showed them. Refresh and try again.",
+            ));
+        }
+        if matches!(kind, Kind::New(_)) && entries.iter().all(|entry| !staged_side(entry)) {
+            return Err(nothing_staged());
+        }
+    }
+    let head = repo.head(deadline)?;
+    if head != expect.head {
+        return Err(RepositoryError::stale(
+            StaleReason::HeadMoved,
+            "HEAD moved since L1 Git read this worktree. Refresh and try again.",
+        ));
+    }
+    let before = oid(&head);
+    let expected_parents = match (kind, &before) {
+        (Kind::New(_), before) => before.iter().cloned().collect(),
+        (Kind::Amend(_) | Kind::EditMessage, Some(before)) => parents(repo, deadline, before)?,
+        (Kind::Amend(_) | Kind::EditMessage, None) => {
+            return Err(RepositoryError::new(
+                ErrorKind::UnchangedPath,
+                "There is no commit to amend yet.",
+            ));
+        }
+    };
+    let (applied, recorded) = store.record_intent(repo, log, operation)?;
+    let trace = Trace::create()?;
+    let ran = txn
+        .commit(kind.flags(), message)
+        .trace2_event(&trace.0)
+        .run(deadline);
+    let txn = txn.renewed();
+    let deadline = deadline.renewed();
+    let landed = Landed::read(repo, deadline, &head)?;
+    let succeeded = matches!(&ran, Ok(wrote) if wrote.code() == Some(0));
+    let made = match landed.made.clone() {
+        Some(made) if succeeded => Some(made),
+        Some(made)
+            if trace.failed_hook().is_none()
+                && landed.target == Target::of(&head)
+                && parents(repo, deadline, &made)? == expected_parents =>
+        {
+            Some(made)
+        }
+        _ => None,
+    };
+    let Some(made) = made else {
+        return Err(match ran {
+            Ok(wrote) if !succeeded => refused(&wrote, &trace),
+            Ok(_) => RepositoryError::stale(
+                StaleReason::HeadMoved,
+                "HEAD moved while Git was committing. Refresh.",
+            ),
+            Err(error) => error,
+        });
+    };
+    let made_parents = parents(repo, deadline, &made)?;
+    let (change, race) = if matches!(kind, Kind::New(_)) {
+        let parent = made_parents.first();
+        let raced = landed.target != Target::of(&head) || made_parents != expected_parents;
+        (
+            RefChange::new(landed.target.at(parent)?, landed.head.clone(), None)?,
+            raced.then(|| commit_race(&made, &landed.target, parent)),
+        )
+    } else {
+        let replaced = if landed.target == Target::of(&head) {
+            previous(repo, deadline, &landed.target, &made)?
+        } else {
+            None
+        };
+        let before = match (&replaced, &before) {
+            (None, Some(before)) if made_parents == expected_parents => before.clone(),
+            (Some(replaced), _) if parents(repo, deadline, replaced)? == made_parents => {
+                replaced.clone()
+            }
+            _ => return Err(amend_race(&made, &landed.target)),
+        };
+        let race = (replaced.is_some() && Some(&before) != oid(&head).as_ref())
+            .then(|| amend_race_undoable(&made, &before, &landed.target));
+        (
+            RefChange::new(
+                landed.target.at(Some(&before))?,
+                landed.head.clone(),
+                Some(before),
+            )?,
+            race,
+        )
+    };
+    recorded
+        .complete(txn.runner(), &Change::Ref(change))
+        .map_err(|error| {
+            RepositoryError::new(
+                error.kind,
+                format!(
+                    "Git made the commit, but L1 Git could not record it, so it cannot undo it. {}",
+                    error.message
+                ),
+            )
+        })?;
+    race.map_or(Ok(applied), Err)
+}
+
+/// Git moves the ref before `post-commit` runs, so a commit can land even
+/// when Git fails or is stopped afterwards.
+struct Landed {
+    head: Head,
+    target: Target,
+    made: Option<Oid>,
+}
+
+impl Landed {
+    fn read(repo: &Repo, deadline: WriteDeadline, before: &Head) -> Result<Self, RepositoryError> {
+        let head = repo.head(deadline)?;
+        let target = Target::of(&head);
+        let made = oid(&head).filter(|now| Some(now) != oid(before).as_ref());
+        Ok(Self { head, target, made })
+    }
+}
+
+fn previous(
+    repo: &Repo,
+    deadline: WriteDeadline,
+    target: &Target,
+    made: &Oid,
+) -> Result<Option<Oid>, RepositoryError> {
+    let name = match target {
+        Target::Branch(reference) => reference.as_str(),
+        Target::Detached => "HEAD",
+    };
+    let ran = git::run(
+        &repo.root,
+        &[
+            "rev-parse",
+            "-q",
+            "--verify",
+            &format!("{name}@{{0}}"),
+            &format!("{name}@{{1}}"),
+        ],
+        deadline.reads(),
+    )?;
+    if !ran.status.success() {
+        return Ok(None);
+    }
+    let text = git::text(&ran.stdout);
+    let mut lines = text.lines();
+    match (lines.next(), lines.next()) {
+        (Some(now), Some(then)) if now == made.as_str() => Ok(Oid::try_from(then.to_owned()).ok()),
+        _ => Ok(None),
+    }
+}
+
+fn commit_race(made: &Oid, target: &Target, parent: Option<&Oid>) -> RepositoryError {
+    let after = parent.map_or("nothing", short);
+    RepositoryError::new(
+        ErrorKind::Raced,
+        format!(
+            "Another process moved HEAD while Git committed, so the commit {} landed on {} after {after} instead of after what L1 Git showed. Undo moves {} back to {after}.",
+            short(made),
+            target.name(),
+            target.name(),
+        ),
+    )
+}
+
+fn amend_race(made: &Oid, target: &Target) -> RepositoryError {
+    RepositoryError::new(
+        ErrorKind::Raced,
+        format!(
+            "Another process moved HEAD while Git amended, so the amend {} replaced a commit L1 Git did not show, and L1 Git cannot tell which. It cannot undo it. Git's reflog for {} names the commit it replaced.",
+            short(made),
+            target.name()
+        ),
+    )
+}
+
+fn amend_race_undoable(made: &Oid, replaced: &Oid, target: &Target) -> RepositoryError {
+    RepositoryError::new(
+        ErrorKind::Raced,
+        format!(
+            "Another process moved HEAD while Git amended, so the amend {} replaced {} on {}, not the commit L1 Git showed. Undo puts {} back.",
+            short(made),
+            short(replaced),
+            target.name(),
+            short(replaced),
+        ),
+    )
+}
+
+fn staged_side(entry: &StatusEntry) -> bool {
+    match entry {
+        StatusEntry::Ordinary { sides, .. } => !matches!(sides, crate::Sides::Unstaged { .. }),
+        StatusEntry::Renamed { side, .. } => matches!(side, crate::MoveSide::Staged { .. }),
+        StatusEntry::Unmerged { .. } | StatusEntry::Untracked { .. } => false,
+    }
+}
+
+fn short(oid: &Oid) -> &str {
+    &oid.as_str()[..7]
+}
+
+fn nothing_staged() -> RepositoryError {
+    RepositoryError::new(
+        ErrorKind::UnchangedPath,
+        "Nothing is staged, so there is nothing to commit. Stage a file, or amend the previous commit.",
+    )
+}
+
+fn parents(
+    repo: &Repo,
+    deadline: WriteDeadline,
+    commit: &Oid,
+) -> Result<Vec<Oid>, RepositoryError> {
+    let output = git::read(
+        &repo.root,
+        &["rev-list", "--parents", "-n", "1", commit.as_str(), "--"],
+        deadline.reads(),
+    )?;
+    git::text(&output)
+        .split_whitespace()
+        .skip(1)
+        .map(|oid| Oid::try_from(oid.to_owned()).map_err(|_| git::malformed()))
+        .collect()
+}
+
+fn refused(wrote: &Wrote, trace: &Trace) -> RepositoryError {
+    let said = wrote.stderr();
+    let printed = format!("{said}\n{}", git::text(wrote.stdout()));
+    if let Some(hook) = trace.failed_hook() {
+        return RepositoryError::new(
+            ErrorKind::HookFailed,
+            format!("The {hook} hook stopped the commit, so Git made no commit."),
+        )
+        .with_output(said);
+    }
+    let has = |needles: &[&str]| needles.iter().any(|needle| printed.contains(needle));
+    if has(&[
+        "identity unknown",
+        "empty ident name",
+        "no email was given",
+        "no name was given",
+    ]) {
+        return RepositoryError::new(
+            ErrorKind::MissingIdentity,
+            "Git does not know your name and email, so it made no commit. Set them with the commands below, then try again.",
+        )
+        .with_output(said);
+    }
+    if has(&[
+        "nothing to commit",
+        "nothing added to commit",
+        "no changes added to commit",
+    ]) {
+        return nothing_staged();
+    }
+    if has(&["Aborting commit due to empty commit message"]) {
+        return RepositoryError::new(
+            ErrorKind::GitFailed,
+            "The message is empty once Git removes its comment lines, so Git made no commit.",
+        );
+    }
+    if said.contains(stderr::LOCK_HELD) {
+        return RepositoryError::new(
+            ErrorKind::LockHeld,
+            format!(
+                "Another Git process is changing this repository, so Git made no commit. Wait for it to finish, then try again. Git said: {}",
+                stderr::summarize(said)
+            ),
+        );
+    }
+    if said.contains("cannot lock ref") {
+        return RepositoryError::stale(
+            StaleReason::HeadMoved,
+            "HEAD moved while Git was committing, so Git made no commit. Refresh.",
+        );
+    }
+    RepositoryError::new(
+        ErrorKind::GitFailed,
+        format!("Git made no commit. Git said: {}", stderr::summarize(said)),
+    )
+}
+
+/// A private file for `GIT_TRACE2_EVENT`, created here with O_EXCL so
+/// another user cannot point Git's writes elsewhere.
+struct Trace(PathBuf);
+
+#[derive(Deserialize)]
+struct Event {
+    event: String,
+    sid: String,
+    child_id: Option<u64>,
+    child_class: Option<String>,
+    hook_name: Option<String>,
+    #[serde(default)]
+    argv: Vec<String>,
+    code: Option<i64>,
+}
+
+/// `reference-transaction` stops a commit only while preparing.
+fn stops_commit(name: &str, argv: &[String]) -> bool {
+    match name {
+        "pre-commit" | "prepare-commit-msg" | "commit-msg" => true,
+        "reference-transaction" => argv
+            .get(1)
+            .is_some_and(|phase| phase == "preparing" || phase == "prepared"),
+        _ => false,
+    }
+}
+
+impl Trace {
+    fn create() -> Result<Self, RepositoryError> {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |since| since.as_nanos());
+        let path =
+            std::env::temp_dir().join(format!("l1git-trace2-{}-{nanos}.json", std::process::id()));
+        fs::File::options()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .map_err(|error: io::Error| {
+                RepositoryError::new(
+                    ErrorKind::GitFailed,
+                    format!("L1 Git could not prepare the commit, so it made none: {error}"),
+                )
+            })?;
+        Ok(Self(path))
+    }
+
+    fn failed_hook(&self) -> Option<String> {
+        let text = fs::read_to_string(&self.0).ok()?;
+        let mut hooks = HashMap::new();
+        for line in text.lines() {
+            let Ok(event) = serde_json::from_str::<Event>(line) else {
+                continue;
+            };
+            if event.sid.contains('/') {
+                continue;
+            }
+            match (event.event.as_str(), event.child_id) {
+                ("child_start", Some(id)) if event.child_class.as_deref() == Some("hook") => {
+                    if let Some(name) = event.hook_name {
+                        hooks.insert(id, (name, event.argv));
+                    }
+                }
+                ("child_exit", Some(id)) if event.code.is_some_and(|code| code != 0) => {
+                    if let Some((name, argv)) = hooks.get(&id)
+                        && stops_commit(name, argv)
+                    {
+                        return Some(name.clone());
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+}
+
+impl Drop for Trace {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn counts_reference_transaction_only_while_preparing() {
+        let argv = |phase: &str| vec!["hook".to_owned(), phase.to_owned()];
+        assert!(stops_commit("pre-commit", &[]));
+        assert!(stops_commit("reference-transaction", &argv("prepared")));
+        assert!(!stops_commit("reference-transaction", &argv("aborted")));
+        assert!(!stops_commit("post-commit", &[]));
+    }
+}

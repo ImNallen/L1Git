@@ -15,15 +15,64 @@ const MAINLINE: [&str; 5] = ["main", "master", "develop", "development", "trunk"
 const FALLBACK_DEFAULT: [&str; 2] = ["main", "master"];
 /// What Git leaves in a worktree's git dir while a merge, rebase, am,
 /// cherry-pick, revert, or bisect is unfinished.
-const OPERATION_STATE: [&str; 7] = [
-    "MERGE_HEAD",
-    "CHERRY_PICK_HEAD",
-    "REVERT_HEAD",
-    "rebase-merge",
-    "rebase-apply",
-    "sequencer",
-    "BISECT_LOG",
+const OPERATION_STATE: [(&str, InProgress); 7] = [
+    ("MERGE_HEAD", InProgress::Merge),
+    ("CHERRY_PICK_HEAD", InProgress::CherryPick),
+    ("REVERT_HEAD", InProgress::Revert),
+    ("rebase-merge", InProgress::Rebase),
+    ("rebase-apply", InProgress::RebaseOrAm),
+    ("sequencer", InProgress::Sequence),
+    ("BISECT_LOG", InProgress::Bisect),
 ];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InProgress {
+    Merge,
+    CherryPick,
+    Revert,
+    Rebase,
+    RebaseOrAm,
+    Sequence,
+    Bisect,
+}
+
+impl InProgress {
+    pub(crate) const fn name(self) -> &'static str {
+        match self {
+            Self::Merge => "a merge",
+            Self::CherryPick => "a cherry-pick",
+            Self::Revert => "a revert",
+            Self::Rebase => "a rebase",
+            Self::RebaseOrAm => "a rebase or am",
+            Self::Sequence => "a cherry-pick or revert of several commits",
+            Self::Bisect => "a bisect",
+        }
+    }
+
+    /// `git commit` would conclude or join each of these but a bisect, and
+    /// moving a branch under one changes what it finishes with.
+    pub(crate) const fn holds_commits(self) -> bool {
+        !matches!(self, Self::Bisect)
+    }
+}
+
+pub(crate) fn in_progress(
+    worktree: &Path,
+    reads: Deadline,
+) -> Result<Vec<InProgress>, RepositoryError> {
+    let mut args = vec!["rev-parse", "--path-format=absolute"];
+    for (path, _) in OPERATION_STATE {
+        args.extend(["--git-path", path]);
+    }
+    let paths = git::read(worktree, &args, reads)?;
+    let paths = git::text(&paths);
+    Ok(paths
+        .lines()
+        .zip(OPERATION_STATE)
+        .filter(|(path, _)| Path::new(path).exists())
+        .map(|(_, (_, operation))| operation)
+        .collect())
+}
 
 pub(super) struct Repository {
     pub root: PathBuf,
@@ -435,11 +484,6 @@ struct Occupant {
 fn occupant(worktree: &str, reads: Deadline) -> Result<Occupant, RepositoryError> {
     let path = Path::new(worktree);
     let head = git::run(path, &["symbolic-ref", "--quiet", "HEAD"], reads)?;
-    let mut pending = vec!["rev-parse", "--path-format=absolute"];
-    for operation in OPERATION_STATE {
-        pending.extend(["--git-path", operation]);
-    }
-    let pending = git::run(path, &pending, reads)?;
     let status = git::run(
         path,
         &["status", "--porcelain=v1", "-z", "--untracked-files=no"],
@@ -448,10 +492,7 @@ fn occupant(worktree: &str, reads: Deadline) -> Result<Occupant, RepositoryError
     Ok(Occupant {
         worktree: worktree.to_owned(),
         head: head.status.success().then(|| git::line(&head.stdout)),
-        mid_operation: !pending.status.success()
-            || git::text(&pending.stdout)
-                .lines()
-                .any(|path| Path::new(path).exists()),
+        mid_operation: in_progress(path, reads).map_or(true, |found| !found.is_empty()),
         dirty: !status.status.success() || !status.stdout.is_empty(),
     })
 }

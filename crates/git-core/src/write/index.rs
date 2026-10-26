@@ -531,7 +531,7 @@ pub(super) fn restore(
         .into_iter()
         .cloned()
         .collect();
-    entry.bring_back(txn, &objects)?;
+    entry.bring_back(txn, &store::Objects::exact(objects))?;
     put(txn, &pending)?;
     let written = read(txn)?;
     let mut expected = current;

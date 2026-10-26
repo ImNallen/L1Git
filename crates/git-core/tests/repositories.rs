@@ -1576,9 +1576,11 @@ fn worktree_status_tags_staged_unstaged_renamed_and_untracked_paths() {
     fs::write(fixture.repo.join("with space.txt"), "new\n").unwrap();
     fs::create_dir(fixture.repo.join("folder")).unwrap();
     fs::write(fixture.repo.join("folder/nested\nname.txt"), "new\n").unwrap();
+    let status = worktree_status(fixture.path()).unwrap();
     assert_eq!(
-        worktree_status(fixture.path()).unwrap(),
+        status,
         WorktreeStatus {
+            staged_stamp: status.staged_stamp.clone(),
             root: snapshot(fixture.path()).unwrap().root,
             head: Head::Attached {
                 reference: "refs/heads/main".into(),
@@ -1767,9 +1769,11 @@ fn worktree_status_reads_head_from_the_real_ref() {
     fs::write(unborn.join("added.txt"), "added\n").unwrap();
     git(&unborn, &["add", "added.txt"]);
     fs::write(unborn.join("loose.txt"), "loose\n").unwrap();
+    let status = worktree_status(unborn.to_str().unwrap()).unwrap();
     assert_eq!(
-        worktree_status(unborn.to_str().unwrap()).unwrap(),
+        status,
         WorktreeStatus {
+            staged_stamp: status.staged_stamp.clone(),
             root: snapshot(unborn.to_str().unwrap()).unwrap().root,
             head: Head::Unborn {
                 reference: "refs/heads/(detached)".into(),

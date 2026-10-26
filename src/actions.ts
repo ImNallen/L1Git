@@ -56,6 +56,7 @@ export type Commands = {
   showStash: (stash: Stash) => void;
   stageAll: () => void;
   unstageAll: () => void;
+  focusCommit: () => void;
   undo: () => void;
   redo: () => void;
 };
@@ -70,6 +71,7 @@ export type Shortcut = {
 export type ActionId =
   | "stageAll"
   | "unstageAll"
+  | "focusCommit"
   | "undo"
   | "redo"
   | "fetch"
@@ -142,6 +144,15 @@ export const actions: readonly Action[] = [
       !context.writing &&
       (context.worktree?.staged ?? 0) > 0,
     run: (commands) => commands.unstageAll(),
+  },
+  {
+    id: "focusCommit",
+    title: "Commit…",
+    available: (context) =>
+      onRepository(context) &&
+      !context.writing &&
+      (context.worktree?.staged ?? 0) > 0,
+    run: (commands) => commands.focusCommit(),
   },
   {
     id: "undo",

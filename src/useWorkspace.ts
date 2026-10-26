@@ -278,8 +278,8 @@ export function useWorkspace() {
 
   const latest = useRef({ activeRoot, refresh });
   latest.current = { activeRoot, refresh };
-  const rereadOpenRepository = useCallback((path: RepositoryRoot) => {
-    if (latest.current.activeRoot === path) void latest.current.refresh();
+  const rereadOpenRepository = useCallback(async (path: RepositoryRoot) => {
+    if (latest.current.activeRoot === path) await latest.current.refresh();
   }, []);
 
   const removeRepository = (removed: RepositoryRoot) => {
@@ -352,11 +352,12 @@ export function useWorkspace() {
       void readStatus(worktree.root);
   }, [worktreeKey, changesAttempt, readStatus]);
 
+  const rereading = workspace.kind === "loading";
   useEffect(() => {
-    if (current === null || selection?.kind !== "worktree") return;
+    if (current === null || selection?.kind !== "worktree" || rereading) return;
     const next = restoreSelection(current.snapshot, selection, changes);
     if (!sameSelection(next, selection)) setSelection(next);
-  }, [current, selection, changes]);
+  }, [current, selection, changes, rereading]);
 
   const [detailReader] = useState(() =>
     latestReader<DetailKey, CommitDetail>({

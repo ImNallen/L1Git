@@ -1,6 +1,6 @@
 mod write;
 
-pub(crate) use write::{LocalWrite, Write, WriteDeadline};
+pub(crate) use write::{LocalWrite, Write, WriteDeadline, Wrote};
 
 use crate::{BranchRef, ErrorKind, Oid, RepositoryError};
 use std::{

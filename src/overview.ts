@@ -66,6 +66,7 @@ export type OverviewStore = {
   updateAll(commonDir?: RepositoryRoot): Promise<void>;
   setInterval(minutes: FetchInterval): void;
   onRefsChanged(listener: (roots: RepositoryRoot[]) => void): () => void;
+  refreshLocal(commonDir: RepositoryRoot): Promise<void>;
   dispose(): void;
 };
 
@@ -300,6 +301,21 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
     ).then(() => {});
   }
 
+  async function refreshLocal(commonDir: RepositoryRoot) {
+    const root = rootsOf(commonDir)[0];
+    if (root === undefined) return;
+    try {
+      const overview = await deps.overview(root, "local");
+      const repo = repos.get(commonDir);
+      if (repo) {
+        repo.overview = overview;
+        emit();
+      }
+    } finally {
+      if (repos.has(commonDir)) notifyRefsChanged(commonDir);
+    }
+  }
+
   function fastForwardAll(
     commonDir: RepositoryRoot,
     advances: Advance[],
@@ -333,6 +349,7 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
       emit();
     },
     fetch,
+    refreshLocal: (commonDir) => refreshLocal(commonDir).catch(() => {}),
     fastForward(commonDir, branch) {
       const repo = repos.get(commonDir);
       if (!repo) return Promise.resolve();

@@ -1,13 +1,21 @@
 import { describe as group, expect, it } from "vitest";
 import {
+  commitWrite,
   describe,
   failureText,
+  movesRefs,
   rereadsRepository,
   stepButton,
   writeFor,
 } from "./operations";
 import type { History, HistoryEntry, StaleReason } from "./operations";
-import { entryIdSchema, oidSchema, refSchema, rootSchema } from "./repository";
+import {
+  entryIdSchema,
+  oidSchema,
+  refSchema,
+  rootSchema,
+  stagedStampSchema,
+} from "./repository";
 import type {
   IndexObject,
   Problem,
@@ -51,6 +59,7 @@ const status: WorktreeStatus = {
   root: rootSchema.parse("/work/l1-demo"),
   head,
   entries: [modified, untracked, renamed, unmerged],
+  stagedStamp: stagedStampSchema.parse("d".repeat(40)),
 };
 
 group("writeFor", () => {
@@ -201,6 +210,28 @@ group("failureText", () => {
       },
       history,
     );
+
+  it("reports a raced commit as landed, not as a failure", () => {
+    const message =
+      "Another process moved HEAD while Git committed, so the commit 1234567 landed on main after 89abcde instead of after what L1 Git showed. Undo moves main back to 89abcde.";
+    expect(write({ kind: "raced", message })).toBe(message);
+  });
+
+  it("names a changed staged list for a commit", () => {
+    expect(
+      failureText(
+        {
+          kind: "failed",
+          action: "write",
+          label: "Commit “Fix”",
+          problem: stale("stagedChanged"),
+        },
+        false,
+      ),
+    ).toBe(
+      "Could not commit “Fix”. The staged files changed since L1 Git showed them. L1 Git reread the worktree, so check the lists and try again.",
+    );
+  });
 
   it("names what changed from the reason and says the worktree was reread", () => {
     expect(write(stale("headMoved"))).toBe(
@@ -364,5 +395,44 @@ group("stepButton", () => {
       name: "Redo",
       title: "Reading the undo history",
     });
+  });
+});
+
+group("commitWrite", () => {
+  it("sends the staged stamp and the HEAD the box showed", () => {
+    expect(commitWrite("commit", status, "Update readme\n")).toEqual({
+      operation: {
+        kind: "commit",
+        message: "Update readme\n",
+        staged: "d".repeat(40),
+      },
+      expect: { head },
+    });
+    expect(commitWrite("amend", status, "A\n").operation).toEqual({
+      kind: "amend",
+      message: "A\n",
+      staged: "d".repeat(40),
+    });
+  });
+
+  it("leaves the staged list out of a message edit", () => {
+    expect(commitWrite("editMessage", status, "Reword\n")).toEqual({
+      operation: { kind: "editMessage", message: "Reword\n" },
+      expect: { head },
+    });
+  });
+
+  it("names commits by their subject and marks them as ref moves", () => {
+    const commit = commitWrite("commit", status, "Update readme\n\nBody\n");
+    expect(describe(commit.operation)).toBe("Commit “Update readme”");
+    expect(describe(commitWrite("amend", status, "Fix").operation)).toBe(
+      "Amend “Fix”",
+    );
+    expect(
+      describe(commitWrite("editMessage", status, "x".repeat(80)).operation),
+    ).toBe(`Edit message to “${"x".repeat(59)}…”`);
+    expect(movesRefs(commit.operation)).toBe(true);
+    const stage = writeFor("stageFiles", status, ["README.md"]);
+    expect(stage && movesRefs(stage.operation)).toBe(false);
   });
 });

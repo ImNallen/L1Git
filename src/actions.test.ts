@@ -57,6 +57,7 @@ function commands(): Commands {
     showStash: vi.fn(),
     stageAll: vi.fn(),
     unstageAll: vi.fn(),
+    focusCommit: vi.fn(),
     undo: vi.fn(),
     redo: vi.fn(),
   };
@@ -394,6 +395,18 @@ describe("staging and undo", () => {
     ).toEqual(["Unstage all"]);
     expect(titles({ ...unstaged, writing: true }, "stage")).toEqual([]);
     expect(titles(repositoryScreen, "stage")).toEqual([]);
+  });
+
+  it("offers Commit only with staged files", () => {
+    const staged: ActionContext = {
+      ...repositoryScreen,
+      worktree: { unstaged: 0, staged: 1 },
+    };
+    expect(titles(staged, "commit…")).toEqual(["Commit…"]);
+    expect(
+      titles({ ...staged, worktree: { unstaged: 3, staged: 0 } }, "commit…"),
+    ).toEqual([]);
+    expect(titles({ ...staged, writing: true }, "commit…")).toEqual([]);
   });
 
   it("undoes with Cmd+Z and redoes with Cmd+Shift+Z", () => {

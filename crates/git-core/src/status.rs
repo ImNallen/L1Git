@@ -1,7 +1,7 @@
 use crate::{
     ChangeStatus, ChangedFile, Conflict, ErrorKind, FilePatch, IndexObject, Mode, MoveSide, Moved,
-    Oid, PATCH_LIMIT, RepositoryError, Side, Sides, Stages, StatusEntry, SubmoduleState,
-    WorktreePatch, WorktreeStatus,
+    Oid, PATCH_LIMIT, RepositoryError, Side, Sides, StagedStamp, Stages, StatusEntry,
+    SubmoduleState, WorktreePatch, WorktreeStatus,
     git::{self, Deadline, LocalRead},
     repository::{self, text_patch},
     untracked::untracked,
@@ -21,14 +21,27 @@ pub(crate) fn worktree_status_within(
     deadline: Deadline,
 ) -> Result<WorktreeStatus, RepositoryError> {
     let root = repository::root(path, deadline)?;
+    let head = repository::head(&root, deadline)?;
+    let (entries, staged_stamp) = entries(&root, Untracked::All, deadline)?;
     Ok(WorktreeStatus {
-        head: repository::head(&root, deadline)?,
-        entries: entries(&root, deadline)?,
+        head,
+        entries,
+        staged_stamp,
         root: root.to_string_lossy().into_owned(),
     })
 }
 
-fn entries(root: &Path, deadline: Deadline) -> Result<Vec<StatusEntry>, RepositoryError> {
+#[derive(Clone, Copy)]
+pub(crate) enum Untracked {
+    All,
+    No,
+}
+
+pub(crate) fn entries(
+    root: &Path,
+    untracked: Untracked,
+    deadline: Deadline,
+) -> Result<(Vec<StatusEntry>, StagedStamp), RepositoryError> {
     let output = git::read(
         root,
         &[
@@ -36,17 +49,39 @@ fn entries(root: &Path, deadline: Deadline) -> Result<Vec<StatusEntry>, Reposito
             "--porcelain=v2",
             "-z",
             "--find-renames",
-            "--untracked-files=all",
+            match untracked {
+                Untracked::All => "--untracked-files=all",
+                Untracked::No => "--untracked-files=no",
+            },
         ],
         deadline,
     )?;
+    let mut stamp = sha1_smol::Sha1::new();
+    let mut stamped = |fields: &[&[u8]]| {
+        for field in fields {
+            stamp.update(field);
+            stamp.update(&[0]);
+        }
+        stamp.update(b"\n");
+    };
     let mut entries = Vec::new();
     let mut fields = output.split(|byte| *byte == 0);
     while let Some(field) = fields.next() {
         entries.push(match field {
             [] => continue,
             [b'1', b' ', record @ ..] => {
-                let [xy, sub, _, m_index, _, _, h_index, path] = columns::<8>(record)?;
+                let [xy, sub, m_head, m_index, _, h_head, h_index, path] = columns::<8>(record)?;
+                if staged_status(xy) != b"." {
+                    stamped(&[
+                        b"1",
+                        staged_status(xy),
+                        m_head,
+                        m_index,
+                        h_head,
+                        h_index,
+                        path,
+                    ]);
+                }
                 StatusEntry::Ordinary {
                     path: git::text(path),
                     submodule: submodule(sub)?,
@@ -55,7 +90,20 @@ fn entries(root: &Path, deadline: Deadline) -> Result<Vec<StatusEntry>, Reposito
                 }
             }
             [b'2', b' ', record @ ..] => {
-                let [xy, sub, _, m_index, _, _, h_index, _, path] = columns::<9>(record)?;
+                let [xy, sub, m_head, m_index, _, h_head, h_index, _, path] = columns::<9>(record)?;
+                let original = fields.next().ok_or_else(git::malformed)?;
+                if staged_status(xy) != b"." {
+                    stamped(&[
+                        b"2",
+                        staged_status(xy),
+                        m_head,
+                        m_index,
+                        h_head,
+                        h_index,
+                        path,
+                        original,
+                    ]);
+                }
                 let entry = index_object(m_index, h_index)?.ok_or_else(git::malformed)?;
                 let staged = |unstaged, index| {
                     Ok::<_, RepositoryError>(MoveSide::Staged {
@@ -72,13 +120,14 @@ fn entries(root: &Path, deadline: Deadline) -> Result<Vec<StatusEntry>, Reposito
                 };
                 StatusEntry::Renamed {
                     path: git::text(path),
-                    original: git::text(fields.next().ok_or_else(git::malformed)?),
+                    original: git::text(original),
                     how,
                     submodule: submodule(sub)?,
                     side,
                 }
             }
             [b'u', b' ', record @ ..] => {
+                stamped(&[b"u", record]);
                 let [xy, sub, m1, m2, m3, _, h1, h2, h3, path] = columns::<10>(record)?;
                 StatusEntry::Unmerged {
                     path: git::text(path),
@@ -97,7 +146,11 @@ fn entries(root: &Path, deadline: Deadline) -> Result<Vec<StatusEntry>, Reposito
             _ => return Err(git::malformed()),
         });
     }
-    Ok(entries)
+    Ok((entries, StagedStamp::of(&stamp)))
+}
+
+fn staged_status(xy: &[u8]) -> &[u8] {
+    xy.get(..1).unwrap_or_default()
 }
 
 fn columns<const N: usize>(record: &[u8]) -> Result<[&[u8]; N], RepositoryError> {
@@ -192,7 +245,7 @@ pub(crate) fn worktree_patch_within(
 ) -> Result<WorktreePatch, RepositoryError> {
     let root = repository::root(path, deadline)?;
     check(file)?;
-    let entries = entries(&root, deadline)?;
+    let (entries, _) = entries(&root, Untracked::All, deadline)?;
     let entry = entries
         .iter()
         .find(|entry| lists(entry, file, side))
@@ -336,7 +389,8 @@ pub(crate) fn worktree_changes(
         .collect::<Result<Vec<_>, RepositoryError>>()?;
     let tracked: HashSet<String> = files.iter().map(|file| file.path.clone()).collect();
     files.extend(
-        entries(root, deadline)?
+        entries(root, Untracked::All, deadline)?
+            .0
             .into_iter()
             .filter_map(|entry| match entry {
                 StatusEntry::Untracked { path } if !tracked.contains(&path) => Some(ChangedFile {
@@ -368,7 +422,8 @@ pub(crate) fn worktree_file_patch(
     )? {
         return Ok(Some(diff));
     }
-    let untracked_path = entries(root, deadline)?
+    let untracked_path = entries(root, Untracked::All, deadline)?
+        .0
         .iter()
         .any(|entry| matches!(entry, StatusEntry::Untracked { path } if path == file));
     if !untracked_path {

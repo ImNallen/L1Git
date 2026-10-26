@@ -45,6 +45,8 @@ import { useBranchVisibility } from "./branchVisibility";
 import type { ThemeSettings } from "./themes/catalog";
 import { AppearanceSettings } from "./components/AppearanceSettings";
 import { AddRepositoryDialog } from "./components/AddRepositoryDialog";
+import { EditMessageDialog } from "./components/EditMessageDialog";
+import { COMMIT_SUMMARY_ID } from "./components/CommitBox";
 import { CommandPalette } from "./components/CommandPalette";
 import { FetchSettings } from "./components/FetchSettings";
 import { CommitInspector, InspectorFrame } from "./components/CommitInspector";
@@ -149,6 +151,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     fetchSettings.intervalMinutes,
   );
   const [adding, setAdding] = useState(false);
+  const [editingMessage, setEditingMessage] = useState(false);
   const [palette, setPalette] = useState<{ picked: Oid | null } | null>(null);
   const paletteReturn = useRef<Element | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -224,6 +227,13 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   const writes = useWrites(snapshot?.root ?? null, {
     worktree: app.rereadWorktree,
     repository: app.rereadOpenRepository,
+    refs: (worktree, repository) => {
+      const state =
+        overview.roots.get(worktree) ?? overview.roots.get(repository);
+      if (state?.kind === "open")
+        void overviewStore.refreshLocal(state.commonDir);
+      return app.rereadOpenRepository(repository);
+    },
   });
   function writeFiles(
     root: RepositoryRoot,
@@ -235,6 +245,10 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       changes?.kind === "ready" ? writeFor(kind, changes.status, paths) : null;
     return write === null ? Promise.resolve(false) : writes.write(root, write);
   }
+  const rootChanges = snapshot ? app.changes.get(snapshot.root) : undefined;
+  const headStatus = rootChanges?.kind === "ready" ? rootChanges.status : null;
+  const editableHead =
+    headStatus?.head.kind === "unborn" ? null : (headStatus?.head.oid ?? null);
   const selectedChanges =
     app.compare === null ? selectedWorktree?.changes : undefined;
   const selectedLists = useMemo(
@@ -517,6 +531,10 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     },
     stageAll: () => writeList("unstaged"),
     unstageAll: () => writeList("staged"),
+    focusCommit: () => {
+      flushSync(() => setInspectorOpen(true));
+      document.getElementById(COMMIT_SUMMARY_ID)?.focus();
+    },
     undo: () => void writes.undo(),
     redo: () => void writes.redo(),
   };
@@ -933,6 +951,8 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                     trunk={trunk}
                     visibleColumns={historyColumns.visible}
                     onToggleColumn={historyColumns.toggle}
+                    editableHead={editableHead}
+                    onEditMessage={() => setEditingMessage(true)}
                   />
                   {fileDiff.kind !== "closed" && (
                     <FileDiffPane
@@ -1050,6 +1070,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                     writes={{
                       busy: writes.running !== null,
                       write: writeFiles,
+                      commit: writes.write,
                     }}
                   />
                 ) : (
@@ -1106,6 +1127,13 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
           )}
           onClose={closePalette}
           onRun={runItem}
+        />
+      )}
+      {editingMessage && headStatus && editableHead && (
+        <EditMessageDialog
+          status={headStatus}
+          onSave={writes.write}
+          onClose={() => setEditingMessage(false)}
         />
       )}
       {adding && (

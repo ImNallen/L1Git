@@ -1,4 +1,7 @@
-use super::{Applied, Change, Direction, EntryId, Operation, Repo, txn::Txn};
+use super::{
+    Applied, Change, Direction, EntryId, Operation, Repo,
+    txn::{Runner, Txn},
+};
 use crate::{
     ErrorKind, Oid, RepositoryError, StaleReason,
     git::{Deadline, WriteDeadline},
@@ -274,6 +277,37 @@ impl LockedStore {
         ))
     }
 
+    pub(super) fn record_intent(
+        &self,
+        repo: &Repo,
+        log: &Log,
+        operation: &Operation,
+    ) -> Result<(Applied, Recorded<'_>), RepositoryError> {
+        let id = EntryId::after(log.entries.last().copied());
+        let applied = Applied {
+            id,
+            root: repo.root(),
+            operation: operation.clone(),
+        };
+        let entry = NewEntry {
+            dir: self.entry_dir(id),
+            kept: false,
+        };
+        fs::create_dir(&entry.dir).map_err(unwritable)?;
+        self.write(id, "applied.json", &applied)?;
+        let log = log.with_pending(id);
+        self.save(&log)?;
+        Ok((
+            applied,
+            Recorded {
+                store: self,
+                id,
+                log,
+                entry,
+            },
+        ))
+    }
+
     fn forget(&self, log: &Log) {
         let Ok(names) = fs::read_dir(self.dir.join("entries")) else {
             return;
@@ -315,6 +349,17 @@ pub(super) struct Recorded<'s> {
 }
 
 impl Recorded<'_> {
+    pub(super) fn complete(
+        self,
+        runner: &impl Runner,
+        change: &Change,
+    ) -> Result<(), RepositoryError> {
+        self.store.entry(self.id).keep(runner, &change.objects())?;
+        self.store.write(self.id, "change.json", change)?;
+        self.confirm();
+        Ok(())
+    }
+
     /// Marks the write done once the index holds it. If the log cannot be
     /// saved, it stays pending, and the next locked request keeps it,
     /// because the index holds what it wrote.
@@ -440,66 +485,116 @@ impl Log {
     }
 }
 
+#[derive(Debug, Default)]
+pub(super) struct Objects {
+    pub(super) tips: Vec<Oid>,
+    pub(super) not: Vec<Oid>,
+}
+
+impl Objects {
+    pub(super) fn exact(tips: Vec<Oid>) -> Self {
+        Self {
+            tips,
+            not: Vec::new(),
+        }
+    }
+
+    fn revs(&self, tips: &[Oid]) -> Vec<u8> {
+        let mut revs = lines(tips);
+        if !self.not.is_empty() {
+            revs.extend(b"--not\n");
+            revs.extend(lines(&self.not));
+        }
+        revs
+    }
+}
+
 pub(super) struct EntryObjects {
     objects: PathBuf,
 }
 
 impl EntryObjects {
-    fn keep(&self, txn: &Txn<'_>, oids: &[Oid]) -> Result<(), RepositoryError> {
-        if oids.is_empty() {
+    pub(super) fn keep(
+        &self,
+        runner: &impl Runner,
+        objects: &Objects,
+    ) -> Result<(), RepositoryError> {
+        let tips = if self.objects.exists() {
+            missing(runner, Some(&self.objects), &objects.tips)?
+        } else {
+            objects.tips.clone()
+        };
+        if tips.is_empty() {
             return Ok(());
         }
         let pack = self.objects.join("pack");
         fs::create_dir_all(&pack).map_err(unwritable)?;
         let base = pack.join("pack").to_string_lossy().into_owned();
-        txn.git(&["pack-objects", "-q", &base])
+        runner
+            .git(&["pack-objects", "--revs", "-q", &base])
             .object_directory(&self.objects)
-            .alternate_object_directory(&txn.repo().objects)
-            .input(lines(oids))
-            .run(txn.deadline())?
+            .alternate_object_directory(&runner.repo().objects)
+            .input(objects.revs(&tips))
+            .run(runner.deadline())?
             .succeeded()?;
         Ok(())
     }
 
-    /// Copies back whichever of `oids` the repository lacks, as after a
-    /// `gc --prune=now` there, because `update-index --index-info` accepts an
-    /// object that does not exist and would leave a broken index.
-    pub(super) fn bring_back(&self, txn: &Txn<'_>, oids: &[Oid]) -> Result<(), RepositoryError> {
-        if oids.is_empty() {
-            return Ok(());
-        }
-        let found = txn
-            .git(&["cat-file", "--batch-check=%(objectname)"])
-            .input(lines(oids))
-            .uncapped()
-            .run(txn.deadline())?
-            .succeeded()?;
-        let named: BTreeSet<&[u8]> = found
-            .split(|byte| *byte == b'\n')
-            .filter_map(|answer| answer.strip_suffix(b" missing"))
-            .collect();
-        let missing: Vec<Oid> = oids
-            .iter()
-            .filter(|oid| named.contains(oid.as_str().as_bytes()))
-            .cloned()
-            .collect();
+    /// `update-index --index-info` accepts an object that does not exist, so
+    /// this copies back whichever tips the repository lacks, as after a
+    /// `gc --prune=now` there.
+    pub(super) fn bring_back(
+        &self,
+        runner: &impl Runner,
+        objects: &Objects,
+    ) -> Result<(), RepositoryError> {
+        let missing = missing(runner, None, &objects.tips)?;
         if missing.is_empty() {
             return Ok(());
         }
-        let base = txn
+        let base = runner
             .repo()
             .objects
             .join("pack")
             .join("pack")
             .to_string_lossy()
             .into_owned();
-        txn.git(&["pack-objects", "-q", &base])
+        runner
+            .git(&["pack-objects", "--revs", "-q", &base])
             .alternate_object_directory(&self.objects)
-            .input(lines(&missing))
-            .run(txn.deadline())?
+            .input(objects.revs(&missing))
+            .run(runner.deadline())?
             .succeeded()?;
         Ok(())
     }
+}
+
+fn missing(
+    runner: &impl Runner,
+    store: Option<&Path>,
+    oids: &[Oid],
+) -> Result<Vec<Oid>, RepositoryError> {
+    if oids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut check = runner.git(&["cat-file", "--batch-check=%(objectname)"]);
+    if let Some(store) = store {
+        check = check.object_directory(store);
+    }
+    let found = check
+        .input(lines(oids))
+        .uncapped()
+        .run(runner.deadline())?
+        .succeeded()?;
+    let named: BTreeSet<&[u8]> = found
+        .split(|byte| *byte == b'\n')
+        .filter_map(|answer| answer.strip_suffix(b" missing"))
+        .collect();
+    Ok(oids
+        .iter()
+        .filter(|oid| named.contains(oid.as_str().as_bytes()))
+        .cloned()
+        .collect())
 }
 
 fn lines(oids: &[Oid]) -> Vec<u8> {
