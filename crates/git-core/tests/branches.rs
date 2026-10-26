@@ -42,9 +42,11 @@ fn git(path: &Path, args: &[&str]) -> String {
         .to_owned()
 }
 
-fn init(root: &Path) {
+fn init(root: &Path, options: &[&str]) {
     fs::create_dir_all(root).unwrap();
-    git(root, &["init", "--quiet", "--initial-branch=main"]);
+    let mut args = vec!["init", "--quiet", "--initial-branch=main"];
+    args.extend(options);
+    git(root, &args);
     for (key, value) in [
         ("user.name", "Ada"),
         ("user.email", "ada@example.test"),
@@ -63,9 +65,13 @@ struct Repo {
 
 impl Repo {
     fn new() -> Self {
+        Self::init(&[])
+    }
+
+    fn init(options: &[&str]) -> Self {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().canonicalize().unwrap().join("repo");
-        init(&root);
+        init(&root, options);
         let coordinator = Coordinator::new(Limits::default(), directory.path().join("undo"));
         let repo = Self {
             directory,
@@ -241,7 +247,15 @@ fn creates_from_a_local_branch_only_while_it_holds_the_tip_shown() {
         oid: repo.oid("topic~1"),
     };
     let before = repo.state();
-    assert_eq!(kind(repo.create("late", stale)), BRANCH_CHANGED);
+    let error = repo.create("late", stale).unwrap_err();
+    assert_eq!(error.kind, BRANCH_CHANGED);
+    assert!(
+        error
+            .message
+            .starts_with("topic is no longer at the commit"),
+        "{}",
+        error.message
+    );
     assert_eq!(repo.state(), before);
 }
 
@@ -285,6 +299,22 @@ fn creates_from_a_remote_branch_with_it_as_the_upstream() {
             .status
             .success()
     );
+
+    let stale = Start::Remote {
+        reference: "refs/remotes/origin/topic".to_owned().try_into().unwrap(),
+        oid: repo.oid("origin/topic~1"),
+    };
+    let before = repo.state();
+    let error = repo.create("late", stale).unwrap_err();
+    assert_eq!(error.kind, BRANCH_CHANGED);
+    assert!(
+        error
+            .message
+            .starts_with("origin/topic is no longer at the commit"),
+        "{}",
+        error.message
+    );
+    assert_eq!(repo.state(), before);
 }
 
 #[test]
@@ -577,4 +607,208 @@ fn reports_whether_a_branch_is_merged_into_head_and_its_upstream() {
             upstream: None,
         }
     );
+}
+
+fn no_entry(repo: &Repo) {
+    let history = repo.coordinator.undo_history(repo.path()).unwrap();
+    assert_eq!(history.undo, None, "no undo entry");
+}
+
+#[test]
+fn refuses_a_folder_that_differs_only_in_case_where_refs_fold_case() {
+    let repo = Repo::new();
+    repo.git(&["config", "core.ignorecase", "true"]);
+    repo.git(&["branch", "grp/leaf"]);
+    let before = repo.state();
+    let at = Start::Commit {
+        oid: repo.oid("HEAD"),
+    };
+    for refused in [repo.create("Grp/x", at), repo.rename("topic", "Grp/y")] {
+        let error = refused.unwrap_err();
+        assert_eq!(error.kind, ErrorKind::InvalidRef, "{}", error.message);
+        assert!(
+            error.message.contains("'grp/leaf'")
+                && error.message.contains("does not tell names apart by case"),
+            "{}",
+            error.message
+        );
+    }
+    assert_eq!(repo.state(), before);
+    no_entry(&repo);
+
+    let applied = repo.rename("topic", "grp/y").unwrap();
+    round_trip(&repo, &before, &applied);
+}
+
+#[test]
+fn refuses_a_case_only_rename_where_refs_fold_case() {
+    let repo = Repo::new();
+    repo.git(&["config", "core.ignorecase", "true"]);
+    repo.git(&["branch", "packed"]);
+    repo.git(&["pack-refs", "--all"]);
+    repo.git(&["branch", "loose"]);
+    let before = repo.state();
+    for (name, to) in [("packed", "Packed"), ("loose", "LOOSE")] {
+        let error = repo.rename(name, to).unwrap_err();
+        assert_eq!(error.kind, ErrorKind::InvalidRef, "{}", error.message);
+        assert!(
+            error.message.contains("does not tell names apart by case"),
+            "{}",
+            error.message
+        );
+    }
+    assert_eq!(repo.state(), before);
+    no_entry(&repo);
+
+    let first = repo.rename("packed", "interim").unwrap();
+    let second = repo.rename("interim", "Packed").unwrap();
+    repo.undo(&second).unwrap();
+    repo.undo(&first).unwrap();
+    assert_eq!(repo.state(), before);
+}
+
+#[test]
+fn reftable_tells_names_apart_by_case_and_undoes_each_case_change() {
+    let repo = Repo::init(&["--ref-format=reftable"]);
+    repo.git(&["config", "core.ignorecase", "true"]);
+    repo.git(&["branch", "grp/leaf"]);
+    let head = || Start::Commit {
+        oid: repo.oid("HEAD"),
+    };
+    let rename = |branch: &str, to: &str| Operation::RenameBranch {
+        branch: repo.tip(branch),
+        to: to.to_owned(),
+    };
+    let create = |name: &str| Operation::CreateBranch {
+        name: name.to_owned(),
+        at: head(),
+    };
+    for operation in [
+        create("Grp/x"),
+        rename("topic", "Grp/y"),
+        rename("grp/leaf", "GRP/Leaf"),
+        create("MAIN"),
+    ] {
+        let before = repo.state();
+        let applied = repo.write(operation).unwrap();
+        assert_ne!(repo.state(), before);
+        round_trip(&repo, &before, &applied);
+    }
+}
+
+#[test]
+fn sets_the_upstream_plain_git_branch_sets_for_each_auto_setup_merge() {
+    let (repo, _remote) = with_remote();
+    repo.git(&["push", "--quiet", "origin", "topic:feat/x"]);
+    repo.git(&["fetch", "--quiet", "origin"]);
+    repo.git(&["branch", "--quiet", "--set-upstream-to=origin/main", "main"]);
+    let remote = |name: &str| Start::Remote {
+        reference: format!("refs/remotes/origin/{name}").try_into().unwrap(),
+        oid: repo.oid(&format!("origin/{name}")),
+    };
+    let local = |name: &str| Start::Local {
+        reference: format!("refs/heads/{name}").try_into().unwrap(),
+        oid: repo.oid(name),
+    };
+    let commit = repo.oid("HEAD");
+    let starts = [
+        ("feat/x", "origin/feat/x", remote("feat/x")),
+        ("x", "origin/feat/x", remote("feat/x")),
+        ("review", "origin/topic", remote("topic")),
+        ("copy", "main", local("main")),
+        ("plain", "topic", local("topic")),
+        (
+            "at",
+            commit.as_str(),
+            Start::Commit {
+                oid: commit.clone(),
+            },
+        ),
+    ];
+    let settings = |name: &str| {
+        let prefix = format!("branch.{name}.");
+        repo.git(&["config", "--local", "--list"])
+            .lines()
+            .filter(|line| line.starts_with(&prefix))
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    };
+    let set = |key: &str, value: Option<&str>| match value {
+        Some(value) => drop(repo.git(&["config", key, value])),
+        None => drop(git_output(&repo.root, &["config", "--unset", key])),
+    };
+    let mut tracked = 0;
+    for rebase in [None, Some("always")] {
+        set("branch.autoSetupRebase", rebase);
+        for merge in [
+            None,
+            Some("true"),
+            Some("false"),
+            Some("always"),
+            Some("inherit"),
+            Some("simple"),
+        ] {
+            set("branch.autoSetupMerge", merge);
+            for (name, from, start) in &starts {
+                repo.git(&["branch", "--quiet", "--", name, from]);
+                let git_wrote = settings(name);
+                repo.git(&["branch", "-D", "--quiet", "--", name]);
+                repo.create(name, start.clone()).unwrap();
+                assert_eq!(
+                    settings(name),
+                    git_wrote,
+                    "autoSetupMerge {merge:?}, autoSetupRebase {rebase:?}, {name} from {from}"
+                );
+                tracked += usize::from(!git_wrote.is_empty());
+                repo.git(&["branch", "-D", "--quiet", "--", name]);
+            }
+        }
+    }
+    assert!(tracked > 0);
+}
+
+#[test]
+fn an_undo_says_git_no_longer_has_commits_only_a_deleted_tag_reached() {
+    let repo = Repo::new();
+    repo.git(&["tag", "keep", "topic"]);
+    let applied = repo.delete("topic").unwrap();
+    repo.git(&["tag", "-d", "keep"]);
+    repo.prune();
+    let before = repo.state();
+    let error = repo.undo(&applied).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::GitFailed);
+    assert!(
+        error
+            .message
+            .starts_with("Git no longer has some of this branch's commits"),
+        "{}",
+        error.message
+    );
+    assert_eq!(repo.state(), before);
+}
+
+#[test]
+fn records_no_entry_when_git_leaves_a_branch_undo_cannot_read() {
+    let repo = Repo::new();
+    let hooks = repo.directory.path().join("hooks");
+    fs::create_dir_all(&hooks).unwrap();
+    let hook = hooks.join("reference-transaction");
+    fs::write(
+        &hook,
+        format!(
+            "#!/bin/sh\n[ \"$1\" = committed ] || exit 0\n[ -z \"$MOVED\" ] || exit 0\ngrep -q ' refs/heads/topic$' || exit 0\nMOVED=1 git update-ref refs/heads/topic {}\n",
+            repo.oid("main").as_str()
+        ),
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    repo.git(&["config", "core.hooksPath", hooks.to_str().unwrap()]);
+    let error = repo.delete("topic").unwrap_err();
+    assert_eq!(error.kind, BRANCH_CHANGED, "{}", error.message);
+    assert_eq!(repo.oid("topic"), repo.oid("main"));
+    no_entry(&repo);
 }
