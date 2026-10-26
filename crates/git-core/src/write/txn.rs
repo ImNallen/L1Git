@@ -398,7 +398,6 @@ impl<'r> RefTxn<'r> {
         &self.0
     }
 
-    /// For the work after a Git command that may have used up the deadline.
     pub(super) fn renewed(&self) -> Result<Self, RepositoryError> {
         Self::begin(self.0.repo, self.0.deadline.renewed())
     }

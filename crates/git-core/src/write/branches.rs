@@ -452,8 +452,6 @@ pub(super) fn moved(name: &str) -> RepositoryError {
     )
 }
 
-/// An undo or redo that creates a branch cannot tell a branch of that name
-/// from one it made itself, so it never takes one over.
 pub(super) fn exists_again(branch: &BranchRef, doing: &str) -> RepositoryError {
     let name = branch.name();
     RepositoryError::stale(

@@ -655,7 +655,7 @@ impl EntryObjects {
     ) -> Result<(), RepositoryError> {
         let exclude = except_branch.map(|name| format!("--exclude={name}"));
         let mut not: Vec<&str> = exclude.iter().map(String::as_str).collect();
-        not.extend(CHECKOUT_LASTING_REFS);
+        not.extend(CHECKOUT_TRUSTED_REFS);
         self.keep_unique(runner, tip, &not)
     }
 
@@ -756,10 +756,7 @@ impl EntryObjects {
 /// `--prune` drops remote-tracking refs, and a checkout moves HEAD.
 const LASTING_REFS: [&str; 2] = ["--branches", "--tags"];
 
-/// A checkout's entry also trusts remote-tracking refs, because packing a
-/// remote branch's whole history on every checkout costs too much. A fetch
-/// with `--prune` and a `gc` can then take what its undo or redo needs.
-const CHECKOUT_LASTING_REFS: [&str; 3] = ["--branches", "--tags", "--remotes"];
+const CHECKOUT_TRUSTED_REFS: [&str; 3] = ["--branches", "--tags", "--remotes"];
 
 /// What `pack-objects` names its pack after in an object directory.
 fn pack_base(objects: &Path) -> String {
