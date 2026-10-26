@@ -169,12 +169,28 @@ const unknownReason: Problem = {
 
 group("failureText", () => {
   const blockedId = entryIdSchema.parse("18e1c91cc9cade98");
+  const nextUndo = (id: string): History => ({
+    kind: "read",
+    undo: {
+      id: entryIdSchema.parse(id),
+      root: status.root,
+      operation: { kind: "stageFiles", entries: [modified] },
+      label: "Stage README.md",
+    },
+    redo: null,
+  });
+  const blocking = nextUndo("18e1c91cc9cade98");
+  const movedOn = nextUndo("27f2d02dd0dbef09");
+  const unreadable: History = {
+    kind: "unreadable",
+    problem: { kind: "unreadablePath", message: "Delete the log." },
+  };
   const write = (problem: Problem) =>
     failureText(
       { kind: "failed", action: "write", label: "Stage README.md", problem },
-      false,
+      movedOn,
     );
-  const undo = (problem: Problem, blocking: boolean) =>
+  const undo = (problem: Problem, history: History) =>
     failureText(
       {
         kind: "failed",
@@ -183,7 +199,7 @@ group("failureText", () => {
         problem,
         entry: blockedId,
       },
-      blocking,
+      history,
     );
 
   it("names what changed from the reason and says the worktree was reread", () => {
@@ -202,7 +218,7 @@ group("failureText", () => {
     expect(write(notChosen("a", "b", "c", "d", "e"))).toBe(
       "Could not stage README.md. Git would also change a, b, and 3 more files, which were not chosen. L1 Git reread the worktree, so check the lists and try again.",
     );
-    expect(undo(notChosen("z/x"), true)).toBe(
+    expect(undo(notChosen("z/x"), blocking)).toBe(
       "Could not undo Stage README.md. Git would also change z/x, which is outside this change, so L1 Git cannot undo it. Undo goes in order, so older changes stay blocked until this one can be undone.",
     );
   });
@@ -211,13 +227,13 @@ group("failureText", () => {
     expect(write(unknownReason)).toBe(
       "Could not stage README.md. A newer core says what changed.",
     );
-    expect(undo(unknownReason, true)).toBe(
+    expect(undo(unknownReason, blocking)).toBe(
       "Could not undo Stage README.md. A newer core says what changed.",
     );
   });
 
   it("explains that a blocked undo holds back the older entries", () => {
-    expect(undo(stale("headMoved"), true)).toBe(
+    expect(undo(stale("headMoved"), blocking)).toBe(
       "Could not undo Stage README.md. HEAD moved after this change, so L1 Git cannot undo it exactly. Undo goes in order, so older changes stay blocked until this one can be undone.",
     );
   });
@@ -242,7 +258,7 @@ group("failureText", () => {
         changed(
           "exec.sh changed after this change, so L1 Git cannot undo or redo it without losing that edit. Refresh.",
         ),
-        true,
+        blocking,
       ),
     ).toBe(
       "Could not undo Stage README.md. exec.sh changed after this change, so L1 Git cannot undo or redo it without losing that edit. Refresh. Undo goes in order, so older changes stay blocked until this one can be undone.",
@@ -250,8 +266,17 @@ group("failureText", () => {
   });
 
   it("names a reread history when another entry is now next", () => {
-    expect(undo(stale("historyChanged"), false)).toBe(
+    expect(undo(stale("historyChanged"), movedOn)).toBe(
       "Could not undo Stage README.md. The undo history changed since L1 Git showed it. L1 Git reread the undo history.",
+    );
+  });
+
+  it("claims no reread when the history cannot be read", () => {
+    expect(undo(stale("headMoved"), unreadable)).toBe(
+      "Could not undo Stage README.md. HEAD moved after this change, so L1 Git cannot undo it exactly.",
+    );
+    expect(undo(stale("historyChanged"), unreadable)).toBe(
+      "Could not undo Stage README.md. The undo history changed since L1 Git showed it.",
     );
   });
 
@@ -265,7 +290,7 @@ group("failureText", () => {
           problem: { kind: "unchangedPath", message: "Any core message." },
           entry: blockedId,
         },
-        false,
+        movedOn,
       ),
     ).toBe("Could not redo Unstage 2 files. Any core message.");
   });
