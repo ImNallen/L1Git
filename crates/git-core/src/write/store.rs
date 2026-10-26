@@ -220,6 +220,9 @@ impl LockedStore {
         let Ok((applied, change)) = self.record_of(id) else {
             return Ok(false);
         };
+        if change.kept_while_pending() {
+            return Ok(true);
+        }
         if applied.root == opened.root() {
             return change.landed(opened, deadline);
         }
@@ -250,6 +253,25 @@ impl LockedStore {
         operation: &Operation,
         change: &Change,
     ) -> Result<(Applied, Recorded<'_>), RepositoryError> {
+        let (applied, _, recorded) = self.record_with(txn, log, operation, |entry| {
+            entry.keep(txn, &change.objects())?;
+            Ok(change.clone())
+        })?;
+        Ok((applied, recorded))
+    }
+
+    /// Records a write whose change `fill` builds once the entry's folder
+    /// exists, so the change can keep files there before it is named.
+    pub(super) fn record_with<C: Clone>(
+        &self,
+        txn: &Txn<'_>,
+        log: &Log,
+        operation: &Operation,
+        fill: impl FnOnce(&EntryObjects) -> Result<C, RepositoryError>,
+    ) -> Result<(Applied, C, Recorded<'_>), RepositoryError>
+    where
+        Change: From<C>,
+    {
         let id = EntryId::after(log.entries.last().copied());
         let applied = Applied {
             id,
@@ -261,13 +283,14 @@ impl LockedStore {
             kept: false,
         };
         fs::create_dir(&entry.dir).map_err(unwritable)?;
-        self.entry(id).keep(txn, &change.objects())?;
+        let change = fill(&self.entry(id))?;
         self.write(id, "applied.json", &applied)?;
-        self.write(id, "change.json", change)?;
+        self.write(id, "change.json", &Change::from(change.clone()))?;
         let log = log.with_pending(id);
         self.save(&log)?;
         Ok((
             applied,
+            change,
             Recorded {
                 store: self,
                 id,
@@ -529,6 +552,10 @@ pub(super) struct EntryObjects {
 }
 
 impl EntryObjects {
+    pub(super) fn files(&self) -> PathBuf {
+        self.objects.with_file_name("files")
+    }
+
     pub(super) fn keep(
         &self,
         runner: &impl Runner,

@@ -46,6 +46,15 @@ fn base(path: &Path, lazy_fetch: bool) -> Command {
     command
 }
 
+/// Answers every credential prompt no, so a fetch Git starts fails instead
+/// of waiting for a person.
+fn without_prompts(command: &mut Command) -> &mut Command {
+    command
+        .env("SSH_ASKPASS", "/usr/bin/false")
+        .env("SSH_ASKPASS_REQUIRE", "force")
+        .env("GCM_INTERACTIVE", "never")
+}
+
 fn command(path: &Path, args: &[&str]) -> Command {
     let mut command = base(path, false);
     command.args(args);
@@ -584,11 +593,8 @@ pub(crate) fn mutate(
     if merge {
         command.env("GIT_REFLOG_ACTION", "l1git fast-forward");
     }
-    command
+    without_prompts(&mut command)
         .args(mutation.args())
-        .env("SSH_ASKPASS", "/usr/bin/false")
-        .env("SSH_ASKPASS_REQUIRE", "force")
-        .env("GCM_INTERACTIVE", "never")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped());

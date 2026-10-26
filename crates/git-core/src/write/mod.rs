@@ -4,6 +4,7 @@
 )]
 
 mod commit;
+mod discard;
 mod index;
 mod refs;
 mod store;
@@ -54,6 +55,10 @@ pub enum Operation {
     /// Replaces HEAD's commit with one that has `message` and the same files,
     /// parents, and author. Staged files stay staged.
     EditMessage { message: String },
+    /// Puts each entry's unstaged side back to the index's version on disk,
+    /// and deletes each untracked file. The entries are `worktreeStatus`
+    /// entries, sent back unchanged.
+    Discard { entries: Vec<StatusEntry> },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -125,6 +130,13 @@ impl fmt::Display for EntryId {
 enum Change {
     Index(index::IndexChange),
     Ref(refs::RefChange),
+    Discard(discard::DiscardChange),
+}
+
+impl From<discard::DiscardChange> for Change {
+    fn from(change: discard::DiscardChange) -> Self {
+        Self::Discard(change)
+    }
 }
 
 impl Change {
@@ -132,6 +144,7 @@ impl Change {
         match self {
             Self::Index(change) => Objects::exact(change.objects()),
             Self::Ref(change) => change.objects(),
+            Self::Discard(_) => Objects::default(),
         }
     }
 
@@ -160,20 +173,35 @@ impl Change {
                 store.save(step.log())?;
                 Ok(None)
             }
+            Self::Discard(change) => {
+                let txn = Txn::begin(repo, deadline)?;
+                discard::step(&txn, entry, change, direction)?;
+                store.save(step.log())?;
+                Ok(None)
+            }
         }
     }
 
     fn landed(&self, repo: &Repo, deadline: WriteDeadline) -> Result<bool, RepositoryError> {
         match self {
             Self::Index(change) => index::landed(repo, change, deadline),
-            Self::Ref(_) => Ok(true),
+            Self::Ref(_) | Self::Discard(_) => Ok(true),
+        }
+    }
+
+    /// A pending discard may have changed files before L1 Git stopped, and
+    /// its entry holds the only copy of what they held.
+    const fn kept_while_pending(&self) -> bool {
+        match self {
+            Self::Discard(_) => true,
+            Self::Index(_) | Self::Ref(_) => false,
         }
     }
 
     fn touches_skip_worktree(&self) -> bool {
         match self {
             Self::Index(change) => change.touches_skip_worktree(),
-            Self::Ref(_) => false,
+            Self::Ref(_) | Self::Discard(_) => false,
         }
     }
 }
@@ -207,6 +235,7 @@ impl Operation {
             Self::Commit { .. } => LocalWrite::Commit,
             Self::Amend { .. } => LocalWrite::Amend,
             Self::EditMessage { .. } => LocalWrite::EditMessage,
+            Self::Discard { .. } => LocalWrite::Discard,
         }
     }
 
@@ -233,6 +262,9 @@ impl Operation {
             Self::Commit { message, staged } => commit(commit::Kind::New(staged), message),
             Self::Amend { message, staged } => commit(commit::Kind::Amend(staged), message),
             Self::EditMessage { message } => commit(commit::Kind::EditMessage, message),
+            Self::Discard { entries } => {
+                discard::discard(repo, store, log, deadline, expect, self, entries)
+            }
         }
     }
 }

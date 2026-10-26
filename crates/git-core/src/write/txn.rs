@@ -1,6 +1,6 @@
 use super::{
     Applied, Change, Operation, Repo,
-    store::{LockedStore, Log, Step},
+    store::{LockedStore, Log, Recorded, Step},
 };
 use crate::{
     ErrorKind, RepositoryError,
@@ -15,8 +15,9 @@ const PREFIX: &str = "l1git-";
 
 pub(crate) const HOOK_OFF: &str = "L1GIT_HOOK_OFF";
 
-/// Only `commit_write` and `commit_step` replace the index with the copy, so
-/// nothing reaches the index before the undo history names it.
+/// Only `commit_write`, `commit_recorded`, and `commit_step` replace the
+/// index with the copy, so nothing reaches the index before the undo history
+/// names it.
 pub(crate) struct Txn<'r> {
     repo: &'r Repo,
     lock: PathBuf,
@@ -199,6 +200,19 @@ impl<'r> Txn<'r> {
         let published = self.publish(change)?;
         recorded.confirm();
         Ok((applied, published))
+    }
+
+    /// Replaces the index with the copy after a write that already changed
+    /// files on disk, so the record is kept even when the index cannot be
+    /// replaced.
+    pub(super) fn commit_recorded(
+        mut self,
+        recorded: Recorded<'_>,
+        change: &Change,
+    ) -> Result<Published, RepositoryError> {
+        let published = self.publish(change);
+        recorded.confirm();
+        published
     }
 
     /// Replaces the index with an undo or redo of the entry the log names
