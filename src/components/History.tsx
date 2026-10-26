@@ -1175,6 +1175,7 @@ export function History({
                 role="menuitem"
                 onClick={() => {
                   closeMenu();
+                  tableRef.current?.focus({ preventScroll: true });
                   onNewBranch(menuCommit);
                 }}
               >

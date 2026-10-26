@@ -1245,9 +1245,25 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
           ask={branchAsk}
           root={snapshot.root}
           head={snapshot.head}
-          onWrite={(write) => writes.write(snapshot.root, write)}
+          onWrite={async (write) => {
+            const outcome = await writes.write(snapshot.root, write);
+            const shownInDialog = write.operation.kind !== "deleteBranch";
+            if (outcome.kind === "failed" && shownInDialog) writes.dismiss();
+            if (!shownElement(focusedElement())) focusFallback();
+            return outcome;
+          }}
           onNamed={(branch) => jumpTo(snapshot.root, branch)}
-          onClose={() => setBranchAsk(null)}
+          onClose={() => {
+            setBranchAsk(null);
+            requestAnimationFrame(() => {
+              if (shownElement(focusedElement())) return;
+              const named = document.querySelector<HTMLElement>(
+                ".repository-tree .branch-row[aria-current='true']",
+              );
+              if (named) named.focus();
+              else focusFallback();
+            });
+          }}
         />
       )}
       {discarding && (
