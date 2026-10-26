@@ -606,7 +606,7 @@ fn switch(
     if Stat::of(&repo.index).ok() == index {
         return Outcome::Failed(refused);
     }
-    let put_back = put_back(txn, repo, from, planned, deadline.renewed());
+    let put_back = put_back(txn, repo, from, planned);
     Outcome::Failed(match put_back {
         Ok(()) => RepositoryError::new(
             refused.kind,
@@ -765,9 +765,10 @@ fn put_back(
     repo: &Repo,
     from: &Head,
     planned: &Switch,
-    deadline: WriteDeadline,
 ) -> Result<(), RepositoryError> {
+    let txn = txn.renewed()?;
     let runner = txn.runner();
+    let deadline = runner.deadline();
     let from = oid(from).ok_or_else(git::malformed)?;
     let goal = oid(&planned.goal).ok_or_else(git::malformed)?;
     runner
@@ -781,14 +782,14 @@ fn put_back(
     let slot = Listing::read(repo, deadline.reads())?.slot(&new.branch)?;
     if slot.tip.as_ref() == Some(&goal) {
         branches::run_delete(
-            txn,
+            &txn,
             &BranchTip {
                 reference: new.branch.clone(),
                 oid: goal,
             },
         )?;
     }
-    branches::set_config(txn, &new.branch, &slot.config, &new.before)
+    branches::set_config(&txn, &new.branch, &slot.config, &new.before)
 }
 
 fn made(
@@ -894,11 +895,12 @@ pub(super) fn step(
         return Err(branches::exists_again(&made.branch, "redo this checkout"));
     }
     if let Some(made) = created {
-        let deadline = deadline.renewed();
+        let txn = txn.renewed()?;
         match direction {
-            Direction::Undo => unmake(&txn, repo, entry, made, &tip, deadline)?,
+            Direction::Undo => unmake(&txn, repo, entry, made, &tip)?,
             Direction::Redo => {
-                let slot = Listing::read(repo, deadline.reads())?.slot(&made.branch)?;
+                let reads = txn.runner().deadline().reads();
+                let slot = Listing::read(repo, reads)?.slot(&made.branch)?;
                 branches::set_config(&txn, &made.branch, &slot.config, &made.after)?;
             }
         }
@@ -947,9 +949,8 @@ fn unmake(
     entry: &EntryObjects,
     made: &MadeBranch,
     tip: &Oid,
-    deadline: WriteDeadline,
 ) -> Result<(), RepositoryError> {
-    let listing = Listing::read(repo, deadline.reads())?;
+    let listing = Listing::read(repo, txn.runner().deadline().reads())?;
     let slot = listing.slot(&made.branch)?;
     match &slot.tip {
         Some(now) if now == tip => {
