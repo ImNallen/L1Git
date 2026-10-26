@@ -540,6 +540,22 @@ fn blank_context() -> Repo {
 }
 
 #[test]
+fn a_hunk_past_the_last_names_how_many_hunks_there_are() {
+    let repo = appended();
+    let error = repo.stage_hunk("f.txt", 1).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::UnchangedPath);
+    assert_eq!(
+        error.message,
+        "The diff of f.txt has 1 hunk, so it has no hunk 1, counting from 0."
+    );
+    let repo = middle_stage();
+    assert_eq!(
+        repo.stage_hunk("f.txt", 3).unwrap_err().message,
+        "The diff of f.txt has 3 hunks, so it has no hunk 3, counting from 0."
+    );
+}
+
+#[test]
 fn suppress_blank_empty_stage_lines_keeps_the_empty_context_line() {
     let repo = blank_context();
     repo.stage_lines("f.txt", &[d(1), a(1)]).unwrap();

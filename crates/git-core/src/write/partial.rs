@@ -266,7 +266,8 @@ impl<'o> Part<'o> {
             Refusal::NoHunk { index, hunks } => RepositoryError::new(
                 ErrorKind::UnchangedPath,
                 format!(
-                    "The diff of {path} has {hunks} hunks, so it has no hunk {index}, counting from 0."
+                    "The diff of {path} has {hunks} {}, so it has no hunk {index}, counting from 0.",
+                    if hunks == 1 { "hunk" } else { "hunks" }
                 ),
             ),
             Refusal::NotInDiff(LinePick { side, line }) => RepositoryError::new(
