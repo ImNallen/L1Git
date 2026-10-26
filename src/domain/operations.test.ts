@@ -187,9 +187,6 @@ group("failureText", () => {
     );
 
   it("names what changed from the reason and says the worktree was reread", () => {
-    expect(write(stale("pathChanged"))).toBe(
-      "Could not stage README.md. A chosen file changed since L1 Git read it. L1 Git reread the worktree, so check the lists and try again.",
-    );
     expect(write(stale("headMoved"))).toBe(
       "Could not stage README.md. HEAD moved since L1 Git read this worktree. L1 Git reread the worktree, so check the lists and try again.",
     );
@@ -223,8 +220,32 @@ group("failureText", () => {
     expect(undo(stale("headMoved"), true)).toBe(
       "Could not undo Stage README.md. HEAD moved after this change, so L1 Git cannot undo it exactly. Undo goes in order, so older changes stay blocked until this one can be undone.",
     );
-    expect(undo(stale("pathChanged"), true)).toBe(
-      "Could not undo Stage README.md. A file in this change was edited since, so L1 Git cannot undo it without losing that edit. Undo goes in order, so older changes stay blocked until this one can be undone.",
+  });
+
+  it("names the changed file in the core's words", () => {
+    const changed = (message: string): Problem => ({
+      kind: "staleView",
+      reason: "pathChanged",
+      message,
+    });
+    expect(
+      write(
+        changed(
+          "README.md changed since L1 Git read it. Refresh and try again.",
+        ),
+      ),
+    ).toBe(
+      "Could not stage README.md. README.md changed since L1 Git read it. Refresh and try again.",
+    );
+    expect(
+      undo(
+        changed(
+          "exec.sh changed after this change, so L1 Git cannot undo or redo it without losing that edit. Refresh.",
+        ),
+        true,
+      ),
+    ).toBe(
+      "Could not undo Stage README.md. exec.sh changed after this change, so L1 Git cannot undo or redo it without losing that edit. Refresh. Undo goes in order, so older changes stay blocked until this one can be undone.",
     );
   });
 
