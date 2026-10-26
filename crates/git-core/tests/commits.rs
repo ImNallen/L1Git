@@ -531,6 +531,19 @@ fn a_commit_another_process_builds_on_during_post_commit_is_named_and_not_undone
 }
 
 #[test]
+fn a_commit_a_hook_sets_the_branch_to_again_stays_ours() {
+    let repo = Repo::born();
+    let parent = repo.head();
+    repo.hook("post-commit", "git update-ref refs/heads/main HEAD\n");
+    repo.staged_edit("a.txt", "two\n");
+    let applied = repo
+        .write(Kind::Commit, "Mine\n")
+        .expect("main still holds the commit Git made");
+    repo.undo(&applied);
+    assert_eq!(repo.head(), parent);
+}
+
+#[test]
 fn a_commit_keeps_its_branch_when_head_switches_during_post_commit() {
     let repo = Repo::born();
     let parent = repo.head();
