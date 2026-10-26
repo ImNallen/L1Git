@@ -7,6 +7,7 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use std::{
+    cmp::Ordering,
     collections::{BTreeMap, BTreeSet},
     fs, io,
     path::Path,
@@ -567,18 +568,28 @@ fn at<'r>(rows: &'r Rows, path: &str) -> &'r [IndexEntry] {
 
 /// The paths whose entries differ between two reads of the whole index, so
 /// a path Git changed cannot go unseen, whatever name it gave it.
-fn differences<'r>(before: &'r Rows, after: &'r Rows) -> BTreeSet<&'r [u8]> {
-    before
-        .iter()
-        .filter(|(path, entries)| after.get(*path) != Some(*entries))
-        .map(|(path, _)| path.as_slice())
-        .chain(
-            after
-                .keys()
-                .filter(|path| !before.contains_key(*path))
-                .map(Vec::as_slice),
-        )
-        .collect()
+fn differences<'r>(before: &'r Rows, after: &'r Rows) -> Vec<&'r [u8]> {
+    let (mut old, mut new) = (before.iter().peekable(), after.iter().peekable());
+    let mut changed = Vec::new();
+    loop {
+        let order = match (old.peek(), new.peek()) {
+            (None, None) => return changed,
+            (Some(_), None) => Ordering::Less,
+            (None, Some(_)) => Ordering::Greater,
+            (Some((was, _)), Some((is, _))) => was.cmp(is),
+        };
+        match order {
+            Ordering::Less => changed.extend(old.next().map(|(path, _)| path.as_slice())),
+            Ordering::Greater => changed.extend(new.next().map(|(path, _)| path.as_slice())),
+            Ordering::Equal => {
+                if let (Some((path, was)), Some((_, is))) = (old.next(), new.next())
+                    && was != is
+                {
+                    changed.push(path.as_slice());
+                }
+            }
+        }
+    }
 }
 
 fn nul_separated<'p>(paths: impl IntoIterator<Item = &'p str>) -> Vec<u8> {
@@ -719,7 +730,7 @@ fn placeholder(file: &Path, _mode: Mode) -> io::Result<()> {
 /// `flags: <hex>`. A path can hold a newline, so only lines that start with
 /// two spaces are debug lines.
 fn parse_debug(output: &[u8]) -> Result<Rows, RepositoryError> {
-    let mut rows = Rows::new();
+    let mut paths: Vec<(Vec<u8>, Vec<IndexEntry>)> = Vec::new();
     let mut open: Option<(&[u8], Mode, Oid, u8)> = None;
     for mut piece in output.split(|byte| *byte == 0) {
         let mut flags = None;
@@ -732,20 +743,24 @@ fn parse_debug(output: &[u8]) -> Result<Rows, RepositoryError> {
                 .windows(7)
                 .position(|window| window == b"flags: ")
             {
-                let hex = git::text(&rest[at + 7..end]);
+                let hex = str::from_utf8(&rest[at + 7..end]).map_err(|_| git::malformed())?;
                 flags = Some(u32::from_str_radix(hex.trim(), 16).map_err(|_| git::malformed())?);
             }
             piece = &rest[end + 1..];
         }
         if let Some(flags) = flags {
             let (path, mode, oid, stage) = open.take().ok_or_else(git::malformed)?;
-            rows.entry(path.to_vec()).or_default().push(IndexEntry {
+            let entry = IndexEntry {
                 mode,
                 oid,
                 stage,
                 intent_to_add: flags & INTENT_TO_ADD != 0,
                 skip_worktree: flags & SKIP_WORKTREE != 0,
-            });
+            };
+            match paths.last_mut() {
+                Some((last, entries)) if last.as_slice() == path => entries.push(entry),
+                _ => paths.push((path.to_vec(), vec![entry])),
+            }
         }
         if piece.is_empty() {
             continue;
@@ -757,7 +772,9 @@ fn parse_debug(output: &[u8]) -> Result<Rows, RepositoryError> {
             .iter()
             .position(|byte| *byte == b'\t')
             .ok_or_else(git::malformed)?;
-        let [mode, oid, stage] = piece[..tab].split(|byte| *byte == b' ').collect::<Vec<_>>()[..]
+        let mut fields = piece[..tab].split(|byte| *byte == b' ');
+        let (Some(mode), Some(oid), Some(stage), None) =
+            (fields.next(), fields.next(), fields.next(), fields.next())
         else {
             return Err(git::malformed());
         };
@@ -770,6 +787,11 @@ fn parse_debug(output: &[u8]) -> Result<Rows, RepositoryError> {
         open = Some((&piece[tab + 1..], mode, oid, stage));
     }
     if open.is_some() {
+        return Err(git::malformed());
+    }
+    let count = paths.len();
+    let rows: Rows = paths.into_iter().collect();
+    if rows.len() != count {
         return Err(git::malformed());
     }
     Ok(rows)
