@@ -1,6 +1,7 @@
 import { normalizeSearch } from "./domain/search";
 import type { FullRef, Oid, RepositoryRoot, Stash } from "./domain/repository";
 import type { Selection } from "./domain/selection";
+import type { PartAction } from "./domain/operations";
 import type { BranchVisibility, VisibilityRule } from "./domain/visibility";
 
 export type Screen = "repository" | "settings";
@@ -15,7 +16,7 @@ export type ActionContext = {
   searchable: boolean;
   inspectable: boolean;
   repository: { fetching: boolean; idle: boolean; ready: number } | null;
-  file: { hasCommit: boolean } | null;
+  file: { hasCommit: boolean; lineActions: readonly PartAction[] } | null;
   selection: Selection | null;
   picked: Oid | null;
   compare: { swappable: boolean } | null;
@@ -60,6 +61,7 @@ export type Commands = {
   focusCommit: () => void;
   undo: () => void;
   redo: () => void;
+  writeLines: (action: PartAction) => void;
 };
 
 export type Shortcut = {
@@ -70,6 +72,9 @@ export type Shortcut = {
 };
 
 export type ActionId =
+  | "stageLines"
+  | "unstageLines"
+  | "discardLines"
   | "stageAll"
   | "unstageAll"
   | "discardAll"
@@ -117,6 +122,10 @@ const fileOpen = (context: ActionContext) =>
   onRepository(context) && context.file !== null;
 const withRevision = (context: ActionContext) =>
   onRepository(context) && context.file?.hasCommit === true;
+const linesAllow = (action: PartAction) => (context: ActionContext) =>
+  onRepository(context) &&
+  !context.writing &&
+  context.file?.lineActions.includes(action) === true;
 const branchName = (context: ActionContext) =>
   context.sidebarBranch?.name ?? "";
 
@@ -129,6 +138,24 @@ export const UNDO_SHORTCUT: Shortcut = {
 export const REDO_SHORTCUT: Shortcut = { ...UNDO_SHORTCUT, shift: true };
 
 export const actions: readonly Action[] = [
+  {
+    id: "stageLines",
+    title: "Stage chosen lines",
+    available: linesAllow("stage"),
+    run: (commands) => commands.writeLines("stage"),
+  },
+  {
+    id: "unstageLines",
+    title: "Unstage chosen lines",
+    available: linesAllow("unstage"),
+    run: (commands) => commands.writeLines("unstage"),
+  },
+  {
+    id: "discardLines",
+    title: "Discard chosen lines…",
+    available: linesAllow("discard"),
+    run: (commands) => commands.writeLines("discard"),
+  },
   {
     id: "stageAll",
     title: "Stage all",

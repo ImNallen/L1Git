@@ -207,3 +207,76 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.file-diff-body {
+  display: contents;
+}
+.line-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.line-bar .button {
+  height: 26px;
+  padding: 0 10px;
+  font-size: 11px;
+}
+.line-bar-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.hunk-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 14px;
+  border-top: 1px solid var(--border);
+  background: color-mix(
+    in srgb,
+    var(--diffs-fg, var(--text-strong)) 5%,
+    var(--diffs-bg, var(--panel-raised))
+  );
+  font-family: "Inter Variable", Inter, sans-serif;
+  font-size: 11px;
+}
+.hunk-bar-label {
+  margin-right: 4px;
+  color: var(--diffs-fg, var(--text-dim));
+  opacity: 0.7;
+}
+.hunk-bar-button {
+  height: 20px;
+  padding: 0 8px;
+  border: 1px solid
+    color-mix(in srgb, var(--diffs-fg, var(--text-strong)) 22%, transparent);
+  border-radius: 4px;
+  background: color-mix(
+    in srgb,
+    var(--diffs-fg, var(--text-strong)) 7%,
+    var(--diffs-bg, var(--panel-raised))
+  );
+  color: var(--diffs-fg, var(--text-strong));
+  font-size: 11px;
+}
+.hunk-bar-button:hover:not([aria-disabled="true"]) {
+  background: color-mix(
+    in srgb,
+    var(--diffs-fg, var(--text-strong)) 14%,
+    var(--diffs-bg, var(--panel-raised))
+  );
+}
+.hunk-bar-button:focus-visible {
+  outline: 2px solid var(--primary-bg);
+  outline-offset: 1px;
+}
+.line-bar [aria-disabled="true"],
+.hunk-bar-button[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: default;
+}

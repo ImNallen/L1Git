@@ -45,7 +45,7 @@ import { useBranchVisibility } from "./branchVisibility";
 import type { ThemeSettings } from "./themes/catalog";
 import { AppearanceSettings } from "./components/AppearanceSettings";
 import { AddRepositoryDialog } from "./components/AddRepositoryDialog";
-import { DiscardDialog } from "./components/DiscardDialog";
+import { DiscardDialog, DiscardPartDialog } from "./components/DiscardDialog";
 import { EditMessageDialog } from "./components/EditMessageDialog";
 import { COMMIT_SUMMARY_ID } from "./components/CommitBox";
 import { CommandPalette } from "./components/CommandPalette";
@@ -91,6 +91,7 @@ import { useHistoryColumns } from "./historyColumns";
 import { repositoryWarnings, useOverview } from "./overview";
 import { mac, macNative } from "./repositories";
 import { useRepositoryRefs } from "./useRepositoryRefs";
+import { useParts } from "./useParts";
 import { useWorkspace } from "./useWorkspace";
 import { useWrites } from "./useWrites";
 
@@ -244,6 +245,15 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
         void overviewStore.refreshLocal(state.commonDir);
       return app.rereadOpenRepository(repository);
     },
+  });
+  const parts = useParts({
+    fileDiff,
+    changes: app.changes,
+    diffStyle,
+    busy: writes.running !== null,
+    write: writes.write,
+    selectRange: app.selectRange,
+    lostFocus: () => checkLostFocus((count) => count + 1),
   });
   function writeFiles(
     root: RepositoryRoot,
@@ -563,6 +573,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     },
     undo: () => void writes.undo(),
     redo: () => void writes.redo(),
+    writeLines: parts.writeLines,
   };
   const context: ActionContext = {
     screen,
@@ -579,7 +590,10 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     file:
       fileDiff.kind === "closed"
         ? null
-        : { hasCommit: revisionOf(fileDiff) !== null },
+        : {
+            hasCommit: revisionOf(fileDiff) !== null,
+            lineActions: parts.lineActions,
+          },
     selection: selected,
     picked: palette?.picked ?? null,
     compare: app.compare && { swappable: swapEnds(app.compare) !== null },
@@ -1014,6 +1028,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                       }}
                       selectable={shows}
                       onSelectCommit={selectCommit}
+                      parts={parts.view}
                     />
                   )}
                 </>
@@ -1200,6 +1215,15 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
             setDiscarding(null);
             discarding.returnFocus?.();
           }}
+        />
+      )}
+      {parts.discarding && (
+        <DiscardPartDialog
+          path={parts.discarding.path}
+          choice={parts.discarding.choice}
+          deletes={parts.discarding.deletes}
+          onDiscard={parts.confirmDiscard}
+          onClose={parts.closeDiscard}
         />
       )}
       {adding && (
