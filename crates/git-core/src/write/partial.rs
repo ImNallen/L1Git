@@ -410,6 +410,8 @@ pub(super) fn partial_patch(
 const SECTION: &[u8] = b"diff --git ";
 const NO_NEWLINE: &[u8] = b"\\ No newline at end of file\n";
 const DEV_NULL: &[u8] = b"/dev/null\n";
+/// `diff.suppressBlankEmpty` drops the space before a blank context line.
+const BLANK_CONTEXT: &[u8] = b"\n";
 
 struct Parsed<'b> {
     header: Vec<&'b [u8]>,
@@ -551,7 +553,13 @@ impl<'b> Parsed<'b> {
                 || lines.peek().is_some_and(|line| line.starts_with(b"\\"))
             {
                 let line = lines.next().ok_or(Refusal::Malformed)?;
-                let (&marker, body) = line.split_first().ok_or(Refusal::Malformed)?;
+                let (marker, body) = match line {
+                    BLANK_CONTEXT => (b' ', line),
+                    _ => line
+                        .split_first()
+                        .map(|(marker, body)| (*marker, body))
+                        .ok_or(Refusal::Malformed)?,
+                };
                 let row = match marker {
                     b'\\' => {
                         hunk.lines.last_mut().ok_or(Refusal::Malformed)?.no_newline = true;
@@ -848,6 +856,23 @@ mod tests {
         "@@ -12,7 +14,7 @@ tail\n",
         " l12\n l13\n l14\n-l15\n+L15\n l16\n l17\n l18\n",
     );
+
+    #[test]
+    fn reads_an_empty_line_as_blank_context_and_writes_it_with_its_space() {
+        let suppressed = concat!(
+            "diff --git a/f b/f\n--- a/f\n+++ b/f\n",
+            "@@ -1,4 +1,4 @@\n",
+            "-a\n+A\n\n-b\n+B\n c\n",
+        );
+        assert_eq!(
+            built(suppressed, Picks::Lines(&[d(1), a(1)]), Apply::Forward),
+            concat!(
+                "diff --git a/f b/f\n--- a/f\n+++ b/f\n",
+                "@@ -1,4 +1,4 @@\n",
+                "-a\n+A\n \n b\n c\n",
+            )
+        );
+    }
 
     #[test]
     fn a_forward_hunk_keeps_its_old_start_and_shifts_its_new_start_by_the_hunks_kept_before_it() {
