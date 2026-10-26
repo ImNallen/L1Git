@@ -310,21 +310,17 @@ impl Listing {
 }
 
 /// A loose ref is a file, so a disk that folds case folds each folder and
-/// name of a ref. Git records that in `core.ignorecase`, but a repository
-/// copied from another disk can say otherwise, so a `REFS` that Git did not
-/// make yet finds `refs` counts too. Reftable keeps names apart on any disk.
+/// name of a ref. Git records that in `core.ignorecase`, which a repository
+/// copied from another disk can get wrong, so a disk that finds `refs` as
+/// `REFS` folds too. Reftable keeps names apart on any disk.
 pub(super) fn folds_case(repo: &Repo, config: &[(String, String)]) -> bool {
     let set = |name: &str, wanted: &str| {
         config
             .iter()
             .any(|(key, value)| key == name && value.eq_ignore_ascii_case(wanted))
     };
-    let disk_folds = || {
-        repo.common_dir.join("REFS").exists()
-            && fs::read_dir(&repo.common_dir)
-                .is_ok_and(|names| names.flatten().all(|name| name.file_name() != "REFS"))
-    };
-    !set("extensions.refstorage", "reftable") && (set("core.ignorecase", "true") || disk_folds())
+    !set("extensions.refstorage", "reftable")
+        && (set("core.ignorecase", "true") || repo.common_dir.join("REFS").exists())
 }
 
 pub(super) fn refuse_clash<'a>(
@@ -432,8 +428,7 @@ pub(super) fn new_name(
     if name.contains('\0') || name.starts_with("refs/") {
         return Err(invalid_name(name));
     }
-    let name = git::precomposed(&repo.root, name, reads)?;
-    let name = name.as_str();
+    let name: &str = &git::precomposed(&repo.root, name, reads)?;
     let ran = git::run_capped(
         &repo.root,
         &["check-ref-format", "--branch", name],
