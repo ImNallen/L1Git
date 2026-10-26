@@ -501,9 +501,11 @@ fn no_eof_newline_no_guard_git_apply_accepts_context_without_newline_followed_by
 #[test]
 fn no_eof_newline_builder_refuses_picking_the_appended_line_without_its_newline_fix() {
     let repo = appended();
-    refused(
-        repo.stage_lines("f.txt", &[a(4)]),
-        &ErrorKind::UnsupportedPath,
+    let error = repo.stage_lines("f.txt", &[a(4)]).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::UnsupportedPath);
+    assert_eq!(
+        error.message,
+        "L1 Git cannot stage only these lines of f.txt, because line 3 of the old file has no newline at its end and a chosen line would follow it. Include the change to that line, or stage the whole file."
     );
     assert_eq!(repo.index_blob("f.txt"), bytes("a\nb\nc"));
 }

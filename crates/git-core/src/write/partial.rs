@@ -73,10 +73,9 @@ pub(super) enum Refusal {
     Mode(Mode),
     Copy,
     /// `git apply` accepts a line after a `\ No newline at end of file`
-    /// marker and joins the two lines into one.
-    NoNewlineSuccessor {
-        side: LineSide,
-    },
+    /// marker and joins the two lines into one. Names the line without the
+    /// newline.
+    NoNewlineSuccessor(LinePick),
     NoHunk {
         index: u32,
         hunks: usize,
@@ -260,8 +259,8 @@ impl<'o> Part<'o> {
                 self.cannot(&format!("Git shows it with mode {}", mode.octal()))
             }
             Refusal::Copy => self.cannot("Git shows it as a copy of another file"),
-            Refusal::NoNewlineSuccessor { side } => unsupported(format!(
-                "L1 Git cannot {verb} only these lines of {path}, because the last line of the {} file has no newline and a chosen line would follow it. Include the change to that line, or {verb} the whole file.",
+            Refusal::NoNewlineSuccessor(LinePick { side, line }) => unsupported(format!(
+                "L1 Git cannot {verb} only these lines of {path}, because line {line} of the {} file has no newline at its end and a chosen line would follow it. Include the change to that line, or {verb} the whole file.",
                 side.file()
             )),
             Refusal::NoHunk { index, hunks } => RepositoryError::new(
@@ -494,6 +493,16 @@ impl Row {
         }
     }
 
+    fn pick(self) -> LinePick {
+        match self {
+            Self::Context { old, .. } => LinePick {
+                side: LineSide::Deletions,
+                line: old,
+            },
+            Self::Change(pick) => pick,
+        }
+    }
+
     fn changes(self, side: LineSide) -> bool {
         matches!(self, Self::Change(pick) if pick.side == side)
     }
@@ -714,12 +723,12 @@ fn split_view_order<'h, 'b>(lines: &'h [Line<'b>]) -> Vec<&'h Line<'b>> {
 
 fn lines_on(kept: &[(Marker, &Line<'_>)], side: LineSide) -> Result<i64, Refusal> {
     let mut count = 0;
-    let mut ended = false;
+    let mut unended = None;
     for (_, line) in kept.iter().filter(|(marker, _)| marker.on(side)) {
-        if ended {
-            return Err(Refusal::NoNewlineSuccessor { side });
+        if let Some(last) = unended {
+            return Err(Refusal::NoNewlineSuccessor(last));
         }
-        ended = line.no_newline;
+        unended = line.no_newline.then(|| line.row.pick());
         count += 1;
     }
     Ok(count)
@@ -1007,9 +1016,7 @@ mod tests {
     fn refuses_a_line_after_one_without_a_newline_and_takes_the_newline_fix_with_it() {
         assert_eq!(
             refused(APPENDED, Picks::Lines(&[a(4)]), Apply::Forward),
-            Refusal::NoNewlineSuccessor {
-                side: LineSide::Additions
-            }
+            Refusal::NoNewlineSuccessor(d(3))
         );
         assert_eq!(
             built(APPENDED, Picks::Lines(&[d(3), a(3), a(4)]), Apply::Forward),
@@ -1021,9 +1028,16 @@ mod tests {
         );
         assert_eq!(
             refused(APPENDED, Picks::Lines(&[d(3)]), Apply::Reverse),
-            Refusal::NoNewlineSuccessor {
-                side: LineSide::Deletions
-            }
+            Refusal::NoNewlineSuccessor(d(3))
+        );
+        let shortened = concat!(
+            "diff --git a/f b/f\n--- a/f\n+++ b/f\n",
+            "@@ -1,2 +1 @@\n",
+            "-x\n-y\n+X\n\\ No newline at end of file\n",
+        );
+        assert_eq!(
+            refused(shortened, Picks::Lines(&[a(1)]), Apply::Forward),
+            Refusal::NoNewlineSuccessor(a(1))
         );
     }
 
