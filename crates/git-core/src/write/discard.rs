@@ -262,7 +262,7 @@ pub(super) fn discard(
     }
     let paths: Vec<&str> = targets.iter().map(|target| target.path).collect();
     let rows = index::read(&txn)?;
-    let stats = writable_stats(&repo.root, &paths)?;
+    let stats = guard(&txn, &paths)?;
     for (target, stat) in targets.iter().zip(&stats) {
         let fresh = index::at(&rows, target.path);
         if fresh.iter().any(|entry| entry.intent_to_add) {
@@ -419,7 +419,7 @@ fn place_step(
     let root = &txn.repo().root;
     let files = entry.files();
     let paths: Vec<&str> = change.paths.iter().map(|path| path.path.as_str()).collect();
-    let stats = writable_stats(root, &paths)?;
+    let stats = guard(txn, &paths)?;
     let mut pending = Vec::new();
     for (discarded, stat) in change.paths.iter().zip(stats) {
         let (from, to) = discarded.source_and_target(direction);
@@ -498,6 +498,59 @@ impl Drop for Scratch {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.0);
     }
+}
+
+fn guard(txn: &Txn<'_>, paths: &[&str]) -> Result<Vec<Option<Stat>>, RepositoryError> {
+    let stats = writable_stats(&txn.repo().root, paths)?;
+    no_other_names(txn, paths, &stats)?;
+    Ok(stats)
+}
+
+/// A case-insensitive disk opens a tracked file through any spelling of its
+/// name, whatever `core.ignorecase` says, so a chosen path can be another
+/// name for a tracked file. Git's case-insensitive pathspecs list the
+/// candidates, and the file system decides by identity.
+fn no_other_names(
+    txn: &Txn<'_>,
+    paths: &[&str],
+    stats: &[Option<Stat>],
+) -> Result<(), RepositoryError> {
+    let chosen: BTreeMap<(u64, u64), &str> = paths
+        .iter()
+        .zip(stats)
+        .filter_map(|(path, stat)| Some((stat.as_ref()?.identity?, *path)))
+        .collect();
+    if chosen.is_empty() {
+        return Ok(());
+    }
+    for chunk in paths.chunks(PATHS_PER_READ) {
+        let specs: Vec<String> = chunk
+            .iter()
+            .map(|path| format!(":(icase,literal){path}"))
+            .collect();
+        let mut args = vec!["ls-files", "-z", "--"];
+        args.extend(specs.iter().map(String::as_str));
+        let listed = txn.git(&args).uncapped().run(txn.deadline())?.succeeded()?;
+        for name in listed
+            .split(|byte| *byte == 0)
+            .filter(|name| !name.is_empty())
+        {
+            let other = crate::git::text(name);
+            if paths.contains(&other.as_str()) {
+                continue;
+            }
+            let identity = Stat::of(&txn.repo().root.join(&other))
+                .ok()
+                .flatten()
+                .and_then(|stat| stat.identity);
+            if let Some(path) = identity.and_then(|identity| chosen.get(&identity)) {
+                return Err(unsupported(format!(
+                    "{path} and {other} are the same file on this disk, so discarding {path} would change {other}. L1 Git does not discard it."
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn writable_stats(root: &Path, paths: &[&str]) -> Result<Vec<Option<Stat>>, RepositoryError> {
