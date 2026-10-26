@@ -4,12 +4,11 @@ import { LoaderCircle, TriangleAlert } from "lucide-react";
 import * as repositories from "../repositories";
 import { amendsHead, clearSubmitted, useCommitDraft } from "../commitDrafts";
 import {
-  enterAction,
   identityCommands,
   loadMessage,
   messageFor,
+  submitsMessage,
 } from "../domain/commitMessage";
-import type { MessageField } from "../domain/commitMessage";
 import { singleCommit } from "../domain/comparison";
 import { commitWrite } from "../domain/operations";
 import type { Write } from "../domain/operations";
@@ -29,13 +28,11 @@ export async function commitMessage(root: RepositoryRoot, oid: Oid) {
 
 export const COMMIT_SUMMARY_ID = "commit-summary";
 
-export const messageKeys =
-  (field: MessageField, submit: () => void) => (event: KeyboardEvent) => {
-    const action = enterAction(event.nativeEvent, field);
-    if (action === "type") return;
-    event.preventDefault();
-    if (action === "submit") submit();
-  };
+export const messageKeys = (submit: () => void) => (event: KeyboardEvent) => {
+  if (!submitsMessage(event.nativeEvent)) return;
+  event.preventDefault();
+  submit();
+};
 
 export function CommitBox({
   status,
@@ -114,7 +111,7 @@ export function CommitBox({
       setProblem(problem);
   }
 
-  const keys = (field: MessageField) => messageKeys(field, () => void submit());
+  const keys = messageKeys(() => void submit());
   const action = amending ? "Amend" : "Commit";
   const hint =
     draft.summary.trim() === ""
@@ -123,14 +120,7 @@ export function CommitBox({
         ? "Stage a file first, or amend the previous commit."
         : `${action} (${repositories.mac ? "⌘" : "Ctrl+"}Enter)`;
   return (
-    <form
-      className="commit-box"
-      aria-label="Commit"
-      onSubmit={(event) => {
-        event.preventDefault();
-        void submit();
-      }}
-    >
+    <div className="commit-box" role="group" aria-label="Commit">
       <input
         id={COMMIT_SUMMARY_ID}
         className="commit-summary"
@@ -143,7 +133,7 @@ export function CommitBox({
         onChange={(event) =>
           setDraft({ draft: { ...draft, summary: event.target.value }, amend })
         }
-        onKeyDown={keys("summary")}
+        onKeyDown={keys}
       />
       <textarea
         className="commit-description"
@@ -159,7 +149,7 @@ export function CommitBox({
             amend,
           })
         }
-        onKeyDown={keys("description")}
+        onKeyDown={keys}
       />
       <div className="commit-actions">
         <label className="commit-amend">
@@ -172,10 +162,11 @@ export function CommitBox({
           Amend previous commit
         </label>
         <button
-          type="submit"
+          type="button"
           className="button primary"
           aria-disabled={!ready}
           title={hint}
+          onClick={() => void submit()}
         >
           {submitting || loading ? (
             <LoaderCircle size={14} className="spin" />
@@ -192,7 +183,7 @@ export function CommitBox({
             </p>
           </div>
         ))}
-    </form>
+    </div>
   );
 }
 

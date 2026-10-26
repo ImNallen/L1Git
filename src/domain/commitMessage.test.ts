@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
-  enterAction,
   composeMessage,
   identityCommands,
   loadMessage,
   messageFor,
   splitMessage,
   subjectOf,
+  submitsMessage,
 } from "./commitMessage";
 
 describe("composeMessage", () => {
@@ -99,7 +99,7 @@ describe("identityCommands", () => {
 
 describe("what Enter does in a message field", () => {
   const press = (
-    modifiers: Partial<Parameters<typeof enterAction>[0]> = {},
+    modifiers: Partial<Parameters<typeof submitsMessage>[0]> = {},
   ) => ({
     key: "Enter",
     metaKey: false,
@@ -108,30 +108,19 @@ describe("what Enter does in a message field", () => {
     ...modifiers,
   });
 
-  it("submits only with Cmd or Ctrl held, in either field", () => {
-    for (const field of ["summary", "description"] as const) {
-      expect(enterAction(press({ metaKey: true }), field)).toBe("submit");
-      expect(enterAction(press({ ctrlKey: true }), field)).toBe("submit");
-    }
-  });
-
-  it("does nothing in the summary, so a plain Enter never commits", () => {
-    expect(enterAction(press(), "summary")).toBe("suppress");
-  });
-
-  it("starts a new line in the description", () => {
-    expect(enterAction(press(), "description")).toBe("type");
+  it("submits only with Cmd or Ctrl held", () => {
+    expect(submitsMessage(press({ metaKey: true }))).toBe(true);
+    expect(submitsMessage(press({ ctrlKey: true }))).toBe(true);
+    expect(submitsMessage(press())).toBe(false);
   });
 
   it("leaves an input method's Enter alone", () => {
-    expect(
-      enterAction(press({ isComposing: true, metaKey: true }), "summary"),
-    ).toBe("type");
+    expect(submitsMessage(press({ isComposing: true, metaKey: true }))).toBe(
+      false,
+    );
   });
 
   it("ignores other keys", () => {
-    expect(enterAction(press({ key: "a", metaKey: true }), "summary")).toBe(
-      "type",
-    );
+    expect(submitsMessage(press({ key: "a", metaKey: true }))).toBe(false);
   });
 });

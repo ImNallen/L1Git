@@ -40,22 +40,9 @@ export function identityCommands(output: string): string[] {
     .filter((line) => line.startsWith("git config "));
 }
 
-export type MessageField = "summary" | "description";
-
-/**
- * A plain Enter in a one-line input submits its form, so the summary
- * suppresses it.
- */
-export function enterAction(
-  key: {
-    key: string;
-    metaKey: boolean;
-    ctrlKey: boolean;
-    isComposing: boolean;
-  },
-  field: MessageField,
-): "submit" | "suppress" | "type" {
-  if (key.key !== "Enter" || key.isComposing) return "type";
-  if (key.metaKey || key.ctrlKey) return "submit";
-  return field === "summary" ? "suppress" : "type";
-}
+export const submitsMessage = (key: {
+  key: string;
+  metaKey: boolean;
+  ctrlKey: boolean;
+  isComposing: boolean;
+}) => key.key === "Enter" && !key.isComposing && (key.metaKey || key.ctrlKey);

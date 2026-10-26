@@ -81,12 +81,7 @@ export function EditMessageDialog({
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          void save();
-        }}
-      >
+      <div>
         <div className="dialog-title">
           <div className="dialog-icon">
             <PencilLine size={20} />
@@ -123,7 +118,7 @@ export function EditMessageDialog({
               onChange={(event) =>
                 setDraft({ ...draft, summary: event.target.value })
               }
-              onKeyDown={messageKeys("summary", () => void save())}
+              onKeyDown={messageKeys(() => void save())}
             />
             <textarea
               className="commit-description"
@@ -135,7 +130,7 @@ export function EditMessageDialog({
               onChange={(event) =>
                 setDraft({ ...draft, description: event.target.value })
               }
-              onKeyDown={messageKeys("description", () => void save())}
+              onKeyDown={messageKeys(() => void save())}
             />
           </div>
         )}
@@ -151,12 +146,17 @@ export function EditMessageDialog({
           <button type="button" className="button secondary" onClick={onClose}>
             Cancel
           </button>
-          <button type="submit" className="button primary" disabled={!ready}>
+          <button
+            type="button"
+            className="button primary"
+            disabled={!ready}
+            onClick={() => void save()}
+          >
             {saving && <LoaderCircle size={14} className="spin" />}
             Save message
           </button>
         </div>
-      </form>
+      </div>
     </dialog>
   );
 }
