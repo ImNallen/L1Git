@@ -1,7 +1,7 @@
 use crate::{
-    ErrorKind, FilePatch, PATCH_LIMIT, RepositoryError, WorktreePatch,
+    ErrorKind, PATCH_LIMIT, RepositoryError,
     git::{self, Deadline},
-    repository::text_patch,
+    status::PatchBytes,
 };
 use std::{
     fs,
@@ -14,20 +14,20 @@ pub(crate) fn untracked(
     root: &Path,
     file: &str,
     deadline: Deadline,
-) -> Result<Option<WorktreePatch>, RepositoryError> {
+) -> Result<Option<PatchBytes>, RepositoryError> {
     let found = match open_without_following_links(root, file) {
         Ok(found) => found,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(unreadable(error)),
     };
-    let diff = match found {
+    let patch = match found {
         Found::File {
             file: handle,
             executable,
         } => regular(root, file, handle, executable, deadline)?,
         Found::Link(target) => {
             let oid = hash(root, &["--no-filters"], target.clone(), deadline)?;
-            text_patch(&link_patch(file, &oid, &target))
+            PatchBytes::Text(link_patch(file, &oid, &target))
         }
         Found::Directory if file.ends_with('/') => {
             return Err(RepositoryError::new(
@@ -43,7 +43,7 @@ pub(crate) fn untracked(
             ));
         }
     };
-    Ok(Some(WorktreePatch::Diff { diff }))
+    Ok(Some(patch))
 }
 
 fn unreadable(error: io::Error) -> RepositoryError {
@@ -70,10 +70,10 @@ fn regular(
     mut handle: fs::File,
     executable: bool,
     deadline: Deadline,
-) -> Result<FilePatch, RepositoryError> {
+) -> Result<PatchBytes, RepositoryError> {
     let size = handle.metadata().map_err(unreadable)?.len();
     if size > PATCH_LIMIT as u64 {
-        return Ok(FilePatch::TooLarge { bytes: size });
+        return Ok(PatchBytes::TooLarge { bytes: size });
     }
     let mut read_without_links = Vec::new();
     (&mut handle)
@@ -81,7 +81,7 @@ fn regular(
         .read_to_end(&mut read_without_links)
         .map_err(unreadable)?;
     if read_without_links.len() > PATCH_LIMIT {
-        return Ok(FilePatch::TooLarge {
+        return Ok(PatchBytes::TooLarge {
             bytes: read_without_links.len() as u64,
         });
     }
@@ -117,7 +117,7 @@ fn regular(
     }
     let patch = match run.stdout {
         git::Capped::Within(patch) => patch,
-        git::Capped::Over(bytes) => return Ok(FilePatch::TooLarge { bytes }),
+        git::Capped::Over(bytes) => return Ok(PatchBytes::TooLarge { bytes }),
     };
     let read_nothing = read_without_links.is_empty();
     let oid = hash(
@@ -135,7 +135,7 @@ fn regular(
         git::quoted("b/", given)
     );
     if body == binary.as_bytes() {
-        return Ok(FilePatch::Binary);
+        return Ok(PatchBytes::Binary);
     }
     let hunk = match body {
         [] => body,
@@ -159,7 +159,7 @@ fn regular(
         patch.extend_from_slice(lead(file).as_bytes());
         patch.extend_from_slice(hunk);
     }
-    Ok(text_patch(&patch))
+    Ok(PatchBytes::Text(patch))
 }
 
 fn hash(
