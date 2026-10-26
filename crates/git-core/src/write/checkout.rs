@@ -970,7 +970,7 @@ fn unmake(
                 },
             )?;
         }
-        None => {}
+        None => entry.keep_left_behind(txn.runner(), tip, Some(made.branch.name()))?,
         Some(_) => return Err(made_moved(made)),
     }
     branches::set_config(txn, &made.branch, &slot.config, &made.before)

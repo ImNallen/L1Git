@@ -944,6 +944,9 @@ pub(super) fn step(
             }
         }
         current = Listing::read(repo, deadline.renewed().reads())?.slots_like(to)?;
+    } else if let Transition::Delete(slot) = transition {
+        let tip = slot.tip.as_ref().ok_or_else(git::malformed)?;
+        entry.keep_branch(txn.runner(), tip, slot.branch.name())?;
     }
     for (now, wanted) in current.iter().zip(to) {
         set_config(&txn, &wanted.branch, &now.config, &wanted.config)?;
