@@ -1392,29 +1392,39 @@ describe("real Rust writes, undo, and redo", () => {
     ).toEqual({ undo: applied, redo: null });
   });
 
-  it("names each path Git would also change that the write does not choose", async () => {
-    const path = committed({ z: "file\n" });
+  it("sends every staleView reason under its wire name", async () => {
+    const path = committed({ "README.md": "one\n", z: "file\n" });
+    writeFileSync(join(path, "README.md"), "two\n");
+    const seen = await stage(path);
+    const refusal = async (request: object) =>
+      failure.parse(await (await post(request)).json()).error;
+    git(path, "add", "README.md");
+    const pathChanged = await refusal(seen);
+    git(path, "reset", "--quiet", "README.md");
+    git(path, "commit", "--quiet", "--allow-empty", "-m", "moves HEAD");
+    const headMoved = await refusal(seen);
     rmSync(join(path, "z"));
     mkdirSync(join(path, "z"));
     writeFileSync(join(path, "z", "x"), "inside\n");
     const status = await view(path);
-    const untouched = index(path);
     const deletion = status.entries.filter((entry) => entry.path === "z");
-    expect(
-      failure.parse(
-        await (
-          await post(
-            write(path, "stageFiles", { ...status, entries: deletion }),
-          )
-        ).json(),
-      ).error,
-    ).toEqual({
-      kind: "staleView",
-      reason: "pathNotChosen",
-      paths: ["z/x"],
-      message: expect.any(String),
+    const untouched = index(path);
+    const pathNotChosen = await refusal(
+      write(path, "stageFiles", { ...status, entries: deletion }),
+    );
+    const historyChanged = await refusal({
+      op: "redo",
+      path,
+      id: "0000000000000001",
     });
-    expect(index(path)).toBe(untouched);
+    const stale = { kind: "staleView", message: expect.any(String) };
+    expect([headMoved, pathChanged, pathNotChosen, historyChanged]).toEqual([
+      { ...stale, reason: "headMoved" },
+      { ...stale, reason: "pathChanged" },
+      { ...stale, reason: "pathNotChosen", paths: ["z/x"] },
+      { ...stale, reason: "historyChanged" },
+    ]);
+    expect(index(path), "no refusal changes the index").toBe(untouched);
   });
 
   it("rejects a write entry that omits its index or its submodule", async () => {
