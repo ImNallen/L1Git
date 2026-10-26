@@ -61,13 +61,19 @@ import { RepositoryTree } from "./components/RepositoryTree";
 import { UndoButtons, WriteNoticeRow } from "./components/UndoControls";
 import {
   branchAsks,
-  branchLeft,
+  branchStep,
   discardChoice,
   isBranchOperation,
   nextEntry,
   writeFor,
 } from "./domain/operations";
-import type { BranchAsk, FileWrite, Step, Write } from "./domain/operations";
+import type {
+  BranchAsk,
+  BranchStep,
+  FileWrite,
+  Step,
+  Write,
+} from "./domain/operations";
 import { swapEnds } from "./domain/comparison";
 import { buildGraph } from "./domain/graph";
 import { trunkTips } from "./domain/highlight";
@@ -172,6 +178,10 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     returnFocus?: () => void;
   } | null>(null);
   const [branchAsk, setBranchAsk] = useState<BranchAsk | null>(null);
+  const [steppedBranch, setSteppedBranch] = useState<
+    (BranchStep & { root: RepositoryRoot }) | null
+  >(null);
+  const focusJumpedRow = useRef(false);
   const [palette, setPalette] = useState<{ picked: Oid | null } | null>(null);
   const paletteReturn = useRef<Element | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -676,21 +686,38 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   };
   async function stepHistory(step: Step) {
     const entry = nextEntry(writes.history, step);
+    setSteppedBranch(null);
     const outcome = await writes[step]();
     if (
-      outcome.kind !== "applied" ||
-      entry === null ||
-      !isBranchOperation(entry.operation)
+      outcome.kind === "applied" &&
+      entry !== null &&
+      isBranchOperation(entry.operation)
     )
-      return;
-    const left = branchLeft(entry.operation, step);
-    requestAnimationFrame(() => {
-      if (shownElement(focusedElement())) return;
-      if (left === null) return focusFallback();
-      jumpTo(entry.root, left);
-      requestAnimationFrame(focusNamedBranch);
-    });
+      setSteppedBranch({
+        root: entry.root,
+        ...branchStep(entry.operation, step),
+      });
   }
+  useEffect(() => {
+    if (steppedBranch === null) return;
+    const { root, left, gone } = steppedBranch;
+    const state = branchRefs.refs.get(root);
+    const listed = (reference: FullRef) =>
+      state?.kind === "ready" &&
+      state.refs.branches.some((branch) => branch.reference === reference);
+    if ((left !== null && !listed(left.reference)) || (gone && listed(gone)))
+      return;
+    setSteppedBranch(null);
+    if (shownElement(focusedElement())) return;
+    if (left === null) return focusFallback();
+    focusJumpedRow.current = true;
+    jumpTo(root, left);
+  }, [steppedBranch, branchRefs.refs]);
+  useEffect(() => {
+    if (!focusJumpedRow.current) return;
+    focusJumpedRow.current = false;
+    focusNamedBranch();
+  }, [sidebarJump]);
   const closePalette = () => {
     flushSync(() => setPalette(null));
     const back = paletteReturn.current;

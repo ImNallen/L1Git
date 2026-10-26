@@ -170,23 +170,29 @@ export const localBranch = (name: string, oid: Oid): Branch => ({
   upstream: null,
 });
 
-export function branchLeft(
-  operation: BranchOperation,
-  step: Step,
-): Branch | null {
+export type BranchStep = { left: Branch | null; gone: FullRef | null };
+
+export function branchStep(operation: BranchOperation, step: Step): BranchStep {
+  const named = (name: string) => `refs/heads/${name}` as FullRef;
   switch (operation.kind) {
-    case "createBranch":
-      return step === "redo"
-        ? localBranch(operation.name, operation.at.oid)
-        : null;
+    case "createBranch": {
+      const { name, at } = operation;
+      return step === "undo"
+        ? { left: null, gone: named(name) }
+        : { left: localBranch(name, at.oid), gone: null };
+    }
     case "renameBranch": {
       const { branch, to } = operation;
-      return localBranch(step === "undo" ? branchName(branch) : to, branch.oid);
+      const [from, into] =
+        step === "undo" ? [to, branchName(branch)] : [branchName(branch), to];
+      return { left: localBranch(into, branch.oid), gone: named(from) };
     }
-    case "deleteBranch":
+    case "deleteBranch": {
+      const { branch } = operation;
       return step === "undo"
-        ? localBranch(branchName(operation.branch), operation.branch.oid)
-        : null;
+        ? { left: localBranch(branchName(branch), branch.oid), gone: null }
+        : { left: null, gone: branch.reference };
+    }
   }
 }
 

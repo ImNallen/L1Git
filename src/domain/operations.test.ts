@@ -1,6 +1,6 @@
 import { describe as group, expect, it } from "vitest";
 import {
-  branchLeft,
+  branchStep,
   branchWrite,
   commitWrite,
   describe,
@@ -872,11 +872,14 @@ group("branch writes", () => {
     );
   });
 
-  it("names the branch an undo or redo leaves, for focus to follow", () => {
-    const left = (
-      operation: Parameters<typeof branchLeft>[0],
+  it("names the branch an undo or redo leaves and the one it removes", () => {
+    const moved = (
+      operation: Parameters<typeof branchStep>[0],
       step: "undo" | "redo",
-    ) => branchLeft(operation, step)?.reference ?? null;
+    ) => {
+      const { left, gone } = branchStep(operation, step);
+      return [left?.reference ?? null, gone];
+    };
     const create = {
       kind: "createBranch" as const,
       name: "made",
@@ -888,13 +891,19 @@ group("branch writes", () => {
       to: "feat/renamed",
     };
     const remove = { kind: "deleteBranch" as const, branch: topic };
-    expect(left(create, "undo")).toBeNull();
-    expect(left(create, "redo")).toBe("refs/heads/made");
-    expect(left(rename, "undo")).toBe("refs/heads/feat/topic");
-    expect(left(rename, "redo")).toBe("refs/heads/feat/renamed");
-    expect(left(remove, "undo")).toBe("refs/heads/feat/topic");
-    expect(left(remove, "redo")).toBeNull();
-    expect(branchLeft(rename, "undo")?.oid).toBe(topic.oid);
+    expect(moved(create, "undo")).toEqual([null, "refs/heads/made"]);
+    expect(moved(create, "redo")).toEqual(["refs/heads/made", null]);
+    expect(moved(rename, "undo")).toEqual([
+      "refs/heads/feat/topic",
+      "refs/heads/feat/renamed",
+    ]);
+    expect(moved(rename, "redo")).toEqual([
+      "refs/heads/feat/renamed",
+      "refs/heads/feat/topic",
+    ]);
+    expect(moved(remove, "undo")).toEqual(["refs/heads/feat/topic", null]);
+    expect(moved(remove, "redo")).toEqual([null, "refs/heads/feat/topic"]);
+    expect(branchStep(rename, "undo").left?.oid).toBe(topic.oid);
   });
 
   it("says which of HEAD and the upstream a branch is not merged into", () => {
