@@ -10,9 +10,11 @@ import type {
 } from "./repository";
 
 type FileOperation = Extract<Operation, { entries: unknown }>;
-type CommitOperation = Exclude<Operation, FileOperation>;
+type CommitOperation = Extract<Operation, { message: unknown }>;
+type PartOperation = Extract<Operation, { shown: unknown }>;
 export type FileWrite = FileOperation["kind"];
 export type CommitWrite = CommitOperation["kind"];
+export type PartWrite = PartOperation["kind"];
 
 export type Write = { operation: Operation; expect: Expect };
 
@@ -39,7 +41,7 @@ export function commitWrite(
   return { operation, expect: { head: status.head } };
 }
 
-export const movesRefs = (operation: Operation) => !("entries" in operation);
+export const movesRefs = (operation: Operation) => "message" in operation;
 
 export function discardable(entry: StatusEntry): boolean {
   switch (entry.kind) {
@@ -109,6 +111,15 @@ const fileVerbs: Record<FileWrite, string> = {
   discard: "Discard",
 };
 
+const partVerbs: Record<PartWrite, string> = {
+  stageHunk: "Stage a hunk of",
+  unstageHunk: "Unstage a hunk of",
+  discardHunk: "Discard a hunk of",
+  stageLines: "Stage lines of",
+  unstageLines: "Unstage lines of",
+  discardLines: "Discard lines of",
+};
+
 function folderOf(path: string): string[] {
   return path.replace(/\/$/, "").split("/").slice(0, -1);
 }
@@ -125,8 +136,10 @@ function sharedFolder(paths: readonly string[]): string {
 }
 
 export function describe(operation: Operation): string {
-  if (!("entries" in operation))
+  if ("message" in operation)
     return `${commitVerbs[operation.kind]} ${quoted(operation.message)}`;
+  if ("shown" in operation)
+    return `${partVerbs[operation.kind]} ${operation.path}`;
   const paths = operation.entries.map((entry) => entry.path);
   const resolving =
     operation.kind === "stageFiles" &&

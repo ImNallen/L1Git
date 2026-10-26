@@ -256,6 +256,21 @@ export const entryIdSchema = z
   .string()
   .regex(/^[0-9a-f]{16}$/)
   .brand<"EntryId">();
+export const lineSideSchema = z.enum(["deletions", "additions"]);
+export const linePickSchema = z.strictObject({
+  side: lineSideSchema,
+  line: z.number().int().positive(),
+});
+const hunkPart = {
+  path: z.string(),
+  hunk: z.number().int().nonnegative(),
+  shown: z.string(),
+};
+const linesPart = {
+  path: z.string(),
+  lines: z.array(linePickSchema),
+  shown: z.string(),
+};
 export const operationSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("stageFiles"),
@@ -280,6 +295,12 @@ export const operationSchema = z.discriminatedUnion("kind", [
     kind: z.literal("discard"),
     entries: z.array(statusEntrySchema),
   }),
+  z.strictObject({ kind: z.literal("stageHunk"), ...hunkPart }),
+  z.strictObject({ kind: z.literal("unstageHunk"), ...hunkPart }),
+  z.strictObject({ kind: z.literal("stageLines"), ...linesPart }),
+  z.strictObject({ kind: z.literal("unstageLines"), ...linesPart }),
+  z.strictObject({ kind: z.literal("discardHunk"), ...hunkPart }),
+  z.strictObject({ kind: z.literal("discardLines"), ...linesPart }),
 ]);
 export const expectSchema = z.strictObject({ head: headSchema });
 export const appliedSchema = z.strictObject({
@@ -377,6 +398,8 @@ export type StagedStamp = z.infer<typeof stagedStampSchema>;
 export type Side = z.infer<typeof sideSchema>;
 export type WorktreePatch = z.infer<typeof worktreePatchSchema>;
 export type EntryId = z.infer<typeof entryIdSchema>;
+export type LineSide = z.infer<typeof lineSideSchema>;
+export type LinePick = z.infer<typeof linePickSchema>;
 export type Operation = z.infer<typeof operationSchema>;
 export type Expect = z.infer<typeof expectSchema>;
 export type Applied = z.infer<typeof appliedSchema>;
