@@ -182,8 +182,12 @@ fn sha1_hex(bytes: &[u8]) -> String {
     sha1_smol::Sha1::from(bytes).digest().to_string()
 }
 
-/// Another commit whose ID starts with `prefix`, and its object body.
-fn colliding_commit(repo: &Repo, prefix: &str, mine: &str) -> (String, String) {
+struct LooseCommit {
+    body: String,
+    oid: String,
+}
+
+fn colliding_commit(repo: &Repo, prefix: &str, mine: &str) -> LooseCommit {
     let tree = repo.git(&["rev-parse", "main^{tree}"]);
     let parent = repo.git(&["rev-parse", "main^"]);
     (0u64..)
@@ -192,13 +196,13 @@ fn colliding_commit(repo: &Repo, prefix: &str, mine: &str) -> (String, String) {
                 "tree {tree}\nparent {parent}\nauthor Eve <eve@example.test> 1700000000 +0000\ncommitter Eve <eve@example.test> 1700000000 +0000\n\nother {n}\n"
             );
             let oid = sha1_hex(&[format!("commit {}\0", body.len()).as_bytes(), body.as_bytes()].concat());
-            (body, oid)
+            LooseCommit { body, oid }
         })
-        .find(|(_, oid)| oid.starts_with(prefix) && oid != mine)
+        .find(|commit| commit.oid.starts_with(prefix) && commit.oid != mine)
         .unwrap()
 }
 
-fn point_main_at_new_commit(repo: &Repo, body: &str, oid: &str) {
+fn point_main_at_new_commit(repo: &Repo, commit: &LooseCommit) {
     let mut hash = Command::new("git")
         .arg("-C")
         .arg(&repo.root)
@@ -210,11 +214,14 @@ fn point_main_at_new_commit(repo: &Repo, body: &str, oid: &str) {
     hash.stdin
         .take()
         .unwrap()
-        .write_all(body.as_bytes())
+        .write_all(commit.body.as_bytes())
         .unwrap();
     let written = hash.wait_with_output().unwrap();
-    assert_eq!(String::from_utf8(written.stdout).unwrap().trim(), oid);
-    repo.git(&["update-ref", "refs/heads/main", oid]);
+    assert_eq!(
+        String::from_utf8(written.stdout).unwrap().trim(),
+        commit.oid
+    );
+    repo.git(&["update-ref", "refs/heads/main", &commit.oid]);
 }
 
 fn wait_for(path: &Path) {
@@ -239,10 +246,10 @@ fn a_commit_that_shares_the_printed_prefix_is_not_taken_as_ours() {
         wait_for(&repo.root.join(".git/exited"));
         let mine = repo.main();
         let printed = repo.git(&["rev-parse", "--short", "HEAD"]);
-        let (body, other) = colliding_commit(&repo, &printed, &mine);
-        point_main_at_new_commit(&repo, &body, &other);
+        let other = colliding_commit(&repo, &printed, &mine);
+        point_main_at_new_commit(&repo, &other);
         fs::write(repo.root.join(".git/collided"), "").unwrap();
-        (write.join().unwrap(), other)
+        (write.join().unwrap(), other.oid)
     });
     raced(result);
     assert_eq!(repo.main(), other, "L1 Git leaves the other commit alone");
@@ -270,8 +277,8 @@ fn a_hook_that_forges_gits_update_to_a_commit_sharing_the_printed_prefix_is_not_
         wait_for(&repo.root.join(".git/mine"));
         let traced = fs::read_to_string(repo.root.join(".git/mine")).unwrap();
         let mine = traced.split_whitespace().nth(1).unwrap().to_owned();
-        let (body, other) = colliding_commit(&repo, &mine[..5], &mine);
-        fs::write(repo.root.join(".git/forged.part"), &other).unwrap();
+        let other = colliding_commit(&repo, &mine[..5], &mine);
+        fs::write(repo.root.join(".git/forged.part"), &other.oid).unwrap();
         fs::rename(
             repo.root.join(".git/forged.part"),
             repo.root.join(".git/forged"),
@@ -279,9 +286,9 @@ fn a_hook_that_forges_gits_update_to_a_commit_sharing_the_printed_prefix_is_not_
         .unwrap();
         wait_for(&repo.root.join(".git/exited"));
         assert_eq!(repo.main(), mine, "Git made our commit");
-        point_main_at_new_commit(&repo, &body, &other);
+        point_main_at_new_commit(&repo, &other);
         fs::write(repo.root.join(".git/collided"), "").unwrap();
-        (write.join().unwrap(), other)
+        (write.join().unwrap(), other.oid)
     });
     raced(result);
     assert_eq!(repo.main(), other, "L1 Git leaves the other commit alone");

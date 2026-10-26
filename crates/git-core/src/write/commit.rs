@@ -190,7 +190,8 @@ pub(super) fn commit(
         )
     })?;
     let target = Target::of(&head);
-    let update = named(repo, deadline, &printed)?.and_then(|made| trace.update(&target, &made));
+    let update = only_object_starting_with(repo, deadline, &printed)?
+        .and_then(|made| trace.first_update_to(&target, &made));
     let Some(update) = update else {
         return Err(elsewhere(&printed, &target));
     };
@@ -240,9 +241,7 @@ fn printed(stdout: &[u8]) -> Option<String> {
     })
 }
 
-/// Git abbreviates the ID it prints so that no other object starts with it,
-/// so the ID names our commit only while it still names one object.
-fn named(
+fn only_object_starting_with(
     repo: &Repo,
     deadline: WriteDeadline,
     printed: &str,
@@ -457,11 +456,7 @@ impl Trace {
         })
     }
 
-    /// Git processes that hooks start trace their updates to the same file.
-    /// Git traces its own once it has moved the branch, before `post-commit`
-    /// and the `committed` `reference-transaction` hook run, so a later update
-    /// to the same commit is a hook's.
-    fn update(&self, target: &Target, made: &Oid) -> Option<Update> {
+    fn first_update_to(&self, target: &Target, made: &Oid) -> Option<Update> {
         let file = fs::File::open(&self.refs).ok()?;
         io::BufReader::new(file)
             .split(b'\n')
