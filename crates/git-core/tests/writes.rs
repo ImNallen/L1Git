@@ -26,17 +26,19 @@ const HISTORY_CHANGED: ErrorKind = ErrorKind::StaleView {
     reason: StaleReason::HistoryChanged,
 };
 
-fn git_output(path: &Path, args: &[&str]) -> std::process::Output {
+fn git_command(path: &Path, args: &[&str]) -> Command {
     let mut command = Command::new("git");
     for (key, _) in std::env::vars_os() {
         if key.to_string_lossy().starts_with("GIT_") {
             command.env_remove(key);
         }
     }
+    command.arg("-C").arg(path).args(args);
     command
-        .arg("-C")
-        .arg(path)
-        .args(args)
+}
+
+fn git_output(path: &Path, args: &[&str]) -> std::process::Output {
+    git_command(path, args)
         .stdin(Stdio::null())
         .output()
         .unwrap()
@@ -718,10 +720,7 @@ fn stages_a_name_holding_the_replacement_character_and_refuses_one_that_is_not_u
     let blob = repo.git(&["hash-object", "-w", "f"]);
     let mut info = format!("100644 {}\tcaf", blob.trim()).into_bytes();
     info.extend(b"\xff\0");
-    let mut child = Command::new("git")
-        .arg("-C")
-        .arg(&repo.root)
-        .args(["update-index", "-z", "--index-info"])
+    let mut child = git_command(&repo.root, &["update-index", "-z", "--index-info"])
         .stdin(Stdio::piped())
         .spawn()
         .unwrap();

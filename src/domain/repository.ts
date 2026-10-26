@@ -271,29 +271,31 @@ export const undoHistorySchema = z.strictObject({
   undo: appliedSchema.nullable(),
   redo: appliedSchema.nullable(),
 });
-const staleReasons = ["headMoved", "pathChanged", "historyChanged"] as const;
-const knownStaleReasons = new Set<string>([...staleReasons, "pathNotChosen"]);
+const staleReasonSchema = z.enum([
+  "headMoved",
+  "pathChanged",
+  "pathNotChosen",
+  "historyChanged",
+]);
+const staleView = { kind: z.literal("staleView"), message: z.string() };
 export const repositoryErrorSchema = z.union([
   z.discriminatedUnion("reason", [
     z.object({
-      kind: z.literal("staleView"),
+      ...staleView,
       reason: z.literal("pathNotChosen"),
       paths: z.array(z.string()).min(1),
-      message: z.string(),
     }),
     z.object({
-      kind: z.literal("staleView"),
-      reason: z.enum(staleReasons),
-      message: z.string(),
+      ...staleView,
+      reason: staleReasonSchema.exclude(["pathNotChosen"]),
     }),
   ]),
   z.object({
-    kind: z.literal("staleView"),
+    ...staleView,
     reason: z
       .string()
-      .refine((reason) => !knownStaleReasons.has(reason))
+      .refine((reason) => !staleReasonSchema.safeParse(reason).success)
       .transform(() => "unknown" as const),
-    message: z.string(),
   }),
   z.object({
     kind: z.enum([
