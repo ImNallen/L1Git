@@ -29,6 +29,13 @@ pub(super) struct IndexEntry {
     pub(super) assume_unchanged: bool,
 }
 
+/// What the user chose: whole paths, or part of one file.
+#[derive(Debug, Clone, Copy)]
+enum Scope<'p> {
+    Paths,
+    Part(&'p str),
+}
+
 const ASSUME_UNCHANGED: u32 = 0x8000;
 const INTENT_TO_ADD: u32 = 0x2000_0000;
 const SKIP_WORKTREE: u32 = 0x4000_0000;
@@ -63,11 +70,12 @@ impl IndexChange {
         before: &Rows,
         after: &Rows,
         verb: &str,
+        scope: Scope<'_>,
         claimed: &BTreeSet<&str>,
     ) -> Result<Self, RepositoryError> {
         let unchosen = unnamed(&differences(before, after), |path| claimed.contains(path));
         if !unchosen.is_empty() {
-            return Err(not_chosen(verb, claimed, unchosen));
+            return Err(not_chosen(verb, scope, claimed, unchosen));
         }
         let paths: Vec<PathChange> = claimed
             .iter()
@@ -393,6 +401,7 @@ pub(super) fn edit<'r>(
         deadline,
         expect,
         command.verb(),
+        Scope::Paths,
         &claimed,
         |txn, before| {
             for (path, seen) in &plan.claims {
@@ -430,6 +439,7 @@ pub(super) fn edit_part<'r>(
         deadline,
         expect,
         action.verb(),
+        Scope::Part(path),
         &BTreeSet::from([path]),
         |txn, before| {
             let had = at(before, path);
@@ -504,6 +514,7 @@ fn guarded<'r>(
     deadline: WriteDeadline,
     expect: &Expect,
     verb: &str,
+    scope: Scope<'_>,
     claimed: &BTreeSet<&str>,
     run: impl FnOnce(&Txn<'r>, &Rows) -> Result<(), RepositoryError>,
 ) -> Result<(Txn<'r>, Change), RepositoryError> {
@@ -512,7 +523,7 @@ fn guarded<'r>(
     let before = read(&txn)?;
     run(&txn, &before)?;
     let after = read(&txn)?;
-    let change = IndexChange::between(head, &before, &after, verb, claimed)?;
+    let change = IndexChange::between(head, &before, &after, verb, scope, claimed)?;
     Ok((txn, Change::Index(change)))
 }
 
@@ -525,7 +536,12 @@ fn respelled<'p>(named: impl IntoIterator<Item = &'p str>, path: &str) -> Option
         .find(|named| *named != path && named.eq_ignore_ascii_case(path))
 }
 
-fn not_chosen(verb: &str, claimed: &BTreeSet<&str>, unchosen: Vec<String>) -> RepositoryError {
+fn not_chosen(
+    verb: &str,
+    scope: Scope<'_>,
+    claimed: &BTreeSet<&str>,
+    unchosen: Vec<String>,
+) -> RepositoryError {
     for path in &unchosen {
         if let Some(chosen) = respelled(claimed.iter().copied(), path) {
             return RepositoryError::new(
@@ -536,10 +552,15 @@ fn not_chosen(verb: &str, claimed: &BTreeSet<&str>, unchosen: Vec<String>) -> Re
             );
         }
     }
-    let message = format!(
-        "Git would also {verb} paths you did not choose: {}. Refresh, choose them too, and try again.",
-        unchosen.join(", ")
-    );
+    let listed = unchosen.join(", ");
+    let message = match scope {
+        Scope::Paths => format!(
+            "Git would also {verb} paths you did not choose: {listed}. Refresh, choose them too, and try again."
+        ),
+        Scope::Part(path) => format!(
+            "Git would also {verb} {listed} along with part of {path}, so L1 Git changed nothing. Refresh and try again, or {verb} {path} with Git."
+        ),
+    };
     RepositoryError::stale(StaleReason::PathNotChosen { paths: unchosen }, message)
 }
 
@@ -978,6 +999,20 @@ mod tests {
             ])
         );
         assert!(parse_debug(format!("100644 {OID} 0\tx\0").as_bytes()).is_err());
+    }
+
+    #[test]
+    fn a_part_write_that_would_change_another_path_does_not_ask_to_choose_it() {
+        let claimed = BTreeSet::from(["f.txt"]);
+        let unchosen = || vec!["g.txt".to_owned()];
+        assert_eq!(
+            not_chosen("stage", Scope::Paths, &claimed, unchosen()).message,
+            "Git would also stage paths you did not choose: g.txt. Refresh, choose them too, and try again."
+        );
+        assert_eq!(
+            not_chosen("stage", Scope::Part("f.txt"), &claimed, unchosen()).message,
+            "Git would also stage g.txt along with part of f.txt, so L1 Git changed nothing. Refresh and try again, or stage f.txt with Git."
+        );
     }
 
     #[test]
