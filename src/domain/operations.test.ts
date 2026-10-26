@@ -148,11 +148,24 @@ group("describe", () => {
   });
 });
 
-const stale = (reason: StaleReason) => ({
-  kind: "staleView" as const,
+const stale = (
+  reason: Exclude<StaleReason, "pathNotChosen" | "unknown">,
+): Problem => ({
+  kind: "staleView",
   reason,
   message: "Core wording that the notice does not show.",
 });
+const notChosen = (...paths: string[]): Problem => ({
+  kind: "staleView",
+  reason: "pathNotChosen",
+  paths,
+  message: "Core wording that the notice does not show.",
+});
+const unknownReason: Problem = {
+  kind: "staleView",
+  reason: "unknown",
+  message: "A newer core says what changed.",
+};
 
 group("failureText", () => {
   const blockedId = entryIdSchema.parse("18e1c91cc9cade98");
@@ -180,8 +193,29 @@ group("failureText", () => {
     expect(write(stale("headMoved"))).toBe(
       "Could not stage README.md. HEAD moved since L1 Git read this worktree. L1 Git reread the worktree, so check the lists and try again.",
     );
-    expect(write(stale("pathNotChosen"))).toBe(
-      "Could not stage README.md. Git would also change a file that was not chosen. L1 Git reread the worktree, so check the lists and try again.",
+  });
+
+  it("names the files Git would also change", () => {
+    expect(write(notChosen("z/x"))).toBe(
+      "Could not stage README.md. Git would also change z/x, which was not chosen. L1 Git reread the worktree, so check the lists and try again.",
+    );
+    expect(write(notChosen("z/x", "z/y"))).toBe(
+      "Could not stage README.md. Git would also change z/x and z/y, which were not chosen. L1 Git reread the worktree, so check the lists and try again.",
+    );
+    expect(write(notChosen("a", "b", "c", "d", "e"))).toBe(
+      "Could not stage README.md. Git would also change a, b, and 3 more files, which were not chosen. L1 Git reread the worktree, so check the lists and try again.",
+    );
+    expect(undo(notChosen("z/x"), true)).toBe(
+      "Could not undo Stage README.md. Git would also change z/x, which is outside this change, so L1 Git cannot undo it. Undo goes in order, so older changes stay blocked until this one can be undone.",
+    );
+  });
+
+  it("shows the core's message for a stale reason it does not know", () => {
+    expect(write(unknownReason)).toBe(
+      "Could not stage README.md. A newer core says what changed.",
+    );
+    expect(undo(unknownReason, true)).toBe(
+      "Could not undo Stage README.md. A newer core says what changed.",
     );
   });
 
@@ -221,6 +255,8 @@ group("rereadsRepository", () => {
     expect(rereadsRepository(stale("headMoved"))).toBe(true);
     expect(rereadsRepository(stale("pathChanged"))).toBe(false);
     expect(rereadsRepository(stale("historyChanged"))).toBe(false);
+    expect(rereadsRepository(notChosen("z/x"))).toBe(false);
+    expect(rereadsRepository(unknownReason)).toBe(false);
     expect(
       rereadsRepository({ kind: "lockHeld", message: "Another Git process." }),
     ).toBe(false);
@@ -264,6 +300,23 @@ group("stepButton", () => {
       name: "Undo",
       title:
         "Undo is unavailable. The development bridge is unavailable. Start pnpm dev and try again.",
+    });
+    expect(stepButton(history, "redo", "⇧⌘Z")).toEqual({
+      name: "Redo",
+      title:
+        "Redo is unavailable. The development bridge is unavailable. Start pnpm dev and try again.",
+    });
+  });
+
+  it("says the history is loading before the first read answers", () => {
+    const history: History = { kind: "unread" };
+    expect(stepButton(history, "undo", "⌘Z")).toEqual({
+      name: "Undo",
+      title: "Reading the undo history",
+    });
+    expect(stepButton(history, "redo", "⇧⌘Z")).toEqual({
+      name: "Redo",
+      title: "Reading the undo history",
     });
   });
 });
