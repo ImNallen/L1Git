@@ -61,11 +61,13 @@ import { RepositoryTree } from "./components/RepositoryTree";
 import { UndoButtons, WriteNoticeRow } from "./components/UndoControls";
 import {
   branchAsks,
+  branchLeft,
   discardChoice,
+  isBranchOperation,
   nextEntry,
   writeFor,
 } from "./domain/operations";
-import type { BranchAsk, FileWrite, Write } from "./domain/operations";
+import type { BranchAsk, FileWrite, Step, Write } from "./domain/operations";
 import { swapEnds } from "./domain/comparison";
 import { buildGraph } from "./domain/graph";
 import { trunkTips } from "./domain/highlight";
@@ -594,8 +596,8 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       flushSync(() => setInspectorOpen(true));
       document.getElementById(COMMIT_SUMMARY_ID)?.focus();
     },
-    undo: () => void writes.undo(),
-    redo: () => void writes.redo(),
+    undo: () => void stepHistory("undo"),
+    redo: () => void stepHistory("redo"),
     writeLines: parts.writeLines,
   };
   const context: ActionContext = {
@@ -664,6 +666,31 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       if (shownElement(focusedElement())) return;
     }
   };
+  const focusNamedBranch = () => {
+    if (shownElement(focusedElement())) return;
+    const named = document.querySelector<HTMLElement>(
+      ".repository-tree .branch-row[aria-current='true']",
+    );
+    if (named) named.focus();
+    else focusFallback();
+  };
+  async function stepHistory(step: Step) {
+    const entry = nextEntry(writes.history, step);
+    const outcome = await writes[step]();
+    if (
+      outcome.kind !== "applied" ||
+      entry === null ||
+      !isBranchOperation(entry.operation)
+    )
+      return;
+    const left = branchLeft(entry.operation, step);
+    requestAnimationFrame(() => {
+      if (shownElement(focusedElement())) return;
+      if (left === null) return focusFallback();
+      jumpTo(entry.root, left);
+      requestAnimationFrame(focusNamedBranch);
+    });
+  }
   const closePalette = () => {
     flushSync(() => setPalette(null));
     const back = paletteReturn.current;
@@ -1257,14 +1284,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
           onNamedBranch={(branch) => jumpTo(snapshot.root, branch)}
           onClose={() => {
             setBranchAsk(null);
-            requestAnimationFrame(() => {
-              if (shownElement(focusedElement())) return;
-              const named = document.querySelector<HTMLElement>(
-                ".repository-tree .branch-row[aria-current='true']",
-              );
-              if (named) named.focus();
-              else focusFallback();
-            });
+            requestAnimationFrame(focusNamedBranch);
           }}
         />
       )}

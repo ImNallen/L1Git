@@ -1,5 +1,6 @@
 import { describe as group, expect, it } from "vitest";
 import {
+  branchLeft,
   branchWrite,
   commitWrite,
   describe,
@@ -869,6 +870,31 @@ group("branch writes", () => {
     ).toBe(
       "Could not delete branch topic. topic is no longer at the commit L1 Git showed.",
     );
+  });
+
+  it("names the branch an undo or redo leaves, for focus to follow", () => {
+    const left = (
+      operation: Parameters<typeof branchLeft>[0],
+      step: "undo" | "redo",
+    ) => branchLeft(operation, step)?.reference ?? null;
+    const create = {
+      kind: "createBranch" as const,
+      name: "made",
+      at: { kind: "commit" as const, oid: topic.oid },
+    };
+    const rename = {
+      kind: "renameBranch" as const,
+      branch: topic,
+      to: "feat/renamed",
+    };
+    const remove = { kind: "deleteBranch" as const, branch: topic };
+    expect(left(create, "undo")).toBeNull();
+    expect(left(create, "redo")).toBe("refs/heads/made");
+    expect(left(rename, "undo")).toBe("refs/heads/feat/topic");
+    expect(left(rename, "redo")).toBe("refs/heads/feat/renamed");
+    expect(left(remove, "undo")).toBe("refs/heads/feat/topic");
+    expect(left(remove, "redo")).toBeNull();
+    expect(branchLeft(rename, "undo")?.oid).toBe(topic.oid);
   });
 
   it("says which of HEAD and the upstream a branch is not merged into", () => {

@@ -8,8 +8,10 @@ import type {
   BranchTip,
   EntryId,
   Expect,
+  FullRef,
   Head,
   LinePick,
+  Oid,
   Operation,
   Problem,
   Start,
@@ -159,6 +161,34 @@ export const isBranchOperation = (
   operation.kind === "createBranch" ||
   operation.kind === "renameBranch" ||
   operation.kind === "deleteBranch";
+
+export const localBranch = (name: string, oid: Oid): Branch => ({
+  kind: "local",
+  reference: `refs/heads/${name}` as FullRef,
+  name,
+  oid,
+  upstream: null,
+});
+
+export function branchLeft(
+  operation: BranchOperation,
+  step: Step,
+): Branch | null {
+  switch (operation.kind) {
+    case "createBranch":
+      return step === "redo"
+        ? localBranch(operation.name, operation.at.oid)
+        : null;
+    case "renameBranch": {
+      const { branch, to } = operation;
+      return localBranch(step === "undo" ? branchName(branch) : to, branch.oid);
+    }
+    case "deleteBranch":
+      return step === "undo"
+        ? localBranch(branchName(operation.branch), operation.branch.oid)
+        : null;
+  }
+}
 
 export const branchWrite = (operation: BranchOperation, head: Head): Write => ({
   operation,

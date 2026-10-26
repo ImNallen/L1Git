@@ -7,13 +7,12 @@ import {
   X,
 } from "lucide-react";
 import * as repositories from "../repositories";
-import { branchWrite, notMergedInto } from "../domain/operations";
+import { branchWrite, localBranch, notMergedInto } from "../domain/operations";
 import type { BranchAsk, Write } from "../domain/operations";
 import { problemFrom } from "../domain/repository";
 import type {
   Branch,
   BranchMerged,
-  FullRef,
   Head,
   Problem,
   RepositoryRoot,
@@ -86,13 +85,9 @@ function NameBranchDialog({
       return;
     }
     close();
-    onNamedBranch({
-      kind: "local",
-      reference: `refs/heads/${name}` as FullRef,
-      name,
-      oid: ask.kind === "create" ? ask.at.oid : ask.branch.oid,
-      upstream: null,
-    });
+    onNamedBranch(
+      localBranch(name, ask.kind === "create" ? ask.at.oid : ask.branch.oid),
+    );
   }
 
   return (
