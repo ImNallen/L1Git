@@ -36,7 +36,32 @@ Before and after each step, record `git -C <worktree> status --porcelain` and `g
 
 21. Record `git ls-files -s` and copy `README.md` with `cp -p`. Right-click `README.md` under **Unstaged** and choose **Discard changes…**. Confirm the dialog asks `Discard changes to README.md?`, lists `README.md`, and that **Cancel** has focus. Press Escape and confirm focus returns to the row. Open it again and click **Discard changes**. Confirm the worktree row disappears and the only change is ` M README.md` leaving the status. Focus the history and press Cmd+Z. Confirm the notice reads `Undid Discard README.md` and `cmp` finds the file identical to the copy.
 22. Open the dialog again, run `git add README.md` in a terminal, then confirm. Confirm the notice starts `Could not discard README.md.`, says a chosen file changed, and only the terminal's staging changed Git.
-23. In a clone, set up the files of `c2_discard_undo.sh`: a lossy clean filter, an LFS-style filter, an `eol=crlf` file with LF bytes, an executable bit turned on, a retargeted symlink, and an untracked file. Copy them with `cp -pR`. Click **Discard all…** and confirm. Click **Undo**. Confirm `cmp` matches every file, `stat -f %Lp` every mode, and `readlink` the link. Click **Redo** and confirm the status is clean again.
+23. In a clone, set up a lossy clean filter, an LFS-style filter, an `eol=crlf` file with LF bytes, a file whose size changes on checkout under `core.autocrlf=input`, an executable bit turned on, a retargeted symlink, and an untracked file. Run this in the clone, with `F` set to an empty folder outside it:
+
+    ```sh
+    cat > "$F/fakelfs-clean" <<'EOS'
+    #!/bin/sh
+    d="$(git rev-parse --git-dir)/fakelfs"; mkdir -p "$d"; t=$(mktemp); cat > "$t"
+    s=$(shasum -a 256 < "$t" | cut -c1-64); mv "$t" "$d/$s"; echo "fakelfs-pointer $s"
+    EOS
+    cat > "$F/fakelfs-smudge" <<'EOS'
+    #!/bin/sh
+    read tag s; d="$(git rev-parse --git-dir)/fakelfs"
+    if [ "$tag" = fakelfs-pointer ] && [ -f "$d/$s" ]; then cat "$d/$s"; else echo "$tag $s"; fi
+    EOS
+    chmod +x "$F/fakelfs-clean" "$F/fakelfs-smudge"
+    git config filter.strip.clean "grep -v '^OUTPUT:'"; git config filter.strip.smudge cat
+    git config filter.fakelfs.clean "$F/fakelfs-clean"; git config filter.fakelfs.smudge "$F/fakelfs-smudge"
+    git config filter.fakelfs.required true; git config core.autocrlf input
+    printf '*.nb filter=strip\n*.bin filter=fakelfs\n*.crlf text eol=crlf\n' > .gitattributes
+    printf 'cell\n' > n.nb; printf 'v1\n' > x.sh; printf 'blob-v1\n' > big.bin; printf 'a\r\nb\r\n' > w.crlf
+    printf 'a\r\nb\r\n' > r.txt; printf 't\n' > target-one; ln -s target-one link
+    git add -A; git commit -qm base
+    printf 'cell2\nOUTPUT: 42\n' > n.nb; printf 'v2\n' > x.sh; chmod +x x.sh; printf 'blob-v2-large\n' > big.bin
+    printf 'a\nb\nc\n' > w.crlf; printf 'a\r\nb\r\nc\r\n' > r.txt; rm link; ln -s target-two link; printf 'untracked\n' > u.txt
+    ```
+
+    Copy the seven paths with `cp -pR`. Click **Discard all…** and confirm. Confirm `git status --porcelain` is empty. `r.txt` checks out 4 bytes over an index entry that recorded 6, so a discard that only refreshes stat data leaves it ` M` with an empty diff. Click **Undo**. Confirm `cmp` matches every file, `stat -f %Lp` every mode, and `readlink` the link. Click **Redo** and confirm the status is empty again.
 24. Discard a file, write new text into it in a terminal, then click **Undo**. Confirm the notice says the file was edited since, the file keeps the terminal's text, and nothing else changed.
 25. In a clone, edit twelve files and click **Discard all…**. Confirm the dialog lists ten paths and `and 2 more`.
 26. In a clone, add an untracked nested repository and change a submodule. Confirm neither row offers **Discard changes…** and that **Discard all…** says how many items it leaves.
