@@ -1,12 +1,12 @@
 import { useRef, useState } from "react";
 import type { SelectedLineRange } from "@pierre/diffs";
 import {
-  deletesNewFile,
+  discardEffect,
   parsedFiles,
   picksFor,
   shownText,
 } from "./domain/lineSelection";
-import type { DiffStyle } from "./domain/lineSelection";
+import type { DiffStyle, DiscardEffect } from "./domain/lineSelection";
 import { partActions, partWrite } from "./domain/operations";
 import type { PartAction, PartChoice, Write } from "./domain/operations";
 import type { RepositoryRoot } from "./domain/repository";
@@ -20,7 +20,7 @@ export type PartDiscard = {
   write: Write;
   path: string;
   choice: PartChoice;
-  deletes: boolean;
+  effect: DiscardEffect;
 };
 
 export function useParts({
@@ -83,11 +83,11 @@ export function useParts({
       void run(root, path, chosen);
       return;
     }
-    const deletes = deletesNewFile(
+    const effect = discardEffect(
       file,
       choice.kind === "hunk" ? "hunk" : choice.lines,
     );
-    setDiscarding({ root, write: chosen, path, choice, deletes });
+    setDiscarding({ root, write: chosen, path, choice, effect });
   }
 
   const writeLines = (action: PartAction) => {

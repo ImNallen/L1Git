@@ -1221,7 +1221,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
         <DiscardPartDialog
           path={parts.discarding.path}
           choice={parts.discarding.choice}
-          deletes={parts.discarding.deletes}
+          effect={parts.discarding.effect}
           onDiscard={parts.confirmDiscard}
           onClose={parts.closeDiscard}
         />

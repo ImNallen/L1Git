@@ -150,12 +150,17 @@ export function hunkAnchor(
   };
 }
 
-export function deletesNewFile(
+export type DiscardEffect = "deleteFile" | "removeLines" | "restoreLines";
+
+export function discardEffect(
   file: FileDiffMetadata,
   picks: readonly LinePick[] | "hunk",
-): boolean {
+): DiscardEffect {
+  if (file.type !== "new") return "restoreLines";
   const [only, ...rest] = file.hunks;
-  if (file.type !== "new" || only === undefined || rest.length > 0)
-    return false;
-  return picks === "hunk" || picks.length === only.additionLines;
+  const takesEveryLine =
+    only !== undefined &&
+    rest.length === 0 &&
+    (picks === "hunk" || picks.length === only.additionLines);
+  return takesEveryLine ? "deleteFile" : "removeLines";
 }

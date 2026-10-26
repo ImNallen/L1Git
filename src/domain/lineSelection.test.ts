@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  deletesNewFile,
+  discardEffect,
   hunkAnchor,
   parsedFiles,
   picksFor,
@@ -147,23 +147,29 @@ describe("hunkAnchor", () => {
   });
 });
 
-describe("deletesNewFile", () => {
+describe("discardEffect", () => {
   const newFile = only(created);
   it("deletes a new file when the discard takes its hunk or every line", () => {
-    expect(deletesNewFile(newFile, "hunk")).toBe(true);
+    expect(discardEffect(newFile, "hunk")).toBe("deleteFile");
     expect(
-      deletesNewFile(newFile, [
+      discardEffect(newFile, [
         { side: "additions", line: 1 },
         { side: "additions", line: 2 },
         { side: "additions", line: 3 },
       ]),
-    ).toBe(true);
+    ).toBe("deleteFile");
   });
 
-  it("keeps a new file when lines stay, and never deletes an edited file", () => {
-    expect(deletesNewFile(newFile, [{ side: "additions", line: 2 }])).toBe(
-      false,
+  it("removes lines from a new file that keeps others", () => {
+    expect(discardEffect(newFile, [{ side: "additions", line: 2 }])).toBe(
+      "removeLines",
     );
-    expect(deletesNewFile(file, "hunk")).toBe(false);
+  });
+
+  it("restores an edited file's lines and never deletes it", () => {
+    expect(discardEffect(file, "hunk")).toBe("restoreLines");
+    expect(discardEffect(file, [{ side: "additions", line: 5 }])).toBe(
+      "restoreLines",
+    );
   });
 });
