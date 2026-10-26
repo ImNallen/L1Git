@@ -33,11 +33,8 @@ export function listsRow(
   files: readonly { path: string }[],
   row: string,
 ): boolean {
-  return files.some((file) =>
-    row.endsWith("/")
-      ? treePath(file.path).startsWith(row)
-      : treePath(file.path) === row,
-  );
+  const kind = row.endsWith("/") ? "directory" : "file";
+  return pathsUnder(files, { kind, path: row }).length > 0;
 }
 
 export function pathsUnder(

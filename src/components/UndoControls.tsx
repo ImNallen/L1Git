@@ -51,12 +51,14 @@ export function UndoButtons({
 export function WriteNoticeRow({ writes }: { writes: WritesView }) {
   const { notice, history, running } = writes;
   const row = useRef<HTMLDivElement>(null);
-  const heldFocus = row.current?.contains(document.activeElement) ?? false;
+  const handsOff = useRef(false);
   useLayoutEffect(() => {
+    if (!handsOff.current || running !== null) return;
+    handsOff.current = false;
     const focused = document.activeElement;
-    if (heldFocus && (focused === null || focused === document.body))
+    if (focused === null || focused === document.body)
       row.current?.querySelector("button")?.focus();
-  });
+  }, [running]);
   if (notice === null) {
     if (history.kind !== "unreadable") return null;
     return (
@@ -91,8 +93,8 @@ export function WriteNoticeRow({ writes }: { writes: WritesView }) {
     );
   const again =
     notice.step === "undo"
-      ? { label: "Redo", ready: nextEntry(history, "redo"), run: writes.redo }
-      : { label: "Undo", ready: nextEntry(history, "undo"), run: writes.undo };
+      ? { label: "Redo", entry: nextEntry(history, "redo"), run: writes.redo }
+      : { label: "Undo", entry: nextEntry(history, "undo"), run: writes.undo };
   return (
     <div ref={row} className="notice info-notice" role="status">
       <Info size={14} />
@@ -100,8 +102,11 @@ export function WriteNoticeRow({ writes }: { writes: WritesView }) {
         {notice.step === "undo" ? "Undid" : "Redid"} {notice.label}
       </span>
       <button
-        aria-disabled={again.ready === null || running !== null}
-        onClick={() => void again.run()}
+        aria-disabled={again.entry === null || running !== null}
+        onClick={() => {
+          handsOff.current = true;
+          void again.run();
+        }}
       >
         {again.label}
       </button>

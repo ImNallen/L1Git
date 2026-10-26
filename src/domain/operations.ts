@@ -114,7 +114,7 @@ const staleStep: Record<StaleReason, (step: Step) => string> = {
     `A file in this change was edited since, so L1 Git cannot ${step} it without losing that edit.`,
   pathNotChosen: (step) =>
     `Git would also change a file outside this change, so L1 Git cannot ${step} it.`,
-  historyChanged: () => "The undo history changed since L1 Git showed it.",
+  historyChanged: () => staleWrite.historyChanged,
 };
 
 const lowerFirst = (text: string) =>

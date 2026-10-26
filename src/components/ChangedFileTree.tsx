@@ -39,6 +39,7 @@ type Props = {
   action?: RowAction;
   refocusPath?: string | null;
   onFocused?: () => void;
+  onRowFocus?: (row: string) => void;
 };
 
 const ITEM_HEIGHT = FILE_TREE_DENSITY_PRESETS.compact.itemHeight;
@@ -61,6 +62,7 @@ export function ChangedFileTree({
   action,
   refocusPath = null,
   onFocused,
+  onRowFocus,
 }: Props) {
   const onSelectFileRef = useRef(onSelectFile);
   useEffect(() => {
@@ -132,6 +134,11 @@ export function ChangedFileTree({
     <FileTree
       model={model}
       className="changed-file-tree"
+      onFocus={(event) => {
+        const [row] = event.nativeEvent.composedPath();
+        if (row instanceof HTMLElement && row.dataset.itemPath)
+          onRowFocus?.(row.dataset.itemPath);
+      }}
       renderContextMenu={
         action &&
         ((item, context) => (

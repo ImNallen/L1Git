@@ -221,15 +221,12 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
         changes: app.changes.get(listedWorktree.root),
       }
     : null;
-  const refreshRef = useRef(app.refresh);
-  const reloadRefsRef = useRef(branchRefs.reload);
-  const rereadOutsideChanges = useCallback(() => {
-    void refreshRef.current();
-    reloadRefsRef.current();
-  }, []);
   const writes = useWrites(snapshot?.root ?? null, {
     worktree: app.rereadWorktree,
-    repository: rereadOutsideChanges,
+    repository: () => {
+      void app.refresh();
+      branchRefs.reload();
+    },
   });
   function writeFiles(
     root: RepositoryRoot,
@@ -357,6 +354,8 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     snapshot.stashes.some((stash) => stash.oid === selected.oid)
       ? { root: snapshot.root, oid: selected.oid }
       : null;
+  const refreshRef = useRef(app.refresh);
+  const reloadRefsRef = useRef(branchRefs.reload);
   useEffect(() => {
     refreshRef.current = () => {
       app.refreshChanges();
@@ -371,7 +370,8 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     const reread = () => {
       if (document.hidden || performance.now() - last < 1000) return;
       last = performance.now();
-      rereadOutsideChanges();
+      void refreshRef.current();
+      reloadRefsRef.current();
     };
     window.addEventListener("focus", reread);
     document.addEventListener("visibilitychange", reread);
@@ -379,7 +379,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       window.removeEventListener("focus", reread);
       document.removeEventListener("visibilitychange", reread);
     };
-  }, [rereadOutsideChanges]);
+  }, []);
   useEffect(
     () =>
       overviewStore.onRefsChanged((roots) => {

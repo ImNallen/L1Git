@@ -41,7 +41,7 @@ import type { Selection } from "../domain/selection";
 import { relativeTime } from "../domain/time";
 import type { FileWrite } from "../domain/operations";
 import type { DetailState } from "../useWorkspace";
-import { firstChangedPath, listsRow, treePath } from "../domain/changedFiles";
+import { changedFileTreeInput, listsRow } from "../domain/changedFiles";
 import { ChangedFileTree, changeStatuses } from "./ChangedFileTree";
 import type { RowAction } from "./ChangedFileTree";
 import { RefBadge } from "./History";
@@ -628,15 +628,7 @@ function WorktreeFiles({
     run: (paths, target) => onWrite(kind, side, paths, target),
   };
   return (
-    <section
-      className="worktree-group"
-      aria-label={title}
-      onFocus={(event) => {
-        const [target] = event.nativeEvent.composedPath();
-        const row = target instanceof HTMLElement && target.dataset.itemPath;
-        if (row) onRowFocus({ row, side });
-      }}
-    >
+    <section className="worktree-group" aria-label={title}>
       <header className="worktree-group-header">
         <h3 className="changed-files-title">
           {title}
@@ -645,14 +637,15 @@ function WorktreeFiles({
         {all !== null && (
           <button
             className="button secondary list-action"
-            disabled={busy}
-            onClick={() =>
-              onWrite(
-                kind,
-                side,
-                files.map((file) => file.path),
-              )
-            }
+            aria-disabled={busy}
+            onClick={() => {
+              if (!busy)
+                onWrite(
+                  kind,
+                  side,
+                  files.map((file) => file.path),
+                );
+            }}
           >
             {all}
           </button>
@@ -667,6 +660,7 @@ function WorktreeFiles({
         action={action}
         refocusPath={refocusPath}
         onFocused={onFocused}
+        onRowFocus={(row) => onRowFocus({ row, side })}
       />
     </section>
   );
@@ -730,7 +724,7 @@ function WorktreeInspector({
   ) => {
     const files = groups.find((group) => group.side === side)?.files ?? [];
     const last = lastRow.current;
-    const first = firstChangedPath(files);
+    const first = changedFileTreeInput(files).paths.at(0);
     resume.current =
       row !== undefined
         ? { row, side }
@@ -738,7 +732,7 @@ function WorktreeInspector({
           ? last
           : first === undefined
             ? null
-            : { row: treePath(first), side };
+            : { row: first, side };
     void writes.write(worktree.root, kind, paths);
   };
   const { head } = worktree;
