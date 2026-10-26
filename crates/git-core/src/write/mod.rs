@@ -3,6 +3,7 @@
     clippy::match_wildcard_for_single_variants
 )]
 
+mod branches;
 mod commit;
 mod discard;
 mod index;
@@ -16,6 +17,8 @@ use crate::{
     git::{self, Deadline, LocalRead, LocalWrite, WriteDeadline},
     repository,
 };
+pub(crate) use branches::merged_within;
+pub use branches::{BranchTip, Start};
 use partial::{Action, Part, Picks};
 pub use partial::{LinePick, LineSide};
 use serde::{Deserialize, Serialize};
@@ -103,6 +106,15 @@ pub enum Operation {
         lines: Vec<LinePick>,
         shown: String,
     },
+    /// Creates the local branch `name` at `at`, and when `at` is a
+    /// remote-tracking branch sets it as the upstream, as `git branch` does.
+    CreateBranch { name: String, at: Start },
+    /// Renames a local branch with `git branch -m`, which moves its config
+    /// and every worktree's HEAD that names it.
+    RenameBranch { branch: BranchTip, to: String },
+    /// Deletes a local branch no worktree uses, and its `branch.<name>.*`
+    /// config.
+    DeleteBranch { branch: BranchTip },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -175,6 +187,7 @@ enum Change {
     Index(index::IndexChange),
     Ref(refs::RefChange),
     Discard(discard::DiscardChange),
+    Branch(branches::BranchChange),
 }
 
 impl From<discard::DiscardChange> for Change {
@@ -183,12 +196,18 @@ impl From<discard::DiscardChange> for Change {
     }
 }
 
+impl From<branches::BranchChange> for Change {
+    fn from(change: branches::BranchChange) -> Self {
+        Self::Branch(change)
+    }
+}
+
 impl Change {
     fn objects(&self) -> Objects {
         match self {
             Self::Index(change) => Objects::exact(change.objects()),
             Self::Ref(change) => change.objects(),
-            Self::Discard(_) => Objects::default(),
+            Self::Discard(_) | Self::Branch(_) => Objects::default(),
         }
     }
 
@@ -227,20 +246,40 @@ impl Change {
                     Restored::Staged => Ok(Some(txn.commit_step(store, step, self)?)),
                 }
             }
+            Self::Branch(change) => {
+                branches::step(repo, entry, change, direction, deadline)?;
+                store.save(step.log())?;
+                Ok(None)
+            }
         }
     }
 
-    fn landed(&self, repo: &Repo, deadline: WriteDeadline) -> Result<bool, RepositoryError> {
+    fn landed(
+        &self,
+        repo: &Repo,
+        deadline: WriteDeadline,
+    ) -> Result<Option<Self>, RepositoryError> {
         match self {
-            Self::Index(change) => index::landed(repo, change, deadline),
-            Self::Ref(_) | Self::Discard(_) => Ok(true),
+            Self::Index(change) => Ok(index::landed(repo, change, deadline)?.then(|| self.clone())),
+            Self::Ref(_) | Self::Discard(_) => Ok(Some(self.clone())),
+            Self::Branch(change) => Ok(branches::landed(repo, change, deadline)?.map(Self::Branch)),
+        }
+    }
+
+    /// Branches belong to the whole repository, so their undo runs in
+    /// whichever worktree is open, even after the one the write ran in is
+    /// removed.
+    const fn repository_wide(&self) -> bool {
+        match self {
+            Self::Branch(_) => true,
+            Self::Index(_) | Self::Ref(_) | Self::Discard(_) => false,
         }
     }
 
     const fn keeps_overwritten_files(&self) -> bool {
         match self {
             Self::Discard(_) => true,
-            Self::Index(_) | Self::Ref(_) => false,
+            Self::Index(_) | Self::Ref(_) | Self::Branch(_) => false,
         }
     }
 
@@ -249,14 +288,14 @@ impl Change {
             Self::Discard(change) => {
                 discard::remove_copies_beside(Path::new(&applied.root), applied.id, change);
             }
-            Self::Index(_) | Self::Ref(_) => {}
+            Self::Index(_) | Self::Ref(_) | Self::Branch(_) => {}
         }
     }
 
     fn touches_skip_worktree(&self) -> bool {
         match self {
             Self::Index(change) => change.touches_skip_worktree(),
-            Self::Ref(_) | Self::Discard(_) => false,
+            Self::Ref(_) | Self::Discard(_) | Self::Branch(_) => false,
         }
     }
 }
@@ -294,6 +333,9 @@ impl Operation {
             Self::StageHunk { .. } | Self::StageLines { .. } => LocalWrite::StagePart,
             Self::UnstageHunk { .. } | Self::UnstageLines { .. } => LocalWrite::UnstagePart,
             Self::DiscardHunk { .. } | Self::DiscardLines { .. } => LocalWrite::DiscardPart,
+            Self::CreateBranch { .. } => LocalWrite::CreateBranch,
+            Self::RenameBranch { .. } => LocalWrite::RenameBranch,
+            Self::DeleteBranch { .. } => LocalWrite::DeleteBranch,
         }
     }
 
@@ -310,6 +352,17 @@ impl Operation {
             let (applied, published) = txn.commit_write(store, log, self, &change)?;
             Ok((applied, Some(published)))
         };
+        let branch =
+            |write: &dyn Fn(&branches::Writing<'_>) -> Result<Applied, RepositoryError>| {
+                write(&branches::Writing {
+                    repo,
+                    store,
+                    log,
+                    deadline,
+                    operation: self,
+                })
+                .map(|applied| (applied, None))
+            };
         let commit = |kind, message| {
             commit::commit(repo, store, log, deadline, expect, self, kind, message)
                 .map(|applied| (applied, None))
@@ -351,6 +404,13 @@ impl Operation {
             Self::DiscardLines { path, lines, shown } => {
                 discard_part(path, Picks::Lines(lines), shown)
             }
+            Self::CreateBranch { name, at } => {
+                branch(&|writing| branches::create(writing, name, at))
+            }
+            Self::RenameBranch { branch: tip, to } => {
+                branch(&|writing| branches::rename(writing, tip, to))
+            }
+            Self::DeleteBranch { branch: tip } => branch(&|writing| branches::delete(writing, tip)),
         }
     }
 }
@@ -525,7 +585,7 @@ impl Coordinator {
                     Position::Elsewhere => return Err(store::history_changed()),
                 };
                 let (applied, change) = store.record_of(id)?;
-                let repo = if applied.root == opened.root() {
+                let repo = if applied.root == opened.root() || change.repository_wide() {
                     opened
                 } else {
                     opened.worktree(&applied.root, deadline.reads())?
