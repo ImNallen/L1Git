@@ -322,15 +322,10 @@ pub(super) fn discard_part(
     let prepared = part.read(&txn)?;
     let scratch = Scratch::new(&txn)?;
     let checkout = scratch.0.join("checkout");
-    let after = if partial::revert(&txn, &rows, part, prepared, &checkout)? {
-        if let Some(stat) = &stat {
-            set_permissions(&checkout.join(path), stat.mode & 0o7777)
-                .map_err(|error| failed(path, &error))?;
-        }
-        After::Checkout
-    } else {
-        After::Absent
-    };
+    let after = partial::check_out_without_picks(&txn, &rows, part, prepared, &checkout)?;
+    if let (After::Checkout, Some(stat)) = (&after, &stat) {
+        keep_permissions(&checkout.join(path), stat).map_err(|error| failed(path, &error))?;
+    }
     land(
         txn,
         store,
@@ -342,13 +337,18 @@ pub(super) fn discard_part(
     )
 }
 
+/// The partial patch carries no mode, so the file keeps its own bits.
+fn keep_permissions(prepared: &Path, stat: &Stat) -> io::Result<()> {
+    set_permissions(prepared, stat.mode & 0o7777)
+}
+
 pub(super) fn checkout_prefix(checkout: &Path) -> String {
     let mut prefix = checkout.as_os_str().to_owned();
     prefix.push("/");
     format!("--prefix={}", prefix.to_string_lossy())
 }
 
-enum After {
+pub(super) enum After {
     Absent,
     Checkout,
 }

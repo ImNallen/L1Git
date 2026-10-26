@@ -438,7 +438,7 @@ pub(super) fn edit_part<'r>(
             }
             let prepared = part.read(txn)?;
             txn.git(action.apply().args())
-                .input(prepared.patch)
+                .input(prepared.picked)
                 .run(deadline)?
                 .succeeded()?;
             if had.iter().any(|entry| entry.skip_worktree) && listed(txn, path)? {

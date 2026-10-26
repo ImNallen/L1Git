@@ -326,13 +326,13 @@ pub(crate) fn run(path: &Path, args: &[&str], deadline: Deadline) -> Result<Exit
 pub(crate) fn config_flag(
     path: &Path,
     key: &str,
-    unset: bool,
+    if_unset: bool,
     deadline: Deadline,
 ) -> Result<bool, RepositoryError> {
     let output = run(path, &["config", "--type=bool", "--get", key], deadline)?;
     match output.status.code() {
         Some(0) => Ok(output.stdout == b"true\n"),
-        Some(1) => Ok(unset),
+        Some(1) => Ok(if_unset),
         _ => Err(malformed()),
     }
 }

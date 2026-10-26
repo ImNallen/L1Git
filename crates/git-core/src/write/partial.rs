@@ -1,5 +1,5 @@
 use super::{
-    discard,
+    discard::{self, After},
     index::{self, Rows},
     txn::Txn,
 };
@@ -69,7 +69,7 @@ impl Apply {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Refusal {
-    Sections,
+    SecondSection,
     Mode(Mode),
     Copy,
     /// `git apply` accepts a line after a `\ No newline at end of file`
@@ -125,7 +125,7 @@ pub(super) struct Part<'o> {
 
 pub(super) struct Prepared {
     pub(super) fresh: Vec<u8>,
-    pub(super) patch: Vec<u8>,
+    pub(super) picked: Vec<u8>,
 }
 
 impl<'o> Part<'o> {
@@ -136,9 +136,9 @@ impl<'o> Part<'o> {
         shown: &'o str,
     ) -> Result<Self, RepositoryError> {
         status::check(path)?;
-        if path.contains(['\0', char::REPLACEMENT_CHARACTER]) {
+        if !names_one_file(path) {
             return Err(unsupported(format!(
-                "L1 Git cannot {} part of a file whose name is not valid UTF-8.",
+                "L1 Git cannot {} part of a file whose name holds a NUL byte or is not valid UTF-8.",
                 action.verb()
             )));
         }
@@ -178,22 +178,35 @@ impl<'o> Part<'o> {
         let Some(SideRead { entry, patch }) = fresh else {
             return Err(changed());
         };
-        let fresh = match patch {
-            SidePatch::Diff(PatchBytes::Text(bytes)) => bytes,
-            SidePatch::Diff(PatchBytes::Binary) => {
-                return Err(self.cannot("Git shows it as a binary file"));
-            }
-            SidePatch::Diff(PatchBytes::TooLarge { .. }) => {
-                return Err(self.cannot("its diff is too large to show"));
-            }
-            SidePatch::Submodule(_) => return Err(self.cannot("it is a submodule")),
-            SidePatch::Conflicted { .. } => return Err(self.cannot("it has a conflict")),
-        };
+        let fresh = self.splittable_text(patch)?;
         self.refuse_entry(&entry)?;
-        if String::from_utf8_lossy(&fresh) != self.shown {
+        if !self.is_shown(&fresh) {
             return Err(changed());
         }
-        let patch = partial_patch(&fresh, self.picks, self.action.apply())
+        let picked = self.picked_from_shown(&fresh)?;
+        Ok(Prepared { fresh, picked })
+    }
+
+    fn splittable_text(&self, patch: SidePatch) -> Result<Vec<u8>, RepositoryError> {
+        match patch {
+            SidePatch::Diff(PatchBytes::Text(bytes)) => Ok(bytes),
+            SidePatch::Diff(PatchBytes::Binary) => {
+                Err(self.cannot("Git shows it as a binary file"))
+            }
+            SidePatch::Diff(PatchBytes::TooLarge { .. }) => {
+                Err(self.cannot("its diff is too large to show"))
+            }
+            SidePatch::Submodule(_) => Err(self.cannot("it is a submodule")),
+            SidePatch::Conflicted { .. } => Err(self.cannot("it has a conflict")),
+        }
+    }
+
+    fn is_shown(&self, fresh: &[u8]) -> bool {
+        String::from_utf8_lossy(fresh) == self.shown
+    }
+
+    fn picked_from_shown(&self, fresh: &[u8]) -> Result<Vec<u8>, RepositoryError> {
+        partial_patch(fresh, self.picks, self.action.apply())
             .map_err(|refusal| self.refused(refusal))?
             .ok_or_else(|| {
                 RepositoryError::new(
@@ -204,8 +217,7 @@ impl<'o> Part<'o> {
                         self.action.verb()
                     ),
                 )
-            })?;
-        Ok(Prepared { fresh, patch })
+            })
     }
 
     fn refuse_entry(&self, entry: &StatusEntry) -> Result<(), RepositoryError> {
@@ -241,7 +253,7 @@ impl<'o> Part<'o> {
     fn refused(&self, refusal: Refusal) -> RepositoryError {
         let (path, verb) = (self.path, self.action.verb());
         match refusal {
-            Refusal::Sections => self.cannot("Git shows its type change as two changes"),
+            Refusal::SecondSection => self.cannot("Git shows its type change as two changes"),
             Refusal::Mode(Mode::Symlink) => self.cannot("it is a symbolic link"),
             Refusal::Mode(Mode::Submodule) => self.cannot("it is a submodule"),
             Refusal::Mode(mode @ (Mode::File | Mode::Executable)) => {
@@ -270,13 +282,13 @@ impl<'o> Part<'o> {
     }
 }
 
-pub(super) fn revert(
+pub(super) fn check_out_without_picks(
     txn: &Txn<'_>,
     rows: &Rows,
     part: &Part<'_>,
     prepared: Prepared,
     checkout: &Path,
-) -> Result<bool, RepositoryError> {
+) -> Result<After, RepositoryError> {
     let scratch = txn.scratch_index("partial")?;
     let deadline = txn.deadline();
     let path = part.path;
@@ -295,7 +307,7 @@ pub(super) fn revert(
     }
     for (apply, patch) in [
         (Apply::Forward, prepared.fresh),
-        (Apply::Reverse, prepared.patch),
+        (Apply::Reverse, prepared.picked),
     ] {
         txn.git_on(&scratch, apply.args())
             .input(patch)
@@ -310,7 +322,7 @@ pub(super) fn revert(
         .run(deadline)?
         .succeeded()?;
     if listed.is_empty() {
-        return Ok(false);
+        return Ok(After::Absent);
     }
     let prefix = discard::checkout_prefix(checkout);
     txn.git_on(
@@ -320,7 +332,11 @@ pub(super) fn revert(
     .input(index::nul_separated([path]))
     .run(deadline)?
     .succeeded()?;
-    Ok(true)
+    Ok(After::Checkout)
+}
+
+fn names_one_file(path: &str) -> bool {
+    !path.contains(['\0', char::REPLACEMENT_CHARACTER])
 }
 
 fn changed() -> RepositoryError {
@@ -344,7 +360,7 @@ pub(super) fn partial_patch(
     let mut body = Vec::new();
     let (mut delta, mut old_total, mut new_total) = (0, 0, 0);
     for hunk in &parsed.hunks {
-        let kept: Vec<(Marker, &Line<'_>)> = paired(&hunk.lines)
+        let kept: Vec<(Marker, &Line<'_>)> = split_view_order(&hunk.lines)
             .into_iter()
             .filter_map(|line| Some((line.row.kept(&chosen, apply)?, line)))
             .collect();
@@ -512,7 +528,7 @@ impl<'b> Parsed<'b> {
             .filter(|line| line.starts_with(SECTION))
             .ok_or(Refusal::Malformed)?;
         if lines.clone().any(|line| line.starts_with(SECTION)) {
-            return Err(Refusal::Sections);
+            return Err(Refusal::SecondSection);
         }
         let mut header = vec![first];
         while let Some(line) = lines.next_if(|line| !line.starts_with(b"@@ ")) {
@@ -661,7 +677,7 @@ fn span(bytes: &[u8]) -> Option<(Span, &[u8])> {
     Some((span, &bytes[end + 1..]))
 }
 
-fn paired<'h, 'b>(lines: &'h [Line<'b>]) -> Vec<&'h Line<'b>> {
+fn split_view_order<'h, 'b>(lines: &'h [Line<'b>]) -> Vec<&'h Line<'b>> {
     let mut out = Vec::with_capacity(lines.len());
     let mut rest = lines;
     while let Some(first) = rest.first() {
@@ -1027,7 +1043,7 @@ mod tests {
         );
         assert_eq!(
             refused(type_change, Picks::Hunk(0), Apply::Forward),
-            Refusal::Sections
+            Refusal::SecondSection
         );
         let link = concat!(
             "diff --git a/link b/link\n",
@@ -1238,7 +1254,7 @@ mod tests {
     }
 
     fn kind(result: Result<Prepared, RepositoryError>) -> ErrorKind {
-        result.map(|prepared| prepared.patch).unwrap_err().kind
+        result.map(|prepared| prepared.picked).unwrap_err().kind
     }
 
     const STALE: ErrorKind = ErrorKind::StaleView {
@@ -1265,7 +1281,7 @@ mod tests {
         );
         let prepared = part.prepare(read(modified("f"), text(BLOCK))).unwrap();
         assert_eq!(
-            prepared.patch,
+            prepared.picked,
             partial_patch(BLOCK.as_bytes(), Picks::Hunk(0), Apply::Forward)
                 .unwrap()
                 .unwrap()
@@ -1332,6 +1348,6 @@ mod tests {
         let part = Part::new(Action::Stage, "f", Picks::Hunk(0), &shown).unwrap();
         let fresh = SidePatch::Diff(PatchBytes::Text(latin.to_vec()));
         let prepared = part.prepare(read(modified("f"), fresh)).unwrap();
-        assert!(prepared.patch.ends_with(b"-caf\xe9\n+CAF\xe9\n"));
+        assert!(prepared.picked.ends_with(b"-caf\xe9\n+CAF\xe9\n"));
     }
 }
