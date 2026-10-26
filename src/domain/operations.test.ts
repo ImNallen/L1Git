@@ -226,7 +226,7 @@ group("failureText", () => {
           label: "Commit “Fix”",
           problem: stale("stagedChanged"),
         },
-        false,
+        movedOn,
       ),
     ).toBe(
       "Could not commit “Fix”. The staged files changed since L1 Git showed them. L1 Git reread the worktree, so check the lists and try again.",
