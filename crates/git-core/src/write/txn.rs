@@ -205,7 +205,7 @@ impl<'r> Txn<'r> {
         change: &Change,
     ) -> Result<Published, RepositoryError> {
         let published = self.publish(change);
-        recorded.confirm();
+        recorded.confirm_as(change);
         published
     }
 

@@ -30,6 +30,16 @@ struct Discarded {
     after: Content,
 }
 
+impl DiscardChange {
+    fn tracked(&self) -> Vec<&str> {
+        self.paths
+            .iter()
+            .filter(|discarded| discarded.after != Content::Absent)
+            .map(|discarded| discarded.path.as_str())
+            .collect()
+    }
+}
+
 impl Discarded {
     const fn source_and_target(&self, direction: Direction) -> (&Content, &Content) {
         match direction {
@@ -273,31 +283,44 @@ pub(super) fn discard(
             .collect::<Result<_, RepositoryError>>()?;
         Ok(DiscardChange { paths })
     })?;
-    unchanged(&repo.root, paths.iter().copied().zip(&stats))?;
-    let placed = discard.paths.iter().try_for_each(|discarded| {
-        turn(&discarded.path);
-        place(
-            &repo.root,
-            &discarded.path,
-            &discarded.after,
-            &checkout.join(&discarded.path),
-        )
-    });
-    if let Err(error) = placed {
-        recorded.confirm();
-        return Err(RepositoryError::new(
+    let mut placed = 0;
+    let failure: Option<RepositoryError> = discard
+        .paths
+        .iter()
+        .zip(&stats)
+        .try_for_each(|(discarded, stat)| {
+            turn(&discarded.path);
+            unchanged(&repo.root, &discarded.path, stat)?;
+            place(
+                &repo.root,
+                &discarded.path,
+                &discarded.after,
+                &checkout.join(&discarded.path),
+            )?;
+            placed += 1;
+            Ok(())
+        })
+        .err();
+    if placed == 0
+        && let Some(error) = failure
+    {
+        return Err(error);
+    }
+    let kept = DiscardChange {
+        paths: discard.paths[..placed].to_vec(),
+    };
+    refresh(&txn, &kept.tracked());
+    let published = txn.commit_recorded(recorded, &Change::Discard(kept));
+    match failure {
+        None => Ok((applied, published.ok())),
+        Some(error) => Err(RepositoryError::new(
             error.kind,
             format!(
                 "{}. The files L1 Git already discarded stay discarded, and Undo puts them back.",
-                error.message
+                error.message.trim_end_matches('.')
             ),
-        ));
+        )),
     }
-    refresh(&txn, &tracked);
-    let published = txn
-        .commit_recorded(recorded, &Change::Discard(discard))
-        .ok();
-    Ok((applied, published))
 }
 
 pub(super) fn step(
@@ -310,13 +333,7 @@ pub(super) fn step(
     if direction == Direction::Undo {
         return Ok(Restored::AlreadyThere);
     }
-    let tracked: Vec<&str> = change
-        .paths
-        .iter()
-        .filter(|discarded| discarded.after != Content::Absent)
-        .map(|discarded| discarded.path.as_str())
-        .collect();
-    refresh(txn, &tracked);
+    refresh(txn, &change.tracked());
     Ok(Restored::Staged)
 }
 
@@ -402,17 +419,12 @@ fn place_step(
         prepare(to, &files, &temporary).map_err(|error| failed(&discarded.path, &error))?;
         prepared.push(temporary);
     }
-    unchanged(
-        root,
-        pending
-            .iter()
-            .map(|(discarded, _, stat)| (discarded.path.as_str(), stat)),
-    )?;
     pending
         .iter()
         .zip(&prepared)
-        .try_for_each(|((discarded, to, _), temporary)| {
+        .try_for_each(|((discarded, to, stat), temporary)| {
             turn(&discarded.path);
+            unchanged(root, &discarded.path, stat)?;
             place(root, &discarded.path, to, temporary)
         })
 }
@@ -505,16 +517,12 @@ fn writable_stats(root: &Path, paths: &[&str]) -> Result<Vec<Option<Stat>>, Repo
     Ok(stats)
 }
 
-fn unchanged<'p>(
-    root: &Path,
-    seen: impl IntoIterator<Item = (&'p str, &'p Option<Stat>)>,
-) -> Result<(), RepositoryError> {
-    for (path, stat) in seen {
-        if Stat::of(&root.join(path)).map_err(|error| failed(path, &error))? != *stat {
-            return Err(changed(path));
-        }
+fn unchanged(root: &Path, path: &str, seen: &Option<Stat>) -> Result<(), RepositoryError> {
+    if Stat::of(&root.join(path)).map_err(|error| failed(path, &error))? == *seen {
+        Ok(())
+    } else {
+        Err(changed(path))
     }
-    Ok(())
 }
 
 fn capture(

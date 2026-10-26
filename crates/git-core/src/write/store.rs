@@ -368,7 +368,11 @@ impl LockedStore {
     ) -> Result<(), RepositoryError> {
         let bytes =
             serde_json::to_vec(value).map_err(|error| unwritable(io::Error::other(error)))?;
-        fs::write(self.entry_dir(id).join(name), bytes).map_err(unwritable)
+        let file = self.entry_dir(id).join(name);
+        let temporary = self.entry_dir(id).join(format!("{name}.new"));
+        fs::write(&temporary, bytes)
+            .and_then(|()| fs::rename(&temporary, file))
+            .map_err(unwritable)
     }
 }
 
@@ -397,6 +401,13 @@ impl Recorded<'_> {
         self.store.write(self.id, "change.json", change)?;
         self.confirm();
         Ok(())
+    }
+
+    /// Confirms the write with `change`, which names only what the write
+    /// reached. If `change` cannot be saved, the first record stays.
+    pub(super) fn confirm_as(self, change: &Change) {
+        let _ = self.store.write(self.id, "change.json", change);
+        self.confirm();
     }
 
     /// Marks the write done once the index holds it. If the log cannot be
