@@ -545,3 +545,51 @@ fn runs_post_index_change_once_saying_the_worktree_changed() {
     repo.coordinator().undo(repo.path(), applied.id).unwrap();
     assert_eq!(fs::read_to_string(&log).unwrap(), "1 0\n");
 }
+
+#[test]
+fn discards_and_undoes_where_the_git_dir_is_on_another_file_system() {
+    let shm = Path::new("/dev/shm");
+    if !shm.is_dir() {
+        return;
+    }
+    let git_dir = tempfile::tempdir_in(shm).unwrap();
+    let repo = Repo::new(&[]);
+    let root = repo.directory.path().join("separate");
+    fs::create_dir(&root).unwrap();
+    git(
+        &root,
+        &[
+            "init",
+            "--quiet",
+            "--initial-branch=main",
+            "--separate-git-dir",
+            git_dir.path().join("repo.git").to_str().unwrap(),
+        ],
+    );
+    let separate = Repo {
+        directory: tempfile::tempdir().unwrap(),
+        root,
+    };
+    for (key, value) in [
+        ("user.name", "Ada"),
+        ("user.email", "ada@example.test"),
+        ("commit.gpgSign", "false"),
+        ("core.hooksPath", "/dev/null"),
+    ] {
+        separate.git(&["config", key, value]);
+    }
+    separate.put("f", "one\n");
+    separate.git(&["add", "f"]);
+    separate.git(&["commit", "--quiet", "-m", "initial"]);
+    separate.put("f", "two\n");
+    separate.put("new", "untracked\n");
+    let before = separate.disk();
+    let applied = separate.discard(&["f", "new"]).unwrap();
+    assert_eq!(separate.status(), "");
+    separate
+        .coordinator()
+        .undo(separate.path(), applied.id)
+        .unwrap();
+    assert_eq!(separate.disk(), before);
+    drop(repo);
+}
