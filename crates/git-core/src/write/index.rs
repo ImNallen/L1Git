@@ -416,17 +416,19 @@ pub(super) fn edit<'r>(
     Ok((txn, Change::Index(change)))
 }
 
-/// With `core.ignorecase`, Git stages a new file under the spelling the
-/// index already uses for its folder, so that path differs from a chosen one
-/// only in case.
+/// With `core.ignorecase`, Git adds a path under the spelling the index
+/// already uses for its folder, so that path differs from a named one only
+/// in case.
+fn respelled<'p>(named: impl IntoIterator<Item = &'p str>, path: &str) -> Option<&'p str> {
+    named
+        .into_iter()
+        .find(|named| *named != path && named.eq_ignore_ascii_case(path))
+}
+
 fn not_chosen(command: Command, plan: &Plan, unchosen: Vec<String>) -> RepositoryError {
     let verb = command.verb();
     for path in &unchosen {
-        if let Some(chosen) = plan
-            .claims
-            .keys()
-            .find(|chosen| chosen.eq_ignore_ascii_case(path))
-        {
+        if let Some(chosen) = respelled(plan.claims.keys().map(String::as_str), path) {
             return RepositoryError::new(
                 ErrorKind::UnsupportedPath,
                 format!(
@@ -545,11 +547,25 @@ pub(super) fn restore(
             expected.insert(path.as_bytes().to_vec(), to.to_vec());
         }
     }
-    if let Some(path) = differences(&expected, &written).first() {
-        let path = git::text(path);
-        if !change.paths.iter().any(|recorded| recorded.path == path) {
-            return Err(changed_since(&path));
+    let differ = differences(&expected, &written);
+    let recorded = || change.paths.iter().map(|recorded| recorded.path.as_str());
+    if let Some(path) = differ
+        .iter()
+        .map(|path| git::text(path))
+        .find(|path| !recorded().any(|recorded| recorded == path))
+    {
+        if let Some(named) = respelled(recorded(), &path) {
+            return Err(RepositoryError::stale(
+                StaleReason::PathChanged,
+                format!(
+                    "Git would put {named} back as {path}, because this repository ignores case and its index now spells the name that way, so L1 Git left the index unchanged."
+                ),
+            ));
         }
+        return Err(changed_since(&path));
+    }
+    if let Some(path) = differ.first() {
+        let path = git::text(path);
         return Err(RepositoryError::stale(
             StaleReason::PathChanged,
             format!(
