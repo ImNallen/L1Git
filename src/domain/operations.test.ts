@@ -1,7 +1,19 @@
 import { describe as group, expect, it } from "vitest";
-import { describe, failureText, writeFor } from "./operations";
+import {
+  describe,
+  failureText,
+  rereadsRepository,
+  stepButton,
+  writeFor,
+} from "./operations";
+import type { History, HistoryEntry, StaleReason } from "./operations";
 import { entryIdSchema, oidSchema, refSchema, rootSchema } from "./repository";
-import type { IndexObject, StatusEntry, WorktreeStatus } from "./repository";
+import type {
+  IndexObject,
+  Problem,
+  StatusEntry,
+  WorktreeStatus,
+} from "./repository";
 
 const blob = (digit: string): IndexObject => ({
   mode: "100644",
@@ -136,85 +148,122 @@ group("describe", () => {
   });
 });
 
+const stale = (reason: StaleReason) => ({
+  kind: "staleView" as const,
+  reason,
+  message: "Core wording that the notice does not show.",
+});
+
 group("failureText", () => {
   const blockedId = entryIdSchema.parse("18e1c91cc9cade98");
-  const stale = (message: string) => ({
-    kind: "staleView" as const,
-    message,
-  });
+  const write = (problem: Problem) =>
+    failureText(
+      { kind: "failed", action: "write", label: "Stage README.md", problem },
+      false,
+    );
+  const undo = (problem: Problem, blocking: boolean) =>
+    failureText(
+      {
+        kind: "failed",
+        action: "undo",
+        label: "Stage README.md",
+        problem,
+        entry: blockedId,
+      },
+      blocking,
+    );
 
-  it("says the worktree was reread instead of asking for a refresh", () => {
-    expect(
-      failureText(
-        {
-          kind: "failed",
-          action: "write",
-          label: "Stage README.md",
-          problem: stale(
-            "README.md changed since L1 Git read it. Refresh and try again.",
-          ),
-        },
-        false,
-      ),
-    ).toBe(
-      "Could not stage README.md. README.md changed since L1 Git read it. L1 Git reread the worktree, so check the lists and try again.",
+  it("names what changed from the reason and says the worktree was reread", () => {
+    expect(write(stale("pathChanged"))).toBe(
+      "Could not stage README.md. A chosen file changed since L1 Git read it. L1 Git reread the worktree, so check the lists and try again.",
+    );
+    expect(write(stale("headMoved"))).toBe(
+      "Could not stage README.md. HEAD moved since L1 Git read this worktree. L1 Git reread the worktree, so check the lists and try again.",
+    );
+    expect(write(stale("pathNotChosen"))).toBe(
+      "Could not stage README.md. Git would also change a file that was not chosen. L1 Git reread the worktree, so check the lists and try again.",
     );
   });
 
   it("explains that a blocked undo holds back the older entries", () => {
-    expect(
-      failureText(
-        {
-          kind: "failed",
-          action: "undo",
-          label: "Stage README.md",
-          problem: stale(
-            "HEAD moved after this change, so L1 Git cannot undo or redo it exactly. Refresh.",
-          ),
-          entry: blockedId,
-        },
-        true,
-      ),
-    ).toBe(
-      "Could not undo Stage README.md. HEAD moved after this change, so L1 Git cannot undo or redo it exactly. Undo goes in order, so older changes stay blocked until this one can be undone.",
+    expect(undo(stale("headMoved"), true)).toBe(
+      "Could not undo Stage README.md. HEAD moved after this change, so L1 Git cannot undo it exactly. Undo goes in order, so older changes stay blocked until this one can be undone.",
+    );
+    expect(undo(stale("pathChanged"), true)).toBe(
+      "Could not undo Stage README.md. A file in this change was edited since, so L1 Git cannot undo it without losing that edit. Undo goes in order, so older changes stay blocked until this one can be undone.",
     );
   });
 
   it("names a reread history when another entry is now next", () => {
-    expect(
-      failureText(
-        {
-          kind: "failed",
-          action: "undo",
-          label: "Stage README.md",
-          problem: stale(
-            "The undo history changed since L1 Git showed it. Refresh and try again.",
-          ),
-          entry: blockedId,
-        },
-        false,
-      ),
-    ).toBe(
+    expect(undo(stale("historyChanged"), false)).toBe(
       "Could not undo Stage README.md. The undo history changed since L1 Git showed it. L1 Git reread the undo history.",
     );
   });
 
-  it("passes other errors through without the refresh advice", () => {
+  it("passes other errors through as the core wrote them", () => {
     expect(
       failureText(
         {
           kind: "failed",
           action: "redo",
           label: "Unstage 2 files",
-          problem: {
-            kind: "unchangedPath",
-            message:
-              "Git made no change to the index. Refresh the worktree status.",
-          },
+          problem: { kind: "unchangedPath", message: "Any core message." },
           entry: blockedId,
         },
         false,
       ),
-    ).toBe("Could not redo Unstage 2 files. Git made no change to the index.");
+    ).toBe("Could not redo Unstage 2 files. Any core message.");
+  });
+});
+
+group("rereadsRepository", () => {
+  it("rereads the repository only when HEAD moved", () => {
+    expect(rereadsRepository(stale("headMoved"))).toBe(true);
+    expect(rereadsRepository(stale("pathChanged"))).toBe(false);
+    expect(rereadsRepository(stale("historyChanged"))).toBe(false);
+    expect(
+      rereadsRepository({ kind: "lockHeld", message: "Another Git process." }),
+    ).toBe(false);
+  });
+});
+
+group("stepButton", () => {
+  const entry = (label: string): HistoryEntry => ({
+    id: entryIdSchema.parse("18e1c91cc9cade98"),
+    root: status.root,
+    operation: { kind: "stageFiles", entries: [modified] },
+    label,
+  });
+
+  it("names the entry in the accessible name and the tooltip", () => {
+    const history: History = {
+      kind: "read",
+      undo: entry("Stage README.md"),
+      redo: null,
+    };
+    expect(stepButton(history, "undo", "⌘Z")).toEqual({
+      name: "Undo Stage README.md",
+      title: "Undo Stage README.md (⌘Z)",
+    });
+    expect(stepButton(history, "redo", "⇧⌘Z")).toEqual({
+      name: "Redo",
+      title: "Nothing to redo",
+    });
+  });
+
+  it("shows why the history cannot be read instead of an empty one", () => {
+    const history: History = {
+      kind: "unreadable",
+      problem: {
+        kind: "transport",
+        message:
+          "The development bridge is unavailable. Start pnpm dev and try again.",
+      },
+    };
+    expect(stepButton(history, "undo", "⌘Z")).toEqual({
+      name: "Undo",
+      title:
+        "Undo is unavailable. The development bridge is unavailable. Start pnpm dev and try again.",
+    });
   });
 });
