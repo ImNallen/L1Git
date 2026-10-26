@@ -1,11 +1,14 @@
 use super::{
     Applied, Change, Direction, EntryId, Expect, Operation, Repo, Restored, index,
+    partial::{self, Part},
     store::{self, EntryObjects, LockedStore, Log},
     txn::{Published, Txn},
 };
 use crate::{
     ChangeStatus, ErrorKind, IndexObject, MoveSide, RepositoryError, Sides, StaleReason,
-    StatusEntry, git::WriteDeadline, status,
+    StatusEntry,
+    git::{self, WriteDeadline},
+    status,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -163,7 +166,7 @@ fn target(entry: &StatusEntry) -> Result<Target<'_>, RepositoryError> {
     }
 }
 
-fn added_with_intent(path: &str) -> RepositoryError {
+pub(super) fn added_with_intent(path: &str) -> RepositoryError {
     unsupported(format!(
         "{path} was added with git add -N. Unstage it first, then discard it."
     ))
@@ -299,6 +302,59 @@ pub(super) fn discard(
         })
         .collect();
     land(txn, store, log, operation, &rows, &checkout, &landings)
+}
+
+/// Discards the picked lines of one file and lands the result through the
+/// same record, recheck, and rename as a whole-file discard. The file keeps
+/// its permission bits, because the partial patch carries no mode.
+pub(super) fn discard_part(
+    repo: &Repo,
+    store: &LockedStore,
+    log: &Log,
+    deadline: WriteDeadline,
+    expect: &Expect,
+    operation: &Operation,
+    part: &Part<'_>,
+) -> Result<(Applied, Option<Published>), RepositoryError> {
+    let path = part.path();
+    let txn = Txn::begin(repo, deadline)?;
+    if repo.head(deadline)? != expect.head {
+        return Err(RepositoryError::stale(
+            StaleReason::HeadMoved,
+            "HEAD moved since L1 Git read this worktree. Refresh and try again.",
+        ));
+    }
+    let rows = index::read(&txn)?;
+    let [stat]: [Option<Stat>; 1] = guard(&repo.root, &rows, &[path])?
+        .try_into()
+        .map_err(|_| git::malformed())?;
+    if index::at(&rows, path)
+        .iter()
+        .any(|entry| entry.intent_to_add)
+    {
+        return Err(added_with_intent(path));
+    }
+    let prepared = part.read(&txn)?;
+    let scratch = Scratch::new(&txn)?;
+    let checkout = scratch.0.join("checkout");
+    let after = if partial::revert(&txn, &rows, part, &prepared, &checkout)? {
+        if let Some(stat) = &stat {
+            set_permissions(&checkout.join(path), stat.mode & 0o7777)
+                .map_err(|error| failed(path, &error))?;
+        }
+        After::Checkout
+    } else {
+        After::Absent
+    };
+    land(
+        txn,
+        store,
+        log,
+        operation,
+        &rows,
+        &checkout,
+        &[Landing { path, stat, after }],
+    )
 }
 
 /// What a discarded path holds afterward.
@@ -440,7 +496,14 @@ pub(super) fn step(
 /// those stay as they are. Under `core.ignoreStat`, `update-index` marks
 /// each entry it writes assume-unchanged, as `git restore` marks what it
 /// checks out, which would hide a later edit, so it runs with that off.
+/// `add --refresh` stops at a path the index lacks and refreshes none, so a
+/// file a partial discard leaves untracked is not named.
 fn refresh(txn: &Txn<'_>, rows: &index::Rows, paths: &[&str]) {
+    let paths: Vec<&str> = paths
+        .iter()
+        .copied()
+        .filter(|path| !index::at(rows, path).is_empty())
+        .collect();
     if paths.is_empty() {
         return;
     }

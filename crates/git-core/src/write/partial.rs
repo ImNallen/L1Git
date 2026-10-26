@@ -1,10 +1,14 @@
-use super::txn::Txn;
+use super::{
+    discard,
+    index::{self, Rows},
+    txn::Txn,
+};
 use crate::{
     ErrorKind, Mode, MoveSide, RepositoryError, Side, StaleReason, StatusEntry, git,
     status::{self, PatchBytes, SidePatch, SideRead},
 };
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeSet, num::NonZeroU32};
+use std::{collections::BTreeSet, num::NonZeroU32, path::Path};
 
 /// One line of the patch the user saw, as `@pierre/diffs` names a selected
 /// line.
@@ -100,12 +104,13 @@ pub(super) enum Refusal {
 pub(super) enum Action {
     Stage,
     Unstage,
+    Discard,
 }
 
 impl Action {
     const fn side(self) -> Side {
         match self {
-            Self::Stage => Side::Unstaged,
+            Self::Stage | Self::Discard => Side::Unstaged,
             Self::Unstage => Side::Staged,
         }
     }
@@ -113,7 +118,7 @@ impl Action {
     pub(super) const fn apply(self) -> Apply {
         match self {
             Self::Stage => Apply::Forward,
-            Self::Unstage => Apply::Reverse,
+            Self::Unstage | Self::Discard => Apply::Reverse,
         }
     }
 
@@ -121,6 +126,7 @@ impl Action {
         match self {
             Self::Stage => "stage",
             Self::Unstage => "unstage",
+            Self::Discard => "discard",
         }
     }
 }
@@ -136,7 +142,9 @@ pub(super) struct Part<'o> {
 
 /// What `Part::read` proved and built under the index lock.
 pub(super) struct Prepared {
-    /// The picked part of the fresh patch, which holds a change.
+    /// The patch read under the lock, whose text is the shown one.
+    pub(super) fresh: Vec<u8>,
+    /// The picked part of `fresh`, which holds a change.
     pub(super) patch: Vec<u8>,
 }
 
@@ -225,7 +233,7 @@ impl<'o> Part<'o> {
                     ),
                 )
             })?;
-        Ok(Prepared { patch })
+        Ok(Prepared { fresh, patch })
     }
 
     fn refuse_entry(&self, entry: &StatusEntry) -> Result<(), RepositoryError> {
@@ -243,6 +251,9 @@ impl<'o> Part<'o> {
             } => Err(self.cannot(&format!(
                 "Git shows it as a move from {original}, which git add -N started"
             ))),
+            StatusEntry::Ordinary { index: None, .. } if self.action == Action::Discard => {
+                Err(discard::added_with_intent(self.path))
+            }
             StatusEntry::Ordinary { .. }
             | StatusEntry::Renamed { .. }
             | StatusEntry::Unmerged { .. }
@@ -289,6 +300,67 @@ impl<'o> Part<'o> {
             Refusal::Malformed => git::malformed(),
         }
     }
+}
+
+/// Works out what `part`'s path holds once its picked lines are discarded,
+/// in an index and object folder of its own, and checks that file out under
+/// `checkout`. No Git process here reads the worktree file: the fresh patch
+/// applied to the path's index entry gives exactly the bytes Git diffed, and
+/// the stat taken before the read and checked again before the rename shows
+/// the file still holds them. `false` when the path is left with no file.
+pub(super) fn revert(
+    txn: &Txn<'_>,
+    rows: &Rows,
+    part: &Part<'_>,
+    prepared: &Prepared,
+    checkout: &Path,
+) -> Result<bool, RepositoryError> {
+    let scratch = txn.scratch_index("partial")?;
+    let deadline = txn.deadline();
+    let path = part.path;
+    let seed: Vec<u8> = index::at(rows, path)
+        .iter()
+        .filter(|entry| entry.stage == 0)
+        .flat_map(|entry| {
+            format!("{} {} 0\t{path}\0", entry.mode.octal(), entry.oid.as_str()).into_bytes()
+        })
+        .collect();
+    if !seed.is_empty() {
+        txn.git_on(&scratch, &["update-index", "-z", "--index-info"])
+            .input(seed)
+            .run(deadline)?
+            .succeeded()?;
+    }
+    for (apply, patch) in [
+        (Apply::Forward, &prepared.fresh),
+        (Apply::Reverse, &prepared.patch),
+    ] {
+        txn.git_on(&scratch, apply.args())
+            .input(patch.clone())
+            .run(deadline)?
+            .succeeded()?;
+    }
+    let listed = txn
+        .git_on(
+            &scratch,
+            &["--literal-pathspecs", "ls-files", "-z", "--", path],
+        )
+        .run(deadline)?
+        .succeeded()?;
+    if listed.is_empty() {
+        return Ok(false);
+    }
+    let mut prefix = checkout.as_os_str().to_owned();
+    prefix.push("/");
+    let prefix = format!("--prefix={}", prefix.to_string_lossy());
+    txn.git_on(
+        &scratch,
+        &["checkout-index", &prefix, "-f", "-z", "--stdin"],
+    )
+    .input(index::nul_separated([path]))
+    .run(deadline)?
+    .succeeded()?;
+    Ok(true)
 }
 
 fn changed() -> RepositoryError {

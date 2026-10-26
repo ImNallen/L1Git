@@ -25,7 +25,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use store::{EntryObjects, LockedStore, Log, Objects, Position, Step, Store};
-pub(crate) use txn::{CommitTxn, HOOK_OFF, Outside, Published, RefTxn, Txn};
+pub(crate) use txn::{CommitTxn, HOOK_OFF, Outside, Published, RefTxn, ScratchIndex, Txn};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(
@@ -85,6 +85,20 @@ pub enum Operation {
     },
     /// As `UnstageHunk`, for the chosen lines.
     UnstageLines {
+        path: String,
+        lines: Vec<LinePick>,
+        shown: String,
+    },
+    /// Puts one hunk of `path`'s unstaged patch back to the index's version
+    /// on disk, or for an untracked file takes its lines out, deleting the
+    /// file when none are left. `shown` is the unstaged `worktreePatch` text.
+    DiscardHunk {
+        path: String,
+        hunk: u32,
+        shown: String,
+    },
+    /// As `DiscardHunk`, for the chosen lines.
+    DiscardLines {
         path: String,
         lines: Vec<LinePick>,
         shown: String,
@@ -279,6 +293,7 @@ impl Operation {
             Self::Discard { .. } => LocalWrite::Discard,
             Self::StageHunk { .. } | Self::StageLines { .. } => LocalWrite::StagePart,
             Self::UnstageHunk { .. } | Self::UnstageLines { .. } => LocalWrite::UnstagePart,
+            Self::DiscardHunk { .. } | Self::DiscardLines { .. } => LocalWrite::DiscardPart,
         }
     }
 
@@ -305,6 +320,10 @@ impl Operation {
             let (applied, published) = txn.commit_write(store, log, self, &change)?;
             Ok((applied, Some(published)))
         };
+        let discard_part = |path, picks, shown| {
+            let part = Part::new(Action::Discard, path, picks, shown)?;
+            discard::discard_part(repo, store, log, deadline, expect, self, &part)
+        };
         match self {
             Self::StageFiles { entries } => index(index::Command::Stage, entries),
             Self::UnstageFiles { entries } => index(index::Command::Unstage, entries),
@@ -325,6 +344,12 @@ impl Operation {
             }
             Self::UnstageLines { path, lines, shown } => {
                 index_part(Action::Unstage, path, Picks::Lines(lines), shown)
+            }
+            Self::DiscardHunk { path, hunk, shown } => {
+                discard_part(path, Picks::Hunk(*hunk), shown)
+            }
+            Self::DiscardLines { path, lines, shown } => {
+                discard_part(path, Picks::Lines(lines), shown)
             }
         }
     }
