@@ -543,7 +543,7 @@ fn switch(
             ),
         ));
     }
-    let refused = refusal(planned, ran);
+    let refused = refusal(ran);
     if Stat::of(&repo.index).ok() == index {
         return Outcome::Failed(refused);
     }
@@ -617,15 +617,14 @@ fn after_trouble(planned: &Move, ran: Result<Wrote, RepositoryError>) -> Option<
     }
 }
 
-fn refusal(planned: &Move, ran: Result<Wrote, RepositoryError>) -> RepositoryError {
-    let to = &planned.to;
+fn refusal(ran: Result<Wrote, RepositoryError>) -> RepositoryError {
     let wrote = match ran {
         Ok(wrote) => wrote,
         Err(error) => {
             return RepositoryError::new(
                 error.kind,
                 format!(
-                    "Git did not finish checking out {to}, and HEAD did not move. If Git changed some files before it stopped, they show as changes. Discard them to put them back. {}",
+                    "Git stopped before it finished, and HEAD did not move. If Git changed some files first, they show as changes. Discard them to put them back. {}",
                     error.message
                 ),
             );
@@ -636,10 +635,7 @@ fn refusal(planned: &Move, ran: Result<Wrote, RepositoryError>) -> RepositoryErr
         && (said.lines().last() == Some("Aborting")
             || said.contains("resolve your current index first"))
     {
-        return RepositoryError::new(
-            ErrorKind::Conflict,
-            format!("Git did not check out {to}. {}", in_the_way(said)),
-        );
+        return RepositoryError::new(ErrorKind::Conflict, in_the_way(said));
     }
     let summary = stderr::summarize(said);
     if [
@@ -650,23 +646,20 @@ fn refusal(planned: &Move, ran: Result<Wrote, RepositoryError>) -> RepositoryErr
     .iter()
     .any(|text| said.contains(text))
     {
-        return RepositoryError::new(
-            ErrorKind::Conflict,
-            format!("Git did not check out {to}. Git said: {summary}"),
-        );
+        return RepositoryError::new(ErrorKind::Conflict, format!("Git said: {summary}"));
     }
     if said.contains(stderr::LOCK_HELD) {
         return RepositoryError::new(
             ErrorKind::LockHeld,
             format!(
-                "Another Git process is changing this repository, so Git did not check out {to}. Wait for it to finish, then try again. Git said: {summary}"
+                "Another Git process is changing this repository. Wait for it to finish, then try again. Git said: {summary}"
             ),
         );
     }
     RepositoryError::new(
         ErrorKind::GitFailed,
         format!(
-            "Git did not check out {to}, and HEAD did not move. If Git changed some files before it stopped, they show as changes. Discard them to put them back. Git said: {summary}"
+            "HEAD did not move. If Git changed some files before it stopped, they show as changes. Discard them to put them back. Git said: {summary}"
         ),
     )
 }
