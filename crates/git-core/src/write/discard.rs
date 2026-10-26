@@ -1135,21 +1135,17 @@ mod tests {
         let (operation, expect) = repo.request(&["first", "second"]);
         let second = repo.root.join("second");
         let undo = repo.undo();
-        let locked = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
-        let held = locked.clone();
         let error = hooked(
             move |path| {
                 if path == "second" {
                     fs::write(&second, "editor\n").unwrap();
-                    let entries = entries(&undo);
-                    lock_entries(&entries, 0o500);
-                    held.borrow_mut().extend(entries);
+                    lock_entries(&entries(&undo), 0o500);
                 }
             },
             || repo.coordinator.write(repo.path(), &operation, &expect),
         )
         .expect_err("second changed before its turn");
-        lock_entries(&locked.borrow(), 0o700);
+        lock_entries(&entries(&repo.undo()), 0o700);
         stale(&error);
         assert_eq!(repo.read("first"), "two\n", "{}", error.message);
         assert_eq!(repo.read("second"), "editor\n");
@@ -1165,16 +1161,12 @@ mod tests {
         let (operation, expect) = repo.request(&["first", "second"]);
         let (first, second) = (repo.root.join("first"), repo.root.join("second"));
         let undo = repo.undo();
-        let locked = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
-        let held = locked.clone();
         let mut turns = 0;
         let error = hooked(
             move |path| match path {
                 "second" => {
                     fs::write(&second, "editor\n").unwrap();
-                    let entries = entries(&undo);
-                    lock_entries(&entries, 0o500);
-                    held.borrow_mut().extend(entries);
+                    lock_entries(&entries(&undo), 0o500);
                 }
                 "first" => {
                     turns += 1;
@@ -1187,7 +1179,7 @@ mod tests {
             || repo.coordinator.write(repo.path(), &operation, &expect),
         )
         .expect_err("second changed before its turn");
-        lock_entries(&locked.borrow(), 0o700);
+        lock_entries(&entries(&repo.undo()), 0o700);
         stale(&error);
         assert_eq!(repo.read("first"), "later\n");
         assert_eq!(repo.read("second"), "editor\n");
