@@ -182,51 +182,66 @@ fn sha1_hex(bytes: &[u8]) -> String {
     sha1_smol::Sha1::from(bytes).digest().to_string()
 }
 
-fn a_commit_that_shares_the_printed_prefix_is_not_taken_as_ours() {
-    let repo = Repo::staged_on_second_commit();
+/// Another commit whose ID starts with `prefix`, and its object body.
+fn colliding_commit(repo: &Repo, prefix: &str, mine: &str) -> (String, String) {
+    let tree = repo.git(&["rev-parse", "main^{tree}"]);
+    let parent = repo.git(&["rev-parse", "main^"]);
+    (0u64..)
+        .map(|n| {
+            let body = format!(
+                "tree {tree}\nparent {parent}\nauthor Eve <eve@example.test> 1700000000 +0000\ncommitter Eve <eve@example.test> 1700000000 +0000\n\nother {n}\n"
+            );
+            let oid = sha1_hex(&[format!("commit {}\0", body.len()).as_bytes(), body.as_bytes()].concat());
+            (body, oid)
+        })
+        .find(|(_, oid)| oid.starts_with(prefix) && oid != mine)
+        .unwrap()
+}
+
+fn point_main_at_new_commit(repo: &Repo, body: &str, oid: &str) {
+    let mut hash = Command::new("git")
+        .arg("-C")
+        .arg(&repo.root)
+        .args(["hash-object", "-t", "commit", "-w", "--stdin"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    hash.stdin
+        .take()
+        .unwrap()
+        .write_all(body.as_bytes())
+        .unwrap();
+    let written = hash.wait_with_output().unwrap();
+    assert_eq!(String::from_utf8(written.stdout).unwrap().trim(), oid);
+    repo.git(&["update-ref", "refs/heads/main", oid]);
+}
+
+fn wait_for(path: &Path) {
+    while !path.exists() {
+        thread::sleep(Duration::from_millis(5));
+    }
+}
+
+fn after_git_exits_wait_for_collision(repo: &Repo) {
     repo.git(&["config", "core.abbrev", "4"]);
-    let exited = repo.root.join(".git/exited");
-    let collided = repo.root.join(".git/collided");
     executable(
         &repo.root.join(".git/after-commit"),
         "touch .git/exited\nwhile [ ! -e .git/collided ]; do sleep 0.02; done\n",
     );
+}
+
+fn a_commit_that_shares_the_printed_prefix_is_not_taken_as_ours() {
+    let repo = Repo::staged_on_second_commit();
+    after_git_exits_wait_for_collision(&repo);
     let (result, other) = thread::scope(|scope| {
         let write = scope.spawn(|| repo.write(Kind::Commit, "Mine\n"));
-        while !exited.exists() {
-            thread::sleep(Duration::from_millis(5));
-        }
+        wait_for(&repo.root.join(".git/exited"));
         let mine = repo.main();
         let printed = repo.git(&["rev-parse", "--short", "HEAD"]);
-        let tree = repo.git(&["rev-parse", "HEAD^{tree}"]);
-        let parent = repo.git(&["rev-parse", "HEAD^"]);
-        let (body, other) = (0u64..)
-            .map(|n| {
-                let body = format!(
-                    "tree {tree}\nparent {parent}\nauthor Eve <eve@example.test> 1700000000 +0000\ncommitter Eve <eve@example.test> 1700000000 +0000\n\nother {n}\n"
-                );
-                let oid = sha1_hex(&[format!("commit {}\0", body.len()).as_bytes(), body.as_bytes()].concat());
-                (body, oid)
-            })
-            .find(|(_, oid)| oid.starts_with(&printed) && *oid != mine)
-            .unwrap();
-        let mut hash = Command::new("git")
-            .arg("-C")
-            .arg(&repo.root)
-            .args(["hash-object", "-t", "commit", "-w", "--stdin"])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .unwrap();
-        hash.stdin
-            .take()
-            .unwrap()
-            .write_all(body.as_bytes())
-            .unwrap();
-        let written = hash.wait_with_output().unwrap();
-        assert_eq!(String::from_utf8(written.stdout).unwrap().trim(), other);
-        repo.git(&["update-ref", "refs/heads/main", &other]);
-        fs::write(&collided, "").unwrap();
+        let (body, other) = colliding_commit(&repo, &printed, &mine);
+        point_main_at_new_commit(&repo, &body, &other);
+        fs::write(repo.root.join(".git/collided"), "").unwrap();
         (write.join().unwrap(), other)
     });
     raced(result);
@@ -234,6 +249,45 @@ fn a_commit_that_shares_the_printed_prefix_is_not_taken_as_ours() {
     assert!(
         repo.undo_entry().is_none(),
         "undo must not move main off a commit L1 Git did not make"
+    );
+}
+
+fn a_hook_that_forges_gits_update_to_a_commit_sharing_the_printed_prefix_is_not_taken_as_ours() {
+    let repo = Repo::staged_on_second_commit();
+    after_git_exits_wait_for_collision(&repo);
+    let hooks = repo.root.join(".git/forging-hooks");
+    fs::create_dir(&hooks).unwrap();
+    repo.git(&["config", "core.hooksPath", hooks.to_str().unwrap()]);
+    executable(
+        &hooks.join("reference-transaction"),
+        "[ \"$1\" = prepared ] && [ ! -e .git/mine ] || exit 0\n\
+         awk '$3 == \"refs/heads/main\" { print $1, $2 }' > .git/mine.part && mv .git/mine.part .git/mine\n\
+         while [ ! -e .git/forged ]; do sleep 0.02; done\n\
+         printf '00:00:00.000000 refs/debug.c:88         1: refs/heads/main %s -> %s (F=0xc, T=0x0) \"commit: Mine\"\\n' \"$(cut -d' ' -f1 .git/mine)\" \"$(cat .git/forged)\" >> \"$GIT_TRACE_REFS\"\n",
+    );
+    let (result, other) = thread::scope(|scope| {
+        let write = scope.spawn(|| repo.write(Kind::Commit, "Mine\n"));
+        wait_for(&repo.root.join(".git/mine"));
+        let traced = fs::read_to_string(repo.root.join(".git/mine")).unwrap();
+        let mine = traced.split_whitespace().nth(1).unwrap().to_owned();
+        let (body, other) = colliding_commit(&repo, &mine[..5], &mine);
+        fs::write(repo.root.join(".git/forged.part"), &other).unwrap();
+        fs::rename(
+            repo.root.join(".git/forged.part"),
+            repo.root.join(".git/forged"),
+        )
+        .unwrap();
+        wait_for(&repo.root.join(".git/exited"));
+        assert_eq!(repo.main(), mine, "Git made our commit");
+        point_main_at_new_commit(&repo, &body, &other);
+        fs::write(repo.root.join(".git/collided"), "").unwrap();
+        (write.join().unwrap(), other)
+    });
+    raced(result);
+    assert_eq!(repo.main(), other, "L1 Git leaves the other commit alone");
+    assert!(
+        repo.undo_entry().is_none(),
+        "a forged trace line must not make another commit ours"
     );
 }
 
@@ -276,4 +330,5 @@ fn another_process_that_moves_head_around_gits_commit_is_never_taken_for_ours() 
     a_commit_on_a_commit_another_process_made_undoes_to_that_commit();
     a_commit_on_a_branch_another_process_switched_to_has_no_undo_entry();
     a_commit_that_shares_the_printed_prefix_is_not_taken_as_ours();
+    a_hook_that_forges_gits_update_to_a_commit_sharing_the_printed_prefix_is_not_taken_as_ours();
 }
