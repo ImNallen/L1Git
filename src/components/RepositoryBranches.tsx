@@ -1,4 +1,4 @@
-import { Fragment } from "react";
+import { Fragment, useRef } from "react";
 import type {
   KeyboardEvent as ReactKeyboardEvent,
   ReactNode,
@@ -69,6 +69,8 @@ type Props = {
     event: ReactMouseEvent<HTMLElement> | ReactKeyboardEvent<HTMLElement>,
     branch: Branch,
   ) => void;
+  /** Null unless this is the open repository. */
+  onCheckout: ((branch: Branch) => void) | null;
 };
 
 export function RepositoryBranches({
@@ -85,7 +87,11 @@ export function RepositoryBranches({
   rule,
   onRule,
   onMenu,
+  onCheckout,
 }: Props) {
+  // The first click can open another repository, so a double click checks
+  // out only what was checkable when it began.
+  const checkoutArmed = useRef<FullRef | null>(null);
   const matches = (...values: string[]) =>
     repositoryMatches ||
     values.some((value) => normalizeSearch(value).includes(search));
@@ -267,7 +273,18 @@ export function RepositoryBranches({
         <button
           className={`branch-row ${selected ? "selected" : ""} ${checkedOut ? "head" : ""}`}
           style={{ "--depth": depth }}
-          onClick={() => onJump(branch)}
+          onClick={(event) => {
+            if (event.detail > 1) return;
+            checkoutArmed.current =
+              onCheckout && !checkedOut ? branch.reference : null;
+            onJump(branch);
+          }}
+          onDoubleClick={(event) => {
+            if (checkoutArmed.current !== branch.reference) return;
+            checkoutArmed.current = null;
+            event.currentTarget.focus();
+            onCheckout?.(branch);
+          }}
           onContextMenu={(event) => onMenu(event, branch)}
           onKeyDown={(event) => {
             if (opensMenu(event)) onMenu(event, branch);

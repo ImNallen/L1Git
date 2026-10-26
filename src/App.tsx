@@ -46,6 +46,7 @@ import type { ThemeSettings } from "./themes/catalog";
 import { AppearanceSettings } from "./components/AppearanceSettings";
 import { AddRepositoryDialog } from "./components/AddRepositoryDialog";
 import { BranchDialog } from "./components/BranchDialog";
+import { CheckoutCommitDialog } from "./components/CheckoutCommitDialog";
 import { DiscardDialog, DiscardPartDialog } from "./components/DiscardDialog";
 import { EditMessageDialog } from "./components/EditMessageDialog";
 import { COMMIT_SUMMARY_ID } from "./components/CommitBox";
@@ -62,9 +63,11 @@ import { UndoButtons, WriteNoticeRow } from "./components/UndoControls";
 import {
   branchAsks,
   branchStep,
+  checkoutWrite,
   discardChoice,
   isBranchOperation,
   nextEntry,
+  startAt,
   writeFor,
 } from "./domain/operations";
 import type {
@@ -85,6 +88,7 @@ import type {
   Oid,
   RepositoryRefs,
   RepositoryRoot,
+  Start,
   Stash,
   Tag,
 } from "./domain/repository";
@@ -178,6 +182,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     returnFocus?: () => void;
   } | null>(null);
   const [branchAsk, setBranchAsk] = useState<BranchAsk | null>(null);
+  const [detaching, setDetaching] = useState<Oid | null>(null);
   const [steppedBranch, setSteppedBranch] = useState<
     (BranchStep & { root: RepositoryRoot }) | null
   >(null);
@@ -574,6 +579,9 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     showAllBranches: () => {
       if (snapshot) setRule(snapshot.root, NO_RULE);
     },
+    checkout: () => {
+      if (ruledBranch) void checkout(startAt(ruledBranch));
+    },
     newBranch: askFor("create"),
     renameBranch: askFor("rename"),
     deleteBranch: askFor("delete"),
@@ -684,10 +692,20 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     if (named) named.focus();
     else focusFallback();
   };
+  const refocusIfLost = () =>
+    requestAnimationFrame(() => {
+      if (!shownElement(focusedElement())) focusFallback();
+    });
+  async function checkout(target: Start) {
+    if (!snapshot) return;
+    await writes.write(snapshot.root, checkoutWrite(target, snapshot.head));
+    refocusIfLost();
+  }
   async function stepHistory(step: Step) {
     const entry = nextEntry(writes.history, step);
     setSteppedBranch(null);
     const outcome = await writes[step]();
+    if (entry?.operation.kind === "checkout") refocusIfLost();
     if (
       outcome.kind === "applied" &&
       entry !== null &&
@@ -727,9 +745,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   const runItem = (item: PaletteItem) => {
     closePalette();
     item.run();
-    requestAnimationFrame(() => {
-      if (!shownElement(focusedElement())) focusFallback();
-    });
+    refocusIfLost();
   };
   useEffect(() => {
     const pending = gridFocus.current;
@@ -914,6 +930,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
               snapshot && { root: snapshot.root, checkedOutIn: checkedOut }
             }
             onBranchAsk={setBranchAsk}
+            onCheckout={(branch) => void checkout(startAt(branch))}
           />
         </div>
         {screen === "settings" && (
@@ -1099,6 +1116,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                         from: `commit ${oid.slice(0, 7)}`,
                       })
                     }
+                    onCheckout={setDetaching}
                   />
                   {fileDiff.kind !== "closed" && (
                     <FileDiffPane
@@ -1303,7 +1321,9 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
           head={snapshot.head}
           onWrite={async (write) => {
             const outcome = await writes.write(snapshot.root, write);
-            const shownInDialog = write.operation.kind !== "deleteBranch";
+            const shownInDialog =
+              write.operation.kind === "createBranch" ||
+              write.operation.kind === "renameBranch";
             if (outcome.kind === "failed" && shownInDialog) writes.dismiss();
             if (!shownElement(focusedElement())) focusFallback();
             return outcome;
@@ -1313,6 +1333,13 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
             setBranchAsk(null);
             requestAnimationFrame(focusNamedBranch);
           }}
+        />
+      )}
+      {detaching && (
+        <CheckoutCommitDialog
+          oid={detaching}
+          onConfirm={() => void checkout({ kind: "commit", oid: detaching })}
+          onClose={() => setDetaching(null)}
         />
       )}
       {discarding && (

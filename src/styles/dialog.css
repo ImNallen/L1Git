@@ -427,3 +427,9 @@
 .branch-dialog .error-message {
   margin-bottom: 0;
 }
+.add-dialog .dialog-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 14px 0 0;
+}

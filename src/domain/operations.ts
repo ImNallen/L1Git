@@ -120,12 +120,19 @@ export function partWrite(
 }
 
 export const movesRefs = (operation: Operation) =>
-  "message" in operation || isBranchOperation(operation);
+  "message" in operation ||
+  isBranchOperation(operation) ||
+  operation.kind === "checkout";
 
 export type BranchAsk =
   | { kind: "create"; at: Start; from: string }
   | { kind: "rename"; branch: BranchTip; name: string }
   | { kind: "delete"; branch: BranchTip; name: string };
+
+export const startAt = ({ kind, reference, oid }: Branch): Start =>
+  kind === "local"
+    ? { kind: "local", reference, oid }
+    : { kind: "remote", reference, oid };
 
 export function branchAsks(branch: Branch): {
   create: BranchAsk;
@@ -133,23 +140,11 @@ export function branchAsks(branch: Branch): {
   delete: BranchAsk | null;
 } {
   const { reference, oid, name } = branch;
-  if (branch.kind === "remote")
-    return {
-      create: {
-        kind: "create",
-        at: { kind: "remote", reference, oid },
-        from: name,
-      },
-      rename: null,
-      delete: null,
-    };
+  const create: BranchAsk = { kind: "create", at: startAt(branch), from: name };
+  if (branch.kind === "remote") return { create, rename: null, delete: null };
   const tip = { reference, oid };
   return {
-    create: {
-      kind: "create",
-      at: { kind: "local", reference, oid },
-      from: name,
-    },
+    create,
     rename: { kind: "rename", branch: tip, name },
     delete: { kind: "delete", branch: tip, name },
   };
@@ -201,8 +196,18 @@ export const branchWrite = (operation: BranchOperation, head: Head): Write => ({
   expect: { head },
 });
 
+export const checkoutWrite = (target: Start, head: Head): Write => ({
+  operation: { kind: "checkout", target },
+  expect: { head },
+});
+
 const branchName = (branch: BranchTip) =>
   branch.reference.replace(/^refs\/heads\//, "");
+
+const startName = (start: Start) =>
+  start.kind === "commit"
+    ? start.oid.slice(0, 7)
+    : start.reference.replace(/^refs\/(?:heads|remotes)\//, "");
 
 export function notMergedInto(
   name: string,
@@ -321,6 +326,8 @@ export function describe(operation: Operation): string {
       return `Rename branch ${branchName(operation.branch)} to ${operation.to}`;
     case "deleteBranch":
       return `Delete branch ${branchName(operation.branch)}`;
+    case "checkout":
+      return `Check out ${startName(operation.target)}`;
   }
   if ("message" in operation)
     return `${commitVerbs[operation.kind]} ${quoted(operation.message)}`;
@@ -439,6 +446,16 @@ function staleCause(problem: KnownStale, step: Step | null): string {
   }
 }
 
+const HOOK_LINES = 3;
+
+export const hookOutputTail = (problem: Problem): string[] =>
+  problem.kind === "afterHookFailed"
+    ? problem.output
+        .split(/\r?\n|\r/)
+        .filter((line) => line.trim() !== "")
+        .slice(-HOOK_LINES)
+    : [];
+
 const lowerFirst = (text: string) =>
   text.charAt(0).toLowerCase() + text.slice(1);
 
@@ -451,7 +468,8 @@ export function failureText(
     action === "write"
       ? `Could not ${lowerFirst(label)}.`
       : `Could not ${action} ${label}.`;
-  if (problem.kind === "raced") return problem.message;
+  if (problem.kind === "raced" || problem.kind === "afterHookFailed")
+    return problem.message;
   if (problem.kind !== "staleView" || problem.reason === "unknown")
     return `${what} ${problem.message}`;
   if (action === "write") {

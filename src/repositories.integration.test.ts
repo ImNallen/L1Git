@@ -1744,6 +1744,94 @@ describe("real Rust writes, undo, and redo", () => {
     });
   });
 
+  it("checks out a local branch, a commit, and a remote branch it creates, and undoes each", async () => {
+    const path = clone();
+    const main = git(path, "rev-parse", "HEAD").trim();
+    const merge = git(path, "rev-parse", "HEAD~1").trim();
+    const history = git(path, "rev-parse", "origin/feat/history").trim();
+    git(path, "branch", "topic", merge);
+    const onMain = {
+      kind: "attached",
+      reference: "refs/heads/main",
+      oid: main,
+    };
+    const checkout = (target: unknown) => ({
+      op: "write",
+      path,
+      operation: { kind: "checkout", target },
+      expect: { head: onMain },
+    });
+    const written = async (request: ReturnType<typeof checkout>) => {
+      const applied = writeEnvelope.parse(
+        await (await post(request)).json(),
+      ).data;
+      expect(applied).toEqual({
+        id: expect.any(String),
+        root: path,
+        operation: request.operation,
+      });
+      return applied;
+    };
+    const step = async (op: "undo" | "redo", id: string) =>
+      (op === "undo" ? undoEnvelope : redoEnvelope).parse(
+        await (await post({ op, path, id })).json(),
+      ).data;
+    const headName = () =>
+      git(path, "rev-parse", "--symbolic-full-name", "HEAD").trim();
+    const tracking = () =>
+      git(path, "config", "--local", "--list")
+        .split("\n")
+        .filter((line) => line.startsWith("branch.feat/history."))
+        .sort();
+    const tracksOrigin = [
+      "branch.feat/history.merge=refs/heads/feat/history",
+      "branch.feat/history.remote=origin",
+    ];
+
+    const local = await written(
+      checkout({ kind: "local", reference: "refs/heads/topic", oid: merge }),
+    );
+    expect(headName()).toBe("refs/heads/topic");
+    expect(porcelain(path)).toBe(" M README.md\n");
+    expect(await step("undo", local.id)).toEqual(local);
+    expect(headName()).toBe("refs/heads/main");
+
+    const detached = await written(checkout({ kind: "commit", oid: merge }));
+    expect(headName()).toBe("HEAD");
+    expect(git(path, "rev-parse", "HEAD").trim()).toBe(merge);
+    expect(await step("undo", detached.id)).toEqual(detached);
+    expect(headName()).toBe("refs/heads/main");
+
+    expect(git(path, "for-each-ref", "refs/heads/feat/history")).toBe("");
+    const remote = await written(
+      checkout({
+        kind: "remote",
+        reference: "refs/remotes/origin/feat/history",
+        oid: history,
+      }),
+    );
+    expect(headName()).toBe("refs/heads/feat/history");
+    expect(git(path, "rev-parse", "refs/heads/feat/history").trim()).toBe(
+      history,
+    );
+    expect(tracking()).toEqual(tracksOrigin);
+    expect(await step("undo", remote.id)).toEqual(remote);
+    expect(headName()).toBe("refs/heads/main");
+    expect(git(path, "for-each-ref", "refs/heads/feat/history")).toBe("");
+    expect(tracking()).toEqual([]);
+    expect(git(path, "rev-parse", "HEAD").trim()).toBe(main);
+    expect(porcelain(path)).toBe(" M README.md\n");
+    expect(await step("redo", remote.id)).toEqual(remote);
+    expect(headName()).toBe("refs/heads/feat/history");
+    expect(tracking()).toEqual(tracksOrigin);
+
+    expect(
+      (await rejected(checkout({ kind: "commit", oid: merge, extra: 1 })))
+        .status,
+    ).toBe(400);
+    expect(headName()).toBe("refs/heads/feat/history");
+  });
+
   it("discards a tracked and an untracked file, undoes them byte for byte, and redoes them", async () => {
     const path = clone();
     writeFileSync(join(path, "notes.txt"), "untracked\n");

@@ -54,6 +54,7 @@ export type Commands = {
   toggleHide: () => void;
   toggleSolo: () => void;
   showAllBranches: () => void;
+  checkout: () => void;
   newBranch: () => void;
   renameBranch: () => void;
   deleteBranch: () => void;
@@ -103,6 +104,7 @@ export type ActionId =
   | "toggleHide"
   | "toggleSolo"
   | "showAllBranches"
+  | "checkout"
   | "newBranch"
   | "renameBranch"
   | "deleteBranch"
@@ -349,6 +351,16 @@ export const actions: readonly Action[] = [
     title: "Show all branches",
     available: (context) => onRepository(context) && context.rule !== "none",
     run: (commands) => commands.showAllBranches(),
+  },
+  {
+    id: "checkout",
+    title: (context) => `Check out ${branchName(context)}`,
+    available: (context) =>
+      onRepository(context) &&
+      !context.writing &&
+      context.sidebarBranch !== null &&
+      !context.sidebarBranch.checkedOut,
+    run: (commands) => commands.checkout(),
   },
   {
     id: "newBranch",
