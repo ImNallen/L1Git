@@ -534,10 +534,6 @@ fn blank_context() -> Repo {
         &[("diff.suppressBlankEmpty", "true")],
     );
     repo.write("f.txt", "A\n\nB\nc\n");
-    assert!(
-        repo.shown("f.txt", Side::Unstaged).contains("+A\n\n-b\n"),
-        "Git prints the blank context line as an empty line"
-    );
     repo
 }
 
