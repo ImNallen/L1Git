@@ -16,12 +16,20 @@ export const localRefSchema = z
   .string()
   .regex(/^refs\/heads\/.+$/)
   .brand<"FullRef">();
+export const tagRefSchema = z
+  .string()
+  .regex(/^refs\/tags\/.+$/)
+  .brand<"FullRef">();
 export const remoteRefSchema = z
   .string()
   .regex(/^refs\/remotes\/.+\/.+$/)
   .brand<"FullRef">();
 export const branchTipSchema = z.strictObject({
   reference: localRefSchema,
+  oid: oidSchema,
+});
+export const tagTipSchema = z.strictObject({
+  reference: tagRefSchema,
   oid: oidSchema,
 });
 export const startSchema = z.discriminatedUnion("kind", [
@@ -66,6 +74,7 @@ export const tagSchema = z.object({
   reference: refSchema,
   name: z.string(),
   oid: oidSchema,
+  object: oidSchema,
 });
 export const stashSchema = z.object({
   name: z.string(),
@@ -338,6 +347,13 @@ export const operationSchema = z.discriminatedUnion("kind", [
   }),
   z.strictObject({ kind: z.literal("deleteBranch"), branch: branchTipSchema }),
   z.strictObject({ kind: z.literal("checkout"), target: startSchema }),
+  z.strictObject({
+    kind: z.literal("createTag"),
+    name: z.string(),
+    at: oidSchema,
+    message: z.string().nullable(),
+  }),
+  z.strictObject({ kind: z.literal("deleteTag"), tag: tagTipSchema }),
 ]);
 export const expectSchema = z.strictObject({ head: headSchema });
 export const appliedSchema = z.strictObject({
@@ -362,6 +378,7 @@ const staleReasonSchema = z.enum([
   "stagedChanged",
   "historyChanged",
   "branchChanged",
+  "tagChanged",
 ]);
 const staleView = { kind: z.literal("staleView"), message: z.string() };
 export const repositoryErrorSchema = z.union([
@@ -449,6 +466,7 @@ export type Expect = z.infer<typeof expectSchema>;
 export type Applied = z.infer<typeof appliedSchema>;
 export type UndoHistory = z.infer<typeof undoHistorySchema>;
 export type BranchTip = z.infer<typeof branchTipSchema>;
+export type TagTip = z.infer<typeof tagTipSchema>;
 export type Start = z.infer<typeof startSchema>;
 export type BranchMerged = z.infer<typeof branchMergedSchema>;
 export type Problem =

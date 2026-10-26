@@ -69,6 +69,10 @@ type Props = {
     event: ReactMouseEvent<HTMLElement> | ReactKeyboardEvent<HTMLElement>,
     branch: Branch,
   ) => void;
+  onTagMenu: (
+    event: ReactMouseEvent<HTMLElement> | ReactKeyboardEvent<HTMLElement>,
+    tag: Tag,
+  ) => void;
   onCheckout: ((branch: Branch) => void) | null;
 };
 
@@ -86,6 +90,7 @@ export function RepositoryBranches({
   rule,
   onRule,
   onMenu,
+  onTagMenu,
   onCheckout,
 }: Props) {
   const checkableAtFirstClick = useRef<FullRef | null>(null);
@@ -170,6 +175,10 @@ export function RepositoryBranches({
         key={tag.reference}
         className={`branch-row ${selected ? "selected" : ""}`}
         onClick={() => onJump(tag)}
+        onContextMenu={(event) => onTagMenu(event, tag)}
+        onKeyDown={(event) => {
+          if (opensMenu(event)) onTagMenu(event, tag);
+        }}
         title={`${tag.reference} · Show in graph`}
         aria-current={selected ? "true" : undefined}
       >

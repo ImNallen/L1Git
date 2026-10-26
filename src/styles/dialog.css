@@ -433,3 +433,6 @@
   gap: 6px;
   margin: 14px 0 0;
 }
+.tag-dialog .tag-message-label {
+  margin-top: 16px;
+}

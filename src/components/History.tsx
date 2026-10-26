@@ -463,6 +463,7 @@ type Props = {
   editableHead: Oid | null;
   onEditMessage: () => void;
   onNewBranch: (oid: Oid) => void;
+  onCreateTag: (oid: Oid) => void;
   onCheckout: (oid: Oid) => void;
 };
 
@@ -492,6 +493,7 @@ export function History({
   editableHead,
   onEditMessage,
   onNewBranch,
+  onCreateTag,
   onCheckout,
 }: Props) {
   const selectedOid = selection?.kind === "commit" ? selection.oid : null;
@@ -1199,6 +1201,17 @@ export function History({
               >
                 <GitBranchPlus size={14} />
                 <span>New branch…</span>
+              </button>
+              <button
+                role="menuitem"
+                onClick={() => {
+                  closeMenu();
+                  tableRef.current?.focus({ preventScroll: true });
+                  onCreateTag(menuCommit);
+                }}
+              >
+                <Tag size={14} />
+                <span>Create tag…</span>
               </button>
               {menuCommit === editableHead && (
                 <button

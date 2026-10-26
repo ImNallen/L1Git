@@ -27,6 +27,7 @@ export type ActionContext = {
     local: boolean;
     checkedOut: boolean;
   } | null;
+  sidebarTag: { name: string } | null;
   rule: VisibilityRule["kind"];
   worktree: { unstaged: number; staged: number; discardable: number } | null;
   history: { undo: string | null; redo: string | null };
@@ -58,6 +59,8 @@ export type Commands = {
   newBranch: () => void;
   renameBranch: () => void;
   deleteBranch: () => void;
+  createTag: () => void;
+  deleteTag: () => void;
   openRepository: (root: RepositoryRoot) => void;
   jumpToRef: (reference: FullRef) => void;
   showStash: (stash: Stash) => void;
@@ -108,6 +111,8 @@ export type ActionId =
   | "newBranch"
   | "renameBranch"
   | "deleteBranch"
+  | "createTag"
+  | "deleteTag"
   | "addRepository"
   | "toggleSidebar"
   | "toggleInspector"
@@ -389,6 +394,22 @@ export const actions: readonly Action[] = [
       context.sidebarBranch?.local === true &&
       !context.sidebarBranch.checkedOut,
     run: (commands) => commands.deleteBranch(),
+  },
+  {
+    id: "createTag",
+    title: "Create tag…",
+    available: (context) =>
+      onRepository(context) &&
+      !context.writing &&
+      context.selection?.kind === "commit",
+    run: (commands) => commands.createTag(),
+  },
+  {
+    id: "deleteTag",
+    title: (context) => `Delete tag ${context.sidebarTag?.name ?? ""}…`,
+    available: (context) =>
+      onRepository(context) && !context.writing && context.sidebarTag !== null,
+    run: (commands) => commands.deleteTag(),
   },
   {
     id: "addRepository",

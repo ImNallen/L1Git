@@ -18,7 +18,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { branchAsks } from "../domain/operations";
-import type { BranchAsk } from "../domain/operations";
+import type { BranchAsk, TagAsk } from "../domain/operations";
 import type { RecentRepository } from "../domain/recents";
 import { normalizeSearch } from "../domain/search";
 import type {
@@ -60,6 +60,7 @@ type Props = {
     checkedOutIn: ReadonlyMap<FullRef, string>;
   } | null;
   onBranchAsk: (ask: BranchAsk) => void;
+  onTagAsk: (ask: TagAsk) => void;
   onCheckout: (branch: Branch) => void;
 };
 
@@ -81,13 +82,15 @@ export function RepositoryTree({
   onAdd,
   writable,
   onBranchAsk,
+  onTagAsk,
   onCheckout,
 }: Props) {
   const [query, setQuery] = useState("");
   const [menu, setMenu] = useState<{
     target:
       | { kind: "repository"; entry: RecentRepository }
-      | { kind: "branch"; root: RepositoryRoot; branch: Branch };
+      | { kind: "branch"; root: RepositoryRoot; branch: Branch }
+      | { kind: "tag"; root: RepositoryRoot; tag: Tag };
     x: number;
     y: number;
     focus: HTMLElement;
@@ -155,6 +158,29 @@ export function RepositoryTree({
     if (returnFocus) menu?.focus.focus({ preventScroll: true });
   }
 
+  const write = (
+    Icon: typeof Plus,
+    label: string,
+    run: (() => void) | null,
+    off: string | null,
+  ) =>
+    run && (
+      <button
+        role="menuitem"
+        aria-disabled={off !== null}
+        title={off ?? undefined}
+        onClick={() => {
+          if (off !== null) return;
+          closeMenu();
+          run();
+        }}
+      >
+        <Icon size={14} />
+        <span>{label}</span>
+        {off !== null && <small className="menu-reason">{off}</small>}
+      </button>
+    );
+
   function menuItems(target: NonNullable<typeof menu>["target"]) {
     if (target.kind === "repository")
       return (
@@ -169,6 +195,15 @@ export function RepositoryTree({
           <Trash2 size={14} />
           <span>Remove</span>
         </button>
+      );
+    if (target.kind === "tag")
+      return write(
+        Trash2,
+        "Delete tag…",
+        () => onTagAsk({ kind: "delete", tag: target.tag }),
+        writable?.root === target.root
+          ? null
+          : "Open this repository to change its tags.",
       );
     const { root, branch } = target;
     const rule = ruleFor(root);
@@ -186,28 +221,6 @@ export function RepositoryTree({
           ? null
           : `Checked out in ${checkedOutIn}`;
     const asking = (ask: BranchAsk | null) => ask && (() => onBranchAsk(ask));
-    const write = (
-      Icon: typeof Plus,
-      label: string,
-      run: (() => void) | null,
-      off: string | null,
-    ) =>
-      run && (
-        <button
-          role="menuitem"
-          aria-disabled={off !== null}
-          title={off ?? undefined}
-          onClick={() => {
-            if (off !== null) return;
-            closeMenu();
-            run();
-          }}
-        >
-          <Icon size={14} />
-          <span>{label}</span>
-          {off !== null && <small className="menu-reason">{off}</small>}
-        </button>
-      );
     const state = branchVisibility(rule, branch.reference);
     const apply = (next: VisibilityRule) => () => {
       onRule(root, next);
@@ -294,6 +307,13 @@ export function RepositoryTree({
             event.currentTarget,
           )
         }
+        onTagMenu={(event, tag) =>
+          openMenu(
+            event,
+            { kind: "tag", root: entry.root, tag },
+            event.currentTarget,
+          )
+        }
         onCheckout={writable?.root === entry.root ? onCheckout : null}
       />
     );
@@ -377,7 +397,13 @@ export function RepositoryTree({
         <ContextMenu
           x={menu.x}
           y={menu.y}
-          label={`${menu.target.kind === "repository" ? menu.target.entry.name : menu.target.branch.name} actions`}
+          label={`${
+            menu.target.kind === "repository"
+              ? menu.target.entry.name
+              : menu.target.kind === "tag"
+                ? menu.target.tag.name
+                : menu.target.branch.name
+          } actions`}
           onClose={closeMenu}
         >
           {menuItems(menu.target)}
