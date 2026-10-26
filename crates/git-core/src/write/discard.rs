@@ -357,7 +357,11 @@ pub(super) fn step(
 /// the file's, as after a checkout that converted line endings, it reports
 /// the file modified without reading it, so `add --refresh` alone cannot
 /// clear it. Each entry is written again without stat data first, so Git
-/// compares the content.
+/// compares the content. Git never reads the stat data of a skip-worktree
+/// or assume-unchanged entry, and writing it again would drop the flag, so
+/// those stay as they are. Under `core.ignoreStat`, `update-index` marks
+/// each entry it writes assume-unchanged, as `git restore` marks what it
+/// checks out, which would hide a later edit, so it runs with that off.
 fn refresh(txn: &Txn<'_>, paths: &[&str]) {
     if paths.is_empty() {
         return;
@@ -366,7 +370,12 @@ fn refresh(txn: &Txn<'_>, paths: &[&str]) {
         let info: Vec<u8> = paths
             .iter()
             .filter_map(|path| match index::at(&rows, path) {
-                [entry] if entry.stage == 0 && !entry.intent_to_add && !entry.skip_worktree => {
+                [entry]
+                    if entry.stage == 0
+                        && !entry.intent_to_add
+                        && !entry.skip_worktree
+                        && !entry.assume_unchanged =>
+                {
                     Some(format!(
                         "{} {}\t{path}\0",
                         entry.mode.octal(),
@@ -378,7 +387,13 @@ fn refresh(txn: &Txn<'_>, paths: &[&str]) {
             .flat_map(String::into_bytes)
             .collect();
         let _ = txn
-            .git(&["update-index", "-z", "--index-info"])
+            .git(&[
+                "-c",
+                "core.ignoreStat=false",
+                "update-index",
+                "-z",
+                "--index-info",
+            ])
             .input(info)
             .run(txn.deadline());
     }

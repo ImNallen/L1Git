@@ -21,7 +21,7 @@ pub(super) struct IndexEntry {
     pub(super) stage: u8,
     pub(super) intent_to_add: bool,
     pub(super) skip_worktree: bool,
-    assume_unchanged: bool,
+    pub(super) assume_unchanged: bool,
 }
 
 const ASSUME_UNCHANGED: u32 = 0x8000;
