@@ -277,7 +277,7 @@ impl Switch {
         let mut created = None;
         match to {
             Head::Detached { .. } => {
-                entry.bring_back_branch(runner, &tip)?;
+                entry.bring_back_tip(runner, &tip, "branch")?;
                 args.extend(["--detach".to_owned(), tip.as_str().to_owned()]);
             }
             Head::Attached { reference, .. } => {
@@ -286,7 +286,7 @@ impl Switch {
                 let slot = Listing::read(repo, reads)?.slot(&branch)?;
                 match (&slot.tip, remake) {
                     (None, Some(_)) => {
-                        entry.bring_back_branch(runner, &tip)?;
+                        entry.bring_back_tip(runner, &tip, "branch")?;
                         created = Some(NewBranch {
                             branch: branch.clone(),
                             before: slot.config,

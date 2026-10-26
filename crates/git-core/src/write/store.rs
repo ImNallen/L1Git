@@ -697,10 +697,21 @@ impl EntryObjects {
         Ok(())
     }
 
-    pub(super) fn bring_back_branch(
+    pub(super) fn keep_tag(
         &self,
         runner: &impl Runner,
         tip: &Oid,
+        name: &str,
+    ) -> Result<(), RepositoryError> {
+        let exclude = format!("--exclude={name}");
+        self.keep_unique(runner, tip, &[LASTING_REFS[0], &exclude, LASTING_REFS[1]])
+    }
+
+    pub(super) fn bring_back_tip(
+        &self,
+        runner: &impl Runner,
+        tip: &Oid,
+        noun: &str,
     ) -> Result<(), RepositoryError> {
         let mut present = runner.git(&["cat-file", "-e", tip.as_str()]);
         let mut list = runner.git(&[
@@ -718,7 +729,9 @@ impl EntryObjects {
         let lost = || {
             RepositoryError::new(
                 ErrorKind::GitFailed,
-                "Git no longer has some of this branch's commits, and L1 Git's undo store does not hold them, so nothing changed. A branch, tag, or remote-tracking branch that shared them was likely deleted outside L1 Git and its commits pruned.",
+                format!(
+                    "Git no longer has some of this {noun}'s commits, and L1 Git's undo store does not hold them, so nothing changed. A branch, tag, or remote-tracking branch that shared them was likely deleted outside L1 Git and its commits pruned."
+                ),
             )
         };
         // rev-list skips a missing tip under --missing=allow-promisor.

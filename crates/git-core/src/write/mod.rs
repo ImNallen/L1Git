@@ -11,10 +11,11 @@ mod index;
 mod partial;
 mod refs;
 mod store;
+mod tags;
 mod txn;
 
 use crate::{
-    Coordinator, ErrorKind, Head, RepositoryError, StagedStamp, StaleReason, StatusEntry,
+    Coordinator, ErrorKind, Head, Oid, RepositoryError, StagedStamp, StaleReason, StatusEntry,
     git::{self, Deadline, LocalRead, LocalWrite, WriteDeadline},
     repository,
 };
@@ -29,6 +30,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use store::{EntryObjects, LockedStore, Log, Objects, Position, Step, Store};
+pub use tags::TagTip;
 pub(crate) use txn::{CommitTxn, HOOK_OFF, Outside, Published, RefTxn, ScratchIndex, Txn};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -120,6 +122,16 @@ pub enum Operation {
     /// `git switch`. A remote-tracking branch checks out the local branch its
     /// fetch refspec maps it to, or creates that branch tracking it.
     Checkout { target: Start },
+    /// Creates the tag `name` at the commit `at`. With a message the tag is
+    /// annotated, made by `git tag -a`, which signs it when `tag.gpgSign`
+    /// asks.
+    CreateTag {
+        name: String,
+        at: Oid,
+        message: Option<String>,
+    },
+    /// Deletes a tag. Undo puts the ref back at the same object.
+    DeleteTag { tag: TagTip },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -194,6 +206,7 @@ enum Change {
     Discard(discard::DiscardChange),
     Branch(branches::BranchChange),
     Checkout(checkout::CheckoutChange),
+    Tag(tags::TagChange),
 }
 
 impl From<discard::DiscardChange> for Change {
@@ -214,12 +227,20 @@ impl From<checkout::CheckoutChange> for Change {
     }
 }
 
+impl From<tags::TagChange> for Change {
+    fn from(change: tags::TagChange) -> Self {
+        Self::Tag(change)
+    }
+}
+
 impl Change {
     fn objects(&self) -> Objects {
         match self {
             Self::Index(change) => Objects::exact(change.objects()),
             Self::Ref(change) => change.objects(),
-            Self::Discard(_) | Self::Branch(_) | Self::Checkout(_) => Objects::default(),
+            Self::Discard(_) | Self::Branch(_) | Self::Checkout(_) | Self::Tag(_) => {
+                Objects::default()
+            }
         }
     }
 
@@ -263,6 +284,11 @@ impl Change {
                 store.save(step.log())?;
                 Ok(None)
             }
+            Self::Tag(change) => {
+                tags::step(repo, entry, change, direction, deadline)?;
+                store.save(step.log())?;
+                Ok(None)
+            }
             Self::Checkout(change) => {
                 let trouble = checkout::step(repo, entry, change, direction, deadline)?;
                 store.save(step.log())?;
@@ -275,7 +301,10 @@ impl Change {
         match (self, direction) {
             (Self::Checkout(_), Direction::Undo) => Some(LocalWrite::UndoCheckout),
             (Self::Checkout(_), Direction::Redo) => Some(LocalWrite::RedoCheckout),
-            (Self::Index(_) | Self::Ref(_) | Self::Discard(_) | Self::Branch(_), _) => None,
+            (
+                Self::Index(_) | Self::Ref(_) | Self::Discard(_) | Self::Branch(_) | Self::Tag(_),
+                _,
+            ) => None,
         }
     }
 
@@ -291,12 +320,13 @@ impl Change {
             Self::Checkout(change) => {
                 Ok(checkout::landed(repo, change, deadline)?.map(Self::Checkout))
             }
+            Self::Tag(change) => Ok(tags::landed(repo, change, deadline)?.map(Self::Tag)),
         }
     }
 
     const fn repository_wide(&self) -> bool {
         match self {
-            Self::Branch(_) => true,
+            Self::Branch(_) | Self::Tag(_) => true,
             Self::Index(_) | Self::Ref(_) | Self::Discard(_) | Self::Checkout(_) => false,
         }
     }
@@ -304,7 +334,9 @@ impl Change {
     const fn keeps_overwritten_files(&self) -> bool {
         match self {
             Self::Discard(_) => true,
-            Self::Index(_) | Self::Ref(_) | Self::Branch(_) | Self::Checkout(_) => false,
+            Self::Index(_) | Self::Ref(_) | Self::Branch(_) | Self::Checkout(_) | Self::Tag(_) => {
+                false
+            }
         }
     }
 
@@ -313,14 +345,18 @@ impl Change {
             Self::Discard(change) => {
                 discard::remove_copies_beside(Path::new(&applied.root), applied.id, change);
             }
-            Self::Index(_) | Self::Ref(_) | Self::Branch(_) | Self::Checkout(_) => {}
+            Self::Index(_) | Self::Ref(_) | Self::Branch(_) | Self::Checkout(_) | Self::Tag(_) => {}
         }
     }
 
     fn touches_skip_worktree(&self) -> bool {
         match self {
             Self::Index(change) => change.touches_skip_worktree(),
-            Self::Ref(_) | Self::Discard(_) | Self::Branch(_) | Self::Checkout(_) => false,
+            Self::Ref(_)
+            | Self::Discard(_)
+            | Self::Branch(_)
+            | Self::Checkout(_)
+            | Self::Tag(_) => false,
         }
     }
 }
@@ -362,6 +398,8 @@ impl Operation {
             Self::RenameBranch { .. } => LocalWrite::RenameBranch,
             Self::DeleteBranch { .. } => LocalWrite::DeleteBranch,
             Self::Checkout { .. } => LocalWrite::Checkout,
+            Self::CreateTag { .. } => LocalWrite::CreateTag,
+            Self::DeleteTag { .. } => LocalWrite::DeleteTag,
         }
     }
 
@@ -432,6 +470,10 @@ impl Operation {
             Self::RenameBranch { branch: tip, to } => branch(branches::rename(&writing, tip, to)),
             Self::DeleteBranch { branch: tip } => branch(branches::delete(&writing, tip)),
             Self::Checkout { target } => branch(checkout::checkout(&writing, expect, target)),
+            Self::CreateTag { name, at, message } => {
+                branch(tags::create(&writing, name, at, message.as_deref()))
+            }
+            Self::DeleteTag { tag } => branch(tags::delete(&writing, tag)),
         }
     }
 }

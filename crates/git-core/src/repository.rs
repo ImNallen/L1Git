@@ -168,6 +168,7 @@ fn tags(path: &Path, deadline: Deadline) -> Result<Vec<Tag>, RepositoryError> {
         let [reference, oid, kind, peeled, peeled_kind] = fields.as_slice() else {
             return Err(git::malformed());
         };
+        let object = git::text(oid);
         let (oid, kind) = if peeled.is_empty() {
             (oid, kind)
         } else {
@@ -188,6 +189,7 @@ fn tags(path: &Path, deadline: Deadline) -> Result<Vec<Tag>, RepositoryError> {
         tags.push(Tag {
             name: name.into(),
             oid,
+            object,
             reference,
         });
     }
