@@ -8,8 +8,8 @@ use super::{
     txn::Runner,
 };
 use crate::{
-    BranchRef, BranchTip, ChangeStatus, ErrorKind, Head, MoveSide, Oid, RemoteRef, RepositoryError,
-    Sides, StaleReason, StatusEntry,
+    BranchRef, BranchTip, ChangeStatus, ErrorKind, Head, MoveSide, Moved, Oid, RemoteRef,
+    RepositoryError, Sides, StaleReason, StatusEntry,
     git::{self, Deadline, WriteDeadline, Wrote},
     status::{self, Untracked},
     stderr, sync,
@@ -401,6 +401,12 @@ fn refuse_absorbing(
                         unstaged: ChangeStatus::Deleted,
                     },
                 ..
+            }
+            | StatusEntry::Renamed {
+                original: path,
+                how: Moved::Renamed,
+                side: MoveSide::Unstaged { .. },
+                ..
             } => {
                 deleted.insert(path);
             }
@@ -409,6 +415,7 @@ fn refuse_absorbing(
                 ..
             }
             | StatusEntry::Renamed {
+                how: Moved::Copied,
                 side: MoveSide::Unstaged { .. },
                 ..
             }
