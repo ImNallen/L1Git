@@ -281,6 +281,14 @@ impl Listing {
         let same = |a: &str, b: &str| a == b || (folds && a.to_lowercase() == b.to_lowercase());
         let name = target.name();
         let clash = |message: String| Err(RepositoryError::new(ErrorKind::InvalidRef, message));
+        if let Some(source) = source
+            .map(BranchRef::name)
+            .filter(|source| *source != name && same(source, name))
+        {
+            return clash(format!(
+                "This repository does not tell names apart by case, so Git cannot rename '{source}' to '{name}' in one step. Rename it to another name first, then to '{name}'."
+            ));
+        }
         let wanted: Vec<_> = name.split('/').collect();
         for other in self
             .branches
