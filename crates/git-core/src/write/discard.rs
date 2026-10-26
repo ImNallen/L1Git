@@ -1,7 +1,7 @@
 use super::{
     Applied, Change, Direction, Expect, Operation, Repo, Restored,
     index::{self, IndexEntry},
-    store::{EntryObjects, LockedStore, Log},
+    store::{self, EntryObjects, LockedStore, Log},
     txn::{Published, Txn},
 };
 use crate::{
@@ -250,7 +250,9 @@ pub(super) fn discard(
     }
     let (applied, discard, recorded) = store.record_with(&txn, log, operation, |entry| {
         let files = entry.files();
-        fs::create_dir(&files).map_err(|error| failed("the undo history", &error))?;
+        store::private_folder()
+            .create(&files)
+            .map_err(|error| failed("the undo history", &error))?;
         let paths = targets
             .iter()
             .enumerate()
@@ -530,12 +532,22 @@ fn capture(
                 target: link_bytes(target),
             })
         }
-        Ok(metadata) => fs::copy(&file, files.join(&copy)).map(|_| Content::File {
+        Ok(metadata) => copy_private(&file, &files.join(&copy)).map(|()| Content::File {
             copy,
             permissions: permissions(&metadata),
         }),
     };
     captured.map_err(|error| failed(path, &error))
+}
+
+/// The copy is the user's only remaining copy of the bytes, so it is created
+/// readable by its owner alone, whatever the file's own permissions were.
+fn copy_private(from: &Path, to: &Path) -> io::Result<()> {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    io::copy(&mut fs::File::open(from)?, &mut options.open(to)?).map(drop)
 }
 
 fn holds(root: &Path, path: &str, content: &Content, files: &Path) -> io::Result<bool> {

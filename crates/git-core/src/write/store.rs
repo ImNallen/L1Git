@@ -167,7 +167,10 @@ impl LockedStore {
     ) -> Result<Self, RepositoryError> {
         private_dir(undo_dir)?;
         let store = Store::open(undo_dir, common_dir)?;
-        fs::create_dir_all(store.dir.join("entries")).map_err(unwritable)?;
+        private_folder()
+            .recursive(true)
+            .create(store.dir.join("entries"))
+            .map_err(unwritable)?;
         let lock = File::options()
             .create(true)
             .truncate(false)
@@ -280,7 +283,7 @@ impl LockedStore {
             dir: self.entry_dir(id),
             kept: false,
         };
-        fs::create_dir(&entry.dir).map_err(unwritable)?;
+        private_folder().create(&entry.dir).map_err(unwritable)?;
         let change = fill(&self.entry(id))?;
         self.write(id, "applied.json", &applied)?;
         self.write(id, "change.json", &Change::from(change.clone()))?;
@@ -329,7 +332,7 @@ impl LockedStore {
             dir: self.entry_dir(id),
             kept: false,
         };
-        fs::create_dir(&entry.dir).map_err(unwritable)?;
+        private_folder().create(&entry.dir).map_err(unwritable)?;
         self.write(id, "applied.json", &applied)?;
         let log = log.with_pending(id);
         self.save(&log)?;
@@ -643,13 +646,21 @@ fn lines(oids: &[Oid]) -> Vec<u8> {
         .collect()
 }
 
+/// Discarded files can hold secrets, so every folder of the history is
+/// private, even inside an undo folder that others can read.
+pub(super) fn private_folder() -> fs::DirBuilder {
+    let mut builder = fs::DirBuilder::new();
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+    builder
+}
+
 fn private_dir(dir: &Path) -> Result<(), RepositoryError> {
     #[cfg(unix)]
     {
-        use std::os::unix::fs::{DirBuilderExt, MetadataExt};
-        fs::DirBuilder::new()
+        use std::os::unix::fs::MetadataExt;
+        private_folder()
             .recursive(true)
-            .mode(0o700)
             .create(dir)
             .map_err(unwritable)?;
         let metadata = fs::metadata(dir).map_err(unwritable)?;
