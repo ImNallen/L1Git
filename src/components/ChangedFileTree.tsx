@@ -27,6 +27,8 @@ export type RowAction = {
   label: string;
   disabled: boolean;
   run: (paths: string[], row: string) => void;
+  /** The paths it acts on. A row with none of them does not offer it. */
+  only?: ReadonlySet<string>;
 };
 
 export const focusedRow = '[data-type="item"][tabindex="0"]';
@@ -39,7 +41,7 @@ type Props = {
   selectedPath: string | null;
   onSelectFile: (path: string) => void;
   maxRows?: number;
-  action?: RowAction;
+  actions?: readonly RowAction[];
   refocusPath?: string | null;
   onFocused?: () => void;
   onRowFocus?: (row: string) => void;
@@ -62,7 +64,7 @@ export function ChangedFileTree({
   selectedPath,
   onSelectFile,
   maxRows,
-  action,
+  actions = [],
   refocusPath = null,
   onFocused,
   onRowFocus,
@@ -89,9 +91,15 @@ export function ChangedFileTree({
     flattenEmptyDirectories,
     density: "compact",
     unsafeCSS: keyboardFocusOnly,
-    composition: action && {
-      contextMenu: { triggerMode: "both", buttonVisibility: "when-needed" },
-    },
+    composition:
+      actions.length > 0
+        ? {
+            contextMenu: {
+              triggerMode: "both",
+              buttonVisibility: "when-needed",
+            },
+          }
+        : undefined,
     onSelectionChange: ([shown, ...rest]) => {
       if (syncing.current) return;
       const path =
@@ -143,29 +151,40 @@ export function ChangedFileTree({
           onRowFocus?.(row.dataset.itemPath);
       }}
       renderContextMenu={
-        action &&
-        ((item, context) => (
-          <ContextMenu
-            x={context.anchorRect.left}
-            y={context.anchorRect.bottom}
-            label={`${item.name} actions`}
-            onClose={({ returnFocus }) =>
-              context.close({ restoreFocus: returnFocus })
-            }
-          >
-            <button
-              role="menuitem"
-              aria-disabled={action.disabled}
-              onClick={() => {
-                if (action.disabled) return;
-                context.close();
-                action.run(pathsUnder(files, item), item.path);
-              }}
-            >
-              {action.label}
-            </button>
-          </ContextMenu>
-        ))
+        actions.length > 0
+          ? (item, context) => (
+              <ContextMenu
+                x={context.anchorRect.left}
+                y={context.anchorRect.bottom}
+                label={`${item.name} actions`}
+                onClose={({ returnFocus }) =>
+                  context.close({ restoreFocus: returnFocus })
+                }
+              >
+                {actions.map((action) => {
+                  const paths = pathsUnder(files, item).filter(
+                    (path) => action.only?.has(path) ?? true,
+                  );
+                  return (
+                    paths.length > 0 && (
+                      <button
+                        key={action.label}
+                        role="menuitem"
+                        aria-disabled={action.disabled}
+                        onClick={() => {
+                          if (action.disabled) return;
+                          context.close();
+                          action.run(paths, item.path);
+                        }}
+                      >
+                        {action.label}
+                      </button>
+                    )
+                  );
+                })}
+              </ContextMenu>
+            )
+          : undefined
       }
     />
   );

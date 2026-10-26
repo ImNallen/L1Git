@@ -184,7 +184,7 @@ impl<'a> Write<'a> {
                 "--ignore-missing",
                 "post-index-change",
                 "--",
-                "0",
+                if published.worktree() { "1" } else { "0" },
                 if published.skip_worktree() { "1" } else { "0" },
             ],
             env: Vec::new(),

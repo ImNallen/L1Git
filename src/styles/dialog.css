@@ -387,3 +387,22 @@
   flex-direction: column;
   gap: 8px;
 }
+.dialog-paths {
+  list-style: none;
+  margin: -13px 0 25px;
+  padding: 8px 10px;
+  max-height: 240px;
+  overflow: auto;
+  background: var(--control-inset);
+  border: 1px solid var(--border-control);
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.8;
+  color: var(--text-secondary);
+}
+.dialog-paths li {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

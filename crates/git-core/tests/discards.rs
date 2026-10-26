@@ -529,3 +529,24 @@ fn refuses_two_names_for_one_file_on_a_case_insensitive_disk() {
         "two\n"
     );
 }
+
+#[test]
+fn runs_post_index_change_once_saying_the_worktree_changed() {
+    let repo = Repo::new(&[("f", "one\n")]);
+    let hooks = repo.directory.path().join("hooks");
+    let log = repo.directory.path().join("hook.log");
+    fs::create_dir(&hooks).unwrap();
+    let hook = hooks.join("post-index-change");
+    fs::write(
+        &hook,
+        format!("#!/bin/sh\necho \"$1 $2\" >> '{}'\n", log.display()),
+    )
+    .unwrap();
+    executable(&hook, true);
+    repo.git(&["config", "core.hooksPath", hooks.to_str().unwrap()]);
+    repo.put("f", "two\n");
+    let applied = repo.discard(&["f"]).unwrap();
+    assert_eq!(fs::read_to_string(&log).unwrap(), "1 0\n");
+    repo.coordinator().undo(repo.path(), applied.id).unwrap();
+    assert_eq!(fs::read_to_string(&log).unwrap(), "1 0\n");
+}

@@ -45,6 +45,7 @@ import { useBranchVisibility } from "./branchVisibility";
 import type { ThemeSettings } from "./themes/catalog";
 import { AppearanceSettings } from "./components/AppearanceSettings";
 import { AddRepositoryDialog } from "./components/AddRepositoryDialog";
+import { DiscardDialog } from "./components/DiscardDialog";
 import { EditMessageDialog } from "./components/EditMessageDialog";
 import { COMMIT_SUMMARY_ID } from "./components/CommitBox";
 import { CommandPalette } from "./components/CommandPalette";
@@ -57,7 +58,7 @@ import type { HistoryHandle } from "./components/History";
 import { PaneDivider } from "./components/PaneDivider";
 import { RepositoryTree } from "./components/RepositoryTree";
 import { UndoButtons, WriteNoticeRow } from "./components/UndoControls";
-import { nextEntry, writeFor } from "./domain/operations";
+import { discardChoice, nextEntry, writeFor } from "./domain/operations";
 import type { FileWrite } from "./domain/operations";
 import { swapEnds } from "./domain/comparison";
 import { buildGraph } from "./domain/graph";
@@ -154,6 +155,12 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   const [editingMessage, setEditingMessage] = useState(false);
   const [headOf, setHeadOf] = useState<RepositoryRoot | null>(null);
   const [lostFocusChecks, checkLostFocus] = useState(0);
+  const [discarding, setDiscarding] = useState<{
+    root: RepositoryRoot;
+    paths: string[];
+    left: number;
+    returnFocus?: () => void;
+  } | null>(null);
   const [palette, setPalette] = useState<{ picked: Oid | null } | null>(null);
   const paletteReturn = useRef<Element | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -246,6 +253,17 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     const write =
       changes?.kind === "ready" ? writeFor(kind, changes.status, paths) : null;
     return write === null ? Promise.resolve(false) : writes.write(root, write);
+  }
+  function askDiscard(
+    root: RepositoryRoot,
+    paths: readonly string[],
+    returnFocus?: () => void,
+  ) {
+    const changes = app.changes.get(root);
+    if (changes?.kind !== "ready") return;
+    const choice = discardChoice(changes.status, paths);
+    if (choice.paths.length > 0)
+      setDiscarding({ root, ...choice, returnFocus });
   }
   const rootChanges = snapshot ? app.changes.get(snapshot.root) : undefined;
   const headStatus = rootChanges?.kind === "ready" ? rootChanges.status : null;
@@ -533,6 +551,11 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     },
     stageAll: () => writeList("unstaged"),
     unstageAll: () => writeList("staged"),
+    discardAll: () => {
+      const paths = selectedLists?.get("unstaged");
+      if (selectedWorktree && paths)
+        askDiscard(selectedWorktree.worktree.root, paths);
+    },
     focusCommit: () => {
       flushSync(() => setInspectorOpen(true));
       document.getElementById(COMMIT_SUMMARY_ID)?.focus();
@@ -568,6 +591,13 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     worktree: selectedLists && {
       unstaged: selectedLists.get("unstaged")?.length ?? 0,
       staged: selectedLists.get("staged")?.length ?? 0,
+      discardable:
+        selectedChanges?.kind === "ready"
+          ? discardChoice(
+              selectedChanges.status,
+              selectedLists.get("unstaged") ?? [],
+            ).paths.length
+          : 0,
     },
     history: {
       undo: nextEntry(writes.history, "undo")?.label ?? null,
@@ -1086,6 +1116,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                         checkLostFocus((count) => count + 1);
                         return outcome;
                       },
+                      discard: askDiscard,
                     }}
                   />
                 ) : (
@@ -1155,6 +1186,19 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
           onClose={() => {
             flushSync(() => setEditingMessage(false));
             focusFallback();
+          }}
+        />
+      )}
+      {discarding && (
+        <DiscardDialog
+          paths={discarding.paths}
+          left={discarding.left}
+          onDiscard={() =>
+            void writeFiles(discarding.root, "discard", discarding.paths)
+          }
+          onClose={() => {
+            setDiscarding(null);
+            discarding.returnFocus?.();
           }}
         />
       )}

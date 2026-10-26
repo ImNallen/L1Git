@@ -276,6 +276,10 @@ export const operationSchema = z.discriminatedUnion("kind", [
     staged: stagedStampSchema,
   }),
   z.strictObject({ kind: z.literal("editMessage"), message: z.string() }),
+  z.strictObject({
+    kind: z.literal("discard"),
+    entries: z.array(statusEntrySchema),
+  }),
 ]);
 export const expectSchema = z.strictObject({ head: headSchema });
 export const appliedSchema = z.strictObject({

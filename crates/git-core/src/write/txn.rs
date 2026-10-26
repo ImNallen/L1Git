@@ -247,6 +247,7 @@ impl<'r> Txn<'r> {
             root: self.repo.root.clone(),
             deadline: self.deadline,
             skip_worktree: change.touches_skip_worktree(),
+            worktree: matches!(change, Change::Discard(_)),
             hooks: self.hooks.any(),
         })
     }
@@ -359,6 +360,7 @@ pub(crate) struct Published {
     root: PathBuf,
     deadline: WriteDeadline,
     skip_worktree: bool,
+    worktree: bool,
     hooks: bool,
 }
 
@@ -369,6 +371,11 @@ impl Published {
 
     pub(crate) const fn skip_worktree(&self) -> bool {
         self.skip_worktree
+    }
+
+    /// Whether the write also changed files on disk.
+    pub(crate) const fn worktree(&self) -> bool {
+        self.worktree
     }
 
     /// Runs `post-index-change` after the write let go of its locks, as Git

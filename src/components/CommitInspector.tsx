@@ -39,6 +39,7 @@ import type {
 import type { RefLabel } from "../domain/refs";
 import type { Selection } from "../domain/selection";
 import { relativeTime } from "../domain/time";
+import { discardablePaths } from "../domain/operations";
 import type { FileWrite, Write } from "../domain/operations";
 import type { DetailState } from "../useWorkspace";
 import { changedFileTreeInput, listsRow } from "../domain/changedFiles";
@@ -77,6 +78,15 @@ export type WorktreeWrites = {
     paths: readonly string[],
   ) => Promise<unknown>;
   commit: (worktree: RepositoryRoot, write: Write) => Promise<Outcome>;
+  /**
+   * Asks before it discards the Unstaged side of `paths`, and calls
+   * `returnFocus` when the question closes.
+   */
+  discard: (
+    worktree: RepositoryRoot,
+    paths: readonly string[],
+    returnFocus?: () => void,
+  ) => void;
 };
 
 export function InspectorFrame({
@@ -606,6 +616,8 @@ function WorktreeFiles({
   onSelectFile,
   busy,
   onWrite,
+  discardable,
+  onDiscard,
   onRowFocus,
   refocusPath,
   onFocused,
@@ -620,16 +632,30 @@ function WorktreeFiles({
     paths: string[],
     row?: string,
   ) => void;
+  discardable: ReadonlySet<string>;
+  onDiscard: (paths: string[], row?: string) => void;
   onRowFocus: (focus: RowFocus) => void;
   refocusPath: string | null;
   onFocused: () => void;
 }) {
   const { kind, row, all } = listWrites[side];
-  const action: RowAction = {
-    label: row,
-    disabled: busy,
-    run: (paths, target) => onWrite(kind, side, paths, target),
-  };
+  const actions: RowAction[] = [
+    {
+      label: row,
+      disabled: busy,
+      run: (paths, target) => onWrite(kind, side, paths, target),
+    },
+  ];
+  const discarding = side === "unstaged";
+  if (discarding)
+    actions.push({
+      label: "Discard changes…",
+      disabled: busy,
+      run: onDiscard,
+      only: discardable,
+    });
+  const discardAll =
+    discarding && files.some((file) => discardable.has(file.path));
   return (
     <section className="worktree-group" aria-label={title}>
       <header className="worktree-group-header">
@@ -653,6 +679,17 @@ function WorktreeFiles({
             {all}
           </button>
         )}
+        {discardAll && (
+          <button
+            className="button secondary list-action"
+            aria-disabled={busy}
+            onClick={() => {
+              if (!busy) onDiscard(files.map((file) => file.path));
+            }}
+          >
+            Discard all…
+          </button>
+        )}
       </header>
       <ChangedFileTree
         key={files.map((file) => `${file.status}:${file.path}`).join("\0")}
@@ -660,7 +697,7 @@ function WorktreeFiles({
         selectedPath={selectedFile?.side === side ? selectedFile.path : null}
         onSelectFile={(path) => onSelectFile(path, side)}
         maxRows={GROUP_MAX_ROWS}
-        action={action}
+        actions={actions}
         refocusPath={refocusPath}
         onFocused={onFocused}
         onRowFocus={(row) => onRowFocus({ row, side })}
@@ -709,6 +746,10 @@ function WorktreeInspector({
           (group) => group.files.length > 0,
         )
       : [];
+  const discardable =
+    changes?.kind === "ready"
+      ? discardablePaths(changes.status)
+      : new Set<string>();
   const listsFocus = (group: WorktreeGroup) =>
     focusAfter !== null && listsRow(group.files, focusAfter.row);
   const focusTarget =
@@ -821,6 +862,16 @@ function WorktreeInspector({
               onSelectFile={onSelectFile}
               busy={writes.busy}
               onWrite={onWrite}
+              discardable={discardable}
+              onDiscard={(paths, row) =>
+                writes.discard(
+                  worktree.root,
+                  paths,
+                  row === undefined
+                    ? undefined
+                    : () => setFocusAfter({ row, side: "unstaged" }),
+                )
+              }
               onRowFocus={(focus) => (lastRow.current = focus)}
               refocusPath={
                 group === focusTarget ? (focusAfter?.row ?? null) : null

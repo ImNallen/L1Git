@@ -22,7 +22,7 @@ import {
 } from "../themes/palette";
 import { AddThemeDialog } from "./AddThemeDialog";
 import { CreateThemePanel } from "./CreateThemePanel";
-import { DeleteThemeDialog } from "./DeleteThemeDialog";
+import { ConfirmDialog } from "./ConfirmDialog";
 
 type Props = { appearance: AppearanceState };
 
@@ -330,11 +330,19 @@ export function AppearanceSettings({ appearance }: Props) {
         />
       )}
       {deleting && (
-        <DeleteThemeDialog
-          name={deleting.name}
-          onDelete={() => appearance.deleteTheme(deleting.id)}
+        <ConfirmDialog
+          icon={Trash2}
+          title={`Delete ${deleting.name}?`}
+          closeLabel="Close delete theme"
+          confirm="Delete theme"
+          onConfirm={() => appearance.deleteTheme(deleting.id)}
           onClose={() => setDeleting(null)}
-        />
+        >
+          <p>
+            The theme is removed from your themes. If light or dark mode uses
+            it, that mode goes back to L1.
+          </p>
+        </ConfirmDialog>
       )}
     </section>
   );
