@@ -692,33 +692,114 @@ fn a_write_entry_carries_every_field_that_worktree_status_sends() {
     }
 }
 
+#[cfg(unix)]
 #[test]
-fn names_the_unstage_it_refuses_for_a_name_that_is_not_utf8() {
+fn stages_a_name_holding_the_replacement_character_and_refuses_one_that_is_not_utf8() {
+    use std::{ffi::OsStr, io::Write, os::unix::ffi::OsStrExt};
     let repo = Repo::committed(&[("f", "one\n")]);
     let coordinator = repo.coordinator();
-    let (_, expect) = entries(&repo, &[]);
-    let entry: StatusEntry = serde_json::from_value(serde_json::json!({
-        "kind": "ordinary",
-        "path": "caf\u{FFFD}",
-        "submodule": null,
-        "sides": { "kind": "staged", "staged": "A" },
-        "index": {
-            "mode": "100644",
-            "oid": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
-        },
-    }))
-    .unwrap();
-    let refused = coordinator
+    repo.put("ok\u{FFFD}name.txt", "valid UTF-8\n");
+    round_trip(&coordinator, &repo, || {
+        stage(&coordinator, &repo, &["ok\u{FFFD}name.txt"]).unwrap()
+    });
+    assert_eq!(repo.status(), ["A  ok\u{FFFD}name.txt"]);
+
+    let blob = repo.git(&["hash-object", "-w", "f"]);
+    let mut info = format!("100644 {}\tcaf", blob.trim()).into_bytes();
+    info.extend(b"\xff\0");
+    let mut child = Command::new("git")
+        .arg("-C")
+        .arg(&repo.root)
+        .args(["update-index", "-z", "--index-info"])
+        .stdin(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(&info).unwrap();
+    assert!(child.wait().unwrap().success());
+    let indexed = repo.index();
+    let refused = unstage(&coordinator, &repo, &["caf\u{FFFD}"]).unwrap_err();
+    assert_eq!(
+        refused.kind,
+        ErrorKind::UnsupportedPath,
+        "{}",
+        refused.message
+    );
+    assert!(
+        refused.message.contains("unstage") && refused.message.contains("UTF-8"),
+        "{}",
+        refused.message
+    );
+    assert_eq!(repo.index(), indexed);
+
+    if fs::write(repo.root.join(OsStr::from_bytes(b"bad\xffname")), "x\n").is_ok() {
+        let refused = stage(&coordinator, &repo, &["bad\u{FFFD}name"]).unwrap_err();
+        assert_eq!(
+            refused.kind,
+            ErrorKind::UnsupportedPath,
+            "{}",
+            refused.message
+        );
+        assert!(refused.message.contains("UTF-8"), "{}", refused.message);
+        assert_eq!(repo.index(), indexed);
+    }
+}
+
+#[test]
+fn refuses_to_stage_a_name_that_git_would_spell_in_another_case() {
+    let repo = Repo::committed(&[("Dir/a", "one\n")]);
+    let coordinator = repo.coordinator();
+    repo.git(&["config", "core.ignorecase", "true"]);
+    if repo.root.join("DIR").exists() {
+        fs::rename(repo.root.join("Dir"), repo.root.join("moving")).unwrap();
+        fs::rename(repo.root.join("moving"), repo.root.join("dir")).unwrap();
+    }
+    repo.put("Dir/a", "two\n");
+    repo.put("dir/b", "new\n");
+    assert_eq!(repo.status(), [" M Dir/a", "?? dir/b"]);
+    let untouched = repo.index();
+    for chosen in [&["dir/b"][..], &["Dir/a", "dir/b"]] {
+        let refused = stage(&coordinator, &repo, chosen).unwrap_err();
+        assert_eq!(
+            refused.kind,
+            ErrorKind::UnsupportedPath,
+            "{chosen:?}: {}",
+            refused.message
+        );
+        assert!(refused.message.contains("Dir/b"), "{}", refused.message);
+        assert_eq!(repo.index(), untouched);
+    }
+    assert_eq!(coordinator.undo_history(repo.path()).unwrap().undo, None);
+    round_trip(&coordinator, &repo, || {
+        stage(&coordinator, &repo, &["Dir/a"]).unwrap()
+    });
+}
+
+#[test]
+fn an_undo_for_a_removed_worktree_names_that_worktree() {
+    let repo = Repo::committed(&[("f", "one\n")]);
+    let coordinator = repo.coordinator();
+    let linked = repo.directory.path().canonicalize().unwrap().join("linked");
+    let linked = linked.to_str().unwrap();
+    repo.git(&["worktree", "add", "--quiet", "-b", "side", linked]);
+    fs::write(Path::new(linked).join("f"), "linked edit\n").unwrap();
+    let status = worktree_status(linked).unwrap();
+    let applied = coordinator
         .write(
-            repo.path(),
-            &Operation::UnstageFiles {
-                entries: vec![entry],
+            linked,
+            &Operation::StageFiles {
+                entries: status.entries,
             },
-            &expect,
+            &Expect { head: status.head },
         )
-        .unwrap_err();
-    assert_eq!(refused.kind, ErrorKind::UnsupportedPath);
-    assert!(refused.message.contains("unstage"), "{}", refused.message);
+        .unwrap();
+    repo.git(&["worktree", "remove", "--force", linked]);
+    let refused = coordinator.undo(repo.path(), applied.id).unwrap_err();
+    assert_eq!(refused.kind, ErrorKind::MissingPath);
+    assert!(refused.message.contains(linked), "{}", refused.message);
+    assert_eq!(
+        coordinator.undo_history(repo.path()).unwrap().undo,
+        Some(applied)
+    );
 }
 
 #[cfg(unix)]
@@ -933,31 +1014,36 @@ fn sends_a_stale_view_with_its_reason_and_other_errors_without_one() {
 #[cfg(unix)]
 #[test]
 fn runs_a_hook_that_config_defines_only_once_the_index_holds_the_write() {
-    let repo = Repo::committed(&[("f", "one\n")]);
-    let coordinator = repo.coordinator();
-    let log = repo.directory.path().join("config-hook.log");
-    let command = format!(
-        "printf '%s|%s\\n' \"${{GIT_INDEX_FILE-unset}}\" \"$(env -u GIT_INDEX_FILE git ls-files --stage -- f)\" >> '{}'; true",
-        log.display()
-    );
-    let probe = repo.directory.path().join("probe");
-    init(&probe);
-    git(&probe, &["config", "hook.probe.event", "post-index-change"]);
-    git(&probe, &["config", "hook.probe.command", &command]);
-    git(
-        &probe,
-        &["hook", "run", "--ignore-missing", "post-index-change"],
-    );
-    if fs::read_to_string(&log).is_err() {
-        return;
+    for name in ["probe", "a=b"] {
+        let repo = Repo::committed(&[("f", "one\n")]);
+        let coordinator = repo.coordinator();
+        let log = repo.directory.path().join("config-hook.log");
+        let command = format!(
+            "printf '%s|%s\\n' \"${{GIT_INDEX_FILE-unset}}\" \"$(env -u GIT_INDEX_FILE git ls-files --stage -- f)\" >> '{}'; true",
+            log.display()
+        );
+        let event = format!("hook.{name}.event");
+        let run = format!("hook.{name}.command");
+        let probe = repo.directory.path().join("probe");
+        init(&probe);
+        git(&probe, &["config", &event, "post-index-change"]);
+        git(&probe, &["config", &run, &command]);
+        git(
+            &probe,
+            &["hook", "run", "--ignore-missing", "post-index-change"],
+        );
+        if fs::read_to_string(&log).is_err() {
+            return;
+        }
+        fs::remove_file(&log).unwrap();
+        repo.git(&["config", &event, "post-index-change"]);
+        repo.git(&["config", &run, &command]);
+        repo.put("f", "two\n");
+        stage(&coordinator, &repo, &["f"]).unwrap();
+        assert_eq!(
+            fs::read_to_string(&log).unwrap(),
+            "unset|100644 f719efd430d52bcfc8566a43b2eb655688d38871 0\tf\n",
+            "{name}"
+        );
     }
-    fs::remove_file(&log).unwrap();
-    repo.git(&["config", "hook.probe.event", "post-index-change"]);
-    repo.git(&["config", "hook.probe.command", &command]);
-    repo.put("f", "two\n");
-    stage(&coordinator, &repo, &["f"]).unwrap();
-    assert_eq!(
-        fs::read_to_string(&log).unwrap(),
-        "unset|100644 f719efd430d52bcfc8566a43b2eb655688d38871 0\tf\n"
-    );
 }
