@@ -73,16 +73,16 @@ L1GIT_DEV_PORT=1423 L1GIT_BRIDGE_PORT=9418 pnpm dev
 
 Every read and every write has a deadline. When the deadline passes, L1 Git stops Git and every process Git started, such as a clean filter, and the request returns a `timedOut` error that names it and asks you to retry. A stopped write also says what it left behind. The inspector shows it with **Retry details**. A history read that times out shows it with **Try again**, above the last history it read or in place of a history it never read. Each deadline is about 100 times or more the read's run time on the `pnpm fixture:large` repository:
 
-| Read or write                                                         | Deadline                           |
-| --------------------------------------------------------------------- | ---------------------------------- |
-| `snapshot`                                                            | 120 s                              |
-| `refs`, `lineStats`, `worktreeStatus`, `worktreePatch`, `undoHistory` | 30 s                               |
-| `commitDetail`, `filePatch`                                           | 20 s                               |
-| `fileHistory`, `blame`                                                | 60 s                               |
-| Branch status in `overview` and `fastForward`                         | 60 s                               |
-| `write` of `stageFiles` or `unstageFiles`, `undo`, `redo`             | 120 s                              |
+| Read or write                                                         | Deadline                                              |
+| --------------------------------------------------------------------- | ----------------------------------------------------- |
+| `snapshot`                                                            | 120 s                                                 |
+| `refs`, `lineStats`, `worktreeStatus`, `worktreePatch`, `undoHistory` | 30 s                                                  |
+| `commitDetail`, `filePatch`                                           | 20 s                                                  |
+| `fileHistory`, `blame`                                                | 60 s                                                  |
+| Branch status in `overview` and `fastForward`                         | 60 s                                                  |
+| `write` of `stageFiles` or `unstageFiles`, `undo`, `redo`             | 120 s                                                 |
 | `write` of `discard`                                                  | 300 s, because filters and lazy fetches run inside it |
-| `write` of `commit`, `amend`, or `editMessage`                        | 600 s, because hooks run inside it |
+| `write` of `commit`, `amend`, or `editMessage`                        | 600 s, because hooks run inside it                    |
 
 A deadline covers all of a read's or a write's Git commands. A write's deadline starts again once it holds its locks. Branch status is the exception. Its deadline starts again after each fetch, checkout probe, branch move, or fast-forward merge, because those commands have their own deadlines, and after waiting for another fetch or fast-forward of the same repository to finish.
 
@@ -155,7 +155,7 @@ A write changes only the paths its entries name. L1 Git reads the whole index be
 
 It also discards unstaged changes in one worktree, through the same request:
 
-- `discard` puts each tracked entry's path back to its index version and deletes each untracked file. Git first writes the index version of every tracked path into a scratch folder, `.git/l1git-discard.<pid>`, with `git checkout-index`, so smudge filters, line endings, symlinks, and executable bits apply as in a checkout, and a partial clone fetches the blobs it needs. Then L1 Git copies what each path holds into the undo history, and only after that renames each scratch file over its path or deletes the untracked file. A failing filter or fetch therefore changes no file. Afterwards L1 Git writes each tracked path's index entry again without its stat data and runs `git add --refresh`, which compares the file's content with the entry and records the file's new stat data, so the next status read does not rerun its clean filters. `git add --refresh` alone keeps an entry whose recorded size differs from the file, as after a checkout that converts line endings, and Git would then show the file modified with an empty diff. Redo refreshes the index the same way.
+- `discard` puts each tracked entry's path back to its index version and deletes each untracked file. Git first writes the index version of every tracked path into a scratch folder, `.git/l1git-discard.<pid>`, with `git checkout-index`, so smudge filters, line endings, symlinks, and executable bits apply as in a checkout, and a partial clone fetches the blobs it needs. Then L1 Git copies what each path holds into the undo history, and only after that renames each scratch file over its path or deletes the untracked file. A failing filter or fetch therefore changes no file. Afterwards L1 Git writes each tracked path's index entry again without its stat data and runs `git add --refresh`, which compares the file's content with the entry and records the file's new stat data, so the next status read does not rerun its clean filters. `git add --refresh` alone keeps an entry whose recorded size differs from the file, as after a checkout that converts line endings, and Git would then show the file modified with an empty diff. Redo refreshes the index the same way. The refresh leaves every index flag as it was. It skips an entry marked skip-worktree or assume-unchanged, whose stat data Git never reads, and writes the others with `core.ignoreStat=false`. Under `core.ignoreStat=true`, `git restore` marks each file it puts back assume-unchanged, so a later edit no longer shows. After a discard, a later edit still shows.
 - It refuses a submodule, a nested repository, a path below a folder that holds a `.git`, a file added with `git add -N`, a conflict, and a path that is a folder on disk or sits below a file or a symlink. `git restore` would empty an intent-to-add file and delete a folder's untracked files, so L1 Git never runs it. It also refuses two names for one file on a case-insensitive disk, whether you chose both or one is a tracked file under another spelling, as when `core.ignorecase=false` makes Git list `README.md` as the untracked `readme.md`. L1 Git compares the files' identity on disk, whatever `core.ignorecase` says.
 - A hard link is not kept. Discarding one name gives it a new file, so the file's other names keep the old bytes, and undo puts the bytes back as a file with one link.
 
