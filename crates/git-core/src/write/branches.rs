@@ -89,6 +89,18 @@ pub(super) struct BranchChange {
     after: Option<Vec<Slot>>,
 }
 
+impl BranchChange {
+    /// What Git left, when undo and redo can read it as one create, delete,
+    /// or rename.
+    fn landed(before: &[Slot], after: Vec<Slot>) -> Option<Self> {
+        Transition::between(before, &after).ok()?;
+        Some(Self {
+            before: before.to_vec(),
+            after: Some(after),
+        })
+    }
+}
+
 fn guarded(slots: &[Slot]) -> Vec<(&BranchRef, &Option<Oid>, &[String])> {
     slots
         .iter()
@@ -164,18 +176,7 @@ impl Listing {
                 },
             )
             .collect::<Result<_, _>>()?;
-        let config = git::read(&repo.root, &["config", "--local", "-z", "--list"], reads)?
-            .split(|byte| *byte == 0)
-            .filter(|record| !record.is_empty())
-            .map(|record| {
-                let text = git::text(record);
-                match text.split_once('\n') {
-                    Some((key, value)) => (key.to_owned(), value.to_owned()),
-                    // Git reads a config key with no value as true.
-                    None => (text, "true".to_owned()),
-                }
-            })
-            .collect();
+        let config = config(repo, &["--local"], reads)?;
         let listed = git::read(
             &repo.root,
             &["worktree", "list", "--porcelain", "-z"],
@@ -259,10 +260,16 @@ impl Listing {
         }
     }
 
-    fn ignores_case(&self) -> bool {
-        self.config
-            .iter()
-            .any(|(key, value)| key == "core.ignorecase" && value.eq_ignore_ascii_case("true"))
+    /// A loose ref is a file, so a disk that folds case, which Git records in
+    /// `core.ignorecase`, folds each folder and name of a branch. Reftable
+    /// keeps names apart on any disk.
+    fn folds_case(&self) -> bool {
+        let set = |name: &str, wanted: &str| {
+            self.config
+                .iter()
+                .any(|(key, value)| key == name && value.eq_ignore_ascii_case(wanted))
+        };
+        set("core.ignorecase", "true") && !set("extensions.refstorage", "reftable")
     }
 
     fn refuse_clash(
@@ -270,39 +277,39 @@ impl Listing {
         target: &BranchRef,
         source: Option<&BranchRef>,
     ) -> Result<(), RepositoryError> {
-        let fold = |name: &str| {
-            if self.ignores_case() {
-                name.to_lowercase()
-            } else {
-                name.to_owned()
-            }
-        };
+        let folds = self.folds_case();
+        let same = |a: &str, b: &str| a == b || (folds && a.to_lowercase() == b.to_lowercase());
         let name = target.name();
-        let wanted = fold(name);
         let clash = |message: String| Err(RepositoryError::new(ErrorKind::InvalidRef, message));
-        for listed in &self.branches {
-            if source.is_some_and(|source| source.as_str() == listed.reference) {
-                continue;
-            }
-            let Some(other) = listed.reference.strip_prefix("refs/heads/") else {
-                continue;
-            };
-            let folded = fold(other);
-            if other == name {
-                return clash(format!("A branch named '{name}' already exists."));
-            }
-            if folded == wanted {
-                return clash(format!(
+        let wanted: Vec<_> = name.split('/').collect();
+        for other in self
+            .branches
+            .iter()
+            .filter_map(|listed| listed.reference.strip_prefix("refs/heads/"))
+            .filter(|other| source.is_none_or(|source| source.name() != *other))
+        {
+            let theirs: Vec<_> = other.split('/').collect();
+            let shared = wanted
+                .iter()
+                .zip(&theirs)
+                .take_while(|(a, b)| a == b)
+                .count();
+            let last = |parts: &[&str]| shared + 1 == parts.len();
+            let message = match (wanted.get(shared), theirs.get(shared)) {
+                (None, None) => format!("A branch named '{name}' already exists."),
+                (Some(a), Some(b)) if !same(a, b) => continue,
+                (Some(_), Some(_)) if last(&wanted) && last(&theirs) => format!(
                     "A branch named '{other}' already exists, and this repository does not tell names apart by case."
-                ));
-            }
-            if folded.starts_with(&format!("{wanted}/"))
-                || wanted.starts_with(&format!("{folded}/"))
-            {
-                return clash(format!(
+                ),
+                (Some(_), Some(_)) if !last(&wanted) && !last(&theirs) => format!(
+                    "A branch named '{other}' already exists, and this repository does not tell names apart by case. Write the folder as '{}'.",
+                    theirs[..=shared].join("/")
+                ),
+                _ => format!(
                     "A branch named '{other}' already exists, so Git cannot also store '{name}'."
-                ));
-            }
+                ),
+            };
+            return clash(message);
         }
         Ok(())
     }
@@ -353,6 +360,28 @@ fn operation_on(repo: &Repo, branch: &BranchRef) -> Option<PathBuf> {
                 .any(|line| line == branch.as_str())
             || read("BISECT_START").trim_end() == branch.name()
     })
+}
+
+fn config(
+    repo: &Repo,
+    scope: &[&str],
+    reads: Deadline,
+) -> Result<Vec<(String, String)>, RepositoryError> {
+    let mut args = vec!["config"];
+    args.extend(scope);
+    args.extend(["-z", "--list"]);
+    Ok(git::read(&repo.root, &args, reads)?
+        .split(|byte| *byte == 0)
+        .filter(|record| !record.is_empty())
+        .map(|record| {
+            let text = git::text(record);
+            match text.split_once('\n') {
+                Some((key, value)) => (key.to_owned(), value.to_owned()),
+                // Git reads a config key with no value as true.
+                None => (text, "true".to_owned()),
+            }
+        })
+        .collect())
 }
 
 pub(super) struct Writing<'a> {
@@ -622,11 +651,17 @@ fn record_around(
             RepositoryError::new(ErrorKind::UnchangedPath, "Git changed nothing.")
         }));
     }
-    let change = Change::Branch(BranchChange {
-        before,
-        after: Some(after),
-    });
-    match recorded.replace(&change) {
+    let Some(change) = BranchChange::landed(&before, after) else {
+        let names: Vec<_> = before.iter().map(|slot| slot.branch.name()).collect();
+        return Err(RepositoryError::stale(
+            StaleReason::BranchChanged,
+            format!(
+                "{} changed in a way L1 Git cannot undo, so this change has no Undo. Refresh to see the branches.",
+                names.join(" and ")
+            ),
+        ));
+    };
+    match recorded.replace(&Change::Branch(change)) {
         Ok(()) => recorded.confirm(),
         Err(_) => recorded.stay_pending(),
     }
@@ -743,10 +778,7 @@ pub(super) fn landed(
     deadline: WriteDeadline,
 ) -> Result<Option<BranchChange>, RepositoryError> {
     let now = Listing::read(repo, deadline.reads())?.slots_like(&change.before)?;
-    Ok((now != change.before).then(|| BranchChange {
-        before: change.before.clone(),
-        after: Some(now),
-    }))
+    Ok(BranchChange::landed(&change.before, now))
 }
 
 pub(crate) fn merged_within(
