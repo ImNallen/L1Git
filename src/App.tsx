@@ -1118,6 +1118,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                         return outcome;
                       },
                       confirmDiscard: askDiscard,
+                      lostFocus: () => checkLostFocus((count) => count + 1),
                     }}
                   />
                 ) : (

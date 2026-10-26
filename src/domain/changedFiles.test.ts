@@ -3,6 +3,7 @@ import {
   changedFileTreeInput,
   changedPathAt,
   firstChangedPath,
+  nearbyRows,
   pathsUnder,
 } from "./changedFiles";
 
@@ -38,5 +39,39 @@ describe("paths under a tree row", () => {
       "src/ui/a.ts",
       "src/ui/b.ts",
     ]);
+  });
+});
+
+describe("rows beside a removed row", () => {
+  const files = [
+    { path: "a.ts" },
+    { path: "src/ui/b.ts" },
+    { path: "src/ui/c.ts" },
+    { path: "d.ts" },
+    { path: "e.ts" },
+  ];
+
+  it("puts the rows after it first, nearest first, then the rows before it", () => {
+    expect(nearbyRows(files, "d.ts")).toEqual([
+      "e.ts",
+      "a.ts",
+      "src/ui/c.ts",
+      "src/ui/b.ts",
+    ]);
+    expect(nearbyRows(files, "e.ts")).toEqual([
+      "d.ts",
+      "a.ts",
+      "src/ui/c.ts",
+      "src/ui/b.ts",
+    ]);
+  });
+
+  it("skips every row inside a folder row", () => {
+    expect(nearbyRows(files, "src/ui/")).toEqual(["a.ts", "d.ts", "e.ts"]);
+  });
+
+  it("finds no row for a path the list does not show", () => {
+    expect(nearbyRows(files, "gone.ts")).toEqual([]);
+    expect(nearbyRows([{ path: "a.ts" }], "a.ts")).toEqual([]);
   });
 });

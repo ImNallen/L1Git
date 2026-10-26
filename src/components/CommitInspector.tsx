@@ -42,7 +42,11 @@ import { relativeTime } from "../domain/time";
 import { discardablePaths } from "../domain/operations";
 import type { FileWrite, Write } from "../domain/operations";
 import type { DetailState } from "../useWorkspace";
-import { changedFileTreeInput, listsRow } from "../domain/changedFiles";
+import {
+  changedFileTreeInput,
+  listsRow,
+  nearbyRows,
+} from "../domain/changedFiles";
 import type { Outcome } from "../useWrites";
 import { ChangedFileTree, changeStatuses } from "./ChangedFileTree";
 import { CommitBox } from "./CommitBox";
@@ -83,6 +87,7 @@ export type WorktreeWrites = {
     paths: readonly string[],
     returnFocus?: () => void,
   ) => void;
+  lostFocus: () => void;
 };
 
 export function InspectorFrame({
@@ -724,18 +729,9 @@ function WorktreeInspector({
   const [focusAfter, setFocusAfter] = useState<RowFocus | null>(null);
   const clearFocus = useCallback(() => setFocusAfter(null), []);
   const lastRow = useRef<RowFocus | null>(null);
-  const resume = useRef<RowFocus | null>(null);
+  const resume = useRef<(RowFocus & { near?: string[] }) | null>(null);
+  const writing = useRef(false);
   const lists = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (writes.busy) {
-      resume.current ??= lists.current?.contains(document.activeElement)
-        ? lastRow.current
-        : null;
-      return;
-    }
-    if (resume.current !== null) setFocusAfter(resume.current);
-    resume.current = null;
-  }, [writes.busy]);
   const groups =
     changes?.kind === "ready"
       ? worktreeGroups(changes.status.entries).filter(
@@ -746,6 +742,41 @@ function WorktreeInspector({
     changes?.kind === "ready"
       ? discardablePaths(changes.status)
       : new Set<string>();
+  const listed = (row: string, side?: ListSide) =>
+    groups.some(
+      (group) =>
+        (side ?? group.side) === group.side && listsRow(group.files, row),
+    );
+  useEffect(() => {
+    if (writes.busy) {
+      writing.current = true;
+      const row =
+        resume.current ??
+        focusAfter ??
+        (lists.current?.contains(document.activeElement)
+          ? lastRow.current
+          : null);
+      const files = groups.find((group) => group.side === row?.side)?.files;
+      resume.current = row && {
+        ...row,
+        near: nearbyRows(files ?? [], row.row),
+      };
+      return;
+    }
+    if (!writing.current) return;
+    writing.current = false;
+    const row = resume.current;
+    resume.current = null;
+    const target =
+      row === null
+        ? undefined
+        : listed(row.row)
+          ? row.row
+          : row.near?.find((near) => listed(near, row.side));
+    if (row !== null && target !== undefined)
+      setFocusAfter({ row: target, side: row.side });
+    else writes.lostFocus();
+  }, [writes.busy]);
   const listsFocus = (group: WorktreeGroup) =>
     focusAfter !== null && listsRow(group.files, focusAfter.row);
   const focusTarget =

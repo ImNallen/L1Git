@@ -37,6 +37,22 @@ export function listsRow(
   return pathsUnder(files, { kind, path: row }).length > 0;
 }
 
+/** The rows beside `row` in its list, nearest after it first, then nearest before it. */
+export function nearbyRows(
+  files: readonly { path: string }[],
+  row: string,
+): string[] {
+  const kind = row.endsWith("/") ? "directory" : "file";
+  const gone = new Set(pathsUnder(files, { kind, path: row }).map(treePath));
+  const rows = changedFileTreeInput(files).paths;
+  const at = rows.findIndex((path) => gone.has(path));
+  if (at === -1) return [];
+  return [
+    ...rows.slice(at).filter((path) => !gone.has(path)),
+    ...rows.slice(0, at).reverse(),
+  ];
+}
+
 export function pathsUnder(
   files: readonly { path: string }[],
   item: { kind: "file" | "directory"; path: string },
