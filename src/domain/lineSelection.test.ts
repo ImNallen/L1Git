@@ -232,4 +232,23 @@ new mode 100755
     expect(splittable(typeChange)).toBe(false);
     expect(splittable(modeOnly)).toBe(false);
   });
+
+  it("refuses a patch whose lines disagree with its hunk header", () => {
+    const blankContext = `diff --git a/wrong.txt b/wrong.txt
+index 1111111111111111111111111111111111111111..2222222222222222222222222222222222222222 100644
+--- a/wrong.txt
++++ b/wrong.txt
+@@ -1,6 +1,6 @@
+ w1
+${" "}
+-w3
+-w4
++W3
++W4
+ w5
+ w6
+`;
+    expect(splittable(blankContext)).toBe(true);
+    expect(splittable(blankContext.replace("\n \n", "\n\n"))).toBe(false);
+  });
 });
