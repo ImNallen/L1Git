@@ -643,22 +643,48 @@ impl EntryObjects {
         tip: &Oid,
         name: &str,
     ) -> Result<(), RepositoryError> {
+        let exclude = format!("--exclude={name}");
+        self.keep_unique(runner, tip, &[&exclude, LASTING_REFS[0], LASTING_REFS[1]])
+    }
+
+    /// Keeps what a checkout leaves behind: `tip`'s objects that no other
+    /// branch, tag, or remote-tracking branch reaches, or none of `tip`'s own
+    /// branch when `branch` names it. Remote-tracking branches count here,
+    /// because packing all of a remote branch's history on every checkout
+    /// would cost far more than an undo after a prune and a `gc` that misses.
+    pub(super) fn keep_left_behind(
+        &self,
+        runner: &impl Runner,
+        tip: &Oid,
+        branch: Option<&str>,
+    ) -> Result<(), RepositoryError> {
+        let exclude = branch.map(|name| format!("--exclude={name}"));
+        let mut not: Vec<&str> = exclude.iter().map(String::as_str).collect();
+        not.extend(LASTING_REFS);
+        not.push("--remotes");
+        self.keep_unique(runner, tip, &not)
+    }
+
+    fn keep_unique(
+        &self,
+        runner: &impl Runner,
+        tip: &Oid,
+        not: &[&str],
+    ) -> Result<(), RepositoryError> {
         let tips = std::slice::from_ref(tip);
         if self.objects.exists() && missing(runner, Some(&self.objects), tips)?.is_empty() {
             return Ok(());
         }
-        let exclude = format!("--exclude={name}");
+        let mut args = vec![
+            "rev-list",
+            "--objects",
+            "--missing=allow-promisor",
+            tip.as_str(),
+            "--not",
+        ];
+        args.extend(not);
         let listed = runner
-            .git(&[
-                "rev-list",
-                "--objects",
-                "--missing=allow-promisor",
-                tip.as_str(),
-                "--not",
-                &exclude,
-                LASTING_REFS[0],
-                LASTING_REFS[1],
-            ])
+            .git(&args)
             .uncapped()
             .run(runner.deadline())?
             .succeeded()?;

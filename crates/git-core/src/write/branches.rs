@@ -70,9 +70,9 @@ impl Start {
 #[serde(rename_all = "camelCase")]
 pub(super) struct Slot {
     branch: BranchRef,
-    tip: Option<Oid>,
-    config: Vec<Setting>,
-    heads: Vec<String>,
+    pub(super) tip: Option<Oid>,
+    pub(super) config: Vec<Setting>,
+    pub(super) heads: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -143,14 +143,14 @@ struct Listed {
     symref: String,
 }
 
-struct Listing {
+pub(super) struct Listing {
     branches: Vec<Listed>,
     config: Vec<(String, String)>,
     worktrees: Vec<WorktreeHead>,
 }
 
 impl Listing {
-    fn read(repo: &Repo, reads: Deadline) -> Result<Self, RepositoryError> {
+    pub(super) fn read(repo: &Repo, reads: Deadline) -> Result<Self, RepositoryError> {
         let refs = git::read(
             &repo.root,
             &[
@@ -210,7 +210,7 @@ impl Listing {
             .find(|listed| listed.reference == branch.as_str())
     }
 
-    fn slot(&self, branch: &BranchRef) -> Result<Slot, RepositoryError> {
+    pub(super) fn slot(&self, branch: &BranchRef) -> Result<Slot, RepositoryError> {
         let tip = self
             .listed(branch)
             .map(|listed| Oid::try_from(listed.oid.clone()))
@@ -244,7 +244,7 @@ impl Listing {
         slots.iter().map(|slot| self.slot(&slot.branch)).collect()
     }
 
-    fn refuse_symbolic(&self, branch: &BranchRef) -> Result<(), RepositoryError> {
+    pub(super) fn refuse_symbolic(&self, branch: &BranchRef) -> Result<(), RepositoryError> {
         match self.listed(branch) {
             Some(listed) if !listed.symref.is_empty() => Err(RepositoryError::new(
                 ErrorKind::InvalidRef,
@@ -270,7 +270,7 @@ impl Listing {
         set("core.ignorecase", "true") && !set("extensions.refstorage", "reftable")
     }
 
-    fn refuse_clash(
+    pub(super) fn refuse_clash(
         &self,
         target: &BranchRef,
         source: Option<&BranchRef>,
@@ -320,7 +320,7 @@ impl Listing {
         Ok(())
     }
 
-    fn refuse_in_use(&self, repo: &Repo, slot: &Slot) -> Result<(), RepositoryError> {
+    pub(super) fn refuse_in_use(&self, repo: &Repo, slot: &Slot) -> Result<(), RepositoryError> {
         let name = slot.branch.name();
         if let Some(root) = slot.heads.first() {
             return Err(RepositoryError::new(
@@ -368,7 +368,7 @@ fn operation_on(repo: &Repo, branch: &BranchRef) -> Option<PathBuf> {
     })
 }
 
-fn config(
+pub(super) fn config(
     repo: &Repo,
     scope: &[&str],
     reads: Deadline,
@@ -407,7 +407,11 @@ fn invalid_name(name: &str) -> RepositoryError {
     )
 }
 
-fn new_name(repo: &Repo, name: &str, reads: Deadline) -> Result<BranchRef, RepositoryError> {
+pub(super) fn new_name(
+    repo: &Repo,
+    name: &str,
+    reads: Deadline,
+) -> Result<BranchRef, RepositoryError> {
     if name.contains('\0') || name.starts_with("refs/") {
         return Err(invalid_name(name));
     }
@@ -439,7 +443,7 @@ fn new_name(repo: &Repo, name: &str, reads: Deadline) -> Result<BranchRef, Repos
     BranchRef::try_from(format!("refs/heads/{name}")).map_err(|_| invalid_name(name))
 }
 
-fn moved(name: &str) -> RepositoryError {
+pub(super) fn moved(name: &str) -> RepositoryError {
     RepositoryError::stale(
         StaleReason::BranchChanged,
         format!(
@@ -611,15 +615,27 @@ impl Upstream {
     }
 }
 
-fn fetched_into<'c>(config: &'c [(String, String)], reference: &str) -> Vec<(&'c str, String)> {
+pub(super) fn fetched_into<'c>(
+    config: &'c [(String, String)],
+    reference: &str,
+) -> Vec<(&'c str, String)> {
+    let refspecs: Vec<(&str, &str)> = config
+        .iter()
+        .filter_map(|(key, value)| {
+            let remote = key.strip_prefix("remote.")?.strip_suffix(".fetch")?;
+            Some((remote, value.as_str()))
+        })
+        .collect();
+    let excluded = |remote: &str, source: &str| {
+        refspecs.iter().any(|(other, value)| {
+            *other == remote
+                && value
+                    .strip_prefix('^')
+                    .is_some_and(|pattern| matches(pattern, source))
+        })
+    };
     let mut found: Vec<(&str, String)> = Vec::new();
-    for (key, value) in config {
-        let Some(remote) = key
-            .strip_prefix("remote.")
-            .and_then(|key| key.strip_suffix(".fetch"))
-        else {
-            continue;
-        };
+    for (remote, value) in &refspecs {
         let Some((source, destination)) = value.strip_prefix('+').unwrap_or(value).split_once(':')
         else {
             continue;
@@ -633,12 +649,25 @@ fn fetched_into<'c>(config: &'c [(String, String)], reference: &str) -> Vec<(&'c
             _ => None,
         };
         if let Some(mapped) = mapped
-            && found.iter().all(|(seen, _)| *seen != remote)
+            && !excluded(remote, &mapped)
+            && found.iter().all(|(seen, _)| seen != remote)
         {
             found.push((remote, mapped));
         }
     }
     found
+}
+
+/// A refspec side with at most one `*`, as Git matches it.
+fn matches(pattern: &str, name: &str) -> bool {
+    match pattern.split_once('*') {
+        Some((prefix, suffix)) => {
+            name.len() >= prefix.len() + suffix.len()
+                && name.starts_with(prefix)
+                && name.ends_with(suffix)
+        }
+        None => pattern == name,
+    }
 }
 
 fn values<'c>(config: &'c [(String, String)], key: &str) -> Vec<&'c str> {
@@ -649,7 +678,7 @@ fn values<'c>(config: &'c [(String, String)], key: &str) -> Vec<&'c str> {
         .collect()
 }
 
-fn short(reference: &str) -> &str {
+pub(super) fn short(reference: &str) -> &str {
     reference
         .strip_prefix("refs/heads/")
         .or_else(|| reference.strip_prefix("refs/remotes/"))
@@ -751,7 +780,7 @@ pub(super) fn delete(writing: &Writing<'_>, tip: &BranchTip) -> Result<Applied, 
     })
 }
 
-fn run_delete(txn: &RefTxn<'_>, tip: &BranchTip) -> Result<(), RepositoryError> {
+pub(super) fn run_delete(txn: &RefTxn<'_>, tip: &BranchTip) -> Result<(), RepositoryError> {
     let delete = Move {
         name: tip.reference.as_str().to_owned(),
         old: Some(tip.oid.clone()),
@@ -811,7 +840,7 @@ fn record_around(
     acted.map(|()| applied)
 }
 
-fn set_config(
+pub(super) fn set_config(
     txn: &RefTxn<'_>,
     branch: &BranchRef,
     now: &[Setting],

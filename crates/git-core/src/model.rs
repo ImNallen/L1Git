@@ -829,6 +829,12 @@ pub enum ErrorKind {
     /// The commit landed, but another process moved HEAD or its branch at
     /// the same time, so it sits somewhere other than the user saw.
     Raced,
+    /// The write landed and has an undo entry, but a hook that Git runs
+    /// after it, such as `post-checkout`, failed.
+    AfterHookFailed {
+        /// What Git and the hook printed, up to 64 KiB.
+        output: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

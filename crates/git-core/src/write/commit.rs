@@ -255,7 +255,7 @@ fn only_object_starting_with(
     }
 }
 
-fn resolve(
+pub(super) fn resolve(
     repo: &Repo,
     deadline: WriteDeadline,
     name: &str,
@@ -308,7 +308,7 @@ fn staged_side(entry: &StatusEntry) -> bool {
     }
 }
 
-fn short(oid: &Oid) -> &str {
+pub(super) fn short(oid: &Oid) -> &str {
     &oid.as_str()[..7]
 }
 

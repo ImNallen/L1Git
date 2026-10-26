@@ -4,6 +4,7 @@
 )]
 
 mod branches;
+mod checkout;
 mod commit;
 mod discard;
 mod index;
@@ -115,6 +116,10 @@ pub enum Operation {
     /// Deletes a local branch no worktree uses, and its `branch.<name>.*`
     /// config.
     DeleteBranch { branch: BranchTip },
+    /// Checks out a local branch, a remote-tracking branch, or a commit with
+    /// `git switch`. A remote-tracking branch checks out the local branch its
+    /// fetch refspec maps it to, or creates that branch tracking it.
+    Checkout { target: Start },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -188,6 +193,7 @@ enum Change {
     Ref(refs::RefChange),
     Discard(discard::DiscardChange),
     Branch(branches::BranchChange),
+    Checkout(checkout::CheckoutChange),
 }
 
 impl From<discard::DiscardChange> for Change {
@@ -202,12 +208,18 @@ impl From<branches::BranchChange> for Change {
     }
 }
 
+impl From<checkout::CheckoutChange> for Change {
+    fn from(change: checkout::CheckoutChange) -> Self {
+        Self::Checkout(change)
+    }
+}
+
 impl Change {
     fn objects(&self) -> Objects {
         match self {
             Self::Index(change) => Objects::exact(change.objects()),
             Self::Ref(change) => change.objects(),
-            Self::Discard(_) | Self::Branch(_) => Objects::default(),
+            Self::Discard(_) | Self::Branch(_) | Self::Checkout(_) => Objects::default(),
         }
     }
 
@@ -251,6 +263,21 @@ impl Change {
                 store.save(step.log())?;
                 Ok(None)
             }
+            Self::Checkout(change) => {
+                let trouble = checkout::step(repo, entry, change, direction, deadline)?;
+                store.save(step.log())?;
+                trouble.map_or(Ok(None), Err)
+            }
+        }
+    }
+
+    /// A step's own deadline, when its Git commands need more than an
+    /// index or ref step's.
+    const fn step_write(&self, direction: Direction) -> Option<LocalWrite> {
+        match (self, direction) {
+            (Self::Checkout(_), Direction::Undo) => Some(LocalWrite::UndoCheckout),
+            (Self::Checkout(_), Direction::Redo) => Some(LocalWrite::RedoCheckout),
+            (Self::Index(_) | Self::Ref(_) | Self::Discard(_) | Self::Branch(_), _) => None,
         }
     }
 
@@ -263,20 +290,23 @@ impl Change {
             Self::Index(change) => Ok(index::landed(repo, change, deadline)?.then(|| self.clone())),
             Self::Ref(_) | Self::Discard(_) => Ok(Some(self.clone())),
             Self::Branch(change) => Ok(branches::landed(repo, change, deadline)?.map(Self::Branch)),
+            Self::Checkout(change) => {
+                Ok(checkout::landed(repo, change, deadline)?.map(Self::Checkout))
+            }
         }
     }
 
     const fn repository_wide(&self) -> bool {
         match self {
             Self::Branch(_) => true,
-            Self::Index(_) | Self::Ref(_) | Self::Discard(_) => false,
+            Self::Index(_) | Self::Ref(_) | Self::Discard(_) | Self::Checkout(_) => false,
         }
     }
 
     const fn keeps_overwritten_files(&self) -> bool {
         match self {
             Self::Discard(_) => true,
-            Self::Index(_) | Self::Ref(_) | Self::Branch(_) => false,
+            Self::Index(_) | Self::Ref(_) | Self::Branch(_) | Self::Checkout(_) => false,
         }
     }
 
@@ -285,14 +315,14 @@ impl Change {
             Self::Discard(change) => {
                 discard::remove_copies_beside(Path::new(&applied.root), applied.id, change);
             }
-            Self::Index(_) | Self::Ref(_) | Self::Branch(_) => {}
+            Self::Index(_) | Self::Ref(_) | Self::Branch(_) | Self::Checkout(_) => {}
         }
     }
 
     fn touches_skip_worktree(&self) -> bool {
         match self {
             Self::Index(change) => change.touches_skip_worktree(),
-            Self::Ref(_) | Self::Discard(_) | Self::Branch(_) => false,
+            Self::Ref(_) | Self::Discard(_) | Self::Branch(_) | Self::Checkout(_) => false,
         }
     }
 }
@@ -333,6 +363,7 @@ impl Operation {
             Self::CreateBranch { .. } => LocalWrite::CreateBranch,
             Self::RenameBranch { .. } => LocalWrite::RenameBranch,
             Self::DeleteBranch { .. } => LocalWrite::DeleteBranch,
+            Self::Checkout { .. } => LocalWrite::Checkout,
         }
     }
 
@@ -402,6 +433,7 @@ impl Operation {
             Self::CreateBranch { name, at } => branch(branches::create(&writing, name, at)),
             Self::RenameBranch { branch: tip, to } => branch(branches::rename(&writing, tip, to)),
             Self::DeleteBranch { branch: tip } => branch(branches::delete(&writing, tip)),
+            Self::Checkout { target } => branch(checkout::checkout(&writing, expect, target)),
         }
     }
 }
@@ -576,6 +608,9 @@ impl Coordinator {
                     Position::Elsewhere => return Err(store::history_changed()),
                 };
                 let (applied, change) = store.record_of(id)?;
+                let deadline = change
+                    .step_write(direction)
+                    .map_or(deadline, |write| self.write_deadline(write));
                 let repo = if applied.root == opened.root() || change.repository_wide() {
                     opened
                 } else {

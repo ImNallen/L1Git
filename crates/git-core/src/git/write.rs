@@ -24,8 +24,11 @@ pub(crate) enum LocalWrite {
     CreateBranch,
     RenameBranch,
     DeleteBranch,
+    Checkout,
     Undo,
     Redo,
+    UndoCheckout,
+    RedoCheckout,
 }
 
 impl LocalWrite {
@@ -42,7 +45,12 @@ impl LocalWrite {
             | Self::Undo
             | Self::Redo => 120,
             Self::Discard => 300,
-            Self::Commit | Self::Amend | Self::EditMessage => 600,
+            Self::Commit
+            | Self::Amend
+            | Self::EditMessage
+            | Self::Checkout
+            | Self::UndoCheckout
+            | Self::RedoCheckout => 600,
         })
     }
 
@@ -60,8 +68,11 @@ impl LocalWrite {
             Self::CreateBranch => "Creating the branch",
             Self::RenameBranch => "Renaming the branch",
             Self::DeleteBranch => "Deleting the branch",
+            Self::Checkout => "Checking out",
             Self::Undo => "Undoing the change",
             Self::Redo => "Redoing the change",
+            Self::UndoCheckout => "Undoing the checkout",
+            Self::RedoCheckout => "Redoing the checkout",
         }
     }
 
@@ -79,8 +90,9 @@ impl LocalWrite {
             Self::CreateBranch => "l1git create branch",
             Self::RenameBranch => "l1git rename branch",
             Self::DeleteBranch => "l1git delete branch",
-            Self::Undo => "l1git undo",
-            Self::Redo => "l1git redo",
+            Self::Checkout => "l1git checkout",
+            Self::Undo | Self::UndoCheckout => "l1git undo",
+            Self::Redo | Self::RedoCheckout => "l1git redo",
         }
     }
 
@@ -98,6 +110,9 @@ impl LocalWrite {
             Self::Discard | Self::DiscardPart => "No file changed.",
             Self::CreateBranch | Self::RenameBranch | Self::DeleteBranch => {
                 "L1 Git rereads the branch to see what changed."
+            }
+            Self::Checkout | Self::UndoCheckout | Self::RedoCheckout => {
+                "L1 Git rereads HEAD to see whether Git moved it."
             }
         }
     }
@@ -224,6 +239,30 @@ impl<'a> Write<'a> {
         }
     }
 
+    /// Runs `git switch` as the user would, hooks included, with no
+    /// `GIT_REFLOG_ACTION`, so HEAD's reflog reads `checkout: moving from A to
+    /// B`, which `git switch -` reads. Git overwrites no ignored file, because
+    /// undo could not bring it back.
+    pub(crate) fn switch(txn: &'a RefTxn<'_>, args: &[&'a str]) -> Self {
+        let mut all = vec![
+            "-c",
+            "core.quotePath=false",
+            "switch",
+            "--quiet",
+            "--no-overwrite-ignore",
+        ];
+        all.extend(args);
+        Self {
+            dir: txn.root(),
+            args: all,
+            env: Vec::new(),
+            input: None,
+            cap: None,
+            as_user: true,
+            lazy_fetch: true,
+        }
+    }
+
     pub(crate) fn update_refs(txn: &'a RefTxn<'_>, reflog: &'a str, input: Vec<u8>) -> Self {
         Self {
             dir: txn.root(),
@@ -299,11 +338,11 @@ impl<'a> Write<'a> {
         } else {
             let mut command = base(self.dir, self.lazy_fetch);
             command.env("GIT_REFLOG_ACTION", write.reflog_action());
-            if self.lazy_fetch {
-                without_prompts(&mut command);
-            }
             command
         };
+        if self.lazy_fetch {
+            without_prompts(&mut command);
+        }
         command.args(&self.args).env("GIT_EDITOR", ":");
         for (key, value) in self.env {
             command.env(key, value);

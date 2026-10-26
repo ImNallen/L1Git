@@ -904,7 +904,7 @@ pub(super) fn remove_copies_beside(root: &Path, id: EntryId, change: &DiscardCha
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct Stat {
+pub(super) struct Stat {
     folder: bool,
     identity: Option<(u64, u64)>,
     size: u64,
@@ -914,7 +914,7 @@ struct Stat {
 }
 
 impl Stat {
-    fn of(file: &Path) -> io::Result<Option<Self>> {
+    pub(super) fn of(file: &Path) -> io::Result<Option<Self>> {
         let metadata = match fs::symlink_metadata(file) {
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
             other => other?,
