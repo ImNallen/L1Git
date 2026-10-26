@@ -85,9 +85,15 @@ const WRITE_STDOUT_CAP: usize = 1024 * 1024;
 
 impl<'a> Write<'a> {
     /// Hooks are off, because Git would run `post-index-change` against the
-    /// copy.
+    /// copy. The copy stays whole, because writing a split copy makes a new
+    /// shared index and can expire the one the real index names.
     pub(crate) fn new(txn: &'a Txn<'_>, dir: &'a Path, args: &[&'a str]) -> Self {
-        let mut all = vec!["-c", "core.hooksPath=/dev/null"];
+        let mut all = vec![
+            "-c",
+            "core.hooksPath=/dev/null",
+            "-c",
+            "core.splitIndex=false",
+        ];
         all.extend(txn.disabled_hooks().iter().map(String::as_str));
         all.extend(args);
         Self {

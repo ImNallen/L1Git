@@ -124,11 +124,20 @@ impl Repo {
             .collect()
     }
 
+    /// Git also prints flags it keeps only in memory, such as split-index
+    /// bookkeeping, so this keeps the ones an index entry stores:
+    /// assume-unchanged, intent-to-add, and skip-worktree.
     fn index(&self) -> String {
         self.git(&["ls-files", "--stage", "--debug"])
             .lines()
             .filter(|line| !line.starts_with("  ") || line.contains("flags"))
-            .map(|line| line.split("flags:").last().unwrap().trim())
+            .map(|line| match line.split_once("flags:") {
+                Some((_, flags)) => format!(
+                    "{:x}",
+                    u32::from_str_radix(flags.trim(), 16).unwrap() & 0x6000_8000
+                ),
+                None => line.to_owned(),
+            })
             .collect::<Vec<_>>()
             .join("\n")
     }
