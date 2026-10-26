@@ -19,7 +19,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use store::{LockedStore, Log, Position, Store};
-pub(crate) use txn::{Published, Txn};
+pub(crate) use txn::{HOOK_OFF, Published, Txn};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(

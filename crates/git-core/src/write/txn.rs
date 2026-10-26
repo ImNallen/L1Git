@@ -13,6 +13,8 @@ use std::{
 
 const PREFIX: &str = "l1git-";
 
+pub(crate) const HOOK_OFF: &str = "L1GIT_HOOK_OFF";
+
 /// Only `commit_write` and `commit_step` replace the index with the copy, so
 /// nothing reaches the index before the undo history names it.
 pub(crate) struct Txn<'r> {
@@ -26,7 +28,9 @@ pub(crate) struct Txn<'r> {
 }
 
 /// `core.hooksPath` does not turn off a hook that config defines, so each
-/// command of the transaction turns those off by name.
+/// command of the transaction turns those off by name. The name can hold
+/// `=`, which `-c` would split on, so the value comes from
+/// [`HOOK_OFF`] through `--config-env`, which splits on the last `=`.
 struct Hooks {
     file: bool,
     disabled: Vec<String>,
@@ -52,7 +56,7 @@ impl Hooks {
                 .filter_map(|record| {
                     let key = git::text(record.split(|byte| *byte == b'\n').next()?);
                     let name = key.strip_prefix("hook.")?.strip_suffix(".event")?;
-                    Some(format!("hook.{name}.enabled=false"))
+                    Some(format!("--config-env=hook.{name}.enabled={HOOK_OFF}"))
                 })
                 .collect(),
             Some(1) => Vec::new(),

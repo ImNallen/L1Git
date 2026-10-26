@@ -1,7 +1,7 @@
 use super::{Capped, Deadline, Work, base, execute, text, too_old};
 use crate::{
     ErrorKind, RepositoryError, StaleReason, stderr,
-    write::{Published, Txn},
+    write::{HOOK_OFF, Published, Txn},
 };
 use std::{ffi::OsStr, path::Path, time::Duration};
 
@@ -88,14 +88,15 @@ impl<'a> Write<'a> {
     /// copy.
     pub(crate) fn new(txn: &'a Txn<'_>, dir: &'a Path, args: &[&'a str]) -> Self {
         let mut all = vec!["-c", "core.hooksPath=/dev/null"];
-        for disabled in txn.disabled_hooks() {
-            all.extend(["-c", disabled.as_str()]);
-        }
+        all.extend(txn.disabled_hooks().iter().map(String::as_str));
         all.extend(args);
         Self {
             dir,
             args: all,
-            env: vec![("GIT_INDEX_FILE", txn.copy().as_os_str())],
+            env: vec![
+                ("GIT_INDEX_FILE", txn.copy().as_os_str()),
+                (HOOK_OFF, OsStr::new("false")),
+            ],
             input: None,
             cap: Some(WRITE_STDOUT_CAP),
         }
