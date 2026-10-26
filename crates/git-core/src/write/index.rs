@@ -422,7 +422,7 @@ fn not_chosen(command: Command, plan: &Plan, unchosen: Vec<String>) -> Repositor
         "Git would also {verb} paths you did not choose: {}. Refresh, choose them too, and try again.",
         unchosen.join(", ")
     );
-    RepositoryError::stale(StaleReason::PathNotChosen, message)
+    RepositoryError::stale(StaleReason::PathNotChosen { paths: unchosen }, message)
 }
 
 pub(super) fn restore(

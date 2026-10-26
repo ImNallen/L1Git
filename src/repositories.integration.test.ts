@@ -1392,6 +1392,31 @@ describe("real Rust writes, undo, and redo", () => {
     ).toEqual({ undo: applied, redo: null });
   });
 
+  it("names each path Git would also change that the write does not choose", async () => {
+    const path = committed({ z: "file\n" });
+    rmSync(join(path, "z"));
+    mkdirSync(join(path, "z"));
+    writeFileSync(join(path, "z", "x"), "inside\n");
+    const status = await view(path);
+    const untouched = index(path);
+    const deletion = status.entries.filter((entry) => entry.path === "z");
+    expect(
+      failure.parse(
+        await (
+          await post(
+            write(path, "stageFiles", { ...status, entries: deletion }),
+          )
+        ).json(),
+      ).error,
+    ).toEqual({
+      kind: "staleView",
+      reason: "pathNotChosen",
+      paths: ["z/x"],
+      message: expect.any(String),
+    });
+    expect(index(path)).toBe(untouched);
+  });
+
   it("rejects a write entry that omits its index or its submodule", async () => {
     const path = clone();
     const request = await stage(path);

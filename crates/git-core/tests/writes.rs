@@ -15,9 +15,13 @@ const HEAD_MOVED: ErrorKind = ErrorKind::StaleView {
 const PATH_CHANGED: ErrorKind = ErrorKind::StaleView {
     reason: StaleReason::PathChanged,
 };
-const NOT_CHOSEN: ErrorKind = ErrorKind::StaleView {
-    reason: StaleReason::PathNotChosen,
-};
+fn not_chosen(paths: &[&str]) -> ErrorKind {
+    ErrorKind::StaleView {
+        reason: StaleReason::PathNotChosen {
+            paths: paths.iter().map(|path| (*path).to_owned()).collect(),
+        },
+    }
+}
 const HISTORY_CHANGED: ErrorKind = ErrorKind::StaleView {
     reason: StaleReason::HistoryChanged,
 };
@@ -509,10 +513,14 @@ fn stages_a_file_a_folder_replaced_only_with_the_paths_git_also_changes() {
     fs::remove_dir_all(repo.root.join("d")).unwrap();
     repo.put("d", "now a file\n");
     let untouched = repo.index();
-    for chosen in [&["a/b"][..], &["d"], &["a", "d/x"]] {
+    for (chosen, unchosen) in [
+        (&["a/b"][..], &["a"][..]),
+        (&["d"], &["d/x"]),
+        (&["a", "d/x"], &["a/b"]),
+    ] {
         assert_eq!(
             kind(stage(&coordinator, &repo, chosen)),
-            NOT_CHOSEN,
+            not_chosen(unchosen),
             "{chosen:?}"
         );
         assert_eq!(repo.index(), untouched);
@@ -533,10 +541,10 @@ fn finds_the_file_above_a_chosen_path_whatever_the_names_hold() {
     }
     repo.put("a\nb/c", "newline folder\n");
     let untouched = repo.index();
-    for chosen in [&["a\nb/c", "z/x"][..], &["0:z/x"]] {
+    for (chosen, unchosen) in [(&["a\nb/c", "z/x"][..], "z"), (&["0:z/x"], "0:z")] {
         assert_eq!(
             kind(stage(&coordinator, &repo, chosen)),
-            NOT_CHOSEN,
+            not_chosen(&[unchosen]),
             "{chosen:?}"
         );
         assert_eq!(repo.index(), untouched);
@@ -580,7 +588,7 @@ fn refuses_to_drop_a_file_entry_restaged_above_a_chosen_path() {
         .filter(|entry| entry_path(entry) == "z/x")
         .cloned()
         .collect();
-    for (entries, refused) in [(only_inside, NOT_CHOSEN), (seen, PATH_CHANGED)] {
+    for (entries, refused) in [(only_inside, not_chosen(&["z"])), (seen, PATH_CHANGED)] {
         assert_eq!(
             kind(coordinator.write(repo.path(), &Operation::StageFiles { entries }, &expect)),
             refused
@@ -596,7 +604,10 @@ fn refuses_to_stage_a_deleted_file_that_is_now_a_folder_of_unchosen_files() {
     fs::remove_file(repo.root.join("z")).unwrap();
     repo.put("z/x", "not chosen\n");
     let untouched = repo.index();
-    assert_eq!(kind(stage(&coordinator, &repo, &["z"])), NOT_CHOSEN);
+    assert_eq!(
+        kind(stage(&coordinator, &repo, &["z"])),
+        not_chosen(&["z/x"])
+    );
     assert_eq!(repo.index(), untouched);
     assert_eq!(repo.status(), [" D z", "?? z/x"]);
 }
@@ -835,7 +846,10 @@ fn runs_post_index_change_once_against_the_published_index_and_only_then() {
 
     fs::remove_file(repo.root.join("z")).unwrap();
     repo.put("z/x", "not chosen\n");
-    assert_eq!(kind(stage(&coordinator, &repo, &["z"])), NOT_CHOSEN);
+    assert_eq!(
+        kind(stage(&coordinator, &repo, &["z"])),
+        not_chosen(&["z/x"])
+    );
     assert_eq!(runs(), [run(two), run(one)].concat());
 
     repo.put("g", "intent\n");
@@ -1000,6 +1014,14 @@ fn sends_a_stale_view_with_its_reason_and_other_errors_without_one() {
     assert_eq!(
         serde_json::to_value(&stale).unwrap(),
         serde_json::json!({ "kind": "staleView", "reason": "pathChanged", "message": "f changed." })
+    );
+    let unchosen = RepositoryError {
+        kind: not_chosen(&["z/x"]),
+        message: "z/x too.".into(),
+    };
+    assert_eq!(
+        serde_json::to_value(&unchosen).unwrap(),
+        serde_json::json!({ "kind": "staleView", "reason": "pathNotChosen", "paths": ["z/x"], "message": "z/x too." })
     );
     let held = RepositoryError {
         kind: ErrorKind::LockHeld,

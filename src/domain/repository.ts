@@ -271,17 +271,21 @@ export const undoHistorySchema = z.strictObject({
   undo: appliedSchema.nullable(),
   redo: appliedSchema.nullable(),
 });
-export const repositoryErrorSchema = z.discriminatedUnion("kind", [
+const staleViewSchema = z.discriminatedUnion("reason", [
   z.object({
     kind: z.literal("staleView"),
-    reason: z.enum([
-      "headMoved",
-      "pathChanged",
-      "pathNotChosen",
-      "historyChanged",
-    ]),
+    reason: z.literal("pathNotChosen"),
+    paths: z.array(z.string()).min(1),
     message: z.string(),
   }),
+  z.object({
+    kind: z.literal("staleView"),
+    reason: z.enum(["headMoved", "pathChanged", "historyChanged"]),
+    message: z.string(),
+  }),
+]);
+export const repositoryErrorSchema = z.discriminatedUnion("kind", [
+  staleViewSchema,
   z.object({
     kind: z.enum([
       "missingPath",

@@ -696,7 +696,7 @@ pub enum SkipReason {
     },
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum ErrorKind {
     MissingPath,
@@ -712,6 +712,7 @@ pub enum ErrorKind {
     TimedOut,
     /// The repository no longer matches what the request says the user saw.
     StaleView {
+        #[serde(flatten)]
         reason: StaleReason,
     },
     /// Another Git process holds a lock the write needs.
@@ -720,15 +721,15 @@ pub enum ErrorKind {
     Conflict,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "reason", rename_all = "camelCase")]
 pub enum StaleReason {
     /// HEAD is not the commit the request or the undo entry names.
     HeadMoved,
     /// A path's index entries differ from the request or the undo entry.
     PathChanged,
-    /// Git would also change a path the request does not name.
-    PathNotChosen,
+    /// Git would also change `paths`, which the request does not name.
+    PathNotChosen { paths: Vec<String> },
     /// The entry is not the next one to undo or redo.
     HistoryChanged,
 }
