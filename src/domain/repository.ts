@@ -280,12 +280,12 @@ const staleReasonSchema = z.enum([
 const staleView = { kind: z.literal("staleView"), message: z.string() };
 export const repositoryErrorSchema = z.union([
   z.discriminatedUnion("reason", [
-    z.object({
+    z.strictObject({
       ...staleView,
       reason: z.literal("pathNotChosen"),
       paths: z.array(z.string()).min(1),
     }),
-    z.object({
+    z.strictObject({
       ...staleView,
       reason: staleReasonSchema.exclude(["pathNotChosen"]),
     }),
