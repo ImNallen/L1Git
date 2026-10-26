@@ -949,3 +949,35 @@ fn says_why_a_view_is_stale_in_a_field() {
     repo.put("z/x", "not chosen\n");
     assert_eq!(reason(stage(&coordinator, &repo, &["z"])), "pathNotChosen");
 }
+
+#[cfg(unix)]
+#[test]
+fn runs_a_hook_that_config_defines_only_once_the_index_holds_the_write() {
+    let repo = Repo::committed(&[("f", "one\n")]);
+    let coordinator = repo.coordinator();
+    let log = repo.directory.path().join("config-hook.log");
+    let command = format!(
+        "printf '%s|%s\\n' \"${{GIT_INDEX_FILE-unset}}\" \"$(env -u GIT_INDEX_FILE git ls-files --stage -- f)\" >> '{}'; true",
+        log.display()
+    );
+    let probe = repo.directory.path().join("probe");
+    init(&probe);
+    git(&probe, &["config", "hook.probe.event", "post-index-change"]);
+    git(&probe, &["config", "hook.probe.command", &command]);
+    git(
+        &probe,
+        &["hook", "run", "--ignore-missing", "post-index-change"],
+    );
+    if fs::read_to_string(&log).is_err() {
+        return;
+    }
+    fs::remove_file(&log).unwrap();
+    repo.git(&["config", "hook.probe.event", "post-index-change"]);
+    repo.git(&["config", "hook.probe.command", &command]);
+    repo.put("f", "two\n");
+    stage(&coordinator, &repo, &["f"]).unwrap();
+    assert_eq!(
+        fs::read_to_string(&log).unwrap(),
+        "unset|100644 f719efd430d52bcfc8566a43b2eb655688d38871 0\tf\n"
+    );
+}
