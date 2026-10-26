@@ -30,7 +30,8 @@ function subscribe(listener: () => void) {
 }
 
 export function useCommitDraft(root: RepositoryRoot) {
-  const current = useSyncExternalStore(subscribe, () => draftOf(root));
+  const read = () => draftOf(root);
+  const current = useSyncExternalStore(subscribe, read, read);
   const update = useCallback(
     (next: CommitDraft) => setDraft(root, next),
     [root],
