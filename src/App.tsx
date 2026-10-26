@@ -152,6 +152,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   );
   const [adding, setAdding] = useState(false);
   const [editingMessage, setEditingMessage] = useState(false);
+  const [headOf, setHeadOf] = useState<RepositoryRoot | null>(null);
   const [committed, setCommitted] = useState(0);
   const [palette, setPalette] = useState<{ picked: Oid | null } | null>(null);
   const paletteReturn = useRef<Element | null>(null);
@@ -675,6 +676,12 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       setJump({ ...jump, pending: false, seq: jump.seq + 1 });
     }
   }, [jump, reread, visibleOids, app.activeRoot, app.select]);
+  useEffect(() => {
+    if (headOf === null || reread === null) return;
+    if (reread.root === headOf && reread.head.kind !== "unborn")
+      app.select({ kind: "commit", oid: reread.head.oid });
+    setHeadOf(null);
+  }, [headOf, reread, app.select]);
   // A commit that cleans the worktree removes the box that held focus.
   useEffect(() => {
     const active = document.activeElement;
@@ -1143,7 +1150,11 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       {editingMessage && headStatus && editableHead && (
         <EditMessageDialog
           status={headStatus}
-          onSave={writes.write}
+          onSave={async (worktree, write) => {
+            const outcome = await writes.write(worktree, write);
+            if (outcome.kind === "applied") setHeadOf(worktree);
+            return outcome;
+          }}
           onClose={() => setEditingMessage(false)}
         />
       )}

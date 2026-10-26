@@ -1105,8 +1105,8 @@ export function History({
             <GitBranch size={26} />
             <h2>No commits yet</h2>
             <p>
-              This repository has no commit history. Create a commit in Git,
-              then refresh.
+              This repository has no commit history yet. Select its worktree,
+              stage files, and commit them in the inspector.
             </p>
           </div>
         )}
