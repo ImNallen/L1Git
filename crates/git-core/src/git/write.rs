@@ -289,7 +289,7 @@ impl Wrote {
         Err(self.failed())
     }
 
-    pub(crate) fn failed(&self) -> RepositoryError {
+    fn failed(&self) -> RepositoryError {
         if let Some(error) = too_old(self.code, &self.stderr) {
             return error;
         }

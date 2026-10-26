@@ -647,3 +647,26 @@ fn the_commit_trace_is_private_and_a_crashed_runs_file_is_replaced() {
     repo.write(Kind::Commit, "Traced again\n").unwrap();
     assert!(!Path::new(trace).exists(), "{trace}");
 }
+
+#[test]
+fn undo_that_a_reference_transaction_hook_refuses_says_the_branch_is_unchanged() {
+    let repo = Repo::born();
+    repo.staged_edit("a.txt", "two\n");
+    let applied = repo.write(Kind::Commit, "Kept\n").unwrap();
+    let made = repo.head();
+    repo.hook(
+        "reference-transaction",
+        "cat > /dev/null\n[ \"$1\" = prepared ] && { echo 'policy says no'; exit 1; }\nexit 0\n",
+    );
+    let error = refused(
+        repo.coordinator().undo(repo.path(), applied.id),
+        ErrorKind::GitFailed,
+    );
+    assert!(
+        error.message.contains("policy says no"),
+        "{}",
+        error.message
+    );
+    assert!(!error.message.contains("index"), "{}", error.message);
+    assert_eq!(repo.head(), made);
+}

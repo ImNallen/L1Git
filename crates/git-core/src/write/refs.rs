@@ -104,18 +104,33 @@ pub(super) fn transact(txn: &RefTxn, moves: &[Move], reflog: &str) -> Result<(),
         return Ok(());
     }
     let said = wrote.stderr();
+    if said.contains(stderr::LOCK_HELD) {
+        return Err(RepositoryError::new(
+            ErrorKind::LockHeld,
+            format!(
+                "Another Git process is changing a branch, so nothing changed. Wait for it to finish, then try again. Git said: {}",
+                stderr::summarize(said)
+            ),
+        ));
+    }
     let moved = [
         "but expected",
         "reference already exists",
         "unable to resolve reference",
     ];
-    if !said.contains(stderr::LOCK_HELD) && moved.iter().any(|text| said.contains(text)) {
+    if moved.iter().any(|text| said.contains(text)) {
         return Err(RepositoryError::stale(
             StaleReason::HeadMoved,
             "A branch moved since L1 Git read it, so nothing changed. Refresh and try again.",
         ));
     }
-    Err(wrote.failed())
+    Err(RepositoryError::new(
+        ErrorKind::GitFailed,
+        format!(
+            "Git did not move the branch, so nothing changed. Git said: {}",
+            stderr::summarize(said)
+        ),
+    ))
 }
 
 pub(super) fn restore(
