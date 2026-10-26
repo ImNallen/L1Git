@@ -324,13 +324,31 @@ fn refuses_a_tag_moved_since_the_view_and_an_undo_after_a_later_move() {
 }
 
 #[test]
-fn undo_of_a_create_finds_the_tag_already_gone_and_changes_nothing() {
+fn undo_of_a_create_finds_the_tag_already_gone_and_keeps_its_object_for_redo() {
     let repo = Repo::new();
     let before = repo.state();
     let applied = repo.create("v0.2.0", "HEAD", Some("Release")).unwrap();
+    let after = repo.state();
     repo.git(&["tag", "-d", "v0.2.0"]);
     repo.coordinator.undo(repo.path(), applied.id).unwrap();
     assert_eq!(repo.state(), before);
     let history = repo.coordinator.undo_history(repo.path()).unwrap();
     assert_eq!(history.redo.map(|entry| entry.id), Some(applied.id));
+    repo.prune();
+    repo.coordinator.redo(repo.path(), applied.id).unwrap();
+    assert_eq!(repo.state(), after);
+
+    let pruned = repo.create("v0.4.0", "HEAD", Some("Pruned")).unwrap();
+    repo.git(&["tag", "-d", "v0.4.0"]);
+    repo.prune();
+    repo.coordinator.undo(repo.path(), pruned.id).unwrap();
+    let error = repo.coordinator.redo(repo.path(), pruned.id).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::GitFailed);
+    assert!(
+        error
+            .message
+            .starts_with("Git no longer has some of this tag's commits"),
+        "{}",
+        error.message
+    );
 }

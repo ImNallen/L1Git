@@ -301,10 +301,11 @@ pub(super) fn step(
         (TagChange::Pending { .. }, _) => return Err(git::malformed()),
     };
     let now = held(repo, tag, deadline.reads())?;
-    if now.as_ref() == to {
+    let already = now.as_ref() == to;
+    if already && to.is_some() {
         return Ok(());
     }
-    if now.as_ref() != from {
+    if !already && now.as_ref() != from {
         let step = match direction {
             Direction::Undo => "undo",
             Direction::Redo => "redo",
@@ -334,6 +335,9 @@ pub(super) fn step(
         }
         (Some(oid), None) => {
             entry.keep_tag(txn.runner(), oid, tag.name())?;
+            if already {
+                return Ok(());
+            }
             remove(&txn, tag, oid, reflog)
         }
         (None, None) => Err(git::malformed()),
