@@ -184,7 +184,7 @@ fn annotate(
     message: &str,
 ) -> Result<(), RepositoryError> {
     let wrote = txn
-        .tag(&["-a", "-F", "-", "--", tag.name(), at.as_str()], message)
+        .tag(&["-F", "-", "--", tag.name(), at.as_str()], message)
         .run(txn.runner().deadline())?;
     if wrote.code() == Some(0) {
         return Ok(());

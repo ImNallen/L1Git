@@ -123,8 +123,8 @@ pub enum Operation {
     /// fetch refspec maps it to, or creates that branch tracking it.
     Checkout { target: Start },
     /// Creates the tag `name` at the commit `at`. With a message the tag is
-    /// annotated, made by `git tag -a`, which signs it when `tag.gpgSign`
-    /// asks.
+    /// annotated, made by `git tag`, which signs it when `tag.gpgSign` or
+    /// `tag.forceSignAnnotated` asks.
     CreateTag {
         name: String,
         at: Oid,
