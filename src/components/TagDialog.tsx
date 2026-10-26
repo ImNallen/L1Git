@@ -4,7 +4,6 @@ import {
   answeredInTagDialog,
   createTagWrite,
   deleteTagWrite,
-  isAnnotated,
 } from "../domain/operations";
 import type { TagAsk, Write } from "../domain/operations";
 import type { Head, Problem } from "../domain/repository";
@@ -190,8 +189,8 @@ function DeleteTagDialog({
       onClose={onClose}
     >
       <p>
-        {tag.name} is {isAnnotated(tag) ? "an annotated" : "a lightweight"} tag
-        on commit {tag.oid.slice(0, 7)}, and you can undo this.
+        {tag.name} is {tag.annotated ? "an annotated" : "a lightweight"} tag on
+        commit {tag.oid.slice(0, 7)}, and you can undo this.
       </p>
     </ConfirmDialog>
   );

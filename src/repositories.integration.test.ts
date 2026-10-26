@@ -191,6 +191,7 @@ describe("real Rust transport contract", () => {
         name: "v0.1.0",
         oid: theme?.oid,
         object: expect.any(String),
+        annotated: true,
       },
     ]);
     const squashed = snapshot.branches.find(
@@ -552,6 +553,7 @@ describe("real Rust transport contract", () => {
         name: "v0.1.0",
         oid: tagged("v0.1.0^{commit}"),
         object: tagged("refs/tags/v0.1.0"),
+        annotated: true,
       },
     ]);
     expect(refs.tags[0]?.object).not.toBe(refs.tags[0]?.oid);

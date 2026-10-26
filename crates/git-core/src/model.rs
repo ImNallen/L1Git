@@ -35,6 +35,10 @@ pub struct Tag {
     /// What the ref holds: the commit for a lightweight tag, or the tag
     /// object for an annotated one.
     pub object: String,
+    /// Whether `object` is a tag object made under this tag's name. A
+    /// lightweight tag can hold another tag's object, as `git tag latest
+    /// v1.0` makes.
+    pub annotated: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

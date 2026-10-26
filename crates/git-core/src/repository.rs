@@ -154,7 +154,7 @@ fn tags(path: &Path, deadline: Deadline) -> Result<Vec<Tag>, RepositoryError> {
         &[
             "for-each-ref",
             "--sort=refname",
-            "--format=%(refname)%00%(objectname)%00%(objecttype)%00%(*objectname)%00%(*objecttype)",
+            "--format=%(refname)%00%(objectname)%00%(objecttype)%00%(tag)%00%(*objectname)%00%(*objecttype)",
             "refs/tags/",
         ],
         deadline,
@@ -165,10 +165,12 @@ fn tags(path: &Path, deadline: Deadline) -> Result<Vec<Tag>, RepositoryError> {
         .filter(|row| !row.is_empty())
     {
         let fields: Vec<_> = row.split(|byte| *byte == 0).collect();
-        let [reference, oid, kind, peeled, peeled_kind] = fields.as_slice() else {
+        let [reference, oid, kind, tag_name, peeled, peeled_kind] = fields.as_slice() else {
             return Err(git::malformed());
         };
         let object = git::text(oid);
+        let annotated =
+            *kind == b"tag" && reference.strip_prefix(b"refs/tags/".as_slice()) == Some(*tag_name);
         let (oid, kind) = if peeled.is_empty() {
             (oid, kind)
         } else {
@@ -190,6 +192,7 @@ fn tags(path: &Path, deadline: Deadline) -> Result<Vec<Tag>, RepositoryError> {
             name: name.into(),
             oid,
             object,
+            annotated,
             reference,
         });
     }

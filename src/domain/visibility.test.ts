@@ -118,6 +118,7 @@ describe("branch visibility", () => {
           name: "v1",
           oid: squashed,
           object: squashed,
+          annotated: false,
         },
       ],
     };

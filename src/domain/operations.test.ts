@@ -1059,6 +1059,7 @@ group("tag writes", () => {
     name: "v0.1.0",
     oid: commit,
     object: oidSchema.parse("f".repeat(40)),
+    annotated: true,
   };
   const create = createTagWrite("v0.2.0", commit, "", head);
   const remove = deleteTagWrite(annotated, head);

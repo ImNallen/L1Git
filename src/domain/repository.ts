@@ -75,6 +75,7 @@ export const tagSchema = z.object({
   name: z.string(),
   oid: oidSchema,
   object: oidSchema,
+  annotated: z.boolean(),
 });
 export const stashSchema = z.object({
   name: z.string(),

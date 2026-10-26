@@ -223,8 +223,6 @@ export const isTagOperation = (
 ): operation is TagOperation =>
   operation.kind === "createTag" || operation.kind === "deleteTag";
 
-export const isAnnotated = (tag: Tag) => tag.object !== tag.oid;
-
 export const createTagWrite = (
   name: string,
   at: Oid,

@@ -142,6 +142,7 @@ describe("branches reported for pruning", () => {
           name: "v1",
           oid,
           object: oid,
+          annotated: false,
         },
       ],
       stashes: [
