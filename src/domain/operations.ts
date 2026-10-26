@@ -146,7 +146,7 @@ const lowerFirst = (text: string) =>
 
 export function failureText(
   notice: Extract<WriteNotice, { kind: "failed" }>,
-  blocking: boolean,
+  history: History,
 ): string {
   const { action, label, problem } = notice;
   const what =
@@ -159,10 +159,13 @@ export function failureText(
     return problem.reason === "pathChanged"
       ? `${what} ${problem.message}`
       : `${what} ${staleCause(problem, null)} L1 Git reread the worktree, so check the lists and try again.`;
-  const then = !blocking
-    ? "L1 Git reread the undo history."
-    : action === "undo"
-      ? "Undo goes in order, so older changes stay blocked until this one can be undone."
-      : "Redo stays blocked until this one can be redone. A new change clears it.";
-  return `${what} ${staleCause(problem, action)} ${then}`;
+  const cause = `${what} ${staleCause(problem, action)}`;
+  if (history.kind !== "read") return cause;
+  const then =
+    history[action]?.id !== notice.entry
+      ? "L1 Git reread the undo history."
+      : action === "undo"
+        ? "Undo goes in order, so older changes stay blocked until this one can be undone."
+        : "Redo stays blocked until this one can be redone. A new change clears it.";
+  return `${cause} ${then}`;
 }

@@ -88,13 +88,7 @@ function StepNotice({ writes }: { writes: WritesView }) {
     return (
       <div ref={row} className="notice error-notice" role="alert">
         <TriangleAlert size={14} />
-        <span>
-          {failureText(
-            notice,
-            notice.action !== "write" &&
-              nextEntry(history, notice.action)?.id === notice.entry,
-          )}
-        </span>
+        <span>{failureText(notice, history)}</span>
         {dismiss}
       </div>
     );
