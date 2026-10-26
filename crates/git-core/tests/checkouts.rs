@@ -58,9 +58,6 @@ fn commit(root: &Path, files: &[(&str, &str)], message: &str) {
     git(root, &["commit", "--quiet", "-m", message]);
 }
 
-/// A clone of a repository with `main`, `feature`, which changes
-/// `both.txt` and adds `feature.txt`, and `topic`, which only the remote
-/// has. Locally only `main` exists.
 struct Repo {
     _directory: TempDir,
     root: PathBuf,

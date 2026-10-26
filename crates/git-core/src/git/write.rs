@@ -239,10 +239,8 @@ impl<'a> Write<'a> {
         }
     }
 
-    /// Runs `git switch` as the user would, hooks included, with no
-    /// `GIT_REFLOG_ACTION`, so HEAD's reflog reads `checkout: moving from A to
-    /// B`, which `git switch -` reads. Git overwrites no ignored file, because
-    /// undo could not bring it back.
+    /// With no `GIT_REFLOG_ACTION`, HEAD's reflog reads `checkout: moving from
+    /// A to B`, which `git switch -` reads.
     pub(crate) fn switch(txn: &'a RefTxn<'_>, args: &[&'a str]) -> Self {
         let mut all = vec![
             "-c",

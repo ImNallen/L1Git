@@ -69,7 +69,6 @@ type Props = {
     event: ReactMouseEvent<HTMLElement> | ReactKeyboardEvent<HTMLElement>,
     branch: Branch,
   ) => void;
-  /** Null unless this is the open repository. */
   onCheckout: ((branch: Branch) => void) | null;
 };
 
@@ -89,9 +88,7 @@ export function RepositoryBranches({
   onMenu,
   onCheckout,
 }: Props) {
-  // The first click can open another repository, so a double click checks
-  // out only what was checkable when it began.
-  const checkoutArmed = useRef<FullRef | null>(null);
+  const checkableAtFirstClick = useRef<FullRef | null>(null);
   const matches = (...values: string[]) =>
     repositoryMatches ||
     values.some((value) => normalizeSearch(value).includes(search));
@@ -275,13 +272,13 @@ export function RepositoryBranches({
           style={{ "--depth": depth }}
           onClick={(event) => {
             if (event.detail > 1) return;
-            checkoutArmed.current =
+            checkableAtFirstClick.current =
               onCheckout && !checkedOut ? branch.reference : null;
             onJump(branch);
           }}
           onDoubleClick={(event) => {
-            if (checkoutArmed.current !== branch.reference) return;
-            checkoutArmed.current = null;
+            if (checkableAtFirstClick.current !== branch.reference) return;
+            checkableAtFirstClick.current = null;
             event.currentTarget.focus();
             onCheckout?.(branch);
           }}

@@ -24,8 +24,6 @@ use std::collections::BTreeSet;
     rename_all_fields = "camelCase"
 )]
 pub(super) enum CheckoutChange {
-    /// Recorded before Git runs. The next locked request keeps it only if
-    /// HEAD is exactly `goal`.
     Pending {
         before: Head,
         goal: Head,
@@ -38,17 +36,13 @@ pub(super) enum CheckoutChange {
     },
 }
 
-/// The branch a remote-branch checkout creates, with its settings before
-/// Git ran, which a leftover `branch.<name>` section can hold.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct NewBranch {
     branch: BranchRef,
-    config: Vec<Setting>,
+    before: Vec<Setting>,
 }
 
-/// The branch a remote-branch checkout created. Its tip is the commit the
-/// checkout's `after` names.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct MadeBranch {
@@ -57,12 +51,10 @@ pub(super) struct MadeBranch {
     after: Vec<Setting>,
 }
 
-/// One `git switch`: where HEAD goes, what messages call the two ends, and
-/// the arguments after `git switch`.
-struct Move {
+struct Switch {
     goal: Head,
-    to: String,
-    from: String,
+    to_name: String,
+    from_name: String,
     args: Vec<String>,
     created: Option<NewBranch>,
 }
@@ -84,8 +76,8 @@ pub(super) fn checkout(
         ));
     }
     let from = leaving(&before)?;
-    let planned = Move::to(repo, &before, target, deadline)?;
-    refuse_absorbing(repo, &from, &planned.goal, &planned.to, reads)?;
+    let planned = Switch::to_target(repo, &before, target, deadline)?;
+    refuse_absorbing(repo, &from, &planned.goal, &planned.to_name, reads)?;
     let txn = RefTxn::begin(repo, deadline)?;
     let (applied, _, recorded) =
         writing
@@ -142,8 +134,8 @@ pub(super) fn checkout(
     }
 }
 
-impl Move {
-    fn to(
+impl Switch {
+    fn to_target(
         repo: &Repo,
         before: &Head,
         target: &Start,
@@ -170,8 +162,8 @@ impl Move {
                 }
                 Ok(Self {
                     goal,
-                    to: short(oid).to_owned(),
-                    from,
+                    to_name: short(oid).to_owned(),
+                    from_name: from,
                     args: vec!["--detach".to_owned(), oid.as_str().to_owned()],
                     created: None,
                 })
@@ -209,8 +201,8 @@ impl Move {
                         reference: branch.as_str().to_owned(),
                         oid: oid.as_str().to_owned(),
                     },
-                    to: remote.to_owned(),
-                    from,
+                    to_name: remote.to_owned(),
+                    from_name: from,
                     args: vec![
                         "--no-guess".to_owned(),
                         "-c".to_owned(),
@@ -220,7 +212,7 @@ impl Move {
                     ],
                     created: Some(NewBranch {
                         branch,
-                        config: slot.config,
+                        before: slot.config,
                     }),
                 })
             }
@@ -255,16 +247,14 @@ impl Move {
                 reference: branch.as_str().to_owned(),
                 oid: tip.as_str().to_owned(),
             },
-            to: name.to_owned(),
-            from,
+            to_name: name.to_owned(),
+            from_name: from,
             args: vec!["--no-guess".to_owned(), "--".to_owned(), name.to_owned()],
             created: None,
         })
     }
 
-    /// The `git switch` that puts HEAD back where an entry recorded it.
-    /// `remake` is the branch a redo creates again.
-    fn back(
+    fn to_recorded(
         repo: &Repo,
         entry: &EntryObjects,
         runner: &impl Runner,
@@ -291,7 +281,7 @@ impl Move {
                         entry.bring_back_branch(runner, &tip)?;
                         created = Some(NewBranch {
                             branch: branch.clone(),
-                            config: slot.config,
+                            before: slot.config,
                         });
                         args.extend([
                             "--no-guess".to_owned(),
@@ -318,8 +308,8 @@ impl Move {
         }
         Ok(Self {
             goal: to.clone(),
-            to: shown(to),
-            from: shown(from),
+            to_name: shown(to),
+            from_name: shown(from),
             args,
             created,
         })
@@ -493,26 +483,20 @@ fn names(repo: &Repo, args: &[&str], reads: Deadline) -> Result<BTreeSet<String>
 }
 
 enum Outcome {
-    /// HEAD is on the goal's branch or at the goal's commit. `trouble` is
-    /// what the answer reports beside the entry.
     Reached {
         after: Head,
         trouble: Option<RepositoryError>,
     },
-    /// HEAD did not move, or moved elsewhere, and nothing is recorded.
     Failed(RepositoryError),
-    /// HEAD could not be read after Git ran.
     Unread(RepositoryError),
 }
 
-/// Git writes the index and the files before it moves HEAD, so this reads
-/// where HEAD went, whatever Git's exit, and puts the files back when Git
-/// wrote the index but could not move HEAD.
+/// Git writes the index and the files before it moves HEAD.
 fn switch(
     txn: &RefTxn<'_>,
     repo: &Repo,
     from: &Head,
-    planned: &Move,
+    planned: &Switch,
     deadline: WriteDeadline,
 ) -> Outcome {
     let index = Stat::of(&repo.index).ok();
@@ -534,12 +518,12 @@ fn switch(
             trouble: Some(raced(planned)),
         };
     }
-    if !same_place(&now, from) {
+    if !same_branch_or_commit(&now, from) {
         return Outcome::Failed(RepositoryError::new(
             ErrorKind::Raced,
             format!(
                 "Another process moved HEAD while Git checked out {}, so L1 Git has no undo entry for it. Refresh.",
-                planned.to
+                planned.to_name
             ),
         ));
     }
@@ -560,7 +544,7 @@ fn switch(
             ErrorKind::GitFailed,
             format!(
                 "Git changed the files to {}'s version but could not move HEAD, so they show as changes, and L1 Git could not put them back: {} {} Check out {} again once the cause is fixed.",
-                planned.to, error.message, refused.message, planned.to
+                planned.to_name, error.message, refused.message, planned.to_name
             ),
         ),
     })
@@ -573,8 +557,7 @@ fn same_branch(now: &Head, goal: &Head) -> bool {
     )
 }
 
-/// Where HEAD points, apart from a commit made on its branch meanwhile.
-fn same_place(a: &Head, b: &Head) -> bool {
+fn same_branch_or_commit(a: &Head, b: &Head) -> bool {
     match (a, b) {
         (
             Head::Attached { reference: a, .. } | Head::Unborn { reference: a },
@@ -585,17 +568,17 @@ fn same_place(a: &Head, b: &Head) -> bool {
     }
 }
 
-fn raced(planned: &Move) -> RepositoryError {
+fn raced(planned: &Switch) -> RepositoryError {
     RepositoryError::new(
         ErrorKind::Raced,
         format!(
             "{} moved while Git checked it out, so HEAD is not at the commit L1 Git showed. Undo puts back {}.",
-            planned.to, planned.from
+            planned.to_name, planned.from_name
         ),
     )
 }
 
-fn after_trouble(planned: &Move, ran: Result<Wrote, RepositoryError>) -> Option<RepositoryError> {
+fn after_trouble(planned: &Switch, ran: Result<Wrote, RepositoryError>) -> Option<RepositoryError> {
     match ran {
         Ok(wrote) if wrote.code() == Some(0) => None,
         Ok(wrote) => Some(RepositoryError::new(
@@ -604,14 +587,14 @@ fn after_trouble(planned: &Move, ran: Result<Wrote, RepositoryError>) -> Option<
             },
             format!(
                 "Git checked out {}, but the post-checkout hook failed. Undo puts back {}.",
-                planned.to, planned.from
+                planned.to_name, planned.from_name
             ),
         )),
         Err(error) => Some(RepositoryError::new(
             error.kind,
             format!(
                 "Git checked out {}, but it was stopped before it finished. {}",
-                planned.to, error.message
+                planned.to_name, error.message
             ),
         )),
     }
@@ -664,8 +647,6 @@ fn refusal(ran: Result<Wrote, RepositoryError>) -> RepositoryError {
     )
 }
 
-/// Git names each path on its own line, after a heading that the 64 KiB
-/// tail of a long list can cut.
 fn in_the_way(said: &str) -> String {
     let heading = said
         .lines()
@@ -703,14 +684,12 @@ fn listed(paths: &[String]) -> String {
     text
 }
 
-/// Undoes what Git did before it failed to move HEAD: a two-way merge from
-/// the goal back to where HEAD is, which keeps the changes Git carried, and
-/// the branch `git switch -c` created first.
+/// `git switch -c` creates the branch before it moves HEAD.
 fn put_back(
     txn: &RefTxn<'_>,
     repo: &Repo,
     from: &Head,
-    planned: &Move,
+    planned: &Switch,
     deadline: WriteDeadline,
 ) -> Result<(), RepositoryError> {
     let runner = txn.runner();
@@ -734,7 +713,7 @@ fn put_back(
             },
         )?;
     }
-    branches::set_config(txn, &new.branch, &slot.config, &new.config)
+    branches::set_config(txn, &new.branch, &slot.config, &new.before)
 }
 
 fn made(
@@ -747,7 +726,7 @@ fn made(
     Ok(
         (slot.tip.is_some() && slot.tip == oid(after)).then(|| MadeBranch {
             branch: new.branch.clone(),
-            before: new.config.clone(),
+            before: new.before.clone(),
             after: slot.config,
         }),
     )
@@ -783,10 +762,6 @@ pub(super) fn landed(
     }))
 }
 
-/// Undo switches back, then deletes the branch a remote checkout created.
-/// Redo creates it again in the same `git switch`. Each part first reads
-/// where things are, so a stopped step resumes. Answers what to report
-/// once the step is saved, such as a failed `post-checkout` hook.
 pub(super) fn step(
     repo: &Repo,
     entry: &EntryObjects,
@@ -817,9 +792,9 @@ pub(super) fn step(
             refuse_unmaking(repo, made, &tip, deadline.reads())?;
         }
         let remake = created.as_ref().filter(|_| direction == Direction::Redo);
-        let planned = Move::back(repo, entry, runner, from, to, remake, name)?;
+        let planned = Switch::to_recorded(repo, entry, runner, from, to, remake, name)?;
         let left = oid(from).ok_or_else(git::malformed)?;
-        refuse_absorbing(repo, &left, to, &planned.to, deadline.reads())?;
+        refuse_absorbing(repo, &left, to, &planned.to_name, deadline.reads())?;
         if matches!(from, Head::Detached { .. }) {
             entry.keep_left_behind(runner, &left, None)?;
         }
@@ -854,9 +829,6 @@ pub(super) fn step(
     Ok(trouble)
 }
 
-/// Checks, before undo switches away, everything that would stop it
-/// deleting the branch afterwards. HEAD here is the one worktree that may
-/// have it checked out.
 fn refuse_unmaking(
     repo: &Repo,
     made: &MadeBranch,

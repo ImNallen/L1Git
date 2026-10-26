@@ -271,8 +271,6 @@ impl Change {
         }
     }
 
-    /// A step's own deadline, when its Git commands need more than an
-    /// index or ref step's.
     const fn step_write(&self, direction: Direction) -> Option<LocalWrite> {
         match (self, direction) {
             (Self::Checkout(_), Direction::Undo) => Some(LocalWrite::UndoCheckout),

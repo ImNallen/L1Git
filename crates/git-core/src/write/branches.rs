@@ -631,7 +631,7 @@ pub(super) fn fetched_into<'c>(
             *other == remote
                 && value
                     .strip_prefix('^')
-                    .is_some_and(|pattern| matches(pattern, source))
+                    .is_some_and(|pattern| refspec_side_matches(pattern, source))
         })
     };
     let mut found: Vec<(&str, String)> = Vec::new();
@@ -658,8 +658,7 @@ pub(super) fn fetched_into<'c>(
     found
 }
 
-/// A refspec side with at most one `*`, as Git matches it.
-fn matches(pattern: &str, name: &str) -> bool {
+fn refspec_side_matches(pattern: &str, name: &str) -> bool {
     match pattern.split_once('*') {
         Some((prefix, suffix)) => {
             name.len() >= prefix.len() + suffix.len()

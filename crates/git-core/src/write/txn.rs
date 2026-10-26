@@ -406,8 +406,6 @@ impl<'r> RefTxn<'r> {
         Write::branch(self, args)
     }
 
-    /// `git switch` takes `index.lock` itself and runs the user's hooks on
-    /// the real index, as `git commit` does.
     pub(super) fn switch<'a>(&'a self, args: &[&'a str]) -> Write<'a> {
         Write::switch(self, args)
     }

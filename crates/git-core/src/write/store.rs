@@ -647,21 +647,15 @@ impl EntryObjects {
         self.keep_unique(runner, tip, &[&exclude, LASTING_REFS[0], LASTING_REFS[1]])
     }
 
-    /// Keeps what a checkout leaves behind: `tip`'s objects that no other
-    /// branch, tag, or remote-tracking branch reaches, or none of `tip`'s own
-    /// branch when `branch` names it. Remote-tracking branches count here,
-    /// because packing all of a remote branch's history on every checkout
-    /// would cost far more than an undo after a prune and a `gc` that misses.
     pub(super) fn keep_left_behind(
         &self,
         runner: &impl Runner,
         tip: &Oid,
-        branch: Option<&str>,
+        except_branch: Option<&str>,
     ) -> Result<(), RepositoryError> {
-        let exclude = branch.map(|name| format!("--exclude={name}"));
+        let exclude = except_branch.map(|name| format!("--exclude={name}"));
         let mut not: Vec<&str> = exclude.iter().map(String::as_str).collect();
-        not.extend(LASTING_REFS);
-        not.push("--remotes");
+        not.extend(CHECKOUT_LASTING_REFS);
         self.keep_unique(runner, tip, &not)
     }
 
@@ -761,6 +755,8 @@ impl EntryObjects {
 /// The refs whose objects a branch's undo entry need not keep. A fetch with
 /// `--prune` drops remote-tracking refs, and a checkout moves HEAD.
 const LASTING_REFS: [&str; 2] = ["--branches", "--tags"];
+
+const CHECKOUT_LASTING_REFS: [&str; 3] = ["--branches", "--tags", "--remotes"];
 
 /// What `pack-objects` names its pack after in an object directory.
 fn pack_base(objects: &Path) -> String {
