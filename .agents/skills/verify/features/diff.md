@@ -23,7 +23,7 @@ Open the fixture repository. Select a commit in the history. In the inspector's 
 11. Click the `285b405` band. Confirm the diff closes and the graph selects `feat(history): add bounded repository history`.
 12. Open `assets/icon.png` in the inspector commit and click **Blame**. Confirm the notice `Binary file. L1 Git does not blame binary files.`
 13. Switch between **Unified**, **Split**, **History**, and **Blame**. Confirm each view replaces the last one. Press Escape from Blame and confirm the history returns with the commit still selected.
-14. Select a worktree row and open a file. Confirm **History** and **Blame** are off and their tooltip asks for a commit.
+14. Select a worktree row and open a file. Confirm **History** and **Blame** are off and their tooltip asks for a commit. Confirm a bar above each hunk and the line bar above the diff, which [changes](changes.md) steps 29 to 37 drive. Commit and comparison diffs show neither.
 
 ## Gotchas
 
