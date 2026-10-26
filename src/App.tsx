@@ -223,10 +223,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     : null;
   const writes = useWrites(snapshot?.root ?? null, {
     worktree: app.rereadWorktree,
-    repository: () => {
-      void app.refresh();
-      branchRefs.reload();
-    },
+    repository: app.rereadOpenRepository,
   });
   function writeFiles(
     root: RepositoryRoot,
@@ -354,14 +351,18 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     snapshot.stashes.some((stash) => stash.oid === selected.oid)
       ? { root: snapshot.root, oid: selected.oid }
       : null;
-  const refreshRef = useRef(app.refresh);
+  const rereadChanges = () => {
+    app.refreshChanges();
+    writes.rereadHistory();
+  };
+  const rereadAll = () => {
+    rereadChanges();
+    return app.refresh();
+  };
+  const refreshRef = useRef(rereadAll);
   const reloadRefsRef = useRef(branchRefs.reload);
   useEffect(() => {
-    refreshRef.current = () => {
-      app.refreshChanges();
-      writes.rereadHistory();
-      return app.refresh();
-    };
+    refreshRef.current = rereadAll;
     reloadRefsRef.current = branchRefs.reload;
   });
   // Commits and branches made outside L1 Git show up when its window regains focus.
@@ -871,7 +872,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                 <span>
                   {current.error.message} The last successful view is retained.
                 </span>
-                <button onClick={() => void app.refresh()}>Try again</button>
+                <button onClick={() => void rereadAll()}>Try again</button>
               </div>
             )}
             {openRepository &&
@@ -946,7 +947,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                       onBack={closeFile}
                       onRetry={() => app.openFile(fileDiff.path, fileDiff.side)}
                       onRefresh={() => {
-                        app.refreshChanges();
+                        rereadChanges();
                         app.openFile(fileDiff.path, fileDiff.side);
                       }}
                       selectable={shows}
@@ -1045,7 +1046,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                     toggleButton={inspectorToggle}
                     onRetry={app.retryDetail}
                     worktree={selectedWorktree}
-                    onRefreshChanges={app.refreshChanges}
+                    onRefreshChanges={rereadChanges}
                     writes={{
                       busy: writes.running !== null,
                       write: writeFiles,

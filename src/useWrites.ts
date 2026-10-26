@@ -36,7 +36,7 @@ export function useWrites(
   root: RepositoryRoot | null,
   reread: {
     worktree: (worktree: RepositoryRoot) => Promise<void>;
-    repository: () => void;
+    repository: (repository: RepositoryRoot) => void;
   },
 ) {
   const [byRoot, setByRoot] = useState<ReadonlyMap<RepositoryRoot, Writes>>(
@@ -100,7 +100,7 @@ export function useWrites(
     }
     const changed = "applied" in outcome ? outcome.applied.root : worktree;
     if ("problem" in outcome && rereadsRepository(outcome.problem))
-      reread.repository();
+      reread.repository(repository);
     await Promise.all([
       readHistory(repository),
       reread.worktree(worktree),

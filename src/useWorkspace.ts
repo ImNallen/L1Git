@@ -276,6 +276,12 @@ export function useWorkspace() {
     }
   };
 
+  const latest = useRef({ activeRoot, refresh });
+  latest.current = { activeRoot, refresh };
+  const rereadOpenRepository = useCallback((path: RepositoryRoot) => {
+    if (latest.current.activeRoot === path) void latest.current.refresh();
+  }, []);
+
   const removeRepository = (removed: RepositoryRoot) => {
     save(forget(catalogRef.current, removed));
     snapshots.current = evictSnapshot(snapshots.current, removed);
@@ -560,6 +566,7 @@ export function useWorkspace() {
     addRepository,
     removeRepository,
     refresh,
+    rereadOpenRepository,
     activeRoot,
     scrollTopOf,
     rememberScroll,

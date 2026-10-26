@@ -49,6 +49,21 @@ export function UndoButtons({
 }
 
 export function WriteNoticeRow({ writes }: { writes: WritesView }) {
+  const { history } = writes;
+  return (
+    <>
+      <StepNotice writes={writes} />
+      {history.kind === "unreadable" && (
+        <div className="notice error-notice" role="alert">
+          <TriangleAlert size={14} />
+          <span>{historyFailure(history.problem)}</span>
+        </div>
+      )}
+    </>
+  );
+}
+
+function StepNotice({ writes }: { writes: WritesView }) {
   const { notice, history, running } = writes;
   const row = useRef<HTMLDivElement>(null);
   const handsOff = useRef(false);
@@ -59,15 +74,7 @@ export function WriteNoticeRow({ writes }: { writes: WritesView }) {
     if (focused === null || focused === document.body)
       row.current?.querySelector("button")?.focus();
   }, [running]);
-  if (notice === null) {
-    if (history.kind !== "unreadable") return null;
-    return (
-      <div className="notice error-notice" role="alert">
-        <TriangleAlert size={14} />
-        <span>{historyFailure(history.problem)}</span>
-      </div>
-    );
-  }
+  if (notice === null) return null;
   const dismiss = (
     <button
       className="notice-dismiss"
@@ -95,6 +102,7 @@ export function WriteNoticeRow({ writes }: { writes: WritesView }) {
     notice.step === "undo"
       ? { label: "Redo", entry: nextEntry(history, "redo"), run: writes.redo }
       : { label: "Undo", entry: nextEntry(history, "undo"), run: writes.undo };
+  const unavailable = again.entry === null || running !== null;
   return (
     <div ref={row} className="notice info-notice" role="status">
       <Info size={14} />
@@ -102,8 +110,9 @@ export function WriteNoticeRow({ writes }: { writes: WritesView }) {
         {notice.step === "undo" ? "Undid" : "Redid"} {notice.label}
       </span>
       <button
-        aria-disabled={again.entry === null || running !== null}
+        aria-disabled={unavailable}
         onClick={() => {
+          if (unavailable) return;
           handsOff.current = true;
           void again.run();
         }}

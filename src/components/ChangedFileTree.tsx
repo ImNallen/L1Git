@@ -31,6 +31,9 @@ export type RowAction = {
 
 export const focusedRow = '[data-type="item"][tabindex="0"]';
 
+const focusIsFree = () =>
+  document.activeElement === null || document.activeElement === document.body;
+
 type Props = {
   files: readonly { path: string; status: GitStatus }[];
   selectedPath: string | null;
@@ -115,17 +118,17 @@ export function ChangedFileTree({
   }, [model, maxRows]);
   useEffect(() => {
     if (refocusPath === null) return;
-    const focused = document.activeElement;
-    if (focused !== null && focused !== document.body) {
+    if (!focusIsFree()) {
       onFocused?.();
       return;
     }
     model.focusPath(refocusPath);
     const frame = requestAnimationFrame(() => {
-      model
-        .getFileTreeContainer()
-        ?.shadowRoot?.querySelector<HTMLElement>(focusedRow)
-        ?.focus();
+      if (focusIsFree())
+        model
+          .getFileTreeContainer()
+          ?.shadowRoot?.querySelector<HTMLElement>(focusedRow)
+          ?.focus();
       onFocused?.();
     });
     return () => cancelAnimationFrame(frame);

@@ -64,7 +64,7 @@ export const nextEntry = (history: History, step: Step) =>
   history.kind === "read" ? history[step] : null;
 
 export const historyFailure = (problem: Problem) =>
-  `Undo is unavailable. ${problem.message}`;
+  `Undo and redo are unavailable. ${problem.message}`;
 
 const stepNames = { undo: "Undo", redo: "Redo" } as const;
 
@@ -74,9 +74,14 @@ export function stepButton(
   shortcut: string,
 ): { name: string; title: string } {
   const name = stepNames[step];
+  if (history.kind === "unread")
+    return { name, title: "Reading the undo history" };
   if (history.kind === "unreadable")
-    return { name, title: historyFailure(history.problem) };
-  const entry = nextEntry(history, step);
+    return {
+      name,
+      title: `${name} is unavailable. ${history.problem.message}`,
+    };
+  const entry = history[step];
   if (entry === null) return { name, title: `Nothing to ${step}` };
   return {
     name: `${name} ${entry.label}`,
@@ -97,25 +102,46 @@ export type WriteNotice =
 
 export type StaleReason = Extract<Problem, { kind: "staleView" }>["reason"];
 
+type KnownStale = Exclude<
+  Extract<Problem, { kind: "staleView" }>,
+  { reason: "unknown" }
+>;
+
 export const rereadsRepository = (problem: Problem) =>
   problem.kind === "staleView" && problem.reason === "headMoved";
 
-const staleWrite: Record<StaleReason, string> = {
-  headMoved: "HEAD moved since L1 Git read this worktree.",
-  pathChanged: "A chosen file changed since L1 Git read it.",
-  pathNotChosen: "Git would also change a file that was not chosen.",
-  historyChanged: "The undo history changed since L1 Git showed it.",
-};
+function listed(paths: readonly string[]): string {
+  const shown =
+    paths.length <= 3
+      ? paths
+      : [
+          ...paths.slice(0, 2),
+          `${(paths.length - 2).toLocaleString()} more files`,
+        ];
+  return new Intl.ListFormat("en").format(shown);
+}
 
-const staleStep: Record<StaleReason, (step: Step) => string> = {
-  headMoved: (step) =>
-    `HEAD moved after this change, so L1 Git cannot ${step} it exactly.`,
-  pathChanged: (step) =>
-    `A file in this change was edited since, so L1 Git cannot ${step} it without losing that edit.`,
-  pathNotChosen: (step) =>
-    `Git would also change a file outside this change, so L1 Git cannot ${step} it.`,
-  historyChanged: () => staleWrite.historyChanged,
-};
+function staleCause(problem: KnownStale, step: Step | null): string {
+  switch (problem.reason) {
+    case "headMoved":
+      return step === null
+        ? "HEAD moved since L1 Git read this worktree."
+        : `HEAD moved after this change, so L1 Git cannot ${step} it exactly.`;
+    case "pathChanged":
+      return step === null
+        ? "A chosen file changed since L1 Git read it."
+        : `A file in this change was edited since, so L1 Git cannot ${step} it without losing that edit.`;
+    case "pathNotChosen": {
+      const { paths } = problem;
+      const one = paths.length === 1;
+      return step === null
+        ? `Git would also change ${listed(paths)}, which ${one ? "was" : "were"} not chosen.`
+        : `Git would also change ${listed(paths)}, which ${one ? "is" : "are"} outside this change, so L1 Git cannot ${step} it.`;
+    }
+    case "historyChanged":
+      return "The undo history changed since L1 Git showed it.";
+  }
+}
 
 const lowerFirst = (text: string) =>
   text.charAt(0).toLowerCase() + text.slice(1);
@@ -129,13 +155,14 @@ export function failureText(
     action === "write"
       ? `Could not ${lowerFirst(label)}.`
       : `Could not ${action} ${label}.`;
-  if (problem.kind !== "staleView") return `${what} ${problem.message}`;
+  if (problem.kind !== "staleView" || problem.reason === "unknown")
+    return `${what} ${problem.message}`;
   if (action === "write")
-    return `${what} ${staleWrite[problem.reason]} L1 Git reread the worktree, so check the lists and try again.`;
+    return `${what} ${staleCause(problem, null)} L1 Git reread the worktree, so check the lists and try again.`;
   const then = !blocking
     ? "L1 Git reread the undo history."
     : action === "undo"
       ? "Undo goes in order, so older changes stay blocked until this one can be undone."
       : "Redo stays blocked until this one can be redone. A new change clears it.";
-  return `${what} ${staleStep[problem.reason](action)} ${then}`;
+  return `${what} ${staleCause(problem, action)} ${then}`;
 }
