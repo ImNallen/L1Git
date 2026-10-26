@@ -59,11 +59,18 @@ const lineWrites = {
   discard: "discardLines",
 } as const satisfies Record<PartAction, PartWrite>;
 
+const decodedWithReplacements = (path: string) => path.includes("�");
+
 export function partActions(
   entry: StatusEntry | undefined,
   side: ListSide,
 ): readonly PartAction[] {
-  if (entry === undefined || side === "conflict") return [];
+  if (
+    entry === undefined ||
+    side === "conflict" ||
+    decodedWithReplacements(entry.path)
+  )
+    return [];
   switch (entry.kind) {
     case "unmerged":
       return [];
