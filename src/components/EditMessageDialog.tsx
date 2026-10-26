@@ -149,7 +149,7 @@ export function EditMessageDialog({
           <button
             type="button"
             className="button primary"
-            disabled={!ready}
+            aria-disabled={!ready}
             onClick={() => void save()}
           >
             {saving && <LoaderCircle size={14} className="spin" />}

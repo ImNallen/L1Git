@@ -1152,7 +1152,10 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
             if (outcome.kind === "applied") setHeadOf(worktree);
             return outcome;
           }}
-          onClose={() => setEditingMessage(false)}
+          onClose={() => {
+            flushSync(() => setEditingMessage(false));
+            focusFallback();
+          }}
         />
       )}
       {adding && (
