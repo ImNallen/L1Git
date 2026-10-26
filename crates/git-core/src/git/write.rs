@@ -14,6 +14,8 @@ use std::{
 pub(crate) enum LocalWrite {
     StageFiles,
     UnstageFiles,
+    StagePart,
+    UnstagePart,
     Commit,
     Amend,
     EditMessage,
@@ -25,7 +27,12 @@ pub(crate) enum LocalWrite {
 impl LocalWrite {
     pub(crate) const fn budget(self) -> Duration {
         Duration::from_secs(match self {
-            Self::StageFiles | Self::UnstageFiles | Self::Undo | Self::Redo => 120,
+            Self::StageFiles
+            | Self::UnstageFiles
+            | Self::StagePart
+            | Self::UnstagePart
+            | Self::Undo
+            | Self::Redo => 120,
             Self::Discard => 300,
             Self::Commit | Self::Amend | Self::EditMessage => 600,
         })
@@ -35,6 +42,8 @@ impl LocalWrite {
         match self {
             Self::StageFiles => "Staging the files",
             Self::UnstageFiles => "Unstaging the files",
+            Self::StagePart => "Staging part of the file",
+            Self::UnstagePart => "Unstaging part of the file",
             Self::Commit => "Committing",
             Self::Amend => "Amending the commit",
             Self::EditMessage => "Editing the commit message",
@@ -48,6 +57,8 @@ impl LocalWrite {
         match self {
             Self::StageFiles => "l1git stage",
             Self::UnstageFiles => "l1git unstage",
+            Self::StagePart => "l1git stage part",
+            Self::UnstagePart => "l1git unstage part",
             Self::Commit => "l1git commit",
             Self::Amend => "l1git amend",
             Self::EditMessage => "l1git edit message",
@@ -59,9 +70,12 @@ impl LocalWrite {
 
     pub(super) const fn left_behind(self) -> &'static str {
         match self {
-            Self::StageFiles | Self::UnstageFiles | Self::Undo | Self::Redo => {
-                "The index is unchanged."
-            }
+            Self::StageFiles
+            | Self::UnstageFiles
+            | Self::StagePart
+            | Self::UnstagePart
+            | Self::Undo
+            | Self::Redo => "The index is unchanged.",
             Self::Commit | Self::Amend | Self::EditMessage => {
                 "Git may have finished the commit, so check the history."
             }

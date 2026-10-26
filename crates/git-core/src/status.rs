@@ -302,10 +302,6 @@ impl From<SidePatch> for WorktreePatch {
 
 /// One side of one path, read as the diff pane reads it.
 pub(crate) struct SideRead {
-    #[expect(
-        dead_code,
-        reason = "the partial writes read the entry from a later commit"
-    )]
     pub(crate) entry: StatusEntry,
     pub(crate) patch: SidePatch,
 }

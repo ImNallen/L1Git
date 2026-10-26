@@ -16,6 +16,8 @@ use crate::{
     git::{self, Deadline, LocalRead, LocalWrite, WriteDeadline},
     repository,
 };
+use partial::{Action, Part, Picks};
+pub use partial::{LinePick, LineSide};
 use serde::{Deserialize, Serialize};
 use std::{
     fmt,
@@ -60,6 +62,33 @@ pub enum Operation {
     /// and deletes each untracked file. The entries are `worktreeStatus`
     /// entries, sent back unchanged.
     Discard { entries: Vec<StatusEntry> },
+    /// Stages every change of one hunk of `path`'s unstaged patch, as
+    /// `git add -p` does with one `y`. `hunk` counts from 0. `shown` is the
+    /// unstaged `worktreePatch` text the user saw.
+    StageHunk {
+        path: String,
+        hunk: u32,
+        shown: String,
+    },
+    /// Takes one hunk of `path`'s staged patch back out of the index.
+    /// `shown` is the staged `worktreePatch` text.
+    UnstageHunk {
+        path: String,
+        hunk: u32,
+        shown: String,
+    },
+    /// As `StageHunk`, for the chosen lines. A line of context is ignored.
+    StageLines {
+        path: String,
+        lines: Vec<LinePick>,
+        shown: String,
+    },
+    /// As `UnstageHunk`, for the chosen lines.
+    UnstageLines {
+        path: String,
+        lines: Vec<LinePick>,
+        shown: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -248,6 +277,8 @@ impl Operation {
             Self::Amend { .. } => LocalWrite::Amend,
             Self::EditMessage { .. } => LocalWrite::EditMessage,
             Self::Discard { .. } => LocalWrite::Discard,
+            Self::StageHunk { .. } | Self::StageLines { .. } => LocalWrite::StagePart,
+            Self::UnstageHunk { .. } | Self::UnstageLines { .. } => LocalWrite::UnstagePart,
         }
     }
 
@@ -268,6 +299,12 @@ impl Operation {
             commit::commit(repo, store, log, deadline, expect, self, kind, message)
                 .map(|applied| (applied, None))
         };
+        let index_part = |action, path, picks, shown| {
+            let part = Part::new(action, path, picks, shown)?;
+            let (txn, change) = index::edit_part(repo, deadline, expect, &part)?;
+            let (applied, published) = txn.commit_write(store, log, self, &change)?;
+            Ok((applied, Some(published)))
+        };
         match self {
             Self::StageFiles { entries } => index(index::Command::Stage, entries),
             Self::UnstageFiles { entries } => index(index::Command::Unstage, entries),
@@ -276,6 +313,18 @@ impl Operation {
             Self::EditMessage { message } => commit(commit::Kind::EditMessage, message),
             Self::Discard { entries } => {
                 discard::discard(repo, store, log, deadline, expect, self, entries)
+            }
+            Self::StageHunk { path, hunk, shown } => {
+                index_part(Action::Stage, path, Picks::Hunk(*hunk), shown)
+            }
+            Self::UnstageHunk { path, hunk, shown } => {
+                index_part(Action::Unstage, path, Picks::Hunk(*hunk), shown)
+            }
+            Self::StageLines { path, lines, shown } => {
+                index_part(Action::Stage, path, Picks::Lines(lines), shown)
+            }
+            Self::UnstageLines { path, lines, shown } => {
+                index_part(Action::Unstage, path, Picks::Lines(lines), shown)
             }
         }
     }

@@ -1,9 +1,8 @@
-#![expect(
-    dead_code,
-    reason = "the partial writes call the builder from a later commit"
-)]
-
-use crate::Mode;
+use super::txn::Txn;
+use crate::{
+    ErrorKind, Mode, MoveSide, RepositoryError, Side, StaleReason, StatusEntry, git,
+    status::{self, PatchBytes, SidePatch, SideRead},
+};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeSet, num::NonZeroU32};
 
@@ -23,6 +22,15 @@ pub struct LinePick {
 pub enum LineSide {
     Deletions,
     Additions,
+}
+
+impl LineSide {
+    const fn file(self) -> &'static str {
+        match self {
+            Self::Deletions => "old",
+            Self::Additions => "new",
+        }
+    }
 }
 
 /// What to take from a patch. A pick on a context line is ignored.
@@ -84,6 +92,222 @@ pub(super) enum Refusal {
     /// No line of any hunk has this number on this side.
     NotInDiff(LinePick),
     Malformed,
+}
+
+/// The partial writes. Each reads one side of the path and applies its
+/// patch one way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Action {
+    Stage,
+    Unstage,
+}
+
+impl Action {
+    const fn side(self) -> Side {
+        match self {
+            Self::Stage => Side::Unstaged,
+            Self::Unstage => Side::Staged,
+        }
+    }
+
+    pub(super) const fn apply(self) -> Apply {
+        match self {
+            Self::Stage => Apply::Forward,
+            Self::Unstage => Apply::Reverse,
+        }
+    }
+
+    pub(super) const fn verb(self) -> &'static str {
+        match self {
+            Self::Stage => "stage",
+            Self::Unstage => "unstage",
+        }
+    }
+}
+
+/// A hunk or line write as the request names it.
+pub(super) struct Part<'o> {
+    action: Action,
+    path: &'o str,
+    picks: Picks<'o>,
+    /// The text of the patch the user saw.
+    shown: &'o str,
+}
+
+/// What `Part::read` proved and built under the index lock.
+pub(super) struct Prepared {
+    /// The picked part of the fresh patch, which holds a change.
+    pub(super) patch: Vec<u8>,
+}
+
+impl<'o> Part<'o> {
+    /// Refuses what `status::check` refuses, a name holding NUL or U+FFFD,
+    /// which Git would read as another file, and no lines.
+    pub(super) fn new(
+        action: Action,
+        path: &'o str,
+        picks: Picks<'o>,
+        shown: &'o str,
+    ) -> Result<Self, RepositoryError> {
+        status::check(path)?;
+        if path.contains(['\0', char::REPLACEMENT_CHARACTER]) {
+            return Err(unsupported(format!(
+                "L1 Git cannot {} part of a file whose name is not valid UTF-8.",
+                action.verb()
+            )));
+        }
+        if let Picks::Lines([]) = picks {
+            return Err(RepositoryError::new(
+                ErrorKind::UnchangedPath,
+                "Choose at least one line.",
+            ));
+        }
+        Ok(Self {
+            action,
+            path,
+            picks,
+            shown,
+        })
+    }
+
+    pub(super) const fn action(&self) -> Action {
+        self.action
+    }
+
+    pub(super) const fn path(&self) -> &'o str {
+        self.path
+    }
+
+    /// Reads the path's side again through the diff pane's own read. Call it
+    /// with the index lock held.
+    pub(super) fn read(&self, txn: &Txn<'_>) -> Result<Prepared, RepositoryError> {
+        let fresh = status::read_side(
+            &txn.repo().root,
+            self.path,
+            self.action.side(),
+            txn.deadline().reads(),
+        )?;
+        self.prepare(fresh)
+    }
+
+    /// A refusal describes only the patch the user is looking at, so a path
+    /// that no longer lists a change or whose patch differs from `shown` is
+    /// stale before the bytes are judged. A path whose patch has no text, or
+    /// that this write never splits, is refused whatever was shown.
+    fn prepare(&self, fresh: Option<SideRead>) -> Result<Prepared, RepositoryError> {
+        let Some(SideRead { entry, patch }) = fresh else {
+            return Err(changed());
+        };
+        let fresh = match patch {
+            SidePatch::Diff(PatchBytes::Text(bytes)) => bytes,
+            SidePatch::Diff(PatchBytes::Binary) => {
+                return Err(self.cannot("Git shows it as a binary file"));
+            }
+            SidePatch::Diff(PatchBytes::TooLarge { .. }) => {
+                return Err(self.cannot("its diff is too large to show"));
+            }
+            SidePatch::Submodule(_) => return Err(self.cannot("it is a submodule")),
+            SidePatch::Conflicted { .. } => return Err(self.cannot("it has a conflict")),
+        };
+        self.refuse_entry(&entry)?;
+        if String::from_utf8_lossy(&fresh) != self.shown {
+            return Err(changed());
+        }
+        let patch = partial_patch(&fresh, self.picks, self.action.apply())
+            .map_err(|refusal| self.refused(refusal))?
+            .ok_or_else(|| {
+                RepositoryError::new(
+                    ErrorKind::UnchangedPath,
+                    format!(
+                        "The chosen lines of {} hold no change to {}.",
+                        self.path,
+                        self.action.verb()
+                    ),
+                )
+            })?;
+        Ok(Prepared { patch })
+    }
+
+    fn refuse_entry(&self, entry: &StatusEntry) -> Result<(), RepositoryError> {
+        match entry {
+            StatusEntry::Ordinary {
+                submodule: Some(_), ..
+            }
+            | StatusEntry::Renamed {
+                submodule: Some(_), ..
+            } => Err(self.cannot("it is a submodule")),
+            StatusEntry::Renamed {
+                original,
+                side: MoveSide::Unstaged { .. },
+                ..
+            } => Err(self.cannot(&format!(
+                "Git shows it as a move from {original}, which git add -N started"
+            ))),
+            StatusEntry::Ordinary { .. }
+            | StatusEntry::Renamed { .. }
+            | StatusEntry::Unmerged { .. }
+            | StatusEntry::Untracked { .. } => Ok(()),
+        }
+    }
+
+    fn cannot(&self, because: &str) -> RepositoryError {
+        let verb = self.action.verb();
+        unsupported(format!(
+            "L1 Git cannot {verb} part of {}, because {because}. {} the whole file instead.",
+            self.path,
+            capitalized(verb)
+        ))
+    }
+
+    fn refused(&self, refusal: Refusal) -> RepositoryError {
+        let (path, verb) = (self.path, self.action.verb());
+        match refusal {
+            Refusal::Sections => self.cannot("Git shows its type change as two changes"),
+            Refusal::Mode(Mode::Symlink) => self.cannot("it is a symbolic link"),
+            Refusal::Mode(Mode::Submodule) => self.cannot("it is a submodule"),
+            Refusal::Mode(mode @ (Mode::File | Mode::Executable)) => {
+                self.cannot(&format!("Git shows it with mode {}", mode.octal()))
+            }
+            Refusal::Copy => self.cannot("Git shows it as a copy of another file"),
+            Refusal::NoNewlineSuccessor { side } => unsupported(format!(
+                "L1 Git cannot {verb} only these lines of {path}, because the last line of the {} file has no newline and a chosen line would follow it. Include the change to that line, or {verb} the whole file.",
+                side.file()
+            )),
+            Refusal::NoHunk { index, hunks } => RepositoryError::new(
+                ErrorKind::UnchangedPath,
+                format!(
+                    "The diff of {path} has {hunks} hunks, so it has no hunk {index}, counting from 0."
+                ),
+            ),
+            Refusal::NotInDiff(LinePick { side, line }) => RepositoryError::new(
+                ErrorKind::UnchangedPath,
+                format!(
+                    "Line {line} of the {} file is not in the diff of {path}.",
+                    side.file()
+                ),
+            ),
+            Refusal::Malformed => git::malformed(),
+        }
+    }
+}
+
+fn changed() -> RepositoryError {
+    RepositoryError::stale(
+        StaleReason::PathChanged,
+        "This file changed. Refresh to see its current diff.",
+    )
+}
+
+fn unsupported(message: String) -> RepositoryError {
+    RepositoryError::new(ErrorKind::UnsupportedPath, message)
+}
+
+fn capitalized(verb: &str) -> String {
+    let mut letters = verb.chars();
+    letters
+        .next()
+        .map(|first| first.to_ascii_uppercase().to_string() + letters.as_str())
+        .unwrap_or_default()
 }
 
 /// Keeps the picked lines of `patch` and turns the rest into context or
@@ -568,6 +792,7 @@ fn rewrite_header(header: &[&[u8]], old_total: i64, new_total: i64) -> Result<Ve
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{ChangeStatus, IndexObject, Moved, Oid, Sides};
 
     fn d(line: u32) -> LinePick {
         LinePick {
@@ -985,5 +1210,127 @@ mod tests {
                 "--- \"a/new \\\"one\\\".txt\"\t\n+++ \"b/new \\\"one\\\".txt\"\t\n@@ -1,1 +1,1 @@\n-x\n+y\n",
             )
         );
+    }
+
+    const OID: &str = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391";
+
+    fn modified(path: &str) -> StatusEntry {
+        StatusEntry::Ordinary {
+            path: path.to_owned(),
+            submodule: None,
+            sides: Sides::Unstaged {
+                unstaged: ChangeStatus::Modified,
+            },
+            index: Some(IndexObject {
+                mode: Mode::File,
+                oid: Oid::try_from(OID.to_owned()).unwrap(),
+            }),
+        }
+    }
+
+    fn read(entry: StatusEntry, patch: SidePatch) -> Option<SideRead> {
+        Some(SideRead { entry, patch })
+    }
+
+    fn text(patch: &str) -> SidePatch {
+        SidePatch::Diff(PatchBytes::Text(patch.as_bytes().to_vec()))
+    }
+
+    fn kind(result: Result<Prepared, RepositoryError>) -> ErrorKind {
+        result.map(|prepared| prepared.patch).unwrap_err().kind
+    }
+
+    const STALE: ErrorKind = ErrorKind::StaleView {
+        reason: StaleReason::PathChanged,
+    };
+
+    #[test]
+    fn refuses_a_name_git_would_read_as_another_file_and_an_empty_choice_before_any_read() {
+        let lines = |path| Part::new(Action::Stage, path, Picks::Lines(&[]), BLOCK);
+        assert_eq!(lines("f").err().unwrap().kind, ErrorKind::UnchangedPath);
+        for path in ["../f", ".git/config", "a\0b", "caf\u{FFFD}"] {
+            let error = Part::new(Action::Stage, path, Picks::Hunk(0), BLOCK).err();
+            assert_eq!(error.unwrap().kind, ErrorKind::UnsupportedPath, "{path:?}");
+        }
+    }
+
+    #[test]
+    fn a_path_that_lists_no_change_or_whose_patch_differs_from_the_shown_one_is_stale() {
+        let part = Part::new(Action::Stage, "f", Picks::Hunk(0), BLOCK).unwrap();
+        assert_eq!(kind(part.prepare(None)), STALE);
+        assert_eq!(
+            kind(part.prepare(read(modified("f"), text(APPENDED)))),
+            STALE
+        );
+        let prepared = part.prepare(read(modified("f"), text(BLOCK))).unwrap();
+        assert_eq!(
+            prepared.patch,
+            partial_patch(BLOCK.as_bytes(), Picks::Hunk(0), Apply::Forward)
+                .unwrap()
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn refuses_a_patch_with_no_text_and_a_move_git_add_n_started_whatever_was_shown() {
+        let part = Part::new(Action::Stage, "f", Picks::Hunk(0), BLOCK).unwrap();
+        let moved = StatusEntry::Renamed {
+            path: "f".to_owned(),
+            original: "e".to_owned(),
+            how: Moved::Renamed,
+            submodule: None,
+            side: MoveSide::Unstaged {
+                original: IndexObject {
+                    mode: Mode::File,
+                    oid: Oid::try_from(OID.to_owned()).unwrap(),
+                },
+            },
+        };
+        for fresh in [
+            read(modified("f"), SidePatch::Diff(PatchBytes::Binary)),
+            read(
+                modified("f"),
+                SidePatch::Diff(PatchBytes::TooLarge { bytes: 2 << 20 }),
+            ),
+            read(moved, text(APPENDED)),
+        ] {
+            assert_eq!(kind(part.prepare(fresh)), ErrorKind::UnsupportedPath);
+        }
+    }
+
+    #[test]
+    fn judges_the_bytes_only_once_they_are_the_shown_ones() {
+        let link = concat!(
+            "diff --git a/f b/f\n",
+            "index 1de565933b05f74c75ff9a6520af5f9f8a5a2f1d..27fa34919ae70aa0d7eaccdfbf393cfc440e7d25 120000\n",
+            "--- a/f\n+++ b/f\n@@ -1 +1 @@\n-target\n+other\n",
+        );
+        let shown_link = Part::new(Action::Unstage, "f", Picks::Hunk(0), link).unwrap();
+        assert_eq!(
+            kind(shown_link.prepare(read(modified("f"), text(link)))),
+            ErrorKind::UnsupportedPath
+        );
+        let shown_text = Part::new(Action::Unstage, "f", Picks::Hunk(0), BLOCK).unwrap();
+        assert_eq!(
+            kind(shown_text.prepare(read(modified("f"), text(link)))),
+            STALE
+        );
+        for picks in [Picks::Hunk(1), Picks::Lines(&[d(4)]), Picks::Lines(&[d(9)])] {
+            let part = Part::new(Action::Stage, "f", picks, BLOCK).unwrap();
+            assert_eq!(
+                kind(part.prepare(read(modified("f"), text(BLOCK)))),
+                ErrorKind::UnchangedPath
+            );
+        }
+    }
+
+    #[test]
+    fn compares_bytes_that_are_not_utf8_by_the_text_shown_for_them() {
+        let latin = b"diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -1 +1 @@\n-caf\xe9\n+CAF\xe9\n";
+        let shown = String::from_utf8_lossy(latin).into_owned();
+        let part = Part::new(Action::Stage, "f", Picks::Hunk(0), &shown).unwrap();
+        let fresh = SidePatch::Diff(PatchBytes::Text(latin.to_vec()));
+        let prepared = part.prepare(read(modified("f"), fresh)).unwrap();
+        assert!(prepared.patch.ends_with(b"-caf\xe9\n+CAF\xe9\n"));
     }
 }

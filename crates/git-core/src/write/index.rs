@@ -1,4 +1,9 @@
-use super::{Change, Direction, Expect, Repo, Restored, store, txn::Txn};
+use super::{
+    Change, Direction, Expect, Repo, Restored,
+    partial::{Action, Part},
+    store,
+    txn::Txn,
+};
 use crate::{
     ChangeStatus, ErrorKind, Head, IndexObject, Mode, MoveSide, Moved, Oid, RepositoryError, Sides,
     Stages, StaleReason, StatusEntry,
@@ -408,6 +413,97 @@ pub(super) fn edit<'r>(
             Ok(())
         },
     )
+}
+
+/// Applies part of one file's patch to the index. `git apply` writes the
+/// entry anew, which drops skip-worktree and assume-unchanged. Skip-worktree
+/// comes back, and assume-unchanged stays dropped, as `git reset` drops it.
+pub(super) fn edit_part<'r>(
+    repo: &'r Repo,
+    deadline: WriteDeadline,
+    expect: &Expect,
+    part: &Part<'_>,
+) -> Result<(Txn<'r>, Change), RepositoryError> {
+    let (path, action) = (part.path(), part.action());
+    guarded(
+        repo,
+        deadline,
+        expect,
+        action.verb(),
+        &BTreeSet::from([path]),
+        |txn, before| {
+            let had = at(before, path);
+            if action == Action::Stage && had.is_empty() {
+                one_spelling(txn, before, path)?;
+            }
+            let prepared = part.read(txn)?;
+            txn.git(action.apply().args())
+                .input(prepared.patch)
+                .run(deadline)?
+                .succeeded()?;
+            if had.iter().any(|entry| entry.skip_worktree) && listed(txn, path)? {
+                mark(txn, &[(path, had)], "--skip-worktree", |entry| {
+                    entry.skip_worktree
+                })?;
+            }
+            Ok(())
+        },
+    )
+}
+
+/// With `core.ignorecase`, `git add` files a new path under the folder
+/// spelling the index already uses, and `git apply` does not, so a stage
+/// that creates an entry could leave two spellings of one folder.
+fn one_spelling(txn: &Txn<'_>, before: &Rows, path: &str) -> Result<(), RepositoryError> {
+    let Some(spelled) = folder_spelled_otherwise(before, path) else {
+        return Ok(());
+    };
+    let config = git::run(
+        &txn.repo().root,
+        &["config", "--type=bool", "--get", "core.ignorecase"],
+        txn.deadline().reads(),
+    )?;
+    let ignores_case = match config.status.code() {
+        Some(0) => config.stdout == b"true\n",
+        Some(1) => false,
+        _ => return Err(git::malformed()),
+    };
+    if !ignores_case {
+        return Ok(());
+    }
+    Err(RepositoryError::new(
+        ErrorKind::UnsupportedPath,
+        format!(
+            "This repository ignores case and its index spells the folder of {path} as {spelled}, so staging part of it would leave two spellings of that folder. Rename the folder on disk to match, or stage the whole file."
+        ),
+    ))
+}
+
+/// The leading folders of an index path that match `path`'s ignoring ASCII
+/// case but not byte for byte.
+fn folder_spelled_otherwise(rows: &Rows, path: &str) -> Option<String> {
+    let (folder, _) = path.rsplit_once('/')?;
+    let ours: Vec<&str> = folder.split('/').collect();
+    rows.keys()
+        .filter_map(|key| str::from_utf8(key).ok())
+        .find_map(|other| {
+            let (folder, _) = other.rsplit_once('/')?;
+            let theirs: Vec<&str> = folder.split('/').collect();
+            let same = ours
+                .iter()
+                .zip(&theirs)
+                .take_while(|(ours, theirs)| ours.eq_ignore_ascii_case(theirs))
+                .count();
+            (ours[..same] != theirs[..same]).then(|| theirs[..same].join("/"))
+        })
+}
+
+fn listed(txn: &Txn<'_>, path: &str) -> Result<bool, RepositoryError> {
+    Ok(!txn
+        .git(&["--literal-pathspecs", "ls-files", "-z", "--", path])
+        .run(txn.deadline())?
+        .succeeded()?
+        .is_empty())
 }
 
 /// Every index write: lock, check HEAD, read the private index, let `run`

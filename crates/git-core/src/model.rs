@@ -777,7 +777,8 @@ pub enum ErrorKind {
 pub enum StaleReason {
     /// HEAD is not the commit the request or the undo entry names.
     HeadMoved,
-    /// A path's index entries differ from the request or the undo entry.
+    /// A path's index entries, its file, or the patch shown for it differ
+    /// from the request or the undo entry.
     PathChanged,
     /// Git would also change `paths`, which the request does not name.
     PathNotChosen { paths: Vec<String> },
