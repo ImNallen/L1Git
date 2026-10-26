@@ -245,7 +245,8 @@ export const actions: readonly Action[] = [
     id: "closeFile",
     title: "Back to history",
     shortcut: { key: "Escape", modifier: "unchecked" },
-    available: (context) => keysFree(context) && context.file !== null,
+    available: (context) =>
+      keysFree(context) && !context.dialogOpen && context.file !== null,
     run: (commands) => commands.closeFile(),
   },
   {
