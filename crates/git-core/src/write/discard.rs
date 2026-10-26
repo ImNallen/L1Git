@@ -1,6 +1,5 @@
 use super::{
-    Applied, Change, Direction, EntryId, Expect, Operation, Repo, Restored,
-    index::{self, IndexEntry},
+    Applied, Change, Direction, EntryId, Expect, Operation, Repo, Restored, index,
     store::{self, EntryObjects, LockedStore, Log},
     txn::{Published, Txn},
 };
@@ -66,18 +65,6 @@ enum Content {
 enum Seen<'e> {
     Tracked(&'e IndexObject),
     Untracked,
-}
-
-impl Seen<'_> {
-    fn matches(self, fresh: &[IndexEntry]) -> bool {
-        match (self, fresh) {
-            (Self::Tracked(seen), [entry]) => {
-                entry.stage == 0 && entry.mode == seen.mode && entry.oid == seen.oid
-            }
-            (Self::Untracked, []) => true,
-            _ => false,
-        }
-    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -203,8 +190,11 @@ fn targets(entries: &[StatusEntry]) -> Result<Vec<Target<'_>>, RepositoryError> 
 /// limit.
 const PATHS_PER_READ: usize = 1000;
 
-/// Each entry must be one that Git reports now, as the status the user saw
-/// did, so a request cannot name a file Git ignores or hides from status.
+/// Each entry must be one that Git reports now, with the same index object
+/// and the same deleted-or-present side, so a request cannot name a file
+/// that changed, or one that Git ignores or hides from status. Status shows
+/// a deleted intent-to-add file with the empty blob, so the index's flags
+/// catch that one.
 fn listed(
     root: &Path,
     targets: &[Target<'_>],
@@ -263,14 +253,12 @@ pub(super) fn discard(
     let paths: Vec<&str> = targets.iter().map(|target| target.path).collect();
     let rows = index::read(&txn)?;
     let stats = guard(&txn, &paths)?;
-    for (target, stat) in targets.iter().zip(&stats) {
-        let fresh = index::at(&rows, target.path);
-        if fresh.iter().any(|entry| entry.intent_to_add) {
-            return Err(added_with_intent(target.path));
-        }
-        if !target.seen.matches(fresh) || target.on_disk != stat.is_some() {
-            return Err(changed(target.path));
-        }
+    if let Some(target) = targets.iter().find(|target| {
+        index::at(&rows, target.path)
+            .iter()
+            .any(|entry| entry.intent_to_add)
+    }) {
+        return Err(added_with_intent(target.path));
     }
     listed(&repo.root, &targets, deadline)?;
     let scratch = Scratch::new(&txn)?;
@@ -290,7 +278,7 @@ pub(super) fn discard(
             .run(deadline)?
             .succeeded()?;
     }
-    let (applied, discard, recorded) = store.record_with(&txn, log, operation, |entry| {
+    let (applied, mut discard, recorded) = store.record_with(&txn, log, operation, |entry| {
         let files = entry.files();
         store::private_folder()
             .create(&files)
@@ -339,11 +327,9 @@ pub(super) fn discard(
     {
         return Err(error);
     }
-    let kept = DiscardChange {
-        paths: discard.paths[..placed].to_vec(),
-    };
-    refresh(&txn, &kept.tracked());
-    let published = txn.commit_recorded(recorded, &Change::Discard(kept));
+    discard.paths.truncate(placed);
+    refresh(&txn, &discard.tracked());
+    let published = txn.commit_recorded(recorded, &Change::Discard(discard));
     match failure {
         None => Ok((applied, published.ok())),
         Some(error) => Err(RepositoryError::new(
@@ -522,10 +508,9 @@ fn no_other_names(
         .zip(stats)
         .filter_map(|(path, stat)| Some((stat.as_ref()?.identity?, *path)))
         .collect();
-    if chosen.is_empty() {
-        return Ok(());
-    }
-    for chunk in paths.chunks(PATHS_PER_READ) {
+    let names: BTreeSet<&str> = paths.iter().copied().collect();
+    let on_disk: Vec<&str> = chosen.values().copied().collect();
+    for chunk in on_disk.chunks(PATHS_PER_READ) {
         let specs: Vec<String> = chunk
             .iter()
             .map(|path| format!(":(icase,literal){path}"))
@@ -538,7 +523,7 @@ fn no_other_names(
             .filter(|name| !name.is_empty())
         {
             let other = crate::git::text(name);
-            if paths.contains(&other.as_str()) {
+            if names.contains(other.as_str()) {
                 continue;
             }
             let identity = Stat::of(&txn.repo().root.join(&other))
