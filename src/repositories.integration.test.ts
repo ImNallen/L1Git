@@ -1085,7 +1085,7 @@ describe("real Rust writes, undo, and redo", () => {
       .map((line) => line.split("flags:").pop()?.trim())
       .join("\n");
   const roundTrip = async (
-    request: ReturnType<typeof write>,
+    request: { path: string; operation: unknown },
     written: () => void,
   ) => {
     const before = index(request.path);
@@ -1700,6 +1700,187 @@ describe("real Rust writes, undo, and redo", () => {
         })
       ).status,
     ).toBe(400);
+  });
+
+  const numbered = (count: number) =>
+    Array.from({ length: count }, (_, at) => `line ${at + 1}\n`).join("");
+  const edited = (text: string, lines: Record<number, string>) =>
+    text
+      .split(/(?<=\n)/)
+      .map((line, at) => lines[at + 1] ?? line)
+      .join("");
+  const threeHunks = edited(numbered(30), {
+    3: "line 3 changed\n",
+    15: "line 15 changed\n",
+    27: "line 27 changed\n",
+  });
+  const shownPatch = async (
+    path: string,
+    file: string,
+    side: "staged" | "unstaged",
+  ) => {
+    const patch = worktreePatchEnvelope.parse(
+      await (await post({ op: "worktreePatch", path, file, side })).json(),
+    ).data;
+    if (patch.kind !== "diff" || patch.diff.kind !== "text")
+      throw new Error(`${file} has no text patch on its ${side} side`);
+    return patch.diff.patch;
+  };
+  const partWrite = async (
+    path: string,
+    operation: Record<string, unknown> & { kind: string; path: string },
+  ) => {
+    const side = operation.kind.startsWith("unstage") ? "staged" : "unstaged";
+    return {
+      op: "write",
+      path,
+      operation: {
+        ...operation,
+        shown: await shownPatch(path, operation.path, side),
+      },
+      expect: { head: (await view(path)).head },
+    };
+  };
+  const staged = (path: string, file: string) => git(path, "show", `:${file}`);
+
+  it("stages, unstages, and discards a hunk and chosen lines, and undoes each", async () => {
+    const path = committed({ "f.txt": numbered(30) });
+    writeFileSync(join(path, "f.txt"), threeHunks);
+    await roundTrip(
+      await partWrite(path, { kind: "stageHunk", path: "f.txt", hunk: 1 }),
+      () =>
+        expect(staged(path, "f.txt")).toBe(
+          edited(numbered(30), { 15: "line 15 changed\n" }),
+        ),
+    );
+    await roundTrip(
+      await partWrite(path, {
+        kind: "stageLines",
+        path: "f.txt",
+        lines: [
+          { side: "deletions", line: 27 },
+          { side: "additions", line: 27 },
+        ],
+      }),
+      () =>
+        expect(staged(path, "f.txt")).toBe(
+          edited(numbered(30), { 27: "line 27 changed\n" }),
+        ),
+    );
+
+    git(path, "add", "f.txt");
+    await roundTrip(
+      await partWrite(path, { kind: "unstageHunk", path: "f.txt", hunk: 2 }),
+      () =>
+        expect(staged(path, "f.txt")).toBe(
+          edited(threeHunks, { 27: "line 27\n" }),
+        ),
+    );
+    await roundTrip(
+      await partWrite(path, {
+        kind: "unstageLines",
+        path: "f.txt",
+        lines: [
+          { side: "deletions", line: 3 },
+          { side: "additions", line: 3 },
+        ],
+      }),
+      () =>
+        expect(staged(path, "f.txt")).toBe(
+          edited(threeHunks, { 3: "line 3\n" }),
+        ),
+    );
+    git(path, "reset", "--quiet");
+
+    const discard = await partWrite(path, {
+      kind: "discardHunk",
+      path: "f.txt",
+      hunk: 0,
+    });
+    const applied = writeEnvelope.parse(
+      await (await post(discard)).json(),
+    ).data;
+    expect(applied.operation).toEqual(discard.operation);
+    expect(readFileSync(join(path, "f.txt"), "utf8")).toBe(
+      edited(threeHunks, { 3: "line 3\n" }),
+    );
+    undoEnvelope.parse(
+      await (await post({ op: "undo", path, id: applied.id })).json(),
+    );
+    expect(readFileSync(join(path, "f.txt"), "utf8")).toBe(threeHunks);
+
+    writeFileSync(join(path, "new.txt"), "one\ntwo\nthree\n");
+    const lines = await partWrite(path, {
+      kind: "discardLines",
+      path: "new.txt",
+      lines: [{ side: "additions", line: 2 }],
+    });
+    const removed = writeEnvelope.parse(await (await post(lines)).json()).data;
+    expect(readFileSync(join(path, "new.txt"), "utf8")).toBe("one\nthree\n");
+    expect(porcelain(path)).toBe(" M f.txt\n?? new.txt\n");
+    undoEnvelope.parse(
+      await (await post({ op: "undo", path, id: removed.id })).json(),
+    );
+    expect(readFileSync(join(path, "new.txt"), "utf8")).toBe(
+      "one\ntwo\nthree\n",
+    );
+    expect(
+      historyEnvelope.parse(
+        await (await post({ op: "undoHistory", path })).json(),
+      ).data.redo,
+    ).toEqual(removed);
+  });
+
+  it("refuses a hunk write whose shown patch is stale, and an unknown field", async () => {
+    const path = committed({ "f.txt": numbered(30) });
+    writeFileSync(join(path, "f.txt"), threeHunks);
+    const request = await partWrite(path, {
+      kind: "stageHunk",
+      path: "f.txt",
+      hunk: 1,
+    });
+    writeFileSync(join(path, "f.txt"), `inserted\n${threeHunks}`);
+    const before = index(path);
+    expect(failure.parse(await (await post(request)).json()).error).toEqual({
+      kind: "staleView",
+      reason: "pathChanged",
+      message: "This file changed. Refresh to see its current diff.",
+    });
+    expect(index(path)).toBe(before);
+    expect(
+      (
+        await rejected({
+          ...request,
+          operation: { ...request.operation, side: "unstaged" },
+        })
+      ).status,
+    ).toBe(400);
+  });
+
+  it("stages a hunk of a 900 KiB patch and answers 400 naming the size of a 5 MiB body", async () => {
+    const wide = `start\n${Array.from(
+      { length: 15_000 },
+      (_, at) => `line ${String(at).padStart(6, "0")} ${"x".repeat(50)}\n`,
+    ).join("")}`;
+    const path = committed({ "big.txt": "start\n" });
+    writeFileSync(join(path, "big.txt"), wide);
+    const request = await partWrite(path, {
+      kind: "stageHunk",
+      path: "big.txt",
+      hunk: 0,
+    });
+    expect(request.operation.shown.length).toBeGreaterThan(900 * 1024);
+    writeEnvelope.parse(await (await post(request)).json());
+    expect(staged(path, "big.txt")).toBe(wide);
+
+    const tooLarge = await rejected({
+      ...request,
+      operation: { ...request.operation, shown: "x".repeat(5 * 1024 * 1024) },
+    });
+    expect(tooLarge.status).toBe(400);
+    expect(tooLarge.error).toMatch(
+      /^The request body is \d+ bytes, over the 4194304-byte limit\.$/,
+    );
   });
 });
 
