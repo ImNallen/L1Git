@@ -223,7 +223,7 @@ impl LockedStore {
         let Ok((applied, change)) = self.record_of(id) else {
             return Ok(false);
         };
-        if change.keeps_overwritten_files() {
+        if change.kept_after_a_stop(&applied) {
             return Ok(true);
         }
         if applied.root == opened.root() {
@@ -245,6 +245,7 @@ impl LockedStore {
 
     pub(super) fn entry(&self, id: EntryId) -> EntryObjects {
         EntryObjects {
+            id,
             objects: self.entry_dir(id).join("objects"),
         }
     }
@@ -560,10 +561,15 @@ impl Objects {
 }
 
 pub(super) struct EntryObjects {
+    id: EntryId,
     objects: PathBuf,
 }
 
 impl EntryObjects {
+    pub(super) const fn id(&self) -> EntryId {
+        self.id
+    }
+
     pub(super) fn files(&self) -> PathBuf {
         self.objects.with_file_name("files")
     }

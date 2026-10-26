@@ -1,5 +1,5 @@
 use super::{
-    Applied, Change, Direction, Expect, Operation, Repo, Restored,
+    Applied, Change, Direction, EntryId, Expect, Operation, Repo, Restored,
     index::{self, IndexEntry},
     store::{self, EntryObjects, LockedStore, Log},
     txn::{Published, Txn},
@@ -325,6 +325,7 @@ pub(super) fn discard(
             unchanged(&repo.root, &discarded.path, stat)?;
             place(
                 &repo.root,
+                applied.id,
                 &discarded.path,
                 &discarded.after,
                 &checkout.join(&discarded.path),
@@ -418,6 +419,7 @@ fn place_step(
 ) -> Result<(), RepositoryError> {
     let root = &txn.repo().root;
     let files = entry.files();
+    sweep(root, entry.id(), change);
     let paths: Vec<&str> = change.paths.iter().map(|path| path.path.as_str()).collect();
     let stats = guard(txn, &paths)?;
     let mut pending = Vec::new();
@@ -457,7 +459,7 @@ fn place_step(
         .try_for_each(|((discarded, to, stat), temporary)| {
             turn(&discarded.path);
             unchanged(root, &discarded.path, stat)?;
-            place(root, &discarded.path, to, temporary)
+            place(root, entry.id(), &discarded.path, to, temporary)
         })
 }
 
@@ -696,6 +698,7 @@ fn prepare(content: &Content, files: &Path, temporary: &Path) -> io::Result<()> 
 
 fn place(
     root: &Path,
+    id: EntryId,
     path: &str,
     content: &Content,
     prepared: &Path,
@@ -711,7 +714,7 @@ fn place(
             .map_or(Ok(()), fs::create_dir_all)
             .and_then(|()| match fs::rename(prepared, &file) {
                 Err(error) if error.kind() == io::ErrorKind::CrossesDevices => {
-                    rename_across(prepared, &file)
+                    rename_across(prepared, &file, &beside(id, &file))
                 }
                 other => other,
             }),
@@ -721,22 +724,32 @@ fn place(
 
 /// A linked worktree can live on another file system than its Git dir, so
 /// the prepared file is copied beside the path first and renamed from there.
-fn rename_across(prepared: &Path, file: &Path) -> io::Result<()> {
-    let mut name = std::ffi::OsString::from(".l1git-");
-    name.push(std::process::id().to_string());
-    name.push("-");
-    name.push(file.file_name().unwrap_or_default());
-    let beside = file.with_file_name(name);
+fn rename_across(prepared: &Path, file: &Path, beside: &Path) -> io::Result<()> {
     let copied = if fs::symlink_metadata(prepared)?.is_symlink() {
-        fs::read_link(prepared).and_then(|target| symlink(&link_bytes(target), &beside))
+        fs::read_link(prepared).and_then(|target| symlink(&link_bytes(target), beside))
     } else {
-        fs::copy(prepared, &beside).map(drop)
+        fs::copy(prepared, beside).map(drop)
     };
-    let renamed = copied.and_then(|()| fs::rename(&beside, file));
+    let renamed = copied.and_then(|()| fs::rename(beside, file));
     if renamed.is_err() {
-        let _ = fs::remove_file(&beside);
+        let _ = fs::remove_file(beside);
     }
     renamed
+}
+
+/// The copy a placement across file systems makes beside `file`. It is named
+/// for the entry, so a stop between the copy and the rename leaves a file
+/// that the entry's next settle, undo, or redo can prove is its own.
+fn beside(id: EntryId, file: &Path) -> PathBuf {
+    let mut name = std::ffi::OsString::from(format!(".l1git-{id}-"));
+    name.push(file.file_name().unwrap_or_default());
+    file.with_file_name(name)
+}
+
+pub(super) fn sweep(root: &Path, id: EntryId, change: &DiscardChange) {
+    for discarded in &change.paths {
+        let _ = fs::remove_file(beside(id, &root.join(&discarded.path)));
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

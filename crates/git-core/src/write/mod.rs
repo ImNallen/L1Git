@@ -18,7 +18,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::{
     fmt,
-    path::PathBuf,
+    path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
 use store::{EntryObjects, LockedStore, Log, Objects, Position, Step, Store};
@@ -193,9 +193,15 @@ impl Change {
         }
     }
 
-    const fn keeps_overwritten_files(&self) -> bool {
+    /// A discard may have changed files before L1 Git stopped, and its entry
+    /// holds the only copy of what they held, so a pending one is always
+    /// kept, without the copies a stopped placement left beside its paths.
+    fn kept_after_a_stop(&self, applied: &Applied) -> bool {
         match self {
-            Self::Discard(_) => true,
+            Self::Discard(change) => {
+                discard::sweep(Path::new(&applied.root), applied.id, change);
+                true
+            }
             Self::Index(_) | Self::Ref(_) => false,
         }
     }
