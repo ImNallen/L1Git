@@ -128,9 +128,7 @@ function staleCause(problem: KnownStale, step: Step | null): string {
         ? "HEAD moved since L1 Git read this worktree."
         : `HEAD moved after this change, so L1 Git cannot ${step} it exactly.`;
     case "pathChanged":
-      return step === null
-        ? "A chosen file changed since L1 Git read it."
-        : `A file in this change was edited since, so L1 Git cannot ${step} it without losing that edit.`;
+      return problem.message;
     case "pathNotChosen": {
       const { paths } = problem;
       const one = paths.length === 1;
@@ -158,7 +156,9 @@ export function failureText(
   if (problem.kind !== "staleView" || problem.reason === "unknown")
     return `${what} ${problem.message}`;
   if (action === "write")
-    return `${what} ${staleCause(problem, null)} L1 Git reread the worktree, so check the lists and try again.`;
+    return problem.reason === "pathChanged"
+      ? `${what} ${problem.message}`
+      : `${what} ${staleCause(problem, null)} L1 Git reread the worktree, so check the lists and try again.`;
   const then = !blocking
     ? "L1 Git reread the undo history."
     : action === "undo"
