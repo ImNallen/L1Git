@@ -348,10 +348,11 @@ fn refuses_to_overwrite_an_ignored_file() {
 
 #[test]
 fn refuses_a_change_the_target_already_holds() {
-    for setup in [
-        "stage the target's text",
-        "stage a new file",
-        "delete a file",
+    for (setup, named) in [
+        ("stage the target's text", "both.txt"),
+        ("stage a new file", "feature.txt"),
+        ("delete a file", "both.txt"),
+        ("rename a file in the worktree", "both.txt"),
     ] {
         let repo = Repo::new();
         match setup {
@@ -363,7 +364,11 @@ fn refuses_a_change_the_target_already_holds() {
                 fs::write(repo.root.join("feature.txt"), "feature\n").unwrap();
                 repo.git(&["add", "feature.txt"]);
             }
-            _ => fs::remove_file(repo.root.join("both.txt")).unwrap(),
+            "delete a file" => fs::remove_file(repo.root.join("both.txt")).unwrap(),
+            _ => {
+                fs::rename(repo.root.join("both.txt"), repo.root.join("moved.txt")).unwrap();
+                repo.git(&["add", "--intent-to-add", "moved.txt"]);
+            }
         }
         let before = repo.state();
         let error = refused(repo.checkout(repo.remote("feature")));
@@ -373,9 +378,30 @@ fn refuses_a_change_the_target_already_holds() {
             "{setup}: {}",
             error.message
         );
-        assert!(error.message.contains(".txt"), "{setup}: {}", error.message);
+        assert!(error.message.contains(named), "{setup}: {}", error.message);
         assert_eq!(repo.state(), before, "{setup}");
     }
+}
+
+#[test]
+fn refuses_an_untracked_file_a_sparse_checkout_would_take_over() {
+    let repo = Repo::new();
+    repo.git(&["switch", "--quiet", "-c", "outside"]);
+    fs::create_dir(repo.root.join("out")).unwrap();
+    commit(&repo.root, &[("out/new.txt", "new\n")], "outside");
+    repo.git(&["switch", "--quiet", "main"]);
+    repo.git(&["sparse-checkout", "set", "--cone", "in"]);
+    fs::create_dir(repo.root.join("out")).unwrap();
+    fs::write(repo.root.join("out/new.txt"), "new\n").unwrap();
+    let before = repo.state();
+    let error = refused(repo.checkout(repo.local("outside")));
+    assert_eq!(error.kind, ErrorKind::Conflict, "{}", error.message);
+    assert!(error.message.contains("out/new.txt"), "{}", error.message);
+    assert_eq!(repo.state(), before);
+    assert_eq!(
+        fs::read_to_string(repo.root.join("out/new.txt")).unwrap(),
+        "new\n"
+    );
 }
 
 #[test]
@@ -518,6 +544,39 @@ fn undo_refuses_to_delete_a_created_branch_that_moved() {
         error.message
     );
     assert_eq!(repo.state(), before);
+}
+
+#[test]
+fn redo_refuses_a_branch_made_again_after_undo_whatever_its_tip() {
+    let repo = Repo::new();
+    let applied = repo.checkout(repo.remote("topic")).unwrap();
+    repo.undo(&applied).unwrap();
+    repo.git(&["branch", "--quiet", "--no-track", "topic", "origin/topic"]);
+    repo.git(&["config", "branch.topic.description", "mine"]);
+    let made_again = repo.state();
+    let error = refused(repo.redo(&applied));
+    assert_eq!(
+        error.kind,
+        ErrorKind::StaleView {
+            reason: StaleReason::BranchChanged
+        },
+        "{}",
+        error.message
+    );
+    assert_eq!(repo.state(), made_again);
+
+    repo.git(&["switch", "--quiet", "topic"]);
+    let checked_out = repo.state();
+    let error = refused(repo.redo(&applied));
+    assert_eq!(
+        error.kind,
+        ErrorKind::StaleView {
+            reason: StaleReason::BranchChanged
+        },
+        "{}",
+        error.message
+    );
+    assert_eq!(repo.state(), checked_out);
 }
 
 #[test]

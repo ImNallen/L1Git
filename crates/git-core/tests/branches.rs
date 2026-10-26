@@ -509,6 +509,33 @@ fn an_undo_refuses_a_branch_moved_after_the_write() {
 }
 
 #[test]
+fn a_step_that_creates_a_branch_refuses_one_made_again_at_the_same_tip() {
+    let repo = Repo::new();
+    let created = repo
+        .create(
+            "late",
+            Start::Commit {
+                oid: repo.oid("HEAD"),
+            },
+        )
+        .unwrap();
+    repo.undo(&created).unwrap();
+    repo.git(&["branch", "--quiet", "late", "HEAD"]);
+    repo.git(&["config", "branch.late.description", "mine"]);
+    let made_again = repo.state();
+    assert_eq!(kind(repo.redo(&created)), BRANCH_CHANGED);
+    assert_eq!(repo.state(), made_again);
+
+    repo.git(&["branch", "--quiet", "gone", "topic"]);
+    let deleted = repo.delete("gone").unwrap();
+    repo.git(&["branch", "--quiet", "gone", "topic"]);
+    repo.git(&["config", "branch.gone.description", "mine"]);
+    let made_again = repo.state();
+    assert_eq!(kind(repo.undo(&deleted)), BRANCH_CHANGED);
+    assert_eq!(repo.state(), made_again);
+}
+
+#[test]
 fn refuses_symbolic_branches_and_a_rename_undo_could_not_reverse() {
     let repo = Repo::new();
     repo.git(&["symbolic-ref", "refs/heads/alias", "refs/heads/topic"]);
