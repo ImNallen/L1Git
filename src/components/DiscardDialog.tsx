@@ -4,12 +4,12 @@ import { ConfirmDialog } from "./ConfirmDialog";
 
 type Props = {
   paths: readonly string[];
-  left: number;
+  skipped: number;
   onDiscard: () => void;
   onClose: () => void;
 };
 
-export function DiscardDialog({ paths, left, onDiscard, onClose }: Props) {
+export function DiscardDialog({ paths, skipped, onDiscard, onClose }: Props) {
   const { shown, more } = shownPaths(paths);
   const [only] = paths;
   return (
@@ -37,11 +37,11 @@ export function DiscardDialog({ paths, left, onDiscard, onClose }: Props) {
           <li className="muted">and {more.toLocaleString()} more</li>
         )}
       </ul>
-      {left > 0 && (
+      {skipped > 0 && (
         <p>
-          L1 Git leaves {left.toLocaleString()} {left === 1 ? "item" : "items"}{" "}
-          it cannot discard, such as nested repositories, submodules, and files
-          added with git add -N.
+          L1 Git leaves {skipped.toLocaleString()}{" "}
+          {skipped === 1 ? "item" : "items"} it cannot discard, such as nested
+          repositories, submodules, and files added with git add -N.
         </p>
       )}
     </ConfirmDialog>

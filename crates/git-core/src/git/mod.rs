@@ -46,8 +46,6 @@ fn base(path: &Path, lazy_fetch: bool) -> Command {
     command
 }
 
-/// Answers every credential prompt no, so a fetch Git starts fails instead
-/// of waiting for a person.
 fn without_prompts(command: &mut Command) -> &mut Command {
     command
         .env("SSH_ASKPASS", "/usr/bin/false")

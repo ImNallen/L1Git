@@ -184,7 +184,11 @@ impl<'a> Write<'a> {
                 "--ignore-missing",
                 "post-index-change",
                 "--",
-                if published.worktree() { "1" } else { "0" },
+                if published.worktree_updated() {
+                    "1"
+                } else {
+                    "0"
+                },
                 if published.skip_worktree() { "1" } else { "0" },
             ],
             env: Vec::new(),
@@ -217,9 +221,7 @@ impl<'a> Write<'a> {
         self
     }
 
-    /// Lets Git download missing blobs in a partial clone, with every
-    /// credential prompt answered no, as a fast-forward merge does.
-    pub(crate) fn lazy_fetch(mut self) -> Self {
+    pub(crate) fn lazy_fetch_unprompted(mut self) -> Self {
         self.lazy_fetch = true;
         self
     }

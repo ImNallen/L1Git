@@ -15,9 +15,6 @@ const PREFIX: &str = "l1git-";
 
 pub(crate) const HOOK_OFF: &str = "L1GIT_HOOK_OFF";
 
-/// Only `commit_write`, `commit_recorded`, and `commit_step` replace the
-/// index with the copy, so nothing reaches the index before the undo history
-/// names it.
 pub(crate) struct Txn<'r> {
     repo: &'r Repo,
     lock: PathBuf,
@@ -202,9 +199,6 @@ impl<'r> Txn<'r> {
         Ok((applied, published))
     }
 
-    /// Replaces the index with the copy after a write that already changed
-    /// files on disk, so the record is kept even when the index cannot be
-    /// replaced.
     pub(super) fn commit_recorded(
         mut self,
         recorded: Recorded<'_>,
@@ -247,7 +241,7 @@ impl<'r> Txn<'r> {
             root: self.repo.root.clone(),
             deadline: self.deadline,
             skip_worktree: change.touches_skip_worktree(),
-            worktree: matches!(change, Change::Discard(_)),
+            worktree_updated: matches!(change, Change::Discard(_)),
             hooks: self.hooks.any(),
         })
     }
@@ -360,7 +354,7 @@ pub(crate) struct Published {
     root: PathBuf,
     deadline: WriteDeadline,
     skip_worktree: bool,
-    worktree: bool,
+    worktree_updated: bool,
     hooks: bool,
 }
 
@@ -373,9 +367,8 @@ impl Published {
         self.skip_worktree
     }
 
-    /// Whether the write also changed files on disk.
-    pub(crate) const fn worktree(&self) -> bool {
-        self.worktree
+    pub(crate) const fn worktree_updated(&self) -> bool {
+        self.worktree_updated
     }
 
     /// Runs `post-index-change` after the write let go of its locks, as Git

@@ -39,8 +39,7 @@ impl Discarded {
     }
 }
 
-/// A path's raw state on disk. A file's bytes are kept as `copy` in the
-/// entry's `files` folder, so no filter or line-ending rule ever touches them.
+/// File bytes are copied raw, so no Git filter or line-ending rule touches them.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(
     tag = "kind",
@@ -74,8 +73,7 @@ impl Seen<'_> {
 struct Target<'e> {
     path: &'e str,
     seen: Seen<'e>,
-    /// Whether the user saw something on disk at the path.
-    present: bool,
+    on_disk: bool,
 }
 
 fn unsupported(message: String) -> RepositoryError {
@@ -93,7 +91,7 @@ fn target(entry: &StatusEntry) -> Result<Target<'_>, RepositoryError> {
         Ok(Target {
             path,
             seen: Seen::Tracked(index),
-            present: unstaged != ChangeStatus::Deleted,
+            on_disk: unstaged != ChangeStatus::Deleted,
         })
     };
     match entry {
@@ -151,7 +149,7 @@ fn target(entry: &StatusEntry) -> Result<Target<'_>, RepositoryError> {
         StatusEntry::Untracked { path } => Ok(Target {
             path,
             seen: Seen::Untracked,
-            present: true,
+            on_disk: true,
         }),
     }
 }
@@ -223,13 +221,13 @@ pub(super) fn discard(
     }
     let paths: Vec<&str> = targets.iter().map(|target| target.path).collect();
     let rows = index::read(&txn)?;
-    let stats = guard(&repo.root, &paths)?;
+    let stats = writable_stats(&repo.root, &paths)?;
     for (target, stat) in targets.iter().zip(&stats) {
         let fresh = index::at(&rows, target.path);
         if fresh.iter().any(|entry| entry.intent_to_add) {
             return Err(added_with_intent(target.path));
         }
-        if !target.seen.matches(fresh) || target.present != stat.is_some() {
+        if !target.seen.matches(fresh) || target.on_disk != stat.is_some() {
             return Err(changed(target.path));
         }
     }
@@ -245,7 +243,7 @@ pub(super) fn discard(
         prefix.push("/");
         let prefix = format!("--prefix={}", prefix.to_string_lossy());
         txn.git(&["checkout-index", &prefix, "-f", "-z", "--stdin"])
-            .lazy_fetch()
+            .lazy_fetch_unprompted()
             .input(index::nul_separated(tracked.iter().copied()))
             .run(deadline)?
             .succeeded()?;
@@ -310,8 +308,6 @@ pub(super) fn discard(
     Ok((applied, published))
 }
 
-/// Puts each path back to its other recorded state. A path already there is
-/// left alone, so a step stopped partway finishes when repeated.
 pub(super) fn step(
     txn: &Txn<'_>,
     entry: &EntryObjects,
@@ -321,7 +317,7 @@ pub(super) fn step(
     let root = &txn.repo().root;
     let files = entry.files();
     let paths: Vec<&str> = change.paths.iter().map(|path| path.path.as_str()).collect();
-    let stats = guard(root, &paths)?;
+    let stats = writable_stats(root, &paths)?;
     let mut pending = Vec::new();
     for (discarded, stat) in change.paths.iter().zip(stats) {
         let (from, to) = discarded.source_and_target(direction);
@@ -365,7 +361,6 @@ pub(super) fn step(
         .try_for_each(|((discarded, to, _), temporary)| place(root, &discarded.path, to, temporary))
 }
 
-/// A scratch folder in the Git dir. `Txn::begin` sweeps one a crash left.
 struct Scratch(PathBuf);
 
 impl Scratch {
@@ -383,10 +378,7 @@ impl Drop for Scratch {
     }
 }
 
-/// Refuses a path L1 Git must not write: one below a nested repository, a
-/// file, or a symlink, one that is a folder, and two names for one file.
-/// Answers each path's `lstat` identity, or `None` when it is absent.
-fn guard(root: &Path, paths: &[&str]) -> Result<Vec<Option<Stat>>, RepositoryError> {
+fn writable_stats(root: &Path, paths: &[&str]) -> Result<Vec<Option<Stat>>, RepositoryError> {
     let mut files: BTreeMap<(u64, u64), &str> = BTreeMap::new();
     let mut stats = Vec::new();
     for path in paths {
@@ -421,7 +413,10 @@ fn guard(root: &Path, paths: &[&str]) -> Result<Vec<Option<Stat>>, RepositoryErr
                     "{path} is a folder on disk. Move or delete the folder, then discard {path}."
                 )));
             }
-            if let Some(other) = stat.file().and_then(|file| files.insert(file, path)) {
+            if let Some(other) = stat
+                .identity
+                .and_then(|identity| files.insert(identity, path))
+            {
                 return Err(unsupported(format!(
                     "{other} and {path} are the same file on disk. Discard one of them."
                 )));
@@ -518,8 +513,6 @@ fn prepare(content: &Content, files: &Path, temporary: &Path) -> io::Result<()> 
     }
 }
 
-/// Changes one path in one step: deletes it, or renames the prepared file
-/// over it after creating the folders above it.
 fn place(
     root: &Path,
     path: &str,
@@ -543,8 +536,7 @@ fn place(
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Stat {
     folder: bool,
-    device: u64,
-    inode: u64,
+    identity: Option<(u64, u64)>,
     size: u64,
     mode: u32,
     modified: (i64, i64),
@@ -559,11 +551,6 @@ impl Stat {
         };
         Ok(Some(Self::from(&metadata)))
     }
-
-    /// `None` where the file system gives no inode numbers.
-    fn file(&self) -> Option<(u64, u64)> {
-        (self.inode != 0).then_some((self.device, self.inode))
-    }
 }
 
 #[cfg(unix)]
@@ -572,8 +559,7 @@ impl From<&fs::Metadata> for Stat {
         use std::os::unix::fs::MetadataExt;
         Self {
             folder: metadata.is_dir(),
-            device: metadata.dev(),
-            inode: metadata.ino(),
+            identity: Some((metadata.dev(), metadata.ino())),
             size: metadata.size(),
             mode: metadata.mode(),
             modified: (metadata.mtime(), metadata.mtime_nsec()),
@@ -621,8 +607,7 @@ impl From<&fs::Metadata> for Stat {
         };
         Self {
             folder: metadata.is_dir(),
-            device: 0,
-            inode: 0,
+            identity: None,
             size: metadata.len(),
             mode: 0,
             modified: since(metadata.modified()),

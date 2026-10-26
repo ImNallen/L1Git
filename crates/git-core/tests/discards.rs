@@ -110,8 +110,6 @@ impl Repo {
             .collect()
     }
 
-    /// Every path below the root but `.git`, with its kind, permission bits,
-    /// and bytes or link target.
     fn disk(&self) -> BTreeMap<String, String> {
         let mut found = BTreeMap::new();
         let mut folders = vec![self.root.clone()];
@@ -169,9 +167,6 @@ fn executable(file: &Path, on: bool) {
     .unwrap();
 }
 
-/// The files of `c2_discard_undo.sh`: a lossy clean filter, an LFS-style
-/// filter, `eol=crlf` with LF bytes, an executable bit turned on, a
-/// retargeted symlink, an untracked file, and a file only its owner reads.
 fn filtered() -> Repo {
     let repo = Repo::new(&[]);
     let filters = repo.directory.path().join("filters");

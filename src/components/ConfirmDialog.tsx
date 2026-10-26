@@ -13,7 +13,6 @@ type Props = {
   children: ReactNode;
 };
 
-/** Asks before a destructive action. Cancel has focus first. */
 export function ConfirmDialog({
   icon: Icon,
   title,

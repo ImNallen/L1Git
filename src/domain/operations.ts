@@ -41,27 +41,26 @@ export function commitWrite(
 
 export const movesRefs = (operation: Operation) => !("entries" in operation);
 
-/**
- * Whether the core discards this entry's unstaged side. It leaves
- * submodules, nested repositories, files added with `git add -N`, and
- * conflicts.
- */
 export function discardable(entry: StatusEntry): boolean {
   switch (entry.kind) {
-    case "ordinary":
+    case "ordinary": {
+      const addedWithIntent = entry.index === null;
       return (
         entry.submodule === null &&
-        entry.index !== null &&
+        !addedWithIntent &&
         entry.sides.kind !== "staged"
       );
+    }
     case "renamed":
       return (
         entry.submodule === null &&
         entry.side.kind === "staged" &&
         entry.side.unstaged !== null
       );
-    case "untracked":
-      return !entry.path.endsWith("/");
+    case "untracked": {
+      const nestedRepository = entry.path.endsWith("/");
+      return !nestedRepository;
+    }
     case "unmerged":
       return false;
   }
@@ -70,19 +69,17 @@ export function discardable(entry: StatusEntry): boolean {
 export const discardablePaths = (status: WorktreeStatus): ReadonlySet<string> =>
   new Set(status.entries.filter(discardable).map((entry) => entry.path));
 
-/** The chosen Unstaged paths L1 Git can discard, and how many it leaves. */
 export function discardChoice(
   status: WorktreeStatus,
   paths: readonly string[],
-): { paths: string[]; left: number } {
+): { paths: string[]; skipped: number } {
   const able = discardablePaths(status);
   const kept = paths.filter((path) => able.has(path));
-  return { paths: kept, left: paths.length - kept.length };
+  return { paths: kept, skipped: paths.length - kept.length };
 }
 
 const SHOWN_PATHS = 10;
 
-/** The paths a confirmation lists by name, and how many it only counts. */
 export function shownPaths(paths: readonly string[]): {
   shown: readonly string[];
   more: number;

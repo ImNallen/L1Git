@@ -219,7 +219,7 @@ group("discard", () => {
         "added.txt",
         "finder.ts",
       ]),
-    ).toEqual({ paths: ["README.md", "notes.txt", "finder.ts"], left: 3 });
+    ).toEqual({ paths: ["README.md", "notes.txt", "finder.ts"], skipped: 3 });
   });
 });
 

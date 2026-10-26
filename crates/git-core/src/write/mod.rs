@@ -189,9 +189,7 @@ impl Change {
         }
     }
 
-    /// A pending discard may have changed files before L1 Git stopped, and
-    /// its entry holds the only copy of what they held.
-    const fn kept_while_pending(&self) -> bool {
+    const fn keeps_overwritten_files(&self) -> bool {
         match self {
             Self::Discard(_) => true,
             Self::Index(_) | Self::Ref(_) => false,

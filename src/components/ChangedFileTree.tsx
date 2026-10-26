@@ -27,8 +27,7 @@ export type RowAction = {
   label: string;
   disabled: boolean;
   run: (paths: string[], row: string) => void;
-  /** The paths it acts on. A row with none of them does not offer it. */
-  only?: ReadonlySet<string>;
+  appliesTo?: ReadonlySet<string>;
 };
 
 export const focusedRow = '[data-type="item"][tabindex="0"]';
@@ -163,7 +162,7 @@ export function ChangedFileTree({
               >
                 {actions.map((action) => {
                   const paths = pathsUnder(files, item).filter(
-                    (path) => action.only?.has(path) ?? true,
+                    (path) => action.appliesTo?.has(path) ?? true,
                   );
                   return (
                     paths.length > 0 && (

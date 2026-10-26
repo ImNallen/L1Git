@@ -78,11 +78,7 @@ export type WorktreeWrites = {
     paths: readonly string[],
   ) => Promise<unknown>;
   commit: (worktree: RepositoryRoot, write: Write) => Promise<Outcome>;
-  /**
-   * Asks before it discards the Unstaged side of `paths`, and calls
-   * `returnFocus` when the question closes.
-   */
-  discard: (
+  confirmDiscard: (
     worktree: RepositoryRoot,
     paths: readonly string[],
     returnFocus?: () => void,
@@ -652,7 +648,7 @@ function WorktreeFiles({
       label: "Discard changes…",
       disabled: busy,
       run: onDiscard,
-      only: discardable,
+      appliesTo: discardable,
     });
   const discardAll =
     discarding && files.some((file) => discardable.has(file.path));
@@ -864,7 +860,7 @@ function WorktreeInspector({
               onWrite={onWrite}
               discardable={discardable}
               onDiscard={(paths, row) =>
-                writes.discard(
+                writes.confirmDiscard(
                   worktree.root,
                   paths,
                   row === undefined

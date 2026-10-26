@@ -220,7 +220,7 @@ impl LockedStore {
         let Ok((applied, change)) = self.record_of(id) else {
             return Ok(false);
         };
-        if change.kept_while_pending() {
+        if change.keeps_overwritten_files() {
             return Ok(true);
         }
         if applied.root == opened.root() {
@@ -260,8 +260,6 @@ impl LockedStore {
         Ok((applied, recorded))
     }
 
-    /// Records a write whose change `fill` builds once the entry's folder
-    /// exists, so the change can keep files there before it is named.
     pub(super) fn record_with<C: Clone>(
         &self,
         txn: &Txn<'_>,

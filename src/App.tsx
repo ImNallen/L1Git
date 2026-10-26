@@ -158,7 +158,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   const [discarding, setDiscarding] = useState<{
     root: RepositoryRoot;
     paths: string[];
-    left: number;
+    skipped: number;
     returnFocus?: () => void;
   } | null>(null);
   const [palette, setPalette] = useState<{ picked: Oid | null } | null>(null);
@@ -1116,7 +1116,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                         checkLostFocus((count) => count + 1);
                         return outcome;
                       },
-                      discard: askDiscard,
+                      confirmDiscard: askDiscard,
                     }}
                   />
                 ) : (
@@ -1192,7 +1192,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       {discarding && (
         <DiscardDialog
           paths={discarding.paths}
-          left={discarding.left}
+          skipped={discarding.skipped}
           onDiscard={() =>
             void writeFiles(discarding.root, "discard", discarding.paths)
           }
