@@ -1,7 +1,7 @@
 use super::{
     Applied, Change, Direction, Expect, RefTxn, Repo, Start,
     branches::{self, Listing, Setting, Writing},
-    commit::{resolve, short},
+    commit::{self, short},
     discard::Stat,
     refs::{capitalized, oid},
     store::EntryObjects,
@@ -146,12 +146,7 @@ impl Switch {
         let from = shown(before);
         match target {
             Start::Commit { oid } => {
-                if resolve(repo, deadline, oid.as_str())?.as_ref() != Some(oid) {
-                    return Err(RepositoryError::new(
-                        ErrorKind::InvalidOid,
-                        format!("{} is not a commit.", short(oid)),
-                    ));
-                }
+                commit::refuse_non_commit(repo, deadline, oid)?;
                 let goal = Head::Detached {
                     oid: oid.as_str().to_owned(),
                 };

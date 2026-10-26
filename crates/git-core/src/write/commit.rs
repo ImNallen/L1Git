@@ -273,6 +273,20 @@ pub(super) fn resolve(
         .map_err(|_| git::malformed())
 }
 
+pub(super) fn refuse_non_commit(
+    repo: &Repo,
+    deadline: WriteDeadline,
+    oid: &Oid,
+) -> Result<(), RepositoryError> {
+    if resolve(repo, deadline, oid.as_str())?.as_ref() == Some(oid) {
+        return Ok(());
+    }
+    Err(RepositoryError::new(
+        ErrorKind::InvalidOid,
+        format!("{} is not a commit.", short(oid)),
+    ))
+}
+
 fn raced(kind: Kind<'_>, update: &Update, target: &Target) -> RepositoryError {
     let made = short(&update.new);
     let old = update.old.as_ref().map_or("nothing", short);

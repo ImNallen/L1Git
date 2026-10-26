@@ -148,6 +148,7 @@ pub(super) fn create(
     let repo = writing.repo;
     let reads = writing.deadline.reads();
     let tag = new_name(repo, name, reads)?;
+    commit::refuse_non_commit(repo, writing.deadline, at)?;
     let tags = listed(repo, "refs/tags/", reads)?;
     branches::refuse_clash(
         "tag",
