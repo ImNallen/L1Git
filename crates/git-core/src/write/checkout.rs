@@ -386,6 +386,7 @@ fn refuse_absorbing(
     reads: Deadline,
 ) -> Result<(), RepositoryError> {
     let goal = oid(goal).ok_or_else(git::malformed)?;
+    refuse_taking_untracked(repo, from, &goal, to, reads)?;
     let (entries, _) = status::entries(&repo.root, Untracked::No, reads)?;
     let mut staged = BTreeSet::new();
     let mut deleted = BTreeSet::new();
@@ -480,6 +481,70 @@ fn refuse_absorbing(
         format!(
             "After a checkout of {to}, Git would no longer list your uncommitted changes to {}, and Undo could not bring them back. Commit, unstage, or discard them first.",
             listed(&absorbed)
+        ),
+    ))
+}
+
+/// In a sparse checkout, `git switch` takes over an untracked or ignored file
+/// where the target adds one instead of refusing, so switching back deletes
+/// it.
+fn refuse_taking_untracked(
+    repo: &Repo,
+    from: &Oid,
+    goal: &Oid,
+    to: &str,
+    reads: Deadline,
+) -> Result<(), RepositoryError> {
+    let sparse = git::read(
+        &repo.root,
+        &[
+            "config",
+            "--get",
+            "--type=bool",
+            "--default=false",
+            "core.sparseCheckout",
+        ],
+        reads,
+    )?;
+    if sparse != b"true\n" {
+        return Ok(());
+    }
+    let added = names(
+        repo,
+        &[
+            "diff-tree",
+            "-r",
+            "-z",
+            "--name-only",
+            "--no-renames",
+            "--diff-filter=A",
+            from.as_str(),
+            goal.as_str(),
+        ],
+        reads,
+    )?;
+    let present: Vec<&str> = added
+        .iter()
+        .map(String::as_str)
+        .filter(|path| repo.root.join(path).symlink_metadata().is_ok())
+        .collect();
+    if present.is_empty() {
+        return Ok(());
+    }
+    let args = [
+        &["--literal-pathspecs", "ls-files", "--others", "-z", "--"],
+        &present[..],
+    ]
+    .concat();
+    let taken: Vec<String> = names(repo, &args, reads)?.into_iter().collect();
+    if taken.is_empty() {
+        return Ok(());
+    }
+    Err(RepositoryError::new(
+        ErrorKind::Conflict,
+        format!(
+            "This sparse checkout would take over the untracked or ignored files at {}, which {to} adds, and switching back would delete them. Move or delete them first.",
+            listed(&taken)
         ),
     ))
 }

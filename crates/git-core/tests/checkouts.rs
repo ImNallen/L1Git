@@ -384,24 +384,29 @@ fn refuses_a_change_the_target_already_holds() {
 }
 
 #[test]
-fn refuses_an_untracked_file_a_sparse_checkout_would_take_over() {
-    let repo = Repo::new();
-    repo.git(&["switch", "--quiet", "-c", "outside"]);
-    fs::create_dir(repo.root.join("out")).unwrap();
-    commit(&repo.root, &[("out/new.txt", "new\n")], "outside");
-    repo.git(&["switch", "--quiet", "main"]);
-    repo.git(&["sparse-checkout", "set", "--cone", "in"]);
-    fs::create_dir(repo.root.join("out")).unwrap();
-    fs::write(repo.root.join("out/new.txt"), "new\n").unwrap();
-    let before = repo.state();
-    let error = refused(repo.checkout(repo.local("outside")));
-    assert_eq!(error.kind, ErrorKind::Conflict, "{}", error.message);
-    assert!(error.message.contains("out/new.txt"), "{}", error.message);
-    assert_eq!(repo.state(), before);
-    assert_eq!(
-        fs::read_to_string(repo.root.join("out/new.txt")).unwrap(),
-        "new\n"
-    );
+fn refuses_an_untracked_or_ignored_file_a_sparse_checkout_would_take_over() {
+    for ignored in [false, true] {
+        let repo = Repo::new();
+        repo.git(&["switch", "--quiet", "-c", "outside"]);
+        fs::create_dir(repo.root.join("out")).unwrap();
+        commit(&repo.root, &[("out/new.txt", "new\n")], "outside");
+        repo.git(&["switch", "--quiet", "main"]);
+        repo.git(&["sparse-checkout", "set", "--cone", "in"]);
+        fs::create_dir(repo.root.join("out")).unwrap();
+        fs::write(repo.root.join("out/new.txt"), "new\n").unwrap();
+        if ignored {
+            fs::write(repo.root.join(".git/info/exclude"), "out/\n").unwrap();
+        }
+        let before = repo.state();
+        let error = refused(repo.checkout(repo.local("outside")));
+        assert_eq!(error.kind, ErrorKind::Conflict, "{}", error.message);
+        assert!(error.message.contains("out/new.txt"), "{}", error.message);
+        assert_eq!(repo.state(), before);
+        assert_eq!(
+            fs::read_to_string(repo.root.join("out/new.txt")).unwrap(),
+            "new\n"
+        );
+    }
 }
 
 #[test]
