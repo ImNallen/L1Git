@@ -190,7 +190,8 @@ pub(super) fn commit(
         )
     })?;
     let target = Target::of(&head);
-    let Some(update) = trace.update(&target, &printed) else {
+    let update = named(repo, deadline, &printed)?.and_then(|made| trace.update(&target, &made));
+    let Some(update) = update else {
         return Err(elsewhere(&printed, &target));
     };
     if target.current(repo, deadline)?.as_ref() != Some(&update.new) {
@@ -237,6 +238,28 @@ fn printed(stdout: &[u8]) -> Option<String> {
             .filter(|hex| hex.len() >= 4 && hex.bytes().all(|byte| byte.is_ascii_hexdigit()))
             .map(str::to_owned)
     })
+}
+
+/// Git abbreviates the ID it prints so that no other object starts with it,
+/// so the ID names our commit only while it still names one object.
+fn named(
+    repo: &Repo,
+    deadline: WriteDeadline,
+    printed: &str,
+) -> Result<Option<Oid>, RepositoryError> {
+    let ran = git::run(
+        &repo.root,
+        &["rev-parse", &format!("--disambiguate={printed}")],
+        deadline.reads(),
+    )?;
+    let listed = git::text(&ran.stdout);
+    let mut objects = listed.lines();
+    match (objects.next(), objects.next()) {
+        (Some(only), None) if ran.status.success() => Oid::try_from(only.to_owned())
+            .map(Some)
+            .map_err(|_| git::malformed()),
+        _ => Ok(None),
+    }
 }
 
 fn resolve(
@@ -435,17 +458,16 @@ impl Trace {
     }
 
     /// Git processes that hooks start trace their updates to the same file.
-    /// Git traces its own before `post-commit` and the `committed`
-    /// `reference-transaction` hook run, and while it holds the branch's lock,
-    /// and the ID it prints is unique when it prints it, so no earlier update
-    /// of the branch can name that commit.
-    fn update(&self, target: &Target, printed: &str) -> Option<Update> {
+    /// Git traces its own once it has moved the branch, before `post-commit`
+    /// and the `committed` `reference-transaction` hook run, so a later update
+    /// to the same commit is a hook's.
+    fn update(&self, target: &Target, made: &Oid) -> Option<Update> {
         let file = fs::File::open(&self.refs).ok()?;
         io::BufReader::new(file)
             .split(b'\n')
             .map_while(Result::ok)
             .filter_map(|line| update_in(&String::from_utf8_lossy(&line), target.reference()))
-            .find(|update| update.new.as_str().starts_with(printed))
+            .find(|update| update.new == *made)
     }
 
     fn failed_hook(&self) -> Option<String> {
