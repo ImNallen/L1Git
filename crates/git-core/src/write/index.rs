@@ -186,11 +186,11 @@ impl Plan {
 
 fn checked(path: &str, command: Command) -> Result<(), RepositoryError> {
     status::check(path)?;
-    if path.contains(['\0', char::REPLACEMENT_CHARACTER]) {
+    if path.contains('\0') {
         return Err(RepositoryError::new(
             ErrorKind::UnsupportedPath,
             format!(
-                "L1 Git cannot {} file names that are not valid UTF-8.",
+                "L1 Git cannot {} a file name that holds a NUL byte.",
                 command.verb()
             ),
         ));
@@ -360,6 +360,9 @@ pub(super) fn edit<'r>(
     }
     let before = read(&txn)?;
     for (path, seen) in &plan.claims {
+        if shows_non_utf8(&repo.root, &before, path) {
+            return Err(not_utf8(command));
+        }
         if !seen.matches(at(&before, path)) {
             return Err(RepositoryError::stale(
                 StaleReason::PathChanged,
@@ -423,6 +426,46 @@ fn not_chosen(command: Command, plan: &Plan, unchosen: Vec<String>) -> Repositor
         unchosen.join(", ")
     );
     RepositoryError::stale(StaleReason::PathNotChosen { paths: unchosen }, message)
+}
+
+fn not_utf8(command: Command) -> RepositoryError {
+    RepositoryError::new(
+        ErrorKind::UnsupportedPath,
+        format!(
+            "L1 Git cannot {} file names that are not valid UTF-8.",
+            command.verb()
+        ),
+    )
+}
+
+/// Whether `path` is how status shows a name whose bytes are not UTF-8: no
+/// entry or file has its exact bytes, and one whose bytes are not UTF-8
+/// reads as it.
+fn shows_non_utf8(root: &Path, index: &Rows, path: &str) -> bool {
+    path.contains(char::REPLACEMENT_CHARACTER)
+        && !index.contains_key(path.as_bytes())
+        && (index.keys().any(|key| reads_as(key, path)) || on_disk_as(root, path))
+}
+
+fn reads_as(bytes: &[u8], name: &str) -> bool {
+    str::from_utf8(bytes).is_err() && String::from_utf8_lossy(bytes) == name
+}
+
+fn on_disk_as(root: &Path, path: &str) -> bool {
+    let mut folder = root.to_path_buf();
+    for name in path.split('/') {
+        let exact = folder.join(name);
+        if fs::symlink_metadata(&exact).is_ok() {
+            folder = exact;
+            continue;
+        }
+        return fs::read_dir(&folder)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .any(|entry| reads_as(entry.file_name().as_encoded_bytes(), name));
+    }
+    false
 }
 
 pub(super) fn restore(
