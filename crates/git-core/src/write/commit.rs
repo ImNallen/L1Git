@@ -95,7 +95,6 @@ impl Target {
     }
 }
 
-/// A ref update as Git's ref transaction made it, with full IDs.
 #[derive(Debug, PartialEq, Eq)]
 struct Update {
     old: Option<Oid>,
@@ -372,9 +371,8 @@ fn refused(wrote: &Wrote, trace: &Trace) -> RepositoryError {
     )
 }
 
-/// Git's traces of one commit sit in a folder that only the user can read,
-/// and a Git process that a hook left running cannot recreate them once the
-/// folder is gone.
+/// A Git process that a hook left running cannot recreate these traces once
+/// the folder is gone.
 struct Trace {
     dir: PathBuf,
     events: PathBuf,
@@ -427,7 +425,8 @@ fn stops_commit(name: &str, argv: &[String]) -> bool {
 
 impl Trace {
     fn create(store: &LockedStore, id: EntryId) -> Result<Self, RepositoryError> {
-        let dir = store.trace_dir(id)?;
+        store.remove_traces()?;
+        let dir = store.new_trace_dir(id)?;
         Ok(Self {
             events: dir.join("trace2.json"),
             refs: dir.join("refs.txt"),
@@ -435,9 +434,8 @@ impl Trace {
         })
     }
 
-    /// Our Git's update of the target is the one whose new ID starts with
-    /// what our Git printed. Git processes that hooks start trace their own
-    /// updates to the same file, so two different matches name none.
+    /// Git processes that hooks start trace their own updates to the same
+    /// file, so two different matches name none.
     fn update(&self, target: &Target, printed: &str) -> Option<Update> {
         let file = fs::File::open(&self.refs).ok()?;
         let mut found = None;

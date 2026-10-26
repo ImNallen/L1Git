@@ -48,8 +48,7 @@ struct Repo {
 }
 
 impl Repo {
-    /// `main` holds `first` and `second`, and `a.txt` has a staged change.
-    fn new() -> Self {
+    fn staged_on_second_commit() -> Self {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().canonicalize().unwrap().join("repo");
         fs::create_dir(&root).unwrap();
@@ -84,9 +83,7 @@ impl Repo {
         Coordinator::new(Limits::default(), self.directory.path().join("undo"))
     }
 
-    /// Runs `body` as another process after L1 Git checked HEAD and before
-    /// Git reads it.
-    fn before_git(&self, body: &str) {
+    fn before_git_reads_head(&self, body: &str) {
         executable(&self.root.join(".git/before-commit"), body);
     }
 
@@ -118,17 +115,14 @@ fn raced(result: Result<Applied, RepositoryError>) -> RepositoryError {
     error
 }
 
-/// Another process replaces HEAD's commit with one that has the same parents
-/// before Git reads HEAD. Git then amends that commit, so undo must give it
-/// back, never the commit it replaced.
 fn an_amend_of_a_commit_another_process_swapped_in_undoes_to_that_commit(kind: Kind, reflog: bool) {
-    let repo = Repo::new();
+    let repo = Repo::staged_on_second_commit();
     if !reflog {
         repo.git(&["config", "core.logAllRefUpdates", "false"]);
         fs::remove_dir_all(repo.root.join(".git/logs")).unwrap();
     }
     let shown = repo.main();
-    repo.before_git(
+    repo.before_git_reads_head(
         "x=$(git commit-tree 'HEAD^{tree}' -p HEAD^ -m other) && git update-ref refs/heads/main \"$x\" && echo \"$x\" > .git/other\n",
     );
     let error = raced(repo.write(kind, "Mine\n"));
@@ -158,8 +152,8 @@ fn an_amend_of_a_commit_another_process_swapped_in_undoes_to_that_commit(kind: K
 }
 
 fn a_commit_on_a_commit_another_process_made_undoes_to_that_commit() {
-    let repo = Repo::new();
-    repo.before_git(
+    let repo = Repo::staged_on_second_commit();
+    repo.before_git_reads_head(
         "x=$(git commit-tree 'HEAD^{tree}' -p HEAD -m other) && git update-ref refs/heads/main \"$x\" && echo \"$x\" > .git/other\n",
     );
     raced(repo.write(Kind::Commit, "Mine\n"));
@@ -174,10 +168,10 @@ fn a_commit_on_a_commit_another_process_made_undoes_to_that_commit() {
 }
 
 fn a_commit_on_a_branch_another_process_switched_to_has_no_undo_entry() {
-    let repo = Repo::new();
+    let repo = Repo::staged_on_second_commit();
     let shown = repo.main();
     repo.git(&["branch", "feature", "HEAD^"]);
-    repo.before_git("git symbolic-ref HEAD refs/heads/feature\n");
+    repo.before_git_reads_head("git symbolic-ref HEAD refs/heads/feature\n");
     raced(repo.write(Kind::Commit, "Mine\n"));
     assert_eq!(repo.main(), shown);
     assert_eq!(repo.git(&["log", "-1", "--format=%s", "feature"]), "Mine");
@@ -188,10 +182,8 @@ fn sha1_hex(bytes: &[u8]) -> String {
     sha1_smol::Sha1::from(bytes).digest().to_string()
 }
 
-/// After Git exits, another process points `main` at a commit whose ID
-/// starts with the abbreviated ID Git printed for ours.
 fn a_commit_that_shares_the_printed_prefix_is_not_taken_as_ours() {
-    let repo = Repo::new();
+    let repo = Repo::staged_on_second_commit();
     repo.git(&["config", "core.abbrev", "4"]);
     let exited = repo.root.join(".git/exited");
     let collided = repo.root.join(".git/collided");
@@ -245,12 +237,7 @@ fn a_commit_that_shares_the_printed_prefix_is_not_taken_as_ours() {
     );
 }
 
-/// The only test in this binary, because it puts a fake Git first on PATH.
-/// The fake runs `.git/before-commit` before L1 Git's `git commit` starts and
-/// `.git/after-commit` after it exits, each as another process would, without
-/// the commit's trace variables.
-#[test]
-fn another_process_that_moves_head_around_gits_commit_is_never_taken_for_ours() {
+fn put_fake_git_first_on_path() -> TempDir {
     let real = String::from_utf8(Command::new("which").arg("git").output().unwrap().stdout)
         .unwrap()
         .trim()
@@ -259,12 +246,12 @@ fn another_process_that_moves_head_around_gits_commit_is_never_taken_for_ours() 
     executable(
         &bin.path().join("git"),
         &format!(
-            "run() {{ [ -x \"$2/.git/$1\" ] && (cd \"$2\" && env -u GIT_TRACE2_EVENT -u GIT_TRACE_REFS \"./.git/$1\" < /dev/null) && rm -f \"$2/.git/$1\"; }}\n\
+            "as_another_process() {{ [ -x \"$2/.git/$1\" ] && (cd \"$2\" && env -u GIT_TRACE2_EVENT -u GIT_TRACE_REFS \"./.git/$1\" < /dev/null) && rm -f \"$2/.git/$1\"; }}\n\
              [ \"$1\" = -C ] && [ \"$3\" = commit ] || exec '{real}' \"$@\"\n\
-             run before-commit \"$2\"\n\
+             as_another_process before-commit \"$2\"\n\
              '{real}' \"$@\"\n\
              code=$?\n\
-             run after-commit \"$2\"\n\
+             as_another_process after-commit \"$2\"\n\
              exit $code\n"
         ),
     );
@@ -275,7 +262,13 @@ fn another_process_that_moves_head_around_gits_commit_is_never_taken_for_ours() 
     );
     // SAFETY: this binary runs one test, and no other thread exists yet.
     unsafe { std::env::set_var("PATH", path) };
+    bin
+}
 
+/// The only test in this binary, because it puts a fake Git first on PATH.
+#[test]
+fn another_process_that_moves_head_around_gits_commit_is_never_taken_for_ours() {
+    let _bin = put_fake_git_first_on_path();
     for kind in [Kind::Amend, Kind::EditMessage] {
         an_amend_of_a_commit_another_process_swapped_in_undoes_to_that_commit(kind, true);
     }
