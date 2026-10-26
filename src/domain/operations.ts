@@ -1,8 +1,10 @@
 import { subjectOf } from "./commitMessage";
+import type { ListSide } from "./worktree";
 import type {
   Applied,
   EntryId,
   Expect,
+  LinePick,
   Operation,
   Problem,
   StatusEntry,
@@ -38,6 +40,58 @@ export function commitWrite(
     kind === "editMessage"
       ? { kind, message }
       : { kind, message, staged: status.stagedStamp };
+  return { operation, expect: { head: status.head } };
+}
+
+export type PartAction = "stage" | "unstage" | "discard";
+export type PartChoice =
+  | { kind: "hunk"; hunk: number }
+  | { kind: "lines"; lines: LinePick[] };
+
+const hunkWrites = {
+  stage: "stageHunk",
+  unstage: "unstageHunk",
+  discard: "discardHunk",
+} as const satisfies Record<PartAction, PartWrite>;
+const lineWrites = {
+  stage: "stageLines",
+  unstage: "unstageLines",
+  discard: "discardLines",
+} as const satisfies Record<PartAction, PartWrite>;
+
+export function partActions(
+  entry: StatusEntry | undefined,
+  side: ListSide,
+): readonly PartAction[] {
+  if (entry === undefined || side === "conflict") return [];
+  switch (entry.kind) {
+    case "unmerged":
+      return [];
+    case "untracked":
+      return ["stage", "discard"];
+    case "renamed":
+      if (entry.submodule !== null || entry.side.kind === "unstaged") return [];
+      return side === "staged" ? ["unstage"] : ["stage", "discard"];
+    case "ordinary": {
+      if (entry.submodule !== null) return [];
+      if (side === "staged") return ["unstage"];
+      const addedWithIntent = entry.index === null;
+      return addedWithIntent ? ["stage"] : ["stage", "discard"];
+    }
+  }
+}
+
+export function partWrite(
+  action: PartAction,
+  status: WorktreeStatus,
+  path: string,
+  shown: string,
+  choice: PartChoice,
+): Write {
+  const operation: Operation =
+    choice.kind === "hunk"
+      ? { kind: hunkWrites[action], path, hunk: choice.hunk, shown }
+      : { kind: lineWrites[action], path, lines: choice.lines, shown };
   return { operation, expect: { head: status.head } };
 }
 
@@ -193,7 +247,13 @@ export function stepButton(
 
 export type WriteNotice =
   | { kind: "stepped"; step: Step; label: string }
-  | { kind: "failed"; action: "write"; label: string; problem: Problem }
+  | {
+      kind: "failed";
+      action: "write";
+      label: string;
+      problem: Problem;
+      operation: Operation;
+    }
   | {
       kind: "failed";
       action: Step;
@@ -260,10 +320,17 @@ export function failureText(
   if (problem.kind === "raced") return problem.message;
   if (problem.kind !== "staleView" || problem.reason === "unknown")
     return `${what} ${problem.message}`;
-  if (action === "write")
-    return problem.reason === "pathChanged"
-      ? `${what} ${problem.message}`
-      : `${what} ${staleCause(problem, null)} L1 Git reread the worktree, so check the lists and try again.`;
+  if (action === "write") {
+    const part = "shown" in notice.operation;
+    if (part && problem.reason === "pathChanged")
+      return `${what} The file changed since L1 Git showed its diff. L1 Git reread the diff, so check it and try again.`;
+    if (
+      problem.reason === "pathChanged" ||
+      (part && problem.reason === "pathNotChosen")
+    )
+      return `${what} ${problem.message}`;
+    return `${what} ${staleCause(problem, null)} L1 Git reread the worktree, so check the lists and try again.`;
+  }
   const cause = `${what} ${staleCause(problem, action)}`;
   if (history.kind !== "read") return cause;
   const then =
