@@ -260,7 +260,6 @@ pub(crate) fn worktree_patch_within(
         .ok_or_else(|| no_changes(file, side))
 }
 
-/// A file patch as Git printed it. `FilePatch` is its text for the UI.
 pub(crate) enum PatchBytes {
     Text(Vec<u8>),
     Binary,
@@ -277,7 +276,6 @@ impl From<PatchBytes> for FilePatch {
     }
 }
 
-/// A `WorktreePatch` before its bytes become text.
 pub(crate) enum SidePatch {
     Diff(PatchBytes),
     Submodule(SubmoduleState),
@@ -300,14 +298,11 @@ impl From<SidePatch> for WorktreePatch {
     }
 }
 
-/// One side of one path, read as the diff pane reads it.
 pub(crate) struct SideRead {
     pub(crate) entry: StatusEntry,
     pub(crate) patch: SidePatch,
 }
 
-/// The one read behind `worktree_patch` and every partial write. `None` when
-/// `side` of `file` lists no change.
 pub(crate) fn read_side(
     root: &Path,
     file: &str,

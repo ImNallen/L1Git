@@ -323,7 +323,6 @@ pub(crate) fn run(path: &Path, args: &[&str], deadline: Deadline) -> Result<Exit
     whole(execute(command(path, args), deadline, None, None)?)
 }
 
-/// A boolean config value, or `unset` when no config sets `key`.
 pub(crate) fn config_flag(
     path: &Path,
     key: &str,

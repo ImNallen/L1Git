@@ -50,7 +50,6 @@ struct Repo {
 }
 
 impl Repo {
-    /// The prototype's `repo()`, with `files` committed on `main`.
     fn new(files: &[(&str, &[u8])], config: &[(&str, &str)]) -> Self {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().canonicalize().unwrap().join("repo");
@@ -102,7 +101,6 @@ impl Repo {
         fs::read(self.root.join(file)).ok()
     }
 
-    /// What the diff pane shows for `side` of `file`.
     fn shown(&self, file: &str, side: Side) -> String {
         match worktree_patch(self.path(), file, side).unwrap() {
             WorktreePatch::Diff {
@@ -175,8 +173,6 @@ impl Repo {
         })
     }
 
-    /// Git's own `-p` with these answers, the prototype's independent oracle
-    /// for whole hunks.
     fn interactive(&self, args: &[&str], answers: &str) {
         let mut all = vec!["-c", "interactive.singleKey=false"];
         all.extend(args);
@@ -207,8 +203,6 @@ fn lines(count: usize) -> String {
     (1..=count).map(|line| format!("line {line}\n")).collect()
 }
 
-/// The prototype's `edit`, which replaces or removes each line `at` names
-/// and inserts `after`'s text after the line it names.
 fn edit(text: &str, at: &[(usize, Option<&str>)], after: &[(usize, &str)]) -> String {
     let mut out = String::new();
     for (line, old) in (1..).zip(text.split_inclusive('\n')) {
@@ -245,7 +239,6 @@ fn refused(result: Result<Applied, RepositoryError>, kind: &ErrorKind) {
     assert_eq!(&error.kind, kind, "{}", error.message);
 }
 
-/// Runs bare `git apply` with the flags the prototype gave it.
 fn bare_apply(repo: &Repo, args: &[&str], patch: &[u8]) -> Output {
     git_output(&repo.root, args, patch)
 }

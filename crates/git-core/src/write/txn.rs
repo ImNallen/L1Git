@@ -206,7 +206,6 @@ impl<'r> Txn<'r> {
         Ok(scratch)
     }
 
-    /// The only way to run Git on a `ScratchIndex`.
     pub(super) fn git_on<'a>(&'a self, scratch: &'a ScratchIndex, args: &[&'a str]) -> Write<'a> {
         Write::on_scratch(self, scratch, args)
     }
@@ -275,9 +274,6 @@ impl<'r> Txn<'r> {
     }
 }
 
-/// An index and object folder that only one transaction writes, to work out
-/// a file without touching the index it publishes or the repository's
-/// objects. `Txn::scratch_index` makes one, and dropping it removes both.
 pub(crate) struct ScratchIndex {
     index: PathBuf,
     objects: PathBuf,

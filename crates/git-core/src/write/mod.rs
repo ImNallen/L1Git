@@ -419,7 +419,6 @@ impl Repo {
         repository::head(&self.root, deadline.reads())
     }
 
-    /// HEAD, unless it moved since the view the request was made from.
     fn head_as_seen(
         &self,
         expect: &Expect,

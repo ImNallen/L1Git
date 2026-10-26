@@ -131,9 +131,6 @@ impl<'a> Write<'a> {
         Self::on_index(txn, dir, txn.copy(), args)
     }
 
-    /// As `new`, on an index and object folder that only this transaction
-    /// writes, reading objects from the repository, so nothing it writes
-    /// reaches the repository's object store.
     pub(crate) fn on_scratch(
         txn: &'a Txn<'_>,
         scratch: &'a ScratchIndex,

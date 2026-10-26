@@ -415,9 +415,9 @@ pub(super) fn edit<'r>(
     )
 }
 
-/// Applies part of one file's patch to the index. `git apply` writes the
-/// entry anew, which drops skip-worktree and assume-unchanged. Skip-worktree
-/// comes back, and assume-unchanged stays dropped, as `git reset` drops it.
+/// `git apply` writes the entry anew, which drops skip-worktree and
+/// assume-unchanged. Skip-worktree comes back, and assume-unchanged stays
+/// dropped, as `git reset` drops it.
 pub(super) fn edit_part<'r>(
     repo: &'r Repo,
     deadline: WriteDeadline,
@@ -474,8 +474,6 @@ fn one_spelling(txn: &Txn<'_>, before: &Rows, path: &str) -> Result<(), Reposito
     ))
 }
 
-/// The leading folders of an index path that match `path`'s ignoring ASCII
-/// case but not byte for byte.
 fn folder_spelled_otherwise(rows: &Rows, path: &str) -> Option<String> {
     let (folder, _) = path.rsplit_once('/')?;
     let ours: Vec<&str> = folder.split('/').collect();
@@ -501,9 +499,6 @@ fn listed(txn: &Txn<'_>, path: &str) -> Result<bool, RepositoryError> {
         .is_empty())
 }
 
-/// Every index write: lock, check HEAD, read the private index, let `run`
-/// change it, read it again, and keep the change only if it touches nothing
-/// but `claimed`.
 fn guarded<'r>(
     repo: &'r Repo,
     deadline: WriteDeadline,

@@ -1366,7 +1366,6 @@ mod parts {
         })
     }
 
-    /// The text the diff pane shows, or nothing for a patch with no text.
     fn shown(repo: &Repo, file: &str, side: Side) -> String {
         match worktree_patch(repo.path(), file, side) {
             Ok(WorktreePatch::Diff {
@@ -1422,7 +1421,6 @@ mod parts {
         child.wait_with_output().unwrap()
     }
 
-    /// A file's bytes and permission bits, or nothing when it is gone.
     fn file(repo: &Repo, path: &str) -> Option<(Vec<u8>, u32)> {
         let file = repo.root.join(path);
         let metadata = fs::symlink_metadata(&file).ok()?;
@@ -1432,8 +1430,6 @@ mod parts {
         ))
     }
 
-    /// Undo puts back the file as it was and redo the file as the discard
-    /// left it, twice each, and the index never changes.
     fn file_round_trip(
         coordinator: &Coordinator,
         repo: &Repo,
@@ -1461,7 +1457,6 @@ mod parts {
         );
     }
 
-    /// The write refuses with `kind` and changes neither index nor disk.
     fn refuses(coordinator: &Coordinator, repo: &Repo, operation: &Operation, kind: &ErrorKind) {
         let (index, status) = (repo.index(), repo.status());
         let error = send(coordinator, repo, operation).expect_err("the write should refuse");
@@ -1485,8 +1480,6 @@ mod parts {
         )
     }
 
-    /// The prototype's `stale.ts`: take the shown patch, change the repository,
-    /// then send the write with the old `shown`.
     fn after_change(act: Act, setup: impl Fn(&Repo), change: impl Fn(&Repo)) -> (Repo, Operation) {
         let repo = Repo::committed(&[("f.txt", &forty())]);
         setup(&repo);
@@ -1805,8 +1798,6 @@ mod parts {
         assert_eq!(repo.git(&["show", ":Dir/new.txt"]), "one\n");
     }
 
-    /// The second hunk of Git's own patch, reverse-applied by `git apply` to
-    /// the worktree of a repository set up the same way.
     fn apply_reverse_of_second_hunk(repo: &Repo) -> Vec<u8> {
         let patch = repo.git(&["diff-files", "--patch", "--full-index", "--", "f.txt"]);
         let starts: Vec<usize> = patch.match_indices("\n@@ ").map(|(at, _)| at + 1).collect();

@@ -37,16 +37,12 @@ impl LineSide {
     }
 }
 
-/// What to take from a patch. A pick on a context line is ignored.
 #[derive(Debug, Clone, Copy)]
 pub(super) enum Picks<'p> {
-    /// Every change of one hunk, counted from 0.
     Hunk(u32),
     Lines(&'p [LinePick]),
 }
 
-/// `Forward` applies the picked changes to the old side. `Reverse` takes them
-/// back out of the new side.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Apply {
     Forward,
@@ -55,8 +51,7 @@ pub(super) enum Apply {
 
 impl Apply {
     /// `--whitespace=nowarn` beats `apply.whitespace`, which would refuse a
-    /// shown line or strip its spaces. `--recount`, `-C`, and
-    /// `--unidiff-zero` would let a hunk land away from the shown lines.
+    /// shown line or strip its spaces.
     pub(super) const fn args(self) -> &'static [&'static str] {
         match self {
             Self::Forward => &["apply", "--cached", "--whitespace=nowarn", "-"],
@@ -64,8 +59,6 @@ impl Apply {
         }
     }
 
-    /// The side the patch applies to. An unpicked change on it stays as
-    /// context, and one on the other side is dropped.
     const fn applies_to(self) -> LineSide {
         match self {
             Self::Forward => LineSide::Deletions,
@@ -74,18 +67,13 @@ impl Apply {
     }
 }
 
-/// Why a file patch cannot become a partial patch. Each is a fact about its
-/// bytes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Refusal {
-    /// A second `diff --git` section, as a type change prints.
     Sections,
-    /// A symbolic link or a submodule on either side.
     Mode(Mode),
     Copy,
-    /// A kept line would follow, on `side`, a line that ends the file
-    /// without a newline. `git apply` accepts that patch and joins the two
-    /// lines into one.
+    /// `git apply` accepts a line after a `\ No newline at end of file`
+    /// marker and joins the two lines into one.
     NoNewlineSuccessor {
         side: LineSide,
     },
@@ -93,13 +81,10 @@ pub(super) enum Refusal {
         index: u32,
         hunks: usize,
     },
-    /// No line of any hunk has this number on this side.
     NotInDiff(LinePick),
     Malformed,
 }
 
-/// The partial writes. Each reads one side of the path and applies its
-/// patch one way.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Action {
     Stage,
@@ -131,26 +116,19 @@ impl Action {
     }
 }
 
-/// A hunk or line write as the request names it.
 pub(super) struct Part<'o> {
     action: Action,
     path: &'o str,
     picks: Picks<'o>,
-    /// The text of the patch the user saw.
     shown: &'o str,
 }
 
-/// What `Part::read` proved and built under the index lock.
 pub(super) struct Prepared {
-    /// The patch read under the lock, whose text is the shown one.
     pub(super) fresh: Vec<u8>,
-    /// The picked part of `fresh`, which holds a change.
     pub(super) patch: Vec<u8>,
 }
 
 impl<'o> Part<'o> {
-    /// Refuses what `status::check` refuses, a name holding NUL or U+FFFD,
-    /// which Git would read as another file, and no lines.
     pub(super) fn new(
         action: Action,
         path: &'o str,
@@ -186,8 +164,6 @@ impl<'o> Part<'o> {
         self.path
     }
 
-    /// Reads the path's side again through the diff pane's own read. Call it
-    /// with the index lock held.
     pub(super) fn read(&self, txn: &Txn<'_>) -> Result<Prepared, RepositoryError> {
         let fresh = status::read_side(
             &txn.repo().root,
@@ -198,10 +174,6 @@ impl<'o> Part<'o> {
         self.prepare(fresh)
     }
 
-    /// A refusal describes only the patch the user is looking at, so a path
-    /// that no longer lists a change or whose patch differs from `shown` is
-    /// stale before the bytes are judged. A path whose patch has no text, or
-    /// that this write never splits, is refused whatever was shown.
     fn prepare(&self, fresh: Option<SideRead>) -> Result<Prepared, RepositoryError> {
         let Some(SideRead { entry, patch }) = fresh else {
             return Err(changed());
@@ -298,12 +270,6 @@ impl<'o> Part<'o> {
     }
 }
 
-/// Works out what `part`'s path holds once its picked lines are discarded,
-/// in an index and object folder of its own, and checks that file out under
-/// `checkout`. No Git process here reads the worktree file: the fresh patch
-/// applied to the path's index entry gives exactly the bytes Git diffed, and
-/// the stat taken before the read and checked again before the rename shows
-/// the file still holds them. `false` when the path is left with no file.
 pub(super) fn revert(
     txn: &Txn<'_>,
     rows: &Rows,
@@ -368,9 +334,6 @@ fn unsupported(message: String) -> RepositoryError {
     RepositoryError::new(ErrorKind::UnsupportedPath, message)
 }
 
-/// Keeps the picked lines of `patch` and turns the rest into context or
-/// drops them, so `git apply` with `apply`'s flags applies only the picks.
-/// `None` when no change is left.
 pub(super) fn partial_patch(
     patch: &[u8],
     picks: Picks<'_>,
@@ -440,7 +403,6 @@ struct Parsed<'b> {
 struct Hunk<'b> {
     old: Span,
     new: Span,
-    /// What follows the second `@@`, newline included.
     tail: &'b [u8],
     lines: Vec<Line<'b>>,
 }
@@ -452,21 +414,18 @@ struct Span {
 }
 
 impl Span {
-    /// The line the span's first line is at. Git writes the line before an
-    /// empty span.
+    /// Git writes the line before an empty span.
     fn first(self) -> i64 {
         i64::from(self.start) + i64::from(self.count == 0)
     }
 }
 
-/// A hunk header writes the line before a span with no lines.
 const fn start(first: i64, count: i64) -> i64 {
     if count == 0 { first - 1 } else { first }
 }
 
 struct Line<'b> {
     row: Row,
-    /// The bytes after the marker, newline included.
     body: &'b [u8],
     no_newline: bool,
 }
@@ -522,7 +481,6 @@ impl Row {
     }
 }
 
-/// A line of the built patch.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Marker {
     Context,
@@ -643,7 +601,6 @@ impl<'b> Parsed<'b> {
     }
 }
 
-/// Counts off one line of a span: its number, counted from 1.
 fn take(next: &mut u32, left: &mut u32) -> Result<NonZeroU32, Refusal> {
     *left = left.checked_sub(1).ok_or(Refusal::Malformed)?;
     let line = NonZeroU32::new(*next).ok_or(Refusal::Malformed)?;
@@ -704,10 +661,6 @@ fn span(bytes: &[u8]) -> Option<(Span, &[u8])> {
     Some((span, &bytes[end + 1..]))
 }
 
-/// Within each block of changes, the k-th deletion then the k-th addition,
-/// as the split view draws rows. Git's order, all deletions then all
-/// additions, would put a staged addition after the deletions left as
-/// context instead of in place of its row.
 fn paired<'h, 'b>(lines: &'h [Line<'b>]) -> Vec<&'h Line<'b>> {
     let mut out = Vec::with_capacity(lines.len());
     let mut rest = lines;
@@ -735,8 +688,6 @@ fn paired<'h, 'b>(lines: &'h [Line<'b>]) -> Vec<&'h Line<'b>> {
     out
 }
 
-/// How many kept lines `side` holds. A line that ends its file without a
-/// newline must be the last of them.
 fn lines_on(kept: &[(Marker, &Line<'_>)], side: LineSide) -> Result<i64, Refusal> {
     let mut count = 0;
     let mut ended = false;
@@ -750,9 +701,7 @@ fn lines_on(kept: &[(Marker, &Line<'_>)], side: LineSide) -> Result<i64, Refusal
     Ok(count)
 }
 
-/// A file name as a `---` or `+++` line spells it after `a/` or `b/`, quoted
-/// or not, through the end of the line. Git ends the line with a tab when the
-/// name holds a space.
+/// Git ends a `---` or `+++` line with a tab when the name holds a space.
 struct Name<'b> {
     quoted: bool,
     rest: &'b [u8],
@@ -779,16 +728,12 @@ impl<'b> Name<'b> {
         self.with(prefix, self.rest)
     }
 
-    /// As `diff --git` spells it, with no tab or newline.
     fn bare(&self, prefix: &[u8]) -> Vec<u8> {
         let rest = self.rest.strip_suffix(b"\n").unwrap_or(self.rest);
         self.with(prefix, rest.strip_suffix(b"\t").unwrap_or(rest))
     }
 }
 
-/// A partial patch changes content only, so it names the destination on
-/// both sides and drops the mode, rename, and similarity lines. A creation
-/// or deletion that now keeps lines on its empty side becomes a modification.
 fn rewrite_header(header: &[&[u8]], old_total: i64, new_total: i64) -> Result<Vec<u8>, Refusal> {
     const DROPPED: [&[u8]; 6] = [
         b"old mode ",
@@ -877,7 +822,6 @@ mod tests {
         partial_patch(patch.as_bytes(), picks, apply).unwrap_err()
     }
 
-    /// Two lines inserted after line 3, then line 15 changed.
     const TWO_HUNKS: &str = concat!(
         "diff --git a/f b/f\n",
         "index 1111111111111111111111111111111111111111..2222222222222222222222222222222222222222 100644\n",
@@ -1010,7 +954,6 @@ mod tests {
         );
     }
 
-    /// The old file ends `c` with no newline, and the new one adds `d`.
     const APPENDED: &str = concat!(
         "diff --git a/f b/f\n",
         "--- a/f\n",

@@ -297,9 +297,6 @@ pub(super) fn discard(
     land(txn, store, log, operation, &rows, &checkout, &landings)
 }
 
-/// Discards the picked lines of one file and lands the result through the
-/// same record, recheck, and rename as a whole-file discard. The file keeps
-/// its permission bits, because the partial patch carries no mode.
 pub(super) fn discard_part(
     repo: &Repo,
     store: &LockedStore,
@@ -345,30 +342,23 @@ pub(super) fn discard_part(
     )
 }
 
-/// `checkout-index` writes each path below `checkout`.
 pub(super) fn checkout_prefix(checkout: &Path) -> String {
     let mut prefix = checkout.as_os_str().to_owned();
     prefix.push("/");
     format!("--prefix={}", prefix.to_string_lossy())
 }
 
-/// What a discarded path holds afterward.
 enum After {
     Absent,
-    /// The file at `<checkout>/<path>`.
     Checkout,
 }
 
 struct Landing<'p> {
     path: &'p str,
-    /// What `guard` saw, which the path must still match when its turn
-    /// comes.
     stat: Option<Stat>,
     after: After,
 }
 
-/// Records each path's file before and after, then places each after file
-/// in turn, and stops at the first path that changed since its stat.
 fn land(
     txn: Txn<'_>,
     store: &LockedStore,
@@ -491,8 +481,7 @@ pub(super) fn step(
 /// those stay as they are. Under `core.ignoreStat`, `update-index` marks
 /// each entry it writes assume-unchanged, as `git restore` marks what it
 /// checks out, which would hide a later edit, so it runs with that off.
-/// `add --refresh` stops at a path the index lacks and refreshes none, so a
-/// file a partial discard leaves untracked is not named.
+/// `add --refresh` stops at a path the index lacks and refreshes none.
 fn refresh(txn: &Txn<'_>, rows: &index::Rows, paths: &[&str]) {
     let paths: Vec<&str> = paths
         .iter()
