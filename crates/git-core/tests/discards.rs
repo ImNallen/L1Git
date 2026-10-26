@@ -526,6 +526,149 @@ fn refuses_two_names_for_one_file_on_a_case_insensitive_disk() {
 }
 
 #[test]
+fn leaves_a_clean_status_when_the_checkout_changes_the_size_of_a_file() {
+    let autocrlf_input = || {
+        let repo = Repo::new(&[]);
+        repo.git(&["config", "core.autocrlf", "input"]);
+        repo.put("w.txt", "a\r\nb\r\n");
+        repo.git(&["add", "w.txt"]);
+        repo.git(&["commit", "--quiet", "-m", "crlf bytes"]);
+        repo.put("w.txt", "a\r\nb\r\nc\r\n");
+        repo
+    };
+    let eol_crlf_over_lf_bytes = || {
+        let repo = Repo::new(&[
+            ("w.txt", "a\nb\n"),
+            (".gitattributes", "w.txt text eol=crlf\n"),
+        ]);
+        repo.put("w.txt", "a\nb\nc\n");
+        repo
+    };
+    let autocrlf_true_after_checkout = || {
+        let repo = Repo::new(&[("w.txt", "a\nb\n")]);
+        repo.git(&["config", "core.autocrlf", "true"]);
+        repo.put("w.txt", "a\nb\nc\n");
+        repo
+    };
+    let statuses: Vec<_> = [
+        ("autocrlf=input", &autocrlf_input as &dyn Fn() -> Repo),
+        ("eol=crlf", &eol_crlf_over_lf_bytes),
+        ("autocrlf=true", &autocrlf_true_after_checkout),
+    ]
+    .into_iter()
+    .map(|(setup, make)| {
+        let repo = make();
+        let edited = (repo.disk(), repo.status());
+        let applied = repo.discard(&["w.txt"]).unwrap();
+        let discarded = (repo.disk(), repo.status());
+        repo.coordinator().undo(repo.path(), applied.id).unwrap();
+        assert_eq!((repo.disk(), repo.status()), edited, "{setup}");
+        repo.coordinator().redo(repo.path(), applied.id).unwrap();
+        let redone = (repo.disk(), repo.status());
+        assert_eq!(redone.0, discarded.0, "{setup}");
+        (setup, edited.1, discarded.1, redone.1)
+    })
+    .collect();
+    assert_eq!(
+        statuses,
+        ["autocrlf=input", "eol=crlf", "autocrlf=true"].map(|setup| (
+            setup,
+            " M w.txt\n".to_owned(),
+            String::new(),
+            String::new()
+        ))
+    );
+}
+
+#[test]
+fn keeps_discarded_files_private_inside_an_undo_folder_others_can_read() {
+    let repo = Repo::new(&[("f", "one\n")]);
+    let undo = repo.directory.path().join("undo");
+    fs::create_dir(&undo).unwrap();
+    fs::set_permissions(&undo, fs::Permissions::from_mode(0o755)).unwrap();
+    repo.put("f", "secret\n");
+    repo.put("new", "untracked secret\n");
+    repo.discard(&["f", "new"]).unwrap();
+
+    let mut captured = 0;
+    let mut folders = vec![undo.clone()];
+    while let Some(folder) = folders.pop() {
+        for item in fs::read_dir(&folder).unwrap() {
+            let path = item.unwrap().path();
+            let mode = fs::symlink_metadata(&path).unwrap().permissions().mode() & 0o777;
+            if path.is_dir() {
+                assert_eq!(mode, 0o700, "{}", path.display());
+                folders.push(path);
+            } else if folder.file_name().unwrap() == "files" {
+                assert_eq!(mode, 0o600, "{}", path.display());
+                captured += 1;
+            }
+        }
+    }
+    assert_eq!(captured, 3, "f before and after, and new before");
+    assert_eq!(
+        fs::symlink_metadata(&undo).unwrap().permissions().mode() & 0o777,
+        0o755
+    );
+}
+
+#[test]
+fn refuses_entries_that_git_does_not_list_as_unstaged_changes() {
+    let repo = Repo::new(&[(".gitignore", "*.log\n"), ("f", "one\n")]);
+    repo.put("build.log", "ignored output\n");
+    let (_, expect) = repo.request(&[]);
+    let ignored = Operation::Discard {
+        entries: vec![StatusEntry::Untracked {
+            path: "build.log".to_owned(),
+        }],
+    };
+    let coordinator = repo.coordinator();
+    refused(
+        coordinator.write(repo.path(), &ignored, &expect),
+        &stale(StaleReason::PathChanged),
+    );
+    assert_eq!(
+        fs::read_to_string(repo.root.join("build.log")).unwrap(),
+        "ignored output\n"
+    );
+
+    repo.put("f", "hidden local edit\n");
+    let (operation, expect) = repo.request(&["f"]);
+    repo.git(&["update-index", "--assume-unchanged", "f"]);
+    refused(
+        coordinator.write(repo.path(), &operation, &expect),
+        &stale(StaleReason::PathChanged),
+    );
+    assert_eq!(
+        fs::read_to_string(repo.root.join("f")).unwrap(),
+        "hidden local edit\n"
+    );
+    let history = coordinator.undo_history(repo.path()).unwrap();
+    assert_eq!((history.undo, history.redo), (None, None));
+}
+
+#[test]
+fn refuses_an_untracked_name_that_is_a_tracked_file_on_a_case_insensitive_disk() {
+    let repo = Repo::new(&[("README.md", "one\n")]);
+    if !repo.root.join("readme.MD").exists() {
+        return;
+    }
+    repo.git(&["config", "core.ignorecase", "false"]);
+    fs::rename(repo.root.join("README.md"), repo.root.join("readme.md")).unwrap();
+    assert!(
+        repo.unstaged().iter().any(|path| path == "readme.md"),
+        "{:?}",
+        repo.unstaged()
+    );
+    let error = refused(repo.discard(&["readme.md"]), &ErrorKind::UnsupportedPath);
+    assert!(error.message.contains("README.md"), "{}", error.message);
+    assert_eq!(
+        fs::read_to_string(repo.root.join("README.md")).unwrap(),
+        "one\n"
+    );
+}
+
+#[test]
 fn runs_post_index_change_once_saying_the_worktree_changed() {
     let repo = Repo::new(&[("f", "one\n")]);
     let hooks = repo.directory.path().join("hooks");

@@ -273,6 +273,7 @@ pub(super) fn discard(
     })?;
     unchanged(&repo.root, paths.iter().copied().zip(&stats))?;
     let placed = discard.paths.iter().try_for_each(|discarded| {
+        turn(&discarded.path);
         place(
             &repo.root,
             &discarded.path,
@@ -358,8 +359,33 @@ pub(super) fn step(
     pending
         .iter()
         .zip(&prepared)
-        .try_for_each(|((discarded, to, _), temporary)| place(root, &discarded.path, to, temporary))
+        .try_for_each(|((discarded, to, _), temporary)| {
+            turn(&discarded.path);
+            place(root, &discarded.path, to, temporary)
+        })
 }
+
+#[cfg(test)]
+type Hook = Box<dyn FnMut(&str)>;
+
+#[cfg(test)]
+thread_local! {
+    static TURN: std::cell::RefCell<Option<Hook>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Runs right before a discard, undo, or redo turns to `path`, so a test can
+/// write to it as an editor would while earlier paths change.
+#[cfg(test)]
+fn turn(path: &str) {
+    TURN.with_borrow_mut(|hook| {
+        if let Some(hook) = hook {
+            hook(path);
+        }
+    });
+}
+
+#[cfg(not(test))]
+const fn turn(_path: &str) {}
 
 struct Scratch(PathBuf);
 
@@ -661,4 +687,242 @@ fn symlink(_target: &[u8], _link: &Path) -> io::Result<()> {
     Err(io::Error::other(
         "L1 Git restores symlinks on macOS and Linux only",
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Coordinator, Limits, git::LocalWrite, worktree_status};
+    use std::process::Command;
+
+    struct Repo {
+        _directory: tempfile::TempDir,
+        root: PathBuf,
+        coordinator: Coordinator,
+    }
+
+    impl Repo {
+        fn new(files: &[(&str, &str)]) -> Self {
+            let directory = tempfile::tempdir().unwrap();
+            let root = directory.path().canonicalize().unwrap().join("repo");
+            fs::create_dir(&root).unwrap();
+            let coordinator = Coordinator::new(Limits::default(), directory.path().join("undo"));
+            let repo = Self {
+                _directory: directory,
+                root,
+                coordinator,
+            };
+            repo.git(&["init", "--quiet", "--initial-branch=main"]);
+            for (key, value) in [
+                ("user.name", "Ada"),
+                ("user.email", "ada@example.test"),
+                ("commit.gpgSign", "false"),
+                ("core.hooksPath", "/dev/null"),
+            ] {
+                repo.git(&["config", key, value]);
+            }
+            for (path, contents) in files {
+                repo.put(path, contents);
+            }
+            repo.git(&["add", "-A"]);
+            repo.git(&["commit", "--quiet", "-m", "initial"]);
+            repo
+        }
+
+        fn path(&self) -> &str {
+            self.root.to_str().unwrap()
+        }
+
+        fn put(&self, path: &str, contents: &str) {
+            fs::write(self.root.join(path), contents).unwrap();
+        }
+
+        fn read(&self, path: &str) -> String {
+            fs::read_to_string(self.root.join(path)).unwrap()
+        }
+
+        fn git(&self, args: &[&str]) -> String {
+            let mut command = Command::new("git");
+            for (key, _) in std::env::vars_os() {
+                if key.to_string_lossy().starts_with("GIT_") {
+                    command.env_remove(key);
+                }
+            }
+            let output = command
+                .arg("-C")
+                .arg(&self.root)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "git {args:?}");
+            String::from_utf8(output.stdout).unwrap()
+        }
+
+        fn request(&self, paths: &[&str]) -> (Operation, Expect) {
+            let status = worktree_status(self.path()).unwrap();
+            let entries: Vec<StatusEntry> = status
+                .entries
+                .into_iter()
+                .filter(|entry| {
+                    paths.contains(
+                        &serde_json::to_value(entry).unwrap()["path"]
+                            .as_str()
+                            .unwrap(),
+                    )
+                })
+                .collect();
+            assert_eq!(entries.len(), paths.len(), "{paths:?}");
+            (Operation::Discard { entries }, Expect { head: status.head })
+        }
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum Editor {
+        InPlace,
+        Atomic,
+    }
+
+    fn editing<T>(file: PathBuf, editor: Editor, run: impl FnOnce() -> T) -> T {
+        let name = file.file_name().unwrap().to_string_lossy().into_owned();
+        TURN.set(Some(Box::new(move |path| {
+            if path == name {
+                match editor {
+                    Editor::InPlace => fs::write(&file, "editor\n").unwrap(),
+                    Editor::Atomic => {
+                        let saved = file.with_file_name(".editor-save");
+                        fs::write(&saved, "editor\n").unwrap();
+                        fs::rename(&saved, &file).unwrap();
+                    }
+                }
+            }
+        })));
+        let result = run();
+        TURN.set(None);
+        result
+    }
+
+    fn stale(error: &RepositoryError) {
+        assert_eq!(
+            error.kind,
+            ErrorKind::StaleView {
+                reason: StaleReason::PathChanged
+            },
+            "{}",
+            error.message
+        );
+    }
+
+    #[test]
+    fn keeps_an_edit_that_lands_while_earlier_files_are_discarded() {
+        for editor in [Editor::InPlace, Editor::Atomic] {
+            let repo = Repo::new(&[("a", "one\n"), ("b", "one\n")]);
+            repo.put("a", "two\n");
+            repo.put("b", "two\n");
+            let (operation, expect) = repo.request(&["a", "b"]);
+            let error = editing(repo.root.join("b"), editor, || {
+                repo.coordinator.write(repo.path(), &operation, &expect)
+            })
+            .expect_err("b changed before its turn");
+            stale(&error);
+            assert_eq!(repo.read("b"), "editor\n", "{editor:?}");
+            assert_eq!(repo.read("a"), "one\n", "{editor:?}");
+
+            let kept = repo
+                .coordinator
+                .undo_history(repo.path())
+                .unwrap()
+                .undo
+                .expect("a was discarded");
+            repo.coordinator.undo(repo.path(), kept.id).unwrap();
+            assert_eq!(repo.read("a"), "two\n", "{editor:?}");
+            assert_eq!(repo.read("b"), "editor\n", "{editor:?}");
+        }
+    }
+
+    #[test]
+    fn undo_keeps_an_edit_that_lands_while_earlier_files_are_put_back() {
+        for editor in [Editor::InPlace, Editor::Atomic] {
+            let repo = Repo::new(&[("a", "one\n"), ("b", "one\n")]);
+            repo.put("a", "two\n");
+            repo.put("b", "two\n");
+            let (operation, expect) = repo.request(&["a", "b"]);
+            let applied = repo
+                .coordinator
+                .write(repo.path(), &operation, &expect)
+                .unwrap();
+            let error = editing(repo.root.join("b"), editor, || {
+                repo.coordinator.undo(repo.path(), applied.id)
+            })
+            .expect_err("b changed before its turn");
+            stale(&error);
+            assert_eq!(repo.read("b"), "editor\n", "{editor:?}");
+            assert_eq!(repo.read("a"), "two\n", "{editor:?}");
+
+            let again = repo
+                .coordinator
+                .undo(repo.path(), applied.id)
+                .expect_err("b holds neither state");
+            assert!(again.message.starts_with("b changed"), "{}", again.message);
+            assert_eq!(repo.read("b"), "editor\n", "{editor:?}");
+        }
+    }
+
+    #[test]
+    fn undo_removes_a_copy_that_a_stopped_placement_left_beside_a_path() {
+        let repo = Repo::new(&[("f", "one\n")]);
+        repo.put("f", "two\n");
+        let (operation, expect) = repo.request(&["f"]);
+        let applied = repo
+            .coordinator
+            .write(repo.path(), &operation, &expect)
+            .unwrap();
+        let leftover = repo.root.join(format!(".l1git-{}-f", applied.id));
+        fs::write(&leftover, "partial copy\n").unwrap();
+        repo.coordinator.undo(repo.path(), applied.id).unwrap();
+        assert!(!leftover.exists());
+        assert_eq!(repo.git(&["status", "--porcelain"]), " M f\n");
+    }
+
+    #[test]
+    fn the_next_write_removes_copies_that_a_crashed_discard_left_beside_its_paths() {
+        let repo = Repo::new(&[("f", "one\n"), ("g", "one\n")]);
+        repo.put("f", "two\n");
+        repo.put("g", "two\n");
+        let (operation, _) = repo.request(&["f"]);
+        let mut leftover = None;
+        repo.coordinator
+            .locked(
+                repo.path(),
+                LocalWrite::Discard,
+                |opened, store, log, deadline| {
+                    let txn = Txn::begin(&opened, deadline)?;
+                    let (applied, _, recorded) =
+                        store.record_with(&txn, &log, &operation, |_| {
+                            Ok(DiscardChange {
+                                paths: vec![Discarded {
+                                    path: "f".to_owned(),
+                                    before: Content::Absent,
+                                    after: Content::Absent,
+                                }],
+                            })
+                        })?;
+                    let file = repo.root.join(format!(".l1git-{}-f", applied.id));
+                    fs::write(&file, "partial copy\n").unwrap();
+                    leftover = Some(file);
+                    std::mem::forget(recorded);
+                    std::mem::forget(txn);
+                    Ok(())
+                },
+            )
+            .unwrap();
+        fs::remove_file(repo.root.join(".git/index.lock")).unwrap();
+        let leftover = leftover.unwrap();
+        assert!(leftover.exists());
+
+        let (operation, expect) = repo.request(&["g"]);
+        repo.coordinator
+            .write(repo.path(), &operation, &expect)
+            .unwrap();
+        assert!(!leftover.exists());
+    }
 }
