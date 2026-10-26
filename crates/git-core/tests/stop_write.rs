@@ -31,9 +31,6 @@ fn stage(coordinator: &Coordinator, root: &str) -> Result<(), String> {
         .map_err(|error| format!("{:?}: {}", error.kind, error.message))
 }
 
-/// Runs only inside the process that
-/// `a_write_that_reaches_the_index_after_quitting_began_leaves_it_alone`
-/// starts, because `stop_all_git` stops every Git command in the process.
 #[test]
 fn quitting_process() {
     let Ok(root) = env::var(CHILD) else {

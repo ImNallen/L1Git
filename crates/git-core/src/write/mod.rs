@@ -19,7 +19,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use store::{LockedStore, Log, Position, Store};
-pub(crate) use txn::Txn;
+pub(crate) use txn::{Published, Txn};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(
@@ -115,21 +115,17 @@ impl Change {
         }
     }
 
-    /// Puts the target state of `direction` into the transaction's copy, and
-    /// says whether that changed anything.
     fn restore(
         &self,
         txn: &Txn<'_>,
         entry: &store::EntryObjects,
         direction: Direction,
-    ) -> Result<bool, RepositoryError> {
+    ) -> Result<Restored, RepositoryError> {
         match self {
             Self::Index(change) => index::restore(txn, entry, change, direction),
         }
     }
 
-    /// Whether the repository holds what the write wrote, for a write that
-    /// a crash left recorded but maybe never published.
     fn landed(&self, repo: &Repo, deadline: WriteDeadline) -> Result<bool, RepositoryError> {
         match self {
             Self::Index(change) => index::landed(repo, change, deadline),
@@ -141,6 +137,12 @@ impl Change {
             Self::Index(change) => change.touches_skip_worktree(),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Restored {
+    AlreadyThere,
+    Staged,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -166,16 +168,18 @@ impl Operation {
         }
     }
 
-    /// Runs the write on the transaction's copy of the index and returns what
-    /// it changed. It cannot publish: only the transaction's commit does,
-    /// after the store records the change.
-    fn apply(&self, txn: &Txn<'_>, expect: &Expect) -> Result<Change, RepositoryError> {
+    fn apply<'r>(
+        &self,
+        repo: &'r Repo,
+        deadline: WriteDeadline,
+        expect: &Expect,
+    ) -> Result<(Txn<'r>, Change), RepositoryError> {
         match self {
             Self::StageFiles { entries } => {
-                index::edit(txn, expect, index::Command::Stage, entries)
+                index::edit(repo, deadline, expect, index::Command::Stage, entries)
             }
             Self::UnstageFiles { entries } => {
-                index::edit(txn, expect, index::Command::Unstage, entries)
+                index::edit(repo, deadline, expect, index::Command::Unstage, entries)
             }
         }
     }
@@ -187,6 +191,10 @@ struct Repo {
     git_dir: PathBuf,
     index: PathBuf,
     objects: PathBuf,
+    /// Where Git looks for the `post-index-change` hook, after
+    /// `core.hooksPath`. Relative, because an absolute form fails when
+    /// `core.hooksPath` is `/dev/null`.
+    hook: PathBuf,
     null_oid: String,
 }
 
@@ -204,12 +212,16 @@ impl Repo {
                 "index",
                 "--git-path",
                 "objects",
+                "--path-format=relative",
+                "--git-path",
+                "hooks/post-index-change",
                 "--show-object-format",
             ],
             deadline,
         )?;
         let text = String::from_utf8(output).map_err(|_| repository::non_utf8_path())?;
-        let [common_dir, git_dir, index, objects, format] = text.lines().collect::<Vec<_>>()[..]
+        let [common_dir, git_dir, index, objects, hook, format] =
+            text.lines().collect::<Vec<_>>()[..]
         else {
             return Err(git::malformed());
         };
@@ -223,6 +235,7 @@ impl Repo {
             git_dir: git_dir.into(),
             index: index.into(),
             objects: objects.into(),
+            hook: root.join(hook),
             null_oid,
             root,
         })
@@ -235,6 +248,19 @@ impl Repo {
     fn head(&self, deadline: WriteDeadline) -> Result<Head, RepositoryError> {
         repository::head(&self.root, deadline.reads())
     }
+
+    fn worktree(&self, root: &str, deadline: Deadline) -> Result<Self, RepositoryError> {
+        let repo = Self::open(root, deadline)?;
+        if repo.common_dir != self.common_dir {
+            return Err(RepositoryError::new(
+                ErrorKind::MissingPath,
+                format!(
+                    "{root} is no longer a worktree of this repository, so L1 Git cannot change it."
+                ),
+            ));
+        }
+        Ok(repo)
+    }
 }
 
 impl Coordinator {
@@ -244,15 +270,16 @@ impl Coordinator {
         operation: &Operation,
         expect: &Expect,
     ) -> Result<Applied, RepositoryError> {
-        self.locked(
+        let (applied, published) = self.locked(
             path,
             operation.local_write(),
             |repo, store, log, deadline| {
-                let txn = Txn::begin(&repo, deadline)?;
-                let change = operation.apply(&txn, expect)?;
+                let (txn, change) = operation.apply(&repo, deadline, expect)?;
                 txn.commit_write(store, &log, operation, &change)
             },
-        )
+        )?;
+        published.run_hook();
+        Ok(applied)
     }
 
     /// Undoes `id` if it is the next entry to undo. If it is the next entry
@@ -291,7 +318,7 @@ impl Coordinator {
         self.writing(&common_dir, || {
             let store = LockedStore::lock(self.undo_dir(), &common_dir, deadline.reads())?;
             let deadline = deadline.renewed();
-            let log = store.settled_log(deadline)?;
+            let log = store.settled_log(&repo, deadline)?;
             work(repo, &store, log, deadline)
         })
     }
@@ -302,35 +329,31 @@ impl Coordinator {
         id: EntryId,
         direction: Direction,
     ) -> Result<Applied, RepositoryError> {
-        self.locked(path, direction.write(), |opened, store, log, deadline| {
-            let step = match log.position(id, direction) {
-                Position::Next(step) => step,
-                Position::AlreadyDone => return store.applied(id),
-                Position::Elsewhere => return Err(store::history_changed()),
-            };
-            let (applied, change) = store.record_of(id)?;
-            let repo = if applied.root == opened.root() {
-                opened
-            } else {
-                let repo = Repo::open(&applied.root, deadline.reads())?;
-                if repo.common_dir != opened.common_dir {
-                    return Err(RepositoryError::new(
-                        ErrorKind::MissingPath,
-                        format!(
-                            "{} is no longer a worktree of this repository, so L1 Git cannot change it.",
-                            applied.root
-                        ),
-                    ));
+        let (applied, published) =
+            self.locked(path, direction.write(), |opened, store, log, deadline| {
+                let step = match log.position(id, direction) {
+                    Position::Next(step) => step,
+                    Position::AlreadyDone => return Ok((store.applied(id)?, None)),
+                    Position::Elsewhere => return Err(store::history_changed()),
+                };
+                let (applied, change) = store.record_of(id)?;
+                let repo = if applied.root == opened.root() {
+                    opened
+                } else {
+                    opened.worktree(&applied.root, deadline.reads())?
+                };
+                let txn = Txn::begin(&repo, deadline)?;
+                match change.restore(&txn, &store.entry(id), direction)? {
+                    Restored::AlreadyThere => {
+                        store.save(step.log())?;
+                        Ok((applied, None))
+                    }
+                    Restored::Staged => Ok((applied, Some(txn.commit_step(store, step, &change)?))),
                 }
-                repo
-            };
-            let txn = Txn::begin(&repo, deadline)?;
-            if change.restore(&txn, &store.entry(id), direction)? {
-                txn.commit_step(store, step, &change)?;
-            } else {
-                store.save(step.log())?;
-            }
-            Ok(applied)
-        })
+            })?;
+        if let Some(published) = published {
+            published.run_hook();
+        }
+        Ok(applied)
     }
 }

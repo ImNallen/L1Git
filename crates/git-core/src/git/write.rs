@@ -1,5 +1,8 @@
 use super::{Capped, Deadline, Work, base, execute, text, too_old};
-use crate::{ErrorKind, RepositoryError, StaleReason, stderr, write::Txn};
+use crate::{
+    ErrorKind, RepositoryError, StaleReason, stderr,
+    write::{Published, Txn},
+};
 use std::{ffi::OsStr, path::Path, time::Duration};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -81,13 +84,13 @@ pub(crate) struct Write<'a> {
 const WRITE_STDOUT_CAP: usize = 1024 * 1024;
 
 impl<'a> Write<'a> {
-    /// A Git command of the write that `txn` holds. It needs the transaction,
-    /// so no Git write runs outside one, and it always runs on the
-    /// transaction's private copy of the index, so it cannot reach the index
-    /// before the write is recorded. Hooks are off, because Git would run
-    /// `post-index-change` against the copy.
+    /// Hooks are off, because Git would run `post-index-change` against the
+    /// copy.
     pub(crate) fn new(txn: &'a Txn<'_>, dir: &'a Path, args: &[&'a str]) -> Self {
         let mut all = vec!["-c", "core.hooksPath=/dev/null"];
+        for disabled in txn.disabled_hooks() {
+            all.extend(["-c", disabled.as_str()]);
+        }
         all.extend(args);
         Self {
             dir,
@@ -98,11 +101,9 @@ impl<'a> Write<'a> {
         }
     }
 
-    /// Git's `post-index-change` hook, run as `git add` runs it: from the
-    /// worktree root, against the real index, once `txn` replaced it.
-    pub(crate) fn post_index_change(txn: &'a Txn<'_>, skip_worktree: bool) -> Self {
+    pub(crate) fn post_index_change(published: &'a Published) -> Self {
         Self {
-            dir: txn.root(),
+            dir: published.root(),
             args: vec![
                 "hook",
                 "run",
@@ -110,7 +111,7 @@ impl<'a> Write<'a> {
                 "post-index-change",
                 "--",
                 "0",
-                if skip_worktree { "1" } else { "0" },
+                if published.skip_worktree() { "1" } else { "0" },
             ],
             env: Vec::new(),
             input: None,
@@ -118,14 +119,12 @@ impl<'a> Write<'a> {
         }
     }
 
-    /// Writes new objects to `objects` instead of the repository.
-    pub(crate) fn objects(mut self, objects: &'a Path) -> Self {
+    pub(crate) fn object_directory(mut self, objects: &'a Path) -> Self {
         self.env.push(("GIT_OBJECT_DIRECTORY", objects.as_os_str()));
         self
     }
 
-    /// Reads objects from `objects` as well as the repository.
-    pub(crate) fn alternates(mut self, objects: &'a Path) -> Self {
+    pub(crate) fn alternate_object_directory(mut self, objects: &'a Path) -> Self {
         self.env
             .push(("GIT_ALTERNATE_OBJECT_DIRECTORIES", objects.as_os_str()));
         self

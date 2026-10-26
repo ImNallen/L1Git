@@ -5,6 +5,7 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::BTreeSet,
     fs::{self, File, TryLockError},
     io,
     ops::Deref,
@@ -80,8 +81,6 @@ impl Store {
         })
     }
 
-    /// The history of this repository. A log that an earlier repository at
-    /// the same path left reads as empty.
     pub(super) fn log(&self) -> Result<Log, RepositoryError> {
         let empty = Log {
             version: VERSION,
@@ -190,15 +189,16 @@ impl LockedStore {
         Ok(Self { store, _lock: lock })
     }
 
-    /// The log with a write that a crash left between its record and its
-    /// publish settled: kept when the index holds what the write wrote,
-    /// dropped otherwise.
-    pub(super) fn settled_log(&self, deadline: WriteDeadline) -> Result<Log, RepositoryError> {
+    pub(super) fn settled_log(
+        &self,
+        opened: &Repo,
+        deadline: WriteDeadline,
+    ) -> Result<Log, RepositoryError> {
         let log = self.log()?;
         let Some(id) = log.pending else {
             return Ok(log);
         };
-        let settled = if self.landed(id, deadline)? {
+        let settled = if self.landed(id, opened, deadline)? {
             log.pushed(id)
         } else {
             log.without_pending()
@@ -208,17 +208,22 @@ impl LockedStore {
         Ok(settled)
     }
 
-    fn landed(&self, id: EntryId, deadline: WriteDeadline) -> Result<bool, RepositoryError> {
+    fn landed(
+        &self,
+        id: EntryId,
+        opened: &Repo,
+        deadline: WriteDeadline,
+    ) -> Result<bool, RepositoryError> {
         let Ok((applied, change)) = self.record_of(id) else {
             return Ok(false);
         };
-        let Ok(repo) = Repo::open(&applied.root, deadline.reads()) else {
-            return Ok(false);
-        };
-        if repo.common_dir.to_string_lossy() != self.common_dir {
-            return Ok(false);
+        if applied.root == opened.root() {
+            return change.landed(opened, deadline);
         }
-        change.landed(&repo, deadline)
+        match opened.worktree(&applied.root, deadline.reads()) {
+            Ok(repo) => change.landed(&repo, deadline),
+            Err(_) => Ok(false),
+        }
     }
 
     pub(super) fn save(&self, log: &Log) -> Result<(), RepositoryError> {
@@ -235,22 +240,20 @@ impl LockedStore {
         }
     }
 
-    /// Writes the entry and saves the log with the entry pending, so the
-    /// history names the write before the index changes.
     pub(super) fn record(
         &self,
         txn: &Txn<'_>,
         log: &Log,
         operation: &Operation,
         change: &Change,
-    ) -> Result<Recorded<'_>, RepositoryError> {
+    ) -> Result<(Applied, Recorded<'_>), RepositoryError> {
         let id = EntryId::after(log.entries.last().copied());
         let applied = Applied {
             id,
             root: txn.repo().root(),
             operation: operation.clone(),
         };
-        let mut entry = NewEntry {
+        let entry = NewEntry {
             dir: self.entry_dir(id),
             kept: false,
         };
@@ -258,15 +261,17 @@ impl LockedStore {
         self.entry(id).keep(txn, &change.objects())?;
         self.write(id, "applied.json", &applied)?;
         self.write(id, "change.json", change)?;
-        let pending = log.with_pending(id);
-        self.save(&pending)?;
-        entry.kept = true;
-        Ok(Recorded {
-            store: self,
-            log: pending,
+        let log = log.with_pending(id);
+        self.save(&log)?;
+        Ok((
             applied,
-            entry,
-        })
+            Recorded {
+                store: self,
+                id,
+                log,
+                entry,
+            },
+        ))
     }
 
     fn forget(&self, log: &Log) {
@@ -302,12 +307,10 @@ impl Deref for LockedStore {
     }
 }
 
-/// A write the log names as pending. Dropped unconfirmed, as when the index
-/// could not be replaced, it takes the write back out of the log.
 pub(super) struct Recorded<'s> {
     store: &'s LockedStore,
+    id: EntryId,
     log: Log,
-    applied: Applied,
     entry: NewEntry,
 }
 
@@ -315,21 +318,18 @@ impl Recorded<'_> {
     /// Marks the write done once the index holds it. If the log cannot be
     /// saved, it stays pending, and the next locked request keeps it,
     /// because the index holds what it wrote.
-    pub(super) fn confirm(mut self) -> Applied {
-        let id = self.applied.id;
-        let done = self.log.pushed(id);
+    pub(super) fn confirm(mut self) {
+        self.entry.kept = true;
+        let done = self.log.pushed(self.id);
         if self.store.save(&done).is_ok() {
             self.store.forget(&done);
         }
-        self.log = done;
-        self.entry.kept = true;
-        self.applied.clone()
     }
 }
 
 impl Drop for Recorded<'_> {
     fn drop(&mut self) {
-        if self.log.pending.is_some() {
+        if !self.entry.kept {
             self.entry.kept = self.store.save(&self.log.without_pending()).is_err();
         }
     }
@@ -356,12 +356,9 @@ pub(super) struct Log {
     repository: Identity,
     entries: Vec<EntryId>,
     undone: usize,
-    /// A write recorded but not yet known to have reached the index.
     pending: Option<EntryId>,
 }
 
-/// Where an entry sits for one direction. Only `Next` carries the log a
-/// step leaves, so only the entry the log names next can be stepped.
 pub(super) enum Position {
     Next(Step),
     AlreadyDone,
@@ -430,8 +427,6 @@ impl Log {
         }
     }
 
-    /// The log after `id` is done: the redo entries go, and past the cap the
-    /// oldest.
     fn pushed(&self, id: EntryId) -> Self {
         let mut entries = self.entries[..self.entries.len() - self.undone].to_vec();
         entries.push(id);
@@ -458,8 +453,8 @@ impl EntryObjects {
         fs::create_dir_all(&pack).map_err(unwritable)?;
         let base = pack.join("pack").to_string_lossy().into_owned();
         txn.git(&["pack-objects", "-q", &base])
-            .objects(&self.objects)
-            .alternates(&txn.repo().objects)
+            .object_directory(&self.objects)
+            .alternate_object_directory(&txn.repo().objects)
             .input(lines(oids))
             .run(txn.deadline())?
             .succeeded()?;
@@ -468,22 +463,24 @@ impl EntryObjects {
 
     /// Copies back whichever of `oids` the repository lacks, as after a
     /// `gc --prune=now` there, because `update-index --index-info` accepts an
-    /// object that does not exist and would leave a broken index. Git names
-    /// each missing object in its answer, so the answer is read by name.
-    pub(super) fn bring_back(&self, txn: &Txn<'_>, oids: Vec<Oid>) -> Result<(), RepositoryError> {
+    /// object that does not exist and would leave a broken index.
+    pub(super) fn bring_back(&self, txn: &Txn<'_>, oids: &[Oid]) -> Result<(), RepositoryError> {
         if oids.is_empty() {
             return Ok(());
         }
         let found = txn
             .git(&["cat-file", "--batch-check=%(objectname)"])
-            .input(lines(&oids))
+            .input(lines(oids))
             .uncapped()
             .run(txn.deadline())?
             .succeeded()?;
-        let missing: Vec<Oid> = found
+        let named: BTreeSet<&[u8]> = found
             .split(|byte| *byte == b'\n')
             .filter_map(|answer| answer.strip_suffix(b" missing"))
-            .filter_map(|name| oids.iter().find(|oid| oid.as_str().as_bytes() == name))
+            .collect();
+        let missing: Vec<Oid> = oids
+            .iter()
+            .filter(|oid| named.contains(oid.as_str().as_bytes()))
             .cloned()
             .collect();
         if missing.is_empty() {
@@ -497,7 +494,7 @@ impl EntryObjects {
             .to_string_lossy()
             .into_owned();
         txn.git(&["pack-objects", "-q", &base])
-            .alternates(&self.objects)
+            .alternate_object_directory(&self.objects)
             .input(lines(&missing))
             .run(txn.deadline())?
             .succeeded()?;

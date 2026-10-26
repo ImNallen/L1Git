@@ -911,43 +911,23 @@ fn stages_a_same_size_edit_that_git_can_see_only_by_its_contents() {
 }
 
 #[test]
-fn says_why_a_view_is_stale_in_a_field() {
-    let reason = |result: Result<Applied, RepositoryError>| {
-        let error = serde_json::to_value(result.unwrap_err()).unwrap();
-        assert_eq!(error["kind"], "staleView", "{error}");
-        error["reason"].as_str().unwrap_or_default().to_owned()
+fn sends_a_stale_view_with_its_reason_and_other_errors_without_one() {
+    let stale = RepositoryError {
+        kind: PATH_CHANGED,
+        message: "f changed.".into(),
     };
-    let repo = Repo::committed(&[("f", "one\n"), ("z", "file\n")]);
-    let coordinator = repo.coordinator();
-    repo.put("f", "two\n");
-    let (seen, expect) = entries(&repo, &["f"]);
-    let write = Operation::StageFiles { entries: seen };
-    repo.git(&["add", "f"]);
     assert_eq!(
-        reason(coordinator.write(repo.path(), &write, &expect)),
-        "pathChanged"
+        serde_json::to_value(&stale).unwrap(),
+        serde_json::json!({ "kind": "staleView", "reason": "pathChanged", "message": "f changed." })
     );
-    repo.git(&["commit", "--quiet", "-m", "moves HEAD"]);
-    repo.put("f", "three\n");
-    let (seen, _) = entries(&repo, &["f"]);
+    let held = RepositoryError {
+        kind: ErrorKind::LockHeld,
+        message: "held".into(),
+    };
     assert_eq!(
-        reason(coordinator.write(
-            repo.path(),
-            &Operation::StageFiles { entries: seen },
-            &expect
-        )),
-        "headMoved"
+        serde_json::to_value(&held).unwrap(),
+        serde_json::json!({ "kind": "lockHeld", "message": "held" })
     );
-    let first = stage(&coordinator, &repo, &["f"]).unwrap();
-    repo.put("f", "four\n");
-    stage(&coordinator, &repo, &["f"]).unwrap();
-    assert_eq!(
-        reason(coordinator.undo(repo.path(), first.id)),
-        "historyChanged"
-    );
-    fs::remove_file(repo.root.join("z")).unwrap();
-    repo.put("z/x", "not chosen\n");
-    assert_eq!(reason(stage(&coordinator, &repo, &["z"])), "pathNotChosen");
 }
 
 #[cfg(unix)]

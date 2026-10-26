@@ -1,4 +1,4 @@
-use super::{Change, Direction, Expect, Repo, store, txn::Txn};
+use super::{Change, Direction, Expect, Repo, Restored, store, txn::Txn};
 use crate::{
     ChangeStatus, ErrorKind, Head, IndexObject, Mode, MoveSide, Moved, Oid, RepositoryError, Sides,
     Stages, StaleReason, StatusEntry,
@@ -342,22 +342,37 @@ fn touched(command: Command, entry: &StatusEntry) -> Result<Vec<&str>, Repositor
     }
 }
 
-pub(super) fn edit(
-    txn: &Txn<'_>,
+pub(super) fn edit<'r>(
+    repo: &'r Repo,
+    deadline: WriteDeadline,
     expect: &Expect,
     command: Command,
     entries: &[StatusEntry],
-) -> Result<Change, RepositoryError> {
+) -> Result<(Txn<'r>, Change), RepositoryError> {
     let plan = Plan::new(command, entries)?;
-    let head = txn.repo().head(txn.deadline())?;
+    let txn = Txn::begin(repo, deadline)?;
+    let head = repo.head(deadline)?;
     if head != expect.head {
         return Err(RepositoryError::stale(
             StaleReason::HeadMoved,
             "HEAD moved since L1 Git read this worktree. Refresh and try again.",
         ));
     }
-    let paths = with_file_ancestors(txn, plan.claims.keys().map(String::as_str))?;
-    let before = read(txn, &paths)?;
+    let absent = plan
+        .claims
+        .iter()
+        .filter(|(_, seen)| matches!(seen, Seen::Absent | Seen::Conflict(_)))
+        .map(|(path, _)| path.as_str());
+    let above = files_above(&txn, absent)?;
+    let paths: Vec<&str> = plan
+        .claims
+        .keys()
+        .map(String::as_str)
+        .chain(above)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let before = read(&txn, &paths)?;
     for (path, seen) in &plan.claims {
         if !seen.matches(at(&before, path)) {
             return Err(RepositoryError::stale(
@@ -368,9 +383,9 @@ pub(super) fn edit(
     }
     txn.git(command.args())
         .input(nul_separated(plan.touched.iter().map(String::as_str)))
-        .run(txn.deadline())?
+        .run(deadline)?
         .succeeded()?;
-    let after = read(txn, &paths)?;
+    let after = read(&txn, &paths)?;
     let change = between(head, before, after)?;
     if let Some(other) = change
         .paths
@@ -386,7 +401,7 @@ pub(super) fn edit(
             ),
         ));
     }
-    Ok(Change::Index(change))
+    Ok((txn, Change::Index(change)))
 }
 
 fn between(head: Head, before: Rows, mut after: Rows) -> Result<IndexChange, RepositoryError> {
@@ -416,14 +431,12 @@ fn between(head: Head, before: Rows, mut after: Rows) -> Result<IndexChange, Rep
     Ok(IndexChange { head, paths })
 }
 
-/// Puts the recorded entries of `direction`'s target into the copy. Returns
-/// whether the copy changed: a repeated step finds the index already there.
 pub(super) fn restore(
     txn: &Txn<'_>,
     entry: &store::EntryObjects,
     change: &IndexChange,
     direction: Direction,
-) -> Result<bool, RepositoryError> {
+) -> Result<Restored, RepositoryError> {
     if txn.repo().head(txn.deadline())? != change.head {
         return Err(RepositoryError::stale(
             StaleReason::HeadMoved,
@@ -431,7 +444,14 @@ pub(super) fn restore(
         ));
     }
     let recorded: BTreeSet<&str> = change.paths.iter().map(|path| path.path.as_str()).collect();
-    let paths = with_file_ancestors(txn, recorded.iter().copied())?;
+    let above = files_above(txn, recorded.iter().copied())?;
+    let paths: Vec<&str> = recorded
+        .iter()
+        .copied()
+        .chain(above)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
     let current = read(txn, &paths)?;
     let changed_since = |path: &str| {
         RepositoryError::stale(
@@ -457,13 +477,16 @@ pub(super) fn restore(
         pending.push((path.path.as_str(), to));
     }
     if pending.is_empty() {
-        return Ok(false);
+        return Ok(Restored::AlreadyThere);
     }
-    let objects: BTreeSet<&Oid> = pending
+    let objects: Vec<Oid> = pending
         .iter()
         .flat_map(|(_, to)| to.iter().filter_map(stored))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .cloned()
         .collect();
-    entry.bring_back(txn, objects.into_iter().cloned().collect())?;
+    entry.bring_back(txn, &objects)?;
     put(txn, &pending)?;
     let written = read(txn, &paths)?;
     let inexact = unrecorded(&written, &recorded).or_else(|| {
@@ -481,11 +504,9 @@ pub(super) fn restore(
             ),
         ));
     }
-    Ok(true)
+    Ok(Restored::Staged)
 }
 
-/// Whether the worktree's index holds what the change wrote, read without a
-/// lock. A crash can leave a write recorded but never published.
 pub(super) fn landed(
     repo: &Repo,
     change: &IndexChange,
@@ -525,7 +546,6 @@ fn nul_separated<'p>(paths: impl IntoIterator<Item = &'p str>) -> Vec<u8> {
 /// system's limit.
 const PATHS_PER_READ: usize = 1000;
 
-/// The index entries at `paths` and below them, keyed by exact path.
 fn rows(
     paths: &[&str],
     mut ls_files: impl FnMut(&[&str]) -> Result<Vec<u8>, RepositoryError>,
@@ -551,32 +571,26 @@ fn rows(
     Ok(rows)
 }
 
-fn read(txn: &Txn<'_>, paths: &[String]) -> Result<Rows, RepositoryError> {
-    let paths: Vec<&str> = paths.iter().map(String::as_str).collect();
-    rows(&paths, |args| {
+fn read(txn: &Txn<'_>, paths: &[&str]) -> Result<Rows, RepositoryError> {
+    rows(paths, |args| {
         txn.git(args).uncapped().run(txn.deadline())?.succeeded()
     })
 }
 
-/// `paths` and every folder above them that the copy holds as a file, at
-/// any stage. Git replaces such an entry without a word when it adds a path
-/// below it. Each folder is looked up by exact name with `:<stage>:<path>`,
-/// and a name is found unless Git echoes it back as missing, so no answer
-/// is matched to a question by its position.
-fn with_file_ancestors<'p>(
+/// The folders above `paths` that the copy holds as a file, at any stage.
+/// Git replaces such an entry without a word when it adds a path below it.
+fn files_above<'p>(
     txn: &Txn<'_>,
-    paths: impl Iterator<Item = &'p str> + Clone,
-) -> Result<Vec<String>, RepositoryError> {
-    let folders: BTreeSet<&str> = paths
-        .clone()
-        .flat_map(|path| path.match_indices('/').map(move |(at, _)| &path[..at]))
-        .collect();
-    let mut all: BTreeSet<String> = paths.map(str::to_owned).collect();
-    if folders.is_empty() {
-        return Ok(all.into_iter().collect());
-    }
+    paths: impl Iterator<Item = &'p str>,
+) -> Result<Vec<&'p str>, RepositoryError> {
     fn names(folder: &str) -> impl Iterator<Item = String> + '_ {
         (0..=3).map(move |stage| format!(":{stage}:{folder}"))
+    }
+    let folders: BTreeSet<&str> = paths
+        .flat_map(|path| path.match_indices('/').map(move |(at, _)| &path[..at]))
+        .collect();
+    if folders.is_empty() {
+        return Ok(Vec::new());
     }
     let input: Vec<u8> = folders
         .iter()
@@ -593,13 +607,10 @@ fn with_file_ancestors<'p>(
         .split(|byte| *byte == 0)
         .filter_map(|answer| answer.strip_suffix(b" missing"))
         .collect();
-    all.extend(
-        folders
-            .into_iter()
-            .filter(|folder| names(folder).any(|name| !missing.contains(name.as_bytes())))
-            .map(str::to_owned),
-    );
-    Ok(all.into_iter().collect())
+    Ok(folders
+        .into_iter()
+        .filter(|folder| names(folder).any(|name| !missing.contains(name.as_bytes())))
+        .collect())
 }
 
 fn put(txn: &Txn<'_>, targets: &[(&str, &[IndexEntry])]) -> Result<(), RepositoryError> {
@@ -651,8 +662,7 @@ fn put(txn: &Txn<'_>, targets: &[(&str, &[IndexEntry])]) -> Result<(), Repositor
 }
 
 /// `git add -N` needs a file at the path, which may be gone from the
-/// worktree. So Git adds placeholders of the recorded mode from a private
-/// work tree, and the worktree is never touched.
+/// worktree.
 fn add_intent(txn: &Txn<'_>, targets: &[(&str, Mode)]) -> Result<(), RepositoryError> {
     let tree = txn.scratch("intent");
     let _ = fs::remove_dir_all(&tree);

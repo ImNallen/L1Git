@@ -4,7 +4,7 @@ use super::{
 };
 use crate::{
     ErrorKind, RepositoryError,
-    git::{HeldIndexLock, Write, WriteDeadline},
+    git::{self, HeldIndexLock, Write, WriteDeadline},
 };
 use std::{
     fs, io,
@@ -13,23 +13,83 @@ use std::{
 
 const PREFIX: &str = "l1git-";
 
-/// One write's hold on a worktree's index: `.git/index.lock`, created with
-/// O_EXCL, and a private copy of the index that every command of the write
-/// changes. Only `commit_write` and `commit_step` replace the index with the
-/// copy, so nothing reaches the index before the undo history names it.
-/// Dropping it unpublished deletes the copy and the lock.
+/// Only `commit_write` and `commit_step` replace the index with the copy, so
+/// nothing reaches the index before the undo history names it.
 pub(crate) struct Txn<'r> {
     repo: &'r Repo,
     lock: PathBuf,
     copy: PathBuf,
     deadline: WriteDeadline,
+    hooks: Hooks,
     published: bool,
     _held: HeldIndexLock,
+}
+
+/// `core.hooksPath` does not turn off a hook that config defines, so each
+/// command of the transaction turns those off by name.
+struct Hooks {
+    file: bool,
+    disabled: Vec<String>,
+}
+
+impl Hooks {
+    fn of(repo: &Repo, deadline: WriteDeadline) -> Result<Self, RepositoryError> {
+        let found = git::run(
+            &repo.root,
+            &[
+                "config",
+                "-z",
+                "--get-regexp",
+                r"^hook\..*\.event$",
+                "^post-index-change$",
+            ],
+            deadline.reads(),
+        )?;
+        let disabled = match found.status.code() {
+            Some(0) => found
+                .stdout
+                .split(|byte| *byte == 0)
+                .filter_map(|record| {
+                    let key = git::text(record.split(|byte| *byte == b'\n').next()?);
+                    let name = key.strip_prefix("hook.")?.strip_suffix(".event")?;
+                    Some(format!("hook.{name}.enabled=false"))
+                })
+                .collect(),
+            Some(1) => Vec::new(),
+            _ => return Err(git::read_failed()),
+        };
+        Ok(Self {
+            file: executable(&repo.hook),
+            disabled,
+        })
+    }
+
+    fn any(&self) -> bool {
+        self.file || !self.disabled.is_empty()
+    }
+}
+
+#[cfg(unix)]
+fn executable(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    fs::metadata(path)
+        .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
+}
+
+#[cfg(not(unix))]
+fn executable(path: &Path) -> bool {
+    path.is_file()
+}
+
+fn private(repo: &Repo, name: &str) -> PathBuf {
+    repo.git_dir
+        .join(format!("{PREFIX}{name}.{}", std::process::id()))
 }
 
 impl<'r> Txn<'r> {
     pub(super) fn begin(repo: &'r Repo, deadline: WriteDeadline) -> Result<Self, RepositoryError> {
         let held = HeldIndexLock::begin()?;
+        let hooks = Hooks::of(repo, deadline)?;
         let lock = repo.index.with_extension("lock");
         match fs::File::options().write(true).create_new(true).open(&lock) {
             Ok(_) => {}
@@ -51,11 +111,10 @@ impl<'r> Txn<'r> {
         }
         let txn = Self {
             repo,
-            copy: repo
-                .git_dir
-                .join(format!("{PREFIX}index.{}", std::process::id())),
+            copy: private(repo, "index"),
             lock,
             deadline,
+            hooks,
             published: false,
             _held: held,
         };
@@ -81,8 +140,8 @@ impl<'r> Txn<'r> {
         &self.copy
     }
 
-    pub(crate) fn root(&self) -> &Path {
-        &self.repo.root
+    pub(crate) fn disabled_hooks(&self) -> &[String] {
+        &self.hooks.disabled
     }
 
     /// Git reads an entry whose file changed in the same second as the index
@@ -114,17 +173,12 @@ impl<'r> Txn<'r> {
         }
     }
 
-    /// A Git command in the worktree that reads and writes the copy.
     pub(super) fn git<'a>(&'a self, args: &[&'a str]) -> Write<'a> {
         Write::new(self, &self.repo.root, args)
     }
 
-    /// A private folder in the Git directory that the write deletes when it
-    /// ends, for Git work trees it builds.
     pub(super) fn scratch(&self, name: &str) -> PathBuf {
-        self.repo
-            .git_dir
-            .join(format!("{PREFIX}{name}.{}", std::process::id()))
+        private(self.repo, name)
     }
 
     /// Records the write, then replaces the index, then marks the record
@@ -136,12 +190,11 @@ impl<'r> Txn<'r> {
         log: &Log,
         operation: &Operation,
         change: &Change,
-    ) -> Result<Applied, RepositoryError> {
-        let recorded = store.record(&self, log, operation, change)?;
-        self.publish()?;
-        let applied = recorded.confirm();
-        self.post_index_change(change);
-        Ok(applied)
+    ) -> Result<(Applied, Published), RepositoryError> {
+        let (applied, recorded) = store.record(&self, log, operation, change)?;
+        let published = self.publish(change)?;
+        recorded.confirm();
+        Ok((applied, published))
     }
 
     /// Replaces the index with an undo or redo of the entry the log names
@@ -152,14 +205,13 @@ impl<'r> Txn<'r> {
         store: &LockedStore,
         step: Step,
         change: &Change,
-    ) -> Result<(), RepositoryError> {
-        self.publish()?;
+    ) -> Result<Published, RepositoryError> {
+        let published = self.publish(change)?;
         let _ = store.save(step.log());
-        self.post_index_change(change);
-        Ok(())
+        Ok(published)
     }
 
-    fn publish(&mut self) -> Result<(), RepositoryError> {
+    fn publish(&mut self, change: &Change) -> Result<Published, RepositoryError> {
         let renamed = if self.copy.exists() {
             fs::rename(&self.copy, &self.lock)
                 .and_then(|()| fs::rename(&self.lock, &self.repo.index))
@@ -173,13 +225,38 @@ impl<'r> Txn<'r> {
             )
         })?;
         self.published = true;
-        Ok(())
+        Ok(Published {
+            root: self.repo.root.clone(),
+            deadline: self.deadline,
+            skip_worktree: change.touches_skip_worktree(),
+            hooks: self.hooks.any(),
+        })
+    }
+}
+
+pub(crate) struct Published {
+    root: PathBuf,
+    deadline: WriteDeadline,
+    skip_worktree: bool,
+    hooks: bool,
+}
+
+impl Published {
+    pub(crate) fn root(&self) -> &Path {
+        &self.root
     }
 
-    /// Runs the hook once the index holds the write. Like Git, the write
-    /// ignores how the hook ends.
-    fn post_index_change(&self, change: &Change) {
-        let _ = Write::post_index_change(self, change.touches_skip_worktree()).run(self.deadline);
+    pub(crate) const fn skip_worktree(&self) -> bool {
+        self.skip_worktree
+    }
+
+    /// Runs `post-index-change` after the write let go of its locks, as Git
+    /// runs it after it lets go of `index.lock`. Like Git, the write ignores
+    /// how the hook ends.
+    pub(super) fn run_hook(self) {
+        if self.hooks {
+            let _ = Write::post_index_change(&self).run(self.deadline);
+        }
     }
 }
 
@@ -231,8 +308,6 @@ mod tests {
         )
     }
 
-    /// Stops a write the way a crash would, after its record and, when
-    /// `published`, after it replaced the index, with no drop handler run.
     fn crash(coordinator: &Coordinator, path: &str, published: bool) {
         let (operation, expect) = stage(path, "f");
         coordinator
@@ -240,11 +315,10 @@ mod tests {
                 path,
                 LocalWrite::StageFiles,
                 |repo, store, log, deadline| {
-                    let mut txn = Txn::begin(&repo, deadline)?;
-                    let change = operation.apply(&txn, &expect)?;
-                    let recorded = store.record(&txn, &log, &operation, &change)?;
+                    let (mut txn, change) = operation.apply(&repo, deadline, &expect)?;
+                    let (_, recorded) = store.record(&txn, &log, &operation, &change)?;
                     if published {
-                        txn.publish()?;
+                        txn.publish(&change)?;
                     }
                     std::mem::forget(recorded);
                     std::mem::forget(txn);
