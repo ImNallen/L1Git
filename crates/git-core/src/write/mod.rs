@@ -250,16 +250,27 @@ impl Repo {
     }
 
     fn worktree(&self, root: &str, deadline: Deadline) -> Result<Self, RepositoryError> {
-        let repo = Self::open(root, deadline)?;
-        if repo.common_dir != self.common_dir {
-            return Err(RepositoryError::new(
+        let gone = || {
+            RepositoryError::new(
                 ErrorKind::MissingPath,
                 format!(
                     "{root} is no longer a worktree of this repository, so L1 Git cannot change it."
                 ),
-            ));
+            )
+        };
+        match Self::open(root, deadline) {
+            Ok(repo) if repo.common_dir == self.common_dir => Ok(repo),
+            Ok(_) => Err(gone()),
+            Err(error)
+                if matches!(
+                    error.kind,
+                    ErrorKind::MissingPath | ErrorKind::NotRepository
+                ) =>
+            {
+                Err(gone())
+            }
+            Err(error) => Err(error),
         }
-        Ok(repo)
     }
 }
 
