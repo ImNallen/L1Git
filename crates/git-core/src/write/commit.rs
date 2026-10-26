@@ -434,27 +434,18 @@ impl Trace {
         })
     }
 
-    /// Git processes that hooks start trace their own updates to the same
-    /// file, so two different matches name none.
+    /// Git processes that hooks start trace their updates to the same file.
+    /// Git traces its own before `post-commit` and the `committed`
+    /// `reference-transaction` hook run, and while it holds the branch's lock,
+    /// and the ID it prints is unique when it prints it, so no earlier update
+    /// of the branch can name that commit.
     fn update(&self, target: &Target, printed: &str) -> Option<Update> {
         let file = fs::File::open(&self.refs).ok()?;
-        let mut found = None;
-        for line in io::BufReader::new(file).split(b'\n') {
-            let line = line.ok()?;
-            let Some(update) = update_in(&String::from_utf8_lossy(&line), target.reference())
-            else {
-                continue;
-            };
-            if !update.new.as_str().starts_with(printed) {
-                continue;
-            }
-            match &found {
-                Some(seen) if *seen != update => return None,
-                Some(_) => {}
-                None => found = Some(update),
-            }
-        }
-        found
+        io::BufReader::new(file)
+            .split(b'\n')
+            .map_while(Result::ok)
+            .filter_map(|line| update_in(&String::from_utf8_lossy(&line), target.reference()))
+            .find(|update| update.new.as_str().starts_with(printed))
     }
 
     fn failed_hook(&self) -> Option<String> {
