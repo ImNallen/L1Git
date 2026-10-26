@@ -658,10 +658,16 @@ fn put(txn: &Txn<'_>, targets: &[(&str, &[IndexEntry])]) -> Result<(), Repositor
             );
         }
     }
-    txn.git(&["update-index", "-z", "--index-info"])
-        .input(info)
-        .run(txn.deadline())?
-        .succeeded()?;
+    txn.git(&[
+        "-c",
+        "core.ignoreStat=false",
+        "update-index",
+        "-z",
+        "--index-info",
+    ])
+    .input(info)
+    .run(txn.deadline())?
+    .succeeded()?;
     let intent: Vec<(&str, Mode)> = targets
         .iter()
         .filter_map(|(path, entries)| {
