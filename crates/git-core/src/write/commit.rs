@@ -61,23 +61,16 @@ impl Target {
         })
     }
 
-    /// Whether the ref L1 Git checked before the commit points at `made`,
-    /// which only the process that made the commit could have set.
-    fn holds(
-        &self,
-        repo: &Repo,
-        deadline: WriteDeadline,
-        made: &Oid,
-    ) -> Result<bool, RepositoryError> {
-        Ok(match self {
-            Self::Branch(reference) => resolve(repo, deadline, reference)?.as_ref() == Some(made),
-            Self::Detached => {
-                repo.head(deadline)?
-                    == Head::Detached {
-                        oid: made.as_str().to_owned(),
-                    }
-            }
-        })
+    /// Where the ref L1 Git checked before the commit points now. A detached
+    /// HEAD that another process attached to a branch points nowhere.
+    fn oid(&self, repo: &Repo, deadline: WriteDeadline) -> Result<Option<Oid>, RepositoryError> {
+        match self {
+            Self::Branch(reference) => resolve(repo, deadline, reference),
+            Self::Detached => Ok(match repo.head(deadline)? {
+                head @ Head::Detached { .. } => oid(&head),
+                Head::Attached { .. } | Head::Unborn { .. } => None,
+            }),
+        }
     }
 
     fn name(&self) -> &str {
@@ -174,11 +167,19 @@ pub(super) fn commit(
     if wrote.code() != Some(0) {
         return Err(refused(&wrote, &trace));
     }
-    let made = printed(repo, deadline, wrote.stdout())?;
+    let printed = printed(wrote.stdout()).ok_or_else(|| {
+        RepositoryError::new(
+            ErrorKind::GitFailed,
+            "Git finished, but L1 Git could not read which commit it made, so it has no undo entry for it. Check the history.",
+        )
+    })?;
     let target = Target::of(&head);
-    if !target.holds(repo, deadline, &made)? {
-        return Err(elsewhere(&made, &target));
-    }
+    let Some(made) = target
+        .oid(repo, deadline)?
+        .filter(|now| now.as_str().starts_with(&printed))
+    else {
+        return Err(elsewhere(&printed, &target));
+    };
     if before.as_ref() == Some(&made) {
         return Err(RepositoryError::new(
             ErrorKind::UnchangedPath,
@@ -228,29 +229,16 @@ pub(super) fn commit(
 
 /// Git prints `[<branch> <abbreviated oid>] <subject>` once it has moved the
 /// branch and run `post-commit`. The branch there is HEAD's when Git prints,
-/// which another process may have switched, so only the OID is read.
-fn printed(repo: &Repo, deadline: WriteDeadline, stdout: &[u8]) -> Result<Oid, RepositoryError> {
-    let line = git::text(
-        stdout
-            .split(|byte| *byte == b'\n')
-            .next()
-            .unwrap_or_default(),
-    );
-    line.split(' ')
-        .find_map(|token| {
-            token
-                .strip_suffix(']')
-                .filter(|hex| hex.len() >= 4 && hex.bytes().all(|byte| byte.is_ascii_hexdigit()))
-        })
-        .map(|abbreviated| resolve(repo, deadline, abbreviated))
-        .transpose()?
-        .flatten()
-        .ok_or_else(|| {
-            RepositoryError::new(
-                ErrorKind::GitFailed,
-                "Git finished, but L1 Git could not read which commit it made, so it has no undo entry for it. Check the history.",
-            )
-        })
+/// which another process may have switched, so only the OID is read. Git
+/// abbreviates it to a prefix no other object had then.
+fn printed(stdout: &[u8]) -> Option<String> {
+    let line = git::text(stdout.split(|byte| *byte == b'\n').next()?);
+    line.split(' ').find_map(|token| {
+        token
+            .strip_suffix(']')
+            .filter(|hex| hex.len() >= 4 && hex.bytes().all(|byte| byte.is_ascii_hexdigit()))
+            .map(str::to_owned)
+    })
 }
 
 fn resolve(
@@ -316,12 +304,11 @@ fn commit_race(made: &Oid, target: &Target, parent: Option<&Oid>) -> RepositoryE
     )
 }
 
-fn elsewhere(made: &Oid, target: &Target) -> RepositoryError {
+fn elsewhere(printed: &str, target: &Target) -> RepositoryError {
     RepositoryError::new(
         ErrorKind::Raced,
         format!(
-            "Git made the commit {}, but another process moved HEAD or {} while Git committed, so {} does not point at it. L1 Git cannot undo it. Git's reflog names it.",
-            short(made),
+            "Git made the commit {printed}, but another process moved HEAD or {} while Git committed, so {} does not point at it. L1 Git cannot undo it. Git's reflog names it.",
             target.name(),
             target.name(),
         ),

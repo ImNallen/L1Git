@@ -130,7 +130,13 @@ impl Repo {
     fn hook(&self, name: &str, body: &str) {
         let hooks = self.directory.path().join("hooks");
         fs::create_dir_all(&hooks).unwrap();
-        hook(&hooks, name, body);
+        let path = hooks.join(name);
+        fs::write(&path, format!("#!/bin/sh\n{body}")).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        }
         self.git(&["config", "core.hooksPath", hooks.to_str().unwrap()]);
     }
 
@@ -325,16 +331,6 @@ fn a_commit_that_lands_on_a_branch_l1_git_did_not_check_has_no_undo_entry() {
     assert!(repo.undo_entry().is_none());
 }
 
-fn hook(dir: &Path, name: &str, body: &str) {
-    let path = dir.join(name);
-    fs::write(&path, format!("#!/bin/sh\n{body}")).unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
-    }
-}
-
 #[test]
 fn refuses_during_a_merge_or_with_an_unmerged_path() {
     let repo = Repo::born();
@@ -352,17 +348,10 @@ fn refuses_during_a_merge_or_with_an_unmerged_path() {
 #[test]
 fn a_failing_hook_answers_hook_failed_with_its_output_and_changes_nothing() {
     let repo = Repo::born();
-    let hooks = repo.directory.path().join("hooks");
-    fs::create_dir(&hooks).unwrap();
-    repo.git(&["config", "core.hooksPath", hooks.to_str().unwrap()]);
     repo.staged_edit("a.txt", "two\n");
     let before = repo.refs();
     for name in ["pre-commit", "commit-msg"] {
-        hook(
-            &hooks,
-            name,
-            "echo 'lint failed: TODO'\necho oops >&2\nexit 1\n",
-        );
+        repo.hook(name, "echo 'lint failed: TODO'\necho oops >&2\nexit 1\n");
         let error = repo.write(Kind::Commit, "Hooked\n").unwrap_err();
         let ErrorKind::HookFailed { output } = &error.kind else {
             panic!("{error:?}");
@@ -370,9 +359,9 @@ fn a_failing_hook_answers_hook_failed_with_its_output_and_changes_nothing() {
         assert!(output.contains("lint failed: TODO"), "{output}");
         assert!(output.contains("oops"), "{output}");
         assert!(error.message.contains(name), "{}", error.message);
-        fs::remove_file(hooks.join(name)).unwrap();
+        repo.hook(name, "exit 0\n");
     }
-    hook(&hooks, "post-commit", "exit 1\n");
+    repo.hook("post-commit", "exit 1\n");
     repo.write(Kind::Commit, "Post-commit failures do not count\n")
         .expect("a failing post-commit hook leaves the commit made");
     assert_ne!(repo.refs(), before);
@@ -449,18 +438,14 @@ fn a_commit_git_was_killed_after_making_is_not_reported_as_made() {
 #[test]
 fn hooks_see_the_users_environment_not_l1_gits() {
     let repo = Repo::born();
-    let hooks = repo.directory.path().join("hooks");
-    fs::create_dir(&hooks).unwrap();
     let seen = repo.directory.path().join("seen");
-    hook(
-        &hooks,
+    repo.hook(
         "pre-commit",
         &format!(
             "printf '%s|%s|%s|%s' \"$GIT_CONFIG_PARAMETERS\" \"$GIT_OPTIONAL_LOCKS\" \"$GIT_NO_LAZY_FETCH\" \"$(git rev-parse --short HEAD)\" > '{}'\n",
             seen.display()
         ),
     );
-    repo.git(&["config", "core.hooksPath", hooks.to_str().unwrap()]);
     repo.staged_edit("a.txt", "two\n");
     let short = repo.git(&["rev-parse", "--short", "HEAD"]);
     repo.write(Kind::Commit, "Clean env\n").unwrap();
@@ -478,15 +463,11 @@ fn undo_of_a_commit_moves_only_the_ref_and_runs_its_hooks() {
     let parent = repo.head();
     repo.staged_edit("a.txt", "two\n");
     let applied = repo.write(Kind::Commit, "Ref only\n").unwrap();
-    let hooks = repo.directory.path().join("hooks");
-    fs::create_dir(&hooks).unwrap();
     let seen = repo.directory.path().join("seen");
-    hook(
-        &hooks,
+    repo.hook(
         "reference-transaction",
         &format!("cat > /dev/null\necho \"$1\" >> '{}'\n", seen.display()),
     );
-    repo.git(&["config", "core.hooksPath", hooks.to_str().unwrap()]);
     fs::write(repo.root.join(".git/index.lock"), "").unwrap();
     repo.undo(&applied);
     assert_eq!(repo.head(), parent);

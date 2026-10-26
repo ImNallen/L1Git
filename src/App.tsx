@@ -684,9 +684,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   }, [headOf, reread, app.select]);
   // A commit that cleans the worktree removes the box that held focus.
   useEffect(() => {
-    const active = document.activeElement;
-    if (committed > 0 && (active === null || active === document.body))
-      historyRef.current?.focus();
+    if (committed > 0 && !shownElement(focusedElement())) focusFallback();
   }, [committed]);
   useEffect(() => {
     if (pendingStash === null) return;
