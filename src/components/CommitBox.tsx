@@ -71,6 +71,7 @@ export function CommitBox({
     !submitting;
 
   async function toggleAmend(checked: boolean) {
+    if (loading || submitting) return;
     setProblem(null);
     if (!checked) {
       if (amend) setDraft({ draft: amend.draftAside, amend: null });
@@ -129,7 +130,7 @@ export function CommitBox({
         autoComplete="off"
         spellCheck
         value={draft.summary}
-        disabled={loading}
+        readOnly={loading}
         onChange={(event) =>
           setDraft({ draft: { ...draft, summary: event.target.value }, amend })
         }
@@ -142,7 +143,7 @@ export function CommitBox({
         rows={3}
         spellCheck
         value={draft.description}
-        disabled={loading}
+        readOnly={loading}
         onChange={(event) =>
           setDraft({
             draft: { ...draft, description: event.target.value },
@@ -156,7 +157,8 @@ export function CommitBox({
           <input
             type="checkbox"
             checked={amending}
-            disabled={head.kind === "unborn" || loading || submitting}
+            disabled={head.kind === "unborn"}
+            aria-disabled={loading || submitting}
             onChange={(event) => void toggleAmend(event.target.checked)}
           />
           Amend previous commit
