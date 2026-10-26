@@ -152,6 +152,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   );
   const [adding, setAdding] = useState(false);
   const [editingMessage, setEditingMessage] = useState(false);
+  const [committed, setCommitted] = useState(0);
   const [palette, setPalette] = useState<{ picked: Oid | null } | null>(null);
   const paletteReturn = useRef<Element | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -674,6 +675,12 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       setJump({ ...jump, pending: false, seq: jump.seq + 1 });
     }
   }, [jump, reread, visibleOids, app.activeRoot, app.select]);
+  // A commit that cleans the worktree removes the box that held focus.
+  useEffect(() => {
+    const active = document.activeElement;
+    if (committed > 0 && (active === null || active === document.body))
+      historyRef.current?.focus();
+  }, [committed]);
   useEffect(() => {
     if (pendingStash === null) return;
     if (app.activeRoot !== pendingStash.root) setPendingStash(null);
@@ -1070,7 +1077,11 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                     writes={{
                       busy: writes.running !== null,
                       write: writeFiles,
-                      commit: writes.write,
+                      commit: async (worktree, write) => {
+                        const outcome = await writes.write(worktree, write);
+                        setCommitted((count) => count + 1);
+                        return outcome;
+                      },
                     }}
                   />
                 ) : (

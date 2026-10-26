@@ -174,7 +174,7 @@ export function CommitBox({
         <button
           type="submit"
           className="button primary"
-          disabled={!ready}
+          aria-disabled={!ready}
           title={hint}
         >
           {submitting || loading ? (
