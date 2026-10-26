@@ -441,14 +441,33 @@ fn new_name(repo: &Repo, name: &str, reads: Deadline) -> Result<BranchRef, Repos
     BranchRef::try_from(format!("refs/heads/{name}")).map_err(|_| invalid_name(name))
 }
 
-fn moved(branch: &BranchRef) -> RepositoryError {
+fn moved(name: &str) -> RepositoryError {
     RepositoryError::stale(
         StaleReason::BranchChanged,
         format!(
-            "{} is no longer at the commit L1 Git showed, so nothing changed. Refresh and try again.",
-            branch.name()
+            "{name} is no longer at the commit L1 Git showed, so nothing changed. Refresh and try again."
         ),
     )
+}
+
+fn tip_of(repo: &Repo, reference: &str, reads: Deadline) -> Result<Option<Oid>, RepositoryError> {
+    let listed = git::read(
+        &repo.root,
+        &[
+            "for-each-ref",
+            "--format=%(refname)%00%(objectname)",
+            reference,
+        ],
+        reads,
+    )?;
+    listed
+        .split(|byte| *byte == b'\n')
+        .find_map(|row| {
+            let (name, oid) = row.split_at(row.iter().position(|byte| *byte == 0)?);
+            (name == reference.as_bytes()).then(|| Oid::try_from(git::text(&oid[1..])))
+        })
+        .transpose()
+        .map_err(|_| git::malformed())
 }
 
 fn as_branch_changed(error: RepositoryError) -> RepositoryError {
@@ -479,6 +498,11 @@ pub(super) fn create(
                 "The worktree at {root} waits for its first commit on {name}, so a new {name} would move it. Choose another name."
             ),
         ));
+    }
+    if let Some(start) = at.reference()
+        && tip_of(writing.repo, start, reads)?.as_ref() != Some(at.oid())
+    {
+        return Err(moved(short(start)));
     }
     let upstream = Upstream::of(writing.repo, name, at, reads)?;
     let reflog = format!("branch: Created from {}", at.name());
@@ -687,7 +711,7 @@ pub(super) fn rename(
     listing.refuse_symbolic(&tip.reference)?;
     let source = listing.slot(&tip.reference)?;
     if source.tip.as_ref() != Some(&tip.oid) {
-        return Err(moved(&tip.reference));
+        return Err(moved(tip.reference.name()));
     }
     listing.refuse_clash(&target, Some(&tip.reference))?;
     let left = listing.slot(&target)?;
@@ -745,7 +769,7 @@ pub(super) fn delete(writing: &Writing<'_>, tip: &BranchTip) -> Result<Applied, 
     listing.refuse_symbolic(&tip.reference)?;
     let before = listing.slot(&tip.reference)?;
     if before.tip.as_ref() != Some(&tip.oid) {
-        return Err(moved(&tip.reference));
+        return Err(moved(tip.reference.name()));
     }
     listing.refuse_in_use(writing.repo, &before)?;
     let config = before.config.clone();
