@@ -6,6 +6,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    time::Duration,
 };
 use tempfile::TempDir;
 
@@ -155,6 +156,16 @@ impl Repo {
     fn checkout_seen(&self, target: Start, expect: &Expect) -> Result<Applied, RepositoryError> {
         self.coordinator
             .write(self.path(), &Operation::Checkout { target }, expect)
+    }
+
+    fn checkout_within(&self, target: Start, cap: Duration) -> Result<Applied, RepositoryError> {
+        Coordinator::new(Limits::default(), self.root.with_file_name("undo"))
+            .cap_writes(cap)
+            .write(
+                self.path(),
+                &Operation::Checkout { target },
+                &Expect { head: self.head() },
+            )
     }
 
     fn undo(&self, applied: &Applied) -> Result<Applied, RepositoryError> {
@@ -495,13 +506,77 @@ fn a_failing_post_checkout_hook_keeps_the_entry_and_shows_its_output() {
         panic!("{error:?}");
     };
     assert!(output.contains("lint said no"), "{output}");
+    assert!(
+        error.message.contains("Undo puts back main"),
+        "{}",
+        error.message
+    );
     assert_eq!(repo.git(&["symbolic-ref", "HEAD"]), "refs/heads/topic");
     let entry = repo.next_undo().expect("the checkout has an entry");
     let undone = refused(repo.undo(&entry));
     assert!(matches!(undone.kind, ErrorKind::AfterHookFailed { .. }));
+    assert!(
+        undone.message.contains("Redo puts back topic"),
+        "{}",
+        undone.message
+    );
     assert_eq!(repo.state(), before);
     let history = repo.coordinator.undo_history(repo.path()).unwrap();
     assert_eq!(history.redo.map(|redo| redo.id), Some(entry.id));
+    let redone = refused(repo.redo(&entry));
+    assert!(
+        redone.message.contains("Undo puts back main"),
+        "{}",
+        redone.message
+    );
+}
+
+#[test]
+fn a_checkout_stopped_after_head_moved_keeps_its_entry_and_does_not_ask_for_a_retry() {
+    let repo = Repo::new();
+    hooks(&repo, "post-checkout", "#!/bin/sh\nsleep 30\n");
+    let error = refused(repo.checkout_within(repo.remote("topic"), Duration::from_secs(1)));
+    assert_eq!(error.kind, ErrorKind::TimedOut, "{}", error.message);
+    assert_eq!(repo.git(&["symbolic-ref", "HEAD"]), "refs/heads/topic");
+    assert!(!error.message.contains("Retry"), "{}", error.message);
+    assert!(
+        error.message.contains("Undo puts back main"),
+        "{}",
+        error.message
+    );
+    assert!(repo.next_undo().is_some());
+}
+
+#[test]
+fn a_switch_a_hook_stops_before_head_moves_is_put_back_with_no_advice_to_discard() {
+    for (stop, cap) in [
+        ("echo no >&2\n  exit 1", Duration::from_secs(600)),
+        ("sleep 30", Duration::from_secs(1)),
+    ] {
+        let repo = Repo::new();
+        hooks(
+            &repo,
+            "reference-transaction",
+            &format!(
+                "#!/bin/sh\nin=$(cat)\nif [ \"$1\" = prepared ] && echo \"$in\" | grep -q ' HEAD$'; then\n  {stop}\nfi\n"
+            ),
+        );
+        fs::write(repo.root.join("shared.txt"), "carried\n").unwrap();
+        let before = repo.state();
+        let error = refused(repo.checkout_within(repo.remote("topic"), cap));
+        assert!(
+            error.message.contains("put them back"),
+            "{stop}: {}",
+            error.message
+        );
+        assert!(
+            !error.message.contains("Discard"),
+            "{stop}: {}",
+            error.message
+        );
+        assert_eq!(repo.state(), before, "{stop}");
+        assert!(repo.next_undo().is_none(), "{stop}");
+    }
 }
 
 #[test]
