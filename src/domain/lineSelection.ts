@@ -1,4 +1,4 @@
-import { parsePatchFiles } from "@pierre/diffs";
+import { HUNK_HEADER, parsePatchFiles } from "@pierre/diffs";
 import type {
   DiffLineAnnotation,
   FileDiffMetadata,
@@ -43,12 +43,26 @@ const headerOf = (patch: string) => patch.slice(0, patch.indexOf("\n@@"));
 
 const isCopy = (patch: string) => /^copy from /m.test(headerOf(patch));
 
+function linesMatchHeader(hunk: Hunk): boolean {
+  const [, , deletions = "1", , additions = "1"] =
+    HUNK_HEADER.exec(hunk.hunkSpecs ?? "") ?? [];
+  const context = hunk.hunkContent.reduce(
+    (sum, block) => sum + (block.type === "context" ? block.lines : 0),
+    0,
+  );
+  return (
+    Number(deletions) === context + hunk.deletionLines &&
+    Number(additions) === context + hunk.additionLines
+  );
+}
+
 export function splittable(patch: string): boolean {
   const [file, ...typeChangeHalf] = parsedFiles(patch);
   return (
     file !== undefined &&
     typeChangeHalf.length === 0 &&
     file.hunks.length > 0 &&
+    file.hunks.every(linesMatchHeader) &&
     !isCopy(patch) &&
     !isLinkOrSubmodule(file.mode) &&
     !isLinkOrSubmodule(file.prevMode)
