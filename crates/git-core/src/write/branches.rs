@@ -90,8 +90,6 @@ pub(super) struct BranchChange {
 }
 
 impl BranchChange {
-    /// What Git left, when undo and redo can read it as one create, delete,
-    /// or rename.
     fn landed(before: &[Slot], after: Vec<Slot>) -> Option<Self> {
         Transition::between(before, &after).ok()?;
         Some(Self {
@@ -508,8 +506,6 @@ enum Track {
     Simple,
 }
 
-/// The upstream `git branch` gives a new branch. Git's `setup_tracking`
-/// picks it from `branch.autoSetupMerge` and `branch.autoSetupRebase`.
 struct Upstream {
     remote: String,
     merges: Vec<String>,
@@ -615,9 +611,6 @@ impl Upstream {
     }
 }
 
-/// Each remote whose fetch refspecs map `reference`, with the ref on the
-/// remote it maps from, the first per remote, as Git's
-/// `remote_find_tracking` reads them.
 fn fetched_into<'c>(config: &'c [(String, String)], reference: &str) -> Vec<(&'c str, String)> {
     let mut found: Vec<(&str, String)> = Vec::new();
     for (key, value) in config {
