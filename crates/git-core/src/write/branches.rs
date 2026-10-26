@@ -260,6 +260,7 @@ impl Listing {
 
     pub(super) fn refuse_clash(
         &self,
+        repo: &Repo,
         target: &BranchRef,
         source: Option<&BranchRef>,
     ) -> Result<(), RepositoryError> {
@@ -272,7 +273,7 @@ impl Listing {
             others,
             target.name(),
             source.map(BranchRef::name),
-            folds_case(&self.config),
+            folds_case(repo, &self.config),
         )
     }
 
@@ -308,16 +309,22 @@ impl Listing {
     }
 }
 
-/// A loose ref is a file, so a disk that folds case, which Git records in
-/// `core.ignorecase`, folds each folder and name of a ref. Reftable keeps
-/// names apart on any disk.
-pub(super) fn folds_case(config: &[(String, String)]) -> bool {
+/// A loose ref is a file, so a disk that folds case folds each folder and
+/// name of a ref. Git records that in `core.ignorecase`, but a repository
+/// copied from another disk can say otherwise, so a `REFS` that Git did not
+/// make yet finds `refs` counts too. Reftable keeps names apart on any disk.
+pub(super) fn folds_case(repo: &Repo, config: &[(String, String)]) -> bool {
     let set = |name: &str, wanted: &str| {
         config
             .iter()
             .any(|(key, value)| key == name && value.eq_ignore_ascii_case(wanted))
     };
-    set("core.ignorecase", "true") && !set("extensions.refstorage", "reftable")
+    let disk_folds = || {
+        repo.common_dir.join("REFS").exists()
+            && fs::read_dir(&repo.common_dir)
+                .is_ok_and(|names| names.flatten().all(|name| name.file_name() != "REFS"))
+    };
+    !set("extensions.refstorage", "reftable") && (set("core.ignorecase", "true") || disk_folds())
 }
 
 pub(super) fn refuse_clash<'a>(
@@ -494,7 +501,7 @@ pub(super) fn create(
     let branch = new_name(writing.repo, name, reads)?;
     let name = branch.name();
     let listing = Listing::read(writing.repo, reads)?;
-    listing.refuse_clash(&branch, None)?;
+    listing.refuse_clash(writing.repo, &branch, None)?;
     let before = listing.slot(&branch)?;
     if let Some(root) = before.heads.first() {
         return Err(RepositoryError::new(
@@ -736,7 +743,7 @@ pub(super) fn rename(
     if source.tip.as_ref() != Some(&tip.oid) {
         return Err(moved(tip.reference.name()));
     }
-    listing.refuse_clash(&target, Some(&tip.reference))?;
+    listing.refuse_clash(writing.repo, &target, Some(&tip.reference))?;
     let left = listing.slot(&target)?;
     if !left.config.is_empty() {
         return Err(RepositoryError::new(

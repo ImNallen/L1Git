@@ -157,7 +157,7 @@ pub(super) fn create(
             .filter_map(|listed| listed.reference.strip_prefix("refs/tags/")),
         tag.name(),
         None,
-        branches::folds_case(&branches::config(repo, &["--local"], reads)?),
+        branches::folds_case(repo, &branches::config(repo, &["--local"], reads)?),
     )?;
     if message.is_none() && git::config_flag(&repo.root, "tag.gpgSign", false, reads)? {
         return Err(RepositoryError::new(

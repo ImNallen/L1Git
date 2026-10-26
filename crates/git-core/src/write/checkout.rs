@@ -184,7 +184,7 @@ impl Switch {
                 if let Some(tip) = slot.tip {
                     return Self::existing(&listing, before, &branch, tip, from);
                 }
-                listing.refuse_clash(&branch, None)?;
+                listing.refuse_clash(repo, &branch, None)?;
                 if let Some(root) = slot.heads.first() {
                     return Err(RepositoryError::new(
                         ErrorKind::Conflict,
