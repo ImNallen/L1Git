@@ -4,7 +4,6 @@ import {
   hunkAnchor,
   parsedFiles,
   picksFor,
-  splittable,
 } from "./lineSelection";
 import type { LinePick } from "./repository";
 
@@ -166,89 +165,5 @@ describe("deletesNewFile", () => {
       false,
     );
     expect(deletesNewFile(file, "hunk")).toBe(false);
-  });
-});
-
-describe("splittable", () => {
-  const link = `diff --git a/link b/link
-index 1de565933b05f74c75ff9a6520af5f9f8a5a2f1d..27fa34919ae70aa0d7eaccdfbf393cfc440e7d25 120000
---- a/link
-+++ b/link
-@@ -1 +1 @@
--target-one
-\\ No newline at end of file
-+target-two
-\\ No newline at end of file
-`;
-  const copy = `diff --git a/old.txt b/copy.txt
-similarity index 80%
-copy from old.txt
-copy to copy.txt
-index 1111111111111111111111111111111111111111..2222222222222222222222222222222222222222 100644
---- a/old.txt
-+++ b/copy.txt
-@@ -1,2 +1,2 @@
- one
--two
-+TWO
-`;
-  const typeChange = `diff --git a/x b/x
-deleted file mode 120000
-index 1111111111111111111111111111111111111111..0000000000000000000000000000000000000000
---- a/x
-+++ /dev/null
-@@ -1 +0,0 @@
--t
-\\ No newline at end of file
-diff --git a/x b/x
-new file mode 100644
-index 0000000000000000000000000000000000000000..2222222222222222222222222222222222222222
---- /dev/null
-+++ b/x
-@@ -0,0 +1 @@
-+t
-`;
-  const modeOnly = `diff --git a/x.sh b/x.sh
-old mode 100644
-new mode 100755
-`;
-
-  it("splits a text edit, a new file, and a rename", () => {
-    expect(splittable(threeHunks)).toBe(true);
-    expect(splittable(created)).toBe(true);
-    expect(
-      splittable(
-        threeHunks.replace(
-          "index 2e9afba",
-          "similarity index 90%\nrename from was.ts\nrename to app.ts\nindex 2e9afba",
-        ),
-      ),
-    ).toBe(true);
-  });
-
-  it("refuses a link, a copy, a type change, and a patch with no hunk", () => {
-    expect(splittable(link)).toBe(false);
-    expect(splittable(copy)).toBe(false);
-    expect(splittable(typeChange)).toBe(false);
-    expect(splittable(modeOnly)).toBe(false);
-  });
-
-  it("refuses a patch whose lines disagree with its hunk header", () => {
-    const blankContext = `diff --git a/wrong.txt b/wrong.txt
-index 1111111111111111111111111111111111111111..2222222222222222222222222222222222222222 100644
---- a/wrong.txt
-+++ b/wrong.txt
-@@ -1,6 +1,6 @@
- w1
-${" "}
--w3
--w4
-+W3
-+W4
- w5
- w6
-`;
-    expect(splittable(blankContext)).toBe(true);
-    expect(splittable(blankContext.replace("\n \n", "\n\n"))).toBe(false);
   });
 });

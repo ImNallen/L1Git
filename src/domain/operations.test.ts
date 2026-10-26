@@ -25,8 +25,10 @@ import type {
   Operation,
   Problem,
   StatusEntry,
+  WorktreePatch,
   WorktreeStatus,
 } from "./repository";
+import type { ListSide } from "./worktree";
 
 const blob = (digit: string): IndexObject => ({
   mode: "100644",
@@ -489,45 +491,200 @@ group("partActions", () => {
     index,
   });
   const both = ordinary({ kind: "both", staged: "M", unstaged: "M" });
+  const submodule = { commitChanged: true, modified: false, untracked: false };
+  const text = (patch: string): WorktreePatch => ({
+    kind: "diff",
+    diff: { kind: "text", patch, lossy: false },
+  });
+  const edited = `diff --git a/a.txt b/a.txt
+index 1111111111111111111111111111111111111111..2222222222222222222222222222222222222222 100644
+--- a/a.txt
++++ b/a.txt
+@@ -1,3 +1,3 @@
+ one
+${" "}
+-two
++TWO
+`;
+  const edit = text(edited);
+  const created = text(`diff --git a/notes.txt b/notes.txt
+new file mode 100644
+index 0000000000000000000000000000000000000000..3333333333333333333333333333333333333333
+--- /dev/null
++++ b/notes.txt
+@@ -0,0 +1,2 @@
++one
++two
+`);
+  const moved = text(`diff --git a/search.ts b/finder.ts
+similarity index 90%
+rename from search.ts
+rename to finder.ts
+index 1111111111111111111111111111111111111111..2222222222222222222222222222222222222222 100644
+--- a/search.ts
++++ b/finder.ts
+@@ -1,2 +1,2 @@
+ one
+-two
++TWO
+`);
 
   it("stages and discards an unstaged diff and unstages a staged one", () => {
-    expect(partActions(both, "unstaged")).toEqual(["stage", "discard"]);
-    expect(partActions(both, "staged")).toEqual(["unstage"]);
-    expect(partActions(untracked, "unstaged")).toEqual(["stage", "discard"]);
-    expect(partActions(renamed, "staged")).toEqual(["unstage"]);
+    expect(partActions(edit, both, "unstaged")).toEqual(["stage", "discard"]);
+    expect(partActions(edit, both, "staged")).toEqual(["unstage"]);
+    expect(partActions(created, untracked, "unstaged")).toEqual([
+      "stage",
+      "discard",
+    ]);
+    expect(partActions(moved, renamed, "staged")).toEqual(["unstage"]);
   });
 
   it("only stages a file added with git add -N", () => {
     const intent = ordinary({ kind: "unstaged", unstaged: "A" }, null);
-    expect(partActions(intent, "unstaged")).toEqual(["stage"]);
+    expect(partActions(created, intent, "unstaged")).toEqual(["stage"]);
   });
 
-  it("writes no part of a conflict, a submodule, or a move git add -N started", () => {
-    expect(partActions(unmerged, "conflict")).toEqual([]);
-    expect(partActions(both, "conflict")).toEqual([]);
-    expect(
-      partActions(
+  it("writes no part of a diff wherever the core refuses to", () => {
+    const refusals: [
+      string,
+      WorktreePatch,
+      StatusEntry | undefined,
+      ListSide,
+    ][] = [
+      ["a conflict", edit, unmerged, "conflict"],
+      ["a file in the conflict list", edit, both, "conflict"],
+      [
+        "a conflict's diff",
         {
-          ...both,
-          submodule: { commitChanged: true, modified: false, untracked: false },
+          kind: "conflicted",
+          conflict: "bothModified",
+          diff: { kind: "text", patch: edited, lossy: false },
         },
+        unmerged,
+        "conflict",
+      ],
+      [
+        "a binary file",
+        { kind: "diff", diff: { kind: "binary" } },
+        both,
         "unstaged",
-      ),
-    ).toEqual([]);
-    expect(
-      partActions(
+      ],
+      [
+        "a diff too large to show",
+        { kind: "diff", diff: { kind: "tooLarge", bytes: 2_000_000 } },
+        both,
+        "unstaged",
+      ],
+      [
+        "a submodule's change",
+        { kind: "submodule", submodule },
+        both,
+        "unstaged",
+      ],
+      ["a submodule entry", edit, { ...both, submodule }, "unstaged"],
+      [
+        "a move git add -N started",
+        moved,
         { ...renamed, side: { kind: "unstaged", original: blob("b") } },
         "unstaged",
-      ),
-    ).toEqual([]);
-    expect(partActions(undefined, "unstaged")).toEqual([]);
-  });
-
-  it("writes no part of a file whose name was not valid UTF-8", () => {
-    const lossy = "odd�.txt";
-    expect(partActions({ ...untracked, path: lossy }, "unstaged")).toEqual([]);
-    expect(partActions({ ...both, path: lossy }, "unstaged")).toEqual([]);
-    expect(partActions({ ...both, path: lossy }, "staged")).toEqual([]);
+      ],
+      [
+        "a name that was not valid UTF-8",
+        edit,
+        { ...both, path: "odd\uFFFD.txt" },
+        "unstaged",
+      ],
+      [
+        "an untracked name that was not valid UTF-8",
+        created,
+        { ...untracked, path: "odd\uFFFD.txt" },
+        "unstaged",
+      ],
+      [
+        "a symbolic link",
+        text(`diff --git a/link b/link
+index 1de565933b05f74c75ff9a6520af5f9f8a5a2f1d..27fa34919ae70aa0d7eaccdfbf393cfc440e7d25 120000
+--- a/link
++++ b/link
+@@ -1 +1 @@
+-target-one
+\\ No newline at end of file
++target-two
+\\ No newline at end of file
+`),
+        both,
+        "unstaged",
+      ],
+      [
+        "a gitlink",
+        text(`diff --git a/sub b/sub
+index 1111111111111111111111111111111111111111..2222222222222222222222222222222222222222 160000
+--- a/sub
++++ b/sub
+@@ -1 +1 @@
+-Subproject commit 1111111111111111111111111111111111111111
++Subproject commit 2222222222222222222222222222222222222222
+`),
+        both,
+        "unstaged",
+      ],
+      [
+        "a copy",
+        text(`diff --git a/old.txt b/copy.txt
+similarity index 80%
+copy from old.txt
+copy to copy.txt
+index 1111111111111111111111111111111111111111..2222222222222222222222222222222222222222 100644
+--- a/old.txt
++++ b/copy.txt
+@@ -1,2 +1,2 @@
+ one
+-two
++TWO
+`),
+        both,
+        "unstaged",
+      ],
+      [
+        "a type change, which Git shows as two changes",
+        text(`diff --git a/x b/x
+deleted file mode 100644
+index 1111111111111111111111111111111111111111..0000000000000000000000000000000000000000
+--- a/x
++++ /dev/null
+@@ -1 +0,0 @@
+-t
+diff --git a/x b/x
+new file mode 120000
+index 0000000000000000000000000000000000000000..2222222222222222222222222222222222222222
+--- /dev/null
++++ b/x
+@@ -0,0 +1 @@
++t
+\\ No newline at end of file
+`),
+        both,
+        "unstaged",
+      ],
+      [
+        "a mode change with no hunk",
+        text(`diff --git a/x.sh b/x.sh
+old mode 100644
+new mode 100755
+`),
+        both,
+        "unstaged",
+      ],
+      [
+        "lines that disagree with their hunk header",
+        text(edited.replace("\n \n", "\n\n")),
+        both,
+        "unstaged",
+      ],
+      ["a path the status no longer lists", edit, undefined, "unstaged"],
+    ];
+    for (const [refusal, patch, entry, side] of refusals)
+      expect(partActions(patch, entry, side), refusal).toEqual([]);
   });
 });
 

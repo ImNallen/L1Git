@@ -5,7 +5,6 @@ import {
   parsedFiles,
   picksFor,
   shownText,
-  splittable,
 } from "./domain/lineSelection";
 import type { DiffStyle } from "./domain/lineSelection";
 import { partActions, partWrite } from "./domain/operations";
@@ -44,15 +43,15 @@ export function useParts({
   const [discarding, setDiscarding] = useState<PartDiscard | null>(null);
   const target = (() => {
     if (fileDiff.kind !== "ready" || fileDiff.side === null) return null;
-    const shown = shownText(fileDiff.patch);
     const read = changes.get(fileDiff.selection.root);
-    if (shown === null || read?.kind !== "ready" || !splittable(shown))
-      return null;
-    const { path, side, range } = fileDiff;
+    if (read?.kind !== "ready") return null;
+    const { path, side, range, patch } = fileDiff;
     const entry = read.status.entries.find((each) => each.path === path);
-    const actions = partActions(entry, side);
-    const [file] = parsedFiles(shown);
-    if (actions.length === 0 || file === undefined) return null;
+    const actions = partActions(patch, entry, side);
+    const shown = shownText(patch);
+    const [file] = shown === null ? [] : parsedFiles(shown);
+    if (actions.length === 0 || shown === null || file === undefined)
+      return null;
     const root = fileDiff.selection.root;
     return { root, path, shown, file, actions, range, status: read.status };
   })();

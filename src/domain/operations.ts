@@ -1,4 +1,5 @@
 import { subjectOf } from "./commitMessage";
+import { shownText, splittable } from "./lineSelection";
 import type { ListSide } from "./worktree";
 import type {
   Applied,
@@ -8,6 +9,7 @@ import type {
   Operation,
   Problem,
   StatusEntry,
+  WorktreePatch,
   WorktreeStatus,
 } from "./repository";
 
@@ -59,13 +61,17 @@ const lineWrites = {
   discard: "discardLines",
 } as const satisfies Record<PartAction, PartWrite>;
 
-const decodedWithReplacements = (path: string) => path.includes("�");
+const decodedWithReplacements = (path: string) => path.includes("\uFFFD");
 
 export function partActions(
+  patch: WorktreePatch,
   entry: StatusEntry | undefined,
   side: ListSide,
 ): readonly PartAction[] {
+  const shown = shownText(patch);
   if (
+    shown === null ||
+    !splittable(shown) ||
     entry === undefined ||
     side === "conflict" ||
     decodedWithReplacements(entry.path)
