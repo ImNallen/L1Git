@@ -1360,6 +1360,25 @@ mod tests {
     }
 
     #[test]
+    fn refuses_to_discard_part_of_an_intent_to_add_file_but_stages_part_of_one() {
+        let added = StatusEntry::Ordinary {
+            path: "f".to_owned(),
+            submodule: None,
+            sides: Sides::Unstaged {
+                unstaged: ChangeStatus::Added,
+            },
+            index: None,
+        };
+        let discard = Part::new(Action::Discard, "f", Picks::Hunk(0), CREATION).unwrap();
+        assert_eq!(
+            kind(discard.prepare(read(added.clone(), text(CREATION)))),
+            ErrorKind::UnsupportedPath
+        );
+        let stage = Part::new(Action::Stage, "f", Picks::Hunk(0), CREATION).unwrap();
+        assert!(stage.prepare(read(added, text(CREATION))).is_ok());
+    }
+
+    #[test]
     fn judges_the_bytes_only_once_they_are_the_shown_ones() {
         let link = concat!(
             "diff --git a/f b/f\n",
