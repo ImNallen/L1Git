@@ -98,6 +98,22 @@ impl Repo {
         repo
     }
 
+    fn conflicted() -> Self {
+        let repo = Self::committed(&[("shared.txt", "base\n")]);
+        repo.git(&["switch", "--quiet", "-c", "theirs"]);
+        repo.put("shared.txt", "theirs\n");
+        repo.git(&["commit", "--quiet", "-am", "theirs"]);
+        repo.git(&["switch", "--quiet", "main"]);
+        repo.put("shared.txt", "ours\n");
+        repo.git(&["commit", "--quiet", "-am", "ours"]);
+        assert!(
+            !git_output(&repo.root, &["merge", "--quiet", "theirs"])
+                .status
+                .success()
+        );
+        repo
+    }
+
     fn path(&self) -> &str {
         self.root.to_str().unwrap()
     }
@@ -319,19 +335,8 @@ fn stages_and_unstages_a_rename_as_both_of_its_paths() {
 
 #[test]
 fn refuses_to_unstage_a_conflict_and_stages_it_as_resolved() {
-    let repo = Repo::committed(&[("shared.txt", "base\n")]);
+    let repo = Repo::conflicted();
     let coordinator = repo.coordinator();
-    repo.git(&["switch", "--quiet", "-c", "theirs"]);
-    repo.put("shared.txt", "theirs\n");
-    repo.git(&["commit", "--quiet", "-am", "theirs"]);
-    repo.git(&["switch", "--quiet", "main"]);
-    repo.put("shared.txt", "ours\n");
-    repo.git(&["commit", "--quiet", "-am", "ours"]);
-    assert!(
-        !git_output(&repo.root, &["merge", "--quiet", "theirs"])
-            .status
-            .success()
-    );
     let conflicted = repo.index();
     assert_eq!(
         kind(unstage(&coordinator, &repo, &["shared.txt"])),
@@ -558,6 +563,55 @@ fn an_undo_puts_back_the_assume_unchanged_bit_that_unstaging_dropped() {
         unstage(&coordinator, &repo, &["f"]).unwrap()
     });
     assert_eq!(repo.git(&["ls-files", "-v"]), "H f\nh g\n");
+}
+
+#[test]
+fn undo_and_redo_of_a_stage_restore_exactly_when_git_ignores_stat() {
+    let repo = Repo::committed(&[("f", "one\n"), ("g", "one\n")]);
+    let coordinator = repo.coordinator();
+    repo.put("f", "two\n");
+    repo.git(&["config", "core.ignoreStat", "true"]);
+    round_trip(&coordinator, &repo, || {
+        stage(&coordinator, &repo, &["f"]).unwrap()
+    });
+    assert_eq!(repo.git(&["ls-files", "-v"]), "h f\nH g\n");
+}
+
+#[test]
+fn undo_and_redo_of_an_unstage_restore_exactly_when_git_ignores_stat() {
+    let repo = Repo::committed(&[("f", "one\n"), ("marked", "one\n")]);
+    let coordinator = repo.coordinator();
+    repo.put("f", "two\n");
+    repo.put("marked", "two\n");
+    repo.git(&["add", "f", "marked"]);
+    repo.git(&["update-index", "--assume-unchanged", "marked"]);
+    repo.git(&["config", "core.ignoreStat", "true"]);
+    round_trip(&coordinator, &repo, || {
+        unstage(&coordinator, &repo, &["f", "marked"]).unwrap()
+    });
+    assert_eq!(repo.git(&["ls-files", "-v"]), "H f\nH marked\n");
+}
+
+#[test]
+fn an_undo_puts_back_intent_to_add_exactly_when_git_ignores_stat() {
+    let repo = Repo::committed(&[("kept", "k\n")]);
+    let coordinator = repo.coordinator();
+    repo.put("new", "n\n");
+    repo.git(&["add", "--intent-to-add", "new"]);
+    repo.git(&["config", "core.ignoreStat", "true"]);
+    round_trip(&coordinator, &repo, || {
+        stage(&coordinator, &repo, &["new"]).unwrap()
+    });
+}
+
+#[test]
+fn an_undo_puts_back_a_conflict_exactly_when_git_ignores_stat() {
+    let repo = Repo::conflicted();
+    let coordinator = repo.coordinator();
+    repo.git(&["config", "core.ignoreStat", "true"]);
+    round_trip(&coordinator, &repo, || {
+        stage(&coordinator, &repo, &["shared.txt"]).unwrap()
+    });
 }
 
 #[test]
