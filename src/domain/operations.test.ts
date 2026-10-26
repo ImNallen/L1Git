@@ -522,6 +522,13 @@ group("partActions", () => {
     ).toEqual([]);
     expect(partActions(undefined, "unstaged")).toEqual([]);
   });
+
+  it("writes no part of a file whose name was not valid UTF-8", () => {
+    const lossy = "odd�.txt";
+    expect(partActions({ ...untracked, path: lossy }, "unstaged")).toEqual([]);
+    expect(partActions({ ...both, path: lossy }, "unstaged")).toEqual([]);
+    expect(partActions({ ...both, path: lossy }, "staged")).toEqual([]);
+  });
 });
 
 group("partWrite", () => {
