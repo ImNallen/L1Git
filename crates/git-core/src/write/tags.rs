@@ -147,6 +147,7 @@ pub(super) fn create(
 ) -> Result<Applied, RepositoryError> {
     let repo = writing.repo;
     let reads = writing.deadline.reads();
+    let message = message.filter(|message| !message.trim().is_empty());
     let tag = new_name(repo, name, reads)?;
     commit::refuse_non_commit(repo, writing.deadline, at)?;
     let tags = listed(repo, "refs/tags/", reads)?;
