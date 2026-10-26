@@ -361,6 +361,7 @@ describe("shortcuts", () => {
       file: { hasCommit: true, lineActions: [] },
     };
     expect(id(file, key("Escape"))).toBe("closeFile");
+    expect(id({ ...file, dialogOpen: true }, key("Escape"))).toBeNull();
     expect(id({ ...file, adding: true }, key("Escape"))).toBeNull();
     expect(id(repositoryScreen, key("Escape"))).toBeNull();
     const settings: ActionContext = { ...repositoryScreen, screen: "settings" };
