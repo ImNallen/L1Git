@@ -576,6 +576,27 @@ fn a_hook_that_prints_a_lot_shows_what_it_printed_last() {
 }
 
 #[test]
+fn a_hook_that_prints_one_long_line_shows_its_end() {
+    let repo = Repo::born();
+    repo.hook(
+        "pre-commit",
+        "head -c 100000 /dev/zero | tr '\\0' x\necho ' THE REAL ERROR'\nexit 1\n",
+    );
+    repo.staged_edit("a.txt", "two\n");
+    let error = repo.write(Kind::Commit, "Loud\n").unwrap_err();
+    let ErrorKind::HookFailed { output } = &error.kind else {
+        panic!("{error:?}");
+    };
+    assert!(
+        output.starts_with("…x") && output.ends_with("xxx THE REAL ERROR\n"),
+        "{} bytes: {:?}",
+        output.len(),
+        output.chars().take(20).collect::<String>()
+    );
+    assert!(output.len() <= 64 * 1024 + "…".len(), "{}", output.len());
+}
+
+#[test]
 fn an_amend_that_makes_the_same_commit_answers_unchanged_and_records_nothing() {
     let second = || {
         std::time::SystemTime::now()
@@ -601,32 +622,47 @@ fn an_amend_that_makes_the_same_commit_answers_unchanged_and_records_nothing() {
 }
 
 #[test]
-fn the_commit_trace_is_private_and_a_crashed_runs_file_is_replaced() {
+fn the_commit_traces_stay_in_a_private_folder_that_goes_with_the_commit() {
     let repo = Repo::born();
     let seen = repo.directory.path().join("seen");
     repo.hook(
         "pre-commit",
         &format!(
-            "ls -l \"$GIT_TRACE2_EVENT\" | cut -c1-10 > '{0}'\necho \"$GIT_TRACE2_EVENT\" >> '{0}'\n",
+            "echo \"$GIT_TRACE2_EVENT\" > '{0}'\necho \"$GIT_TRACE_REFS\" >> '{0}'\nls -ld \"$(dirname \"$GIT_TRACE2_EVENT\")\" | cut -c1-10 >> '{0}'\n",
             seen.display()
         ),
+    );
+    repo.hook(
+        "post-commit",
+        "(sleep 1; git rev-parse HEAD) > /dev/null 2>&1 &\n",
     );
     repo.staged_edit("a.txt", "two\n");
     repo.write(Kind::Commit, "Traced\n").unwrap();
     let report = fs::read_to_string(&seen).unwrap();
-    let [mode, trace] = report.lines().collect::<Vec<_>>()[..] else {
+    let [events, refs, mode] = report.lines().collect::<Vec<_>>()[..] else {
         panic!("{report}");
     };
-    assert_eq!(mode, "-rw-------");
+    let folder = Path::new(events).parent().unwrap();
+    assert_eq!(Path::new(refs).parent(), Some(folder), "{report}");
+    assert_eq!(mode, "drwx------", "{report}");
     assert!(
-        Path::new(trace).starts_with(repo.directory.path().join("undo")),
-        "{trace}"
+        folder.starts_with(repo.directory.path().join("undo")),
+        "{report}"
     );
-    assert!(!Path::new(trace).exists(), "{trace}");
-    fs::write(trace, "left by a crash").unwrap();
+    std::thread::sleep(std::time::Duration::from_secs(2));
+    assert!(
+        !folder.exists(),
+        "a git a hook left running cannot bring the trace back: {report}"
+    );
+    let left = folder.with_file_name("trace-0000000000000001");
+    fs::create_dir(&left).unwrap();
+    fs::write(left.join("trace2.json"), "left by a crash").unwrap();
     repo.staged_edit("a.txt", "three\n");
     repo.write(Kind::Commit, "Traced again\n").unwrap();
-    assert!(!Path::new(trace).exists(), "{trace}");
+    assert!(
+        !left.exists(),
+        "the next commit sweeps a crashed run's folder"
+    );
 }
 
 #[test]

@@ -884,3 +884,20 @@ fn signal_group(pid: u32, signal: Signal) {
 
 #[cfg(not(unix))]
 fn signal_group(_pid: u32, _signal: Signal) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn kept(printed: &str, cap: usize) -> String {
+        String::from_utf8(last_whole_lines(&mut printed.as_bytes(), cap)).unwrap()
+    }
+
+    #[test]
+    fn a_cut_output_keeps_its_last_bytes_and_marks_the_cut() {
+        assert_eq!(kept("short\n", 9), "short\n");
+        assert_eq!(kept("drop\nkept\nend\n", 9), "…kept\nend\n");
+        assert_eq!(kept("aaaaaaaaaabbbb\n", 5), "…bbbb\n");
+        assert_eq!(kept("aaaaabbbbb", 5), "…bbbbb");
+    }
+}
