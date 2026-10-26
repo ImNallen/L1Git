@@ -8,7 +8,7 @@ use crate::{
     BranchMerged, BranchRef, ErrorKind, Oid, RemoteRef, RepositoryError, StaleReason,
     UpstreamMerged,
     git::{self, Capped, Deadline, WriteDeadline, Wrote},
-    repository, stderr,
+    repository, stderr, sync,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -450,26 +450,6 @@ fn moved(name: &str) -> RepositoryError {
     )
 }
 
-fn tip_of(repo: &Repo, reference: &str, reads: Deadline) -> Result<Option<Oid>, RepositoryError> {
-    let listed = git::read(
-        &repo.root,
-        &[
-            "for-each-ref",
-            "--format=%(refname)%00%(objectname)",
-            reference,
-        ],
-        reads,
-    )?;
-    listed
-        .split(|byte| *byte == b'\n')
-        .find_map(|row| {
-            let (name, oid) = row.split_at(row.iter().position(|byte| *byte == 0)?);
-            (name == reference.as_bytes()).then(|| Oid::try_from(git::text(&oid[1..])))
-        })
-        .transpose()
-        .map_err(|_| git::malformed())
-}
-
 fn as_branch_changed(error: RepositoryError) -> RepositoryError {
     let head_moved = ErrorKind::StaleView {
         reason: StaleReason::HeadMoved,
@@ -500,7 +480,7 @@ pub(super) fn create(
         ));
     }
     if let Some(start) = at.reference()
-        && tip_of(writing.repo, start, reads)?.as_ref() != Some(at.oid())
+        && !sync::is_at(&writing.repo.root, start, at.oid(), reads)?
     {
         return Err(moved(short(start)));
     }
@@ -573,7 +553,6 @@ impl Upstream {
         };
         let shown = short(start);
         let tracked = match (track, at) {
-            (Track::Never, _) => None,
             (Track::Inherit, Start::Local { .. }) => {
                 let merges: Vec<_> = values(&config, &format!("branch.{shown}.merge"))
                     .into_iter()
@@ -583,7 +562,7 @@ impl Upstream {
                     .filter(|_| !merges.is_empty())
                     .map(|remote| upstream(Some(remote), merges))
             }
-            (Track::Inherit, _) => None,
+            (Track::Never | Track::Inherit, _) => None,
             (track, _) => match fetched_into(&config, start)[..] {
                 [] => (matches!(track, Track::Always) && matches!(at, Start::Local { .. }))
                     .then(|| upstream(None, vec![start.to_owned()])),

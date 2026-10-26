@@ -2,6 +2,7 @@ mod advance;
 mod fetch;
 mod read;
 
+pub(crate) use advance::is_at;
 pub(crate) use read::in_progress;
 
 use crate::{
