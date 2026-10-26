@@ -25,6 +25,10 @@ fn not_chosen(paths: &[&str]) -> ErrorKind {
 const HISTORY_CHANGED: ErrorKind = ErrorKind::StaleView {
     reason: StaleReason::HistoryChanged,
 };
+const ASSUME_UNCHANGED: u32 = 0x8000;
+const INTENT_TO_ADD: u32 = 0x2000_0000;
+const SKIP_WORKTREE: u32 = 0x4000_0000;
+const STORED_FLAGS: u32 = ASSUME_UNCHANGED | INTENT_TO_ADD | SKIP_WORKTREE;
 
 fn git_command(path: &Path, args: &[&str]) -> Command {
     let mut command = Command::new("git");
@@ -124,9 +128,6 @@ impl Repo {
             .collect()
     }
 
-    /// Git also prints flags it keeps only in memory, such as split-index
-    /// bookkeeping, so this keeps the ones an index entry stores:
-    /// assume-unchanged, intent-to-add, and skip-worktree.
     fn index(&self) -> String {
         self.git(&["ls-files", "--stage", "--debug"])
             .lines()
@@ -134,7 +135,7 @@ impl Repo {
             .map(|line| match line.split_once("flags:") {
                 Some((_, flags)) => format!(
                     "{:x}",
-                    u32::from_str_radix(flags.trim(), 16).unwrap() & 0x6000_8000
+                    u32::from_str_radix(flags.trim(), 16).unwrap() & STORED_FLAGS
                 ),
                 None => line.to_owned(),
             })

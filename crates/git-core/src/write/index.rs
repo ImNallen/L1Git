@@ -452,9 +452,6 @@ fn not_utf8(command: Command, path: &str) -> RepositoryError {
     )
 }
 
-/// A name that is not valid UTF-8 reaches the app with U+FFFD in place of
-/// its bad bytes, so a chosen name that holds U+FFFD may stand for it, or
-/// for a valid name that reads the same.
 fn shows_non_utf8(root: &Path, index: &Rows, path: &str) -> bool {
     path.contains(char::REPLACEMENT_CHARACTER)
         && (index.keys().any(|key| reads_as(key, path)) || on_disk_as(root, path))
