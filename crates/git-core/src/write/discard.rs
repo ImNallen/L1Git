@@ -62,7 +62,7 @@ enum Content {
     Symlink { target: Vec<u8> },
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Seen<'e> {
     Tracked(&'e IndexObject),
     Untracked,
@@ -80,6 +80,7 @@ impl Seen<'_> {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
 struct Target<'e> {
     path: &'e str,
     seen: Seen<'e>,
@@ -198,6 +199,36 @@ fn targets(entries: &[StatusEntry]) -> Result<Vec<Target<'_>>, RepositoryError> 
     Ok(targets)
 }
 
+/// Paths per Git call, so one argument list stays far below the system's
+/// limit.
+const PATHS_PER_READ: usize = 1000;
+
+/// Each entry must be one that Git reports now, as the status the user saw
+/// did, so a request cannot name a file Git ignores or hides from status.
+fn listed(
+    root: &Path,
+    targets: &[Target<'_>],
+    deadline: WriteDeadline,
+) -> Result<(), RepositoryError> {
+    for chunk in targets.chunks(PATHS_PER_READ) {
+        let paths: Vec<&str> = chunk.iter().map(|target| target.path).collect();
+        let (fresh, _) =
+            status::entries_of(root, status::Untracked::All, &paths, deadline.reads())?;
+        let now: BTreeMap<&str, Target<'_>> = fresh
+            .iter()
+            .filter_map(|entry| target(entry).ok())
+            .map(|now| (now.path, now))
+            .collect();
+        if let Some(target) = chunk
+            .iter()
+            .find(|target| now.get(target.path) != Some(target))
+        {
+            return Err(changed(target.path));
+        }
+    }
+    Ok(())
+}
+
 fn changed(path: &str) -> RepositoryError {
     RepositoryError::stale(
         StaleReason::PathChanged,
@@ -241,6 +272,7 @@ pub(super) fn discard(
             return Err(changed(target.path));
         }
     }
+    listed(&repo.root, &targets, deadline)?;
     let scratch = Scratch::new(&txn)?;
     let tracked: Vec<&str> = targets
         .iter()
