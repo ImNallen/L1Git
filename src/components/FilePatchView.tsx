@@ -1,4 +1,6 @@
-import { useLayoutEffect, useMemo, useRef } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import type { MouseEvent, RefObject } from "react";
+import { DIFFS_TAG_NAME } from "@pierre/diffs";
 import type { SelectedLineRange } from "@pierre/diffs";
 import { FileX2, TriangleAlert } from "lucide-react";
 import { FileDiff, Virtualizer } from "@pierre/diffs/react";
@@ -69,6 +71,8 @@ export function Diff({
   );
 }
 
+const GUTTER_PLUS = "[data-utility-button]";
+
 const hunkLabels: Record<PartAction, string> = {
   stage: "Stage hunk",
   unstage: "Unstage hunk",
@@ -96,6 +100,7 @@ function Patch({
   const files = useMemo(() => parsedFiles(patch), [patch]);
   const latest = useRef(parts);
   latest.current = parts;
+  const firstLineAction = useRef<HTMLButtonElement>(null);
   const writable = parts !== null;
   const firstHunk = files[0]?.hunks[0];
   const barOnTop =
@@ -113,13 +118,35 @@ function Patch({
           onLineSelectionEnd: (range: SelectedLineRange | null) =>
             latest.current?.onSelectRange(range),
           onGutterUtilityClick: (range: SelectedLineRange) =>
-            latest.current?.onGutterFirstAction(range),
+            gutterFirstAction(range),
         }),
       }) as const,
     [diffStyle, theme, painted, writable, barOnTop],
   );
   const pressed = useRef<{ hunk: number; action: PartAction } | null>(null);
   const scroll = useRef<HTMLDivElement>(null);
+  function gutterFirstAction(range: SelectedLineRange) {
+    firstLineAction.current?.focus({ preventScroll: true });
+    latest.current?.onGutterFirstAction(range);
+  }
+  const [firstAction] = parts?.actions ?? [];
+  const gutterLabel = firstAction && lineLabels[firstAction];
+  useEffect(function nameTheGutterPlus() {
+    if (!gutterLabel) return;
+    for (const host of scroll.current?.querySelectorAll(DIFFS_TAG_NAME) ?? [])
+      host.shadowRoot
+        ?.querySelector(GUTTER_PLUS)
+        ?.setAttribute("aria-label", gutterLabel);
+  });
+  const pressGutterPlusByKey = (event: MouseEvent) => {
+    const range = latest.current?.range;
+    const onPlus = event.nativeEvent
+      .composedPath()
+      .some(
+        (target) => target instanceof Element && target.matches(GUTTER_PLUS),
+      );
+    if (event.detail === 0 && onPlus && range) gutterFirstAction(range);
+  };
   useLayoutEffect(
     function refocusTheNextHunkBar() {
       const after = pressed.current;
@@ -181,8 +208,12 @@ function Patch({
   }
   return (
     <>
-      {parts && <LineBar parts={parts} />}
-      <div ref={scroll} className="file-diff-body">
+      {parts && <LineBar parts={parts} firstAction={firstLineAction} />}
+      <div
+        ref={scroll}
+        className="file-diff-body"
+        onClick={pressGutterPlusByKey}
+      >
         <Virtualizer className="file-diff-scroll">
           {files.map((file, index) => (
             <FileDiff<HunkBar>
@@ -208,7 +239,13 @@ function Patch({
   );
 }
 
-function LineBar({ parts }: { parts: Parts }) {
+function LineBar({
+  parts,
+  firstAction,
+}: {
+  parts: Parts;
+  firstAction: RefObject<HTMLButtonElement | null>;
+}) {
   const { range, picks, busy, actions } = parts;
   const count = picks.length;
   const off = busy || count === 0;
@@ -221,9 +258,10 @@ function LineBar({ parts }: { parts: Parts }) {
             ? "The chosen lines hold no change."
             : `${count.toLocaleString()} changed ${count === 1 ? "line" : "lines"} chosen.`}
       </span>
-      {actions.map((action) => (
+      {actions.map((action, index) => (
         <button
           key={action}
+          ref={index === 0 ? firstAction : undefined}
           className="button secondary"
           aria-disabled={off}
           onClick={() => {
