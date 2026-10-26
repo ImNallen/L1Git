@@ -277,8 +277,17 @@ impl LockedStore {
         ))
     }
 
-    pub(super) fn trace_file(&self) -> PathBuf {
-        self.dir.join("trace2.json")
+    /// The store lock is held, so any other trace folder here was left by a
+    /// crash or by a Git process that a hook left running.
+    pub(super) fn trace_dir(&self, id: EntryId) -> Result<PathBuf, RepositoryError> {
+        for entry in fs::read_dir(&self.dir).map_err(unwritable)?.flatten() {
+            if entry.file_name().to_string_lossy().starts_with("trace-") {
+                let _ = fs::remove_dir_all(entry.path());
+            }
+        }
+        let dir = self.dir.join(format!("trace-{id}"));
+        private_dir(&dir)?;
+        Ok(dir)
     }
 
     pub(super) fn record_intent(

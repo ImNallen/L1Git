@@ -1,5 +1,5 @@
 use super::{
-    Applied, Change, CommitTxn, Expect, Operation, Repo,
+    Applied, Change, CommitTxn, EntryId, Expect, Operation, Repo,
     refs::{RefChange, capitalized, oid},
     store::{LockedStore, Log},
 };
@@ -10,7 +10,7 @@ use crate::{
     stderr, sync,
 };
 use serde::Deserialize;
-use std::{collections::HashMap, fs, io, path::PathBuf};
+use std::{collections::HashMap, fs, path::PathBuf};
 
 #[derive(Clone, Copy)]
 pub(super) enum Kind<'a> {
@@ -159,10 +159,10 @@ pub(super) fn commit(
         }
     };
     let (applied, recorded) = store.record_intent(repo, log, operation)?;
-    let trace = Trace::create(store)?;
+    let trace = Trace::create(store, applied.id)?;
     let wrote = txn
         .commit(kind.flags(), message)
-        .trace2_event(&trace.0)
+        .trace2_event(&trace.events)
         .run(deadline)?;
     let txn = txn.renewed();
     let deadline = deadline.renewed();
@@ -445,7 +445,13 @@ fn refused(wrote: &Wrote, trace: &Trace) -> RepositoryError {
     )
 }
 
-struct Trace(PathBuf);
+/// Git's traces of one commit sit in a folder that only the user can read,
+/// and a Git process that a hook left running cannot recreate them once the
+/// folder is gone.
+struct Trace {
+    dir: PathBuf,
+    events: PathBuf,
+}
 
 #[derive(Deserialize)]
 struct Event {
@@ -471,28 +477,16 @@ fn stops_commit(name: &str, argv: &[String]) -> bool {
 }
 
 impl Trace {
-    fn create(store: &LockedStore) -> Result<Self, RepositoryError> {
-        let path = store.trace_file();
-        let unprepared = |error: io::Error| {
-            RepositoryError::new(
-                ErrorKind::GitFailed,
-                format!("L1 Git could not prepare the commit, so it made none: {error}"),
-            )
-        };
-        match fs::remove_file(&path) {
-            Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(unprepared(error)),
-            _ => {}
-        }
-        let mut options = fs::File::options();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-        options.open(&path).map_err(unprepared)?;
-        Ok(Self(path))
+    fn create(store: &LockedStore, id: EntryId) -> Result<Self, RepositoryError> {
+        let dir = store.trace_dir(id)?;
+        Ok(Self {
+            events: dir.join("trace2.json"),
+            dir,
+        })
     }
 
     fn failed_hook(&self) -> Option<String> {
-        let text = fs::read_to_string(&self.0).ok()?;
+        let text = fs::read_to_string(&self.events).ok()?;
         let mut hooks = HashMap::new();
         for line in text.lines() {
             let Ok(event) = serde_json::from_str::<Event>(line) else {
@@ -523,7 +517,7 @@ impl Trace {
 
 impl Drop for Trace {
     fn drop(&mut self) {
-        let _ = fs::remove_file(&self.0);
+        let _ = fs::remove_dir_all(&self.dir);
     }
 }
 
