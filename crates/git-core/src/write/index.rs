@@ -29,7 +29,6 @@ pub(super) struct IndexEntry {
     pub(super) assume_unchanged: bool,
 }
 
-/// What the user chose: whole paths, or part of one file.
 #[derive(Debug, Clone, Copy)]
 enum Scope<'p> {
     Paths,

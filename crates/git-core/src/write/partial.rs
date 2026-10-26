@@ -73,9 +73,10 @@ pub(super) enum Refusal {
     Mode(Mode),
     Copy,
     /// `git apply` accepts a line after a `\ No newline at end of file`
-    /// marker and joins the two lines into one. Names the line without the
-    /// newline.
-    NoNewlineSuccessor(LinePick),
+    /// marker and joins the two lines into one.
+    NoNewlineSuccessor {
+        unended: LinePick,
+    },
     NoHunk {
         index: u32,
         hunks: usize,
@@ -259,7 +260,9 @@ impl<'o> Part<'o> {
                 self.cannot(&format!("Git shows it with mode {}", mode.octal()))
             }
             Refusal::Copy => self.cannot("Git shows it as a copy of another file"),
-            Refusal::NoNewlineSuccessor(LinePick { side, line }) => unsupported(format!(
+            Refusal::NoNewlineSuccessor {
+                unended: LinePick { side, line },
+            } => unsupported(format!(
                 "L1 Git cannot {verb} only these lines of {path}, because line {line} of the {} file has no newline at its end and a chosen line would follow it. Include the change to that line, or {verb} the whole file.",
                 side.file()
             )),
@@ -727,7 +730,7 @@ fn lines_on(kept: &[(Marker, &Line<'_>)], side: LineSide) -> Result<i64, Refusal
     let mut unended = None;
     for (_, line) in kept.iter().filter(|(marker, _)| marker.on(side)) {
         if let Some(last) = unended {
-            return Err(Refusal::NoNewlineSuccessor(last));
+            return Err(Refusal::NoNewlineSuccessor { unended: last });
         }
         unended = line.no_newline.then(|| line.row.pick());
         count += 1;
@@ -1017,7 +1020,7 @@ mod tests {
     fn refuses_a_line_after_one_without_a_newline_and_takes_the_newline_fix_with_it() {
         assert_eq!(
             refused(APPENDED, Picks::Lines(&[a(4)]), Apply::Forward),
-            Refusal::NoNewlineSuccessor(d(3))
+            Refusal::NoNewlineSuccessor { unended: d(3) }
         );
         assert_eq!(
             built(APPENDED, Picks::Lines(&[d(3), a(3), a(4)]), Apply::Forward),
@@ -1029,7 +1032,7 @@ mod tests {
         );
         assert_eq!(
             refused(APPENDED, Picks::Lines(&[d(3)]), Apply::Reverse),
-            Refusal::NoNewlineSuccessor(d(3))
+            Refusal::NoNewlineSuccessor { unended: d(3) }
         );
         let shortened = concat!(
             "diff --git a/f b/f\n--- a/f\n+++ b/f\n",
@@ -1038,7 +1041,7 @@ mod tests {
         );
         assert_eq!(
             refused(shortened, Picks::Lines(&[a(1)]), Apply::Forward),
-            Refusal::NoNewlineSuccessor(a(1))
+            Refusal::NoNewlineSuccessor { unended: a(1) }
         );
     }
 
