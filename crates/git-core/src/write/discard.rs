@@ -247,7 +247,7 @@ pub(super) fn discard(
     }
     let paths: Vec<&str> = targets.iter().map(|target| target.path).collect();
     let rows = index::read(&txn)?;
-    let stats = guard(&txn, &paths)?;
+    let stats = guard(&repo.root, &rows, &paths)?;
     // Status shows a deleted intent-to-add file with the empty blob, so only
     // the index's flags catch that one.
     if let Some(target) = targets.iter().find(|target| {
@@ -325,7 +325,7 @@ pub(super) fn discard(
         return Err(error);
     }
     discard.paths.truncate(placed);
-    refresh(&txn, &discard.tracked());
+    refresh(&txn, &rows, &discard.tracked());
     let published = txn.commit_recorded(recorded, &Change::Discard(discard));
     match failure {
         None => Ok((applied, published.ok())),
@@ -345,11 +345,12 @@ pub(super) fn step(
     change: &DiscardChange,
     direction: Direction,
 ) -> Result<Restored, RepositoryError> {
-    place_step(txn, entry, change, direction)?;
+    let rows = index::read(txn)?;
+    place_step(txn, &rows, entry, change, direction)?;
     if direction == Direction::Undo {
         return Ok(Restored::AlreadyThere);
     }
-    refresh(txn, &change.tracked());
+    refresh(txn, &rows, &change.tracked());
     Ok(Restored::Staged)
 }
 
@@ -362,41 +363,39 @@ pub(super) fn step(
 /// those stay as they are. Under `core.ignoreStat`, `update-index` marks
 /// each entry it writes assume-unchanged, as `git restore` marks what it
 /// checks out, which would hide a later edit, so it runs with that off.
-fn refresh(txn: &Txn<'_>, paths: &[&str]) {
+fn refresh(txn: &Txn<'_>, rows: &index::Rows, paths: &[&str]) {
     if paths.is_empty() {
         return;
     }
-    if let Ok(rows) = index::read(txn) {
-        let info: Vec<u8> = paths
-            .iter()
-            .filter_map(|path| match index::at(&rows, path) {
-                [entry]
-                    if entry.stage == 0
-                        && !entry.intent_to_add
-                        && !entry.skip_worktree
-                        && !entry.assume_unchanged =>
-                {
-                    Some(format!(
-                        "{} {}\t{path}\0",
-                        entry.mode.octal(),
-                        entry.oid.as_str()
-                    ))
-                }
-                _ => None,
-            })
-            .flat_map(String::into_bytes)
-            .collect();
-        let _ = txn
-            .git(&[
-                "-c",
-                "core.ignoreStat=false",
-                "update-index",
-                "-z",
-                "--index-info",
-            ])
-            .input(info)
-            .run(txn.deadline());
-    }
+    let info: Vec<u8> = paths
+        .iter()
+        .filter_map(|path| match index::at(rows, path) {
+            [entry]
+                if entry.stage == 0
+                    && !entry.intent_to_add
+                    && !entry.skip_worktree
+                    && !entry.assume_unchanged =>
+            {
+                Some(format!(
+                    "{} {}\t{path}\0",
+                    entry.mode.octal(),
+                    entry.oid.as_str()
+                ))
+            }
+            _ => None,
+        })
+        .flat_map(String::into_bytes)
+        .collect();
+    let _ = txn
+        .git(&[
+            "-c",
+            "core.ignoreStat=false",
+            "update-index",
+            "-z",
+            "--index-info",
+        ])
+        .input(info)
+        .run(txn.deadline());
     let _ = txn
         .git(&[
             "--literal-pathspecs",
@@ -411,6 +410,7 @@ fn refresh(txn: &Txn<'_>, paths: &[&str]) {
 
 fn place_step(
     txn: &Txn<'_>,
+    rows: &index::Rows,
     entry: &EntryObjects,
     change: &DiscardChange,
     direction: Direction,
@@ -418,7 +418,7 @@ fn place_step(
     let root = &txn.repo().root;
     let files = entry.files();
     let paths: Vec<&str> = change.paths.iter().map(|path| path.path.as_str()).collect();
-    let stats = guard(txn, &paths)?;
+    let stats = guard(root, rows, &paths)?;
     let mut pending = Vec::new();
     for (discarded, stat) in change.paths.iter().zip(stats) {
         let (from, to) = discarded.source_and_target(direction);
@@ -497,17 +497,24 @@ impl Drop for Scratch {
     }
 }
 
-fn guard(txn: &Txn<'_>, paths: &[&str]) -> Result<Vec<Option<Stat>>, RepositoryError> {
-    let stats = writable_stats(&txn.repo().root, paths)?;
-    no_other_names(txn, paths, &stats)?;
+fn guard(
+    root: &Path,
+    rows: &index::Rows,
+    paths: &[&str],
+) -> Result<Vec<Option<Stat>>, RepositoryError> {
+    let stats = writable_stats(root, paths)?;
+    no_other_names(root, rows, paths, &stats)?;
     Ok(stats)
 }
 
-/// A case-insensitive disk opens a tracked file through any spelling of its
-/// name, whatever `core.ignorecase` says, so a chosen path can be another
-/// name for a tracked file.
+/// A case-insensitive disk opens a tracked file through any name it folds
+/// to the same one, whatever `core.ignorecase` says, so a chosen path can be
+/// another name for a tracked file. Git's `icase` pathspecs fold only ASCII,
+/// so every name in the index is folded here, and the device and inode
+/// decide among the names that fold alike.
 fn no_other_names(
-    txn: &Txn<'_>,
+    root: &Path,
+    rows: &index::Rows,
     paths: &[&str],
     stats: &[Option<Stat>],
 ) -> Result<(), RepositoryError> {
@@ -516,36 +523,51 @@ fn no_other_names(
         .zip(stats)
         .filter_map(|(path, stat)| Some((stat.as_ref()?.identity?, *path)))
         .collect();
+    let folds: BTreeSet<String> = chosen.values().map(|path| folded(path)).collect();
+    if folds.is_empty() {
+        return Ok(());
+    }
     let names: BTreeSet<&str> = paths.iter().copied().collect();
-    let on_disk: Vec<&str> = chosen.values().copied().collect();
-    for chunk in on_disk.chunks(PATHS_PER_READ) {
-        let specs: Vec<String> = chunk
-            .iter()
-            .map(|path| format!(":(icase,literal){path}"))
-            .collect();
-        let mut args = vec!["ls-files", "-z", "--"];
-        args.extend(specs.iter().map(String::as_str));
-        let listed = txn.git(&args).uncapped().run(txn.deadline())?.succeeded()?;
-        for name in listed
-            .split(|byte| *byte == 0)
-            .filter(|name| !name.is_empty())
-        {
-            let other = crate::git::text(name);
-            if names.contains(other.as_str()) {
-                continue;
-            }
-            let identity = Stat::of(&txn.repo().root.join(&other))
-                .ok()
-                .flatten()
-                .and_then(|stat| stat.identity);
-            if let Some(path) = identity.and_then(|identity| chosen.get(&identity)) {
-                return Err(unsupported(format!(
-                    "{path} and {other} are the same file on this disk, so discarding {path} would change {other}. L1 Git does not discard it."
-                )));
-            }
+    for other in rows.keys().filter_map(|name| str::from_utf8(name).ok()) {
+        if names.contains(other) || !folds.contains(&folded(other)) {
+            continue;
+        }
+        let identity = Stat::of(&root.join(other))
+            .ok()
+            .flatten()
+            .and_then(|stat| stat.identity);
+        if let Some(path) = identity.and_then(|identity| chosen.get(&identity)) {
+            return Err(unsupported(format!(
+                "{path} and {other} are the same file on this disk, so discarding {path} would change {other}. L1 Git does not discard it."
+            )));
         }
     }
     Ok(())
+}
+
+/// Each case-insensitive disk folds names its own way, some also across
+/// Unicode normalization forms, so this folds at least as far as any of
+/// them: canonical decomposition, then each character's lowercase of its
+/// uppercase, until nothing changes. Every character settles within two
+/// rounds.
+fn folded(name: &str) -> String {
+    if name.is_ascii() {
+        return name.to_ascii_lowercase();
+    }
+    let decompose = icu_normalizer::DecomposingNormalizerBorrowed::new_nfd();
+    let mut folded = decompose.normalize(name).into_owned();
+    loop {
+        let cased: String = folded
+            .chars()
+            .flat_map(char::to_uppercase)
+            .flat_map(char::to_lowercase)
+            .collect();
+        let next = decompose.normalize(&cased).into_owned();
+        if next == folded {
+            return folded;
+        }
+        folded = next;
+    }
 }
 
 fn writable_stats(root: &Path, paths: &[&str]) -> Result<Vec<Option<Stat>>, RepositoryError> {
