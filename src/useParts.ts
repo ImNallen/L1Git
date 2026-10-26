@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { SelectedLineRange } from "@pierre/diffs";
 import {
   deletesNewFile,
@@ -59,8 +59,18 @@ export function useParts({
     ? picksFor(target.file, diffStyle, target.range)
     : [];
 
-  async function run(root: RepositoryRoot, chosen: Write) {
+  const shownNow = useRef(fileDiff);
+  shownNow.current = fileDiff;
+
+  async function run(root: RepositoryRoot, path: string, chosen: Write) {
     await write(root, chosen);
+    const shown = shownNow.current;
+    const movedOn =
+      shown.kind !== "closed" &&
+      (shown.side === null ||
+        shown.selection.root !== root ||
+        shown.path !== path);
+    if (movedOn) return;
     selectRange(null);
     lostFocus();
   }
@@ -70,7 +80,7 @@ export function useParts({
     const { root, path, shown, file, status } = target;
     const chosen = partWrite(action, status, path, shown, choice);
     if (action !== "discard") {
-      void run(root, chosen);
+      void run(root, path, chosen);
       return;
     }
     const deletes = deletesNewFile(
@@ -107,7 +117,8 @@ export function useParts({
     writeLines,
     discarding,
     confirmDiscard: () => {
-      if (discarding !== null) void run(discarding.root, discarding.write);
+      if (discarding !== null)
+        void run(discarding.root, discarding.path, discarding.write);
     },
     closeDiscard: () => setDiscarding(null),
   };
