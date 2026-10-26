@@ -291,7 +291,10 @@ impl Switch {
                             tip.as_str().to_owned(),
                         ]);
                     }
-                    (Some(now), _) if *now == tip => {
+                    (Some(_), Some(_)) => {
+                        return Err(branches::exists_again(&branch, "redo this checkout"));
+                    }
+                    (Some(now), None) if *now == tip => {
                         args.extend(["--no-guess".to_owned(), "--".to_owned(), name]);
                     }
                     _ => {
@@ -822,6 +825,8 @@ pub(super) fn step(
             StaleReason::HeadMoved,
             format!("HEAD moved after this checkout, so L1 Git cannot {name} it exactly. Refresh."),
         ));
+    } else if let (Direction::Redo, Some(made)) = (direction, created) {
+        return Err(branches::exists_again(&made.branch, "redo this checkout"));
     }
     if let Some(made) = created {
         let deadline = deadline.renewed();

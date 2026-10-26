@@ -452,6 +452,18 @@ pub(super) fn moved(name: &str) -> RepositoryError {
     )
 }
 
+/// An undo or redo that creates a branch cannot tell a branch of that name
+/// from one it made itself, so it never takes one over.
+pub(super) fn exists_again(branch: &BranchRef, doing: &str) -> RepositoryError {
+    let name = branch.name();
+    RepositoryError::stale(
+        StaleReason::BranchChanged,
+        format!(
+            "A branch named {name} exists again, so L1 Git cannot {doing} without taking over a branch it may not have made. Delete or rename {name} first."
+        ),
+    )
+}
+
 fn as_branch_changed(error: RepositoryError) -> RepositoryError {
     let head_moved = ErrorKind::StaleView {
         reason: StaleReason::HeadMoved,
@@ -880,20 +892,21 @@ pub(super) fn step(
     deadline: WriteDeadline,
 ) -> Result<(), RepositoryError> {
     let after = change.after.as_deref().ok_or_else(git::malformed)?;
-    let (from, to) = match direction {
-        Direction::Undo => (after, change.before.as_slice()),
-        Direction::Redo => (change.before.as_slice(), after),
+    let (from, to, step, reflog) = match direction {
+        Direction::Undo => (after, change.before.as_slice(), "undo", "l1git undo"),
+        Direction::Redo => (change.before.as_slice(), after, "redo", "l1git redo"),
     };
     let listing = Listing::read(repo, deadline.reads())?;
     let mut current = listing.slots_like(from)?;
     let txn = RefTxn::begin(repo, deadline)?;
-    if guarded(&current) != guarded(to) {
+    let transition = Transition::between(from, to)?;
+    let creates = matches!(transition, Transition::Create(_));
+    if creates || guarded(&current) != guarded(to) {
         if guarded(&current) != guarded(from) {
+            if let Transition::Create(slot) = transition {
+                return Err(exists_again(&slot.branch, &format!("{step} this change")));
+            }
             let names: Vec<_> = from.iter().map(|slot| slot.branch.name()).collect();
-            let step = match direction {
-                Direction::Undo => "undo",
-                Direction::Redo => "redo",
-            };
             return Err(RepositoryError::stale(
                 StaleReason::BranchChanged,
                 format!(
@@ -902,11 +915,7 @@ pub(super) fn step(
                 ),
             ));
         }
-        let reflog = match direction {
-            Direction::Undo => "l1git undo",
-            Direction::Redo => "l1git redo",
-        };
-        match Transition::between(from, to)? {
+        match transition {
             Transition::Create(slot) => {
                 let tip = slot.tip.as_ref().ok_or_else(git::malformed)?;
                 entry.bring_back_branch(txn.runner(), tip)?;
