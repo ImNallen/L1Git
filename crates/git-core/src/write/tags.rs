@@ -112,7 +112,7 @@ fn new_name(repo: &Repo, name: &str, reads: Deadline) -> Result<TagRef, Reposito
     if name.contains('\0') || name.starts_with('-') || name == "HEAD" {
         return Err(invalid());
     }
-    let reference = format!("refs/tags/{name}");
+    let reference = format!("refs/tags/{}", git::precomposed(&repo.root, name, reads)?);
     if !git::run(&repo.root, &["check-ref-format", &reference], reads)?
         .status
         .success()

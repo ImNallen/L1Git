@@ -425,6 +425,8 @@ pub(super) fn new_name(
     if name.contains('\0') || name.starts_with("refs/") {
         return Err(invalid_name(name));
     }
+    let name = git::precomposed(&repo.root, name, reads)?;
+    let name = name.as_str();
     let ran = git::run_capped(
         &repo.root,
         &["check-ref-format", "--branch", name],
@@ -490,6 +492,7 @@ pub(super) fn create(
 ) -> Result<Applied, RepositoryError> {
     let reads = writing.deadline.reads();
     let branch = new_name(writing.repo, name, reads)?;
+    let name = branch.name();
     let listing = Listing::read(writing.repo, reads)?;
     listing.refuse_clash(&branch, None)?;
     let before = listing.slot(&branch)?;

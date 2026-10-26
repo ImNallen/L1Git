@@ -342,6 +342,35 @@ pub(crate) fn config_flag(
     }
 }
 
+/// `name` as Git reads it from its command line. Under
+/// `core.precomposeunicode`, Git on macOS composes each argument's
+/// decomposed characters its own way, which is not NFC, so `git tag` stores
+/// a decomposed name composed. `git config --default` echoes an argument
+/// after that step.
+pub(crate) fn precomposed(
+    path: &Path,
+    name: &str,
+    deadline: Deadline,
+) -> Result<String, RepositoryError> {
+    if name.is_ascii() {
+        return Ok(name.to_owned());
+    }
+    let default = format!("--default={name}");
+    let echoed = read(
+        path,
+        &[
+            "config",
+            "--file",
+            "/dev/null",
+            &default,
+            "--get",
+            "l1git.name",
+        ],
+        deadline,
+    )?;
+    Ok(line(&echoed))
+}
+
 /// `base()` passes `--no-lazy-fetch`, which Git before 2.45 rejects.
 fn too_old(code: Option<i32>, stderr: &str) -> Option<RepositoryError> {
     (code == Some(129) && stderr.contains("no-lazy-fetch")).then(|| {
