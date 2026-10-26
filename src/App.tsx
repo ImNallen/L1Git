@@ -45,6 +45,7 @@ import { useBranchVisibility } from "./branchVisibility";
 import type { ThemeSettings } from "./themes/catalog";
 import { AppearanceSettings } from "./components/AppearanceSettings";
 import { AddRepositoryDialog } from "./components/AddRepositoryDialog";
+import { BranchDialog } from "./components/BranchDialog";
 import { DiscardDialog, DiscardPartDialog } from "./components/DiscardDialog";
 import { EditMessageDialog } from "./components/EditMessageDialog";
 import { COMMIT_SUMMARY_ID } from "./components/CommitBox";
@@ -58,8 +59,13 @@ import type { HistoryHandle } from "./components/History";
 import { PaneDivider } from "./components/PaneDivider";
 import { RepositoryTree } from "./components/RepositoryTree";
 import { UndoButtons, WriteNoticeRow } from "./components/UndoControls";
-import { discardChoice, nextEntry, writeFor } from "./domain/operations";
-import type { FileWrite, Write } from "./domain/operations";
+import {
+  branchAsks,
+  discardChoice,
+  nextEntry,
+  writeFor,
+} from "./domain/operations";
+import type { BranchAsk, FileWrite, Write } from "./domain/operations";
 import { swapEnds } from "./domain/comparison";
 import { buildGraph } from "./domain/graph";
 import { trunkTips } from "./domain/highlight";
@@ -163,6 +169,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     skipped: number;
     returnFocus?: () => void;
   } | null>(null);
+  const [branchAsk, setBranchAsk] = useState<BranchAsk | null>(null);
   const [palette, setPalette] = useState<{ picked: Oid | null } | null>(null);
   const paletteReturn = useRef<Element | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -390,6 +397,19 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     sameSelection(app.selection, { kind: "commit", oid: jumped.oid });
   const ruledBranch =
     jumped && isBranch(jumped) && (highlighted || hiddenJump) ? jumped : null;
+  const checkedOut = useMemo(
+    () =>
+      new Map(
+        snapshot?.worktrees.flatMap(({ head, name }) =>
+          head.kind === "attached" ? [[head.reference, name] as const] : [],
+        ),
+      ),
+    [snapshot],
+  );
+  const askFor = (kind: keyof ReturnType<typeof branchAsks>) => () => {
+    const ask = ruledBranch && branchAsks(ruledBranch)[kind];
+    if (ask) setBranchAsk(ask);
+  };
   const selectedStash =
     snapshot &&
     selected?.kind === "commit" &&
@@ -542,6 +562,9 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     showAllBranches: () => {
       if (snapshot) setRule(snapshot.root, NO_RULE);
     },
+    newBranch: askFor("create"),
+    renameBranch: askFor("rename"),
+    deleteBranch: askFor("delete"),
     openRepository: (root) => {
       showRepository(root);
       if (root === snapshot?.root) return;
@@ -601,6 +624,8 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       name: ruledBranch.name,
       visibility: branchVisibility(rule, ruledBranch.reference),
       outOfView: hiddenJump !== null,
+      local: ruledBranch.kind === "local",
+      checkedOut: checkedOut.has(ruledBranch.reference),
     },
     rule: rule.kind,
     worktree: selectedLists && {
@@ -831,6 +856,8 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
               });
             }}
             onAdd={commands.addRepository}
+            writable={snapshot && { root: snapshot.root, checkedOut }}
+            onBranchAsk={setBranchAsk}
           />
         </div>
         {screen === "settings" && (
@@ -1009,6 +1036,13 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                     onToggleColumn={historyColumns.toggle}
                     editableHead={editableHead}
                     onEditMessage={() => setEditingMessage(true)}
+                    onNewBranch={(oid) =>
+                      setBranchAsk({
+                        kind: "create",
+                        at: { kind: "commit", oid },
+                        from: `commit ${oid.slice(0, 7)}`,
+                      })
+                    }
                   />
                   {fileDiff.kind !== "closed" && (
                     <FileDiffPane
@@ -1204,6 +1238,16 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
             flushSync(() => setEditingMessage(false));
             focusFallback();
           }}
+        />
+      )}
+      {branchAsk && snapshot && (
+        <BranchDialog
+          ask={branchAsk}
+          root={snapshot.root}
+          head={snapshot.head}
+          onWrite={(write) => writes.write(snapshot.root, write)}
+          onNamed={(branch) => jumpTo(snapshot.root, branch)}
+          onClose={() => setBranchAsk(null)}
         />
       )}
       {discarding && (

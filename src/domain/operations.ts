@@ -3,17 +3,26 @@ import { shownText, splittable } from "./lineSelection";
 import type { ListSide } from "./worktree";
 import type {
   Applied,
+  Branch,
+  BranchMerged,
+  BranchTip,
   EntryId,
   Expect,
+  Head,
   LinePick,
   Operation,
   Problem,
+  Start,
   StatusEntry,
   WorktreePatch,
   WorktreeStatus,
 } from "./repository";
 
 type FileOperation = Extract<Operation, { entries: unknown }>;
+type BranchOperation = Extract<
+  Operation,
+  { kind: "createBranch" | "renameBranch" | "deleteBranch" }
+>;
 type CommitOperation = Extract<Operation, { message: unknown }>;
 type PartOperation = Extract<Operation, { shown: unknown }>;
 export type FileWrite = FileOperation["kind"];
@@ -108,7 +117,77 @@ export function partWrite(
   return { operation, expect: { head: status.head } };
 }
 
-export const movesRefs = (operation: Operation) => "message" in operation;
+export const movesRefs = (operation: Operation) =>
+  "message" in operation || isBranchOperation(operation);
+
+/** A branch write the user asked for, before its dialog sends it. */
+export type BranchAsk =
+  | { kind: "create"; at: Start; from: string }
+  | { kind: "rename"; branch: BranchTip; name: string }
+  | { kind: "delete"; branch: BranchTip; name: string };
+
+/** The branch writes a sidebar branch offers: any branch can start one, only a local branch can be renamed or deleted. */
+export function branchAsks(branch: Branch): {
+  create: BranchAsk;
+  rename: BranchAsk | null;
+  delete: BranchAsk | null;
+} {
+  const { reference, oid, name } = branch;
+  if (branch.kind === "remote")
+    return {
+      create: {
+        kind: "create",
+        at: { kind: "remote", reference, oid },
+        from: name,
+      },
+      rename: null,
+      delete: null,
+    };
+  const tip = { reference, oid };
+  return {
+    create: {
+      kind: "create",
+      at: { kind: "local", reference, oid },
+      from: name,
+    },
+    rename: { kind: "rename", branch: tip, name },
+    delete: { kind: "delete", branch: tip, name },
+  };
+}
+
+/** Branch writes guard the tips they name, not HEAD, which the core ignores. */
+export const isBranchOperation = (
+  operation: Operation,
+): operation is BranchOperation =>
+  operation.kind === "createBranch" ||
+  operation.kind === "renameBranch" ||
+  operation.kind === "deleteBranch";
+
+export const branchWrite = (operation: BranchOperation, head: Head): Write => ({
+  operation,
+  expect: { head },
+});
+
+const branchName = (branch: BranchTip) =>
+  branch.reference.replace(/^refs\/heads\//, "");
+
+/** Says which of HEAD and the upstream a branch's tip is not in. */
+export function notMergedInto(
+  name: string,
+  merged: BranchMerged,
+  head: string,
+): string | null {
+  const missing = [
+    ...(merged.head ? [] : [head]),
+    ...(merged.upstream && !merged.upstream.merged
+      ? [
+          `its upstream ${merged.upstream.reference.replace(/^refs\/remotes\//, "")}`,
+        ]
+      : []),
+  ];
+  if (missing.length === 0) return null;
+  return `${name} is not merged into ${missing.join(" or ")}.`;
+}
 
 export function discardable(entry: StatusEntry): boolean {
   switch (entry.kind) {
@@ -203,6 +282,14 @@ function sharedFolder(paths: readonly string[]): string {
 }
 
 export function describe(operation: Operation): string {
+  switch (operation.kind) {
+    case "createBranch":
+      return `Create branch ${operation.name}`;
+    case "renameBranch":
+      return `Rename branch ${branchName(operation.branch)} to ${operation.to}`;
+    case "deleteBranch":
+      return `Delete branch ${branchName(operation.branch)}`;
+  }
   if ("message" in operation)
     return `${commitVerbs[operation.kind]} ${quoted(operation.message)}`;
   if ("shown" in operation)
@@ -283,7 +370,8 @@ type KnownStale = Exclude<
 >;
 
 export const rereadsRepository = (problem: Problem) =>
-  problem.kind === "staleView" && problem.reason === "headMoved";
+  problem.kind === "staleView" &&
+  (problem.reason === "headMoved" || problem.reason === "branchChanged");
 
 function listed(paths: readonly string[]): string {
   const shown =
@@ -303,6 +391,7 @@ function staleCause(problem: KnownStale, step: Step | null): string {
         ? "HEAD moved since L1 Git read this worktree."
         : `HEAD moved after this change, so L1 Git cannot ${step} it exactly.`;
     case "pathChanged":
+    case "branchChanged":
       return problem.message;
     case "pathNotChosen": {
       const { paths } = problem;
@@ -339,6 +428,7 @@ export function failureText(
       return `${what} The file changed since L1 Git showed its diff. L1 Git reread the diff, so check it and try again.`;
     if (
       problem.reason === "pathChanged" ||
+      problem.reason === "branchChanged" ||
       (part && problem.reason === "pathNotChosen")
     )
       return `${what} ${problem.message}`;

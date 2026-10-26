@@ -24,6 +24,7 @@ import {
 import type { RepositoryOverview } from "./domain/overview";
 import {
   appliedSchema,
+  branchMergedSchema,
   blameSchema,
   detailSchema,
   fileHistorySchema,
@@ -1641,6 +1642,107 @@ describe("real Rust writes, undo, and redo", () => {
       expect: { head: status.head },
     };
   };
+
+  it("creates, renames, and deletes a branch, undoes each, and says what a branch is not merged into", async () => {
+    const path = clone();
+    const refs = () =>
+      git(
+        path,
+        "for-each-ref",
+        "--format=%(refname) %(objectname)",
+        "refs/heads/",
+      );
+    const head = git(path, "rev-parse", "HEAD").trim();
+    const theme = git(path, "rev-parse", "HEAD~1").trim();
+    const expect_ = {
+      head: {
+        kind: "attached",
+        reference: git(path, "symbolic-ref", "HEAD").trim(),
+        oid: head,
+      },
+    };
+    const branchWrite = (operation: unknown) => ({
+      op: "write",
+      path,
+      operation,
+      expect: expect_,
+    });
+    const step = async (op: "undo" | "redo", id: string) =>
+      (op === "undo" ? undoEnvelope : redoEnvelope).parse(
+        await (await post({ op, path, id })).json(),
+      ).data;
+    const before = refs();
+    const create = {
+      kind: "createBranch",
+      name: "topic",
+      at: { kind: "commit", oid: theme },
+    };
+    const created = writeEnvelope.parse(
+      await (await post(branchWrite(create))).json(),
+    ).data;
+    expect(created.operation).toEqual(create);
+    expect(git(path, "rev-parse", "topic").trim()).toBe(theme);
+    const rename = {
+      kind: "renameBranch",
+      branch: { reference: "refs/heads/topic", oid: theme },
+      to: "feat/topic",
+    };
+    const renamed = writeEnvelope.parse(
+      await (await post(branchWrite(rename))).json(),
+    ).data;
+    expect(git(path, "rev-parse", "feat/topic").trim()).toBe(theme);
+    const merged = answer("branchMerged", branchMergedSchema).strict();
+    expect(
+      merged.parse(
+        await (
+          await post({
+            op: "branchMerged",
+            path,
+            branch: { reference: "refs/heads/feat/topic", oid: theme },
+          })
+        ).json(),
+      ).data,
+    ).toEqual({ head: true, upstream: null });
+    const deleted = writeEnvelope.parse(
+      await (
+        await post(
+          branchWrite({
+            kind: "deleteBranch",
+            branch: { reference: "refs/heads/feat/topic", oid: theme },
+          }),
+        )
+      ).json(),
+    ).data;
+    expect(refs()).toBe(before);
+    for (const applied of [deleted, renamed, created])
+      expect(await step("undo", applied.id)).toEqual(applied);
+    expect(refs()).toBe(before);
+    for (const applied of [created, renamed])
+      expect(await step("redo", applied.id)).toEqual(applied);
+    expect(git(path, "rev-parse", "feat/topic").trim()).toBe(theme);
+
+    const stale = failure.parse(
+      await (
+        await post(
+          branchWrite({
+            kind: "deleteBranch",
+            branch: { reference: "refs/heads/feat/topic", oid: head },
+          }),
+        )
+      ).json(),
+    );
+    expect(stale.error).toMatchObject({
+      kind: "staleView",
+      reason: "branchChanged",
+    });
+    const invalid = failure.parse(
+      await (await post(branchWrite({ ...create, name: "bad..name" }))).json(),
+    );
+    expect(invalid.error).toEqual({
+      kind: "invalidRef",
+      message: "'bad..name' is not a valid branch name.",
+    });
+  });
 
   it("discards a tracked and an untracked file, undoes them byte for byte, and redoes them", async () => {
     const path = clone();

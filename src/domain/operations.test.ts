@@ -1,5 +1,6 @@
 import { describe as group, expect, it } from "vitest";
 import {
+  branchWrite,
   commitWrite,
   describe,
   discardChoice,
@@ -10,6 +11,7 @@ import {
   rereadsRepository,
   shownPaths,
   stepButton,
+  notMergedInto,
   writeFor,
 } from "./operations";
 import type { History, HistoryEntry, StaleReason } from "./operations";
@@ -710,8 +712,9 @@ group("partWrite", () => {
 });
 
 group("rereadsRepository", () => {
-  it("rereads the repository only when HEAD moved", () => {
+  it("rereads the repository only when HEAD or a branch moved", () => {
     expect(rereadsRepository(stale("headMoved"))).toBe(true);
+    expect(rereadsRepository(stale("branchChanged"))).toBe(true);
     expect(rereadsRepository(stale("pathChanged"))).toBe(false);
     expect(rereadsRepository(stale("historyChanged"))).toBe(false);
     expect(rereadsRepository(notChosen("z/x"))).toBe(false);
@@ -816,5 +819,80 @@ group("commitWrite", () => {
     expect(movesRefs(commit.operation)).toBe(true);
     const stage = writeFor("stageFiles", status, ["README.md"]);
     expect(stage && movesRefs(stage.operation)).toBe(false);
+  });
+});
+
+group("branch writes", () => {
+  const head = status.head;
+  const topic = {
+    reference: refSchema.parse("refs/heads/feat/topic"),
+    oid: oidSchema.parse("a".repeat(40)),
+  };
+
+  it("names each branch write by its branch", () => {
+    const create = branchWrite(
+      {
+        kind: "createBranch",
+        name: "topic",
+        at: { kind: "commit", oid: topic.oid },
+      },
+      head,
+    );
+    expect(create.expect).toEqual({ head });
+    expect(describe(create.operation)).toBe("Create branch topic");
+    expect(
+      describe({ kind: "renameBranch", branch: topic, to: "feat/renamed" }),
+    ).toBe("Rename branch feat/topic to feat/renamed");
+    expect(describe({ kind: "deleteBranch", branch: topic })).toBe(
+      "Delete branch feat/topic",
+    );
+    expect(movesRefs(create.operation)).toBe(true);
+  });
+
+  it("shows the core's words when a branch moved before the write or its undo", () => {
+    const moved: Problem = {
+      kind: "staleView",
+      reason: "branchChanged",
+      message: "topic is no longer at the commit L1 Git showed.",
+    };
+    expect(
+      failureText(
+        {
+          kind: "failed",
+          action: "write",
+          label: "Delete branch topic",
+          problem: moved,
+          operation: { kind: "deleteBranch", branch: topic },
+        },
+        { kind: "unread" },
+      ),
+    ).toBe(
+      "Could not delete branch topic. topic is no longer at the commit L1 Git showed.",
+    );
+  });
+
+  it("says which of HEAD and the upstream a branch is not merged into", () => {
+    const upstream = (merged: boolean) => ({
+      reference: refSchema.parse("refs/remotes/origin/topic"),
+      merged,
+    });
+    expect(
+      notMergedInto(
+        "topic",
+        { head: false, upstream: upstream(false) },
+        "HEAD (main)",
+      ),
+    ).toBe(
+      "topic is not merged into HEAD (main) or its upstream origin/topic.",
+    );
+    expect(
+      notMergedInto("topic", { head: true, upstream: upstream(false) }, "HEAD"),
+    ).toBe("topic is not merged into its upstream origin/topic.");
+    expect(
+      notMergedInto("topic", { head: false, upstream: null }, "HEAD"),
+    ).toBe("topic is not merged into HEAD.");
+    expect(
+      notMergedInto("topic", { head: true, upstream: upstream(true) }, "HEAD"),
+    ).toBeNull();
   });
 });

@@ -52,6 +52,9 @@ function commands(): Commands {
     toggleHide: vi.fn(),
     toggleSolo: vi.fn(),
     showAllBranches: vi.fn(),
+    newBranch: vi.fn(),
+    renameBranch: vi.fn(),
+    deleteBranch: vi.fn(),
     openRepository: vi.fn(),
     jumpToRef: vi.fn(),
     showStash: vi.fn(),
@@ -177,6 +180,8 @@ describe("command palette", () => {
         name: "feature/fetch-retry",
         visibility: "hidden",
         outOfView: false,
+        local: true,
+        checkedOut: false,
       },
       rule: "hide",
     };
@@ -191,6 +196,9 @@ describe("command palette", () => {
       "Show feature/fetch-retry",
       "Solo feature/fetch-retry",
       "Show all branches",
+      "New branch from feature/fetch-retry…",
+      "Rename feature/fetch-retry…",
+      "Delete feature/fetch-retry…",
       "Add repository",
       "Toggle sidebar",
       "Toggle commit inspector",
@@ -207,7 +215,13 @@ describe("command palette", () => {
       ...repositoryScreen,
       repository: { fetching: false, idle: true, ready: 1 },
       file: { hasCommit: true, lineActions: [] },
-      sidebarBranch: { name: "main", visibility: "soloed", outOfView: false },
+      sidebarBranch: {
+        name: "main",
+        visibility: "soloed",
+        outOfView: false,
+        local: true,
+        checkedOut: true,
+      },
       rule: "solo",
     };
     expect(titles(ready, "o")).toContain("Fast-forward (1)");
@@ -231,6 +245,8 @@ describe("command palette", () => {
         name: "feature/fetch-retry",
         visibility: rule === "hide" ? "hidden" : "shown",
         outOfView: true,
+        local: false,
+        checkedOut: false,
       },
       rule,
     });
@@ -238,11 +254,47 @@ describe("command palette", () => {
       "feature/fetch-retry",
       "Show feature/fetch-retry",
       "Solo feature/fetch-retry",
+      "New branch from feature/fetch-retry…",
     ]);
     expect(titles(notice("solo"), "feature/fetch-retry")).toEqual([
       "feature/fetch-retry",
       "Show feature/fetch-retry",
+      "New branch from feature/fetch-retry…",
     ]);
+  });
+
+  it("offers branch writes for the sidebar branch as Git allows them", () => {
+    const sidebar = (
+      local: boolean,
+      checkedOut: boolean,
+      writing = false,
+    ): ActionContext => ({
+      ...repositoryScreen,
+      writing,
+      sidebarBranch: {
+        name: "topic",
+        visibility: "shown",
+        outOfView: false,
+        local,
+        checkedOut,
+      },
+    });
+    const branchWrites = (context: ActionContext) =>
+      titles(context, "").filter((title) => title.endsWith("…"));
+    expect(branchWrites(sidebar(true, false))).toEqual([
+      "New branch from topic…",
+      "Rename topic…",
+      "Delete topic…",
+    ]);
+    expect(branchWrites(sidebar(true, true))).toEqual([
+      "New branch from topic…",
+      "Rename topic…",
+    ]);
+    expect(branchWrites(sidebar(false, false))).toEqual([
+      "New branch from topic…",
+    ]);
+    expect(branchWrites(sidebar(true, false, true))).toEqual([]);
+    expect(branchWrites({ ...repositoryScreen })).toEqual([]);
   });
 
   it("offers a pick only for another commit", () => {

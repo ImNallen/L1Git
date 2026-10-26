@@ -15,6 +15,7 @@ import {
   Cloud,
   FolderGit2,
   GitBranch,
+  GitBranchPlus,
   GitCommitHorizontal,
   GitCompareArrows,
   PencilLine,
@@ -461,6 +462,7 @@ type Props = {
   onToggleColumn: (id: ColumnId) => void;
   editableHead: Oid | null;
   onEditMessage: () => void;
+  onNewBranch: (oid: Oid) => void;
 };
 
 export function History({
@@ -488,6 +490,7 @@ export function History({
   onToggleColumn,
   editableHead,
   onEditMessage,
+  onNewBranch,
 }: Props) {
   const selectedOid = selection?.kind === "commit" ? selection.oid : null;
   const selectedId = selectedRowId(selection);
@@ -1167,6 +1170,16 @@ export function History({
                     ? "Clear pick"
                     : "Pick for comparison"}
                 </span>
+              </button>
+              <button
+                role="menuitem"
+                onClick={() => {
+                  closeMenu();
+                  onNewBranch(menuCommit);
+                }}
+              >
+                <GitBranchPlus size={14} />
+                <span>New branch…</span>
               </button>
               {menuCommit === editableHead && (
                 <button
