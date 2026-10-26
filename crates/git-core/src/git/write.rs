@@ -184,8 +184,9 @@ impl<'a> Write<'a> {
         }
     }
 
-    pub(crate) fn trace2_event(mut self, file: &'a Path) -> Self {
-        self.env.push(("GIT_TRACE2_EVENT", file.as_os_str()));
+    pub(crate) fn traces(mut self, events: &'a Path, refs: &'a Path) -> Self {
+        self.env.push(("GIT_TRACE2_EVENT", events.as_os_str()));
+        self.env.push(("GIT_TRACE_REFS", refs.as_os_str()));
         self
     }
 

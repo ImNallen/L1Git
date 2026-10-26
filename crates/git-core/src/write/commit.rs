@@ -10,7 +10,12 @@ use crate::{
     stderr, sync,
 };
 use serde::Deserialize;
-use std::{collections::HashMap, fs, path::PathBuf};
+use std::{
+    collections::HashMap,
+    fs,
+    io::{self, BufRead},
+    path::PathBuf,
+};
 
 #[derive(Clone, Copy)]
 pub(super) enum Kind<'a> {
@@ -81,6 +86,20 @@ impl Target {
             Self::Detached => "detached HEAD",
         }
     }
+
+    fn reference(&self) -> &str {
+        match self {
+            Self::Branch(reference) => reference,
+            Self::Detached => "HEAD",
+        }
+    }
+}
+
+/// A ref update as Git's ref transaction made it, with full IDs.
+#[derive(Debug, PartialEq, Eq)]
+struct Update {
+    old: Option<Oid>,
+    new: Oid,
 }
 
 #[expect(
@@ -148,21 +167,17 @@ pub(super) fn commit(
         ));
     }
     let before = oid(&head);
-    let expected_parents = match (kind, &before) {
-        (Kind::New(_), before) => before.iter().cloned().collect(),
-        (Kind::Amend(_) | Kind::EditMessage, Some(before)) => parents(repo, deadline, before)?,
-        (Kind::Amend(_) | Kind::EditMessage, None) => {
-            return Err(RepositoryError::new(
-                ErrorKind::UnchangedPath,
-                "There is no commit to amend yet.",
-            ));
-        }
-    };
+    if before.is_none() && !matches!(kind, Kind::New(_)) {
+        return Err(RepositoryError::new(
+            ErrorKind::UnchangedPath,
+            "There is no commit to amend yet.",
+        ));
+    }
     let (applied, recorded) = store.record_intent(repo, log, operation)?;
     let trace = Trace::create(store, applied.id)?;
     let wrote = txn
         .commit(kind.flags(), message)
-        .trace2_event(&trace.events)
+        .traces(&trace.events, &trace.refs)
         .run(deadline)?;
     let txn = txn.renewed();
     let deadline = deadline.renewed();
@@ -176,45 +191,28 @@ pub(super) fn commit(
         )
     })?;
     let target = Target::of(&head);
-    let Some(made) = target
-        .current(repo, deadline)?
-        .filter(|now| now.as_str().starts_with(&printed))
-    else {
+    let Some(update) = trace.update(&target, &printed) else {
         return Err(elsewhere(&printed, &target));
     };
-    if before.as_ref() == Some(&made) {
+    if target.current(repo, deadline)?.as_ref() != Some(&update.new) {
+        return Err(elsewhere(short(&update.new), &target));
+    }
+    if update.old.as_ref() == Some(&update.new) {
         return Err(RepositoryError::new(
             ErrorKind::UnchangedPath,
             "Nothing changed. Git made the same commit as HEAD, because the message, the files, and the second it ran are the same.",
         ));
     }
-    let made_parents = parents(repo, deadline, &made)?;
-    let (change, race) = if matches!(kind, Kind::New(_)) {
-        let parent = made_parents.first();
-        (
-            RefChange::new(target.at(parent)?, target.at(Some(&made))?, None)?,
-            (made_parents != expected_parents).then(|| commit_race(&made, &target, parent)),
-        )
-    } else {
-        let replaced = previous(repo, deadline, &target, &made)?;
-        let before = match (&replaced, &before) {
-            (None, Some(before)) if made_parents == expected_parents => before.clone(),
-            (Some(replaced), _) if parents(repo, deadline, replaced)? == made_parents => {
-                replaced.clone()
-            }
-            _ => return Err(amend_race(&made, &target)),
-        };
-        let race = (Some(&before) != oid(&head).as_ref())
-            .then(|| amend_race_undoable(&made, &before, &target));
-        (
-            RefChange::new(
-                target.at(Some(&before))?,
-                target.at(Some(&made))?,
-                Some(before),
-            )?,
-            race,
-        )
+    let race = (update.old != before).then(|| raced(kind, &update, &target));
+    let replaced = match kind {
+        Kind::New(_) => None,
+        Kind::Amend(_) | Kind::EditMessage => update.old.clone(),
     };
+    let change = RefChange::new(
+        target.at(update.old.as_ref())?,
+        target.at(Some(&update.new))?,
+        replaced,
+    )?;
     recorded
         .complete(txn.runner(), &Change::Ref(change))
         .map_err(|error| {
@@ -231,8 +229,7 @@ pub(super) fn commit(
 
 /// Git prints `[<branch> <abbreviated oid>] <subject>` once it has moved the
 /// branch and run `post-commit`. The branch there is HEAD's when Git prints,
-/// which another process may have switched, so only the OID is read. Git
-/// abbreviates it to a prefix no other object had then.
+/// which another process may have switched, so only the OID is read.
 fn printed(stdout: &[u8]) -> Option<String> {
     let line = git::text(stdout.split(|byte| *byte == b'\n').next()?);
     line.split(' ').find_map(|token| {
@@ -261,82 +258,30 @@ fn resolve(
         .map_err(|_| git::malformed())
 }
 
-fn previous(
-    repo: &Repo,
-    deadline: WriteDeadline,
-    target: &Target,
-    made: &Oid,
-) -> Result<Option<Oid>, RepositoryError> {
-    let name = match target {
-        Target::Branch(reference) => reference.as_str(),
-        Target::Detached => "HEAD",
-    };
-    let ran = git::run(
-        &repo.root,
-        &[
-            "rev-parse",
-            "-q",
-            "--verify",
-            &format!("{name}@{{0}}"),
-            &format!("{name}@{{1}}"),
-        ],
-        deadline.reads(),
-    )?;
-    if !ran.status.success() {
-        return Ok(None);
-    }
-    let text = git::text(&ran.stdout);
-    let mut lines = text.lines();
-    match (lines.next(), lines.next()) {
-        (Some(now), Some(then)) if now == made.as_str() => Ok(Oid::try_from(then.to_owned()).ok()),
-        _ => Ok(None),
-    }
-}
-
-fn commit_race(made: &Oid, target: &Target, parent: Option<&Oid>) -> RepositoryError {
-    let after = parent.map_or("nothing", short);
+fn raced(kind: Kind<'_>, update: &Update, target: &Target) -> RepositoryError {
+    let made = short(&update.new);
+    let old = update.old.as_ref().map_or("nothing", short);
+    let name = target.name();
     RepositoryError::new(
         ErrorKind::Raced,
-        format!(
-            "Another process moved HEAD while Git committed, so the commit {} landed on {} after {after} instead of after what L1 Git showed. Undo moves {} back to {after}.",
-            short(made),
-            target.name(),
-            target.name(),
-        ),
+        match kind {
+            Kind::New(_) => format!(
+                "Another process moved HEAD while Git committed, so the commit {made} landed on {name} after {old} instead of after what L1 Git showed. Undo moves {name} back to {old}."
+            ),
+            Kind::Amend(_) | Kind::EditMessage => format!(
+                "Another process moved HEAD while Git amended, so the amend {made} replaced {old} on {name}, not the commit L1 Git showed. Undo puts {old} back."
+            ),
+        },
     )
 }
 
-fn elsewhere(printed: &str, target: &Target) -> RepositoryError {
+fn elsewhere(made: &str, target: &Target) -> RepositoryError {
     RepositoryError::new(
         ErrorKind::Raced,
         format!(
-            "Git made the commit {printed}, but another process moved HEAD or {} while Git committed, so {} does not point at it. L1 Git cannot undo it. Git's reflog names it.",
+            "Git made the commit {made}, but another process moved HEAD or {} while Git committed, so {} does not point at it. L1 Git cannot undo it. Git's reflog names it.",
             target.name(),
             target.name(),
-        ),
-    )
-}
-
-fn amend_race(made: &Oid, target: &Target) -> RepositoryError {
-    RepositoryError::new(
-        ErrorKind::Raced,
-        format!(
-            "Another process moved HEAD while Git amended, so the amend {} replaced a commit L1 Git did not show, and L1 Git cannot tell which. It cannot undo it. Git's reflog for {} names the commit it replaced.",
-            short(made),
-            target.name()
-        ),
-    )
-}
-
-fn amend_race_undoable(made: &Oid, replaced: &Oid, target: &Target) -> RepositoryError {
-    RepositoryError::new(
-        ErrorKind::Raced,
-        format!(
-            "Another process moved HEAD while Git amended, so the amend {} replaced {} on {}, not the commit L1 Git showed. Undo puts {} back.",
-            short(made),
-            short(replaced),
-            target.name(),
-            short(replaced),
         ),
     )
 }
@@ -358,23 +303,6 @@ fn nothing_staged() -> RepositoryError {
         ErrorKind::UnchangedPath,
         "Nothing is staged, so there is nothing to commit. Stage a file, or amend the previous commit.",
     )
-}
-
-fn parents(
-    repo: &Repo,
-    deadline: WriteDeadline,
-    commit: &Oid,
-) -> Result<Vec<Oid>, RepositoryError> {
-    let output = git::read(
-        &repo.root,
-        &["rev-list", "--parents", "-n", "1", commit.as_str(), "--"],
-        deadline.reads(),
-    )?;
-    git::text(&output)
-        .split_whitespace()
-        .skip(1)
-        .map(|oid| Oid::try_from(oid.to_owned()).map_err(|_| git::malformed()))
-        .collect()
 }
 
 fn refused(wrote: &Wrote, trace: &Trace) -> RepositoryError {
@@ -451,6 +379,7 @@ fn refused(wrote: &Wrote, trace: &Trace) -> RepositoryError {
 struct Trace {
     dir: PathBuf,
     events: PathBuf,
+    refs: PathBuf,
 }
 
 #[derive(Deserialize)]
@@ -463,6 +392,28 @@ struct Event {
     #[serde(default)]
     argv: Vec<String>,
     code: Option<i64>,
+}
+
+/// `GIT_TRACE_REFS` prints each update of a finished ref transaction as
+/// `<n>: <ref> <old> -> <new> (F=<flags>, T=<type>) "<reflog message>"`.
+fn update_in(line: &str, reference: &str) -> Option<Update> {
+    let words: Vec<&str> = line.split_whitespace().collect();
+    words.windows(6).find_map(|window| {
+        let [index, name, old, "->", new, flags] = window else {
+            return None;
+        };
+        let numbered = index
+            .strip_suffix(':')
+            .is_some_and(|number| !number.is_empty() && number.bytes().all(|b| b.is_ascii_digit()));
+        if !numbered || *name != reference || !flags.starts_with("(F=") {
+            return None;
+        }
+        let old = Oid::try_from((*old).to_owned()).ok()?;
+        Some(Update {
+            old: old.as_str().bytes().any(|byte| byte != b'0').then_some(old),
+            new: Oid::try_from((*new).to_owned()).ok()?,
+        })
+    })
 }
 
 /// `reference-transaction` stops a commit only while preparing.
@@ -481,8 +432,33 @@ impl Trace {
         let dir = store.trace_dir(id)?;
         Ok(Self {
             events: dir.join("trace2.json"),
+            refs: dir.join("refs.txt"),
             dir,
         })
+    }
+
+    /// Our Git's update of the target is the one whose new ID starts with
+    /// what our Git printed. Git processes that hooks start trace their own
+    /// updates to the same file, so two different matches name none.
+    fn update(&self, target: &Target, printed: &str) -> Option<Update> {
+        let file = fs::File::open(&self.refs).ok()?;
+        let mut found = None;
+        for line in io::BufReader::new(file).split(b'\n') {
+            let line = line.ok()?;
+            let Some(update) = update_in(&String::from_utf8_lossy(&line), target.reference())
+            else {
+                continue;
+            };
+            if !update.new.as_str().starts_with(printed) {
+                continue;
+            }
+            match &found {
+                Some(seen) if *seen != update => return None,
+                Some(_) => {}
+                None => found = Some(update),
+            }
+        }
+        found
     }
 
     fn failed_hook(&self) -> Option<String> {
