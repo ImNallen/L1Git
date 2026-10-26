@@ -29,20 +29,9 @@ pub struct TagTip {
     rename_all_fields = "camelCase"
 )]
 pub(super) enum TagChange {
-    /// Recorded before Git runs. The next locked request settles it from
-    /// what the ref holds then.
-    Pending {
-        tag: TagRef,
-        before: Option<Oid>,
-    },
-    Created {
-        tag: TagRef,
-        oid: Oid,
-    },
-    Deleted {
-        tag: TagRef,
-        oid: Oid,
-    },
+    Pending { tag: TagRef, before: Option<Oid> },
+    Created { tag: TagRef, oid: Oid },
+    Deleted { tag: TagRef, oid: Oid },
 }
 
 impl TagChange {
@@ -119,7 +108,7 @@ fn new_name(repo: &Repo, name: &str, reads: Deadline) -> Result<TagRef, Reposito
             format!("'{name}' is not a valid tag name."),
         )
     };
-    // `git tag` also refuses these two, though `check-ref-format` allows them.
+    // `git tag` refuses a leading `-` and `HEAD`, though `check-ref-format` allows them.
     if name.contains('\0') || name.starts_with('-') || name == "HEAD" {
         return Err(invalid());
     }

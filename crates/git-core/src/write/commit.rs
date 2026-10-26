@@ -319,10 +319,9 @@ fn nothing_staged() -> RepositoryError {
     )
 }
 
-/// `printed` is what Git printed, and `output` the part the user sees.
 pub(super) fn missing_identity(
-    printed: &str,
-    output: &str,
+    searched: &str,
+    shown: &str,
     outcome: &str,
 ) -> Option<RepositoryError> {
     [
@@ -332,11 +331,11 @@ pub(super) fn missing_identity(
         "no name was given",
     ]
     .iter()
-    .any(|needle| printed.contains(needle))
+    .any(|needle| searched.contains(needle))
     .then(|| {
         RepositoryError::new(
             ErrorKind::MissingIdentity {
-                output: output.to_owned(),
+                output: shown.to_owned(),
             },
             format!(
                 "Git does not know your name and email, so {outcome}. Set them with the commands below, then try again."

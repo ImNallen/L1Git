@@ -141,7 +141,6 @@ impl Repo {
         self.git(&["fsck", "--no-progress", "--connectivity-only"]);
     }
 
-    /// A commit no branch reaches, so only a tag keeps it alive.
     fn dangling_commit(&self) -> String {
         let tree = self.git(&["rev-parse", "HEAD^{tree}"]);
         self.git(&["commit-tree", &tree, "-p", "HEAD", "-m", "only tagged"])

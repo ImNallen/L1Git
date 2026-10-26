@@ -130,7 +130,7 @@ pub enum Operation {
         at: Oid,
         message: Option<String>,
     },
-    /// Deletes a tag. Undo puts the ref back at the same object.
+    /// Undo puts the ref back at the same object.
     DeleteTag { tag: TagTip },
 }
 

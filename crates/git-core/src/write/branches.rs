@@ -320,25 +320,22 @@ pub(super) fn folds_case(config: &[(String, String)]) -> bool {
     set("core.ignorecase", "true") && !set("extensions.refstorage", "reftable")
 }
 
-/// Refuses `name` when Git could not store it beside `others`, the names
-/// already under the same `refs/<kind>/` folder. `source` is the name a
-/// rename starts from.
 pub(super) fn refuse_clash<'a>(
     noun: &str,
-    others: impl Iterator<Item = &'a str>,
+    siblings: impl Iterator<Item = &'a str>,
     name: &str,
-    source: Option<&str>,
+    renaming_from: Option<&str>,
     folds: bool,
 ) -> Result<(), RepositoryError> {
     let same = |a: &str, b: &str| a == b || (folds && a.to_lowercase() == b.to_lowercase());
     let clash = |message: String| Err(RepositoryError::new(ErrorKind::InvalidRef, message));
-    if let Some(source) = source.filter(|source| *source != name && same(source, name)) {
+    if let Some(source) = renaming_from.filter(|source| *source != name && same(source, name)) {
         return clash(format!(
             "This repository does not tell names apart by case, so Git cannot rename '{source}' to '{name}' in one step. Rename it to another name first, then to '{name}'."
         ));
     }
     let wanted: Vec<_> = name.split('/').collect();
-    for other in others.filter(|other| source != Some(*other)) {
+    for other in siblings.filter(|other| renaming_from != Some(*other)) {
         let theirs: Vec<_> = other.split('/').collect();
         let shared = wanted
             .iter()
