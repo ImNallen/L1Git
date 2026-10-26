@@ -398,7 +398,7 @@ pub(super) fn edit<'r>(
     let before = read(&txn)?;
     for (path, seen) in &plan.claims {
         if shows_non_utf8(&repo.root, &before, path) {
-            return Err(not_utf8(command));
+            return Err(not_utf8(command, path));
         }
         if !seen.matches(at(&before, path)) {
             return Err(RepositoryError::stale(
@@ -442,19 +442,21 @@ fn not_chosen(command: Command, plan: &Plan, unchosen: Vec<String>) -> Repositor
     RepositoryError::stale(StaleReason::PathNotChosen { paths: unchosen }, message)
 }
 
-fn not_utf8(command: Command) -> RepositoryError {
+fn not_utf8(command: Command, path: &str) -> RepositoryError {
+    let verb = command.verb();
     RepositoryError::new(
         ErrorKind::UnsupportedPath,
         format!(
-            "L1 Git cannot {} file names that are not valid UTF-8.",
-            command.verb()
+            "{path} reads the same as a file name that is not valid UTF-8, which L1 Git cannot {verb}. Rename that file, or {verb} it with Git."
         ),
     )
 }
 
+/// A name that is not valid UTF-8 reaches the app with U+FFFD in place of
+/// its bad bytes, so a chosen name that holds U+FFFD may stand for it, or
+/// for a valid name that reads the same.
 fn shows_non_utf8(root: &Path, index: &Rows, path: &str) -> bool {
     path.contains(char::REPLACEMENT_CHARACTER)
-        && !index.contains_key(path.as_bytes())
         && (index.keys().any(|key| reads_as(key, path)) || on_disk_as(root, path))
 }
 
@@ -463,20 +465,30 @@ fn reads_as(bytes: &[u8], name: &str) -> bool {
 }
 
 fn on_disk_as(root: &Path, path: &str) -> bool {
-    let mut folder = root.to_path_buf();
+    let mut reached = vec![(root.to_path_buf(), false)];
     for name in path.split('/') {
-        let exact = folder.join(name);
-        if fs::symlink_metadata(&exact).is_ok() {
-            folder = exact;
-            continue;
+        let mut next = Vec::new();
+        for (folder, through_non_utf8) in reached {
+            if name.contains(char::REPLACEMENT_CHARACTER) {
+                next.extend(
+                    fs::read_dir(&folder)
+                        .into_iter()
+                        .flatten()
+                        .flatten()
+                        .filter(|entry| reads_as(entry.file_name().as_encoded_bytes(), name))
+                        .map(|entry| (entry.path(), true)),
+                );
+            }
+            let exact = folder.join(name);
+            if fs::symlink_metadata(&exact).is_ok() {
+                next.push((exact, through_non_utf8));
+            }
         }
-        return fs::read_dir(&folder)
-            .into_iter()
-            .flatten()
-            .flatten()
-            .any(|entry| reads_as(entry.file_name().as_encoded_bytes(), name));
+        reached = next;
     }
-    false
+    reached
+        .iter()
+        .any(|(_, through_non_utf8)| *through_non_utf8)
 }
 
 pub(super) fn restore(
