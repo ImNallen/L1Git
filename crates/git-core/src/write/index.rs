@@ -21,8 +21,10 @@ pub(super) struct IndexEntry {
     stage: u8,
     intent_to_add: bool,
     skip_worktree: bool,
+    assume_unchanged: bool,
 }
 
+const ASSUME_UNCHANGED: u32 = 0x8000;
 const INTENT_TO_ADD: u32 = 0x2000_0000;
 const SKIP_WORKTREE: u32 = 0x4000_0000;
 
@@ -642,17 +644,23 @@ fn put(txn: &Txn<'_>, targets: &[(&str, &[IndexEntry])]) -> Result<(), Repositor
     if !intent.is_empty() {
         add_intent(txn, &intent)?;
     }
-    let skipped = nul_separated(
-        targets
-            .iter()
-            .filter(|(_, entries)| entries.iter().any(|entry| entry.skip_worktree))
-            .map(|(path, _)| *path),
-    );
-    if !skipped.is_empty() {
-        txn.git(&["update-index", "-z", "--skip-worktree", "--stdin"])
-            .input(skipped)
-            .run(txn.deadline())?
-            .succeeded()?;
+    let flags: [(fn(&IndexEntry) -> bool, &str); 2] = [
+        (|entry| entry.skip_worktree, "--skip-worktree"),
+        (|entry| entry.assume_unchanged, "--assume-unchanged"),
+    ];
+    for (marked, flag) in flags {
+        let paths = nul_separated(
+            targets
+                .iter()
+                .filter(|(_, entries)| entries.iter().any(marked))
+                .map(|(path, _)| *path),
+        );
+        if !paths.is_empty() {
+            txn.git(&["update-index", "-z", flag, "--stdin"])
+                .input(paths)
+                .run(txn.deadline())?
+                .succeeded()?;
+        }
     }
     Ok(())
 }
@@ -757,6 +765,7 @@ fn parse_debug(output: &[u8]) -> Result<Rows, RepositoryError> {
                 stage,
                 intent_to_add: flags & INTENT_TO_ADD != 0,
                 skip_worktree: flags & SKIP_WORKTREE != 0,
+                assume_unchanged: flags & ASSUME_UNCHANGED != 0,
             };
             match paths.last_mut() {
                 Some((last, entries)) if last.as_slice() == path => entries.push(entry),
@@ -811,6 +820,7 @@ mod tests {
             stage,
             intent_to_add,
             skip_worktree: false,
+            assume_unchanged: false,
         }
     }
 
