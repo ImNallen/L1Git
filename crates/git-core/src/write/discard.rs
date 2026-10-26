@@ -558,10 +558,8 @@ fn guard(
 }
 
 /// A case-insensitive disk opens a tracked file through any name it folds
-/// to the same one, whatever `core.ignorecase` says, so a chosen path can be
-/// another name for a tracked file. Git's `icase` pathspecs fold only ASCII,
-/// so every name in the index is folded here, and the device and inode
-/// decide among the names that fold alike.
+/// to the same one, whatever `core.ignorecase` says, and Git's `icase`
+/// pathspecs fold only ASCII.
 fn no_other_names(
     root: &Path,
     rows: &index::Rows,
@@ -573,13 +571,16 @@ fn no_other_names(
         .zip(stats)
         .filter_map(|(path, stat)| Some((stat.as_ref()?.identity?, *path)))
         .collect();
-    let folds: BTreeSet<String> = chosen.values().map(|path| folded(path)).collect();
+    let folds: BTreeSet<String> = chosen
+        .values()
+        .map(|path| fold_for_any_disk(path))
+        .collect();
     if folds.is_empty() {
         return Ok(());
     }
     let names: BTreeSet<&str> = paths.iter().copied().collect();
     for other in rows.keys().filter_map(|name| str::from_utf8(name).ok()) {
-        if names.contains(other) || !folds.contains(&folded(other)) {
+        if names.contains(other) || !folds.contains(&fold_for_any_disk(other)) {
             continue;
         }
         let identity = Stat::of(&root.join(other))
@@ -596,28 +597,30 @@ fn no_other_names(
 }
 
 /// Each case-insensitive disk folds names its own way, some also across
-/// Unicode normalization forms, so this folds at least as far as any of
-/// them: canonical decomposition, then each character's lowercase of its
-/// uppercase, until nothing changes. Every character settles within two
-/// rounds.
-fn folded(name: &str) -> String {
+/// Unicode normalization forms.
+fn fold_for_any_disk(name: &str) -> String {
     if name.is_ascii() {
         return name.to_ascii_lowercase();
     }
-    let decompose = icu_normalizer::DecomposingNormalizerBorrowed::new_nfd();
-    let mut folded = decompose.normalize(name).into_owned();
-    loop {
-        let cased: String = folded
-            .chars()
-            .flat_map(char::to_uppercase)
-            .flat_map(char::to_lowercase)
-            .collect();
-        let next = decompose.normalize(&cased).into_owned();
-        if next == folded {
-            return folded;
-        }
-        folded = next;
+    let mut folded = DECOMPOSE.normalize(name).into_owned();
+    for _ in 0..FOLD_ROUNDS {
+        folded = fold_round(&folded);
     }
+    folded
+}
+
+const FOLD_ROUNDS: usize = 2;
+
+const DECOMPOSE: icu_normalizer::DecomposingNormalizerBorrowed<'static> =
+    icu_normalizer::DecomposingNormalizerBorrowed::new_nfd();
+
+fn fold_round(name: &str) -> String {
+    let cased: String = name
+        .chars()
+        .flat_map(char::to_uppercase)
+        .flat_map(char::to_lowercase)
+        .collect();
+    DECOMPOSE.normalize(&cased).into_owned()
 }
 
 fn writable_stats(root: &Path, paths: &[&str]) -> Result<Vec<Option<Stat>>, RepositoryError> {
@@ -1124,6 +1127,19 @@ mod tests {
                 .expect_err("b holds neither state");
             assert!(again.message.starts_with("b changed"), "{}", again.message);
             assert_eq!(repo.read("b"), "editor\n", "{editor:?}");
+        }
+    }
+
+    #[test]
+    fn every_character_settles_within_the_fold_rounds() {
+        for character in (0..=u32::from(char::MAX)).filter_map(char::from_u32) {
+            let folded = fold_for_any_disk(&character.to_string());
+            assert_eq!(
+                fold_round(&folded),
+                folded,
+                "U+{:04X}",
+                u32::from(character)
+            );
         }
     }
 

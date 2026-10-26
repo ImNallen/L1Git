@@ -210,16 +210,13 @@ impl LockedStore {
             self.save(&log)?;
             self.forget(&log);
         }
-        for id in [log.next_undo(), log.next_redo()].into_iter().flatten() {
-            self.remove_copies_beside(id);
+        for id in log.next_steps() {
+            self.remove_copies_a_stopped_step_left(id);
         }
         Ok(log)
     }
 
-    /// A discard, undo, or redo stopped by a crash leaves its entry next in
-    /// the log, and no step runs while this store is locked, so a copy named
-    /// for that entry beside one of its paths is a leftover.
-    fn remove_copies_beside(&self, id: EntryId) {
+    fn remove_copies_a_stopped_step_left(&self, id: EntryId) {
         if let Ok((applied, change)) = self.record_of(id) {
             change.remove_copies_beside(&applied);
         }
@@ -489,6 +486,10 @@ impl Log {
     pub(super) fn next_redo(&self) -> Option<EntryId> {
         let at = self.entries.len().checked_sub(self.undone)?;
         self.entries.get(at).copied()
+    }
+
+    fn next_steps(&self) -> impl Iterator<Item = EntryId> {
+        [self.next_undo(), self.next_redo()].into_iter().flatten()
     }
 
     pub(super) fn position(&self, id: EntryId, direction: Direction) -> Position {

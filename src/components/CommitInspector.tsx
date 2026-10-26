@@ -45,7 +45,7 @@ import type { DetailState } from "../useWorkspace";
 import {
   changedFileTreeInput,
   listsRow,
-  nearbyRows,
+  rowsAfterThenBefore,
 } from "../domain/changedFiles";
 import type { Outcome } from "../useWrites";
 import { ChangedFileTree, changeStatuses } from "./ChangedFileTree";
@@ -759,7 +759,7 @@ function WorktreeInspector({
       const files = groups.find((group) => group.side === row?.side)?.files;
       resume.current = row && {
         ...row,
-        near: nearbyRows(files ?? [], row.row),
+        near: rowsAfterThenBefore(files ?? [], row.row),
       };
       return;
     }

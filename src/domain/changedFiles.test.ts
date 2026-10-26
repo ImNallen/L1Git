@@ -3,7 +3,7 @@ import {
   changedFileTreeInput,
   changedPathAt,
   firstChangedPath,
-  nearbyRows,
+  rowsAfterThenBefore,
   pathsUnder,
 } from "./changedFiles";
 
@@ -52,13 +52,13 @@ describe("rows beside a removed row", () => {
   ];
 
   it("puts the rows after it first, nearest first, then the rows before it", () => {
-    expect(nearbyRows(files, "d.ts")).toEqual([
+    expect(rowsAfterThenBefore(files, "d.ts")).toEqual([
       "e.ts",
       "a.ts",
       "src/ui/c.ts",
       "src/ui/b.ts",
     ]);
-    expect(nearbyRows(files, "e.ts")).toEqual([
+    expect(rowsAfterThenBefore(files, "e.ts")).toEqual([
       "d.ts",
       "a.ts",
       "src/ui/c.ts",
@@ -67,11 +67,15 @@ describe("rows beside a removed row", () => {
   });
 
   it("skips every row inside a folder row", () => {
-    expect(nearbyRows(files, "src/ui/")).toEqual(["a.ts", "d.ts", "e.ts"]);
+    expect(rowsAfterThenBefore(files, "src/ui/")).toEqual([
+      "a.ts",
+      "d.ts",
+      "e.ts",
+    ]);
   });
 
   it("finds no row for a path the list does not show", () => {
-    expect(nearbyRows(files, "gone.ts")).toEqual([]);
-    expect(nearbyRows([{ path: "a.ts" }], "a.ts")).toEqual([]);
+    expect(rowsAfterThenBefore(files, "gone.ts")).toEqual([]);
+    expect(rowsAfterThenBefore([{ path: "a.ts" }], "a.ts")).toEqual([]);
   });
 });

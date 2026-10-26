@@ -37,8 +37,7 @@ export function listsRow(
   return pathsUnder(files, { kind, path: row }).length > 0;
 }
 
-/** The rows beside `row` in its list, nearest after it first, then nearest before it. */
-export function nearbyRows(
+export function rowsAfterThenBefore(
   files: readonly { path: string }[],
   row: string,
 ): string[] {
