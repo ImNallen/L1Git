@@ -718,7 +718,7 @@ impl EntryObjects {
         let lost = || {
             RepositoryError::new(
                 ErrorKind::GitFailed,
-                "Git no longer has some of this branch's commits, and L1 Git's undo store does not hold them, so nothing changed. A branch or tag that shared them was likely deleted outside L1 Git and its commits pruned.",
+                "Git no longer has some of this branch's commits, and L1 Git's undo store does not hold them, so nothing changed. A branch, tag, or remote-tracking branch that shared them was likely deleted outside L1 Git and its commits pruned.",
             )
         };
         // rev-list skips a missing tip under --missing=allow-promisor.
@@ -756,6 +756,9 @@ impl EntryObjects {
 /// `--prune` drops remote-tracking refs, and a checkout moves HEAD.
 const LASTING_REFS: [&str; 2] = ["--branches", "--tags"];
 
+/// A checkout's entry also trusts remote-tracking refs, because packing a
+/// remote branch's whole history on every checkout costs too much. A fetch
+/// with `--prune` and a `gc` can then take what its undo or redo needs.
 const CHECKOUT_LASTING_REFS: [&str; 3] = ["--branches", "--tags", "--remotes"];
 
 /// What `pack-objects` names its pack after in an object directory.
