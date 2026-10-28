@@ -14,6 +14,7 @@ import type {
   Oid,
   Operation,
   Problem,
+  RepositoryRoot,
   Start,
   StatusEntry,
   Stash,
@@ -289,6 +290,35 @@ export const stashDropWrite = (stash: Stash, head: Head): Write => ({
   operation: { kind: "stashDrop", stash: stashTip(stash) },
   expect: { head },
 });
+
+const stashBranch = /^(?:WIP on|On) ([^:]*): /;
+
+/** The worktree apply and pop change. A selected worktree wins. Otherwise the one worktree checked out on the branch Git names in the stash message, then the repository that was added. */
+export function worktreeForStash(
+  repository: {
+    root: RepositoryRoot;
+    head: Head;
+    worktrees: readonly { root: RepositoryRoot; head: Head }[];
+  },
+  message: string,
+  selected: { root: RepositoryRoot; head: Head } | null,
+): { root: RepositoryRoot; head: Head } {
+  if (selected) return selected;
+  const branch = stashBranch.exec(message)?.[1];
+  if (branch && branch !== "(no branch)") {
+    const reference = `refs/heads/${branch}`;
+    const matches = repository.worktrees.filter(
+      (worktree) =>
+        worktree.head.kind === "attached" &&
+        worktree.head.reference === reference,
+    );
+    const worktree = matches[0];
+    if (matches.length === 1 && worktree) {
+      return { root: worktree.root, head: worktree.head };
+    }
+  }
+  return { root: repository.root, head: repository.head };
+}
 
 export const noticeLabel = (step: Step, operation: Operation, label: string) =>
   step === "undo" &&

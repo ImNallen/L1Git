@@ -21,6 +21,7 @@ import {
   stashDropWrite,
   stashPopWrite,
   stashPushWrite,
+  worktreeForStash,
   stepButton,
   steppedText,
   notMergedInto,
@@ -1254,6 +1255,38 @@ group("stash writes", () => {
         label: noticeLabel("redo", dropped, describe(dropped)),
       }),
     ).toBe("Redid Drop stash@{1}");
+  });
+
+  it("applies and pops in the open worktree, or the one on the stash's branch", () => {
+    const develop = {
+      kind: "attached" as const,
+      reference: refSchema.parse("refs/heads/develop"),
+      oid: oidSchema.parse("d".repeat(40)),
+    };
+    const linkedWorktree = {
+      root: rootSchema.parse("/work/sync-develop"),
+      head: develop,
+    };
+    const repository = {
+      root: rootSchema.parse("/work/sync-demo"),
+      head,
+      worktrees: [
+        { root: rootSchema.parse("/work/sync-demo"), head },
+        linkedWorktree,
+      ],
+    };
+    const linked = { root: linkedWorktree.root, head: develop };
+    const added = { root: repository.root, head };
+    expect(worktreeForStash(repository, "On develop: wip", linked)).toEqual(
+      linked,
+    );
+    expect(worktreeForStash(repository, "On develop: wip", null)).toEqual(
+      linked,
+    );
+    expect(worktreeForStash(repository, "On main: wip", added)).toEqual(added);
+    expect(
+      worktreeForStash(repository, "WIP on (no branch): abc", null),
+    ).toEqual(added);
   });
 
   it("rereads refs after a stash write and when the entry moved", () => {

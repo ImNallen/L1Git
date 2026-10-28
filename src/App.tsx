@@ -75,6 +75,7 @@ import {
   stashApplyWrite,
   stashDropWrite,
   stashPopWrite,
+  worktreeForStash,
   writeFor,
 } from "./domain/operations";
 import type {
@@ -342,11 +343,21 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       setDroppingStash(stash);
       return;
     }
+    const target = worktreeForStash(
+      snapshot,
+      stash.message,
+      selectedWorktree
+        ? {
+            root: selectedWorktree.worktree.root,
+            head: selectedWorktree.worktree.head,
+          }
+        : null,
+    );
     const write =
       action === "apply"
-        ? stashApplyWrite(stash, snapshot.head)
-        : stashPopWrite(stash, snapshot.head);
-    void writes.write(snapshot.root, write);
+        ? stashApplyWrite(stash, target.head)
+        : stashPopWrite(stash, target.head);
+    void writes.write(target.root, write);
   }
   const rootChanges = snapshot ? app.changes.get(snapshot.root) : undefined;
   const headStatus = rootChanges?.kind === "ready" ? rootChanges.status : null;
