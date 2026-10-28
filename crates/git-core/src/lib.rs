@@ -22,4 +22,4 @@ pub use repository::{
 pub use run::{Request, Response, run};
 pub use status::{worktree_patch, worktree_status};
 pub use sync::{Coordinator, Limits};
-pub use write::{Applied, EntryId, Expect, Operation, UndoHistory};
+pub use write::{Applied, EntryId, Expect, LinePick, LineSide, Operation, UndoHistory};

@@ -20,6 +20,7 @@ import {
 } from "./repository";
 import type {
   IndexObject,
+  Operation,
   Problem,
   StatusEntry,
   WorktreeStatus,
@@ -156,6 +157,29 @@ group("describe", () => {
     expect(describe({ kind: "stageFiles", entries: [unmerged] })).toBe(
       "Mark clash.txt resolved",
     );
+  });
+
+  it("names a hunk or line write by its file and moves no ref", () => {
+    const shown = "diff --git a/src/a.ts b/src/a.ts\n";
+    const hunk = {
+      kind: "stageHunk",
+      path: "src/a.ts",
+      hunk: 1,
+      shown,
+    } satisfies Operation;
+    const lines = {
+      kind: "discardLines",
+      path: "src/a.ts",
+      lines: [{ side: "additions", line: 4 }],
+      shown,
+    } satisfies Operation;
+    expect(describe(hunk)).toBe("Stage a hunk of src/a.ts");
+    expect(describe({ ...hunk, kind: "unstageHunk" })).toBe(
+      "Unstage a hunk of src/a.ts",
+    );
+    expect(describe(lines)).toBe("Discard lines of src/a.ts");
+    expect(movesRefs(hunk)).toBe(false);
+    expect(movesRefs(lines)).toBe(false);
   });
 });
 

@@ -1316,3 +1316,781 @@ fn runs_a_hook_that_config_defines_only_once_the_index_holds_the_write() {
         );
     }
 }
+
+#[cfg(unix)]
+mod parts {
+    use super::*;
+    use l1_git_core::{FilePatch, LinePick, LineSide, Side, WorktreePatch, worktree_patch};
+    use std::{
+        io::Write as _,
+        num::NonZeroU32,
+        os::unix::fs::{PermissionsExt, symlink},
+        process::Output,
+    };
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum Act {
+        Stage,
+        Unstage,
+        Discard,
+    }
+
+    #[derive(Clone, Debug)]
+    enum Choice {
+        Hunk(u32),
+        Lines(Vec<LinePick>),
+    }
+
+    fn d(line: u32) -> LinePick {
+        LinePick {
+            side: LineSide::Deletions,
+            line: NonZeroU32::new(line).unwrap(),
+        }
+    }
+
+    fn a(line: u32) -> LinePick {
+        LinePick {
+            side: LineSide::Additions,
+            line: NonZeroU32::new(line).unwrap(),
+        }
+    }
+
+    fn numbered(count: usize) -> String {
+        (1..=count).map(|line| format!("line {line}\n")).collect()
+    }
+
+    fn replaced(text: &str, edits: &[(&str, &str)]) -> String {
+        edits.iter().fold(text.to_owned(), |text, (from, to)| {
+            assert!(text.contains(from), "{from:?}");
+            text.replacen(from, to, 1)
+        })
+    }
+
+    fn shown(repo: &Repo, file: &str, side: Side) -> String {
+        match worktree_patch(repo.path(), file, side) {
+            Ok(WorktreePatch::Diff {
+                diff: FilePatch::Text { patch, .. },
+            }) => patch,
+            _ => String::new(),
+        }
+    }
+
+    fn part(repo: &Repo, act: Act, file: &str, choice: Choice) -> Operation {
+        let side = match act {
+            Act::Unstage => Side::Staged,
+            Act::Stage | Act::Discard => Side::Unstaged,
+        };
+        let (path, shown) = (file.to_owned(), shown(repo, file, side));
+        match (act, choice) {
+            (Act::Stage, Choice::Hunk(hunk)) => Operation::StageHunk { path, hunk, shown },
+            (Act::Unstage, Choice::Hunk(hunk)) => Operation::UnstageHunk { path, hunk, shown },
+            (Act::Discard, Choice::Hunk(hunk)) => Operation::DiscardHunk { path, hunk, shown },
+            (Act::Stage, Choice::Lines(lines)) => Operation::StageLines { path, lines, shown },
+            (Act::Unstage, Choice::Lines(lines)) => Operation::UnstageLines { path, lines, shown },
+            (Act::Discard, Choice::Lines(lines)) => Operation::DiscardLines { path, lines, shown },
+        }
+    }
+
+    fn send(
+        coordinator: &Coordinator,
+        repo: &Repo,
+        operation: &Operation,
+    ) -> Result<Applied, RepositoryError> {
+        let head = worktree_status(repo.path()).unwrap().head;
+        coordinator.write(repo.path(), operation, &Expect { head })
+    }
+
+    fn write_part(
+        coordinator: &Coordinator,
+        repo: &Repo,
+        act: Act,
+        file: &str,
+        choice: Choice,
+    ) -> Result<Applied, RepositoryError> {
+        send(coordinator, repo, &part(repo, act, file, choice))
+    }
+
+    fn git_with_input(path: &Path, args: &[&str], input: &[u8]) -> Output {
+        let mut child = git_command(path, args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child.stdin.take().unwrap().write_all(input).unwrap();
+        child.wait_with_output().unwrap()
+    }
+
+    fn file(repo: &Repo, path: &str) -> Option<(Vec<u8>, u32)> {
+        let file = repo.root.join(path);
+        let metadata = fs::symlink_metadata(&file).ok()?;
+        Some((
+            fs::read(&file).unwrap(),
+            metadata.permissions().mode() & 0o7777,
+        ))
+    }
+
+    fn file_round_trip(
+        coordinator: &Coordinator,
+        repo: &Repo,
+        path: &str,
+        write: impl FnOnce() -> Applied,
+    ) {
+        let index = repo.index();
+        let before = file(repo, path);
+        let applied = write();
+        let after = file(repo, path);
+        assert_ne!(before, after);
+        for _ in 0..2 {
+            assert_eq!(coordinator.undo(repo.path(), applied.id).unwrap(), applied);
+            assert_eq!(file(repo, path), before);
+        }
+        for _ in 0..2 {
+            assert_eq!(coordinator.redo(repo.path(), applied.id).unwrap(), applied);
+            assert_eq!(file(repo, path), after);
+        }
+        assert_eq!(repo.index(), index);
+        assert!(
+            repo.git_dir_leftovers().is_empty(),
+            "{:?}",
+            repo.git_dir_leftovers()
+        );
+    }
+
+    fn refuses(coordinator: &Coordinator, repo: &Repo, operation: &Operation, kind: &ErrorKind) {
+        let (index, status) = (repo.index(), repo.status());
+        let error = send(coordinator, repo, operation).expect_err("the write should refuse");
+        assert_eq!(&error.kind, kind, "{}", error.message);
+        assert_eq!(repo.index(), index);
+        assert_eq!(repo.status(), status);
+        assert!(repo.git_dir_leftovers().is_empty());
+    }
+
+    fn forty() -> String {
+        numbered(40)
+    }
+
+    fn two(text: &str) -> String {
+        replaced(
+            text,
+            &[
+                ("line 10\n", "line 10 changed\n"),
+                ("line 30\n", "line 30 changed\n"),
+            ],
+        )
+    }
+
+    fn after_change(act: Act, setup: impl Fn(&Repo), change: impl Fn(&Repo)) -> (Repo, Operation) {
+        let repo = Repo::committed(&[("f.txt", &forty())]);
+        setup(&repo);
+        let operation = part(&repo, act, "f.txt", Choice::Hunk(1));
+        change(&repo);
+        (repo, operation)
+    }
+
+    type Edit = fn(&Repo);
+
+    fn worktree_two(repo: &Repo) {
+        repo.put("f.txt", &two(&forty()));
+    }
+
+    fn staged_two(repo: &Repo) {
+        worktree_two(repo);
+        repo.git(&["add", "f.txt"]);
+    }
+
+    fn index_holds(repo: &Repo, contents: &str) {
+        repo.put("tmp", contents);
+        let oid = repo.git(&["hash-object", "-w", "tmp"]);
+        fs::remove_file(repo.root.join("tmp")).unwrap();
+        repo.git(&[
+            "update-index",
+            "--cacheinfo",
+            &format!("100644,{},f.txt", oid.trim()),
+        ]);
+    }
+
+    #[test]
+    fn a_write_against_the_shown_patch_succeeds_when_nothing_changed() {
+        let (repo, operation) = after_change(Act::Stage, worktree_two, |_| {});
+        send(&repo.coordinator(), &repo, &operation).unwrap();
+        assert_eq!(
+            repo.git(&["show", ":f.txt"]),
+            replaced(&forty(), &[("line 30\n", "line 30 changed\n")])
+        );
+    }
+
+    #[test]
+    fn refuses_every_change_since_the_patch_was_shown_and_changes_nothing() {
+        let rewrite_in_hunk: Edit = |repo| {
+            repo.put(
+                "f.txt",
+                &replaced(
+                    &two(&forty()),
+                    &[("line 30 changed\n", "line 30 REWRITTEN\n")],
+                ),
+            );
+        };
+        let index_above: Edit =
+            |repo| index_holds(repo, &format!("inserted A\ninserted B\n{}", forty()));
+        let index_in_context: Edit = |repo| {
+            index_holds(
+                repo,
+                &replaced(&forty(), &[("line 29\n", "line 29 staged elsewhere\n")]),
+            );
+        };
+        let staged_above: Edit = |repo| {
+            repo.put("f.txt", &format!("new top\n{}", two(&forty())));
+            repo.git(&["add", "f.txt"]);
+        };
+        let worktree_above: Edit = |repo| {
+            repo.put(
+                "f.txt",
+                &format!("inserted 1\ninserted 2\ninserted 3\n{}", two(&forty())),
+            );
+        };
+        let worktree_in_hunk: Edit = |repo| {
+            repo.put(
+                "f.txt",
+                &replaced(&two(&forty()), &[("line 31\n", "line 31 edited\n")]),
+            );
+        };
+        let cases: [(&str, Act, Edit, Edit); 6] = [
+            (
+                "stage-worktree-edited-in-hunk",
+                Act::Stage,
+                worktree_two,
+                rewrite_in_hunk,
+            ),
+            (
+                "stage-index-edited-above",
+                Act::Stage,
+                worktree_two,
+                index_above,
+            ),
+            (
+                "stage-index-edited-in-hunk-context",
+                Act::Stage,
+                worktree_two,
+                index_in_context,
+            ),
+            (
+                "unstage-index-edited-above",
+                Act::Unstage,
+                staged_two,
+                staged_above,
+            ),
+            (
+                "discard-worktree-edited-above",
+                Act::Discard,
+                worktree_two,
+                worktree_above,
+            ),
+            (
+                "discard-worktree-edited-in-hunk",
+                Act::Discard,
+                worktree_two,
+                worktree_in_hunk,
+            ),
+        ];
+        for (name, act, setup, change) in cases {
+            let (repo, operation) = after_change(act, setup, change);
+            let disk = fs::read(repo.root.join("f.txt")).unwrap();
+            refuses(&repo.coordinator(), &repo, &operation, &PATH_CHANGED);
+            assert_eq!(fs::read(repo.root.join("f.txt")).unwrap(), disk, "{name}");
+        }
+    }
+
+    #[test]
+    fn refuses_a_discard_that_git_apply_would_land_on_a_copy_27_lines_away() {
+        let block = "alpha\nbeta\ngamma\nTARGET\ndelta\nepsilon\nzeta\n";
+        let head = "top 1\ntop 2\ntop 3\ntop 4\n";
+        let twice = format!("{head}{block}{}{block}", numbered(20));
+        let repo = Repo::committed(&[("f.txt", &twice)]);
+        repo.put(
+            "f.txt",
+            &replaced(&twice, &[("TARGET\n", "TARGET changed\n")]),
+        );
+        let operation = part(&repo, Act::Discard, "f.txt", Choice::Hunk(0));
+        let fixed = replaced(&twice, &[("TARGET\n", "TARGET user-edited\n")]);
+        let (first, second) = fixed.split_at(head.len() + block.len());
+        let moved = format!(
+            "{first}{}",
+            replaced(second, &[("TARGET\n", "TARGET changed\n")])
+        );
+        repo.put("f.txt", &moved);
+        refuses(&repo.coordinator(), &repo, &operation, &PATH_CHANGED);
+        assert_eq!(fs::read_to_string(repo.root.join("f.txt")).unwrap(), moved);
+    }
+
+    #[test]
+    fn refuses_a_shown_patch_whose_blob_ids_were_forged() {
+        let repo = Repo::committed(&[("f.txt", &forty())]);
+        worktree_two(&repo);
+        let Operation::StageHunk { path, hunk, shown } =
+            part(&repo, Act::Stage, "f.txt", Choice::Hunk(1))
+        else {
+            unreachable!("a stage of a hunk");
+        };
+        let (index_line, _) = shown.split_once('\n').unwrap().1.split_once('\n').unwrap();
+        let forged = shown.replacen(
+            index_line,
+            &format!("index {}..{} 100644", "1".repeat(40), "2".repeat(40)),
+            1,
+        );
+        refuses(
+            &repo.coordinator(),
+            &repo,
+            &Operation::StageHunk {
+                path,
+                hunk,
+                shown: forged,
+            },
+            &PATH_CHANGED,
+        );
+    }
+
+    #[test]
+    fn reports_a_held_index_lock_before_reading_the_patch() {
+        let (repo, operation) = after_change(Act::Stage, worktree_two, |_| {});
+        fs::write(repo.root.join(".git/index.lock"), "").unwrap();
+        let error = send(&repo.coordinator(), &repo, &operation).unwrap_err();
+        assert_eq!(error.kind, ErrorKind::LockHeld, "{}", error.message);
+        fs::remove_file(repo.root.join(".git/index.lock")).unwrap();
+        assert_eq!(repo.status(), [" M f.txt"]);
+    }
+
+    fn three_hunks() -> Repo {
+        let repo = Repo::committed(&[("f.txt", &numbered(30))]);
+        repo.put(
+            "f.txt",
+            &replaced(
+                &numbered(30),
+                &[
+                    ("line 3\n", "line 3 changed\n"),
+                    ("line 15\n", "line 15 changed\n"),
+                    ("line 27\n", "line 27 changed\n"),
+                ],
+            ),
+        );
+        repo
+    }
+
+    #[test]
+    fn undo_and_redo_of_each_partial_write_restore_the_index_or_the_file_exactly() {
+        for (act, choice) in [
+            (Act::Stage, Choice::Hunk(1)),
+            (Act::Stage, Choice::Lines(vec![d(15), a(15), a(27)])),
+            (Act::Unstage, Choice::Hunk(1)),
+            (Act::Unstage, Choice::Lines(vec![d(3), d(27), a(27)])),
+        ] {
+            let repo = three_hunks();
+            if act == Act::Unstage {
+                repo.git(&["add", "f.txt"]);
+            }
+            let coordinator = repo.coordinator();
+            round_trip(&coordinator, &repo, || {
+                write_part(&coordinator, &repo, act, "f.txt", choice.clone()).unwrap()
+            });
+        }
+        for choice in [Choice::Hunk(1), Choice::Lines(vec![d(3), a(3), a(27)])] {
+            let repo = three_hunks();
+            fs::set_permissions(repo.root.join("f.txt"), fs::Permissions::from_mode(0o755))
+                .unwrap();
+            let coordinator = repo.coordinator();
+            file_round_trip(&coordinator, &repo, "f.txt", || {
+                write_part(&coordinator, &repo, Act::Discard, "f.txt", choice.clone()).unwrap()
+            });
+        }
+    }
+
+    #[test]
+    fn unstaging_a_hunk_of_a_staged_rename_keeps_the_rename() {
+        let repo = Repo::committed(&[("old.txt", &numbered(30))]);
+        repo.git(&["mv", "old.txt", "new.txt"]);
+        repo.put(
+            "new.txt",
+            &replaced(
+                &numbered(30),
+                &[
+                    ("line 2\n", "line 2 changed\n"),
+                    ("line 29\n", "line 29 changed\n"),
+                ],
+            ),
+        );
+        repo.git(&["add", "new.txt"]);
+        let coordinator = repo.coordinator();
+        round_trip(&coordinator, &repo, || {
+            write_part(
+                &coordinator,
+                &repo,
+                Act::Unstage,
+                "new.txt",
+                Choice::Hunk(1),
+            )
+            .unwrap()
+        });
+        assert_eq!(repo.status(), ["RM new.txt", "old.txt"]);
+    }
+
+    #[test]
+    fn a_partial_unstage_keeps_skip_worktree_and_drops_assume_unchanged() {
+        for (flag, tag) in [("--skip-worktree", "S"), ("--assume-unchanged", "H")] {
+            let repo = three_hunks();
+            repo.git(&["add", "f.txt"]);
+            repo.git(&["update-index", flag, "f.txt"]);
+            let coordinator = repo.coordinator();
+            round_trip(&coordinator, &repo, || {
+                write_part(&coordinator, &repo, Act::Unstage, "f.txt", Choice::Hunk(1)).unwrap()
+            });
+            assert_eq!(
+                repo.git(&["ls-files", "-v", "f.txt"]),
+                format!("{tag} f.txt\n"),
+                "{flag}"
+            );
+        }
+    }
+
+    #[test]
+    fn unstages_all_of_a_new_file_whose_entry_carries_either_flag() {
+        for flag in ["--skip-worktree", "--assume-unchanged"] {
+            let repo = Repo::committed(&[("keep", "k\n")]);
+            repo.put("n.txt", "one\ntwo\n");
+            repo.git(&["add", "n.txt"]);
+            repo.git(&["update-index", flag, "n.txt"]);
+            let coordinator = repo.coordinator();
+            round_trip(&coordinator, &repo, || {
+                write_part(&coordinator, &repo, Act::Unstage, "n.txt", Choice::Hunk(0)).unwrap()
+            });
+            assert_eq!(repo.git(&["ls-files", "n.txt"]), "", "{flag}");
+        }
+    }
+
+    fn respelled_folder(ignorecase: &str) -> Repo {
+        let repo = Repo::committed(&[("dir/old.txt", "old\n")]);
+        repo.git(&["config", "core.ignorecase", ignorecase]);
+        fs::rename(repo.root.join("dir"), repo.root.join("moving")).unwrap();
+        fs::rename(repo.root.join("moving"), repo.root.join("Dir")).unwrap();
+        repo.put("Dir/new.txt", "one\ntwo\n");
+        repo
+    }
+
+    #[test]
+    fn refuses_to_stage_part_of_a_new_file_under_a_second_spelling_of_its_folder() {
+        let repo = respelled_folder("true");
+        let operation = part(&repo, Act::Stage, "Dir/new.txt", Choice::Lines(vec![a(1)]));
+        refuses(
+            &repo.coordinator(),
+            &repo,
+            &operation,
+            &ErrorKind::UnsupportedPath,
+        );
+
+        let repo = respelled_folder("false");
+        write_part(
+            &repo.coordinator(),
+            &repo,
+            Act::Stage,
+            "Dir/new.txt",
+            Choice::Lines(vec![a(1)]),
+        )
+        .unwrap();
+        assert_eq!(repo.git(&["show", ":Dir/new.txt"]), "one\n");
+    }
+
+    fn apply_reverse_of_second_hunk(repo: &Repo) -> Vec<u8> {
+        let patch = repo.git(&["diff-files", "--patch", "--full-index", "--", "f.txt"]);
+        let starts: Vec<usize> = patch.match_indices("\n@@ ").map(|(at, _)| at + 1).collect();
+        let second = format!("{}{}", &patch[..starts[0]], &patch[starts[1]..]);
+        let applied = git_with_input(
+            &repo.root,
+            &["apply", "--reverse", "--whitespace=nowarn", "-"],
+            second.as_bytes(),
+        );
+        assert!(
+            applied.status.success(),
+            "{}",
+            String::from_utf8_lossy(&applied.stderr)
+        );
+        fs::read(repo.root.join("f.txt")).unwrap()
+    }
+
+    fn crlf_lines() -> String {
+        numbered(30).replace('\n', "\r\n")
+    }
+
+    fn crlf_edited() -> String {
+        replaced(
+            &crlf_lines(),
+            &[
+                ("line 3\r\n", "line 3 changed\r\n"),
+                ("line 27\r\n", "line 27 changed\r\n"),
+            ],
+        )
+    }
+
+    fn crlf_blob_under_autocrlf() -> Repo {
+        let repo = Repo::new();
+        repo.git(&["config", "core.autocrlf", "false"]);
+        repo.put("f.txt", &crlf_lines());
+        repo.git(&["add", "f.txt"]);
+        repo.git(&["commit", "--quiet", "-m", "crlf"]);
+        repo.git(&["config", "core.autocrlf", "true"]);
+        repo.put("f.txt", &crlf_edited());
+        repo
+    }
+
+    fn eol_crlf_under_safecrlf() -> Repo {
+        let repo = Repo::committed(&[
+            (".gitattributes", "*.txt text eol=crlf\n"),
+            ("f.txt", &numbered(30)),
+        ]);
+        repo.git(&["config", "core.safecrlf", "true"]);
+        fs::remove_file(repo.root.join("f.txt")).unwrap();
+        repo.git(&["checkout", "--", "f.txt"]);
+        repo.put("f.txt", &crlf_edited());
+        repo
+    }
+
+    #[test]
+    fn discards_a_hunk_as_git_apply_reverse_does_whatever_the_line_ending_rules() {
+        for setup in [crlf_blob_under_autocrlf, eol_crlf_under_safecrlf] {
+            let repo = setup();
+            let coordinator = repo.coordinator();
+            file_round_trip(&coordinator, &repo, "f.txt", || {
+                write_part(&coordinator, &repo, Act::Discard, "f.txt", Choice::Hunk(1)).unwrap()
+            });
+            let sibling = setup();
+            assert_eq!(
+                fs::read(repo.root.join("f.txt")).unwrap(),
+                apply_reverse_of_second_hunk(&sibling)
+            );
+            assert_eq!(
+                fs::read_to_string(repo.root.join("f.txt")).unwrap(),
+                replaced(&crlf_lines(), &[("line 3\r\n", "line 3 changed\r\n")])
+            );
+        }
+    }
+
+    #[test]
+    fn an_untracked_file_stays_untracked_after_a_partial_discard_and_goes_after_a_full_one() {
+        for (choice, left) in [
+            (Choice::Lines(vec![a(2)]), Some("one\nthree\nfour\n")),
+            (Choice::Hunk(0), None),
+        ] {
+            let repo = Repo::committed(&[("keep", "k\n")]);
+            repo.put("n.txt", "one\ntwo\nthree\nfour\n");
+            let coordinator = repo.coordinator();
+            file_round_trip(&coordinator, &repo, "n.txt", || {
+                write_part(&coordinator, &repo, Act::Discard, "n.txt", choice.clone()).unwrap()
+            });
+            assert_eq!(
+                fs::read_to_string(repo.root.join("n.txt")).ok().as_deref(),
+                left
+            );
+            let listed = if left.is_some() {
+                vec!["?? n.txt"]
+            } else {
+                vec![]
+            };
+            assert_eq!(repo.status(), listed);
+        }
+    }
+
+    #[test]
+    fn a_partial_discard_of_a_file_deleted_on_disk_brings_back_the_chosen_lines() {
+        let repo = Repo::committed(&[("g.txt", "d1\nd2\nd3\nd4\n")]);
+        fs::remove_file(repo.root.join("g.txt")).unwrap();
+        let coordinator = repo.coordinator();
+        file_round_trip(&coordinator, &repo, "g.txt", || {
+            write_part(
+                &coordinator,
+                &repo,
+                Act::Discard,
+                "g.txt",
+                Choice::Lines(vec![d(1), d(4)]),
+            )
+            .unwrap()
+        });
+        assert_eq!(
+            fs::read_to_string(repo.root.join("g.txt")).unwrap(),
+            "d1\nd4\n"
+        );
+    }
+
+    #[test]
+    fn a_partial_discard_keeps_the_files_permission_bits() {
+        let repo = three_hunks();
+        fs::set_permissions(repo.root.join("f.txt"), fs::Permissions::from_mode(0o640)).unwrap();
+        write_part(
+            &repo.coordinator(),
+            &repo,
+            Act::Discard,
+            "f.txt",
+            Choice::Hunk(0),
+        )
+        .unwrap();
+        assert_eq!(file(&repo, "f.txt").unwrap().1, 0o640);
+    }
+
+    #[test]
+    fn a_partial_discard_writes_nothing_into_the_object_store() {
+        let objects = |repo: &Repo| {
+            let mut found = Vec::new();
+            let mut folders = vec![repo.root.join(".git/objects")];
+            while let Some(folder) = folders.pop() {
+                for item in fs::read_dir(folder).unwrap() {
+                    let path = item.unwrap().path();
+                    if path.is_dir() {
+                        folders.push(path);
+                    } else {
+                        found.push(path);
+                    }
+                }
+            }
+            found.sort();
+            found
+        };
+        let repo = three_hunks();
+        repo.put("n.txt", "one\ntwo\n");
+        let before = objects(&repo);
+        let coordinator = repo.coordinator();
+        write_part(&coordinator, &repo, Act::Discard, "f.txt", Choice::Hunk(1)).unwrap();
+        write_part(
+            &coordinator,
+            &repo,
+            Act::Discard,
+            "n.txt",
+            Choice::Lines(vec![a(1)]),
+        )
+        .unwrap();
+        assert_eq!(objects(&repo), before);
+    }
+
+    #[test]
+    fn refuses_to_split_a_patch_it_cannot_apply_part_of() {
+        let unsupported = ErrorKind::UnsupportedPath;
+        let stage = |repo: &Repo, file: &str| part(repo, Act::Stage, file, Choice::Hunk(0));
+
+        let repo = Repo::committed(&[("b.bin", "a\0b\n")]);
+        repo.put("b.bin", "a\0c\n");
+        refuses(
+            &repo.coordinator(),
+            &repo,
+            &stage(&repo, "b.bin"),
+            &unsupported,
+        );
+
+        let repo = Repo::committed(&[("big.txt", "small\n")]);
+        repo.put(
+            "big.txt",
+            &"x".repeat(1100 * 1024).replace("xxxxxxxxxx", "xxxxxxxxx\n"),
+        );
+        refuses(
+            &repo.coordinator(),
+            &repo,
+            &stage(&repo, "big.txt"),
+            &unsupported,
+        );
+
+        let repo = Repo::conflicted();
+        refuses(
+            &repo.coordinator(),
+            &repo,
+            &stage(&repo, "shared.txt"),
+            &unsupported,
+        );
+
+        let repo = Repo::committed(&[("f", "one\n")]);
+        let sub = repo.root.join("sub");
+        init(&sub);
+        git(&sub, &["commit", "--quiet", "--allow-empty", "-m", "first"]);
+        repo.git(&["add", "sub"]);
+        repo.git(&["commit", "--quiet", "-m", "add sub"]);
+        git(
+            &sub,
+            &["commit", "--quiet", "--allow-empty", "-m", "second"],
+        );
+        refuses(
+            &repo.coordinator(),
+            &repo,
+            &stage(&repo, "sub"),
+            &unsupported,
+        );
+        repo.git(&["add", "sub"]);
+        let unstage = part(&repo, Act::Unstage, "sub", Choice::Hunk(0));
+        refuses(&repo.coordinator(), &repo, &unstage, &unsupported);
+
+        let repo = Repo::committed(&[("keep", "k\n")]);
+        symlink("target", repo.root.join("link")).unwrap();
+        repo.git(&["add", "link"]);
+        repo.git(&["commit", "--quiet", "-m", "link"]);
+        fs::remove_file(repo.root.join("link")).unwrap();
+        symlink("other", repo.root.join("link")).unwrap();
+        refuses(
+            &repo.coordinator(),
+            &repo,
+            &stage(&repo, "link"),
+            &unsupported,
+        );
+
+        fs::remove_file(repo.root.join("link")).unwrap();
+        repo.put("link", "now a file\n");
+        refuses(
+            &repo.coordinator(),
+            &repo,
+            &stage(&repo, "link"),
+            &unsupported,
+        );
+
+        let repo = Repo::committed(&[("a.txt", &numbered(20))]);
+        repo.git(&["config", "status.renames", "copies"]);
+        repo.put("b.txt", &format!("{}extra\n", numbered(20)));
+        repo.put("a.txt", &format!("{}more\n", numbered(20)));
+        repo.git(&["add", "a.txt", "b.txt"]);
+        let unstage = part(&repo, Act::Unstage, "b.txt", Choice::Hunk(0));
+        refuses(&repo.coordinator(), &repo, &unstage, &unsupported);
+
+        let repo = Repo::committed(&[("old.txt", &numbered(20))]);
+        fs::rename(repo.root.join("old.txt"), repo.root.join("new.txt")).unwrap();
+        repo.put("new.txt", &format!("{}more\n", numbered(20)));
+        repo.git(&["add", "-N", "new.txt"]);
+        refuses(
+            &repo.coordinator(),
+            &repo,
+            &stage(&repo, "new.txt"),
+            &unsupported,
+        );
+
+        for deleted in [false, true] {
+            let repo = Repo::committed(&[("keep", "k\n")]);
+            repo.put("n.txt", "one\ntwo\n");
+            repo.git(&["add", "-N", "n.txt"]);
+            let discard = part(&repo, Act::Discard, "n.txt", Choice::Hunk(0));
+            if deleted {
+                fs::remove_file(repo.root.join("n.txt")).unwrap();
+            }
+            refuses(&repo.coordinator(), &repo, &discard, &unsupported);
+        }
+    }
+
+    #[test]
+    fn refuses_a_line_after_one_without_a_newline_until_the_newline_fix_comes_with_it() {
+        let repo = Repo::committed(&[("f.txt", "a\nb\nc")]);
+        repo.put("f.txt", "a\nb\nc\nd\n");
+        let coordinator = repo.coordinator();
+        let alone = part(&repo, Act::Stage, "f.txt", Choice::Lines(vec![a(4)]));
+        refuses(&coordinator, &repo, &alone, &ErrorKind::UnsupportedPath);
+        round_trip(&coordinator, &repo, || {
+            write_part(
+                &coordinator,
+                &repo,
+                Act::Stage,
+                "f.txt",
+                Choice::Lines(vec![d(3), a(3), a(4)]),
+            )
+            .unwrap()
+        });
+        assert_eq!(repo.git(&["show", ":f.txt"]), "a\nb\nc\nd\n");
+    }
+}

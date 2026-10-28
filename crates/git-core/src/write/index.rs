@@ -1,4 +1,9 @@
-use super::{Change, Direction, Expect, Repo, Restored, store, txn::Txn};
+use super::{
+    Change, Direction, Expect, Repo, Restored,
+    partial::{Action, Part},
+    store,
+    txn::Txn,
+};
 use crate::{
     ChangeStatus, ErrorKind, Head, IndexObject, Mode, MoveSide, Moved, Oid, RepositoryError, Sides,
     Stages, StaleReason, StatusEntry,
@@ -22,6 +27,12 @@ pub(super) struct IndexEntry {
     pub(super) intent_to_add: bool,
     pub(super) skip_worktree: bool,
     pub(super) assume_unchanged: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Scope<'p> {
+    Paths,
+    Part(&'p str),
 }
 
 const ASSUME_UNCHANGED: u32 = 0x8000;
@@ -57,21 +68,19 @@ impl IndexChange {
         head: Head,
         before: &Rows,
         after: &Rows,
-        command: Command,
-        plan: &Plan,
+        verb: &str,
+        scope: Scope<'_>,
+        claimed: &BTreeSet<&str>,
     ) -> Result<Self, RepositoryError> {
-        let unchosen = unnamed(&differences(before, after), |path| {
-            plan.claims.contains_key(path)
-        });
+        let unchosen = unnamed(&differences(before, after), |path| claimed.contains(path));
         if !unchosen.is_empty() {
-            return Err(not_chosen(command, plan, unchosen));
+            return Err(not_chosen(verb, scope, claimed, unchosen));
         }
-        let paths: Vec<PathChange> = plan
-            .claims
-            .keys()
+        let paths: Vec<PathChange> = claimed
+            .iter()
             .filter(|path| at(before, path) != at(after, path))
             .map(|path| PathChange {
-                path: path.clone(),
+                path: (*path).to_owned(),
                 before: at(before, path).to_vec(),
                 after: at(after, path).to_vec(),
             })
@@ -385,32 +394,135 @@ pub(super) fn edit<'r>(
     entries: &[StatusEntry],
 ) -> Result<(Txn<'r>, Change), RepositoryError> {
     let plan = Plan::new(command, entries)?;
+    let claimed = plan.claims.keys().map(String::as_str).collect();
+    guarded(
+        repo,
+        deadline,
+        expect,
+        command.verb(),
+        Scope::Paths,
+        &claimed,
+        |txn, before| {
+            for (path, seen) in &plan.claims {
+                if shows_non_utf8(&repo.root, before, path) {
+                    return Err(not_utf8(command, path));
+                }
+                if !seen.matches(at(before, path)) {
+                    return Err(RepositoryError::stale(
+                        StaleReason::PathChanged,
+                        format!("{path} changed since L1 Git read it. Refresh and try again."),
+                    ));
+                }
+            }
+            txn.git(command.args())
+                .input(nul_separated(plan.touched.iter().map(String::as_str)))
+                .run(deadline)?
+                .succeeded()?;
+            Ok(())
+        },
+    )
+}
+
+/// `git apply` writes the entry anew, which drops skip-worktree and
+/// assume-unchanged. Skip-worktree comes back, and assume-unchanged stays
+/// dropped, as `git reset` drops it.
+pub(super) fn edit_part<'r>(
+    repo: &'r Repo,
+    deadline: WriteDeadline,
+    expect: &Expect,
+    part: &Part<'_>,
+) -> Result<(Txn<'r>, Change), RepositoryError> {
+    let (path, action) = (part.path(), part.action());
+    guarded(
+        repo,
+        deadline,
+        expect,
+        action.verb(),
+        Scope::Part(path),
+        &BTreeSet::from([path]),
+        |txn, before| {
+            let had = at(before, path);
+            if action == Action::Stage && had.is_empty() {
+                one_spelling(txn, before, path)?;
+            }
+            let prepared = part.read(txn)?;
+            txn.git(action.apply().args())
+                .input(prepared.picked)
+                .run(deadline)?
+                .succeeded()?;
+            if had.iter().any(|entry| entry.skip_worktree) && listed(txn, path)? {
+                mark(txn, &[(path, had)], "--skip-worktree", |entry| {
+                    entry.skip_worktree
+                })?;
+            }
+            Ok(())
+        },
+    )
+}
+
+/// With `core.ignorecase`, `git add` files a new path under the folder
+/// spelling the index already uses, and `git apply` does not, so a stage
+/// that creates an entry could leave two spellings of one folder.
+fn one_spelling(txn: &Txn<'_>, before: &Rows, path: &str) -> Result<(), RepositoryError> {
+    let Some(spelled) = folder_spelled_otherwise(before, path) else {
+        return Ok(());
+    };
+    if !git::config_flag(
+        &txn.repo().root,
+        "core.ignorecase",
+        false,
+        txn.deadline().reads(),
+    )? {
+        return Ok(());
+    }
+    Err(RepositoryError::new(
+        ErrorKind::UnsupportedPath,
+        format!(
+            "This repository ignores case and its index spells the folder of {path} as {spelled}, so staging part of it would leave two spellings of that folder. Rename the folder on disk to match, or stage the whole file."
+        ),
+    ))
+}
+
+fn folder_spelled_otherwise(rows: &Rows, path: &str) -> Option<String> {
+    let (folder, _) = path.rsplit_once('/')?;
+    let ours: Vec<&str> = folder.split('/').collect();
+    rows.keys()
+        .filter_map(|key| str::from_utf8(key).ok())
+        .find_map(|other| {
+            let (folder, _) = other.rsplit_once('/')?;
+            let theirs: Vec<&str> = folder.split('/').collect();
+            let same = ours
+                .iter()
+                .zip(&theirs)
+                .take_while(|(ours, theirs)| ours.eq_ignore_ascii_case(theirs))
+                .count();
+            (ours[..same] != theirs[..same]).then(|| theirs[..same].join("/"))
+        })
+}
+
+fn listed(txn: &Txn<'_>, path: &str) -> Result<bool, RepositoryError> {
+    Ok(!txn
+        .git(&["--literal-pathspecs", "ls-files", "-z", "--", path])
+        .run(txn.deadline())?
+        .succeeded()?
+        .is_empty())
+}
+
+fn guarded<'r>(
+    repo: &'r Repo,
+    deadline: WriteDeadline,
+    expect: &Expect,
+    verb: &str,
+    scope: Scope<'_>,
+    claimed: &BTreeSet<&str>,
+    run: impl FnOnce(&Txn<'r>, &Rows) -> Result<(), RepositoryError>,
+) -> Result<(Txn<'r>, Change), RepositoryError> {
     let txn = Txn::begin(repo, deadline)?;
-    let head = repo.head(deadline)?;
-    if head != expect.head {
-        return Err(RepositoryError::stale(
-            StaleReason::HeadMoved,
-            "HEAD moved since L1 Git read this worktree. Refresh and try again.",
-        ));
-    }
+    let head = repo.head_as_seen(expect, deadline)?;
     let before = read(&txn)?;
-    for (path, seen) in &plan.claims {
-        if shows_non_utf8(&repo.root, &before, path) {
-            return Err(not_utf8(command, path));
-        }
-        if !seen.matches(at(&before, path)) {
-            return Err(RepositoryError::stale(
-                StaleReason::PathChanged,
-                format!("{path} changed since L1 Git read it. Refresh and try again."),
-            ));
-        }
-    }
-    txn.git(command.args())
-        .input(nul_separated(plan.touched.iter().map(String::as_str)))
-        .run(deadline)?
-        .succeeded()?;
+    run(&txn, &before)?;
     let after = read(&txn)?;
-    let change = IndexChange::between(head, &before, &after, command, &plan)?;
+    let change = IndexChange::between(head, &before, &after, verb, scope, claimed)?;
     Ok((txn, Change::Index(change)))
 }
 
@@ -423,10 +535,14 @@ fn respelled<'p>(named: impl IntoIterator<Item = &'p str>, path: &str) -> Option
         .find(|named| *named != path && named.eq_ignore_ascii_case(path))
 }
 
-fn not_chosen(command: Command, plan: &Plan, unchosen: Vec<String>) -> RepositoryError {
-    let verb = command.verb();
+fn not_chosen(
+    verb: &str,
+    scope: Scope<'_>,
+    claimed: &BTreeSet<&str>,
+    unchosen: Vec<String>,
+) -> RepositoryError {
     for path in &unchosen {
-        if let Some(chosen) = respelled(plan.claims.keys().map(String::as_str), path) {
+        if let Some(chosen) = respelled(claimed.iter().copied(), path) {
             return RepositoryError::new(
                 ErrorKind::UnsupportedPath,
                 format!(
@@ -435,10 +551,15 @@ fn not_chosen(command: Command, plan: &Plan, unchosen: Vec<String>) -> Repositor
             );
         }
     }
-    let message = format!(
-        "Git would also {verb} paths you did not choose: {}. Refresh, choose them too, and try again.",
-        unchosen.join(", ")
-    );
+    let listed = unchosen.join(", ");
+    let message = match scope {
+        Scope::Paths => format!(
+            "Git would also {verb} paths you did not choose: {listed}. Refresh, choose them too, and try again."
+        ),
+        Scope::Part(path) => format!(
+            "Git would also {verb} {listed} along with part of {path}, so L1 Git changed nothing. Refresh and try again, or {verb} {path} with Git."
+        ),
+    };
     RepositoryError::stale(StaleReason::PathNotChosen { paths: unchosen }, message)
 }
 
@@ -877,6 +998,20 @@ mod tests {
             ])
         );
         assert!(parse_debug(format!("100644 {OID} 0\tx\0").as_bytes()).is_err());
+    }
+
+    #[test]
+    fn a_part_write_that_would_change_another_path_does_not_ask_to_choose_it() {
+        let claimed = BTreeSet::from(["f.txt"]);
+        let unchosen = || vec!["g.txt".to_owned()];
+        assert_eq!(
+            not_chosen("stage", Scope::Paths, &claimed, unchosen()).message,
+            "Git would also stage paths you did not choose: g.txt. Refresh, choose them too, and try again."
+        );
+        assert_eq!(
+            not_chosen("stage", Scope::Part("f.txt"), &claimed, unchosen()).message,
+            "Git would also stage g.txt along with part of f.txt, so L1 Git changed nothing. Refresh and try again, or stage f.txt with Git."
+        );
     }
 
     #[test]

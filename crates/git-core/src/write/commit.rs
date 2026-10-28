@@ -158,13 +158,7 @@ pub(super) fn commit(
             return Err(nothing_staged());
         }
     }
-    let head = repo.head(deadline)?;
-    if head != expect.head {
-        return Err(RepositoryError::stale(
-            StaleReason::HeadMoved,
-            "HEAD moved since L1 Git read this worktree. Refresh and try again.",
-        ));
-    }
+    let head = repo.head_as_seen(expect, deadline)?;
     let before = oid(&head);
     if before.is_none() && !matches!(kind, Kind::New(_)) {
         return Err(RepositoryError::new(

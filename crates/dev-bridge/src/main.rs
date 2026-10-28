@@ -62,13 +62,22 @@ fn handle(mut request: Request, origins: &[String], coordinator: &Coordinator) {
         .take(BODY_LIMIT + 1)
         .read_to_end(&mut bytes)
         .is_err()
-        || bytes.len() as u64 > BODY_LIMIT
     {
         respond(
             request,
             400,
-            json!({"error": "Request body is unreadable or too large."}),
+            json!({"error": "The request body is unreadable."}),
         );
+        return;
+    }
+    if bytes.len() as u64 > BODY_LIMIT {
+        let error = match request.body_length() {
+            Some(length) => {
+                format!("The request body is {length} bytes, over the {BODY_LIMIT}-byte limit.")
+            }
+            None => format!("The request body is over the {BODY_LIMIT}-byte limit."),
+        };
+        respond(request, 400, json!({ "error": error }));
         return;
     }
     if request.url() != "/api/run" {

@@ -1,11 +1,14 @@
 use super::{
     Applied, Change, Direction, EntryId, Expect, Operation, Repo, Restored, index,
+    partial::{self, Part},
     store::{self, EntryObjects, LockedStore, Log},
     txn::{Published, Txn},
 };
 use crate::{
     ChangeStatus, ErrorKind, IndexObject, MoveSide, RepositoryError, Sides, StaleReason,
-    StatusEntry, git::WriteDeadline, status,
+    StatusEntry,
+    git::{self, WriteDeadline},
+    status,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -250,12 +253,7 @@ pub(super) fn discard(
 ) -> Result<(Applied, Option<Published>), RepositoryError> {
     let targets = targets(entries)?;
     let txn = Txn::begin(repo, deadline)?;
-    if repo.head(deadline)? != expect.head {
-        return Err(RepositoryError::stale(
-            StaleReason::HeadMoved,
-            "HEAD moved since L1 Git read this worktree. Refresh and try again.",
-        ));
-    }
+    repo.head_as_seen(expect, deadline)?;
     let paths: Vec<&str> = targets.iter().map(|target| target.path).collect();
     let rows = index::read(&txn)?;
     let stats = guard(&repo.root, &rows, &paths)?;
@@ -277,33 +275,118 @@ pub(super) fn discard(
         .collect();
     let checkout = scratch.0.join("checkout");
     if !tracked.is_empty() {
-        let mut prefix = checkout.clone().into_os_string();
-        prefix.push("/");
-        let prefix = format!("--prefix={}", prefix.to_string_lossy());
+        let prefix = checkout_prefix(&checkout);
         txn.git(&["checkout-index", &prefix, "-f", "-z", "--stdin"])
             .lazy_fetch_unprompted()
             .input(index::nul_separated(tracked.iter().copied()))
             .run(deadline)?
             .succeeded()?;
     }
+    let landings: Vec<Landing<'_>> = targets
+        .iter()
+        .zip(stats)
+        .map(|(target, stat)| Landing {
+            path: target.path,
+            stat,
+            after: match target.seen {
+                Seen::Tracked(_) => After::Checkout,
+                Seen::Untracked => After::Absent,
+            },
+        })
+        .collect();
+    land(txn, store, log, operation, &rows, &checkout, &landings)
+}
+
+pub(super) fn discard_part(
+    repo: &Repo,
+    store: &LockedStore,
+    log: &Log,
+    deadline: WriteDeadline,
+    expect: &Expect,
+    operation: &Operation,
+    part: &Part<'_>,
+) -> Result<(Applied, Option<Published>), RepositoryError> {
+    let path = part.path();
+    let txn = Txn::begin(repo, deadline)?;
+    repo.head_as_seen(expect, deadline)?;
+    let rows = index::read(&txn)?;
+    let [stat]: [Option<Stat>; 1] = guard(&repo.root, &rows, &[path])?
+        .try_into()
+        .map_err(|_| git::malformed())?;
+    if index::at(&rows, path)
+        .iter()
+        .any(|entry| entry.intent_to_add)
+    {
+        return Err(added_with_intent(path));
+    }
+    let prepared = part.read(&txn)?;
+    let scratch = Scratch::new(&txn)?;
+    let checkout = scratch.0.join("checkout");
+    let after = partial::check_out_without_picks(&txn, &rows, part, prepared, &checkout)?;
+    if let (After::Checkout, Some(stat)) = (&after, &stat) {
+        keep_permissions(&checkout.join(path), stat).map_err(|error| failed(path, &error))?;
+    }
+    land(
+        txn,
+        store,
+        log,
+        operation,
+        &rows,
+        &checkout,
+        &[Landing { path, stat, after }],
+    )
+}
+
+/// The partial patch carries no mode, so the file keeps its own bits.
+fn keep_permissions(prepared: &Path, stat: &Stat) -> io::Result<()> {
+    set_permissions(prepared, stat.mode & 0o7777)
+}
+
+pub(super) fn checkout_prefix(checkout: &Path) -> String {
+    let mut prefix = checkout.as_os_str().to_owned();
+    prefix.push("/");
+    format!("--prefix={}", prefix.to_string_lossy())
+}
+
+pub(super) enum After {
+    Absent,
+    Checkout,
+}
+
+struct Landing<'p> {
+    path: &'p str,
+    stat: Option<Stat>,
+    after: After,
+}
+
+fn land(
+    txn: Txn<'_>,
+    store: &LockedStore,
+    log: &Log,
+    operation: &Operation,
+    rows: &index::Rows,
+    checkout: &Path,
+    landings: &[Landing<'_>],
+) -> Result<(Applied, Option<Published>), RepositoryError> {
+    let root = &txn.repo().root;
     let (applied, mut discard, recorded) = store.record_with(&txn, log, operation, |entry| {
         let files = entry.files();
         store::private_folder()
             .create(&files)
             .map_err(|error| failed("the undo history", &error))?;
-        let paths = targets
+        let paths = landings
             .iter()
             .enumerate()
-            .map(|(at, target)| {
-                let before = capture(&repo.root, target.path, &files, format!("{at}.before"))?;
-                let after = match target.seen {
-                    Seen::Tracked(_) => {
-                        capture(&checkout, target.path, &files, format!("{at}.after"))?
+            .map(|(at, landing)| {
+                let before = capture(root, landing.path, &files, format!("{at}.before"))?;
+                let after = match landing.after {
+                    After::Checkout => {
+                        capture(checkout, landing.path, &files, format!("{at}.after"))?
                     }
-                    Seen::Untracked => Content::Absent,
+                    After::Absent => Content::Absent,
                 };
                 Ok(Discarded {
-                    path: target.path.to_owned(),
+                    path: landing.path.to_owned(),
                     before,
                     after,
                 })
@@ -315,12 +398,12 @@ pub(super) fn discard(
     let failure: Option<RepositoryError> = discard
         .paths
         .iter()
-        .zip(&stats)
-        .try_for_each(|(discarded, stat)| {
+        .zip(landings)
+        .try_for_each(|(discarded, landing)| {
             before_placing(&discarded.path);
-            unchanged(&repo.root, &discarded.path, stat)?;
+            unchanged(root, &discarded.path, &landing.stat)?;
             place(
-                &repo.root,
+                root,
                 applied.id,
                 &discarded.path,
                 &discarded.after,
@@ -331,7 +414,7 @@ pub(super) fn discard(
         })
         .err();
     let Some(refusal) = failure else {
-        refresh(&txn, &rows, &discard.tracked());
+        refresh(&txn, rows, &discard.tracked());
         let published = txn.commit_recorded(recorded, &Change::Discard(discard));
         return Ok((applied, published.ok()));
     };
@@ -345,16 +428,14 @@ pub(super) fn discard(
         }
         Err(unsaved) => {
             let entry = store.entry(applied.id);
-            if place_step(&txn, &rows, &entry, &discard, Direction::Undo).is_ok() {
+            if place_step(&txn, rows, &entry, &discard, Direction::Undo).is_ok() {
                 return Err(stopped(refusal, &store::unwritable(unsaved).message));
             }
             let files = entry.files();
             let kept: Vec<String> = discard
                 .paths
                 .iter()
-                .filter(|path| {
-                    !holds(&repo.root, &path.path, &path.before, &files).unwrap_or(false)
-                })
+                .filter(|path| !holds(root, &path.path, &path.before, &files).unwrap_or(false))
                 .map(Discarded::held)
                 .collect();
             format!(
@@ -364,7 +445,7 @@ pub(super) fn discard(
             )
         }
     };
-    refresh(&txn, &rows, &discard.tracked());
+    refresh(&txn, rows, &discard.tracked());
     let _ = txn.commit_recorded(recorded, &Change::Discard(discard));
     Err(stopped(refusal, &done))
 }
@@ -400,7 +481,13 @@ pub(super) fn step(
 /// those stay as they are. Under `core.ignoreStat`, `update-index` marks
 /// each entry it writes assume-unchanged, as `git restore` marks what it
 /// checks out, which would hide a later edit, so it runs with that off.
+/// `add --refresh` stops at a path the index lacks and refreshes none.
 fn refresh(txn: &Txn<'_>, rows: &index::Rows, paths: &[&str]) {
+    let paths: Vec<&str> = paths
+        .iter()
+        .copied()
+        .filter(|path| !index::at(rows, path).is_empty())
+        .collect();
     if paths.is_empty() {
         return;
     }

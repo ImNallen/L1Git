@@ -1,7 +1,7 @@
 use super::{Capped, Deadline, Work, base, execute, text, too_old, without_prompts};
 use crate::{
     ErrorKind, RepositoryError, StaleReason, stderr,
-    write::{CommitTxn, HOOK_OFF, Outside, Published, RefTxn, Txn},
+    write::{CommitTxn, HOOK_OFF, Outside, Published, RefTxn, ScratchIndex, Txn},
 };
 use std::{
     ffi::OsStr,
@@ -14,10 +14,13 @@ use std::{
 pub(crate) enum LocalWrite {
     StageFiles,
     UnstageFiles,
+    StagePart,
+    UnstagePart,
     Commit,
     Amend,
     EditMessage,
     Discard,
+    DiscardPart,
     Undo,
     Redo,
 }
@@ -25,7 +28,13 @@ pub(crate) enum LocalWrite {
 impl LocalWrite {
     pub(crate) const fn budget(self) -> Duration {
         Duration::from_secs(match self {
-            Self::StageFiles | Self::UnstageFiles | Self::Undo | Self::Redo => 120,
+            Self::StageFiles
+            | Self::UnstageFiles
+            | Self::StagePart
+            | Self::UnstagePart
+            | Self::DiscardPart
+            | Self::Undo
+            | Self::Redo => 120,
             Self::Discard => 300,
             Self::Commit | Self::Amend | Self::EditMessage => 600,
         })
@@ -35,10 +44,13 @@ impl LocalWrite {
         match self {
             Self::StageFiles => "Staging the files",
             Self::UnstageFiles => "Unstaging the files",
+            Self::StagePart => "Staging part of the file",
+            Self::UnstagePart => "Unstaging part of the file",
             Self::Commit => "Committing",
             Self::Amend => "Amending the commit",
             Self::EditMessage => "Editing the commit message",
             Self::Discard => "Discarding the changes",
+            Self::DiscardPart => "Discarding part of the file",
             Self::Undo => "Undoing the change",
             Self::Redo => "Redoing the change",
         }
@@ -48,10 +60,13 @@ impl LocalWrite {
         match self {
             Self::StageFiles => "l1git stage",
             Self::UnstageFiles => "l1git unstage",
+            Self::StagePart => "l1git stage part",
+            Self::UnstagePart => "l1git unstage part",
             Self::Commit => "l1git commit",
             Self::Amend => "l1git amend",
             Self::EditMessage => "l1git edit message",
             Self::Discard => "l1git discard",
+            Self::DiscardPart => "l1git discard part",
             Self::Undo => "l1git undo",
             Self::Redo => "l1git redo",
         }
@@ -59,13 +74,16 @@ impl LocalWrite {
 
     pub(super) const fn left_behind(self) -> &'static str {
         match self {
-            Self::StageFiles | Self::UnstageFiles | Self::Undo | Self::Redo => {
-                "The index is unchanged."
-            }
+            Self::StageFiles
+            | Self::UnstageFiles
+            | Self::StagePart
+            | Self::UnstagePart
+            | Self::Undo
+            | Self::Redo => "The index is unchanged.",
             Self::Commit | Self::Amend | Self::EditMessage => {
                 "Git may have finished the commit, so check the history."
             }
-            Self::Discard => "No file changed.",
+            Self::Discard | Self::DiscardPart => "No file changed.",
         }
     }
 }
@@ -109,10 +127,24 @@ pub(crate) struct Write<'a> {
 const WRITE_STDOUT_CAP: usize = 1024 * 1024;
 
 impl<'a> Write<'a> {
-    /// Hooks are off, because Git would run `post-index-change` against the
-    /// copy. The copy stays whole, because writing a split copy makes a new
-    /// shared index and can expire the one the real index names.
     pub(crate) fn new(txn: &'a Txn<'_>, dir: &'a Path, args: &[&'a str]) -> Self {
+        Self::on_index(txn, dir, txn.copy(), args)
+    }
+
+    pub(crate) fn on_scratch(
+        txn: &'a Txn<'_>,
+        scratch: &'a ScratchIndex,
+        args: &[&'a str],
+    ) -> Self {
+        Self::on_index(txn, txn.root(), scratch.index(), args)
+            .object_directory(scratch.objects())
+            .alternate_object_directory(txn.objects())
+    }
+
+    /// Hooks are off, because Git would run `post-index-change` against a
+    /// private index. That index stays whole, because writing a split index
+    /// makes a new shared index and can expire the one the real index names.
+    fn on_index(txn: &'a Txn<'_>, dir: &'a Path, index: &'a Path, args: &[&'a str]) -> Self {
         let mut all = vec![
             "-c",
             "core.hooksPath=/dev/null",
@@ -125,7 +157,7 @@ impl<'a> Write<'a> {
             dir,
             args: all,
             env: vec![
-                ("GIT_INDEX_FILE", txn.copy().as_os_str()),
+                ("GIT_INDEX_FILE", index.as_os_str()),
                 (HOOK_OFF, OsStr::new("false")),
             ],
             input: None,

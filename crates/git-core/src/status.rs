@@ -255,27 +255,76 @@ pub(crate) fn worktree_patch_within(
     deadline: Deadline,
 ) -> Result<WorktreePatch, RepositoryError> {
     let root = repository::root(path, deadline)?;
+    read_side(&root, file, side, deadline)?
+        .map(|read| read.patch.into())
+        .ok_or_else(|| no_changes(file, side))
+}
+
+pub(crate) enum PatchBytes {
+    Text(Vec<u8>),
+    Binary,
+    TooLarge { bytes: u64 },
+}
+
+impl From<PatchBytes> for FilePatch {
+    fn from(patch: PatchBytes) -> Self {
+        match patch {
+            PatchBytes::Text(bytes) => text_patch(&bytes),
+            PatchBytes::Binary => Self::Binary,
+            PatchBytes::TooLarge { bytes } => Self::TooLarge { bytes },
+        }
+    }
+}
+
+pub(crate) enum SidePatch {
+    Diff(PatchBytes),
+    Submodule(SubmoduleState),
+    Conflicted {
+        conflict: Conflict,
+        diff: Option<PatchBytes>,
+    },
+}
+
+impl From<SidePatch> for WorktreePatch {
+    fn from(patch: SidePatch) -> Self {
+        match patch {
+            SidePatch::Diff(diff) => Self::Diff { diff: diff.into() },
+            SidePatch::Submodule(submodule) => Self::Submodule { submodule },
+            SidePatch::Conflicted { conflict, diff } => Self::Conflicted {
+                conflict,
+                diff: diff.map(FilePatch::from),
+            },
+        }
+    }
+}
+
+pub(crate) struct SideRead {
+    pub(crate) entry: StatusEntry,
+    pub(crate) patch: SidePatch,
+}
+
+pub(crate) fn read_side(
+    root: &Path,
+    file: &str,
+    side: Side,
+    deadline: Deadline,
+) -> Result<Option<SideRead>, RepositoryError> {
     check(file)?;
-    let (entries, _) = entries(&root, Untracked::All, deadline)?;
-    let entry = entries
-        .iter()
-        .find(|entry| lists(entry, file, side))
-        .ok_or_else(|| no_changes(file, side))?;
-    let changed = |diff: Option<FilePatch>| {
-        diff.map(|diff| WorktreePatch::Diff { diff })
-            .ok_or_else(|| no_changes(file, side))
+    let (entries, _) = entries(root, Untracked::All, deadline)?;
+    let Some(entry) = entries.into_iter().find(|entry| lists(entry, file, side)) else {
+        return Ok(None);
     };
     let staged = |detect: &str, paths: &[&str]| {
-        let head = head_or_empty_tree(&root, deadline)?;
+        let head = head_or_empty_tree(root, deadline)?;
         tracked(
-            &root,
+            root,
             &["diff-index", "--cached", detect, &head],
             paths,
             file,
             deadline,
         )
     };
-    match (entry, side) {
+    let patch = match (&entry, side) {
         (
             StatusEntry::Unmerged {
                 conflict,
@@ -283,12 +332,12 @@ pub(crate) fn worktree_patch_within(
                 ..
             },
             _,
-        ) => Ok(WorktreePatch::Conflicted {
+        ) => Some(SidePatch::Conflicted {
             conflict: *conflict,
             diff: if submodule.is_none() && fs::symlink_metadata(root.join(file)).is_ok() {
-                let head = head_or_empty_tree(&root, deadline)?;
+                let head = head_or_empty_tree(root, deadline)?;
                 tracked(
-                    &root,
+                    root,
                     &["diff-index", "--no-renames", &head],
                     &[file],
                     file,
@@ -308,10 +357,10 @@ pub(crate) fn worktree_patch_within(
                 ..
             },
             Side::Unstaged,
-        ) => Ok(WorktreePatch::Submodule {
-            submodule: *submodule,
-        }),
-        (StatusEntry::Ordinary { .. }, Side::Staged) => changed(staged("--no-renames", &[file])?),
+        ) => Some(SidePatch::Submodule(*submodule)),
+        (StatusEntry::Ordinary { .. }, Side::Staged) => {
+            staged("--no-renames", &[file])?.map(SidePatch::Diff)
+        }
         (
             StatusEntry::Ordinary { .. }
             | StatusEntry::Renamed {
@@ -319,33 +368,34 @@ pub(crate) fn worktree_patch_within(
                 ..
             },
             Side::Unstaged,
-        ) => changed(tracked(
-            &root,
+        ) => tracked(
+            root,
             &["diff-files", "--no-renames"],
             &[file],
             file,
             deadline,
-        )?),
+        )?
+        .map(SidePatch::Diff),
         (StatusEntry::Renamed { original, how, .. }, _) => {
             let detect = match how {
                 Moved::Renamed => "--find-renames",
                 Moved::Copied => "--find-copies-harder",
             };
-            changed(match side {
+            match side {
                 Side::Staged => staged(detect, &[original, file])?,
                 Side::Unstaged => tracked(
-                    &root,
+                    root,
                     &["diff-files", detect],
                     &[original, file],
                     file,
                     deadline,
                 )?,
-            })
+            }
+            .map(SidePatch::Diff)
         }
-        (StatusEntry::Untracked { .. }, _) => {
-            untracked(&root, file, deadline)?.ok_or_else(|| no_changes(file, side))
-        }
-    }
+        (StatusEntry::Untracked { .. }, _) => untracked(root, file, deadline)?.map(SidePatch::Diff),
+    };
+    Ok(patch.map(|patch| SideRead { entry, patch }))
 }
 
 /// `--raw` lists a file whose stat changed but whose content did not, because
@@ -431,7 +481,7 @@ pub(crate) fn worktree_file_patch(
         file,
         deadline,
     )? {
-        return Ok(Some(diff));
+        return Ok(Some(diff.into()));
     }
     let untracked_path = entries(root, Untracked::All, deadline)?
         .0
@@ -440,11 +490,7 @@ pub(crate) fn worktree_file_patch(
     if !untracked_path {
         return Ok(None);
     }
-    match untracked(root, file, deadline)? {
-        Some(WorktreePatch::Diff { diff }) => Ok(Some(diff)),
-        Some(_) => Err(git::malformed()),
-        None => Ok(None),
-    }
+    Ok(untracked(root, file, deadline)?.map(FilePatch::from))
 }
 
 pub(crate) fn check(file: &str) -> Result<(), RepositoryError> {
@@ -544,7 +590,7 @@ fn tracked(
     paths: &[&str],
     destination: &str,
     deadline: Deadline,
-) -> Result<Option<FilePatch>, RepositoryError> {
+) -> Result<Option<PatchBytes>, RepositoryError> {
     let args = |format| {
         let mut args = vec!["--literal-pathspecs"];
         args.extend(command);
@@ -564,11 +610,11 @@ fn tracked(
         return Ok(None);
     };
     if binary {
-        return Ok(Some(FilePatch::Binary));
+        return Ok(Some(PatchBytes::Binary));
     }
     Ok(Some(
         match git::read_capped(root, &args("--patch"), PATCH_LIMIT, deadline)? {
-            git::Capped::Within(patch) if paths.len() == 1 => text_patch(&patch),
+            git::Capped::Within(patch) if paths.len() == 1 => PatchBytes::Text(patch),
             git::Capped::Within(patch) => {
                 let kept: Vec<u8> = sections(&patch)
                     .filter(|section| ends_at(section, destination))
@@ -578,9 +624,9 @@ fn tracked(
                 if kept.is_empty() {
                     return Err(git::malformed());
                 }
-                text_patch(&kept)
+                PatchBytes::Text(kept)
             }
-            git::Capped::Over(bytes) => FilePatch::TooLarge { bytes },
+            git::Capped::Over(bytes) => PatchBytes::TooLarge { bytes },
         },
     ))
 }

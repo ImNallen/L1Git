@@ -142,6 +142,14 @@ impl<'r> Txn<'r> {
         &self.copy
     }
 
+    pub(crate) fn root(&self) -> &Path {
+        &self.repo.root
+    }
+
+    pub(crate) fn objects(&self) -> &Path {
+        &self.repo.objects
+    }
+
     pub(crate) fn disabled_hooks(&self) -> &[String] {
         &self.hooks.disabled
     }
@@ -181,6 +189,25 @@ impl<'r> Txn<'r> {
 
     pub(super) fn scratch(&self, name: &str) -> PathBuf {
         private(self.repo, name)
+    }
+
+    pub(super) fn scratch_index(&self, name: &str) -> Result<ScratchIndex, RepositoryError> {
+        let scratch = ScratchIndex {
+            index: self.scratch(&format!("{name}-index")),
+            objects: self.scratch(&format!("{name}-objects")),
+        };
+        scratch.remove();
+        fs::create_dir(&scratch.objects).map_err(|error| {
+            RepositoryError::new(
+                ErrorKind::GitFailed,
+                format!("L1 Git could not make a private object folder: {error}"),
+            )
+        })?;
+        Ok(scratch)
+    }
+
+    pub(super) fn git_on<'a>(&'a self, scratch: &'a ScratchIndex, args: &[&'a str]) -> Write<'a> {
+        Write::on_scratch(self, scratch, args)
     }
 
     /// Records the write, then replaces the index, then marks the record
@@ -244,6 +271,32 @@ impl<'r> Txn<'r> {
             worktree_updated: matches!(change, Change::Discard(_)),
             hooks: self.hooks.any(),
         })
+    }
+}
+
+pub(crate) struct ScratchIndex {
+    index: PathBuf,
+    objects: PathBuf,
+}
+
+impl ScratchIndex {
+    pub(crate) fn index(&self) -> &Path {
+        &self.index
+    }
+
+    pub(crate) fn objects(&self) -> &Path {
+        &self.objects
+    }
+
+    fn remove(&self) {
+        let _ = fs::remove_file(&self.index);
+        let _ = fs::remove_dir_all(&self.objects);
+    }
+}
+
+impl Drop for ScratchIndex {
+    fn drop(&mut self) {
+        self.remove();
     }
 }
 
