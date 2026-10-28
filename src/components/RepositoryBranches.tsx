@@ -1,4 +1,4 @@
-import { Fragment } from "react";
+import { Fragment, useRef } from "react";
 import type {
   KeyboardEvent as ReactKeyboardEvent,
   ReactNode,
@@ -69,6 +69,7 @@ type Props = {
     event: ReactMouseEvent<HTMLElement> | ReactKeyboardEvent<HTMLElement>,
     branch: Branch,
   ) => void;
+  onCheckout: ((branch: Branch) => void) | null;
 };
 
 export function RepositoryBranches({
@@ -85,7 +86,9 @@ export function RepositoryBranches({
   rule,
   onRule,
   onMenu,
+  onCheckout,
 }: Props) {
+  const checkableAtFirstClick = useRef<FullRef | null>(null);
   const matches = (...values: string[]) =>
     repositoryMatches ||
     values.some((value) => normalizeSearch(value).includes(search));
@@ -267,7 +270,18 @@ export function RepositoryBranches({
         <button
           className={`branch-row ${selected ? "selected" : ""} ${checkedOut ? "head" : ""}`}
           style={{ "--depth": depth }}
-          onClick={() => onJump(branch)}
+          onClick={(event) => {
+            if (event.detail > 1) return;
+            checkableAtFirstClick.current =
+              onCheckout && !checkedOut ? branch.reference : null;
+            onJump(branch);
+          }}
+          onDoubleClick={(event) => {
+            if (checkableAtFirstClick.current !== branch.reference) return;
+            checkableAtFirstClick.current = null;
+            event.currentTarget.focus();
+            onCheckout?.(branch);
+          }}
           onContextMenu={(event) => onMenu(event, branch)}
           onKeyDown={(event) => {
             if (opensMenu(event)) onMenu(event, branch);

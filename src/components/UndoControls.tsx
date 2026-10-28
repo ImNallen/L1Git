@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef } from "react";
+import { Fragment, useLayoutEffect, useRef } from "react";
 import {
   Info,
   LoaderCircle,
@@ -10,6 +10,7 @@ import {
 import {
   failureText,
   historyFailure,
+  hookOutputTail,
   nextEntry,
   stepButton,
 } from "../domain/operations";
@@ -88,7 +89,15 @@ function StepNotice({ writes }: { writes: WritesView }) {
     return (
       <div ref={row} className="notice error-notice" role="alert">
         <TriangleAlert size={14} />
-        <span>{failureText(notice, history)}</span>
+        <span>
+          {failureText(notice, history)}
+          {hookOutputTail(notice.problem).map((line, index) => (
+            <Fragment key={index}>
+              <br />
+              <code>{line}</code>
+            </Fragment>
+          ))}
+        </span>
         {dismiss}
       </div>
     );

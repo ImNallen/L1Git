@@ -398,12 +398,20 @@ impl<'r> RefTxn<'r> {
         &self.0
     }
 
+    pub(super) fn renewed(&self) -> Result<Self, RepositoryError> {
+        Self::begin(self.0.repo, self.0.deadline.renewed())
+    }
+
     pub(super) fn update_refs<'a>(&'a self, reflog: &'a str, input: Vec<u8>) -> Write<'a> {
         Write::update_refs(self, reflog, input)
     }
 
     pub(super) fn branch<'a>(&'a self, args: &[&'a str]) -> Write<'a> {
         Write::branch(self, args)
+    }
+
+    pub(super) fn switch<'a>(&'a self, args: &[&'a str]) -> Write<'a> {
+        Write::switch(self, args)
     }
 }
 

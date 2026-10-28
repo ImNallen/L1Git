@@ -337,6 +337,7 @@ export const operationSchema = z.discriminatedUnion("kind", [
     to: z.string(),
   }),
   z.strictObject({ kind: z.literal("deleteBranch"), branch: branchTipSchema }),
+  z.strictObject({ kind: z.literal("checkout"), target: startSchema }),
 ]);
 export const expectSchema = z.strictObject({ head: headSchema });
 export const appliedSchema = z.strictObject({
@@ -402,7 +403,7 @@ export const repositoryErrorSchema = z.union([
     message: z.string(),
   }),
   z.object({
-    kind: z.enum(["hookFailed", "missingIdentity"]),
+    kind: z.enum(["hookFailed", "afterHookFailed", "missingIdentity"]),
     message: z.string(),
     output: z.string(),
   }),

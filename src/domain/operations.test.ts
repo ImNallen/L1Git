@@ -2,10 +2,12 @@ import { describe as group, expect, it } from "vitest";
 import {
   branchStep,
   branchWrite,
+  checkoutWrite,
   commitWrite,
   describe,
   discardChoice,
   failureText,
+  hookOutputTail,
   movesRefs,
   partActions,
   partWrite,
@@ -13,12 +15,15 @@ import {
   shownPaths,
   stepButton,
   notMergedInto,
+  startAt,
   writeFor,
 } from "./operations";
 import type { History, HistoryEntry, StaleReason } from "./operations";
 import {
   entryIdSchema,
+  localRefSchema,
   oidSchema,
+  problemFrom,
   refSchema,
   rootSchema,
   stagedStampSchema,
@@ -929,5 +934,116 @@ group("branch writes", () => {
     expect(
       notMergedInto("topic", { head: true, upstream: upstream(true) }, "HEAD"),
     ).toBeNull();
+  });
+});
+
+group("checkout", () => {
+  const oid = oidSchema.parse(`1a2b3c4${"e".repeat(33)}`);
+
+  it("names a checkout by its branch, its remote branch, or its short commit ID", () => {
+    const reference = (name: string) => refSchema.parse(name);
+    expect(
+      describe({
+        kind: "checkout",
+        target: {
+          kind: "local",
+          reference: reference("refs/heads/feat/history"),
+          oid,
+        },
+      }),
+    ).toBe("Check out feat/history");
+    expect(
+      describe({
+        kind: "checkout",
+        target: {
+          kind: "remote",
+          reference: reference("refs/remotes/origin/feat/x"),
+          oid,
+        },
+      }),
+    ).toBe("Check out origin/feat/x");
+    expect(
+      describe({ kind: "checkout", target: { kind: "commit", oid } }),
+    ).toBe("Check out 1a2b3c4");
+  });
+
+  it("sends the branch a sidebar row shows and the HEAD L1 Git read", () => {
+    const write = checkoutWrite(
+      startAt({
+        kind: "remote",
+        reference: refSchema.parse("refs/remotes/origin/feat/x"),
+        name: "origin/feat/x",
+        oid,
+        remote: "origin",
+      }),
+      head,
+    );
+    expect(write).toEqual({
+      operation: {
+        kind: "checkout",
+        target: {
+          kind: "remote",
+          reference: "refs/remotes/origin/feat/x",
+          oid,
+        },
+      },
+      expect: { head },
+    });
+    expect(movesRefs(write.operation)).toBe(true);
+  });
+
+  it("reports a landed checkout whose hook failed in the core's words, with the hook's last lines", () => {
+    const wire = {
+      kind: "afterHookFailed",
+      message:
+        "Git checked out feat/history, but the post-checkout hook failed. Undo puts back main.",
+      output:
+        "Switched to branch 'feat/history'\nlint: checking\n\nsrc/a.ts:1 unused import\r\nsrc/b.ts:9 missing semicolon\n2 problems\n\n",
+    };
+    const problem = problemFrom(wire);
+    expect(problem).toEqual(wire);
+    expect(
+      failureText(
+        {
+          kind: "failed",
+          action: "write",
+          label: "Check out feat/history",
+          problem,
+          operation: {
+            kind: "checkout",
+            target: {
+              kind: "local",
+              reference: localRefSchema.parse("refs/heads/feat/history"),
+              oid: oidSchema.parse("a".repeat(40)),
+            },
+          },
+        },
+        { kind: "unread" },
+      ),
+    ).toBe(wire.message);
+    expect(
+      failureText(
+        {
+          kind: "failed",
+          action: "undo",
+          label: "Check out feat/history",
+          problem,
+          entry: entryIdSchema.parse("18e1c91cc9cade98"),
+        },
+        { kind: "unread" },
+      ),
+    ).toBe(wire.message);
+    expect(hookOutputTail(problem)).toEqual([
+      "src/a.ts:1 unused import",
+      "src/b.ts:9 missing semicolon",
+      "2 problems",
+    ]);
+    expect(
+      hookOutputTail({
+        kind: "hookFailed",
+        message: "The pre-commit hook failed.",
+        output: "lint failed",
+      }),
+    ).toEqual([]);
   });
 });

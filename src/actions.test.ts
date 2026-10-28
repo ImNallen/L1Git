@@ -52,6 +52,7 @@ function commands(): Commands {
     toggleHide: vi.fn(),
     toggleSolo: vi.fn(),
     showAllBranches: vi.fn(),
+    checkout: vi.fn(),
     newBranch: vi.fn(),
     renameBranch: vi.fn(),
     deleteBranch: vi.fn(),
@@ -196,6 +197,7 @@ describe("command palette", () => {
       "Show feature/fetch-retry",
       "Solo feature/fetch-retry",
       "Show all branches",
+      "Check out feature/fetch-retry",
       "New branch from feature/fetch-retry…",
       "Rename feature/fetch-retry…",
       "Delete feature/fetch-retry…",
@@ -254,11 +256,13 @@ describe("command palette", () => {
       "feature/fetch-retry",
       "Show feature/fetch-retry",
       "Solo feature/fetch-retry",
+      "Check out feature/fetch-retry",
       "New branch from feature/fetch-retry…",
     ]);
     expect(titles(notice("solo"), "feature/fetch-retry")).toEqual([
       "feature/fetch-retry",
       "Show feature/fetch-retry",
+      "Check out feature/fetch-retry",
       "New branch from feature/fetch-retry…",
     ]);
   });
@@ -295,6 +299,31 @@ describe("command palette", () => {
     ]);
     expect(branchWrites(sidebar(true, false, true))).toEqual([]);
     expect(branchWrites({ ...repositoryScreen })).toEqual([]);
+  });
+
+  it("offers Check out for the sidebar branch unless a worktree has it checked out", () => {
+    const sidebar = (
+      local: boolean,
+      checkedOut: boolean,
+      writing = false,
+    ): ActionContext => ({
+      ...repositoryScreen,
+      writing,
+      sidebarBranch: {
+        name: "topic",
+        visibility: "shown",
+        outOfView: false,
+        local,
+        checkedOut,
+      },
+    });
+    const checkouts = (context: ActionContext) =>
+      titles(context, "").filter((title) => title.startsWith("Check out"));
+    expect(checkouts(sidebar(true, true))).toEqual([]);
+    expect(checkouts(sidebar(true, false))).toEqual(["Check out topic"]);
+    expect(checkouts(sidebar(false, false))).toEqual(["Check out topic"]);
+    expect(checkouts(sidebar(false, false, true))).toEqual([]);
+    expect(checkouts({ ...repositoryScreen })).toEqual([]);
   });
 
   it("offers a pick only for another commit", () => {

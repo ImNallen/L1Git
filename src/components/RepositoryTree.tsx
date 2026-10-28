@@ -6,6 +6,7 @@ import type {
 import {
   ChevronDown,
   ChevronRight,
+  CircleCheck,
   Eye,
   EyeOff,
   Focus,
@@ -59,6 +60,7 @@ type Props = {
     checkedOutIn: ReadonlyMap<FullRef, string>;
   } | null;
   onBranchAsk: (ask: BranchAsk) => void;
+  onCheckout: (branch: Branch) => void;
 };
 
 export function RepositoryTree({
@@ -79,6 +81,7 @@ export function RepositoryTree({
   onAdd,
   writable,
   onBranchAsk,
+  onCheckout,
 }: Props) {
   const [query, setQuery] = useState("");
   const [menu, setMenu] = useState<{
@@ -175,13 +178,21 @@ export function RepositoryTree({
         ? null
         : "Open this repository to change its branches.";
     const checkedOutIn = writable?.checkedOutIn.get(branch.reference);
+    const head = loaded(root)?.head;
+    const checkedOut =
+      head?.kind === "attached" && head.reference === branch.reference
+        ? "Checked out"
+        : checkedOutIn === undefined
+          ? null
+          : `Checked out in ${checkedOutIn}`;
+    const asking = (ask: BranchAsk | null) => ask && (() => onBranchAsk(ask));
     const write = (
       Icon: typeof Plus,
       label: string,
-      ask: BranchAsk | null,
+      run: (() => void) | null,
       off: string | null,
     ) =>
-      ask && (
+      run && (
         <button
           role="menuitem"
           aria-disabled={off !== null}
@@ -189,7 +200,7 @@ export function RepositoryTree({
           onClick={() => {
             if (off !== null) return;
             closeMenu();
-            onBranchAsk(ask);
+            run();
           }}
         >
           <Icon size={14} />
@@ -225,12 +236,18 @@ export function RepositoryTree({
           </button>
         )}
         <div className="menu-separator" role="separator" />
-        {write(GitBranchPlus, "New branch…", asks.create, elsewhere)}
-        {write(PencilLine, "Rename…", asks.rename, elsewhere)}
+        {write(
+          CircleCheck,
+          "Check out",
+          () => onCheckout(branch),
+          elsewhere ?? checkedOut,
+        )}
+        {write(GitBranchPlus, "New branch…", asking(asks.create), elsewhere)}
+        {write(PencilLine, "Rename…", asking(asks.rename), elsewhere)}
         {write(
           Trash2,
           "Delete…",
-          asks.delete,
+          asking(asks.delete),
           elsewhere ??
             (checkedOutIn === undefined
               ? null
@@ -277,6 +294,7 @@ export function RepositoryTree({
             event.currentTarget,
           )
         }
+        onCheckout={writable?.root === entry.root ? onCheckout : null}
       />
     );
   }

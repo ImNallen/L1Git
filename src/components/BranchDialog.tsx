@@ -7,7 +7,13 @@ import {
   X,
 } from "lucide-react";
 import * as repositories from "../repositories";
-import { branchWrite, localBranch, notMergedInto } from "../domain/operations";
+import {
+  branchWrite,
+  checkoutWrite,
+  localBranch,
+  notMergedInto,
+  startAt,
+} from "../domain/operations";
 import type { BranchAsk, Write } from "../domain/operations";
 import { problemFrom } from "../domain/repository";
 import type {
@@ -51,6 +57,7 @@ function NameBranchDialog({
   const [name, setName] = useState(ask.kind === "rename" ? ask.name : "");
   const [problem, setProblem] = useState<Problem | null>(null);
   const [saving, setSaving] = useState(false);
+  const [checkOut, setCheckOut] = useState(false);
   useEffect(() => {
     dialog.current?.showModal();
     input.current?.select();
@@ -71,6 +78,12 @@ function NameBranchDialog({
         ? { kind: "createBranch" as const, name, at: ask.at }
         : { kind: "renameBranch" as const, branch: ask.branch, to: name };
     const outcome = await onWrite(branchWrite(operation, head));
+    const named = localBranch(
+      name,
+      ask.kind === "create" ? ask.at.oid : ask.branch.oid,
+    );
+    if (outcome.kind === "applied" && creating && checkOut)
+      await onWrite(checkoutWrite(startAt(named), head));
     setSaving(false);
     if (outcome.kind === "busy") {
       setProblem({
@@ -85,9 +98,7 @@ function NameBranchDialog({
       return;
     }
     close();
-    onNamedBranch(
-      localBranch(name, ask.kind === "create" ? ask.at.oid : ask.branch.oid),
-    );
+    onNamedBranch(named);
   }
 
   return (
@@ -148,6 +159,16 @@ function NameBranchDialog({
           <p id={errorId} className="error-message" role="alert">
             {problem.message}
           </p>
+        )}
+        {creating && (
+          <label className="dialog-option">
+            <input
+              type="checkbox"
+              checked={checkOut}
+              onChange={(event) => setCheckOut(event.target.checked)}
+            />
+            Check out after create
+          </label>
         )}
         <div className="dialog-actions">
           <button type="button" className="button secondary" onClick={close}>

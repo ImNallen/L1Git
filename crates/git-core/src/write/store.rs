@@ -643,22 +643,42 @@ impl EntryObjects {
         tip: &Oid,
         name: &str,
     ) -> Result<(), RepositoryError> {
+        let exclude = format!("--exclude={name}");
+        self.keep_unique(runner, tip, &[&exclude, LASTING_REFS[0], LASTING_REFS[1]])
+    }
+
+    pub(super) fn keep_left_behind(
+        &self,
+        runner: &impl Runner,
+        tip: &Oid,
+        except_branch: Option<&str>,
+    ) -> Result<(), RepositoryError> {
+        let exclude = except_branch.map(|name| format!("--exclude={name}"));
+        let mut not: Vec<&str> = exclude.iter().map(String::as_str).collect();
+        not.extend(CHECKOUT_TRUSTED_REFS);
+        self.keep_unique(runner, tip, &not)
+    }
+
+    fn keep_unique(
+        &self,
+        runner: &impl Runner,
+        tip: &Oid,
+        not: &[&str],
+    ) -> Result<(), RepositoryError> {
         let tips = std::slice::from_ref(tip);
         if self.objects.exists() && missing(runner, Some(&self.objects), tips)?.is_empty() {
             return Ok(());
         }
-        let exclude = format!("--exclude={name}");
+        let mut args = vec![
+            "rev-list",
+            "--objects",
+            "--missing=allow-promisor",
+            tip.as_str(),
+            "--not",
+        ];
+        args.extend(not);
         let listed = runner
-            .git(&[
-                "rev-list",
-                "--objects",
-                "--missing=allow-promisor",
-                tip.as_str(),
-                "--not",
-                &exclude,
-                LASTING_REFS[0],
-                LASTING_REFS[1],
-            ])
+            .git(&args)
             .uncapped()
             .run(runner.deadline())?
             .succeeded()?;
@@ -698,7 +718,7 @@ impl EntryObjects {
         let lost = || {
             RepositoryError::new(
                 ErrorKind::GitFailed,
-                "Git no longer has some of this branch's commits, and L1 Git's undo store does not hold them, so nothing changed. A branch or tag that shared them was likely deleted outside L1 Git and its commits pruned.",
+                "Git no longer has some of this branch's commits, and L1 Git's undo store does not hold them, so nothing changed. A branch, tag, or remote-tracking branch that shared them was likely deleted outside L1 Git and its commits pruned.",
             )
         };
         // rev-list skips a missing tip under --missing=allow-promisor.
@@ -735,6 +755,8 @@ impl EntryObjects {
 /// The refs whose objects a branch's undo entry need not keep. A fetch with
 /// `--prune` drops remote-tracking refs, and a checkout moves HEAD.
 const LASTING_REFS: [&str; 2] = ["--branches", "--tags"];
+
+const CHECKOUT_TRUSTED_REFS: [&str; 3] = ["--branches", "--tags", "--remotes"];
 
 /// What `pack-objects` names its pack after in an object directory.
 fn pack_base(objects: &Path) -> String {
