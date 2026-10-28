@@ -229,10 +229,15 @@ export const statusEntrySchema = z.discriminatedUnion("kind", [
   }),
   z.strictObject({ kind: z.literal("untracked"), path: z.string() }),
 ]);
+export const stagedStampSchema = z
+  .string()
+  .regex(/^[0-9a-f]{40}$/)
+  .brand<"StagedStamp">();
 export const worktreeStatusSchema = z.strictObject({
   root: rootSchema,
   head: headSchema,
   entries: z.array(statusEntrySchema),
+  stagedStamp: stagedStampSchema,
 });
 export const sideSchema = z.enum(["staged", "unstaged"]);
 export const worktreePatchSchema = z.discriminatedUnion("kind", [
@@ -260,6 +265,17 @@ export const operationSchema = z.discriminatedUnion("kind", [
     kind: z.literal("unstageFiles"),
     entries: z.array(statusEntrySchema),
   }),
+  z.strictObject({
+    kind: z.literal("commit"),
+    message: z.string(),
+    staged: stagedStampSchema,
+  }),
+  z.strictObject({
+    kind: z.literal("amend"),
+    message: z.string(),
+    staged: stagedStampSchema,
+  }),
+  z.strictObject({ kind: z.literal("editMessage"), message: z.string() }),
 ]);
 export const expectSchema = z.strictObject({ head: headSchema });
 export const appliedSchema = z.strictObject({
@@ -275,6 +291,7 @@ const staleReasonSchema = z.enum([
   "headMoved",
   "pathChanged",
   "pathNotChosen",
+  "stagedChanged",
   "historyChanged",
 ]);
 const staleView = { kind: z.literal("staleView"), message: z.string() };
@@ -311,10 +328,15 @@ export const repositoryErrorSchema = z.union([
       "unreadablePath",
       "timedOut",
       "lockHeld",
-      "hookFailed",
       "conflict",
+      "raced",
     ]),
     message: z.string(),
+  }),
+  z.object({
+    kind: z.enum(["hookFailed", "missingIdentity"]),
+    message: z.string(),
+    output: z.string(),
   }),
 ]);
 
@@ -347,6 +369,7 @@ export type MoveSide = z.infer<typeof moveSideSchema>;
 export type Conflict = z.infer<typeof conflictSchema>;
 export type StatusEntry = z.infer<typeof statusEntrySchema>;
 export type WorktreeStatus = z.infer<typeof worktreeStatusSchema>;
+export type StagedStamp = z.infer<typeof stagedStampSchema>;
 export type Side = z.infer<typeof sideSchema>;
 export type WorktreePatch = z.infer<typeof worktreePatchSchema>;
 export type EntryId = z.infer<typeof entryIdSchema>;

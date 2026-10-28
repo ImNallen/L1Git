@@ -320,3 +320,60 @@
   height: 16px;
   margin-left: 0;
 }
+.commit-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.commit-summary,
+.commit-description {
+  display: block;
+  width: 100%;
+  padding: 7px 9px;
+  background: var(--control-inset);
+  border: 1px solid var(--border-control);
+  border-radius: 6px;
+  color: var(--text-input);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.commit-description {
+  min-height: 56px;
+  resize: vertical;
+}
+.commit-summary::placeholder,
+.commit-description::placeholder {
+  color: var(--text-faint);
+}
+.commit-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.commit-amend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.commit-actions .button {
+  gap: 6px;
+}
+.commit-problem {
+  margin-top: 0;
+}
+.commit-problem p {
+  display: flex;
+  gap: 6px;
+  margin: 0;
+}
+.commit-problem svg {
+  flex: none;
+  margin-top: 3px;
+}

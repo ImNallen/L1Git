@@ -17,6 +17,7 @@ import {
   GitBranch,
   GitCommitHorizontal,
   GitCompareArrows,
+  PencilLine,
   Pin,
   Tag,
 } from "lucide-react";
@@ -458,6 +459,8 @@ type Props = {
   trunk: Oid[];
   visibleColumns: ReadonlySet<ColumnId>;
   onToggleColumn: (id: ColumnId) => void;
+  editableHead: Oid | null;
+  onEditMessage: () => void;
 };
 
 export function History({
@@ -483,6 +486,8 @@ export function History({
   trunk,
   visibleColumns,
   onToggleColumn,
+  editableHead,
+  onEditMessage,
 }: Props) {
   const selectedOid = selection?.kind === "commit" ? selection.oid : null;
   const selectedId = selectedRowId(selection);
@@ -1100,8 +1105,8 @@ export function History({
             <GitBranch size={26} />
             <h2>No commits yet</h2>
             <p>
-              This repository has no commit history. Create a commit in Git,
-              then refresh.
+              This repository has no commit history yet. Select its worktree,
+              stage files, and commit them in the inspector.
             </p>
           </div>
         )}
@@ -1163,6 +1168,18 @@ export function History({
                     : "Pick for comparison"}
                 </span>
               </button>
+              {menuCommit === editableHead && (
+                <button
+                  role="menuitem"
+                  onClick={() => {
+                    closeMenu();
+                    onEditMessage();
+                  }}
+                >
+                  <PencilLine size={14} />
+                  <span>Edit message…</span>
+                </button>
+              )}
               <div className="menu-heading" role="presentation">
                 Columns
               </div>

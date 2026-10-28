@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildGraph, worktreeRowId } from "./graph";
 import type { GraphRow, RowId } from "./graph";
-import { oidSchema, rootSchema } from "./repository";
+import { oidSchema, rootSchema, stagedStampSchema } from "./repository";
 import type { Oid, RepositoryRoot, Worktree } from "./repository";
 import { historyRows } from "./worktree";
 import type { ChangesByWorktree } from "./worktree";
@@ -125,6 +125,7 @@ describe("worktree rows in the graph", () => {
             root,
             head,
             entries: [{ kind: "untracked", path: "new.txt" }],
+            stagedStamp: stagedStampSchema.parse("0".repeat(40)),
           },
         },
       ]),
@@ -218,7 +219,12 @@ describe("worktree rows in the graph", () => {
         clean.root,
         {
           kind: "ready",
-          status: { root: clean.root, head: clean.head, entries: [] },
+          status: {
+            root: clean.root,
+            head: clean.head,
+            entries: [],
+            stagedStamp: stagedStampSchema.parse("0".repeat(40)),
+          },
         },
       ],
     ]);

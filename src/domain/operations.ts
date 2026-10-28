@@ -1,3 +1,4 @@
+import { subjectOf } from "./commitMessage";
 import type {
   Applied,
   EntryId,
@@ -7,7 +8,10 @@ import type {
   WorktreeStatus,
 } from "./repository";
 
-export type FileWrite = Operation["kind"];
+type FileOperation = Extract<Operation, { entries: unknown }>;
+type CommitOperation = Exclude<Operation, FileOperation>;
+export type FileWrite = FileOperation["kind"];
+export type CommitWrite = CommitOperation["kind"];
 
 export type Write = { operation: Operation; expect: Expect };
 
@@ -21,6 +25,33 @@ export function writeFor(
   if (entries.length === 0) return null;
   return { operation: { kind, entries }, expect: { head: status.head } };
 }
+
+export function commitWrite(
+  kind: CommitWrite,
+  status: WorktreeStatus,
+  message: string,
+): Write {
+  const operation: Operation =
+    kind === "editMessage"
+      ? { kind, message }
+      : { kind, message, staged: status.stagedStamp };
+  return { operation, expect: { head: status.head } };
+}
+
+export const movesRefs = (operation: Operation) => !("entries" in operation);
+
+const SUBJECT_LIMIT = 60;
+
+function quoted(message: string): string {
+  const subject = subjectOf(message);
+  return `“${subject.length > SUBJECT_LIMIT ? `${subject.slice(0, SUBJECT_LIMIT - 1)}…` : subject}”`;
+}
+
+const commitVerbs: Record<CommitWrite, string> = {
+  commit: "Commit",
+  amend: "Amend",
+  editMessage: "Edit message to",
+};
 
 function folderOf(path: string): string[] {
   return path.replace(/\/$/, "").split("/").slice(0, -1);
@@ -38,6 +69,8 @@ function sharedFolder(paths: readonly string[]): string {
 }
 
 export function describe(operation: Operation): string {
+  if (!("entries" in operation))
+    return `${commitVerbs[operation.kind]} ${quoted(operation.message)}`;
   const paths = operation.entries.map((entry) => entry.path);
   const resolving =
     operation.kind === "stageFiles" &&
@@ -136,6 +169,8 @@ function staleCause(problem: KnownStale, step: Step | null): string {
         ? `Git would also change ${listed(paths)}, which ${one ? "was" : "were"} not chosen.`
         : `Git would also change ${listed(paths)}, which ${one ? "is" : "are"} outside this change, so L1 Git cannot ${step} it.`;
     }
+    case "stagedChanged":
+      return "The staged files changed since L1 Git showed them.";
     case "historyChanged":
       return "The undo history changed since L1 Git showed it.";
   }
@@ -153,6 +188,7 @@ export function failureText(
     action === "write"
       ? `Could not ${lowerFirst(label)}.`
       : `Could not ${action} ${label}.`;
+  if (problem.kind === "raced") return problem.message;
   if (problem.kind !== "staleView" || problem.reason === "unknown")
     return `${what} ${problem.message}`;
   if (action === "write")

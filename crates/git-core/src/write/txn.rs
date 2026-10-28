@@ -238,6 +238,109 @@ impl<'r> Txn<'r> {
     }
 }
 
+pub(crate) trait Runner {
+    fn git<'a>(&'a self, args: &[&'a str]) -> Write<'a>;
+    fn repo(&self) -> &Repo;
+    fn deadline(&self) -> WriteDeadline;
+}
+
+impl Runner for Txn<'_> {
+    fn git<'a>(&'a self, args: &[&'a str]) -> Write<'a> {
+        Txn::git(self, args)
+    }
+
+    fn repo(&self) -> &Repo {
+        self.repo
+    }
+
+    fn deadline(&self) -> WriteDeadline {
+        self.deadline
+    }
+}
+
+pub(crate) struct Outside<'r> {
+    repo: &'r Repo,
+    deadline: WriteDeadline,
+    _held: HeldIndexLock,
+}
+
+impl<'r> Outside<'r> {
+    fn begin(repo: &'r Repo, deadline: WriteDeadline) -> Result<Self, RepositoryError> {
+        Ok(Self {
+            repo,
+            deadline,
+            _held: HeldIndexLock::begin()?,
+        })
+    }
+
+    pub(crate) fn root(&self) -> &Path {
+        &self.repo.root
+    }
+}
+
+impl Runner for Outside<'_> {
+    fn git<'a>(&'a self, args: &[&'a str]) -> Write<'a> {
+        Write::outside_index(self, args)
+    }
+
+    fn repo(&self) -> &Repo {
+        self.repo
+    }
+
+    fn deadline(&self) -> WriteDeadline {
+        self.deadline
+    }
+}
+
+/// `git commit` takes `index.lock` itself and runs the user's hooks on the
+/// real index, so this transaction holds no lock and no copy.
+pub(crate) struct CommitTxn<'r>(Outside<'r>);
+
+impl<'r> CommitTxn<'r> {
+    pub(super) fn begin(repo: &'r Repo, deadline: WriteDeadline) -> Result<Self, RepositoryError> {
+        Outside::begin(repo, deadline).map(Self)
+    }
+
+    pub(crate) fn root(&self) -> &Path {
+        self.0.root()
+    }
+
+    pub(super) const fn runner(&self) -> &Outside<'r> {
+        &self.0
+    }
+
+    pub(super) fn commit<'a>(&'a self, flags: &[&'a str], message: &str) -> Write<'a> {
+        Write::commit(self, flags, message)
+    }
+
+    pub(super) fn renewed(self) -> Self {
+        Self(Outside {
+            deadline: self.0.deadline.renewed(),
+            ..self.0
+        })
+    }
+}
+
+pub(crate) struct RefTxn<'r>(Outside<'r>);
+
+impl<'r> RefTxn<'r> {
+    pub(super) fn begin(repo: &'r Repo, deadline: WriteDeadline) -> Result<Self, RepositoryError> {
+        Outside::begin(repo, deadline).map(Self)
+    }
+
+    pub(crate) fn root(&self) -> &Path {
+        self.0.root()
+    }
+
+    pub(super) const fn runner(&self) -> &Outside<'r> {
+        &self.0
+    }
+
+    pub(super) fn update_refs<'a>(&'a self, reflog: &'a str, input: Vec<u8>) -> Write<'a> {
+        Write::update_refs(self, reflog, input)
+    }
+}
+
 pub(crate) struct Published {
     root: PathBuf,
     deadline: WriteDeadline,
@@ -319,7 +422,16 @@ mod tests {
                 path,
                 LocalWrite::StageFiles,
                 |repo, store, log, deadline| {
-                    let (mut txn, change) = operation.apply(&repo, deadline, &expect)?;
+                    let Operation::StageFiles { entries } = &operation else {
+                        unreachable!("the crash stages a file");
+                    };
+                    let (mut txn, change) = super::super::index::edit(
+                        &repo,
+                        deadline,
+                        &expect,
+                        super::super::index::Command::Stage,
+                        entries,
+                    )?;
                     let (_, recorded) = store.record(&txn, &log, &operation, &change)?;
                     if published {
                         txn.publish(&change)?;

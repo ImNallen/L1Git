@@ -1,14 +1,22 @@
 use super::{Capped, Deadline, Work, base, execute, text, too_old};
 use crate::{
     ErrorKind, RepositoryError, StaleReason, stderr,
-    write::{HOOK_OFF, Published, Txn},
+    write::{CommitTxn, HOOK_OFF, Outside, Published, RefTxn, Txn},
 };
-use std::{ffi::OsStr, path::Path, time::Duration};
+use std::{
+    ffi::OsStr,
+    path::Path,
+    process::{Command, Stdio},
+    time::Duration,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LocalWrite {
     StageFiles,
     UnstageFiles,
+    Commit,
+    Amend,
+    EditMessage,
     Undo,
     Redo,
 }
@@ -17,6 +25,7 @@ impl LocalWrite {
     pub(crate) const fn budget(self) -> Duration {
         Duration::from_secs(match self {
             Self::StageFiles | Self::UnstageFiles | Self::Undo | Self::Redo => 120,
+            Self::Commit | Self::Amend | Self::EditMessage => 600,
         })
     }
 
@@ -24,6 +33,9 @@ impl LocalWrite {
         match self {
             Self::StageFiles => "Staging the files",
             Self::UnstageFiles => "Unstaging the files",
+            Self::Commit => "Committing",
+            Self::Amend => "Amending the commit",
+            Self::EditMessage => "Editing the commit message",
             Self::Undo => "Undoing the change",
             Self::Redo => "Redoing the change",
         }
@@ -33,6 +45,9 @@ impl LocalWrite {
         match self {
             Self::StageFiles => "l1git stage",
             Self::UnstageFiles => "l1git unstage",
+            Self::Commit => "l1git commit",
+            Self::Amend => "l1git amend",
+            Self::EditMessage => "l1git edit message",
             Self::Undo => "l1git undo",
             Self::Redo => "l1git redo",
         }
@@ -42,6 +57,9 @@ impl LocalWrite {
         match self {
             Self::StageFiles | Self::UnstageFiles | Self::Undo | Self::Redo => {
                 "The index is unchanged."
+            }
+            Self::Commit | Self::Amend | Self::EditMessage => {
+                "Git may have finished the commit, so check the history."
             }
         }
     }
@@ -79,6 +97,7 @@ pub(crate) struct Write<'a> {
     env: Vec<(&'static str, &'a OsStr)>,
     input: Option<Vec<u8>>,
     cap: Option<usize>,
+    as_user: bool,
 }
 
 const WRITE_STDOUT_CAP: usize = 1024 * 1024;
@@ -105,6 +124,44 @@ impl<'a> Write<'a> {
             ],
             input: None,
             cap: Some(WRITE_STDOUT_CAP),
+            as_user: false,
+        }
+    }
+
+    pub(crate) fn outside_index(txn: &'a Outside<'_>, args: &[&'a str]) -> Self {
+        let mut all = vec!["-c", "core.hooksPath=/dev/null"];
+        all.extend(args);
+        Self {
+            dir: txn.root(),
+            args: all,
+            env: Vec::new(),
+            input: None,
+            cap: Some(WRITE_STDOUT_CAP),
+            as_user: false,
+        }
+    }
+
+    pub(crate) fn commit(txn: &'a CommitTxn<'_>, flags: &[&'a str], message: &str) -> Self {
+        let mut args = vec!["commit", "-F", "-"];
+        args.extend(flags);
+        Self {
+            dir: txn.root(),
+            args,
+            env: Vec::new(),
+            input: Some(message.as_bytes().to_vec()),
+            cap: None,
+            as_user: true,
+        }
+    }
+
+    pub(crate) fn update_refs(txn: &'a RefTxn<'_>, reflog: &'a str, input: Vec<u8>) -> Self {
+        Self {
+            dir: txn.root(),
+            args: vec!["update-ref", "-m", reflog, "--stdin"],
+            env: Vec::new(),
+            input: Some(input),
+            cap: Some(WRITE_STDOUT_CAP),
+            as_user: true,
         }
     }
 
@@ -123,7 +180,14 @@ impl<'a> Write<'a> {
             env: Vec::new(),
             input: None,
             cap: Some(WRITE_STDOUT_CAP),
+            as_user: false,
         }
+    }
+
+    pub(crate) fn traces(mut self, events: &'a Path, refs: &'a Path) -> Self {
+        self.env.push(("GIT_TRACE2_EVENT", events.as_os_str()));
+        self.env.push(("GIT_TRACE_REFS", refs.as_os_str()));
+        self
     }
 
     pub(crate) fn object_directory(mut self, objects: &'a Path) -> Self {
@@ -149,11 +213,14 @@ impl<'a> Write<'a> {
 
     pub(crate) fn run(self, deadline: WriteDeadline) -> Result<Wrote, RepositoryError> {
         let WriteDeadline { write, deadline } = deadline;
-        let mut command = base(self.dir, false);
-        command
-            .args(&self.args)
-            .env("GIT_EDITOR", ":")
-            .env("GIT_REFLOG_ACTION", write.reflog_action());
+        let mut command = if self.as_user {
+            as_user(self.dir)
+        } else {
+            let mut command = base(self.dir, false);
+            command.env("GIT_REFLOG_ACTION", write.reflog_action());
+            command
+        };
+        command.args(&self.args).env("GIT_EDITOR", ":");
         for (key, value) in self.env {
             command.env(key, value);
         }
@@ -177,6 +244,25 @@ impl<'a> Write<'a> {
     }
 }
 
+fn as_user(dir: &Path) -> Command {
+    let mut command = Command::new("git");
+    for (key, value) in std::env::vars_os() {
+        let key = key.to_string_lossy();
+        if key.starts_with("GIT_") {
+            command.env_remove(&*key);
+        } else if key == "LC_ALL" {
+            command.env_remove("LC_ALL").env("LC_CTYPE", value);
+        }
+    }
+    command
+        .arg("-C")
+        .arg(dir)
+        .env("LC_MESSAGES", "C")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .stdin(Stdio::null());
+    command
+}
+
 pub(crate) struct Wrote {
     write: LocalWrite,
     code: Option<i32>,
@@ -185,6 +271,18 @@ pub(crate) struct Wrote {
 }
 
 impl Wrote {
+    pub(crate) const fn code(&self) -> Option<i32> {
+        self.code
+    }
+
+    pub(crate) fn stdout(&self) -> &[u8] {
+        &self.stdout
+    }
+
+    pub(crate) fn stderr(&self) -> &str {
+        &self.stderr
+    }
+
     pub(crate) fn succeeded(self) -> Result<Vec<u8>, RepositoryError> {
         if self.code == Some(0) {
             return Ok(self.stdout);

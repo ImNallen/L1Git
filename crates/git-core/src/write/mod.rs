@@ -3,12 +3,14 @@
     clippy::match_wildcard_for_single_variants
 )]
 
+mod commit;
 mod index;
+mod refs;
 mod store;
 mod txn;
 
 use crate::{
-    Coordinator, ErrorKind, Head, Oid, RepositoryError, StatusEntry,
+    Coordinator, ErrorKind, Head, RepositoryError, StagedStamp, StatusEntry,
     git::{self, Deadline, LocalRead, LocalWrite, WriteDeadline},
     repository,
 };
@@ -18,8 +20,8 @@ use std::{
     path::PathBuf,
     time::{SystemTime, UNIX_EPOCH},
 };
-use store::{LockedStore, Log, Position, Store};
-pub(crate) use txn::{HOOK_OFF, Published, Txn};
+use store::{EntryObjects, LockedStore, Log, Objects, Position, Step, Store};
+pub(crate) use txn::{CommitTxn, HOOK_OFF, Outside, Published, RefTxn, Txn};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(
@@ -36,6 +38,22 @@ pub enum Operation {
     /// Puts each entry's paths back to HEAD's version in the index, or
     /// removes them before the first commit. Unmerged paths are refused.
     UnstageFiles { entries: Vec<StatusEntry> },
+    /// Commits the staged files with `message`, as `git commit` does, so
+    /// hooks, signing, and message cleanup follow the user's config. `staged`
+    /// is the `stagedStamp` of the status the user saw.
+    Commit {
+        message: String,
+        staged: StagedStamp,
+    },
+    /// Replaces HEAD's commit with one that holds the staged files and
+    /// `message`, keeping its parents and author.
+    Amend {
+        message: String,
+        staged: StagedStamp,
+    },
+    /// Replaces HEAD's commit with one that has `message` and the same files,
+    /// parents, and author. Staged files stay staged.
+    EditMessage { message: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -106,35 +124,56 @@ impl fmt::Display for EntryId {
 #[serde(tag = "domain", rename_all = "camelCase")]
 enum Change {
     Index(index::IndexChange),
+    Ref(refs::RefChange),
 }
 
 impl Change {
-    fn objects(&self) -> Vec<Oid> {
+    fn objects(&self) -> Objects {
         match self {
-            Self::Index(change) => change.objects(),
+            Self::Index(change) => Objects::exact(change.objects()),
+            Self::Ref(change) => change.objects(),
         }
     }
 
-    fn restore(
+    fn step(
         &self,
-        txn: &Txn<'_>,
-        entry: &store::EntryObjects,
+        repo: &Repo,
+        store: &LockedStore,
+        entry: &EntryObjects,
+        step: Step,
         direction: Direction,
-    ) -> Result<Restored, RepositoryError> {
+        deadline: WriteDeadline,
+    ) -> Result<Option<Published>, RepositoryError> {
         match self {
-            Self::Index(change) => index::restore(txn, entry, change, direction),
+            Self::Index(change) => {
+                let txn = Txn::begin(repo, deadline)?;
+                match index::restore(&txn, entry, change, direction)? {
+                    Restored::AlreadyThere => {
+                        store.save(step.log())?;
+                        Ok(None)
+                    }
+                    Restored::Staged => Ok(Some(txn.commit_step(store, step, self)?)),
+                }
+            }
+            Self::Ref(change) => {
+                refs::restore(repo, entry, change, direction, deadline)?;
+                store.save(step.log())?;
+                Ok(None)
+            }
         }
     }
 
     fn landed(&self, repo: &Repo, deadline: WriteDeadline) -> Result<bool, RepositoryError> {
         match self {
             Self::Index(change) => index::landed(repo, change, deadline),
+            Self::Ref(_) => Ok(true),
         }
     }
 
     fn touches_skip_worktree(&self) -> bool {
         match self {
             Self::Index(change) => change.touches_skip_worktree(),
+            Self::Ref(_) => false,
         }
     }
 }
@@ -165,22 +204,35 @@ impl Operation {
         match self {
             Self::StageFiles { .. } => LocalWrite::StageFiles,
             Self::UnstageFiles { .. } => LocalWrite::UnstageFiles,
+            Self::Commit { .. } => LocalWrite::Commit,
+            Self::Amend { .. } => LocalWrite::Amend,
+            Self::EditMessage { .. } => LocalWrite::EditMessage,
         }
     }
 
-    fn apply<'r>(
+    fn write(
         &self,
-        repo: &'r Repo,
+        repo: &Repo,
+        store: &LockedStore,
+        log: &Log,
         deadline: WriteDeadline,
         expect: &Expect,
-    ) -> Result<(Txn<'r>, Change), RepositoryError> {
+    ) -> Result<(Applied, Option<Published>), RepositoryError> {
+        let index = |command, entries| {
+            let (txn, change) = index::edit(repo, deadline, expect, command, entries)?;
+            let (applied, published) = txn.commit_write(store, log, self, &change)?;
+            Ok((applied, Some(published)))
+        };
+        let commit = |kind, message| {
+            commit::commit(repo, store, log, deadline, expect, self, kind, message)
+                .map(|applied| (applied, None))
+        };
         match self {
-            Self::StageFiles { entries } => {
-                index::edit(repo, deadline, expect, index::Command::Stage, entries)
-            }
-            Self::UnstageFiles { entries } => {
-                index::edit(repo, deadline, expect, index::Command::Unstage, entries)
-            }
+            Self::StageFiles { entries } => index(index::Command::Stage, entries),
+            Self::UnstageFiles { entries } => index(index::Command::Unstage, entries),
+            Self::Commit { message, staged } => commit(commit::Kind::New(staged), message),
+            Self::Amend { message, staged } => commit(commit::Kind::Amend(staged), message),
+            Self::EditMessage { message } => commit(commit::Kind::EditMessage, message),
         }
     }
 }
@@ -277,12 +329,11 @@ impl Coordinator {
         let (applied, published) = self.locked(
             path,
             operation.local_write(),
-            |repo, store, log, deadline| {
-                let (txn, change) = operation.apply(&repo, deadline, expect)?;
-                txn.commit_write(store, &log, operation, &change)
-            },
+            |repo, store, log, deadline| operation.write(&repo, store, &log, deadline, expect),
         )?;
-        published.run_hook();
+        if let Some(published) = published {
+            published.run_hook();
+        }
         Ok(applied)
     }
 
@@ -346,14 +397,9 @@ impl Coordinator {
                 } else {
                     opened.worktree(&applied.root, deadline.reads())?
                 };
-                let txn = Txn::begin(&repo, deadline)?;
-                match change.restore(&txn, &store.entry(id), direction)? {
-                    Restored::AlreadyThere => {
-                        store.save(step.log())?;
-                        Ok((applied, None))
-                    }
-                    Restored::Staged => Ok((applied, Some(txn.commit_step(store, step, &change)?))),
-                }
+                let published =
+                    change.step(&repo, store, &store.entry(id), step, direction, deadline)?;
+                Ok((applied, published))
             })?;
         if let Some(published) = published {
             published.run_hook();

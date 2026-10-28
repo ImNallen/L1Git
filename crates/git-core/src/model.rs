@@ -265,6 +265,43 @@ pub struct WorktreeStatus {
     pub root: String,
     pub head: Head,
     pub entries: Vec<StatusEntry>,
+    pub staged_stamp: StagedStamp,
+}
+
+/// A SHA-1 of the staged fields of a status read, so a commit can refuse
+/// when the staged files differ from the ones the user saw.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct StagedStamp(String);
+
+impl StagedStamp {
+    pub(crate) fn of(digest: &sha1_smol::Sha1) -> Self {
+        Self(digest.digest().to_string())
+    }
+}
+
+impl TryFrom<String> for StagedStamp {
+    type Error = RepositoryError;
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        if value.len() == 40
+            && value
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
+            Ok(Self(value))
+        } else {
+            Err(RepositoryError::stale(
+                StaleReason::PathChanged,
+                "Use the stagedStamp that worktreeStatus returned.",
+            ))
+        }
+    }
+}
+
+impl From<StagedStamp> for String {
+    fn from(value: StagedStamp) -> Self {
+        value.0
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -717,8 +754,22 @@ pub enum ErrorKind {
     },
     /// Another Git process holds a lock the write needs.
     LockHeld,
-    HookFailed,
+    /// A hook stopped the write.
+    HookFailed {
+        /// What Git and the hook printed, up to 64 KiB.
+        output: String,
+    },
+    /// A merge, rebase, cherry-pick, revert, or am is unfinished, or a path
+    /// is unmerged.
     Conflict,
+    /// Git cannot tell who the author or committer is.
+    MissingIdentity {
+        /// Git's advice, which names the `git config` commands to run.
+        output: String,
+    },
+    /// The commit landed, but another process moved HEAD or its branch at
+    /// the same time, so it sits somewhere other than the user saw.
+    Raced,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -730,6 +781,8 @@ pub enum StaleReason {
     PathChanged,
     /// Git would also change `paths`, which the request does not name.
     PathNotChosen { paths: Vec<String> },
+    /// The staged files differ from the `stagedStamp` a commit carries.
+    StagedChanged,
     /// The entry is not the next one to undo or redo.
     HistoryChanged,
 }

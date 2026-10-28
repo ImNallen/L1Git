@@ -2,6 +2,8 @@ mod advance;
 mod fetch;
 mod read;
 
+pub(crate) use read::in_progress;
+
 use crate::{
     Advance, AdvanceOutcome, FastForwardReport, FetchMode, FetchSummary, RepositoryError,
     RepositoryOverview, SkipReason,

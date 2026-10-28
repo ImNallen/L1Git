@@ -318,6 +318,35 @@ describe("overview store", () => {
     ]);
   });
 
+  it("rereads local status after a write moves a ref and reports the move", async () => {
+    const h = harness();
+    const dir = root("/code/app/.git");
+    const changes: RepositoryRoot[][] = [];
+    h.store.onRefsChanged((roots) => changes.push(roots));
+    h.store.track([app, appWorktree]);
+    await h.answer((label) =>
+      label.startsWith("local")
+        ? overview(label.split(" ")[1]!, dir, [upToDate("main")])
+        : overview(app, dir, [upToDate("main")], { changed: false }),
+    );
+    h.calls.length = 0;
+    const refreshed = h.store.refreshLocal(dir);
+    expect(h.calls).toEqual([`local ${app}`]);
+    await h.answerOne(overview(app, dir, [behind("main", b)]));
+    await refreshed;
+    expect(changes).toEqual([[app, appWorktree]]);
+    expect(
+      h.store.getSnapshot().repositories[0]?.overview.branches[0]?.state.kind,
+    ).toBe("behind");
+    const failed = h.store.refreshLocal(dir);
+    await h.failOne(new Error("gone"));
+    await failed;
+    expect(changes).toEqual([
+      [app, appWorktree],
+      [app, appWorktree],
+    ]);
+  });
+
   it("updates all with exactly the ready pairs of each repository", async () => {
     const h = harness();
     h.store.track([app, api]);

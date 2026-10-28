@@ -1,6 +1,6 @@
 mod write;
 
-pub(crate) use write::{LocalWrite, Write, WriteDeadline};
+pub(crate) use write::{LocalWrite, Write, WriteDeadline, Wrote};
 
 use crate::{BranchRef, ErrorKind, Oid, RepositoryError};
 use std::{
@@ -512,7 +512,7 @@ pub(crate) enum Finished {
     TimedOut,
 }
 
-const STDERR_CAP: u64 = 64 * 1024;
+const STDERR_CAP: usize = 64 * 1024;
 const POLL: Duration = Duration::from_millis(10);
 const FIRST_EXIT_POLL: Duration = Duration::from_micros(50);
 const LAST_EXIT_POLL: Duration = Duration::from_millis(1);
@@ -530,10 +530,7 @@ impl Stderr {
         let (sender, receiver) = mpsc::channel();
         if let Some(mut pipe) = pipe {
             thread::spawn(move || {
-                let mut kept = Vec::new();
-                let _ = (&mut pipe).take(STDERR_CAP).read_to_end(&mut kept);
-                let _ = io::copy(&mut pipe, &mut io::sink());
-                let _ = sender.send(kept);
+                let _ = sender.send(marked_tail(&mut pipe, STDERR_CAP));
             });
         }
         Self(receiver)
@@ -544,6 +541,36 @@ impl Stderr {
             .recv_timeout(INHERITED_STDERR_WAIT)
             .unwrap_or_default()
     }
+}
+
+fn marked_tail(pipe: &mut impl Read, cap: usize) -> Vec<u8> {
+    let mut kept = Vec::new();
+    let mut chunk = [0; 8192];
+    let mut cut = false;
+    loop {
+        match pipe.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(read) => kept.extend_from_slice(&chunk[..read]),
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(_) => break,
+        }
+        if kept.len() > 2 * cap {
+            kept.drain(..kept.len() - cap);
+            cut = true;
+        }
+    }
+    if kept.len() > cap {
+        kept.drain(..kept.len() - cap);
+        cut = true;
+    }
+    if !cut {
+        return kept;
+    }
+    let start = kept
+        .iter()
+        .position(|byte| byte & 0xC0 != 0x80)
+        .unwrap_or(kept.len());
+    ["…".as_bytes(), &kept[start..]].concat()
 }
 
 pub(crate) fn mutate(
@@ -861,3 +888,20 @@ fn signal_group(pid: u32, signal: Signal) {
 
 #[cfg(not(unix))]
 fn signal_group(_pid: u32, _signal: Signal) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn kept(printed: &str, cap: usize) -> String {
+        String::from_utf8(marked_tail(&mut printed.as_bytes(), cap)).unwrap()
+    }
+
+    #[test]
+    fn a_cut_output_keeps_its_last_bytes_and_marks_the_cut() {
+        assert_eq!(kept("short\n", 9), "short\n");
+        assert_eq!(kept("drop\nkept\nend\n", 9), "…kept\nend\n");
+        assert_eq!(kept("aaaaaaaaaabbbb\n", 5), "…bbbb\n");
+        assert_eq!(kept("aaaaabbbbb", 5), "…bbbbb");
+    }
+}
