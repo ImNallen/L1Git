@@ -1,3 +1,9 @@
+pub(super) use super::files::Stat;
+use super::files::{
+    Content, DISCARD, DISCARD_WORDS, FileChange, Scratch, capture, changed, check_files,
+    copy_beside, failed, guard, holds, place, place_checked, set_permissions, stopped, unchanged,
+    unsupported,
+};
 use super::{
     Applied, Change, Direction, EntryId, Expect, Operation, Repo, Restored, index,
     partial::{self, Part},
@@ -13,8 +19,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fs,
-    io::{self, Read},
+    fs, io,
     path::{Path, PathBuf},
 };
 
@@ -53,26 +58,6 @@ impl Discarded {
             }
         }
     }
-
-    const fn source_and_target(&self, direction: Direction) -> (&Content, &Content) {
-        match direction {
-            Direction::Undo => (&self.after, &self.before),
-            Direction::Redo => (&self.before, &self.after),
-        }
-    }
-}
-
-/// File bytes are copied raw, so no Git filter or line-ending rule touches them.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(
-    tag = "kind",
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase"
-)]
-enum Content {
-    Absent,
-    File { copy: String, permissions: u32 },
-    Symlink { target: Vec<u8> },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -86,10 +71,6 @@ struct Target<'e> {
     path: &'e str,
     seen: Seen<'e>,
     on_disk: bool,
-}
-
-fn unsupported(message: String) -> RepositoryError {
-    RepositoryError::new(ErrorKind::UnsupportedPath, message)
 }
 
 fn target(entry: &StatusEntry) -> Result<Target<'_>, RepositoryError> {
@@ -228,20 +209,6 @@ fn reported_now(
     Ok(())
 }
 
-fn changed(path: &str) -> RepositoryError {
-    RepositoryError::stale(
-        StaleReason::PathChanged,
-        format!("{path} changed since L1 Git read it. Refresh and try again."),
-    )
-}
-
-fn failed(path: &str, error: &io::Error) -> RepositoryError {
-    RepositoryError::new(
-        ErrorKind::GitFailed,
-        format!("L1 Git could not read or write {path}: {error}"),
-    )
-}
-
 pub(super) fn discard(
     repo: &Repo,
     store: &LockedStore,
@@ -256,7 +223,7 @@ pub(super) fn discard(
     repo.head_as_seen(expect, deadline)?;
     let paths: Vec<&str> = targets.iter().map(|target| target.path).collect();
     let rows = index::read(&txn)?;
-    let stats = guard(&repo.root, &rows, &paths)?;
+    let stats = guard(&repo.root, &rows, &paths, &DISCARD)?;
     // Status shows a deleted intent-to-add file with the empty blob, so only
     // the index's flags catch that one.
     if let Some(target) = targets.iter().find(|target| {
@@ -273,7 +240,7 @@ pub(super) fn discard(
         .filter(|target| matches!(target.seen, Seen::Tracked(_)))
         .map(|target| target.path)
         .collect();
-    let checkout = scratch.0.join("checkout");
+    let checkout = scratch.path().join("checkout");
     if !tracked.is_empty() {
         let prefix = checkout_prefix(&checkout);
         txn.git(&["checkout-index", &prefix, "-f", "-z", "--stdin"])
@@ -310,7 +277,7 @@ pub(super) fn discard_part(
     let txn = Txn::begin(repo, deadline)?;
     repo.head_as_seen(expect, deadline)?;
     let rows = index::read(&txn)?;
-    let [stat]: [Option<Stat>; 1] = guard(&repo.root, &rows, &[path])?
+    let [stat]: [Option<Stat>; 1] = guard(&repo.root, &rows, &[path], &DISCARD)?
         .try_into()
         .map_err(|_| git::malformed())?;
     if index::at(&rows, path)
@@ -321,7 +288,7 @@ pub(super) fn discard_part(
     }
     let prepared = part.read(&txn)?;
     let scratch = Scratch::new(&txn)?;
-    let checkout = scratch.0.join("checkout");
+    let checkout = scratch.path().join("checkout");
     let after = partial::check_out_without_picks(&txn, &rows, part, prepared, &checkout)?;
     if let (After::Checkout, Some(stat)) = (&after, &stat) {
         keep_permissions(&checkout.join(path), stat).map_err(|error| failed(path, &error))?;
@@ -451,13 +418,6 @@ fn land(
     Err(stopped(refusal, &done))
 }
 
-fn stopped(error: RepositoryError, done: &str) -> RepositoryError {
-    RepositoryError::new(
-        error.kind,
-        format!("{}. {done}", error.message.trim_end_matches('.')),
-    )
-}
-
 pub(super) fn step(
     txn: &Txn<'_>,
     entry: &EntryObjects,
@@ -540,62 +500,33 @@ fn place_step(
     change: &DiscardChange,
     direction: Direction,
 ) -> Result<(), RepositoryError> {
-    let root = &txn.repo().root;
-    let files = entry.files();
-    let paths: Vec<&str> = change.paths.iter().map(|path| path.path.as_str()).collect();
-    let stats = guard(root, rows, &paths)?;
-    let mut pending = Vec::new();
-    for (discarded, stat) in change.paths.iter().zip(stats) {
-        let (from, to) = discarded.source_and_target(direction);
-        let at = |content| {
-            holds(root, &discarded.path, content, &files)
-                .map_err(|error| failed(&discarded.path, &error))
-        };
-        if at(to)? {
-            continue;
-        }
-        if !at(from)? {
-            return Err(RepositoryError::stale(
-                StaleReason::PathChanged,
-                format!(
-                    "{} changed after the discard, so L1 Git cannot undo or redo it without losing that edit. Refresh.",
-                    discarded.path
-                ),
-            ));
-        }
-        pending.push((discarded, to, stat));
-    }
-    if pending.is_empty() {
-        return Ok(());
-    }
-    let scratch = Scratch::new(txn)?;
-    let mut prepared = Vec::new();
-    for (at, (discarded, to, _)) in pending.iter().enumerate() {
-        let temporary = scratch.0.join(at.to_string());
-        prepare(to, &files, &temporary).map_err(|error| failed(&discarded.path, &error))?;
-        prepared.push(temporary);
-    }
-    let mut placed = 0;
-    pending
+    let changes: Vec<FileChange> = change
+        .paths
         .iter()
-        .zip(&prepared)
-        .try_for_each(|((discarded, to, stat), temporary)| {
-            before_placing(&discarded.path);
-            unchanged(root, &discarded.path, stat)?;
-            place(root, entry.id(), &discarded.path, to, temporary)?;
-            placed += 1;
-            Ok(())
+        .map(|discarded| FileChange {
+            path: discarded.path.clone(),
+            before: discarded.before.clone(),
+            after: discarded.after.clone(),
         })
-        .map_err(|error| match (placed, direction) {
-            (0, _) => error,
-            (_, Direction::Undo) => {
-                stopped(error, "The files L1 Git already put back stay put back.")
-            }
-            (_, Direction::Redo) => stopped(
-                error,
-                "The files L1 Git already discarded again stay discarded.",
-            ),
-        })
+        .collect();
+    let files = entry.files();
+    let pending = check_files(
+        &txn.repo().root,
+        rows,
+        &files,
+        &changes,
+        direction,
+        &DISCARD,
+    )?;
+    place_checked(
+        txn,
+        entry.id(),
+        &files,
+        &pending,
+        direction,
+        &DISCARD_WORDS,
+        before_placing,
+    )
 }
 
 #[cfg(test)]
@@ -618,394 +549,10 @@ fn before_placing(path: &str) {
 #[cfg(not(test))]
 const fn before_placing(_path: &str) {}
 
-struct Scratch(PathBuf);
-
-impl Scratch {
-    fn new(txn: &Txn<'_>) -> Result<Self, RepositoryError> {
-        let dir = txn.scratch("discard");
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir(&dir).map_err(|error| failed("a scratch folder", &error))?;
-        Ok(Self(dir))
-    }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
-
-fn guard(
-    root: &Path,
-    rows: &index::Rows,
-    paths: &[&str],
-) -> Result<Vec<Option<Stat>>, RepositoryError> {
-    let stats = writable_stats(root, paths)?;
-    no_other_names(root, rows, paths, &stats)?;
-    Ok(stats)
-}
-
-/// A case-insensitive disk opens a tracked file through any name it folds
-/// to the same one, whatever `core.ignorecase` says, and Git's `icase`
-/// pathspecs fold only ASCII.
-fn no_other_names(
-    root: &Path,
-    rows: &index::Rows,
-    paths: &[&str],
-    stats: &[Option<Stat>],
-) -> Result<(), RepositoryError> {
-    let chosen: BTreeMap<(u64, u64), &str> = paths
-        .iter()
-        .zip(stats)
-        .filter_map(|(path, stat)| Some((stat.as_ref()?.identity?, *path)))
-        .collect();
-    let folds: BTreeSet<String> = chosen
-        .values()
-        .map(|path| fold_for_any_disk(path))
-        .collect();
-    if folds.is_empty() {
-        return Ok(());
-    }
-    let names: BTreeSet<&str> = paths.iter().copied().collect();
-    for other in rows.keys().filter_map(|name| str::from_utf8(name).ok()) {
-        if names.contains(other) || !folds.contains(&fold_for_any_disk(other)) {
-            continue;
-        }
-        let identity = Stat::of(&root.join(other))
-            .ok()
-            .flatten()
-            .and_then(|stat| stat.identity);
-        if let Some(path) = identity.and_then(|identity| chosen.get(&identity)) {
-            return Err(unsupported(format!(
-                "{path} and {other} are the same file on this disk, so discarding {path} would change {other}. L1 Git does not discard it."
-            )));
-        }
-    }
-    Ok(())
-}
-
-/// Each case-insensitive disk folds names its own way, some also across
-/// Unicode normalization forms.
-fn fold_for_any_disk(name: &str) -> String {
-    if name.is_ascii() {
-        return name.to_ascii_lowercase();
-    }
-    let mut folded = DECOMPOSE.normalize(name).into_owned();
-    for _ in 0..FOLD_ROUNDS {
-        folded = fold_round(&folded);
-    }
-    folded
-}
-
-const FOLD_ROUNDS: usize = 2;
-
-const DECOMPOSE: icu_normalizer::DecomposingNormalizerBorrowed<'static> =
-    icu_normalizer::DecomposingNormalizerBorrowed::new_nfd();
-
-fn fold_round(name: &str) -> String {
-    let cased: String = name
-        .chars()
-        .flat_map(char::to_uppercase)
-        .flat_map(char::to_lowercase)
-        .collect();
-    DECOMPOSE.normalize(&cased).into_owned()
-}
-
-fn writable_stats(root: &Path, paths: &[&str]) -> Result<Vec<Option<Stat>>, RepositoryError> {
-    let mut files: BTreeMap<(u64, u64), &str> = BTreeMap::new();
-    let mut stats = Vec::new();
-    for path in paths {
-        let mut folder = root.to_path_buf();
-        let mut names = path.split('/').peekable();
-        while let Some(name) = names.next() {
-            folder.push(name);
-            if names.peek().is_none() {
-                break;
-            }
-            let shown = folder.strip_prefix(root).unwrap_or(&folder).display();
-            match fs::symlink_metadata(&folder) {
-                Err(error) if error.kind() == io::ErrorKind::NotFound => break,
-                Err(error) => return Err(failed(path, &error)),
-                Ok(metadata) if !metadata.is_dir() => {
-                    return Err(unsupported(format!(
-                        "{shown} is a file or a link on disk, so L1 Git cannot write {path} below it. Discard or move {shown} first."
-                    )));
-                }
-                Ok(_) => {}
-            }
-            if fs::symlink_metadata(folder.join(".git")).is_ok() {
-                return Err(unsupported(format!(
-                    "{path} is inside the nested repository {shown}. L1 Git does not change it."
-                )));
-            }
-        }
-        let stat = Stat::of(&root.join(path)).map_err(|error| failed(path, &error))?;
-        if let Some(stat) = &stat {
-            if stat.folder {
-                return Err(unsupported(format!(
-                    "{path} is a folder on disk. Move or delete the folder, then discard {path}."
-                )));
-            }
-            if let Some(other) = stat
-                .identity
-                .and_then(|identity| files.insert(identity, path))
-            {
-                return Err(unsupported(format!(
-                    "{other} and {path} are the same file on disk. Discard one of them."
-                )));
-            }
-        }
-        stats.push(stat);
-    }
-    Ok(stats)
-}
-
-fn unchanged(root: &Path, path: &str, seen: &Option<Stat>) -> Result<(), RepositoryError> {
-    if Stat::of(&root.join(path)).map_err(|error| failed(path, &error))? == *seen {
-        Ok(())
-    } else {
-        Err(changed(path))
-    }
-}
-
-fn capture(
-    root: &Path,
-    path: &str,
-    files: &Path,
-    copy: String,
-) -> Result<Content, RepositoryError> {
-    let file = root.join(path);
-    let captured = match fs::symlink_metadata(&file) {
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Content::Absent),
-        Err(error) => Err(error),
-        Ok(metadata) if metadata.is_symlink() => {
-            fs::read_link(&file).map(|target| Content::Symlink {
-                target: link_bytes(target),
-            })
-        }
-        Ok(metadata) => copy_private(&file, &files.join(&copy)).map(|()| Content::File {
-            copy,
-            permissions: permissions(&metadata),
-        }),
-    };
-    captured.map_err(|error| failed(path, &error))
-}
-
-fn copy_private(from: &Path, to: &Path) -> io::Result<()> {
-    let mut options = fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-    io::copy(&mut fs::File::open(from)?, &mut options.open(to)?).map(drop)
-}
-
-fn holds(root: &Path, path: &str, content: &Content, files: &Path) -> io::Result<bool> {
-    let file = root.join(path);
-    let metadata = match fs::symlink_metadata(&file) {
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            return Ok(*content == Content::Absent);
-        }
-        other => other?,
-    };
-    match content {
-        Content::Absent => Ok(false),
-        Content::Symlink { target } => {
-            Ok(metadata.is_symlink() && link_bytes(fs::read_link(&file)?) == *target)
-        }
-        Content::File {
-            copy,
-            permissions: kept,
-        } => Ok(metadata.is_file()
-            && permissions(&metadata) == *kept
-            && same_bytes(&file, &files.join(copy))?),
-    }
-}
-
-fn same_bytes(a: &Path, b: &Path) -> io::Result<bool> {
-    let (mut a, mut b) = (fs::File::open(a)?, fs::File::open(b)?);
-    if a.metadata()?.len() != b.metadata()?.len() {
-        return Ok(false);
-    }
-    let (mut left, mut right) = (vec![0; 64 * 1024], vec![0; 64 * 1024]);
-    loop {
-        let read = a.read(&mut left)?;
-        if read == 0 {
-            return Ok(b.read(&mut right[..1])? == 0);
-        }
-        b.read_exact(&mut right[..read])?;
-        if left[..read] != right[..read] {
-            return Ok(false);
-        }
-    }
-}
-
-fn prepare(content: &Content, files: &Path, temporary: &Path) -> io::Result<()> {
-    match content {
-        Content::Absent => Ok(()),
-        Content::File { copy, permissions } => {
-            fs::copy(files.join(copy), temporary)?;
-            set_permissions(temporary, *permissions)
-        }
-        Content::Symlink { target } => symlink(target, temporary),
-    }
-}
-
-fn place(
-    root: &Path,
-    id: EntryId,
-    path: &str,
-    content: &Content,
-    prepared: &Path,
-) -> Result<(), RepositoryError> {
-    let file = root.join(path);
-    let placed = match content {
-        Content::Absent => match fs::remove_file(&file) {
-            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-            other => other,
-        },
-        Content::File { .. } | Content::Symlink { .. } => file
-            .parent()
-            .map_or(Ok(()), fs::create_dir_all)
-            .and_then(|()| match fs::rename(prepared, &file) {
-                Err(error) if error.kind() == io::ErrorKind::CrossesDevices => {
-                    rename_across(prepared, &file, &copy_beside(id, &file))
-                }
-                other => other,
-            }),
-    };
-    placed.map_err(|error| failed(path, &error))
-}
-
-/// A linked worktree can live on another file system than its Git dir, so
-/// the prepared file is copied beside the path first and renamed from there.
-fn rename_across(prepared: &Path, file: &Path, beside: &Path) -> io::Result<()> {
-    let copied = if fs::symlink_metadata(prepared)?.is_symlink() {
-        fs::read_link(prepared).and_then(|target| symlink(&link_bytes(target), beside))
-    } else {
-        fs::copy(prepared, beside).map(drop)
-    };
-    let renamed = copied.and_then(|()| fs::rename(beside, file));
-    if renamed.is_err() {
-        let _ = fs::remove_file(beside);
-    }
-    renamed
-}
-
-fn copy_beside(id: EntryId, file: &Path) -> PathBuf {
-    let mut name = std::ffi::OsString::from(format!(".l1git-{id}-"));
-    name.push(file.file_name().unwrap_or_default());
-    file.with_file_name(name)
-}
-
 pub(super) fn remove_copies_beside(root: &Path, id: EntryId, change: &DiscardChange) {
     for discarded in &change.paths {
         let _ = fs::remove_file(copy_beside(id, &root.join(&discarded.path)));
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct Stat {
-    folder: bool,
-    identity: Option<(u64, u64)>,
-    size: u64,
-    mode: u32,
-    modified: (i64, i64),
-    changed: (i64, i64),
-}
-
-impl Stat {
-    pub(super) fn of(file: &Path) -> io::Result<Option<Self>> {
-        let metadata = match fs::symlink_metadata(file) {
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-            other => other?,
-        };
-        Ok(Some(Self::from(&metadata)))
-    }
-}
-
-#[cfg(unix)]
-impl From<&fs::Metadata> for Stat {
-    fn from(metadata: &fs::Metadata) -> Self {
-        use std::os::unix::fs::MetadataExt;
-        Self {
-            folder: metadata.is_dir(),
-            identity: Some((metadata.dev(), metadata.ino())),
-            size: metadata.size(),
-            mode: metadata.mode(),
-            modified: (metadata.mtime(), metadata.mtime_nsec()),
-            changed: (metadata.ctime(), metadata.ctime_nsec()),
-        }
-    }
-}
-
-#[cfg(unix)]
-fn permissions(metadata: &fs::Metadata) -> u32 {
-    use std::os::unix::fs::PermissionsExt;
-    metadata.permissions().mode() & 0o7777
-}
-
-#[cfg(unix)]
-fn set_permissions(file: &Path, permissions: u32) -> io::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    fs::set_permissions(file, fs::Permissions::from_mode(permissions))
-}
-
-#[cfg(unix)]
-fn link_bytes(target: PathBuf) -> Vec<u8> {
-    use std::os::unix::ffi::OsStringExt;
-    target.into_os_string().into_vec()
-}
-
-#[cfg(unix)]
-fn symlink(target: &[u8], link: &Path) -> io::Result<()> {
-    use std::os::unix::ffi::OsStrExt;
-    std::os::unix::fs::symlink(std::ffi::OsStr::from_bytes(target), link)
-}
-
-#[cfg(not(unix))]
-impl From<&fs::Metadata> for Stat {
-    fn from(metadata: &fs::Metadata) -> Self {
-        let since = |time: io::Result<std::time::SystemTime>| {
-            time.ok()
-                .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-                .map_or((0, 0), |since| {
-                    (
-                        i64::try_from(since.as_secs()).unwrap_or(i64::MAX),
-                        i64::from(since.subsec_nanos()),
-                    )
-                })
-        };
-        Self {
-            folder: metadata.is_dir(),
-            identity: None,
-            size: metadata.len(),
-            mode: 0,
-            modified: since(metadata.modified()),
-            changed: since(metadata.created()),
-        }
-    }
-}
-
-#[cfg(not(unix))]
-fn permissions(_metadata: &fs::Metadata) -> u32 {
-    0
-}
-
-#[cfg(not(unix))]
-fn set_permissions(_file: &Path, _permissions: u32) -> io::Result<()> {
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn link_bytes(target: PathBuf) -> Vec<u8> {
-    target.to_string_lossy().into_owned().into_bytes()
-}
-
-#[cfg(not(unix))]
-fn symlink(_target: &[u8], _link: &Path) -> io::Result<()> {
-    Err(io::Error::other(
-        "L1 Git restores symlinks on macOS and Linux only",
-    ))
 }
 
 #[cfg(test)]
@@ -1215,19 +762,6 @@ mod tests {
                 .expect_err("b holds neither state");
             assert!(again.message.starts_with("b changed"), "{}", again.message);
             assert_eq!(repo.read("b"), "editor\n", "{editor:?}");
-        }
-    }
-
-    #[test]
-    fn every_character_settles_within_the_fold_rounds() {
-        for character in (0..=u32::from(char::MAX)).filter_map(char::from_u32) {
-            let folded = fold_for_any_disk(&character.to_string());
-            assert_eq!(
-                fold_round(&folded),
-                folded,
-                "U+{:04X}",
-                u32::from(character)
-            );
         }
     }
 

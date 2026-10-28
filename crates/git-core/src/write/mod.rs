@@ -7,6 +7,7 @@ mod branches;
 mod checkout;
 mod commit;
 mod discard;
+mod files;
 mod index;
 mod partial;
 mod refs;
