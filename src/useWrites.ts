@@ -135,7 +135,15 @@ export function useWrites(
     inFlight.current.delete(repository);
     const notice: WriteNotice | null =
       outcome.kind === "failed"
-        ? { kind: "failed", ...job, label, problem: outcome.problem }
+        ? job.action === "write"
+          ? {
+              kind: "failed",
+              ...job,
+              label,
+              problem: outcome.problem,
+              operation,
+            }
+          : { kind: "failed", ...job, label, problem: outcome.problem }
         : action === "write"
           ? null
           : { kind: "stepped", step: action, label };

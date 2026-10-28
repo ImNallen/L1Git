@@ -534,10 +534,6 @@ fn blank_context() -> Repo {
         &[("diff.suppressBlankEmpty", "true")],
     );
     repo.write("f.txt", "A\n\nB\nc\n");
-    assert!(
-        repo.shown("f.txt", Side::Unstaged).contains("+A\n\n-b\n"),
-        "Git prints the blank context line as an empty line"
-    );
     repo
 }
 
@@ -553,6 +549,16 @@ fn a_hunk_past_the_last_names_how_many_hunks_there_are() {
         refused(repo.stage_hunk("f.txt", 3), &ErrorKind::UnchangedPath),
         "The diff of f.txt has 3 hunks, so it has no hunk 3, counting from 0."
     );
+}
+
+#[test]
+fn suppress_blank_empty_patches_keep_the_space_before_a_blank_context_line() {
+    let repo = blank_context();
+    let unstaged = repo.shown("f.txt", Side::Unstaged);
+    assert!(unstaged.contains("+A\n \n-b\n"), "{unstaged}");
+    repo.git(&["add", "f.txt"]);
+    let staged = repo.shown("f.txt", Side::Staged);
+    assert!(staged.contains("+A\n \n-b\n"), "{staged}");
 }
 
 #[test]

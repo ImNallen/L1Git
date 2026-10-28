@@ -1,5 +1,7 @@
 import { Undo2 } from "lucide-react";
 import { shownPaths } from "../domain/operations";
+import type { DiscardEffect } from "../domain/lineSelection";
+import type { PartChoice } from "../domain/operations";
 import { ConfirmDialog } from "./ConfirmDialog";
 
 type Props = {
@@ -44,6 +46,54 @@ export function DiscardDialog({ paths, skipped, onDiscard, onClose }: Props) {
           repositories, submodules, and files added with git add -N.
         </p>
       )}
+    </ConfirmDialog>
+  );
+}
+
+const outcomes: Record<DiscardEffect, (path: string) => string> = {
+  deleteFile: (path) =>
+    `${path} is untracked, and this discards all of it, so L1 Git deletes the file.`,
+  removeLines: (path) =>
+    `${path} is untracked, so L1 Git removes those lines from it, and the rest of the file stays as it is.`,
+  restoreLines: () =>
+    "Those changes go back to the staged or committed version, and the rest of the file stays as it is.",
+};
+
+export function DiscardPartDialog({
+  path,
+  choice,
+  effect,
+  onDiscard,
+  onClose,
+}: {
+  path: string;
+  choice: PartChoice;
+  effect: DiscardEffect;
+  onDiscard: () => void;
+  onClose: () => void;
+}) {
+  const lines = choice.kind === "lines" ? choice.lines.length : 0;
+  const what =
+    choice.kind === "hunk"
+      ? "a hunk"
+      : `${lines.toLocaleString()} changed ${lines === 1 ? "line" : "lines"}`;
+  const deletes = effect === "deleteFile";
+  return (
+    <ConfirmDialog
+      icon={Undo2}
+      title={deletes ? `Delete ${path}?` : `Discard ${what} of ${path}?`}
+      closeLabel="Close discard changes"
+      confirm={
+        deletes
+          ? "Delete file"
+          : choice.kind === "hunk"
+            ? "Discard hunk"
+            : "Discard lines"
+      }
+      onConfirm={onDiscard}
+      onClose={onClose}
+    >
+      <p>{`${outcomes[effect](path)} You can undo this.`}</p>
     </ConfirmDialog>
   );
 }

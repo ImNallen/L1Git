@@ -5,6 +5,8 @@ import {
   discardChoice,
   failureText,
   movesRefs,
+  partActions,
+  partWrite,
   rereadsRepository,
   shownPaths,
   stepButton,
@@ -23,8 +25,10 @@ import type {
   Operation,
   Problem,
   StatusEntry,
+  WorktreePatch,
   WorktreeStatus,
 } from "./repository";
+import type { ListSide } from "./worktree";
 
 const blob = (digit: string): IndexObject => ({
   mode: "100644",
@@ -284,9 +288,16 @@ group("failureText", () => {
     kind: "unreadable",
     problem: { kind: "unreadablePath", message: "Delete the log." },
   };
+  const stageReadme: Operation = { kind: "stageFiles", entries: [modified] };
   const write = (problem: Problem) =>
     failureText(
-      { kind: "failed", action: "write", label: "Stage README.md", problem },
+      {
+        kind: "failed",
+        action: "write",
+        label: "Stage README.md",
+        problem,
+        operation: stageReadme,
+      },
       movedOn,
     );
   const undo = (problem: Problem, history: History) =>
@@ -315,6 +326,7 @@ group("failureText", () => {
           action: "write",
           label: "Commit “Fix”",
           problem: stale("stagedChanged"),
+          operation: commitWrite("commit", status, "Fix").operation,
         },
         movedOn,
       ),
@@ -386,6 +398,55 @@ group("failureText", () => {
     );
   });
 
+  it("says a hunk write reread the diff it refused", () => {
+    expect(
+      failureText(
+        {
+          kind: "failed",
+          action: "write",
+          label: "Stage a hunk of README.md",
+          problem: stale("pathChanged"),
+          operation: {
+            kind: "stageHunk",
+            path: "README.md",
+            hunk: 0,
+            shown: "",
+          },
+        },
+        movedOn,
+      ),
+    ).toBe(
+      "Could not stage a hunk of README.md. The file changed since L1 Git showed its diff. L1 Git reread the diff, so check it and try again.",
+    );
+  });
+
+  it("passes the core's words through when a hunk write would change another path", () => {
+    const message =
+      "Git would also stage z/x along with part of z, so L1 Git changed nothing. Refresh and try again, or stage z with Git.";
+    expect(
+      failureText(
+        {
+          kind: "failed",
+          action: "write",
+          label: "Stage lines of z",
+          problem: {
+            kind: "staleView",
+            reason: "pathNotChosen",
+            paths: ["z/x"],
+            message,
+          },
+          operation: {
+            kind: "stageLines",
+            path: "z",
+            lines: [{ side: "additions", line: 1 }],
+            shown: "",
+          },
+        },
+        movedOn,
+      ),
+    ).toBe(`Could not stage lines of z. ${message}`);
+  });
+
   it("names a reread history when another entry is now next", () => {
     expect(undo(stale("historyChanged"), movedOn)).toBe(
       "Could not undo Stage README.md. The undo history changed since L1 Git showed it. L1 Git reread the undo history.",
@@ -414,6 +475,237 @@ group("failureText", () => {
         movedOn,
       ),
     ).toBe("Could not redo Unstage 2 files. Any core message.");
+  });
+});
+
+group("partActions", () => {
+  type Ordinary = Extract<StatusEntry, { kind: "ordinary" }>;
+  const ordinary = (
+    sides: Ordinary["sides"],
+    index: IndexObject | null = blob("a"),
+  ): Ordinary => ({
+    kind: "ordinary",
+    path: "a.txt",
+    submodule: null,
+    sides,
+    index,
+  });
+  const both = ordinary({ kind: "both", staged: "M", unstaged: "M" });
+  const submodule = { commitChanged: true, modified: false, untracked: false };
+  const text = (patch: string): WorktreePatch => ({
+    kind: "diff",
+    diff: { kind: "text", patch, lossy: false },
+  });
+  const edited = `diff --git a/a.txt b/a.txt
+index 1111111111111111111111111111111111111111..2222222222222222222222222222222222222222 100644
+--- a/a.txt
++++ b/a.txt
+@@ -1,3 +1,3 @@
+ one
+${" "}
+-two
++TWO
+`;
+  const edit = text(edited);
+  const created = text(`diff --git a/notes.txt b/notes.txt
+new file mode 100644
+index 0000000000000000000000000000000000000000..3333333333333333333333333333333333333333
+--- /dev/null
++++ b/notes.txt
+@@ -0,0 +1,2 @@
++one
++two
+`);
+  const moved = text(`diff --git a/search.ts b/finder.ts
+similarity index 90%
+rename from search.ts
+rename to finder.ts
+index 1111111111111111111111111111111111111111..2222222222222222222222222222222222222222 100644
+--- a/search.ts
++++ b/finder.ts
+@@ -1,2 +1,2 @@
+ one
+-two
++TWO
+`);
+
+  it("stages and discards an unstaged diff and unstages a staged one", () => {
+    expect(partActions(edit, both, "unstaged")).toEqual(["stage", "discard"]);
+    expect(partActions(edit, both, "staged")).toEqual(["unstage"]);
+    expect(partActions(created, untracked, "unstaged")).toEqual([
+      "stage",
+      "discard",
+    ]);
+    expect(partActions(moved, renamed, "staged")).toEqual(["unstage"]);
+  });
+
+  it("only stages a file added with git add -N", () => {
+    const intent = ordinary({ kind: "unstaged", unstaged: "A" }, null);
+    expect(partActions(created, intent, "unstaged")).toEqual(["stage"]);
+  });
+
+  it("writes no part of a diff wherever the core refuses to", () => {
+    const refusals: [
+      string,
+      WorktreePatch,
+      StatusEntry | undefined,
+      ListSide,
+    ][] = [
+      ["a conflict", edit, unmerged, "conflict"],
+      ["a file in the conflict list", edit, both, "conflict"],
+      [
+        "a conflict's diff",
+        {
+          kind: "conflicted",
+          conflict: "bothModified",
+          diff: { kind: "text", patch: edited, lossy: false },
+        },
+        unmerged,
+        "conflict",
+      ],
+      [
+        "a binary file",
+        { kind: "diff", diff: { kind: "binary" } },
+        both,
+        "unstaged",
+      ],
+      [
+        "a diff too large to show",
+        { kind: "diff", diff: { kind: "tooLarge", bytes: 2_000_000 } },
+        both,
+        "unstaged",
+      ],
+      [
+        "a submodule's change",
+        { kind: "submodule", submodule },
+        both,
+        "unstaged",
+      ],
+      ["a submodule entry", edit, { ...both, submodule }, "unstaged"],
+      [
+        "a move git add -N started",
+        moved,
+        { ...renamed, side: { kind: "unstaged", original: blob("b") } },
+        "unstaged",
+      ],
+      [
+        "a name that was not valid UTF-8",
+        edit,
+        { ...both, path: "odd\uFFFD.txt" },
+        "unstaged",
+      ],
+      [
+        "an untracked name that was not valid UTF-8",
+        created,
+        { ...untracked, path: "odd\uFFFD.txt" },
+        "unstaged",
+      ],
+      [
+        "a symbolic link",
+        text(`diff --git a/link b/link
+index 1de565933b05f74c75ff9a6520af5f9f8a5a2f1d..27fa34919ae70aa0d7eaccdfbf393cfc440e7d25 120000
+--- a/link
++++ b/link
+@@ -1 +1 @@
+-target-one
+\\ No newline at end of file
++target-two
+\\ No newline at end of file
+`),
+        both,
+        "unstaged",
+      ],
+      [
+        "a gitlink",
+        text(`diff --git a/sub b/sub
+index 1111111111111111111111111111111111111111..2222222222222222222222222222222222222222 160000
+--- a/sub
++++ b/sub
+@@ -1 +1 @@
+-Subproject commit 1111111111111111111111111111111111111111
++Subproject commit 2222222222222222222222222222222222222222
+`),
+        both,
+        "unstaged",
+      ],
+      [
+        "a copy",
+        text(`diff --git a/old.txt b/copy.txt
+similarity index 80%
+copy from old.txt
+copy to copy.txt
+index 1111111111111111111111111111111111111111..2222222222222222222222222222222222222222 100644
+--- a/old.txt
++++ b/copy.txt
+@@ -1,2 +1,2 @@
+ one
+-two
++TWO
+`),
+        both,
+        "unstaged",
+      ],
+      [
+        "a type change, which Git shows as two changes",
+        text(`diff --git a/x b/x
+deleted file mode 100644
+index 1111111111111111111111111111111111111111..0000000000000000000000000000000000000000
+--- a/x
++++ /dev/null
+@@ -1 +0,0 @@
+-t
+diff --git a/x b/x
+new file mode 120000
+index 0000000000000000000000000000000000000000..2222222222222222222222222222222222222222
+--- /dev/null
++++ b/x
+@@ -0,0 +1 @@
++t
+\\ No newline at end of file
+`),
+        both,
+        "unstaged",
+      ],
+      [
+        "a mode change with no hunk",
+        text(`diff --git a/x.sh b/x.sh
+old mode 100644
+new mode 100755
+`),
+        both,
+        "unstaged",
+      ],
+      [
+        "lines that disagree with their hunk header",
+        text(edited.replace("\n \n", "\n\n")),
+        both,
+        "unstaged",
+      ],
+      ["a path the status no longer lists", edit, undefined, "unstaged"],
+    ];
+    for (const [refusal, patch, entry, side] of refusals)
+      expect(partActions(patch, entry, side), refusal).toEqual([]);
+  });
+});
+
+group("partWrite", () => {
+  const shown = "diff --git a/a.txt b/a.txt\n";
+  it("sends the hunk or the lines with the shown patch and HEAD", () => {
+    expect(
+      partWrite("stage", status, "a.txt", shown, { kind: "hunk", hunk: 2 }),
+    ).toEqual({
+      operation: { kind: "stageHunk", path: "a.txt", hunk: 2, shown },
+      expect: { head },
+    });
+    const lines = [{ side: "deletions" as const, line: 5 }];
+    expect(
+      partWrite("discard", status, "a.txt", shown, { kind: "lines", lines })
+        .operation,
+    ).toEqual({ kind: "discardLines", path: "a.txt", lines, shown });
+    expect(
+      partWrite("unstage", status, "a.txt", shown, { kind: "hunk", hunk: 0 })
+        .operation.kind,
+    ).toBe("unstageHunk");
   });
 });
 

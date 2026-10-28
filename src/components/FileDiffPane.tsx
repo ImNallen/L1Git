@@ -7,7 +7,7 @@ import { clampMessage, conflictLabels } from "../domain/worktree";
 import type { ListSide } from "../domain/worktree";
 import type { FileDiffState } from "../useWorkspace";
 import { Diff } from "./FilePatchView";
-import type { DiffStyle } from "./FilePatchView";
+import type { DiffStyle, Parts } from "./FilePatchView";
 import { FileBlame, FileHistory } from "./FileRevisions";
 import type { Revision } from "./FileRevisions";
 
@@ -40,6 +40,7 @@ type Props = {
   onRefresh: () => void;
   selectable: (oid: Oid) => boolean;
   onSelectCommit: (oid: Oid) => void;
+  parts: Parts | null;
 };
 
 /** History and blame read the file in the target commit, which a worktree does not have. */
@@ -65,6 +66,7 @@ export function FileDiffPane({
   onRefresh,
   selectable,
   onSelectCommit,
+  parts,
 }: Props) {
   const backRef = useRef<HTMLButtonElement>(null);
   const [mode, setMode] = useState<"diff" | "history" | "blame">("diff");
@@ -198,7 +200,7 @@ export function FileDiffPane({
           )}
         </>
       ) : (
-        <Diff diff={state.patch.diff} {...look} />
+        <Diff diff={state.patch.diff} {...look} parts={parts} />
       )}
     </section>
   );

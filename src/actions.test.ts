@@ -61,6 +61,7 @@ function commands(): Commands {
     focusCommit: vi.fn(),
     undo: vi.fn(),
     redo: vi.fn(),
+    writeLines: vi.fn(),
   };
 }
 
@@ -171,7 +172,7 @@ describe("command palette", () => {
       repository: { fetching: true, idle: false, ready: 2 },
       selection: { kind: "commit", oid: "a".repeat(40) as Oid },
       compare: { swappable: true },
-      file: { hasCommit: false },
+      file: { hasCommit: false, lineActions: [] },
       sidebarBranch: {
         name: "feature/fetch-retry",
         visibility: "hidden",
@@ -205,7 +206,7 @@ describe("command palette", () => {
     const ready: ActionContext = {
       ...repositoryScreen,
       repository: { fetching: false, idle: true, ready: 1 },
-      file: { hasCommit: true },
+      file: { hasCommit: true, lineActions: [] },
       sidebarBranch: { name: "main", visibility: "soloed", outOfView: false },
       rule: "solo",
     };
@@ -296,7 +297,7 @@ describe("command palette", () => {
     expect(
       shortcut(
         paletteItems(
-          { ...repositoryScreen, file: { hasCommit: true } },
+          { ...repositoryScreen, file: { hasCommit: true, lineActions: [] } },
           commands(),
           true,
           [],
@@ -345,7 +346,7 @@ describe("shortcuts", () => {
     ).toBeNull();
     expect(
       id(
-        { ...repositoryScreen, file: { hasCommit: true } },
+        { ...repositoryScreen, file: { hasCommit: true, lineActions: [] } },
         key("f", { metaKey: true }),
       ),
     ).toBeNull();
@@ -357,9 +358,10 @@ describe("shortcuts", () => {
   it("closes a file or leaves Settings with Escape unless a dialog owns it", () => {
     const file: ActionContext = {
       ...repositoryScreen,
-      file: { hasCommit: true },
+      file: { hasCommit: true, lineActions: [] },
     };
     expect(id(file, key("Escape"))).toBe("closeFile");
+    expect(id({ ...file, dialogOpen: true }, key("Escape"))).toBeNull();
     expect(id({ ...file, adding: true }, key("Escape"))).toBeNull();
     expect(id(repositoryScreen, key("Escape"))).toBeNull();
     const settings: ActionContext = { ...repositoryScreen, screen: "settings" };
@@ -399,6 +401,40 @@ describe("staging and undo", () => {
     ).toEqual(["Unstage all"]);
     expect(titles({ ...unstaged, writing: true }, "stage")).toEqual([]);
     expect(titles(repositoryScreen, "stage")).toEqual([]);
+  });
+
+  it("offers line writes only for a range of changed lines in a worktree diff", () => {
+    const diff = (lines: ActionContext["file"]) => ({
+      ...repositoryScreen,
+      file: lines,
+    });
+    const unstaged = diff({
+      hasCommit: false,
+      lineActions: ["stage", "discard"],
+    });
+    expect(titles(unstaged, "chosen lines")).toEqual([
+      "Stage chosen lines",
+      "Discard chosen lines…",
+    ]);
+    expect(
+      titles(
+        diff({ hasCommit: false, lineActions: ["unstage"] }),
+        "chosen lines",
+      ),
+    ).toEqual(["Unstage chosen lines"]);
+    expect(
+      titles(diff({ hasCommit: false, lineActions: [] }), "chosen lines"),
+    ).toEqual([]);
+    expect(titles(diff({ hasCommit: true, lineActions: [] }), "lines")).toEqual(
+      [],
+    );
+    expect(titles(diff(null), "lines")).toEqual([]);
+    expect(titles({ ...unstaged, writing: true }, "lines")).toEqual([]);
+    const run = commands();
+    paletteItems(unstaged, run, true, [], null)
+      .find((item) => item.title === "Discard chosen lines…")
+      ?.run();
+    expect(run.writeLines).toHaveBeenCalledWith("discard");
   });
 
   it("offers Discard all changes only with unstaged files it can discard", () => {

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { SelectedLineRange } from "@pierre/diffs";
 import * as repositories from "./repositories";
 import { firstChangedPath } from "./domain/changedFiles";
 import {
@@ -19,6 +20,7 @@ import {
   restoreCatalog,
 } from "./domain/recents";
 import type { Catalog } from "./domain/recents";
+import { shownText } from "./domain/lineSelection";
 import { problemFrom } from "./domain/repository";
 import {
   cacheSnapshot,
@@ -92,8 +94,25 @@ type FileKey = { root: RepositoryRoot; path: string } & (
 export type FileDiffState =
   | { kind: "closed" }
   | ({ kind: "loading" } & FileKey)
-  | ({ kind: "ready"; patch: WorktreePatch } & FileKey)
+  | ({
+      kind: "ready";
+      patch: WorktreePatch;
+      range: SelectedLineRange | null;
+    } & FileKey)
   | ({ kind: "error"; error: Problem } & FileKey);
+
+/** Line numbers move when the patch text changes, so a range outlives a reread only when the text is the same. */
+function rangeAfterReread(
+  shown: FileDiffState,
+  side: ListSide | null,
+  patch: WorktreePatch,
+): SelectedLineRange | null {
+  return shown.kind === "ready" &&
+    shown.side === side &&
+    shownText(shown.patch) === shownText(patch)
+    ? shown.range
+    : null;
+}
 
 function sameChanges(
   left: WorktreeChanges | undefined,
@@ -402,6 +421,15 @@ export function useWorkspace() {
   }, [root, selection, comparison]);
 
   const closeFile = useCallback(() => setFileDiff({ kind: "closed" }), []);
+  const selectRange = useCallback(
+    (range: SelectedLineRange | null) =>
+      setFileDiff((state) =>
+        state.kind === "ready" && state.range !== range
+          ? { ...state, range }
+          : state,
+      ),
+    [],
+  );
 
   const select = useCallback((next: Selection) => {
     setCompare(null);
@@ -442,7 +470,14 @@ export function useWorkspace() {
     void reading.then(
       (patch) =>
         setFileDiff((state) =>
-          pending(state) ? { kind: "ready", ...key, patch } : state,
+          pending(state)
+            ? {
+                kind: "ready",
+                ...key,
+                patch,
+                range: rangeAfterReread(state, key.side, patch),
+              }
+            : state,
         ),
       (error: unknown) => {
         const problem = problemFrom(error);
@@ -563,6 +598,7 @@ export function useWorkspace() {
         setPendingOpen({ root, selection, compare: activeCompare });
     },
     closeFile,
+    selectRange,
     selectRepository,
     addRepository,
     removeRepository,

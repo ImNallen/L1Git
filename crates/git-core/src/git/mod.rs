@@ -32,6 +32,8 @@ fn base(path: &Path, lazy_fetch: bool) -> Command {
             "-c",
             "color.ui=false",
             "-c",
+            "diff.suppressBlankEmpty=false",
+            "-c",
             "log.showSignature=false",
             "-c",
             "core.quotePath=false",
