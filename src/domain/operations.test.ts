@@ -2,9 +2,11 @@ import { describe as group, expect, it } from "vitest";
 import {
   commitWrite,
   describe,
+  discardChoice,
   failureText,
   movesRefs,
   rereadsRepository,
+  shownPaths,
   stepButton,
   writeFor,
 } from "./operations";
@@ -154,6 +156,70 @@ group("describe", () => {
     expect(describe({ kind: "stageFiles", entries: [unmerged] })).toBe(
       "Mark clash.txt resolved",
     );
+  });
+});
+
+group("discard", () => {
+  it("names a discard by its files", () => {
+    expect(describe({ kind: "discard", entries: [modified] })).toBe(
+      "Discard README.md",
+    );
+    expect(describe({ kind: "discard", entries: [modified, untracked] })).toBe(
+      "Discard 2 files",
+    );
+  });
+
+  it("lists up to ten paths, then counts the rest", () => {
+    const paths = (count: number) =>
+      Array.from({ length: count }, (_, at) => `file-${at + 1}.txt`);
+    expect(shownPaths(paths(3))).toEqual({
+      shown: ["file-1.txt", "file-2.txt", "file-3.txt"],
+      more: 0,
+    });
+    expect(shownPaths(paths(12))).toEqual({
+      shown: [
+        "file-1.txt",
+        "file-2.txt",
+        "file-3.txt",
+        "file-4.txt",
+        "file-5.txt",
+        "file-6.txt",
+        "file-7.txt",
+        "file-8.txt",
+        "file-9.txt",
+        "file-10.txt",
+      ],
+      more: 2,
+    });
+  });
+
+  it("leaves submodules, nested repositories, git add -N files, and conflicts", () => {
+    const entries: StatusEntry[] = [
+      modified,
+      untracked,
+      { kind: "untracked", path: "nested/" },
+      {
+        ...modified,
+        path: "sub",
+        submodule: { commitChanged: true, modified: false, untracked: false },
+      },
+      { ...modified, path: "added.txt", index: null },
+      unmerged,
+      {
+        ...renamed,
+        side: { kind: "staged", unstaged: "M", index: blob("b") },
+      },
+    ];
+    expect(
+      discardChoice({ ...status, entries }, [
+        "README.md",
+        "notes.txt",
+        "nested/",
+        "sub",
+        "added.txt",
+        "finder.ts",
+      ]),
+    ).toEqual({ paths: ["README.md", "notes.txt", "finder.ts"], skipped: 3 });
   });
 });
 

@@ -1,6 +1,6 @@
 use super::{
     Applied, Change, Operation, Repo,
-    store::{LockedStore, Log, Step},
+    store::{LockedStore, Log, Recorded, Step},
 };
 use crate::{
     ErrorKind, RepositoryError,
@@ -15,8 +15,6 @@ const PREFIX: &str = "l1git-";
 
 pub(crate) const HOOK_OFF: &str = "L1GIT_HOOK_OFF";
 
-/// Only `commit_write` and `commit_step` replace the index with the copy, so
-/// nothing reaches the index before the undo history names it.
 pub(crate) struct Txn<'r> {
     repo: &'r Repo,
     lock: PathBuf,
@@ -201,6 +199,16 @@ impl<'r> Txn<'r> {
         Ok((applied, published))
     }
 
+    pub(super) fn commit_recorded(
+        mut self,
+        recorded: Recorded<'_>,
+        change: &Change,
+    ) -> Result<Published, RepositoryError> {
+        let published = self.publish(change);
+        recorded.confirm();
+        published
+    }
+
     /// Replaces the index with an undo or redo of the entry the log names
     /// next, then saves the stepped log. A crash between the two leaves the
     /// log one step behind, and repeating the step finds nothing left to do.
@@ -233,6 +241,7 @@ impl<'r> Txn<'r> {
             root: self.repo.root.clone(),
             deadline: self.deadline,
             skip_worktree: change.touches_skip_worktree(),
+            worktree_updated: matches!(change, Change::Discard(_)),
             hooks: self.hooks.any(),
         })
     }
@@ -345,6 +354,7 @@ pub(crate) struct Published {
     root: PathBuf,
     deadline: WriteDeadline,
     skip_worktree: bool,
+    worktree_updated: bool,
     hooks: bool,
 }
 
@@ -355,6 +365,10 @@ impl Published {
 
     pub(crate) const fn skip_worktree(&self) -> bool {
         self.skip_worktree
+    }
+
+    pub(crate) const fn worktree_updated(&self) -> bool {
+        self.worktree_updated
     }
 
     /// Runs `post-index-change` after the write let go of its locks, as Git

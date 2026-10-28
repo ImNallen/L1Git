@@ -1,4 +1,4 @@
-use super::{Capped, Deadline, Work, base, execute, text, too_old};
+use super::{Capped, Deadline, Work, base, execute, text, too_old, without_prompts};
 use crate::{
     ErrorKind, RepositoryError, StaleReason, stderr,
     write::{CommitTxn, HOOK_OFF, Outside, Published, RefTxn, Txn},
@@ -17,6 +17,7 @@ pub(crate) enum LocalWrite {
     Commit,
     Amend,
     EditMessage,
+    Discard,
     Undo,
     Redo,
 }
@@ -25,6 +26,7 @@ impl LocalWrite {
     pub(crate) const fn budget(self) -> Duration {
         Duration::from_secs(match self {
             Self::StageFiles | Self::UnstageFiles | Self::Undo | Self::Redo => 120,
+            Self::Discard => 300,
             Self::Commit | Self::Amend | Self::EditMessage => 600,
         })
     }
@@ -36,6 +38,7 @@ impl LocalWrite {
             Self::Commit => "Committing",
             Self::Amend => "Amending the commit",
             Self::EditMessage => "Editing the commit message",
+            Self::Discard => "Discarding the changes",
             Self::Undo => "Undoing the change",
             Self::Redo => "Redoing the change",
         }
@@ -48,6 +51,7 @@ impl LocalWrite {
             Self::Commit => "l1git commit",
             Self::Amend => "l1git amend",
             Self::EditMessage => "l1git edit message",
+            Self::Discard => "l1git discard",
             Self::Undo => "l1git undo",
             Self::Redo => "l1git redo",
         }
@@ -61,6 +65,7 @@ impl LocalWrite {
             Self::Commit | Self::Amend | Self::EditMessage => {
                 "Git may have finished the commit, so check the history."
             }
+            Self::Discard => "No file changed.",
         }
     }
 }
@@ -98,6 +103,7 @@ pub(crate) struct Write<'a> {
     input: Option<Vec<u8>>,
     cap: Option<usize>,
     as_user: bool,
+    lazy_fetch: bool,
 }
 
 const WRITE_STDOUT_CAP: usize = 1024 * 1024;
@@ -125,6 +131,7 @@ impl<'a> Write<'a> {
             input: None,
             cap: Some(WRITE_STDOUT_CAP),
             as_user: false,
+            lazy_fetch: false,
         }
     }
 
@@ -138,6 +145,7 @@ impl<'a> Write<'a> {
             input: None,
             cap: Some(WRITE_STDOUT_CAP),
             as_user: false,
+            lazy_fetch: false,
         }
     }
 
@@ -151,6 +159,7 @@ impl<'a> Write<'a> {
             input: Some(message.as_bytes().to_vec()),
             cap: None,
             as_user: true,
+            lazy_fetch: false,
         }
     }
 
@@ -162,6 +171,7 @@ impl<'a> Write<'a> {
             input: Some(input),
             cap: Some(WRITE_STDOUT_CAP),
             as_user: true,
+            lazy_fetch: false,
         }
     }
 
@@ -174,13 +184,18 @@ impl<'a> Write<'a> {
                 "--ignore-missing",
                 "post-index-change",
                 "--",
-                "0",
+                if published.worktree_updated() {
+                    "1"
+                } else {
+                    "0"
+                },
                 if published.skip_worktree() { "1" } else { "0" },
             ],
             env: Vec::new(),
             input: None,
             cap: Some(WRITE_STDOUT_CAP),
             as_user: false,
+            lazy_fetch: false,
         }
     }
 
@@ -206,6 +221,11 @@ impl<'a> Write<'a> {
         self
     }
 
+    pub(crate) fn lazy_fetch_unprompted(mut self) -> Self {
+        self.lazy_fetch = true;
+        self
+    }
+
     pub(crate) fn uncapped(mut self) -> Self {
         self.cap = None;
         self
@@ -216,8 +236,11 @@ impl<'a> Write<'a> {
         let mut command = if self.as_user {
             as_user(self.dir)
         } else {
-            let mut command = base(self.dir, false);
+            let mut command = base(self.dir, self.lazy_fetch);
             command.env("GIT_REFLOG_ACTION", write.reflog_action());
+            if self.lazy_fetch {
+                without_prompts(&mut command);
+            }
             command
         };
         command.args(&self.args).env("GIT_EDITOR", ":");

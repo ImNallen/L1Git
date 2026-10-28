@@ -5,6 +5,7 @@ import type {
   Expect,
   Operation,
   Problem,
+  StatusEntry,
   WorktreeStatus,
 } from "./repository";
 
@@ -40,6 +41,55 @@ export function commitWrite(
 
 export const movesRefs = (operation: Operation) => !("entries" in operation);
 
+export function discardable(entry: StatusEntry): boolean {
+  switch (entry.kind) {
+    case "ordinary": {
+      const addedWithIntent = entry.index === null;
+      return (
+        entry.submodule === null &&
+        !addedWithIntent &&
+        entry.sides.kind !== "staged"
+      );
+    }
+    case "renamed":
+      return (
+        entry.submodule === null &&
+        entry.side.kind === "staged" &&
+        entry.side.unstaged !== null
+      );
+    case "untracked": {
+      const nestedRepository = entry.path.endsWith("/");
+      return !nestedRepository;
+    }
+    case "unmerged":
+      return false;
+  }
+}
+
+export const discardablePaths = (status: WorktreeStatus): ReadonlySet<string> =>
+  new Set(status.entries.filter(discardable).map((entry) => entry.path));
+
+export function discardChoice(
+  status: WorktreeStatus,
+  paths: readonly string[],
+): { paths: string[]; skipped: number } {
+  const able = discardablePaths(status);
+  const kept = paths.filter((path) => able.has(path));
+  return { paths: kept, skipped: paths.length - kept.length };
+}
+
+const SHOWN_PATHS = 10;
+
+export function shownPaths(paths: readonly string[]): {
+  shown: readonly string[];
+  more: number;
+} {
+  return {
+    shown: paths.slice(0, SHOWN_PATHS),
+    more: Math.max(0, paths.length - SHOWN_PATHS),
+  };
+}
+
 const SUBJECT_LIMIT = 60;
 
 function quoted(message: string): string {
@@ -51,6 +101,12 @@ const commitVerbs: Record<CommitWrite, string> = {
   commit: "Commit",
   amend: "Amend",
   editMessage: "Edit message to",
+};
+
+const fileVerbs: Record<FileWrite, string> = {
+  stageFiles: "Stage",
+  unstageFiles: "Unstage",
+  discard: "Discard",
 };
 
 function folderOf(path: string): string[] {
@@ -81,7 +137,7 @@ export function describe(operation: Operation): string {
       ? paths[0]
       : `${paths.length.toLocaleString()} files${folder === "" ? "" : ` in ${folder}`}`;
   if (resolving) return `Mark ${files} resolved`;
-  return `${operation.kind === "stageFiles" ? "Stage" : "Unstage"} ${files}`;
+  return `${fileVerbs[operation.kind]} ${files}`;
 }
 
 export type Step = "undo" | "redo";

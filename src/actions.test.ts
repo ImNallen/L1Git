@@ -57,6 +57,7 @@ function commands(): Commands {
     showStash: vi.fn(),
     stageAll: vi.fn(),
     unstageAll: vi.fn(),
+    discardAll: vi.fn(),
     focusCommit: vi.fn(),
     undo: vi.fn(),
     redo: vi.fn(),
@@ -387,24 +388,46 @@ describe("staging and undo", () => {
   it("offers Stage all and Unstage all only for a list with files", () => {
     const unstaged: ActionContext = {
       ...repositoryScreen,
-      worktree: { unstaged: 2, staged: 0 },
+      worktree: { unstaged: 2, staged: 0, discardable: 2 },
     };
     expect(titles(unstaged, "stage all")).toEqual(["Stage all"]);
     expect(
-      titles({ ...unstaged, worktree: { unstaged: 0, staged: 1 } }, "stage"),
+      titles(
+        { ...unstaged, worktree: { unstaged: 0, staged: 1, discardable: 0 } },
+        "stage",
+      ),
     ).toEqual(["Unstage all"]);
     expect(titles({ ...unstaged, writing: true }, "stage")).toEqual([]);
     expect(titles(repositoryScreen, "stage")).toEqual([]);
   });
 
+  it("offers Discard all changes only with unstaged files it can discard", () => {
+    const unstaged: ActionContext = {
+      ...repositoryScreen,
+      worktree: { unstaged: 2, staged: 0, discardable: 1 },
+    };
+    expect(titles(unstaged, "discard")).toEqual(["Discard all changes…"]);
+    expect(
+      titles(
+        { ...unstaged, worktree: { unstaged: 1, staged: 3, discardable: 0 } },
+        "discard",
+      ),
+    ).toEqual([]);
+    expect(titles({ ...unstaged, writing: true }, "discard")).toEqual([]);
+    expect(titles(repositoryScreen, "discard")).toEqual([]);
+  });
+
   it("offers Commit only with staged files", () => {
     const staged: ActionContext = {
       ...repositoryScreen,
-      worktree: { unstaged: 0, staged: 1 },
+      worktree: { unstaged: 0, staged: 1, discardable: 0 },
     };
     expect(titles(staged, "commit…")).toEqual(["Commit…"]);
     expect(
-      titles({ ...staged, worktree: { unstaged: 3, staged: 0 } }, "commit…"),
+      titles(
+        { ...staged, worktree: { unstaged: 3, staged: 0, discardable: 3 } },
+        "commit…",
+      ),
     ).toEqual([]);
     expect(titles({ ...staged, writing: true }, "commit…")).toEqual([]);
   });

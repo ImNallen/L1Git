@@ -16,12 +16,12 @@ use std::{
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct IndexEntry {
-    mode: Mode,
-    oid: Oid,
-    stage: u8,
-    intent_to_add: bool,
-    skip_worktree: bool,
-    assume_unchanged: bool,
+    pub(super) mode: Mode,
+    pub(super) oid: Oid,
+    pub(super) stage: u8,
+    pub(super) intent_to_add: bool,
+    pub(super) skip_worktree: bool,
+    pub(super) assume_unchanged: bool,
 }
 
 const ASSUME_UNCHANGED: u32 = 0x8000;
@@ -583,11 +583,11 @@ pub(super) fn landed(
         .all(|path| at(&rows, &path.path) == path.after))
 }
 
-type Rows = BTreeMap<Vec<u8>, Vec<IndexEntry>>;
+pub(super) type Rows = BTreeMap<Vec<u8>, Vec<IndexEntry>>;
 
 const LS_FILES: [&str; 4] = ["ls-files", "--stage", "--debug", "-z"];
 
-fn at<'r>(rows: &'r Rows, path: &str) -> &'r [IndexEntry] {
+pub(super) fn at<'r>(rows: &'r Rows, path: &str) -> &'r [IndexEntry] {
     rows.get(path.as_bytes()).map_or(&[], Vec::as_slice)
 }
 
@@ -623,14 +623,14 @@ fn unnamed(changed: &[&[u8]], named: impl Fn(&str) -> bool) -> Vec<String> {
         .collect()
 }
 
-fn nul_separated<'p>(paths: impl IntoIterator<Item = &'p str>) -> Vec<u8> {
+pub(super) fn nul_separated<'p>(paths: impl IntoIterator<Item = &'p str>) -> Vec<u8> {
     paths
         .into_iter()
         .flat_map(|path| path.bytes().chain([0]))
         .collect()
 }
 
-fn read(txn: &Txn<'_>) -> Result<Rows, RepositoryError> {
+pub(super) fn read(txn: &Txn<'_>) -> Result<Rows, RepositoryError> {
     parse_debug(
         &txn.git(&LS_FILES)
             .uncapped()

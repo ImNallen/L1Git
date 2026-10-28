@@ -22,7 +22,7 @@ import {
 } from "../themes/palette";
 import { AddThemeDialog } from "./AddThemeDialog";
 import { CreateThemePanel } from "./CreateThemePanel";
-import { DeleteThemeDialog } from "./DeleteThemeDialog";
+import { ConfirmDialog } from "./ConfirmDialog";
 
 type Props = { appearance: AppearanceState };
 
@@ -209,6 +209,7 @@ function ThemeCard({
 
 export function AppearanceSettings({ appearance }: Props) {
   const heading = useRef<HTMLHeadingElement>(null);
+  const themesHeading = useRef<HTMLHeadingElement>(null);
   useEffect(() => heading.current?.focus(), []);
   const { settings, variant, persistenceError, nativeError } = appearance;
   const [draft, setDraft] = useState<{ key: number; draft: ThemeDraft } | null>(
@@ -260,7 +261,12 @@ export function AppearanceSettings({ appearance }: Props) {
         <section className="settings-group" aria-labelledby="themes-heading">
           <div className="settings-group-header">
             <div>
-              <h2 id="themes-heading" className="settings-section-title">
+              <h2
+                id="themes-heading"
+                className="settings-section-title"
+                tabIndex={-1}
+                ref={themesHeading}
+              >
                 Themes
               </h2>
               <p className="settings-group-description">
@@ -330,11 +336,22 @@ export function AppearanceSettings({ appearance }: Props) {
         />
       )}
       {deleting && (
-        <DeleteThemeDialog
-          name={deleting.name}
-          onDelete={() => appearance.deleteTheme(deleting.id)}
+        <ConfirmDialog
+          icon={Trash2}
+          title={`Delete ${deleting.name}?`}
+          closeLabel="Close delete theme"
+          confirm="Delete theme"
+          onConfirm={() => {
+            appearance.deleteTheme(deleting.id);
+            themesHeading.current?.focus();
+          }}
           onClose={() => setDeleting(null)}
-        />
+        >
+          <p>
+            The theme is removed from your themes. If light or dark mode uses
+            it, that mode goes back to L1.
+          </p>
+        </ConfirmDialog>
       )}
     </section>
   );

@@ -1,0 +1,883 @@
+#![cfg(unix)]
+
+use l1_git_core::{
+    Applied, Coordinator, ErrorKind, Expect, Limits, Operation, RepositoryError, StaleReason,
+    StatusEntry, worktree_status,
+};
+use std::{
+    collections::BTreeMap,
+    fs,
+    os::unix::fs::{PermissionsExt, symlink},
+    path::{Path, PathBuf},
+    process::{Command, Stdio},
+};
+use tempfile::TempDir;
+
+fn git(path: &Path, args: &[&str]) -> String {
+    let mut command = Command::new("git");
+    for (key, _) in std::env::vars_os() {
+        if key.to_string_lossy().starts_with("GIT_") {
+            command.env_remove(key);
+        }
+    }
+    let output = command
+        .arg("-C")
+        .arg(path)
+        .args(args)
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).unwrap()
+}
+
+struct Repo {
+    directory: TempDir,
+    root: PathBuf,
+}
+
+impl Repo {
+    fn new(files: &[(&str, &str)]) -> Self {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().canonicalize().unwrap().join("repo");
+        fs::create_dir(&root).unwrap();
+        let repo = Self { directory, root };
+        repo.git(&["init", "--quiet", "--initial-branch=main"]);
+        for (key, value) in [
+            ("user.name", "Ada"),
+            ("user.email", "ada@example.test"),
+            ("commit.gpgSign", "false"),
+            ("core.hooksPath", "/dev/null"),
+        ] {
+            repo.git(&["config", key, value]);
+        }
+        for (path, contents) in files {
+            repo.put(path, contents);
+        }
+        repo.git(&["add", "-A"]);
+        repo.git(&["commit", "--quiet", "--allow-empty", "-m", "initial"]);
+        repo
+    }
+
+    fn path(&self) -> &str {
+        self.root.to_str().unwrap()
+    }
+
+    fn coordinator(&self) -> Coordinator {
+        Coordinator::new(Limits::default(), self.directory.path().join("undo"))
+    }
+
+    fn put(&self, path: &str, contents: &str) {
+        let file = self.root.join(path);
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(file, contents).unwrap();
+    }
+
+    fn git(&self, args: &[&str]) -> String {
+        git(&self.root, args)
+    }
+
+    fn status(&self) -> String {
+        self.git(&["status", "--porcelain", "--untracked-files=all"])
+    }
+
+    fn request(&self, paths: &[&str]) -> (Operation, Expect) {
+        let status = worktree_status(self.path()).unwrap();
+        let entries: Vec<StatusEntry> = status
+            .entries
+            .into_iter()
+            .filter(|entry| paths.contains(&path_of(entry)))
+            .collect();
+        assert_eq!(entries.len(), paths.len(), "{paths:?}");
+        (Operation::Discard { entries }, Expect { head: status.head })
+    }
+
+    fn discard(&self, paths: &[&str]) -> Result<Applied, RepositoryError> {
+        let (operation, expect) = self.request(paths);
+        self.coordinator().write(self.path(), &operation, &expect)
+    }
+
+    fn unstaged(&self) -> Vec<String> {
+        worktree_status(self.path())
+            .unwrap()
+            .entries
+            .iter()
+            .map(|entry| path_of(entry).to_owned())
+            .collect()
+    }
+
+    fn disk(&self) -> BTreeMap<String, String> {
+        let mut found = BTreeMap::new();
+        let mut folders = vec![self.root.clone()];
+        while let Some(folder) = folders.pop() {
+            for item in fs::read_dir(&folder).unwrap() {
+                let path = item.unwrap().path();
+                let name = path.strip_prefix(&self.root).unwrap().display().to_string();
+                if name == ".git" {
+                    continue;
+                }
+                let metadata = fs::symlink_metadata(&path).unwrap();
+                let shown = if metadata.is_symlink() {
+                    format!("link {}", fs::read_link(&path).unwrap().display())
+                } else if metadata.is_dir() {
+                    folders.push(path);
+                    continue;
+                } else {
+                    format!(
+                        "{:o} {:?}",
+                        metadata.permissions().mode() & 0o7777,
+                        fs::read(&path).unwrap()
+                    )
+                };
+                found.insert(name, shown);
+            }
+        }
+        found
+    }
+}
+
+fn path_of(entry: &StatusEntry) -> &str {
+    match entry {
+        StatusEntry::Ordinary { path, .. }
+        | StatusEntry::Renamed { path, .. }
+        | StatusEntry::Unmerged { path, .. }
+        | StatusEntry::Untracked { path } => path,
+    }
+}
+
+fn refused(result: Result<Applied, RepositoryError>, kind: &ErrorKind) -> RepositoryError {
+    let error = result.expect_err("the discard should refuse");
+    assert_eq!(&error.kind, kind, "{}", error.message);
+    error
+}
+
+fn stale(reason: StaleReason) -> ErrorKind {
+    ErrorKind::StaleView { reason }
+}
+
+fn executable(file: &Path, on: bool) {
+    fs::set_permissions(
+        file,
+        fs::Permissions::from_mode(if on { 0o755 } else { 0o644 }),
+    )
+    .unwrap();
+}
+
+fn filtered() -> Repo {
+    let repo = Repo::new(&[]);
+    let filters = repo.directory.path().join("filters");
+    fs::create_dir(&filters).unwrap();
+    for (name, script) in [
+        (
+            "fakelfs-clean",
+            "#!/bin/sh\nd=\"$(git rev-parse --git-dir)/fakelfs\"; mkdir -p \"$d\"; t=$(mktemp); cat > \"$t\"; s=$(shasum -a 256 < \"$t\" | cut -c1-64); mv \"$t\" \"$d/$s\"; echo \"fakelfs-pointer $s\"\n",
+        ),
+        (
+            "fakelfs-smudge",
+            "#!/bin/sh\nread tag s; d=\"$(git rev-parse --git-dir)/fakelfs\"; if [ \"$tag\" = fakelfs-pointer ] && [ -f \"$d/$s\" ]; then cat \"$d/$s\"; else echo \"$tag $s\"; fi\n",
+        ),
+    ] {
+        let file = filters.join(name);
+        fs::write(&file, script).unwrap();
+        executable(&file, true);
+    }
+    for (key, value) in [
+        ("filter.strip.clean", "grep -v '^OUTPUT:'".to_owned()),
+        ("filter.strip.smudge", "cat".to_owned()),
+        (
+            "filter.fakelfs.clean",
+            filters.join("fakelfs-clean").display().to_string(),
+        ),
+        (
+            "filter.fakelfs.smudge",
+            filters.join("fakelfs-smudge").display().to_string(),
+        ),
+        ("filter.fakelfs.required", "true".to_owned()),
+    ] {
+        repo.git(&["config", key, &value]);
+    }
+    repo.put(
+        ".gitattributes",
+        "*.nb filter=strip\n*.bin filter=fakelfs\n*.crlf text eol=crlf\n",
+    );
+    for (path, contents) in [
+        ("n.nb", "cell\n"),
+        ("x.sh", "v1\n"),
+        ("big.bin", "blob-v1\n"),
+        ("w.crlf", "a\r\nb\r\n"),
+        ("target-one", "t\n"),
+        ("secret.txt", "old\n"),
+    ] {
+        repo.put(path, contents);
+    }
+    symlink("target-one", repo.root.join("link")).unwrap();
+    repo.git(&["add", "-A"]);
+    repo.git(&["commit", "--quiet", "-m", "base"]);
+    repo.put("n.nb", "cell2\nOUTPUT: 42\n");
+    repo.put("x.sh", "v2\n");
+    executable(&repo.root.join("x.sh"), true);
+    repo.put("big.bin", "blob-v2-large\n");
+    repo.put("w.crlf", "a\nb\nc\n");
+    repo.put("secret.txt", "new\n");
+    fs::set_permissions(
+        repo.root.join("secret.txt"),
+        fs::Permissions::from_mode(0o600),
+    )
+    .unwrap();
+    fs::remove_file(repo.root.join("link")).unwrap();
+    symlink("target-two", repo.root.join("link")).unwrap();
+    repo.put("u.txt", "untracked\n");
+    repo
+}
+
+const FILTERED: [&str; 7] = [
+    "n.nb",
+    "x.sh",
+    "big.bin",
+    "w.crlf",
+    "link",
+    "secret.txt",
+    "u.txt",
+];
+
+#[test]
+fn undo_puts_back_every_byte_mode_and_link_target_that_filters_would_change() {
+    let repo = filtered();
+    let before = (repo.disk(), repo.status());
+    let applied = repo.discard(&FILTERED).unwrap();
+    assert_eq!(repo.status(), "");
+    let discarded = repo.disk();
+    assert_eq!(discarded["link"], "link target-one");
+    assert!(!discarded.contains_key("u.txt"));
+
+    repo.coordinator().undo(repo.path(), applied.id).unwrap();
+    assert_eq!((repo.disk(), repo.status()), before);
+
+    repo.coordinator().redo(repo.path(), applied.id).unwrap();
+    assert_eq!(repo.disk(), discarded);
+    assert_eq!(repo.status(), "");
+
+    repo.coordinator().undo(repo.path(), applied.id).unwrap();
+    assert_eq!((repo.disk(), repo.status()), before);
+}
+
+#[test]
+fn discards_a_deleted_file_in_a_deleted_folder_and_undo_deletes_it_again() {
+    let repo = Repo::new(&[("deep/er/f", "one\n"), ("g", "g\n")]);
+    fs::remove_dir_all(repo.root.join("deep")).unwrap();
+    let applied = repo.discard(&["deep/er/f"]).unwrap();
+    assert_eq!(
+        fs::read_to_string(repo.root.join("deep/er/f")).unwrap(),
+        "one\n"
+    );
+    assert_eq!(repo.status(), "");
+    repo.coordinator().undo(repo.path(), applied.id).unwrap();
+    assert_eq!(repo.status(), " D deep/er/f\n");
+}
+
+#[test]
+fn refuses_a_stale_view_and_changes_nothing() {
+    let repo = Repo::new(&[("f", "one\n"), ("g", "one\n")]);
+    repo.put("f", "two\n");
+    let (operation, expect) = repo.request(&["f"]);
+    repo.git(&["add", "f"]);
+    repo.put("f", "three\n");
+    let coordinator = repo.coordinator();
+    refused(
+        coordinator.write(repo.path(), &operation, &expect),
+        &stale(StaleReason::PathChanged),
+    );
+    assert_eq!(fs::read_to_string(repo.root.join("f")).unwrap(), "three\n");
+
+    let (operation, expect) = repo.request(&["f"]);
+    repo.git(&["commit", "--quiet", "--allow-empty", "-m", "moved"]);
+    refused(
+        coordinator.write(repo.path(), &operation, &expect),
+        &stale(StaleReason::HeadMoved),
+    );
+
+    repo.put("g", "seen\n");
+    let (operation, expect) = repo.request(&["g"]);
+    fs::remove_file(repo.root.join("g")).unwrap();
+    refused(
+        coordinator.write(repo.path(), &operation, &expect),
+        &stale(StaleReason::PathChanged),
+    );
+    assert_eq!(repo.status(), " M f\n D g\n");
+    let history = coordinator.undo_history(repo.path()).unwrap();
+    assert_eq!((history.undo, history.redo), (None, None));
+}
+
+#[test]
+fn undo_refuses_after_a_later_edit_and_keeps_that_edit() {
+    let repo = Repo::new(&[("f", "one\n")]);
+    repo.put("f", "two\n");
+    let applied = repo.discard(&["f"]).unwrap();
+    repo.put("f", "later\n");
+    let error = refused(
+        repo.coordinator().undo(repo.path(), applied.id),
+        &stale(StaleReason::PathChanged),
+    );
+    assert!(
+        error.message.starts_with("f changed after the discard"),
+        "{}",
+        error.message
+    );
+    assert_eq!(fs::read_to_string(repo.root.join("f")).unwrap(), "later\n");
+    assert_eq!(
+        repo.coordinator().undo_history(repo.path()).unwrap().undo,
+        Some(applied.clone())
+    );
+
+    repo.put("f", "one\n");
+    repo.coordinator().undo(repo.path(), applied.id).unwrap();
+    assert_eq!(fs::read_to_string(repo.root.join("f")).unwrap(), "two\n");
+    repo.put("f", "edited again\n");
+    refused(
+        repo.coordinator().redo(repo.path(), applied.id),
+        &stale(StaleReason::PathChanged),
+    );
+    assert_eq!(
+        fs::read_to_string(repo.root.join("f")).unwrap(),
+        "edited again\n"
+    );
+}
+
+#[test]
+fn leaves_nested_repositories_and_submodules_alone() {
+    let repo = Repo::new(&[("d/f", "one\n"), ("f", "one\n")]);
+    let sub = repo.root.join("sub");
+    fs::create_dir(&sub).unwrap();
+    for args in [
+        &["init", "--quiet", "--initial-branch=main"][..],
+        &["config", "user.name", "Ada"],
+        &["config", "user.email", "ada@example.test"],
+        &["commit", "--quiet", "--allow-empty", "-m", "first"],
+    ] {
+        git(&sub, args);
+    }
+    repo.git(&["add", "sub"]);
+    repo.git(&["commit", "--quiet", "-m", "add sub"]);
+    fs::write(sub.join("dirty"), "x\n").unwrap();
+    let nested = repo.root.join("nested");
+    fs::create_dir(&nested).unwrap();
+    git(&nested, &["init", "--quiet"]);
+    fs::write(nested.join("inner"), "x\n").unwrap();
+    repo.put("d/f", "two\n");
+    git(&repo.root.join("d"), &["init", "--quiet"]);
+    repo.put("d/g", "inner file\n");
+    repo.put("f", "two\n");
+    let disk = repo.disk();
+    let unstaged = repo.unstaged();
+
+    for path in ["sub", "nested/", "d/f", "d/g"] {
+        if unstaged.iter().any(|listed| listed == path) {
+            refused(repo.discard(&[path]), &ErrorKind::UnsupportedPath);
+        }
+    }
+    assert!(
+        unstaged.iter().any(|listed| listed == "d/f"),
+        "{unstaged:?}"
+    );
+    assert_eq!(repo.disk(), disk);
+    repo.discard(&["f"]).unwrap();
+    assert_eq!(fs::read_to_string(repo.root.join("f")).unwrap(), "one\n");
+}
+
+#[test]
+fn refuses_intent_to_add_files_and_a_folder_where_a_file_was() {
+    let repo = Repo::new(&[("f", "one\n")]);
+    repo.put("added", "content\n");
+    repo.git(&["add", "-N", "added"]);
+    refused(repo.discard(&["added"]), &ErrorKind::UnsupportedPath);
+    assert_eq!(
+        fs::read_to_string(repo.root.join("added")).unwrap(),
+        "content\n"
+    );
+
+    repo.git(&["rm", "--cached", "--quiet", "added"]);
+    fs::remove_file(repo.root.join("added")).unwrap();
+    repo.put("gone", "content\n");
+    repo.git(&["add", "-N", "gone"]);
+    fs::remove_file(repo.root.join("gone")).unwrap();
+    let error = refused(repo.discard(&["gone"]), &ErrorKind::UnsupportedPath);
+    assert!(error.message.contains("git add -N"), "{}", error.message);
+    assert!(!repo.root.join("gone").exists());
+
+    fs::remove_file(repo.root.join("f")).unwrap();
+    repo.put("f/inside", "keep\n");
+    refused(repo.discard(&["f"]), &ErrorKind::UnsupportedPath);
+    assert_eq!(
+        fs::read_to_string(repo.root.join("f/inside")).unwrap(),
+        "keep\n"
+    );
+}
+
+#[test]
+fn discards_names_with_a_newline_or_a_carriage_return_and_no_other_file() {
+    let repo = Repo::new(&[("x", "x one\n"), ("x\r", "cr one\n"), ("a\nb", "nl one\n")]);
+    for path in ["x", "x\r", "a\nb"] {
+        repo.put(path, &format!("{path} edited\n"));
+    }
+    let before = repo.disk();
+    let applied = repo.discard(&["x\r", "a\nb"]).unwrap();
+    assert_eq!(
+        fs::read_to_string(repo.root.join("x")).unwrap(),
+        "x edited\n"
+    );
+    assert_eq!(
+        fs::read_to_string(repo.root.join("x\r")).unwrap(),
+        "cr one\n"
+    );
+    assert_eq!(
+        fs::read_to_string(repo.root.join("a\nb")).unwrap(),
+        "nl one\n"
+    );
+    repo.coordinator().undo(repo.path(), applied.id).unwrap();
+    assert_eq!(repo.disk(), before);
+}
+
+#[test]
+fn a_failing_smudge_filter_changes_nothing_and_records_nothing() {
+    let repo = Repo::new(&[]);
+    repo.put(".gitattributes", "*.bin filter=broken\n");
+    repo.put("a.bin", "one\n");
+    repo.git(&["config", "filter.broken.clean", "cat"]);
+    repo.git(&["add", "-A"]);
+    repo.git(&["commit", "--quiet", "-m", "base"]);
+    repo.git(&["config", "filter.broken.smudge", "false"]);
+    repo.git(&["config", "filter.broken.required", "true"]);
+    repo.put("a.bin", "two\n");
+    repo.discard(&["a.bin"])
+        .expect_err("the smudge filter fails");
+    assert_eq!(
+        fs::read_to_string(repo.root.join("a.bin")).unwrap(),
+        "two\n"
+    );
+    let history = repo.coordinator().undo_history(repo.path()).unwrap();
+    assert_eq!((history.undo, history.redo), (None, None));
+    let leftovers: Vec<_> = fs::read_dir(repo.root.join(".git"))
+        .unwrap()
+        .map(|item| item.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| name == "index.lock" || name.starts_with("l1git-"))
+        .collect();
+    assert_eq!(leftovers, Vec::<String>::new());
+}
+
+#[test]
+fn keeps_the_entry_when_a_later_file_cannot_be_replaced_and_undo_puts_back_the_rest() {
+    let repo = Repo::new(&[("a/one", "one\n"), ("b/two", "two\n")]);
+    repo.put("a/one", "edited\n");
+    repo.put("b/two", "edited\n");
+    let (operation, expect) = repo.request(&["a/one", "b/two"]);
+    let locked = repo.root.join("b");
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o555)).unwrap();
+    let error = repo
+        .coordinator()
+        .write(repo.path(), &operation, &expect)
+        .expect_err("b cannot take a new file");
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(
+        error.message.contains("Undo puts them back"),
+        "{}",
+        error.message
+    );
+    assert_eq!(repo.status(), " M b/two\n");
+
+    let kept = repo
+        .coordinator()
+        .undo_history(repo.path())
+        .unwrap()
+        .undo
+        .unwrap();
+    repo.coordinator().undo(repo.path(), kept.id).unwrap();
+    assert_eq!(repo.status(), " M a/one\n M b/two\n");
+    assert_eq!(
+        fs::read_to_string(repo.root.join("a/one")).unwrap(),
+        "edited\n"
+    );
+}
+
+#[test]
+fn refuses_two_names_for_one_file_on_a_case_insensitive_disk() {
+    let repo = Repo::new(&[("foo.txt", "one\n")]);
+    if !repo.root.join("FOO.TXT").exists() {
+        return;
+    }
+    repo.git(&["config", "core.ignorecase", "false"]);
+    fs::rename(repo.root.join("foo.txt"), repo.root.join("Foo.txt")).unwrap();
+    repo.put("Foo.txt", "two\n");
+    let unstaged = repo.unstaged();
+    if !unstaged.iter().any(|path| path == "Foo.txt") {
+        return;
+    }
+    refused(
+        repo.discard(&["foo.txt", "Foo.txt"]),
+        &ErrorKind::UnsupportedPath,
+    );
+    assert_eq!(
+        fs::read_to_string(repo.root.join("Foo.txt")).unwrap(),
+        "two\n"
+    );
+}
+
+#[test]
+fn leaves_a_clean_status_when_the_checkout_changes_the_size_of_a_file() {
+    let autocrlf_input = || {
+        let repo = Repo::new(&[]);
+        repo.git(&["config", "core.autocrlf", "input"]);
+        repo.put("w.txt", "a\r\nb\r\n");
+        repo.git(&["add", "w.txt"]);
+        repo.git(&["commit", "--quiet", "-m", "crlf bytes"]);
+        repo.put("w.txt", "a\r\nb\r\nc\r\n");
+        repo
+    };
+    let eol_crlf_over_lf_bytes = || {
+        let repo = Repo::new(&[
+            ("w.txt", "a\nb\n"),
+            (".gitattributes", "w.txt text eol=crlf\n"),
+        ]);
+        repo.put("w.txt", "a\nb\nc\n");
+        repo
+    };
+    let autocrlf_true_after_checkout = || {
+        let repo = Repo::new(&[("w.txt", "a\nb\n")]);
+        repo.git(&["config", "core.autocrlf", "true"]);
+        repo.put("w.txt", "a\nb\nc\n");
+        repo
+    };
+    let statuses: Vec<_> = [
+        ("autocrlf=input", &autocrlf_input as &dyn Fn() -> Repo),
+        ("eol=crlf", &eol_crlf_over_lf_bytes),
+        ("autocrlf=true", &autocrlf_true_after_checkout),
+    ]
+    .into_iter()
+    .map(|(setup, make)| {
+        let repo = make();
+        let edited = (repo.disk(), repo.status());
+        let applied = repo.discard(&["w.txt"]).unwrap();
+        let discarded = (repo.disk(), repo.status());
+        repo.coordinator().undo(repo.path(), applied.id).unwrap();
+        assert_eq!((repo.disk(), repo.status()), edited, "{setup}");
+        repo.coordinator().redo(repo.path(), applied.id).unwrap();
+        let redone = (repo.disk(), repo.status());
+        assert_eq!(redone.0, discarded.0, "{setup}");
+        (setup, edited.1, discarded.1, redone.1)
+    })
+    .collect();
+    assert_eq!(
+        statuses,
+        ["autocrlf=input", "eol=crlf", "autocrlf=true"].map(|setup| (
+            setup,
+            " M w.txt\n".to_owned(),
+            String::new(),
+            String::new()
+        ))
+    );
+}
+
+#[test]
+fn keeps_discarded_files_private_inside_an_undo_folder_others_can_read() {
+    let repo = Repo::new(&[("f", "one\n")]);
+    let undo = repo.directory.path().join("undo");
+    fs::create_dir(&undo).unwrap();
+    fs::set_permissions(&undo, fs::Permissions::from_mode(0o755)).unwrap();
+    repo.put("f", "secret\n");
+    repo.put("new", "untracked secret\n");
+    repo.discard(&["f", "new"]).unwrap();
+
+    let mut captured = 0;
+    let mut folders = vec![undo.clone()];
+    while let Some(folder) = folders.pop() {
+        for item in fs::read_dir(&folder).unwrap() {
+            let path = item.unwrap().path();
+            let mode = fs::symlink_metadata(&path).unwrap().permissions().mode() & 0o777;
+            if path.is_dir() {
+                assert_eq!(mode, 0o700, "{}", path.display());
+                folders.push(path);
+            } else if folder.file_name().unwrap() == "files" {
+                assert_eq!(mode, 0o600, "{}", path.display());
+                captured += 1;
+            }
+        }
+    }
+    assert_eq!(captured, 3, "f before and after, and new before");
+    assert_eq!(
+        fs::symlink_metadata(&undo).unwrap().permissions().mode() & 0o777,
+        0o755
+    );
+}
+
+#[test]
+fn refuses_entries_that_git_does_not_list_as_unstaged_changes() {
+    let repo = Repo::new(&[(".gitignore", "*.log\n"), ("f", "one\n")]);
+    repo.put("build.log", "ignored output\n");
+    let (_, expect) = repo.request(&[]);
+    let ignored = Operation::Discard {
+        entries: vec![StatusEntry::Untracked {
+            path: "build.log".to_owned(),
+        }],
+    };
+    let coordinator = repo.coordinator();
+    refused(
+        coordinator.write(repo.path(), &ignored, &expect),
+        &stale(StaleReason::PathChanged),
+    );
+    assert_eq!(
+        fs::read_to_string(repo.root.join("build.log")).unwrap(),
+        "ignored output\n"
+    );
+
+    repo.put("f", "hidden local edit\n");
+    let (operation, expect) = repo.request(&["f"]);
+    repo.git(&["update-index", "--assume-unchanged", "f"]);
+    refused(
+        coordinator.write(repo.path(), &operation, &expect),
+        &stale(StaleReason::PathChanged),
+    );
+    assert_eq!(
+        fs::read_to_string(repo.root.join("f")).unwrap(),
+        "hidden local edit\n"
+    );
+    let history = coordinator.undo_history(repo.path()).unwrap();
+    assert_eq!((history.undo, history.redo), (None, None));
+}
+
+#[test]
+fn refuses_an_untracked_name_that_is_a_tracked_file_on_a_case_insensitive_disk() {
+    let repo = Repo::new(&[("README.md", "one\n")]);
+    if !repo.root.join("readme.MD").exists() {
+        return;
+    }
+    repo.git(&["config", "core.ignorecase", "false"]);
+    fs::rename(repo.root.join("README.md"), repo.root.join("readme.md")).unwrap();
+    assert!(
+        repo.unstaged().iter().any(|path| path == "readme.md"),
+        "{:?}",
+        repo.unstaged()
+    );
+    let error = refused(repo.discard(&["readme.md"]), &ErrorKind::UnsupportedPath);
+    assert!(error.message.contains("README.md"), "{}", error.message);
+    assert_eq!(
+        fs::read_to_string(repo.root.join("README.md")).unwrap(),
+        "one\n"
+    );
+}
+
+#[test]
+fn refuses_an_untracked_name_that_a_case_insensitive_disk_folds_to_a_tracked_file() {
+    for (tracked, untracked) in [("Ärende.txt", "ärende.txt"), ("Σigma.txt", "σigma.txt")] {
+        for ignorecase in ["true", "false"] {
+            let repo = Repo::new(&[(tracked, "one\n")]);
+            if !repo.root.join(untracked).exists() {
+                return;
+            }
+            repo.git(&["config", "core.ignorecase", ignorecase]);
+            fs::rename(repo.root.join(tracked), repo.root.join(untracked)).unwrap();
+            assert_eq!(repo.unstaged(), [untracked], "{tracked} {ignorecase}");
+            let error = refused(repo.discard(&[untracked]), &ErrorKind::UnsupportedPath);
+            assert!(error.message.contains(tracked), "{}", error.message);
+            assert_eq!(
+                fs::read_to_string(repo.root.join(tracked)).unwrap(),
+                "one\n",
+                "{tracked} {ignorecase}"
+            );
+        }
+    }
+}
+
+#[test]
+fn refuses_an_untracked_name_that_is_a_tracked_file_in_another_unicode_normalization() {
+    let (decomposed, composed) = ("cafe\u{301}.txt", "caf\u{e9}.txt");
+    for (tracked, precompose, untracked) in [
+        (decomposed, "true", composed),
+        (composed, "false", decomposed),
+    ] {
+        let repo = Repo::new(&[]);
+        repo.git(&["config", "core.precomposeunicode", "false"]);
+        repo.put(tracked, "one\n");
+        repo.git(&["add", "--", tracked]);
+        repo.git(&["commit", "--quiet", "-m", "accent"]);
+        if !repo.root.join(untracked).exists() {
+            return;
+        }
+        repo.git(&["config", "core.precomposeunicode", precompose]);
+        fs::rename(repo.root.join(tracked), repo.root.join(untracked)).unwrap();
+        if repo.unstaged() != [untracked] {
+            continue;
+        }
+        let error = refused(repo.discard(&[untracked]), &ErrorKind::UnsupportedPath);
+        assert!(error.message.contains(tracked), "{}", error.message);
+        assert_eq!(
+            fs::read_to_string(repo.root.join(tracked)).unwrap(),
+            "one\n"
+        );
+    }
+}
+
+#[test]
+fn the_next_write_removes_a_copy_that_a_stopped_undo_or_redo_left_beside_a_path() {
+    for stopped in ["undo", "redo"] {
+        let repo = Repo::new(&[("f", "one\n"), ("g", "one\n")]);
+        repo.put("f", "two\n");
+        repo.put("g", "two\n");
+        let coordinator = repo.coordinator();
+        let applied = repo.discard(&["f"]).unwrap();
+        if stopped == "redo" {
+            coordinator.undo(repo.path(), applied.id).unwrap();
+        }
+        let leftover = repo.root.join(format!(".l1git-{}-f", applied.id));
+        fs::write(&leftover, "partial copy\n").unwrap();
+
+        let status = worktree_status(repo.path()).unwrap();
+        let entries = status
+            .entries
+            .into_iter()
+            .filter(|entry| path_of(entry) == "g")
+            .collect();
+        coordinator
+            .write(
+                repo.path(),
+                &Operation::StageFiles { entries },
+                &Expect { head: status.head },
+            )
+            .unwrap();
+        assert!(!leftover.exists(), "a stopped {stopped} left {leftover:?}");
+    }
+}
+
+#[test]
+fn a_discard_and_its_undo_and_redo_leave_every_index_flag_when_git_ignores_stat() {
+    let repo = Repo::new(&[("f", "one\n"), ("g", "one\n")]);
+    repo.git(&["config", "core.ignoreStat", "true"]);
+    repo.put("f", "two\n");
+    let flags = repo.git(&["ls-files", "-v"]);
+    assert_eq!(flags, "H f\nH g\n");
+    let edited = (repo.disk(), repo.status());
+    assert_eq!(edited.1, " M f\n");
+
+    let applied = repo.discard(&["f"]).unwrap();
+    let discarded = (repo.disk(), repo.status());
+    assert_eq!(
+        (repo.git(&["ls-files", "-v"]), discarded.1.as_str()),
+        (flags.clone(), "")
+    );
+    repo.coordinator().undo(repo.path(), applied.id).unwrap();
+    assert_eq!(
+        (repo.git(&["ls-files", "-v"]), (repo.disk(), repo.status())),
+        (flags.clone(), edited)
+    );
+    repo.coordinator().redo(repo.path(), applied.id).unwrap();
+    assert_eq!(
+        (repo.git(&["ls-files", "-v"]), (repo.disk(), repo.status())),
+        (flags, discarded)
+    );
+    repo.put("f", "three\n");
+    assert_eq!(
+        repo.status(),
+        " M f\n",
+        "an edit after the redo still shows"
+    );
+}
+
+#[test]
+fn a_discard_and_its_undo_and_redo_keep_assume_unchanged_bits() {
+    let repo = Repo::new(&[("f", "one\n"), ("marked", "one\n")]);
+    repo.git(&["update-index", "--assume-unchanged", "marked"]);
+    repo.put("f", "two\n");
+    let applied = repo.discard(&["f"]).unwrap();
+    assert_eq!(repo.git(&["ls-files", "-v"]), "H f\nh marked\n");
+
+    repo.git(&["update-index", "--assume-unchanged", "f"]);
+    repo.coordinator().undo(repo.path(), applied.id).unwrap();
+    assert_eq!(
+        (
+            repo.git(&["ls-files", "-v"]),
+            fs::read_to_string(repo.root.join("f")).unwrap()
+        ),
+        ("h f\nh marked\n".to_owned(), "two\n".to_owned())
+    );
+    repo.coordinator().redo(repo.path(), applied.id).unwrap();
+    assert_eq!(
+        (
+            repo.git(&["ls-files", "-v"]),
+            fs::read_to_string(repo.root.join("f")).unwrap()
+        ),
+        ("h f\nh marked\n".to_owned(), "one\n".to_owned())
+    );
+    repo.git(&["update-index", "--no-assume-unchanged", "f", "marked"]);
+    assert_eq!(repo.status(), "");
+}
+
+#[test]
+fn runs_post_index_change_once_saying_the_worktree_changed() {
+    let repo = Repo::new(&[("f", "one\n")]);
+    let hooks = repo.directory.path().join("hooks");
+    let log = repo.directory.path().join("hook.log");
+    fs::create_dir(&hooks).unwrap();
+    let hook = hooks.join("post-index-change");
+    fs::write(
+        &hook,
+        format!("#!/bin/sh\necho \"$1 $2\" >> '{}'\n", log.display()),
+    )
+    .unwrap();
+    executable(&hook, true);
+    repo.git(&["config", "core.hooksPath", hooks.to_str().unwrap()]);
+    repo.put("f", "two\n");
+    let applied = repo.discard(&["f"]).unwrap();
+    assert_eq!(fs::read_to_string(&log).unwrap(), "1 0\n");
+    repo.coordinator().undo(repo.path(), applied.id).unwrap();
+    assert_eq!(fs::read_to_string(&log).unwrap(), "1 0\n");
+}
+
+#[test]
+fn discards_and_undoes_where_the_git_dir_is_on_another_file_system() {
+    let shm = Path::new("/dev/shm");
+    if !shm.is_dir() {
+        return;
+    }
+    let git_dir = tempfile::tempdir_in(shm).unwrap();
+    let repo = Repo::new(&[]);
+    let root = repo.directory.path().join("separate");
+    fs::create_dir(&root).unwrap();
+    git(
+        &root,
+        &[
+            "init",
+            "--quiet",
+            "--initial-branch=main",
+            "--separate-git-dir",
+            git_dir.path().join("repo.git").to_str().unwrap(),
+        ],
+    );
+    let separate = Repo {
+        directory: tempfile::tempdir().unwrap(),
+        root,
+    };
+    for (key, value) in [
+        ("user.name", "Ada"),
+        ("user.email", "ada@example.test"),
+        ("commit.gpgSign", "false"),
+        ("core.hooksPath", "/dev/null"),
+    ] {
+        separate.git(&["config", key, value]);
+    }
+    separate.put("f", "one\n");
+    separate.git(&["add", "f"]);
+    separate.git(&["commit", "--quiet", "-m", "initial"]);
+    separate.put("f", "two\n");
+    separate.put("new", "untracked\n");
+    let before = separate.disk();
+    let applied = separate.discard(&["f", "new"]).unwrap();
+    assert_eq!(separate.status(), "");
+    separate
+        .coordinator()
+        .undo(separate.path(), applied.id)
+        .unwrap();
+    assert_eq!(separate.disk(), before);
+    drop(repo);
+}

@@ -25,7 +25,7 @@ export type ActionContext = {
     outOfView: boolean;
   } | null;
   rule: VisibilityRule["kind"];
-  worktree: { unstaged: number; staged: number } | null;
+  worktree: { unstaged: number; staged: number; discardable: number } | null;
   history: { undo: string | null; redo: string | null };
   writing: boolean;
   typing: boolean;
@@ -56,6 +56,7 @@ export type Commands = {
   showStash: (stash: Stash) => void;
   stageAll: () => void;
   unstageAll: () => void;
+  discardAll: () => void;
   focusCommit: () => void;
   undo: () => void;
   redo: () => void;
@@ -71,6 +72,7 @@ export type Shortcut = {
 export type ActionId =
   | "stageAll"
   | "unstageAll"
+  | "discardAll"
   | "focusCommit"
   | "undo"
   | "redo"
@@ -144,6 +146,15 @@ export const actions: readonly Action[] = [
       !context.writing &&
       (context.worktree?.staged ?? 0) > 0,
     run: (commands) => commands.unstageAll(),
+  },
+  {
+    id: "discardAll",
+    title: "Discard all changes…",
+    available: (context) =>
+      onRepository(context) &&
+      !context.writing &&
+      (context.worktree?.discardable ?? 0) > 0,
+    run: (commands) => commands.discardAll(),
   },
   {
     id: "focusCommit",

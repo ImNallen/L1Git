@@ -42,20 +42,31 @@ pub(crate) fn entries(
     untracked: Untracked,
     deadline: Deadline,
 ) -> Result<(Vec<StatusEntry>, StagedStamp), RepositoryError> {
-    let output = git::read(
-        root,
-        &[
-            "status",
-            "--porcelain=v2",
-            "-z",
-            "--find-renames",
-            match untracked {
-                Untracked::All => "--untracked-files=all",
-                Untracked::No => "--untracked-files=no",
-            },
-        ],
-        deadline,
-    )?;
+    entries_of(root, untracked, None, deadline)
+}
+
+pub(crate) fn entries_of(
+    root: &Path,
+    untracked: Untracked,
+    only: Option<&[&str]>,
+    deadline: Deadline,
+) -> Result<(Vec<StatusEntry>, StagedStamp), RepositoryError> {
+    let mut args = vec![
+        "--literal-pathspecs",
+        "status",
+        "--porcelain=v2",
+        "-z",
+        "--find-renames",
+        match untracked {
+            Untracked::All => "--untracked-files=all",
+            Untracked::No => "--untracked-files=no",
+        },
+    ];
+    if let Some(paths) = only {
+        args.push("--");
+        args.extend(paths);
+    }
+    let output = git::read(root, &args, deadline)?;
     let mut stamp = sha1_smol::Sha1::new();
     let mut stamped = |fields: &[&[u8]]| {
         for field in fields {

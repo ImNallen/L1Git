@@ -167,7 +167,10 @@ impl LockedStore {
     ) -> Result<Self, RepositoryError> {
         private_dir(undo_dir)?;
         let store = Store::open(undo_dir, common_dir)?;
-        fs::create_dir_all(store.dir.join("entries")).map_err(unwritable)?;
+        private_folder()
+            .recursive(true)
+            .create(store.dir.join("entries"))
+            .map_err(unwritable)?;
         let lock = File::options()
             .create(true)
             .truncate(false)
@@ -197,18 +200,26 @@ impl LockedStore {
         opened: &Repo,
         deadline: WriteDeadline,
     ) -> Result<Log, RepositoryError> {
-        let log = self.log()?;
-        let Some(id) = log.pending else {
-            return Ok(log);
-        };
-        let settled = if self.landed(id, opened, deadline)? {
-            log.pushed(id)
-        } else {
-            log.without_pending()
-        };
-        self.save(&settled)?;
-        self.forget(&settled);
-        Ok(settled)
+        let mut log = self.log()?;
+        if let Some(id) = log.pending {
+            log = if self.landed(id, opened, deadline)? {
+                log.pushed(id)
+            } else {
+                log.without_pending()
+            };
+            self.save(&log)?;
+            self.forget(&log);
+        }
+        for id in log.next_steps() {
+            self.remove_copies_a_stopped_step_left(id);
+        }
+        Ok(log)
+    }
+
+    fn remove_copies_a_stopped_step_left(&self, id: EntryId) {
+        if let Ok((applied, change)) = self.record_of(id) {
+            change.remove_copies_beside(&applied);
+        }
     }
 
     fn landed(
@@ -220,6 +231,9 @@ impl LockedStore {
         let Ok((applied, change)) = self.record_of(id) else {
             return Ok(false);
         };
+        if change.keeps_overwritten_files() {
+            return Ok(true);
+        }
         if applied.root == opened.root() {
             return change.landed(opened, deadline);
         }
@@ -239,6 +253,7 @@ impl LockedStore {
 
     pub(super) fn entry(&self, id: EntryId) -> EntryObjects {
         EntryObjects {
+            id,
             objects: self.entry_dir(id).join("objects"),
         }
     }
@@ -250,6 +265,23 @@ impl LockedStore {
         operation: &Operation,
         change: &Change,
     ) -> Result<(Applied, Recorded<'_>), RepositoryError> {
+        let (applied, _, recorded) = self.record_with(txn, log, operation, |entry| {
+            entry.keep(txn, &change.objects())?;
+            Ok(change.clone())
+        })?;
+        Ok((applied, recorded))
+    }
+
+    pub(super) fn record_with<C: Clone>(
+        &self,
+        txn: &Txn<'_>,
+        log: &Log,
+        operation: &Operation,
+        fill: impl FnOnce(&EntryObjects) -> Result<C, RepositoryError>,
+    ) -> Result<(Applied, C, Recorded<'_>), RepositoryError>
+    where
+        Change: From<C>,
+    {
         let id = EntryId::after(log.entries.last().copied());
         let applied = Applied {
             id,
@@ -260,14 +292,15 @@ impl LockedStore {
             dir: self.entry_dir(id),
             kept: false,
         };
-        fs::create_dir(&entry.dir).map_err(unwritable)?;
-        self.entry(id).keep(txn, &change.objects())?;
+        private_folder().create(&entry.dir).map_err(unwritable)?;
+        let change = fill(&self.entry(id))?;
         self.write(id, "applied.json", &applied)?;
-        self.write(id, "change.json", change)?;
+        self.write(id, "change.json", &Change::from(change.clone()))?;
         let log = log.with_pending(id);
         self.save(&log)?;
         Ok((
             applied,
+            change,
             Recorded {
                 store: self,
                 id,
@@ -308,7 +341,7 @@ impl LockedStore {
             dir: self.entry_dir(id),
             kept: false,
         };
-        fs::create_dir(&entry.dir).map_err(unwritable)?;
+        private_folder().create(&entry.dir).map_err(unwritable)?;
         self.write(id, "applied.json", &applied)?;
         let log = log.with_pending(id);
         self.save(&log)?;
@@ -342,9 +375,14 @@ impl LockedStore {
         name: &str,
         value: &impl Serialize,
     ) -> Result<(), RepositoryError> {
-        let bytes =
-            serde_json::to_vec(value).map_err(|error| unwritable(io::Error::other(error)))?;
-        fs::write(self.entry_dir(id).join(name), bytes).map_err(unwritable)
+        self.write_file(id, name, value).map_err(unwritable)
+    }
+
+    fn write_file(&self, id: EntryId, name: &str, value: &impl Serialize) -> io::Result<()> {
+        let bytes = serde_json::to_vec(value).map_err(io::Error::other)?;
+        let file = self.entry_dir(id).join(name);
+        let temporary = self.entry_dir(id).join(format!("{name}.new"));
+        fs::write(&temporary, bytes).and_then(|()| fs::rename(&temporary, file))
     }
 }
 
@@ -373,6 +411,10 @@ impl Recorded<'_> {
         self.store.write(self.id, "change.json", change)?;
         self.confirm();
         Ok(())
+    }
+
+    pub(super) fn replace(&self, change: &Change) -> io::Result<()> {
+        self.store.write_file(self.id, "change.json", change)
     }
 
     /// Marks the write done once the index holds it. If the log cannot be
@@ -444,6 +486,10 @@ impl Log {
     pub(super) fn next_redo(&self) -> Option<EntryId> {
         let at = self.entries.len().checked_sub(self.undone)?;
         self.entries.get(at).copied()
+    }
+
+    fn next_steps(&self) -> impl Iterator<Item = EntryId> {
+        [self.next_undo(), self.next_redo()].into_iter().flatten()
     }
 
     pub(super) fn position(&self, id: EntryId, direction: Direction) -> Position {
@@ -525,10 +571,19 @@ impl Objects {
 }
 
 pub(super) struct EntryObjects {
+    id: EntryId,
     objects: PathBuf,
 }
 
 impl EntryObjects {
+    pub(super) const fn id(&self) -> EntryId {
+        self.id
+    }
+
+    pub(super) fn files(&self) -> PathBuf {
+        self.objects.with_file_name("files")
+    }
+
     pub(super) fn keep(
         &self,
         runner: &impl Runner,
@@ -618,13 +673,19 @@ fn lines(oids: &[Oid]) -> Vec<u8> {
         .collect()
 }
 
+pub(super) fn private_folder() -> fs::DirBuilder {
+    let mut builder = fs::DirBuilder::new();
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+    builder
+}
+
 fn private_dir(dir: &Path) -> Result<(), RepositoryError> {
     #[cfg(unix)]
     {
-        use std::os::unix::fs::{DirBuilderExt, MetadataExt};
-        fs::DirBuilder::new()
+        use std::os::unix::fs::MetadataExt;
+        private_folder()
             .recursive(true)
-            .mode(0o700)
             .create(dir)
             .map_err(unwritable)?;
         let metadata = fs::metadata(dir).map_err(unwritable)?;
@@ -647,7 +708,7 @@ fn private_dir(dir: &Path) -> Result<(), RepositoryError> {
     }
 }
 
-fn unwritable(error: io::Error) -> RepositoryError {
+pub(super) fn unwritable(error: io::Error) -> RepositoryError {
     RepositoryError::new(
         ErrorKind::GitFailed,
         format!("L1 Git could not write its undo history, so it made no change: {error}"),

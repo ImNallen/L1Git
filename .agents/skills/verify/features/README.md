@@ -8,7 +8,7 @@
 | [Read a file diff](diff.md)                     | Read one changed file's patch in place of the history                 | Unified and split diffs, binary notice, Escape back                      |
 | [Change appearance](appearance.md)              | Choose System, Light, or Dark without losing the repository view      | Saved preference, live system changes, themed workspace and diffs        |
 | [Update behind branches](overview.md)           | Fetch saved repositories and fast-forward ready branches in one click | Moved refs match the count, blocked branches stay put, refreshed graph   |
-| [Stage, unstage, commit, and undo](changes.md)  | Stage, unstage, commit, and amend, then undo and redo each write      | Index and refs before and after, exact undo, stale-view and hook notices |
+| [Stage, unstage, commit, discard, and undo](changes.md) | Stage, unstage, commit, amend, and discard, then undo and redo each write | Index, refs, and file bytes before and after, exact undo, stale-view and hook notices |
 | [Read real repository data](reader.md)          | Receive accurate repository states                                    | Automated real Git and HTTP integration tests                            |
 
 Browser and native journeys use real working copies. Reader and build checks passed for the implementation baseline. UI journeys require a live verification pass.

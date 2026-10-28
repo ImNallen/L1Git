@@ -1,8 +1,8 @@
-# Stage, unstage, commit, and undo
+# Stage, unstage, commit, discard, and undo
 
 ## Sub-features
 
-Row menus that stage, unstage, or mark a conflict resolved, **Stage all** and **Unstage all** list buttons, a diff that follows its file to the other list, toolbar **Undo** and **Redo**, Cmd/Ctrl+Z and Cmd/Ctrl+Shift+Z, the undo notice, and the stale-view and blocked-undo notices. The commit box under the lists with **Amend previous commit**, its per-worktree draft, Cmd/Ctrl+Enter, hook output and identity commands under the box, and undo and redo of commits.
+Row menus that stage, unstage, or mark a conflict resolved, **Stage all** and **Unstage all** list buttons, a diff that follows its file to the other list, toolbar **Undo** and **Redo**, Cmd/Ctrl+Z and Cmd/Ctrl+Shift+Z, the undo notice, and the stale-view and blocked-undo notices. The commit box under the lists with **Amend previous commit**, its per-worktree draft, Cmd/Ctrl+Enter, hook output and identity commands under the box, and undo and redo of commits. **Discard changes…** in Unstaged row menus, **Discard all…** beside the **Unstaged** heading, **Discard all changes…** in the palette, the confirmation dialog, and undo and redo of discards.
 
 ## How to get to it (user POV)
 
@@ -34,6 +34,39 @@ Before and after each step, record `git -C <worktree> status --porcelain` and `g
 20. Stage a file and show the box. Run `git commit --allow-empty -m other` in a terminal without focusing the app, then click **Commit**. Confirm the notice starts `Could not commit` and says the staged files changed, the lists reread, and only the terminal's commit changed Git.
 21. Stop the bridge with `kill "$(lsof -ti tcp:<bridge port> -sTCP:LISTEN)"`. From the checkout, start the binary that `pnpm bridge` built with `HOME` set to an empty folder: `HOME=<empty folder> L1GIT_DEV_PORT=<dev port> L1GIT_BRIDGE_PORT=<bridge port> L1GIT_UNDO_DIR=<undo dir> ./target/debug/l1-git-dev-bridge`. `pnpm bridge` cannot run with that `HOME`, because Cargo looks for its toolchain there. Wait for `L1 Git development bridge on` and reload the page. In a clone, run `git config user.useConfigOnly true`, `git config --unset user.name`, and `git config --unset user.email`. Stage a file, type a summary, and click **Commit**. Confirm the box shows the two `git config` commands and nothing changed. Afterwards, stop that bridge and start `pnpm bridge` again as in step 13.
 
+22. Record `git ls-files -s` and copy `README.md` with `cp -p`. Right-click `README.md` under **Unstaged** and choose **Discard changes…**. Confirm the dialog asks `Discard changes to README.md?`, lists `README.md`, and that **Cancel** has focus. Press Escape and confirm focus returns to the row. Open it again and click **Discard changes**. Confirm the worktree row disappears, focus is on the history because `README.md` was the only change, and the only change is ` M README.md` leaving the status. Press Cmd+Z. Confirm the notice reads `Undid Discard README.md` and `cmp` finds the file identical to the copy.
+23. Open the dialog again, run `git add README.md` in a terminal, then confirm. Confirm the notice reads `Could not discard README.md. README.md changed since L1 Git read it. Refresh and try again.` and only the terminal's staging changed Git.
+24. In a clone, set up a lossy clean filter, an LFS-style filter, an `eol=crlf` file with LF bytes, a file whose size changes on checkout under `core.autocrlf=input`, an executable bit turned on, a retargeted symlink, and an untracked file. Run this in the clone, with `F` set to an empty folder outside it:
+
+    ```sh
+    cat > "$F/fakelfs-clean" <<'EOS'
+    #!/bin/sh
+    d="$(git rev-parse --git-dir)/fakelfs"; mkdir -p "$d"; t=$(mktemp); cat > "$t"
+    s=$(shasum -a 256 < "$t" | cut -c1-64); mv "$t" "$d/$s"; echo "fakelfs-pointer $s"
+    EOS
+    cat > "$F/fakelfs-smudge" <<'EOS'
+    #!/bin/sh
+    read tag s; d="$(git rev-parse --git-dir)/fakelfs"
+    if [ "$tag" = fakelfs-pointer ] && [ -f "$d/$s" ]; then cat "$d/$s"; else echo "$tag $s"; fi
+    EOS
+    chmod +x "$F/fakelfs-clean" "$F/fakelfs-smudge"
+    git config filter.strip.clean "grep -v '^OUTPUT:'"; git config filter.strip.smudge cat
+    git config filter.fakelfs.clean "$F/fakelfs-clean"; git config filter.fakelfs.smudge "$F/fakelfs-smudge"
+    git config filter.fakelfs.required true; git config core.autocrlf input
+    printf '*.nb filter=strip\n*.bin filter=fakelfs\n*.crlf text eol=crlf\n' > .gitattributes
+    printf 'cell\n' > n.nb; printf 'v1\n' > x.sh; printf 'blob-v1\n' > big.bin; printf 'a\r\nb\r\n' > w.crlf
+    printf 'a\r\nb\r\n' > r.txt; printf 't\n' > target-one; ln -s target-one link
+    git add -A; git commit -qm base
+    printf 'cell2\nOUTPUT: 42\n' > n.nb; printf 'v2\n' > x.sh; chmod +x x.sh; printf 'blob-v2-large\n' > big.bin
+    printf 'a\nb\nc\n' > w.crlf; printf 'a\r\nb\r\nc\r\n' > r.txt; rm link; ln -s target-two link; printf 'untracked\n' > u.txt
+    ```
+
+    Copy the seven paths with `cp -pR`. Click **Discard all…** and confirm. Confirm `git status --porcelain` is empty. `r.txt` checks out 4 bytes over an index entry that recorded 6, so a discard that only refreshes stat data leaves it ` M` with an empty diff. Click **Undo**. Confirm `cmp` matches every file, `stat -f %Lp` every mode, and `readlink` the link. Click **Redo** and confirm the status is empty again.
+25. Discard a file, write new text into it in a terminal, then click **Undo**. Confirm the notice names the file and says it changed after the discard, the file keeps the terminal's text, and nothing else changed.
+26. In a clone, edit twelve files and click **Discard all…**. Confirm the dialog lists ten paths and `and 2 more`.
+27. In a clone, add an untracked nested repository and change a submodule. Confirm neither row offers **Discard changes…** and that **Discard all…** says how many items it leaves.
+28. Open the palette with unstaged files. Confirm **Discard all changes…** shows only when the selected worktree has a file L1 Git can discard, and that it opens the same dialog.
+
 ## Gotchas
 
-The row's **Options** button lives in the tree's shadow root and appears on hover or keyboard focus, so locate it inside `file-tree-container` or right-click the row instead. A write checks HEAD and the chosen paths' index entries, not file contents. Staging stages what is on disk when it runs, so a file edited after L1 Git read it stages the new bytes with no notice. Only an index or HEAD change, such as `git add` or a commit in a terminal, answers the stale-view notice. One undo history covers every worktree of a repository. Undo works in order, so an entry that cannot be undone blocks the older ones until it can. `@pierre/trees` row decorations cannot hold a button, so the row's write lives in its menu. A clone does not copy the fixture's repo-local identity, so set `user.name`, `user.email`, and `commit.gpgSign=false` in each clone before you commit. A commit that cleans the worktree removes its row and the box with it, so commit failures also show in the notice above the history.
+The row's **Options** button lives in the tree's shadow root and appears on hover or keyboard focus, so locate it inside `file-tree-container` or right-click the row instead. A write checks HEAD and the chosen paths' index entries, not file contents. Staging stages what is on disk when it runs, so a file edited after L1 Git read it stages the new bytes with no notice. Only an index or HEAD change, such as `git add` or a commit in a terminal, answers the stale-view notice. One undo history covers every worktree of a repository. Undo works in order, so an entry that cannot be undone blocks the older ones until it can. `@pierre/trees` row decorations cannot hold a button, so the row's write lives in its menu. A clone does not copy the fixture's repo-local identity, so set `user.name`, `user.email`, and `commit.gpgSign=false` in each clone before you commit. A commit that cleans the worktree removes its row and the box with it, so commit failures also show in the notice above the history. Discard keeps what it replaces in the undo folder, so use a fresh `L1GIT_UNDO_DIR` per run and delete it afterwards. The dialog closes before the discard runs, so a failure shows in the notice above the history. After a discard removes the focused row, focus moves to the row beside it in its list, the next one first, or to the history when the list is empty.

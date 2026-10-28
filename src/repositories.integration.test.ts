@@ -8,6 +8,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { createServer } from "node:net";
@@ -1623,6 +1624,79 @@ describe("real Rust writes, undo, and redo", () => {
         await rejected({
           ...request,
           operation: { ...request.operation, extra: 1 },
+        })
+      ).status,
+    ).toBe(400);
+  });
+
+  const discardRequest = async (path: string, paths: string[]) => {
+    const status = await view(path);
+    return {
+      op: "write",
+      path,
+      operation: {
+        kind: "discard",
+        entries: status.entries.filter((entry) => paths.includes(entry.path)),
+      },
+      expect: { head: status.head },
+    };
+  };
+
+  it("discards a tracked and an untracked file, undoes them byte for byte, and redoes them", async () => {
+    const path = clone();
+    writeFileSync(join(path, "notes.txt"), "untracked\n");
+    chmodSync(join(path, "README.md"), 0o600);
+    const request = await discardRequest(path, ["README.md", "notes.txt"]);
+    const applied = writeEnvelope.parse(
+      await (await post(request)).json(),
+    ).data;
+    expect(applied).toEqual({
+      id: expect.any(String),
+      root: path,
+      operation: request.operation,
+    });
+    expect(porcelain(path)).toBe("");
+    expect(readdirSync(path)).not.toContain("notes.txt");
+
+    undoEnvelope.parse(
+      await (await post({ op: "undo", path, id: applied.id })).json(),
+    );
+    expect(readFileSync(join(path, "README.md"), "utf8")).toBe(
+      "# L1 demo\n\nEdited.\n",
+    );
+    expect(readFileSync(join(path, "notes.txt"), "utf8")).toBe("untracked\n");
+    expect(statSync(join(path, "README.md")).mode & 0o777).toBe(0o600);
+    expect(porcelain(path)).toBe(" M README.md\n?? notes.txt\n");
+
+    redoEnvelope.parse(
+      await (await post({ op: "redo", path, id: applied.id })).json(),
+    );
+    expect(porcelain(path)).toBe("");
+  });
+
+  it("refuses a stale view, a nested repository, and an unknown field in a discard", async () => {
+    const path = clone();
+    const request = await discardRequest(path, ["README.md"]);
+    git(path, "add", "README.md");
+    expect(failure.parse(await (await post(request)).json()).error).toEqual({
+      kind: "staleView",
+      reason: "pathChanged",
+      message: expect.any(String),
+    });
+    expect(porcelain(path)).toBe("M  README.md\n");
+
+    init(join(path, "nested"));
+    const nested = await discardRequest(path, ["nested/"]);
+    expect(nested.operation.entries).toHaveLength(1);
+    expect(failure.parse(await (await post(nested)).json()).error).toEqual({
+      kind: "unsupportedPath",
+      message: expect.stringContaining("nested repository"),
+    });
+    expect(
+      (
+        await rejected({
+          ...nested,
+          operation: { ...nested.operation, extra: 1 },
         })
       ).status,
     ).toBe(400);
