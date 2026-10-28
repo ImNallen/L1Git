@@ -523,7 +523,7 @@ pub(super) fn set_permissions(file: &Path, permissions: u32) -> io::Result<()> {
 }
 
 #[cfg(unix)]
-fn link_bytes(target: PathBuf) -> Vec<u8> {
+pub(super) fn link_bytes(target: PathBuf) -> Vec<u8> {
     use std::os::unix::ffi::OsStringExt;
     target.into_os_string().into_vec()
 }
@@ -569,7 +569,7 @@ pub(super) fn set_permissions(_file: &Path, _permissions: u32) -> io::Result<()>
 }
 
 #[cfg(not(unix))]
-fn link_bytes(target: PathBuf) -> Vec<u8> {
+pub(super) fn link_bytes(target: PathBuf) -> Vec<u8> {
     target.to_string_lossy().into_owned().into_bytes()
 }
 

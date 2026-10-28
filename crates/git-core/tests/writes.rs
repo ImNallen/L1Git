@@ -2098,3 +2098,544 @@ mod parts {
         assert_eq!(repo.git(&["show", ":f.txt"]), "a\nb\nc\nd\n");
     }
 }
+
+fn seen(repo: &Repo) -> Expect {
+    Expect {
+        head: worktree_status(repo.path()).unwrap().head,
+    }
+}
+
+fn stash_tip(repo: &Repo, index: usize) -> l1_git_core::StashTip {
+    let oid = repo
+        .git(&["stash", "list", "--format=%H"])
+        .lines()
+        .nth(index)
+        .unwrap()
+        .to_owned();
+    l1_git_core::StashTip {
+        name: format!("stash@{{{index}}}"),
+        oid: oid.try_into().unwrap(),
+    }
+}
+
+fn stash_push(
+    coordinator: &Coordinator,
+    repo: &Repo,
+    message: &str,
+    untracked: bool,
+    paths: &[&str],
+) -> Result<Applied, RepositoryError> {
+    coordinator.write(
+        repo.path(),
+        &Operation::StashPush {
+            message: message.to_owned(),
+            untracked,
+            paths: paths.iter().map(|path| (*path).to_owned()).collect(),
+        },
+        &seen(repo),
+    )
+}
+
+fn stash_apply(
+    coordinator: &Coordinator,
+    repo: &Repo,
+    index: usize,
+) -> Result<Applied, RepositoryError> {
+    coordinator.write(
+        repo.path(),
+        &Operation::StashApply {
+            stash: stash_tip(repo, index),
+        },
+        &seen(repo),
+    )
+}
+
+fn stash_pop(
+    coordinator: &Coordinator,
+    repo: &Repo,
+    index: usize,
+) -> Result<Applied, RepositoryError> {
+    coordinator.write(
+        repo.path(),
+        &Operation::StashPop {
+            stash: stash_tip(repo, index),
+        },
+        &seen(repo),
+    )
+}
+
+fn stash_drop(
+    coordinator: &Coordinator,
+    repo: &Repo,
+    index: usize,
+) -> Result<Applied, RepositoryError> {
+    coordinator.write(
+        repo.path(),
+        &Operation::StashDrop {
+            stash: stash_tip(repo, index),
+        },
+        &seen(repo),
+    )
+}
+
+fn stash_list(repo: &Repo) -> String {
+    repo.git(&["stash", "list", "--format=%H %gs"])
+}
+
+fn file_text(repo: &Repo, path: &str) -> String {
+    fs::read_to_string(repo.root.join(path)).unwrap()
+}
+
+/// Worktree bytes, the index, and the stash list. Undo and redo restore all three.
+fn stash_picture(repo: &Repo, files: &[&str]) -> (Vec<(String, String)>, String, String) {
+    (
+        files
+            .iter()
+            .map(|path| ((*path).to_owned(), file_text(repo, path)))
+            .collect(),
+        repo.index(),
+        stash_list(repo),
+    )
+}
+
+fn stash_round_trip(
+    coordinator: &Coordinator,
+    repo: &Repo,
+    files: &[&str],
+    write: impl FnOnce() -> Applied,
+) {
+    let before = stash_picture(repo, files);
+    let applied = write();
+    let after = stash_picture(repo, files);
+    assert_ne!(before, after);
+    for _ in 0..2 {
+        assert_eq!(coordinator.undo(repo.path(), applied.id).unwrap(), applied);
+        assert_eq!(stash_picture(repo, files), before);
+    }
+    for _ in 0..2 {
+        assert_eq!(coordinator.redo(repo.path(), applied.id).unwrap(), applied);
+        assert_eq!(stash_picture(repo, files), after);
+    }
+    assert!(repo.git_dir_leftovers().is_empty());
+}
+
+const STASH_CHANGED: ErrorKind = ErrorKind::StaleView {
+    reason: StaleReason::StashChanged,
+};
+
+#[test]
+fn stash_push_saves_one_named_path_and_undo_restores_that_same_commit() {
+    let repo = Repo::committed(&[("a", "a\n"), ("b", "b\n")]);
+    let coordinator = repo.coordinator();
+    repo.put("a", "a2\n");
+    repo.put("b", "b2\n");
+    let before = stash_list(&repo);
+    stash_round_trip(&coordinator, &repo, &["a", "b"], || {
+        stash_push(&coordinator, &repo, "only-a", false, &["a"]).unwrap()
+    });
+    assert_eq!(file_text(&repo, "a"), "a\n");
+    assert_eq!(file_text(&repo, "b"), "b2\n");
+    assert_eq!(repo.status(), [" M b"]);
+    let list = stash_list(&repo);
+    assert_ne!(list, before);
+    assert_eq!(list.lines().count(), 1);
+    assert!(list.contains("only-a"), "{list}");
+    let oid = list.split_whitespace().next().unwrap().to_owned();
+    coordinator
+        .undo(
+            repo.path(),
+            coordinator
+                .undo_history(repo.path())
+                .unwrap()
+                .undo
+                .unwrap()
+                .id,
+        )
+        .unwrap();
+    assert_eq!(file_text(&repo, "a"), "a2\n");
+    assert_eq!(stash_list(&repo), "");
+    coordinator
+        .redo(
+            repo.path(),
+            coordinator
+                .undo_history(repo.path())
+                .unwrap()
+                .redo
+                .unwrap()
+                .id,
+        )
+        .unwrap();
+    assert_eq!(
+        stash_list(&repo).split_whitespace().next(),
+        Some(oid.as_str())
+    );
+}
+
+#[test]
+fn stash_push_keeps_a_staged_and_unstaged_split_in_one_commit() {
+    let repo = Repo::committed(&[("a", "a\n"), ("b", "b\n")]);
+    let coordinator = repo.coordinator();
+    repo.put("a", "staged\n");
+    repo.git(&["add", "a"]);
+    repo.put("a", "staged and unstaged\n");
+    repo.put("b", "unstaged\n");
+    stash_round_trip(&coordinator, &repo, &["a", "b"], || {
+        stash_push(&coordinator, &repo, "both", false, &[]).unwrap()
+    });
+    assert!(repo.status().is_empty());
+    stash_apply(&coordinator, &repo, 0).unwrap();
+    assert_eq!(repo.status(), ["MM a", " M b"]);
+    assert_eq!(file_text(&repo, "a"), "staged and unstaged\n");
+    assert_eq!(repo.git(&["show", ":a"]), "staged\n");
+}
+
+#[test]
+fn stash_push_with_untracked_files_records_three_parents_and_an_empty_push_saves_nothing() {
+    let repo = Repo::committed(&[("a", "a\n")]);
+    let coordinator = repo.coordinator();
+    repo.put("a", "a2\n");
+    repo.put("u", "u\n");
+    let saved = stash_push(&coordinator, &repo, "with-untracked", true, &[]).unwrap();
+    assert!(repo.status().is_empty());
+    assert_eq!(
+        repo.git(&["rev-list", "--parents", "-n", "1", "stash@{0}"])
+            .split_whitespace()
+            .count(),
+        4
+    );
+    let error = stash_push(&coordinator, &repo, "nothing", false, &[]).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::UnchangedPath);
+    assert_eq!(error.message, "No local changes to save");
+    assert_eq!(stash_list(&repo).lines().count(), 1);
+    assert!(
+        coordinator
+            .undo_history(repo.path())
+            .unwrap()
+            .redo
+            .is_none()
+    );
+    coordinator.undo(repo.path(), saved.id).unwrap();
+    assert_eq!(file_text(&repo, "a"), "a2\n");
+    assert_eq!(file_text(&repo, "u"), "u\n");
+    assert_eq!(stash_list(&repo), "");
+    coordinator.redo(repo.path(), saved.id).unwrap();
+    assert!(repo.status().is_empty());
+    assert_eq!(
+        repo.git(&["rev-list", "--parents", "-n", "1", "stash@{0}"])
+            .split_whitespace()
+            .count(),
+        4
+    );
+}
+
+#[test]
+fn stash_push_leaves_untracked_files_alone_when_they_are_not_included() {
+    let repo = Repo::committed(&[("a", "a\n")]);
+    let coordinator = repo.coordinator();
+    repo.put("u", "u\n");
+    let error = stash_push(&coordinator, &repo, "nope", false, &[]).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::UnchangedPath);
+    assert_eq!(error.message, "No local changes to save");
+    assert_eq!(file_text(&repo, "u"), "u\n");
+    assert_eq!(stash_list(&repo), "");
+    let named = stash_push(&coordinator, &repo, "named", false, &["u"]).unwrap_err();
+    assert_eq!(named.kind, PATH_CHANGED);
+    assert_eq!(file_text(&repo, "u"), "u\n");
+}
+
+#[test]
+fn stash_push_on_an_unborn_head_names_the_missing_commit() {
+    let repo = Repo::new();
+    let coordinator = repo.coordinator();
+    repo.put("a", "a\n");
+    repo.git(&["add", "a"]);
+    let error = stash_push(&coordinator, &repo, "x", false, &[]).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::GitFailed);
+    assert_eq!(error.message, "You do not have the initial commit yet");
+    assert_eq!(file_text(&repo, "a"), "a\n");
+    assert!(
+        coordinator
+            .undo_history(repo.path())
+            .unwrap()
+            .undo
+            .is_none()
+    );
+}
+
+#[test]
+fn stash_apply_refuses_a_dirty_file_it_would_overwrite() {
+    let repo = Repo::committed(&[("a", "a\n")]);
+    let coordinator = repo.coordinator();
+    repo.put("a", "a2\n");
+    stash_push(&coordinator, &repo, "s1", false, &[]).unwrap();
+    repo.put("a", "local\n");
+    let error = stash_apply(&coordinator, &repo, 0).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::GitFailed);
+    assert!(
+        error.message.contains("would be overwritten by merge"),
+        "{}",
+        error.message
+    );
+    assert_eq!(file_text(&repo, "a"), "local\n");
+    assert_eq!(stash_list(&repo).lines().count(), 1);
+    assert_eq!(
+        coordinator
+            .undo_history(repo.path())
+            .unwrap()
+            .undo
+            .unwrap()
+            .operation,
+        Operation::StashPush {
+            message: "s1".to_owned(),
+            untracked: false,
+            paths: Vec::new(),
+        }
+    );
+}
+
+#[test]
+fn stash_pop_keeps_the_entry_when_the_apply_conflicts_and_undo_puts_the_file_back() {
+    let repo = Repo::committed(&[("a", "a\n")]);
+    let coordinator = repo.coordinator();
+    repo.put("a", "stashed\n");
+    stash_push(&coordinator, &repo, "s1", false, &[]).unwrap();
+    repo.put("a", "committed\n");
+    repo.git(&["commit", "--quiet", "-am", "c"]);
+    let error = stash_pop(&coordinator, &repo, 0).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::Conflict);
+    assert_eq!(error.message, "a have conflicts. The stash entry is kept.");
+    assert_eq!(repo.git(&["ls-files", "-s", "a"]).lines().count(), 3);
+    assert_eq!(stash_list(&repo).lines().count(), 1);
+    let applied = coordinator.undo_history(repo.path()).unwrap().undo.unwrap();
+    assert!(matches!(applied.operation, Operation::StashPop { .. }));
+    coordinator.undo(repo.path(), applied.id).unwrap();
+    assert_eq!(file_text(&repo, "a"), "committed\n");
+    assert!(repo.status().is_empty());
+    assert_eq!(stash_list(&repo).lines().count(), 1);
+    coordinator.redo(repo.path(), applied.id).unwrap();
+    assert_eq!(repo.git(&["ls-files", "-s", "a"]).lines().count(), 3);
+    assert_eq!(stash_list(&repo).lines().count(), 1);
+    coordinator.undo(repo.path(), applied.id).unwrap();
+}
+
+#[test]
+fn stash_apply_of_an_untracked_file_that_exists_keeps_the_stash_and_the_file() {
+    let repo = Repo::committed(&[("a", "a\n")]);
+    let coordinator = repo.coordinator();
+    repo.put("a", "a2\n");
+    repo.put("u", "from-stash\n");
+    stash_push(&coordinator, &repo, "s1", true, &[]).unwrap();
+    repo.put("u", "other\n");
+    let error = stash_apply(&coordinator, &repo, 0).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::GitFailed);
+    assert!(
+        error.message.contains("could not restore untracked files"),
+        "{}",
+        error.message
+    );
+    assert!(
+        error
+            .message
+            .contains("Undo puts back the files it changed"),
+        "{}",
+        error.message
+    );
+    assert_eq!(file_text(&repo, "u"), "other\n");
+    assert_eq!(file_text(&repo, "a"), "a2\n");
+    assert_eq!(stash_list(&repo).lines().count(), 1);
+    let applied = coordinator.undo_history(repo.path()).unwrap().undo.unwrap();
+    coordinator.undo(repo.path(), applied.id).unwrap();
+    assert_eq!(file_text(&repo, "a"), "a\n");
+    assert_eq!(file_text(&repo, "u"), "other\n");
+    coordinator.redo(repo.path(), applied.id).unwrap();
+    assert_eq!(file_text(&repo, "a"), "a2\n");
+    assert_eq!(file_text(&repo, "u"), "other\n");
+}
+
+#[test]
+fn stash_apply_restores_the_staged_and_unstaged_split_and_undo_clears_it() {
+    let repo = Repo::committed(&[("a", "a\n"), ("b", "b\n")]);
+    let coordinator = repo.coordinator();
+    repo.put("a", "a2\n");
+    repo.git(&["add", "a"]);
+    repo.put("b", "b2\n");
+    stash_push(&coordinator, &repo, "s1", false, &[]).unwrap();
+    assert!(repo.status().is_empty());
+    stash_round_trip(&coordinator, &repo, &["a", "b"], || {
+        stash_apply(&coordinator, &repo, 0).unwrap()
+    });
+    assert_eq!(repo.status(), ["M  a", " M b"]);
+    assert_eq!(repo.git(&["show", ":a"]), "a2\n");
+    assert_eq!(file_text(&repo, "b"), "b2\n");
+    assert_eq!(stash_list(&repo).lines().count(), 1);
+}
+
+#[test]
+fn stash_drop_undo_returns_that_commit_at_stash_zero() {
+    let repo = Repo::committed(&[("a", "a\n")]);
+    let coordinator = repo.coordinator();
+    for (mark, message) in [("0", "s0"), ("1", "s1"), ("2", "s2")] {
+        repo.put("a", mark);
+        stash_push(&coordinator, &repo, message, false, &[]).unwrap();
+    }
+    let before = stash_list(&repo);
+    let middle = before.lines().nth(1).unwrap().to_owned();
+    let dropped = stash_drop(&coordinator, &repo, 1).unwrap();
+    assert!(!stash_list(&repo).contains(middle.split_whitespace().next().unwrap()));
+    coordinator.undo(repo.path(), dropped.id).unwrap();
+    let restored = stash_list(&repo);
+    assert_eq!(restored.lines().next(), Some(middle.as_str()));
+    assert!(restored.contains("stash@{0}") || restored.lines().next() == Some(middle.as_str()));
+    coordinator.redo(repo.path(), dropped.id).unwrap();
+    assert!(!stash_list(&repo).lines().any(|line| line == middle));
+    coordinator.undo(repo.path(), dropped.id).unwrap();
+    assert_eq!(stash_list(&repo).lines().next(), Some(middle.as_str()));
+}
+
+#[test]
+fn stash_drop_refuses_an_oid_and_a_stale_index() {
+    let repo = Repo::committed(&[("a", "a\n")]);
+    let coordinator = repo.coordinator();
+    repo.put("a", "one\n");
+    stash_push(&coordinator, &repo, "s0", false, &[]).unwrap();
+    repo.put("a", "two\n");
+    stash_push(&coordinator, &repo, "s1", false, &[]).unwrap();
+    let older = stash_tip(&repo, 1);
+    let error = coordinator
+        .write(
+            repo.path(),
+            &Operation::StashDrop {
+                stash: l1_git_core::StashTip {
+                    name: older.oid.as_str().to_owned(),
+                    oid: older.oid.clone(),
+                },
+            },
+            &seen(&repo),
+        )
+        .unwrap_err();
+    assert_eq!(error.kind, ErrorKind::UnsupportedPath);
+    repo.git(&["stash", "drop", "stash@{0}"]);
+    let error = coordinator
+        .write(
+            repo.path(),
+            &Operation::StashDrop { stash: older },
+            &seen(&repo),
+        )
+        .unwrap_err();
+    assert_eq!(error.kind, STASH_CHANGED);
+    assert!(
+        error
+            .message
+            .contains("stash@{1} no longer holds the stash you saw"),
+        "{}",
+        error.message
+    );
+    assert_eq!(stash_list(&repo).lines().count(), 1);
+}
+
+#[test]
+fn stash_apply_of_a_dropped_entry_is_stale() {
+    let repo = Repo::committed(&[("a", "a\n")]);
+    let coordinator = repo.coordinator();
+    repo.put("a", "a2\n");
+    stash_push(&coordinator, &repo, "s1", false, &[]).unwrap();
+    let tip = stash_tip(&repo, 0);
+    stash_drop(&coordinator, &repo, 0).unwrap();
+    let error = coordinator
+        .write(
+            repo.path(),
+            &Operation::StashApply { stash: tip },
+            &seen(&repo),
+        )
+        .unwrap_err();
+    assert_eq!(error.kind, STASH_CHANGED);
+    assert_eq!(file_text(&repo, "a"), "a\n");
+    assert!(repo.status().is_empty());
+}
+
+#[test]
+fn stash_push_treats_a_star_as_a_literal_name() {
+    let repo = Repo::committed(&[("x*", "1\n"), ("x1", "1\n")]);
+    let coordinator = repo.coordinator();
+    repo.put("x*", "2\n");
+    repo.put("x1", "2\n");
+    stash_round_trip(&coordinator, &repo, &["x*", "x1"], || {
+        stash_push(&coordinator, &repo, "literal", false, &["x*"]).unwrap()
+    });
+    assert_eq!(file_text(&repo, "x*"), "1\n");
+    assert_eq!(file_text(&repo, "x1"), "2\n");
+    stash_pop(&coordinator, &repo, 0).unwrap();
+    assert_eq!(file_text(&repo, "x*"), "2\n");
+    assert_eq!(file_text(&repo, "x1"), "2\n");
+    assert_eq!(stash_list(&repo), "");
+}
+
+#[test]
+fn stash_pop_and_its_undo_round_trip_the_worktree_and_the_same_commit() {
+    let repo = Repo::committed(&[("a", "a\n"), ("b", "b\n")]);
+    let coordinator = repo.coordinator();
+    repo.put("a", "a2\n");
+    repo.put("b", "b2\n");
+    stash_push(&coordinator, &repo, "s1", false, &[]).unwrap();
+    let oid = stash_list(&repo)
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .to_owned();
+    stash_round_trip(&coordinator, &repo, &["a", "b"], || {
+        stash_pop(&coordinator, &repo, 0).unwrap()
+    });
+    assert_eq!(file_text(&repo, "a"), "a2\n");
+    assert_eq!(file_text(&repo, "b"), "b2\n");
+    assert_eq!(stash_list(&repo), "");
+    coordinator
+        .undo(
+            repo.path(),
+            coordinator
+                .undo_history(repo.path())
+                .unwrap()
+                .undo
+                .unwrap()
+                .id,
+        )
+        .unwrap();
+    assert_eq!(file_text(&repo, "a"), "a\n");
+    let restored = stash_list(&repo);
+    assert_eq!(restored.split_whitespace().next(), Some(oid.as_str()));
+    assert!(restored.contains("s1"), "{restored}");
+}
+
+#[test]
+fn stash_push_refuses_an_assume_unchanged_file_whose_bytes_differ() {
+    let repo = Repo::committed(&[("a", "a\n")]);
+    let coordinator = repo.coordinator();
+    repo.git(&["update-index", "--assume-unchanged", "a"]);
+    repo.put("a", "dirty\n");
+    let error = stash_push(&coordinator, &repo, "hidden", false, &[]).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::GitFailed);
+    assert_eq!(
+        error.message,
+        "a is marked assume-unchanged and its file differs from the index. Stashing would replace the file with the index copy. Refresh it with Git first."
+    );
+    assert_eq!(file_text(&repo, "a"), "dirty\n");
+    assert_eq!(stash_list(&repo), "");
+    assert!(
+        coordinator
+            .undo_history(repo.path())
+            .unwrap()
+            .undo
+            .is_none()
+    );
+}
+
+#[test]
+fn stash_push_refuses_an_intent_to_add_entry() {
+    let repo = Repo::committed(&[("a", "a\n")]);
+    let coordinator = repo.coordinator();
+    repo.put("n", "n\n");
+    repo.git(&["add", "-N", "n"]);
+    let error = stash_push(&coordinator, &repo, "ita", false, &[]).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::UnsupportedPath);
+    assert_eq!(error.message, "Entry 'n' not uptodate. Cannot merge.");
+    assert_eq!(stash_list(&repo), "");
+}

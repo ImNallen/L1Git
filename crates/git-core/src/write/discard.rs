@@ -11,8 +11,7 @@ use super::{
     txn::{Published, Txn},
 };
 use crate::{
-    ChangeStatus, ErrorKind, IndexObject, MoveSide, RepositoryError, Sides, StaleReason,
-    StatusEntry,
+    ChangeStatus, ErrorKind, IndexObject, MoveSide, RepositoryError, Sides, StatusEntry,
     git::{self, WriteDeadline},
     status,
 };
@@ -20,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs, io,
-    path::{Path, PathBuf},
+    path::Path,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -443,7 +442,7 @@ pub(super) fn step(
 /// each entry it writes assume-unchanged, as `git restore` marks what it
 /// checks out, which would hide a later edit, so it runs with that off.
 /// `add --refresh` stops at a path the index lacks and refreshes none.
-fn refresh(txn: &Txn<'_>, rows: &index::Rows, paths: &[&str]) {
+pub(super) fn refresh(txn: &Txn<'_>, rows: &index::Rows, paths: &[&str]) {
     let paths: Vec<&str> = paths
         .iter()
         .copied()
@@ -558,8 +557,8 @@ pub(super) fn remove_copies_beside(root: &Path, id: EntryId, change: &DiscardCha
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Coordinator, Limits, git::LocalWrite, worktree_status};
-    use std::process::Command;
+    use crate::{Coordinator, Limits, StaleReason, git::LocalWrite, worktree_status};
+    use std::{path::PathBuf, process::Command};
 
     struct Repo {
         directory: tempfile::TempDir,

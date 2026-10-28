@@ -365,7 +365,11 @@ fn leaving(head: &Head) -> Result<Oid, RepositoryError> {
     }
 }
 
-fn refuse_unfinished(repo: &Repo, doing: &str, reads: Deadline) -> Result<(), RepositoryError> {
+pub(super) fn refuse_unfinished(
+    repo: &Repo,
+    doing: &str,
+    reads: Deadline,
+) -> Result<(), RepositoryError> {
     match sync::in_progress(&repo.root, reads)?.first() {
         Some(operation) => Err(RepositoryError::new(
             ErrorKind::Conflict,

@@ -897,6 +897,8 @@ pub enum StaleReason {
     BranchChanged,
     /// A tag no longer holds what the request or the undo entry names.
     TagChanged,
+    /// The stash entry is no longer the one the request or the undo entry names.
+    StashChanged,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

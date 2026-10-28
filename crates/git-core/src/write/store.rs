@@ -236,11 +236,12 @@ impl LockedStore {
         if change.keeps_overwritten_files() {
             return Ok(Some(change));
         }
+        let entry = self.entry(id);
         if applied.root == opened.root() || change.repository_wide() {
-            return change.landed(opened, deadline);
+            return change.landed(opened, &entry, deadline);
         }
         match opened.worktree(&applied.root, deadline.reads()) {
-            Ok(repo) => change.landed(&repo, deadline),
+            Ok(repo) => change.landed(&repo, &entry, deadline),
             Err(_) => Ok(None),
         }
     }
@@ -695,6 +696,14 @@ impl EntryObjects {
             .run(runner.deadline())?
             .succeeded()?;
         Ok(())
+    }
+
+    pub(super) fn keep_stash(
+        &self,
+        runner: &impl Runner,
+        tip: &Oid,
+    ) -> Result<(), RepositoryError> {
+        self.keep_unique(runner, tip, &["--branches", "--tags"])
     }
 
     pub(super) fn keep_tag(

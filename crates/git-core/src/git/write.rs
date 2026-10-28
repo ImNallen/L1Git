@@ -27,10 +27,16 @@ pub(crate) enum LocalWrite {
     Checkout,
     CreateTag,
     DeleteTag,
+    StashPush,
+    StashApply,
+    StashPop,
+    StashDrop,
     Undo,
     Redo,
     UndoCheckout,
     RedoCheckout,
+    UndoStash,
+    RedoStash,
 }
 
 impl LocalWrite {
@@ -54,7 +60,13 @@ impl LocalWrite {
             | Self::EditMessage
             | Self::Checkout
             | Self::UndoCheckout
-            | Self::RedoCheckout => 600,
+            | Self::RedoCheckout
+            | Self::StashPush
+            | Self::StashApply
+            | Self::StashPop
+            | Self::StashDrop
+            | Self::UndoStash
+            | Self::RedoStash => 600,
         })
     }
 
@@ -75,10 +87,16 @@ impl LocalWrite {
             Self::Checkout => "Checking out",
             Self::CreateTag => "Creating the tag",
             Self::DeleteTag => "Deleting the tag",
+            Self::StashPush => "Stashing the changes",
+            Self::StashApply => "Applying the stash",
+            Self::StashPop => "Popping the stash",
+            Self::StashDrop => "Dropping the stash",
             Self::Undo => "Undoing the change",
             Self::Redo => "Redoing the change",
             Self::UndoCheckout => "Undoing the checkout",
             Self::RedoCheckout => "Redoing the checkout",
+            Self::UndoStash => "Undoing the stash change",
+            Self::RedoStash => "Redoing the stash change",
         }
     }
 
@@ -99,8 +117,12 @@ impl LocalWrite {
             Self::Checkout => "l1git checkout",
             Self::CreateTag => "l1git create tag",
             Self::DeleteTag => "l1git delete tag",
-            Self::Undo | Self::UndoCheckout => "l1git undo",
-            Self::Redo | Self::RedoCheckout => "l1git redo",
+            Self::StashPush => "l1git stash",
+            Self::StashApply => "l1git stash apply",
+            Self::StashPop => "l1git stash pop",
+            Self::StashDrop => "l1git stash drop",
+            Self::Undo | Self::UndoCheckout | Self::UndoStash => "l1git undo",
+            Self::Redo | Self::RedoCheckout | Self::RedoStash => "l1git redo",
         }
     }
 
@@ -122,6 +144,14 @@ impl LocalWrite {
             Self::CreateTag | Self::DeleteTag => "L1 Git rereads the tag to see what changed.",
             Self::Checkout | Self::UndoCheckout | Self::RedoCheckout => {
                 "L1 Git rereads HEAD to see whether Git moved it."
+            }
+            Self::StashPush
+            | Self::StashApply
+            | Self::StashPop
+            | Self::StashDrop
+            | Self::UndoStash
+            | Self::RedoStash => {
+                "L1 Git rereads the worktree and the stash list to see what changed."
             }
         }
     }
@@ -264,6 +294,22 @@ impl<'a> Write<'a> {
 
     /// With no `GIT_REFLOG_ACTION`, HEAD's reflog reads `checkout: moving from
     /// A to B`, which `git switch -` reads.
+    /// `git stash` runs as the user, on the real index, with hooks on. No
+    /// `GIT_LITERAL_PATHSPECS`: a pathspec file uses `:(literal)` instead.
+    pub(crate) fn stash(txn: &'a RefTxn<'_>, args: &[&'a str]) -> Self {
+        let mut all = vec!["stash"];
+        all.extend(args);
+        Self {
+            dir: txn.root(),
+            args: all,
+            env: Vec::new(),
+            input: None,
+            cap: Some(WRITE_STDOUT_CAP),
+            as_user: true,
+            lazy_fetch: false,
+        }
+    }
+
     pub(crate) fn switch(txn: &'a RefTxn<'_>, args: &[&'a str]) -> Self {
         let mut all = vec![
             "-c",
