@@ -1,7 +1,7 @@
 use l1_git_core::{
     Advance, AdvanceOutcome, Blocker, BranchRef, BranchRole, BranchState, BranchStatus,
-    Coordinator, ErrorKind, FetchFailure, FetchMode, FetchOutcome, Limits, Oid, RemoteFetch,
-    RepositoryOverview, SkipReason,
+    Coordinator, ErrorKind, Expect, FetchFailure, FetchMode, FetchOutcome, Limits, Oid, Operation,
+    RemoteFetch, RepositoryOverview, SkipReason, worktree_status,
 };
 use std::{
     fs,
@@ -88,6 +88,10 @@ impl World {
         }
     }
 
+    fn undo(&self) -> PathBuf {
+        self.directory.path().join("undo")
+    }
+
     fn path(&self) -> &str {
         self.work.to_str().unwrap()
     }
@@ -149,8 +153,8 @@ fn limits() -> Limits {
     }
 }
 
-fn coordinator() -> Coordinator {
-    Coordinator::new(limits())
+fn coordinator(world: &World) -> Coordinator {
+    Coordinator::new(limits(), world.undo())
 }
 
 fn oid(value: &str) -> Oid {
@@ -218,7 +222,7 @@ fn up_to_date(name: &str) -> BranchState {
 #[test]
 fn fast_forwards_the_checked_out_default_branch_after_a_fetch() {
     let world = World::new();
-    let coordinator = coordinator();
+    let coordinator = coordinator(&world);
     let target = world.colleague_pushes("main", "f", "one\ntwo\n");
 
     let local = coordinator
@@ -283,7 +287,7 @@ fn fast_forwards_the_checked_out_default_branch_after_a_fetch() {
 #[test]
 fn moves_a_free_branch_by_compare_and_swap_and_retries_harmlessly() {
     let world = World::new();
-    let coordinator = coordinator();
+    let coordinator = coordinator(&world);
     git(&world.work, &["branch", "feat"]);
     world.publish("feat");
     let target = world.colleague_pushes("feat", "g", "colleague\n");
@@ -323,7 +327,7 @@ fn moves_a_free_branch_by_compare_and_swap_and_retries_harmlessly() {
 #[test]
 fn reports_divergence_and_refuses_a_forged_fast_forward() {
     let world = World::new();
-    let coordinator = coordinator();
+    let coordinator = coordinator(&world);
     git(&world.work, &["branch", "feat"]);
     world.publish("feat");
     let theirs = world.colleague_pushes("feat", "g", "colleague\n");
@@ -362,7 +366,7 @@ fn reports_divergence_and_refuses_a_forged_fast_forward() {
 #[test]
 fn tracked_changes_block_but_untracked_files_only_block_when_overwritten() {
     let world = World::new();
-    let coordinator = coordinator();
+    let coordinator = coordinator(&world);
     let worktree = path(&world.work);
     let second = world.colleague_pushes("main", "f", "one\ntwo\n");
     fs::write(world.work.join("f"), "local edit\n").unwrap();
@@ -438,7 +442,7 @@ fn tracked_changes_block_but_untracked_files_only_block_when_overwritten() {
 #[test]
 fn fast_forwards_a_linked_worktree_inside_that_worktree() {
     let world = World::new();
-    let coordinator = coordinator();
+    let coordinator = coordinator(&world);
     git(&world.work, &["branch", "develop"]);
     world.publish("develop");
     let linked = world.worktree("wt-develop", "develop");
@@ -476,7 +480,7 @@ fn fast_forwards_a_linked_worktree_inside_that_worktree() {
 #[test]
 fn a_worktree_path_with_a_newline_keeps_its_row_whole() {
     let world = World::new();
-    let coordinator = coordinator();
+    let coordinator = coordinator(&world);
     git(&world.work, &["branch", "develop"]);
     world.publish("develop");
     let linked = world.worktree("wt\ndevelop", "develop");
@@ -503,7 +507,7 @@ fn a_worktree_path_with_a_newline_keeps_its_row_whole() {
 #[test]
 fn fetches_of_one_repository_never_overlap_and_concurrent_requests_share_one() {
     let world = World::new();
-    let coordinator = Arc::new(coordinator());
+    let coordinator = Arc::new(coordinator(&world));
     git(&world.work, &["branch", "develop"]);
     let linked = world.worktree("wt-develop", "develop");
     let log = world.file("upload-pack.log");
@@ -551,7 +555,7 @@ fn fetches_of_one_repository_never_overlap_and_concurrent_requests_share_one() {
 #[test]
 fn a_branch_mid_rebase_in_a_linked_worktree_is_in_use() {
     let world = World::new();
-    let coordinator = coordinator();
+    let coordinator = coordinator(&world);
     git(&world.work, &["branch", "develop"]);
     world.publish("develop");
     let linked = world.worktree("wt-develop", "develop");
@@ -608,7 +612,7 @@ fn a_branch_mid_rebase_in_a_linked_worktree_is_in_use() {
 #[test]
 fn a_hidden_rebase_blocks_even_when_the_file_transport_is_disabled() {
     let world = World::new();
-    let coordinator = coordinator();
+    let coordinator = coordinator(&world);
     git(&world.work, &["branch", "develop"]);
     world.publish("develop");
     let linked = world.worktree("wt-develop", "develop");
@@ -668,7 +672,7 @@ fn hook(world: &World, name: &str, body: &str) {
 #[test]
 fn update_all_rechecks_each_branch_after_the_moves_before_it() {
     let world = World::new();
-    let coordinator = coordinator();
+    let coordinator = coordinator(&world);
     for name in ["develop", "release", "old"] {
         git(&world.work, &["branch", name]);
     }
@@ -718,7 +722,7 @@ fn update_all_rechecks_each_branch_after_the_moves_before_it() {
 #[test]
 fn the_same_advance_twice_in_one_request_is_advanced_twice() {
     let world = World::new();
-    let coordinator = coordinator();
+    let coordinator = coordinator(&world);
     git(&world.work, &["branch", "feat"]);
     world.publish("feat");
     let target = world.colleague_pushes("feat", "g", "colleague\n");
@@ -743,7 +747,7 @@ fn the_same_advance_twice_in_one_request_is_advanced_twice() {
 #[test]
 fn a_branch_that_moves_past_the_target_during_its_merge_is_changed() {
     let world = World::new();
-    let coordinator = coordinator();
+    let coordinator = coordinator(&world);
     let target = world.colleague_pushes("main", "f", "one\ntwo\n");
     coordinator
         .overview(world.path(), FetchMode::Remote)
@@ -788,7 +792,7 @@ diff --git a/f b/f
 #[test]
 fn a_stopped_am_or_a_started_bisect_keeps_an_attached_branch_in_use() {
     let world = World::new();
-    let coordinator = coordinator();
+    let coordinator = coordinator(&world);
     let target = world.colleague_pushes("main", "g", "colleague\n");
     git(&world.work, &["fetch", "--quiet", "origin"]);
     let request = advance("main", &world.initial, &target);
@@ -855,7 +859,7 @@ fn names(overview: &RepositoryOverview) -> Vec<&str> {
 #[test]
 fn a_symbolic_branch_is_never_offered_or_moved() {
     let world = World::new();
-    let coordinator = coordinator();
+    let coordinator = coordinator(&world);
     let target = world.colleague_pushes("main", "f", "one\ntwo\n");
     git(&world.work, &["fetch", "--quiet", "origin"]);
     git(
@@ -890,7 +894,7 @@ fn a_symbolic_branch_is_never_offered_or_moved() {
 #[test]
 fn an_odd_ref_degrades_only_its_own_row() {
     let world = World::new();
-    let coordinator = coordinator();
+    let coordinator = coordinator(&world);
     git(&world.work, &["branch", "feat"]);
     world.publish("feat");
     git(
@@ -958,7 +962,7 @@ exit 255
 #[test]
 fn reports_each_remote_and_fails_fast_on_rejected_credentials() {
     let world = World::new();
-    let coordinator = coordinator();
+    let coordinator = coordinator(&world);
     let target = world.colleague_pushes("main", "f", "one\ntwo\n");
     let ssh = world.script("fake-ssh", FAKE_SSH_AUTH);
     git(&world.work, &["config", "core.sshCommand", &ssh]);
@@ -1024,7 +1028,7 @@ fn reports_each_remote_and_fails_fast_on_rejected_credentials() {
 #[test]
 fn skips_the_remotes_git_fetch_all_skips() {
     let world = World::new();
-    let coordinator = coordinator();
+    let coordinator = coordinator(&world);
     for (remote, key, value) in [
         ("dead", "skipDefaultUpdate", "true"),
         ("old.mirror", "skipFetchAll", "yes"),
@@ -1069,7 +1073,7 @@ fn skips_the_remotes_git_fetch_all_skips() {
 #[test]
 fn a_hung_remote_times_out_and_leaves_no_process_behind() {
     let world = World::new();
-    let coordinator = coordinator();
+    let coordinator = coordinator(&world);
     let marker = format!("sleep 600.{}", std::process::id());
     let ssh = world.script("hanging-ssh", &format!("{marker}\n"));
     git(&world.work, &["config", "core.sshCommand", &ssh]);
@@ -1143,7 +1147,7 @@ fn locks(directory: &Path) -> Vec<PathBuf> {
 #[test]
 fn a_fetch_stopped_at_its_deadline_releases_its_ref_locks() {
     let world = World::new();
-    let coordinator = coordinator();
+    let coordinator = coordinator(&world);
     world.colleague_pushes("main", "f", "one\ntwo\n");
     let marker = format!("sleep 601.{}", std::process::id());
     let hooks = world.file("hooks");
@@ -1186,10 +1190,13 @@ fn a_fetch_stopped_at_its_deadline_releases_its_ref_locks() {
 #[test]
 fn probes_only_beside_a_detached_worktree_and_blocks_when_unanswered() {
     let world = World::new();
-    let coordinator = Coordinator::new(Limits {
-        local_deadline: Duration::ZERO,
-        ..limits()
-    });
+    let coordinator = Coordinator::new(
+        Limits {
+            local_deadline: Duration::ZERO,
+            ..limits()
+        },
+        world.undo(),
+    );
     git(&world.work, &["branch", "feat"]);
     git(
         &world.work,
@@ -1240,7 +1247,7 @@ fn probes_only_beside_a_detached_worktree_and_blocks_when_unanswered() {
 #[test]
 fn reports_gone_upstreams_and_resolves_the_default_branch() {
     let world = World::new();
-    let coordinator = coordinator();
+    let coordinator = coordinator(&world);
     git(&world.work, &["branch", "develop"]);
     git(&world.work, &["branch", "feat"]);
     world.publish("develop");
@@ -1288,7 +1295,7 @@ fn a_fetch_keeps_local_tags_when_the_repository_prunes_tags() {
     git(&world.work, &["config", "fetch.pruneTags", "true"]);
     git(&world.work, &["tag", "local-only"]);
 
-    coordinator()
+    coordinator(&world)
         .overview(world.path(), FetchMode::Remote)
         .unwrap();
 
@@ -1298,7 +1305,7 @@ fn a_fetch_keeps_local_tags_when_the_repository_prunes_tags() {
 #[test]
 fn fast_forwards_a_blob_filtered_partial_clone() {
     let world = World::new();
-    let coordinator = coordinator();
+    let coordinator = coordinator(&world);
     git(&world.remote, &["config", "uploadpack.allowFilter", "true"]);
     let source = url::Url::from_file_path(&world.remote).unwrap();
     let partial = world.file("partial");
@@ -1365,8 +1372,104 @@ fn accepts_only_local_branches_and_full_object_ids() {
         let error = Oid::try_from(invalid).unwrap_err();
         assert!(matches!(error.kind, ErrorKind::InvalidOid));
     }
-    let error = coordinator()
+    let error = Coordinator::new(limits(), "/not/a/real/l1git/undo")
         .overview("/not/a/real/l1git/path", FetchMode::Remote)
         .unwrap_err();
     assert!(matches!(error.kind, ErrorKind::MissingPath));
+}
+
+fn stage_all(coordinator: &Coordinator, world: &World) -> Duration {
+    let status = worktree_status(world.path()).unwrap();
+    let started = Instant::now();
+    coordinator
+        .write(
+            world.path(),
+            &Operation::StageFiles {
+                entries: status.entries,
+            },
+            &Expect { head: status.head },
+        )
+        .unwrap();
+    started.elapsed()
+}
+
+fn wait_for(file: &Path) {
+    let asked = Instant::now();
+    while !file.exists() {
+        assert!(asked.elapsed() < Duration::from_secs(10), "{file:?}");
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[test]
+fn a_stage_never_waits_for_a_fetch_of_the_same_repository() {
+    let world = World::new();
+    let coordinator = Arc::new(coordinator(&world));
+    let started = world.file("fetch started");
+    let wrapper = world.script(
+        "upload-pack",
+        &format!(
+            "touch '{}'\nsleep 3\nexec git upload-pack \"$@\"\n",
+            started.display()
+        ),
+    );
+    git(
+        &world.work,
+        &["config", "remote.origin.uploadpack", &wrapper],
+    );
+    fs::write(world.work.join("staged.txt"), "staged\n").unwrap();
+    let fetch = {
+        let (coordinator, root) = (Arc::clone(&coordinator), world.path().to_owned());
+        thread::spawn(move || coordinator.overview(&root, FetchMode::Remote).unwrap())
+    };
+    wait_for(&started);
+    let took = stage_all(&coordinator, &world);
+    assert!(!fetch.is_finished(), "the fetch ended before the stage");
+    assert!(took < Duration::from_secs(1), "{took:?}");
+    assert_eq!(
+        git(&world.work, &["status", "--porcelain"]),
+        "A  staged.txt"
+    );
+    assert!(fetch.join().unwrap().fetch.is_some());
+}
+
+#[test]
+fn a_fast_forward_ref_move_and_a_stage_take_turns_on_the_write_lock() {
+    let world = World::new();
+    let coordinator = Arc::new(coordinator(&world));
+    git(&world.work, &["branch", "feat"]);
+    world.publish("feat");
+    let target = world.colleague_pushes("feat", "g", "colleague\n");
+    coordinator
+        .overview(world.path(), FetchMode::Remote)
+        .unwrap();
+    let moving = world.file("ref move started");
+    let moved = world.file("ref move ended");
+    hook(
+        &world,
+        "reference-transaction",
+        &format!(
+            "cat >/dev/null\nif [ \"$1\" = prepared ]; then touch '{}'; sleep 1; touch '{}'; fi\n",
+            moving.display(),
+            moved.display()
+        ),
+    );
+    fs::write(world.work.join("staged.txt"), "staged\n").unwrap();
+    let forward = {
+        let (coordinator, root) = (Arc::clone(&coordinator), world.path().to_owned());
+        let request = advance("feat", &world.initial, &target);
+        thread::spawn(move || coordinator.fast_forward(&root, &[request]).unwrap())
+    };
+    wait_for(&moving);
+    let took = stage_all(&coordinator, &world);
+    assert!(moved.exists(), "the stage ran during the ref move");
+    assert!(took >= Duration::from_millis(500), "{took:?}");
+    assert_eq!(
+        forward.join().unwrap().outcomes,
+        [advanced("feat", &world.initial, &target)]
+    );
+    assert_eq!(
+        git(&world.work, &["status", "--porcelain"]),
+        "A  staged.txt"
+    );
 }

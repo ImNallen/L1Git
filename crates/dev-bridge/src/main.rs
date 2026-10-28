@@ -1,9 +1,9 @@
-use l1_git_core::{Coordinator, run};
+use l1_git_core::{Coordinator, Limits, run};
 use serde_json::json;
-use std::{io::Read, sync::Arc, thread, time::Duration};
+use std::{io::Read, path::PathBuf, sync::Arc, thread, time::Duration};
 use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
 
-const BODY_LIMIT: u64 = 64 * 1024;
+const BODY_LIMIT: u64 = 4 * 1024 * 1024;
 
 fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     l1_git_core::stop_git_on_exit_signals(l1_git_core::OnQuit::Raise)?;
@@ -17,9 +17,12 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         format!("http://127.0.0.1:{dev_port}"),
         format!("http://localhost:{dev_port}"),
     ]);
+    let undo_dir = std::env::var_os("L1GIT_UNDO_DIR")
+        .map_or_else(|| std::env::temp_dir().join("l1git-undo"), PathBuf::from);
+    let coordinator = Coordinator::new(Limits::default(), undo_dir);
     let coordinator = match std::env::var("L1GIT_READ_DEADLINE_MS") {
-        Ok(cap) => Coordinator::default().cap_reads(Duration::from_millis(cap.parse()?)),
-        Err(_) => Coordinator::default(),
+        Ok(cap) => coordinator.cap_reads(Duration::from_millis(cap.parse()?)),
+        Err(_) => coordinator,
     };
     let coordinator = Arc::new(coordinator);
     let server = Server::http((std::net::Ipv4Addr::LOCALHOST, port))?;

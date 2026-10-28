@@ -53,7 +53,11 @@ pub(crate) fn root(path: &str, deadline: Deadline) -> Result<PathBuf, Repository
             "Repository paths must be valid UTF-8.",
         )
     })?;
-    Path::new(top).canonicalize().map_err(|_| {
+    canonical(top)
+}
+
+pub(crate) fn canonical(path: &str) -> Result<PathBuf, RepositoryError> {
+    Path::new(path).canonicalize().map_err(|_| {
         RepositoryError::new(
             ErrorKind::MissingPath,
             "The repository moved while opening. Choose its current folder.",

@@ -1,6 +1,7 @@
 use crate::{
-    ChangeStatus, ChangedFile, Conflict, ErrorKind, FilePatch, MoveSide, Moved, PATCH_LIMIT,
-    RepositoryError, Side, Sides, StatusEntry, SubmoduleState, WorktreePatch, WorktreeStatus,
+    ChangeStatus, ChangedFile, Conflict, ErrorKind, FilePatch, IndexObject, Mode, MoveSide, Moved,
+    Oid, PATCH_LIMIT, RepositoryError, Side, Sides, Stages, StatusEntry, SubmoduleState,
+    WorktreePatch, WorktreeStatus,
     git::{self, Deadline, LocalRead},
     repository::{self, text_patch},
     untracked::untracked,
@@ -45,25 +46,28 @@ fn entries(root: &Path, deadline: Deadline) -> Result<Vec<StatusEntry>, Reposito
         entries.push(match field {
             [] => continue,
             [b'1', b' ', record @ ..] => {
-                let [xy, sub, .., path] = columns::<8>(record)?;
+                let [xy, sub, _, m_index, _, _, h_index, path] = columns::<8>(record)?;
                 StatusEntry::Ordinary {
                     path: git::text(path),
                     submodule: submodule(sub)?,
                     sides: sides(xy)?,
+                    index: index_object(m_index, h_index)?,
                 }
             }
             [b'2', b' ', record @ ..] => {
-                let [xy, sub, .., path] = columns::<9>(record)?;
-                let staged = |unstaged| {
+                let [xy, sub, _, m_index, _, _, h_index, _, path] = columns::<9>(record)?;
+                let entry = index_object(m_index, h_index)?.ok_or_else(git::malformed)?;
+                let staged = |unstaged, index| {
                     Ok::<_, RepositoryError>(MoveSide::Staged {
                         unstaged: change(unstaged)?,
+                        index,
                     })
                 };
                 let (how, side) = match xy {
-                    [b'R', unstaged] => (Moved::Renamed, staged(*unstaged)?),
-                    [b'C', unstaged] => (Moved::Copied, staged(*unstaged)?),
-                    b".R" => (Moved::Renamed, MoveSide::Unstaged),
-                    b".C" => (Moved::Copied, MoveSide::Unstaged),
+                    [b'R', unstaged] => (Moved::Renamed, staged(*unstaged, entry)?),
+                    [b'C', unstaged] => (Moved::Copied, staged(*unstaged, entry)?),
+                    b".R" => (Moved::Renamed, MoveSide::Unstaged { original: entry }),
+                    b".C" => (Moved::Copied, MoveSide::Unstaged { original: entry }),
                     _ => return Err(git::malformed()),
                 };
                 StatusEntry::Renamed {
@@ -75,11 +79,16 @@ fn entries(root: &Path, deadline: Deadline) -> Result<Vec<StatusEntry>, Reposito
                 }
             }
             [b'u', b' ', record @ ..] => {
-                let [xy, sub, .., path] = columns::<10>(record)?;
+                let [xy, sub, m1, m2, m3, _, h1, h2, h3, path] = columns::<10>(record)?;
                 StatusEntry::Unmerged {
                     path: git::text(path),
                     conflict: conflict(xy)?,
                     submodule: submodule(sub)?,
+                    stages: Stages {
+                        base: index_object(m1, h1)?,
+                        ours: index_object(m2, h2)?,
+                        theirs: index_object(m3, h3)?,
+                    },
                 }
             }
             [b'?', b' ', path @ ..] => StatusEntry::Untracked {
@@ -97,6 +106,19 @@ fn columns<const N: usize>(record: &[u8]) -> Result<[&[u8]; N], RepositoryError>
         .collect::<Vec<_>>()
         .try_into()
         .map_err(|_| git::malformed())
+}
+
+/// `000000` is no entry.
+pub(crate) fn index_object(
+    mode: &[u8],
+    oid: &[u8],
+) -> Result<Option<IndexObject>, RepositoryError> {
+    if mode == b"000000" {
+        return Ok(None);
+    }
+    let mode = Mode::parse(mode).ok_or_else(git::malformed)?;
+    let oid = Oid::try_from(git::text(oid)).map_err(|_| git::malformed())?;
+    Ok(Some(IndexObject { mode, oid }))
 }
 
 fn change(code: u8) -> Result<Option<ChangeStatus>, RepositoryError> {
@@ -359,7 +381,7 @@ pub(crate) fn worktree_file_patch(
     }
 }
 
-fn check(file: &str) -> Result<(), RepositoryError> {
+pub(crate) fn check(file: &str) -> Result<(), RepositoryError> {
     let components: Vec<_> = Path::new(file).components().collect();
     if components.is_empty()
         || !components
@@ -404,8 +426,8 @@ fn lists(entry: &StatusEntry, file: &str, side: Side) -> bool {
         } => {
             path == file
                 && match moved {
-                    MoveSide::Staged { unstaged } => side == Side::Staged || unstaged.is_some(),
-                    MoveSide::Unstaged => side == Side::Unstaged,
+                    MoveSide::Staged { unstaged, .. } => side == Side::Staged || unstaged.is_some(),
+                    MoveSide::Unstaged { .. } => side == Side::Unstaged,
                 }
         }
         StatusEntry::Unmerged { path, .. } => path == file,

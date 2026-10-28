@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
 pub enum Head {
     Attached { reference: String, oid: String },
     Unborn { reference: String },
@@ -268,24 +268,32 @@ pub struct WorktreeStatus {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
 pub enum StatusEntry {
     Ordinary {
         path: String,
+        #[serde(deserialize_with = "Option::deserialize")]
         submodule: Option<SubmoduleState>,
         sides: Sides,
+        /// `None` when the index deletes the path or holds it with
+        /// `git add -N`, which Git reports as zeros.
+        #[serde(deserialize_with = "Option::deserialize")]
+        index: Option<IndexObject>,
     },
     Renamed {
         path: String,
         original: String,
         how: Moved,
+        #[serde(deserialize_with = "Option::deserialize")]
         submodule: Option<SubmoduleState>,
         side: MoveSide,
     },
     Unmerged {
         path: String,
         conflict: Conflict,
+        #[serde(deserialize_with = "Option::deserialize")]
         submodule: Option<SubmoduleState>,
+        stages: Stages,
     },
     Untracked {
         path: String,
@@ -293,7 +301,7 @@ pub enum StatusEntry {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
 pub enum Sides {
     Staged {
         staged: ChangeStatus,
@@ -309,11 +317,19 @@ pub enum Sides {
 
 /// A move between the index and the working tree comes from a path added with
 /// `git add -N`, and its index side never carries a separate change.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
 pub enum MoveSide {
-    Staged { unstaged: Option<ChangeStatus> },
-    Unstaged,
+    /// `index` is the entry of `path`. A rename's original has none. A copy's
+    /// original keeps its own, which this record does not carry.
+    Staged {
+        #[serde(deserialize_with = "Option::deserialize")]
+        unstaged: Option<ChangeStatus>,
+        index: IndexObject,
+    },
+    /// `path` is held with `git add -N`, and `original` is the entry of the
+    /// original path.
+    Unstaged { original: IndexObject },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -324,11 +340,59 @@ pub enum Moved {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SubmoduleState {
     pub commit_changed: bool,
     pub modified: bool,
     pub untracked: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub enum Mode {
+    #[serde(rename = "100644")]
+    File,
+    #[serde(rename = "100755")]
+    Executable,
+    #[serde(rename = "120000")]
+    Symlink,
+    #[serde(rename = "160000")]
+    Submodule,
+}
+
+impl Mode {
+    pub(crate) fn parse(octal: &[u8]) -> Option<Self> {
+        [Self::File, Self::Executable, Self::Symlink, Self::Submodule]
+            .into_iter()
+            .find(|mode| mode.octal().as_bytes() == octal)
+    }
+
+    pub(crate) const fn octal(self) -> &'static str {
+        match self {
+            Self::File => "100644",
+            Self::Executable => "100755",
+            Self::Symlink => "120000",
+            Self::Submodule => "160000",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(deny_unknown_fields)]
+pub struct IndexObject {
+    pub mode: Mode,
+    pub oid: Oid,
+}
+
+/// Stages 1 to 3 of an unmerged path. A side that deleted the path has none.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct Stages {
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub base: Option<IndexObject>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub ours: Option<IndexObject>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub theirs: Option<IndexObject>,
 }
 
 /// `Staged` compares HEAD, or the empty tree before the first commit, with the
@@ -371,7 +435,7 @@ pub enum Conflict {
 }
 
 /// A full 40- or 64-digit lowercase object id.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub struct Oid(String);
 
@@ -632,8 +696,8 @@ pub enum SkipReason {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "camelCase")]
 pub enum ErrorKind {
     MissingPath,
     NotRepository,
@@ -646,10 +710,33 @@ pub enum ErrorKind {
     UnsupportedPath,
     UnreadablePath,
     TimedOut,
+    /// The repository no longer matches what the request says the user saw.
+    StaleView {
+        #[serde(flatten)]
+        reason: StaleReason,
+    },
+    /// Another Git process holds a lock the write needs.
+    LockHeld,
+    HookFailed,
+    Conflict,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "reason", rename_all = "camelCase")]
+pub enum StaleReason {
+    /// HEAD is not the commit the request or the undo entry names.
+    HeadMoved,
+    /// A path's index entries differ from the request or the undo entry.
+    PathChanged,
+    /// Git would also change `paths`, which the request does not name.
+    PathNotChosen { paths: Vec<String> },
+    /// The entry is not the next one to undo or redo.
+    HistoryChanged,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RepositoryError {
+    #[serde(flatten)]
     pub kind: ErrorKind,
     pub message: String,
 }
@@ -660,6 +747,10 @@ impl RepositoryError {
             kind,
             message: message.into(),
         }
+    }
+
+    pub(crate) fn stale(reason: StaleReason, message: impl Into<String>) -> Self {
+        Self::new(ErrorKind::StaleView { reason }, message)
     }
 }
 

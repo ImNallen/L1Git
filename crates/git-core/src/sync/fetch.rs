@@ -1,7 +1,8 @@
-use super::{now, stderr};
+use super::now;
 use crate::{
     FetchFailure, FetchOutcome, FetchSummary, RemoteFetch, RepositoryError,
     git::{self, Deadline, Finished, Mutation},
+    stderr,
 };
 use std::{collections::HashSet, path::Path, time::Duration};
 

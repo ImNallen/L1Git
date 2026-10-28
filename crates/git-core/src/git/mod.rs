@@ -1,6 +1,10 @@
+mod write;
+
+pub(crate) use write::{LocalWrite, Write, WriteDeadline};
+
 use crate::{BranchRef, ErrorKind, Oid, RepositoryError};
 use std::{
-    io::{self, Read, Write},
+    io::{self, Read, Write as _},
     path::Path,
     process::{Child, ChildStderr, Command, ExitStatus, Stdio},
     sync::{
@@ -82,13 +86,18 @@ pub(crate) enum LocalRead {
     WorktreeStatus,
     WorktreePatch,
     BranchStatus,
+    UndoHistory,
 }
 
 impl LocalRead {
     pub(crate) const fn budget(self) -> Duration {
         Duration::from_secs(match self {
             Self::Snapshot => 120,
-            Self::Refs | Self::LineStats | Self::WorktreeStatus | Self::WorktreePatch => 30,
+            Self::Refs
+            | Self::LineStats
+            | Self::WorktreeStatus
+            | Self::WorktreePatch
+            | Self::UndoHistory => 30,
             Self::CommitDetail | Self::FilePatch => 20,
             Self::FileHistory | Self::Blame | Self::BranchStatus => 60,
         })
@@ -106,13 +115,20 @@ impl LocalRead {
             Self::WorktreeStatus => "the worktree status",
             Self::WorktreePatch => "this file's changes",
             Self::BranchStatus => "the branch status",
+            Self::UndoHistory => "the undo history",
         }
     }
 }
 
 #[derive(Debug, Clone, Copy)]
+enum Work {
+    Read(LocalRead),
+    Write(LocalWrite),
+}
+
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct Deadline {
-    read: LocalRead,
+    work: Work,
     budget: Duration,
     at: Instant,
 }
@@ -123,22 +139,22 @@ impl Deadline {
     }
 
     pub(crate) fn start(read: LocalRead, budget: Duration) -> Self {
+        Self::new(Work::Read(read), budget)
+    }
+
+    fn new(work: Work, budget: Duration) -> Self {
         Self {
-            read,
+            work,
             budget,
             at: Instant::now() + budget,
         }
     }
 
-    /// The same read with its full budget again. Branch status renews only
-    /// after a fetch, probe, ref move, or merge, which have their own
-    /// deadlines, or after waiting for another fetch or fast-forward of the
-    /// repository.
     pub(crate) fn renewed(self) -> Self {
-        Self::start(self.read, self.budget)
+        Self::new(self.work, self.budget)
     }
 
-    fn remaining(&self) -> Duration {
+    pub(crate) fn remaining(&self) -> Duration {
         self.at.saturating_duration_since(Instant::now())
     }
 
@@ -150,11 +166,32 @@ impl Deadline {
         };
         RepositoryError::new(
             ErrorKind::TimedOut,
-            format!(
-                "Reading {} took longer than {budget}, so L1 Git stopped Git. Retry. If it happens again, check for a slow disk or a Git filter that does not finish.",
-                self.read.subject()
-            ),
+            match self.work {
+                Work::Read(read) => format!(
+                    "Reading {} took longer than {budget}, so L1 Git stopped Git. Retry. If it happens again, check for a slow disk or a Git filter that does not finish.",
+                    read.subject()
+                ),
+                Work::Write(write) => format!(
+                    "{} took longer than {budget}, so L1 Git stopped Git. {} Retry. If it happens again, check for a Git filter or hook that does not finish.",
+                    write.doing(),
+                    write.left_behind()
+                ),
+            },
         )
+    }
+
+    fn broken(&self) -> RepositoryError {
+        match self.work {
+            Work::Read(_) => read_failed(),
+            Work::Write(write) => RepositoryError::new(
+                ErrorKind::GitFailed,
+                format!(
+                    "Git stopped unexpectedly while {}. {} Retry.",
+                    write.doing().to_lowercase(),
+                    write.left_behind()
+                ),
+            ),
+        }
     }
 }
 
@@ -167,13 +204,11 @@ struct Ran {
 /// Spawns Git in its own process group so an expired deadline stops every
 /// process it started, such as a clean filter.
 fn execute(
-    path: &Path,
-    args: &[&str],
+    mut command: Command,
     deadline: Deadline,
     input: Option<Vec<u8>>,
     cap: Option<usize>,
 ) -> Result<Ran, RepositoryError> {
-    let mut command = command(path, args);
     command
         .stdin(if input.is_some() {
             Stdio::piped()
@@ -193,7 +228,7 @@ fn execute(
     let stderr = Stderr::drain(child.child.stderr.take());
     let Some(mut pipe) = child.child.stdout.take() else {
         child.stop();
-        return Err(read_failed());
+        return Err(deadline.broken());
     };
     let (sender, receiver) = mpsc::channel();
     thread::spawn(move || {
@@ -203,7 +238,7 @@ fn execute(
         Ok(Ok(stdout)) => stdout,
         Ok(Err(_)) => {
             child.stop();
-            return Err(read_failed());
+            return Err(deadline.broken());
         }
         Err(_) => {
             child.stop();
@@ -213,7 +248,7 @@ fn execute(
     let mut pause = FIRST_EXIT_POLL;
     let status = loop {
         match child.exited() {
-            Ok(true) => break child.wait().map_err(|_| read_failed())?,
+            Ok(true) => break child.wait().map_err(|_| deadline.broken())?,
             Ok(false) if deadline.remaining().is_zero() => {
                 child.stop();
                 return Err(deadline.expired());
@@ -224,14 +259,14 @@ fn execute(
             }
             Err(_) => {
                 child.stop();
-                return Err(read_failed());
+                return Err(deadline.broken());
             }
         }
     };
     if let Some(writer) = writer
         && !matches!(writer.join(), Ok(Ok(())))
     {
-        return Err(read_failed());
+        return Err(deadline.broken());
     }
     Ok(Ran {
         status,
@@ -267,12 +302,9 @@ fn whole(ran: Ran) -> Result<Exit, RepositoryError> {
         return Err(read_failed());
     };
     if ran.status.code() == Some(129)
-        && String::from_utf8_lossy(&ran.stderr.after_exit()).contains("no-lazy-fetch")
+        && let Some(error) = too_old(ran.status.code(), &text(&ran.stderr.after_exit()))
     {
-        return Err(RepositoryError::new(
-            ErrorKind::GitFailed,
-            "L1 Git requires Git 2.45 or later. Update Git and try again.",
-        ));
+        return Err(error);
     }
     Ok(Exit {
         status: ran.status,
@@ -281,7 +313,17 @@ fn whole(ran: Ran) -> Result<Exit, RepositoryError> {
 }
 
 pub(crate) fn run(path: &Path, args: &[&str], deadline: Deadline) -> Result<Exit, RepositoryError> {
-    whole(execute(path, args, deadline, None, None)?)
+    whole(execute(command(path, args), deadline, None, None)?)
+}
+
+/// `base()` passes `--no-lazy-fetch`, which Git before 2.45 rejects.
+fn too_old(code: Option<i32>, stderr: &str) -> Option<RepositoryError> {
+    (code == Some(129) && stderr.contains("no-lazy-fetch")).then(|| {
+        RepositoryError::new(
+            ErrorKind::GitFailed,
+            "L1 Git requires Git 2.45 or later. Update Git and try again.",
+        )
+    })
 }
 
 pub(crate) fn read_failed() -> RepositoryError {
@@ -312,7 +354,12 @@ pub(crate) fn read_with_input(
     input: Vec<u8>,
     deadline: Deadline,
 ) -> Result<Vec<u8>, RepositoryError> {
-    succeeded(whole(execute(path, args, deadline, Some(input), None)?)?)
+    succeeded(whole(execute(
+        command(path, args),
+        deadline,
+        Some(input),
+        None,
+    )?)?)
 }
 
 pub(crate) enum Capped {
@@ -339,7 +386,7 @@ pub(crate) fn run_capped(
     cap: usize,
     deadline: Deadline,
 ) -> Result<CappedRun, RepositoryError> {
-    let ran = execute(path, args, deadline, None, Some(cap))?;
+    let ran = execute(command(path, args), deadline, None, Some(cap))?;
     Ok(CappedRun {
         code: ran.status.code(),
         stdout: ran.stdout,
@@ -558,6 +605,30 @@ static RUNNING: Mutex<Vec<u32>> = Mutex::new(Vec::new());
 static STOPPING: AtomicBool = AtomicBool::new(false);
 /// Commands between the `STOPPING` check and their entry in `RUNNING`.
 static SPAWNING: AtomicUsize = AtomicUsize::new(0);
+static HELD_INDEX_LOCKS: AtomicUsize = AtomicUsize::new(0);
+
+pub(crate) struct HeldIndexLock;
+
+impl HeldIndexLock {
+    /// Counts the transaction before it takes the index lock, and refuses
+    /// once `stop_all_git` has begun. `stop_all_git` sets `STOPPING` before
+    /// it reads the count, so it either waits for this transaction or this
+    /// transaction sees it quitting and takes no lock.
+    pub(crate) fn begin() -> Result<Self, RepositoryError> {
+        HELD_INDEX_LOCKS.fetch_add(1, Ordering::SeqCst);
+        let held = Self;
+        if STOPPING.load(Ordering::SeqCst) {
+            return Err(quitting());
+        }
+        Ok(held)
+    }
+}
+
+impl Drop for HeldIndexLock {
+    fn drop(&mut self) {
+        HELD_INDEX_LOCKS.fetch_sub(1, Ordering::SeqCst);
+    }
+}
 
 fn running() -> MutexGuard<'static, Vec<u32>> {
     RUNNING.lock().unwrap_or_else(PoisonError::into_inner)
@@ -732,7 +803,8 @@ fn child_exited(_pid: u32) -> io::Result<bool> {
 /// Stops every Git command L1 Git started that is still running, for a
 /// process that is about to exit. A command checked before it began is
 /// waited for, for up to 1 s, so it is listed and stopped. Later commands are
-/// refused. It can block for about 2 s when a command is slow to start and
+/// refused. Then it waits up to 1 s for index transactions to remove their
+/// locks, and later transactions take none. It can block for about 3 s when a command is slow to start and
 /// another ignores SIGTERM.
 pub fn stop_all_git() {
     STOPPING.store(true, Ordering::SeqCst);
@@ -746,6 +818,10 @@ pub fn stop_all_git() {
         thread::sleep(POLL);
     }
     signal_listed(Signal::Kill);
+    let asked = Instant::now();
+    while HELD_INDEX_LOCKS.load(Ordering::SeqCst) > 0 && asked.elapsed() < SHUTDOWN_GRACE {
+        thread::sleep(POLL);
+    }
 }
 
 /// A listed pid is unreaped, because `Group` unlists it before reaping and

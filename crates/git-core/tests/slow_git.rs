@@ -1,6 +1,8 @@
 #![cfg(unix)]
 
-use l1_git_core::{Comparison, Coordinator, ErrorKind, Request, Response, TargetDetail, run};
+use l1_git_core::{
+    Comparison, Coordinator, ErrorKind, Limits, Request, Response, TargetDetail, run,
+};
 use std::{
     fs,
     os::unix::fs::PermissionsExt,
@@ -71,7 +73,8 @@ fn a_git_that_hangs_on_one_commit_times_out_that_detail_and_leaves_no_process() 
     // SAFETY: this binary runs one test, and no other thread exists yet.
     unsafe { std::env::set_var("PATH", path) };
 
-    let coordinator = Coordinator::default().cap_reads(CAP);
+    let coordinator =
+        Coordinator::new(Limits::default(), directory.path().join("undo")).cap_reads(CAP);
     let request = |oid: &str| Request::CommitDetail {
         path: root.to_str().unwrap().to_owned(),
         comparison: Comparison::commit(oid),

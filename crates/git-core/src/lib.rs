@@ -6,8 +6,10 @@ mod remotes;
 mod repository;
 mod run;
 mod status;
+mod stderr;
 mod sync;
 mod untracked;
+mod write;
 
 pub use exit_signals::{OnQuit, stop_git_on_exit_signals};
 pub use file_history::{blame, file_history};
@@ -20,3 +22,4 @@ pub use repository::{
 pub use run::{Request, Response, run};
 pub use status::{worktree_patch, worktree_status};
 pub use sync::{Coordinator, Limits};
+pub use write::{Applied, EntryId, Expect, Operation, UndoHistory};

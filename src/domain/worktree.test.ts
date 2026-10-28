@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { StatusEntry } from "./repository";
+import { oidSchema } from "./repository";
+import type { IndexObject, StatusEntry } from "./repository";
 import {
   changeSummary,
   clampMessage,
@@ -11,7 +12,18 @@ import {
 const ordinary = (
   path: string,
   sides: Extract<StatusEntry, { kind: "ordinary" }>["sides"],
-): StatusEntry => ({ kind: "ordinary", path, submodule: null, sides });
+): StatusEntry => ({
+  kind: "ordinary",
+  path,
+  submodule: null,
+  sides,
+  index: object,
+});
+const object: IndexObject = {
+  mode: "100644",
+  oid: oidSchema.parse("a".repeat(40)),
+};
+const stages = { base: object, ours: object, theirs: object };
 
 function worktreeLists(entries: StatusEntry[]) {
   const groups = worktreeGroups(entries);
@@ -60,7 +72,7 @@ describe("worktree lists", () => {
       original: "old.txt",
       how: "renamed",
       submodule: null,
-      side: { kind: "staged", unstaged },
+      side: { kind: "staged", unstaged, index: object },
     });
     expect(worktreeLists([renamed(null)])).toEqual({
       staged: [{ path: "new.txt", status: "renamed" }],
@@ -81,7 +93,7 @@ describe("worktree lists", () => {
           original: "intent.txt",
           how: "renamed",
           submodule: null,
-          side: { kind: "unstaged" },
+          side: { kind: "unstaged", original: object },
         },
         {
           kind: "renamed",
@@ -89,7 +101,7 @@ describe("worktree lists", () => {
           original: "source.txt",
           how: "copied",
           submodule: null,
-          side: { kind: "staged", unstaged: null },
+          side: { kind: "staged", unstaged: null, index: object },
         },
         { kind: "untracked", path: "new.txt" },
       ]),
@@ -111,6 +123,7 @@ describe("worktree lists", () => {
           path: "clash.txt",
           conflict: "bothModified",
           submodule: null,
+          stages,
         },
       ]),
     ).toEqual({
@@ -150,6 +163,7 @@ describe("worktree row summary", () => {
           path: "d.txt",
           conflict: "bothAdded",
           submodule: null,
+          stages,
         },
       ]),
     ).toBe("1 conflicted, 2 modified, 1 untracked");
@@ -165,6 +179,7 @@ describe("an open worktree diff after a status change", () => {
       path: "clash.txt",
       conflict: "bothModified",
       submodule: null,
+      stages,
     },
   ];
 

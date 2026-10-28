@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { singleCommit } from "./domain/comparison";
-import { oidSchema, rootSchema } from "./domain/repository";
+import { oidSchema, problemFrom, rootSchema } from "./domain/repository";
 
 const invoke = vi.fn();
 const fetch = vi.fn();
@@ -103,6 +103,37 @@ describe("bridge transport", () => {
     };
     reply(200, { ok: false, error });
     await expect(commitDetail(root, singleCommit(oid))).rejects.toEqual(error);
+  });
+
+  it("keeps the core's message for a staleView reason it does not know", async () => {
+    const { commitDetail } = await load(false);
+    const message = "HEAD went somewhere new. Refresh and try again.";
+    reply(200, {
+      ok: false,
+      error: { kind: "staleView", reason: "headWandered", message },
+    });
+    const failure = commitDetail(root, singleCommit(oid)).catch(problemFrom);
+    await expect(failure).resolves.toEqual({
+      kind: "staleView",
+      reason: "unknown",
+      message,
+    });
+  });
+
+  it("rejects a staleView that carries a field its reason does not define", async () => {
+    const { commitDetail } = await load(false);
+    for (const error of [
+      { reason: "pathChanged", paths: ["f"] },
+      { reason: "pathNotChosen", paths: ["f"], path: "f" },
+    ]) {
+      reply(200, {
+        ok: false,
+        error: { kind: "staleView", message: "Refresh.", ...error },
+      });
+      await expect(
+        commitDetail(root, singleCommit(oid)),
+      ).rejects.toHaveProperty("issues");
+    }
   });
 
   it("names the bridge's reason for a 400", async () => {

@@ -1,7 +1,8 @@
 use crate::{
-    Advance, Blame, CommitDetail, Comparison, Coordinator, FastForwardReport, FetchMode, FilePatch,
-    FileRevision, LineStats, RepositoryError, RepositoryOverview, RepositoryRefs,
-    RepositorySnapshot, Side, WorktreePatch, WorktreeStatus,
+    Advance, Applied, Blame, CommitDetail, Comparison, Coordinator, EntryId, Expect,
+    FastForwardReport, FetchMode, FilePatch, FileRevision, LineStats, Operation, RepositoryError,
+    RepositoryOverview, RepositoryRefs, RepositorySnapshot, Side, UndoHistory, WorktreePatch,
+    WorktreeStatus,
     file_history::{blame_within, file_history_within},
     git::LocalRead,
     repository::{
@@ -59,6 +60,22 @@ pub enum Request {
         file: String,
         side: Side,
     },
+    Write {
+        path: String,
+        operation: Operation,
+        expect: Expect,
+    },
+    Undo {
+        path: String,
+        id: EntryId,
+    },
+    Redo {
+        path: String,
+        id: EntryId,
+    },
+    UndoHistory {
+        path: String,
+    },
 }
 
 #[derive(Debug, Serialize)]
@@ -75,6 +92,10 @@ pub enum Response {
     FastForward(FastForwardReport),
     WorktreeStatus(WorktreeStatus),
     WorktreePatch(WorktreePatch),
+    Write(Applied),
+    Undo(Applied),
+    Redo(Applied),
+    UndoHistory(UndoHistory),
 }
 
 pub fn run(coordinator: &Coordinator, request: Request) -> Result<Response, RepositoryError> {
@@ -127,5 +148,13 @@ pub fn run(coordinator: &Coordinator, request: Request) -> Result<Response, Repo
         Request::WorktreePatch { path, file, side } => Response::WorktreePatch(
             worktree_patch_within(&path, &file, side, deadline(LocalRead::WorktreePatch))?,
         ),
+        Request::Write {
+            path,
+            operation,
+            expect,
+        } => Response::Write(coordinator.write(&path, &operation, &expect)?),
+        Request::Undo { path, id } => Response::Undo(coordinator.undo(&path, id)?),
+        Request::Redo { path, id } => Response::Redo(coordinator.redo(&path, id)?),
+        Request::UndoHistory { path } => Response::UndoHistory(coordinator.undo_history(&path)?),
     })
 }
