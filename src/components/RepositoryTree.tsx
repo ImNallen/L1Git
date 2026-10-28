@@ -4,9 +4,11 @@ import type {
   MouseEvent as ReactMouseEvent,
 } from "react";
 import {
+  ArchiveRestore,
   ChevronDown,
   ChevronRight,
   CircleCheck,
+  CornerDownLeft,
   Eye,
   EyeOff,
   Focus,
@@ -61,6 +63,7 @@ type Props = {
   } | null;
   onBranchAsk: (ask: BranchAsk) => void;
   onTagAsk: (ask: TagAsk) => void;
+  onStashAction: (action: "apply" | "pop" | "drop", stash: Stash) => void;
   onCheckout: (branch: Branch) => void;
 };
 
@@ -83,6 +86,7 @@ export function RepositoryTree({
   writable,
   onBranchAsk,
   onTagAsk,
+  onStashAction,
   onCheckout,
 }: Props) {
   const [query, setQuery] = useState("");
@@ -90,7 +94,8 @@ export function RepositoryTree({
     target:
       | { kind: "repository"; entry: RecentRepository }
       | { kind: "branch"; root: RepositoryRoot; branch: Branch }
-      | { kind: "tag"; root: RepositoryRoot; tag: Tag };
+      | { kind: "tag"; root: RepositoryRoot; tag: Tag }
+      | { kind: "stash"; root: RepositoryRoot; stash: Stash };
     x: number;
     y: number;
     focus: HTMLElement;
@@ -205,6 +210,34 @@ export function RepositoryTree({
           ? null
           : "Open this repository to change its tags.",
       );
+    if (target.kind === "stash") {
+      const off =
+        writable?.root === target.root
+          ? null
+          : "Open this repository to change its stashes.";
+      return (
+        <>
+          {write(
+            CornerDownLeft,
+            "Apply",
+            () => onStashAction("apply", target.stash),
+            off,
+          )}
+          {write(
+            ArchiveRestore,
+            "Pop",
+            () => onStashAction("pop", target.stash),
+            off,
+          )}
+          {write(
+            Trash2,
+            "Drop…",
+            () => onStashAction("drop", target.stash),
+            off,
+          )}
+        </>
+      );
+    }
     const { root, branch } = target;
     const rule = ruleFor(root);
     const asks = branchAsks(branch);
@@ -314,6 +347,13 @@ export function RepositoryTree({
             event.currentTarget,
           )
         }
+        onStashMenu={(event, stash) =>
+          openMenu(
+            event,
+            { kind: "stash", root: entry.root, stash },
+            event.currentTarget,
+          )
+        }
         onCheckout={writable?.root === entry.root ? onCheckout : null}
       />
     );
@@ -402,7 +442,9 @@ export function RepositoryTree({
               ? menu.target.entry.name
               : menu.target.kind === "tag"
                 ? menu.target.tag.name
-                : menu.target.branch.name
+                : menu.target.kind === "stash"
+                  ? menu.target.stash.name
+                  : menu.target.branch.name
           } actions`}
           onClose={closeMenu}
         >

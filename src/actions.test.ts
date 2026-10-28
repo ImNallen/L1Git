@@ -65,6 +65,7 @@ function commands(): Commands {
     stageAll: vi.fn(),
     unstageAll: vi.fn(),
     discardAll: vi.fn(),
+    stashChanges: vi.fn(),
     focusCommit: vi.fn(),
     undo: vi.fn(),
     redo: vi.fn(),
@@ -509,7 +510,7 @@ describe("staging and undo", () => {
     expect(
       titles(
         { ...unstaged, worktree: { unstaged: 0, staged: 1, discardable: 0 } },
-        "stage",
+        "unstage",
       ),
     ).toEqual(["Unstage all"]);
     expect(titles({ ...unstaged, writing: true }, "stage")).toEqual([]);
@@ -564,6 +565,30 @@ describe("staging and undo", () => {
     ).toEqual([]);
     expect(titles({ ...unstaged, writing: true }, "discard")).toEqual([]);
     expect(titles(repositoryScreen, "discard")).toEqual([]);
+  });
+
+  it("offers Stash changes for any uncommitted change", () => {
+    const dirty: ActionContext = {
+      ...repositoryScreen,
+      worktree: { unstaged: 1, staged: 0, discardable: 0 },
+    };
+    expect(titles(dirty, "stash")).toEqual(["Stash changes…"]);
+    expect(
+      titles(
+        {
+          ...repositoryScreen,
+          worktree: { unstaged: 0, staged: 0, conflicts: 1, discardable: 0 },
+        },
+        "stash",
+      ),
+    ).toEqual(["Stash changes…"]);
+    expect(titles(repositoryScreen, "stash")).toEqual([]);
+    expect(titles({ ...dirty, writing: true }, "stash")).toEqual([]);
+    const run = commands();
+    paletteItems(dirty, run, true, [], null)
+      .find((item) => item.title === "Stash changes…")
+      ?.run();
+    expect(run.stashChanges).toHaveBeenCalled();
   });
 
   it("offers Commit only with staged files", () => {
