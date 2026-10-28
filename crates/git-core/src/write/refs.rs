@@ -92,7 +92,12 @@ pub(super) fn oid(head: &Head) -> Option<Oid> {
     }
 }
 
-pub(super) fn transact(txn: &RefTxn, moves: &[Move], reflog: &str) -> Result<(), RepositoryError> {
+pub(super) fn transact(
+    txn: &RefTxn,
+    moves: &[Move],
+    reflog: &str,
+    noun: &str,
+) -> Result<(), RepositoryError> {
     let mut input = String::from("start\n");
     for change in moves {
         input.push_str(&change.line());
@@ -109,7 +114,7 @@ pub(super) fn transact(txn: &RefTxn, moves: &[Move], reflog: &str) -> Result<(),
         return Err(RepositoryError::new(
             ErrorKind::LockHeld,
             format!(
-                "Another Git process is changing a branch, so nothing changed. Wait for it to finish, then try again. Git said: {}",
+                "Another Git process is changing a {noun}, so nothing changed. Wait for it to finish, then try again. Git said: {}",
                 stderr::summarize(said)
             ),
         ));
@@ -122,13 +127,15 @@ pub(super) fn transact(txn: &RefTxn, moves: &[Move], reflog: &str) -> Result<(),
     if moved.iter().any(|text| said.contains(text)) {
         return Err(RepositoryError::stale(
             StaleReason::HeadMoved,
-            "A branch moved since L1 Git read it, so nothing changed. Refresh and try again.",
+            format!(
+                "A {noun} moved since L1 Git read it, so nothing changed. Refresh and try again."
+            ),
         ));
     }
     Err(RepositoryError::new(
         ErrorKind::GitFailed,
         format!(
-            "Git did not move the branch, so nothing changed. Git said: {}",
+            "Git did not move the {noun}, so nothing changed. Git said: {}",
             stderr::summarize(said)
         ),
     ))
@@ -185,7 +192,7 @@ pub(super) fn restore(
         Direction::Undo => "l1git undo",
         Direction::Redo => "l1git redo",
     };
-    transact(&txn, &[step], reflog)
+    transact(&txn, &[step], reflog, "branch")
 }
 
 pub(super) fn capitalized(text: &str) -> String {

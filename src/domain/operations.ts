@@ -16,6 +16,7 @@ import type {
   Problem,
   Start,
   StatusEntry,
+  Tag,
   WorktreePatch,
   WorktreeStatus,
 } from "./repository";
@@ -25,7 +26,11 @@ type BranchOperation = Extract<
   Operation,
   { kind: "createBranch" | "renameBranch" | "deleteBranch" }
 >;
-type CommitOperation = Extract<Operation, { message: unknown }>;
+type TagOperation = Extract<Operation, { kind: "createTag" | "deleteTag" }>;
+type CommitOperation = Extract<
+  Operation,
+  { kind: "commit" | "amend" | "editMessage" }
+>;
 type PartOperation = Extract<Operation, { shown: unknown }>;
 export type FileWrite = FileOperation["kind"];
 export type CommitWrite = CommitOperation["kind"];
@@ -122,6 +127,7 @@ export function partWrite(
 export const movesRefs = (operation: Operation) =>
   "message" in operation ||
   isBranchOperation(operation) ||
+  isTagOperation(operation) ||
   operation.kind === "checkout";
 
 export type BranchAsk =
@@ -190,6 +196,58 @@ export function branchStep(operation: BranchOperation, step: Step): BranchStep {
     }
   }
 }
+
+export type RefStep = { left: FullRef | null; gone: FullRef | null };
+
+export function refStep(operation: Operation, step: Step): RefStep | null {
+  if (isBranchOperation(operation)) {
+    const { left, gone } = branchStep(operation, step);
+    return { left: left?.reference ?? null, gone };
+  }
+  if (!isTagOperation(operation)) return null;
+  const reference =
+    operation.kind === "createTag"
+      ? (`refs/tags/${operation.name}` as FullRef)
+      : operation.tag.reference;
+  return (operation.kind === "createTag") === (step === "redo")
+    ? { left: reference, gone: null }
+    : { left: null, gone: reference };
+}
+
+export type TagAsk =
+  | { kind: "create"; at: Oid; subject: string }
+  | { kind: "delete"; tag: Tag };
+
+export const isTagOperation = (
+  operation: Operation,
+): operation is TagOperation =>
+  operation.kind === "createTag" || operation.kind === "deleteTag";
+
+export const createTagWrite = (
+  name: string,
+  at: Oid,
+  message: string,
+  head: Head,
+): Write => ({
+  operation: {
+    kind: "createTag",
+    name,
+    at,
+    message: message.trim() === "" ? null : message,
+  },
+  expect: { head },
+});
+
+export const answeredInTagDialog = ({ kind }: Problem) =>
+  kind === "invalidRef" || kind === "gitFailed" || kind === "missingIdentity";
+
+export const deleteTagWrite = (tag: Tag, head: Head): Write => ({
+  operation: {
+    kind: "deleteTag",
+    tag: { reference: tag.reference, oid: tag.object },
+  },
+  expect: { head },
+});
 
 export const branchWrite = (operation: BranchOperation, head: Head): Write => ({
   operation,
@@ -328,6 +386,10 @@ export function describe(operation: Operation): string {
       return `Delete branch ${branchName(operation.branch)}`;
     case "checkout":
       return `Check out ${startName(operation.target)}`;
+    case "createTag":
+      return `Create tag ${operation.name}`;
+    case "deleteTag":
+      return `Delete tag ${operation.tag.reference.replace(/^refs\/tags\//, "")}`;
   }
   if ("message" in operation)
     return `${commitVerbs[operation.kind]} ${quoted(operation.message)}`;
@@ -357,6 +419,12 @@ export type History =
 
 export const nextEntry = (history: History, step: Step) =>
   history.kind === "read" ? history[step] : null;
+
+export const steppedText = ({
+  step,
+  label,
+}: Extract<WriteNotice, { kind: "stepped" }>) =>
+  `${step === "undo" ? "Undid" : "Redid"} ${label}`;
 
 export const historyFailure = (problem: Problem) =>
   `Undo and redo are unavailable. ${problem.message}`;
@@ -410,7 +478,9 @@ type KnownStale = Exclude<
 
 export const rereadsRepository = (problem: Problem) =>
   problem.kind === "staleView" &&
-  (problem.reason === "headMoved" || problem.reason === "branchChanged");
+  (problem.reason === "headMoved" ||
+    problem.reason === "branchChanged" ||
+    problem.reason === "tagChanged");
 
 function listed(paths: readonly string[]): string {
   const shown =
@@ -431,6 +501,7 @@ function staleCause(problem: KnownStale, step: Step | null): string {
         : `HEAD moved after this change, so L1 Git cannot ${step} it exactly.`;
     case "pathChanged":
     case "branchChanged":
+    case "tagChanged":
       return problem.message;
     case "pathNotChosen": {
       const { paths } = problem;
@@ -479,6 +550,7 @@ export function failureText(
     if (
       problem.reason === "pathChanged" ||
       problem.reason === "branchChanged" ||
+      problem.reason === "tagChanged" ||
       (part && problem.reason === "pathNotChosen")
     )
       return `${what} ${problem.message}`;

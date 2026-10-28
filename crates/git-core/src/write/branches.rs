@@ -258,66 +258,23 @@ impl Listing {
         }
     }
 
-    /// A loose ref is a file, so a disk that folds case, which Git records in
-    /// `core.ignorecase`, folds each folder and name of a branch. Reftable
-    /// keeps names apart on any disk.
-    fn folds_case(&self) -> bool {
-        let set = |name: &str, wanted: &str| {
-            self.config
-                .iter()
-                .any(|(key, value)| key == name && value.eq_ignore_ascii_case(wanted))
-        };
-        set("core.ignorecase", "true") && !set("extensions.refstorage", "reftable")
-    }
-
     pub(super) fn refuse_clash(
         &self,
+        repo: &Repo,
         target: &BranchRef,
         source: Option<&BranchRef>,
     ) -> Result<(), RepositoryError> {
-        let folds = self.folds_case();
-        let same = |a: &str, b: &str| a == b || (folds && a.to_lowercase() == b.to_lowercase());
-        let name = target.name();
-        let clash = |message: String| Err(RepositoryError::new(ErrorKind::InvalidRef, message));
-        if let Some(source) = source
-            .map(BranchRef::name)
-            .filter(|source| *source != name && same(source, name))
-        {
-            return clash(format!(
-                "This repository does not tell names apart by case, so Git cannot rename '{source}' to '{name}' in one step. Rename it to another name first, then to '{name}'."
-            ));
-        }
-        let wanted: Vec<_> = name.split('/').collect();
-        for other in self
+        let others = self
             .branches
             .iter()
-            .filter_map(|listed| listed.reference.strip_prefix("refs/heads/"))
-            .filter(|other| source.is_none_or(|source| source.name() != *other))
-        {
-            let theirs: Vec<_> = other.split('/').collect();
-            let shared = wanted
-                .iter()
-                .zip(&theirs)
-                .take_while(|(a, b)| a == b)
-                .count();
-            let last = |parts: &[&str]| shared + 1 == parts.len();
-            let message = match (wanted.get(shared), theirs.get(shared)) {
-                (None, None) => format!("A branch named '{name}' already exists."),
-                (Some(a), Some(b)) if !same(a, b) => continue,
-                (Some(_), Some(_)) if last(&wanted) && last(&theirs) => format!(
-                    "A branch named '{other}' already exists, and this repository does not tell names apart by case."
-                ),
-                (Some(_), Some(_)) if !last(&wanted) && !last(&theirs) => format!(
-                    "A branch named '{other}' already exists, and this repository does not tell names apart by case. Write the folder as '{}'.",
-                    theirs[..=shared].join("/")
-                ),
-                _ => format!(
-                    "A branch named '{other}' already exists, so Git cannot also store '{name}'."
-                ),
-            };
-            return clash(message);
-        }
-        Ok(())
+            .filter_map(|listed| listed.reference.strip_prefix("refs/heads/"));
+        refuse_clash(
+            "branch",
+            others,
+            target.name(),
+            source.map(BranchRef::name),
+            folds_case(repo, &self.config),
+        )
     }
 
     pub(super) fn refuse_in_use(&self, repo: &Repo, slot: &Slot) -> Result<(), RepositoryError> {
@@ -350,6 +307,62 @@ impl Listing {
         }
         Ok(())
     }
+}
+
+/// A loose ref is a file, so a disk that folds case folds each folder and
+/// name of a ref. Git records that in `core.ignorecase`, which a repository
+/// copied from another disk can get wrong, so a disk that finds `refs` as
+/// `REFS` folds too. Reftable keeps names apart on any disk.
+pub(super) fn folds_case(repo: &Repo, config: &[(String, String)]) -> bool {
+    let set = |name: &str, wanted: &str| {
+        config
+            .iter()
+            .any(|(key, value)| key == name && value.eq_ignore_ascii_case(wanted))
+    };
+    !set("extensions.refstorage", "reftable")
+        && (set("core.ignorecase", "true") || repo.common_dir.join("REFS").exists())
+}
+
+pub(super) fn refuse_clash<'a>(
+    noun: &str,
+    siblings: impl Iterator<Item = &'a str>,
+    name: &str,
+    renaming_from: Option<&str>,
+    folds: bool,
+) -> Result<(), RepositoryError> {
+    let same = |a: &str, b: &str| a == b || (folds && a.to_lowercase() == b.to_lowercase());
+    let clash = |message: String| Err(RepositoryError::new(ErrorKind::InvalidRef, message));
+    if let Some(source) = renaming_from.filter(|source| *source != name && same(source, name)) {
+        return clash(format!(
+            "This repository does not tell names apart by case, so Git cannot rename '{source}' to '{name}' in one step. Rename it to another name first, then to '{name}'."
+        ));
+    }
+    let wanted: Vec<_> = name.split('/').collect();
+    for other in siblings.filter(|other| renaming_from != Some(*other)) {
+        let theirs: Vec<_> = other.split('/').collect();
+        let shared = wanted
+            .iter()
+            .zip(&theirs)
+            .take_while(|(a, b)| a == b)
+            .count();
+        let last = |parts: &[&str]| shared + 1 == parts.len();
+        let message = match (wanted.get(shared), theirs.get(shared)) {
+            (None, None) => format!("A {noun} named '{name}' already exists."),
+            (Some(a), Some(b)) if !same(a, b) => continue,
+            (Some(_), Some(_)) if last(&wanted) && last(&theirs) => format!(
+                "A {noun} named '{other}' already exists, and this repository does not tell names apart by case."
+            ),
+            (Some(_), Some(_)) if !last(&wanted) && !last(&theirs) => format!(
+                "A {noun} named '{other}' already exists, and this repository does not tell names apart by case. Write the folder as '{}'.",
+                theirs[..=shared].join("/")
+            ),
+            _ => format!(
+                "A {noun} named '{other}' already exists, so Git cannot also store '{name}'."
+            ),
+        };
+        return clash(message);
+    }
+    Ok(())
 }
 
 fn operation_on(repo: &Repo, branch: &BranchRef) -> Option<PathBuf> {
@@ -415,6 +428,7 @@ pub(super) fn new_name(
     if name.contains('\0') || name.starts_with("refs/") {
         return Err(invalid_name(name));
     }
+    let name: &str = &git::precomposed(&repo.root, name, reads)?;
     let ran = git::run_capped(
         &repo.root,
         &["check-ref-format", "--branch", name],
@@ -480,8 +494,9 @@ pub(super) fn create(
 ) -> Result<Applied, RepositoryError> {
     let reads = writing.deadline.reads();
     let branch = new_name(writing.repo, name, reads)?;
+    let name = branch.name();
     let listing = Listing::read(writing.repo, reads)?;
-    listing.refuse_clash(&branch, None)?;
+    listing.refuse_clash(writing.repo, &branch, None)?;
     let before = listing.slot(&branch)?;
     if let Some(root) = before.heads.first() {
         return Err(RepositoryError::new(
@@ -505,7 +520,7 @@ pub(super) fn create(
             new: Some(at.oid().clone()),
         }];
         moves.extend(at.verified());
-        refs::transact(txn, &moves, &reflog).map_err(as_branch_changed)?;
+        refs::transact(txn, &moves, &reflog, "branch").map_err(as_branch_changed)?;
         upstream
             .as_ref()
             .map_or(Ok(()), |upstream| upstream.set(txn, name))
@@ -723,7 +738,7 @@ pub(super) fn rename(
     if source.tip.as_ref() != Some(&tip.oid) {
         return Err(moved(tip.reference.name()));
     }
-    listing.refuse_clash(&target, Some(&tip.reference))?;
+    listing.refuse_clash(writing.repo, &target, Some(&tip.reference))?;
     let left = listing.slot(&target)?;
     if !left.config.is_empty() {
         return Err(RepositoryError::new(
@@ -795,7 +810,7 @@ pub(super) fn run_delete(txn: &RefTxn<'_>, tip: &BranchTip) -> Result<(), Reposi
         old: Some(tip.oid.clone()),
         new: None,
     };
-    refs::transact(txn, &[delete], "branch: Deleted by L1 Git").map_err(as_branch_changed)
+    refs::transact(txn, &[delete], "branch: Deleted by L1 Git", "branch").map_err(as_branch_changed)
 }
 
 fn record_around(
@@ -917,13 +932,13 @@ pub(super) fn step(
         match transition {
             Transition::Create(slot) => {
                 let tip = slot.tip.as_ref().ok_or_else(git::malformed)?;
-                entry.bring_back_branch(txn.runner(), tip)?;
+                entry.bring_back_tip(txn.runner(), tip, "branch")?;
                 let create = Move {
                     name: slot.branch.as_str().to_owned(),
                     old: None,
                     new: Some(tip.clone()),
                 };
-                refs::transact(&txn, &[create], reflog).map_err(as_branch_changed)?;
+                refs::transact(&txn, &[create], reflog, "branch").map_err(as_branch_changed)?;
             }
             Transition::Delete(slot) => {
                 listing.refuse_symbolic(&slot.branch)?;

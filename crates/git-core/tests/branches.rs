@@ -863,3 +863,87 @@ fn records_no_entry_when_git_leaves_a_branch_undo_cannot_read() {
     assert_eq!(repo.oid("topic"), repo.oid("main"));
     no_entry(&repo);
 }
+
+#[test]
+fn a_decomposed_name_is_created_renamed_and_compared_as_git_stores_it() {
+    let (repo, _remote) = with_remote();
+    repo.git(&["config", "core.precomposeunicode", "true"]);
+    let decomposed = "va\u{308}st";
+    let stored = if cfg!(target_os = "macos") {
+        "v\u{e4}st"
+    } else {
+        decomposed
+    };
+    let before = repo.state();
+    let start = Start::Remote {
+        reference: "refs/remotes/origin/topic".to_owned().try_into().unwrap(),
+        oid: repo.oid("origin/topic"),
+    };
+    let applied = repo.create(decomposed, start).unwrap();
+    assert!(
+        repo.state().contains(&format!(
+            "refs/heads/{stored} {}",
+            repo.oid("topic").as_str()
+        )),
+        "{}",
+        repo.state()
+    );
+    assert_eq!(
+        repo.git(&["config", &format!("branch.{stored}.remote")]),
+        "origin"
+    );
+    round_trip(&repo, &before, &applied);
+
+    let error = repo
+        .create(
+            decomposed,
+            Start::Commit {
+                oid: repo.oid("HEAD"),
+            },
+        )
+        .unwrap_err();
+    assert_eq!(error.kind, ErrorKind::InvalidRef, "{}", error.message);
+    assert_eq!(
+        error.message,
+        format!("A branch named '{stored}' already exists.")
+    );
+
+    let before = repo.state();
+    let renamed = repo.rename("main", &format!("{decomposed}-2")).unwrap();
+    assert!(
+        repo.state().contains(&format!("refs/heads/{stored}-2 ")),
+        "{}",
+        repo.state()
+    );
+    round_trip(&repo, &before, &renamed);
+}
+
+#[test]
+fn refuses_a_case_twin_where_the_disk_folds_case_whatever_core_ignorecase_says() {
+    let repo = Repo::new();
+    if !repo.root.join(".git/REFS").exists() {
+        return;
+    }
+    repo.git(&["config", "core.ignorecase", "false"]);
+    repo.git(&["pack-refs", "--all"]);
+    repo.git(&["branch", "loose"]);
+    let before = repo.state();
+    for name in ["TOPIC", "Loose"] {
+        let error = repo
+            .create(
+                name,
+                Start::Commit {
+                    oid: repo.oid("HEAD"),
+                },
+            )
+            .unwrap_err();
+        assert_eq!(error.kind, ErrorKind::InvalidRef, "{}", error.message);
+        assert!(
+            error.message.contains("does not tell names apart by case"),
+            "{}",
+            error.message
+        );
+    }
+    assert_eq!(repo.state(), before);
+    no_entry(&repo);
+}

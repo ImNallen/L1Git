@@ -1,7 +1,7 @@
 use super::{
     Applied, Change, Direction, Expect, RefTxn, Repo, Start,
     branches::{self, Listing, Setting, Writing},
-    commit::{resolve, short},
+    commit::{self, short},
     discard::Stat,
     refs::{capitalized, oid},
     store::EntryObjects,
@@ -146,12 +146,7 @@ impl Switch {
         let from = shown(before);
         match target {
             Start::Commit { oid } => {
-                if resolve(repo, deadline, oid.as_str())?.as_ref() != Some(oid) {
-                    return Err(RepositoryError::new(
-                        ErrorKind::InvalidOid,
-                        format!("{} is not a commit.", short(oid)),
-                    ));
-                }
+                commit::refuse_non_commit(repo, deadline, oid)?;
                 let goal = Head::Detached {
                     oid: oid.as_str().to_owned(),
                 };
@@ -189,7 +184,7 @@ impl Switch {
                 if let Some(tip) = slot.tip {
                     return Self::existing(&listing, before, &branch, tip, from);
                 }
-                listing.refuse_clash(&branch, None)?;
+                listing.refuse_clash(repo, &branch, None)?;
                 if let Some(root) = slot.heads.first() {
                     return Err(RepositoryError::new(
                         ErrorKind::Conflict,
@@ -277,7 +272,7 @@ impl Switch {
         let mut created = None;
         match to {
             Head::Detached { .. } => {
-                entry.bring_back_branch(runner, &tip)?;
+                entry.bring_back_tip(runner, &tip, "branch")?;
                 args.extend(["--detach".to_owned(), tip.as_str().to_owned()]);
             }
             Head::Attached { reference, .. } => {
@@ -286,7 +281,7 @@ impl Switch {
                 let slot = Listing::read(repo, reads)?.slot(&branch)?;
                 match (&slot.tip, remake) {
                     (None, Some(_)) => {
-                        entry.bring_back_branch(runner, &tip)?;
+                        entry.bring_back_tip(runner, &tip, "branch")?;
                         created = Some(NewBranch {
                             branch: branch.clone(),
                             before: slot.config,

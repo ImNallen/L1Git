@@ -273,6 +273,20 @@ pub(super) fn resolve(
         .map_err(|_| git::malformed())
 }
 
+pub(super) fn refuse_non_commit(
+    repo: &Repo,
+    deadline: WriteDeadline,
+    oid: &Oid,
+) -> Result<(), RepositoryError> {
+    if resolve(repo, deadline, oid.as_str())?.as_ref() == Some(oid) {
+        return Ok(());
+    }
+    Err(RepositoryError::new(
+        ErrorKind::InvalidOid,
+        format!("{} is not a commit.", short(oid)),
+    ))
+}
+
 fn raced(kind: Kind<'_>, update: &Update, target: &Target) -> RepositoryError {
     let made = short(&update.new);
     let old = update.old.as_ref().map_or("nothing", short);
@@ -319,6 +333,31 @@ fn nothing_staged() -> RepositoryError {
     )
 }
 
+pub(super) fn missing_identity(
+    searched: &str,
+    shown: &str,
+    outcome: &str,
+) -> Option<RepositoryError> {
+    [
+        "identity unknown",
+        "empty ident name",
+        "no email was given",
+        "no name was given",
+    ]
+    .iter()
+    .any(|needle| searched.contains(needle))
+    .then(|| {
+        RepositoryError::new(
+            ErrorKind::MissingIdentity {
+                output: shown.to_owned(),
+            },
+            format!(
+                "Git does not know your name and email, so {outcome}. Set them with the commands below, then try again."
+            ),
+        )
+    })
+}
+
 fn refused(wrote: &Wrote, trace: &Trace) -> RepositoryError {
     let said = wrote.stderr();
     let printed = format!("{said}\n{}", git::text(wrote.stdout()));
@@ -330,20 +369,10 @@ fn refused(wrote: &Wrote, trace: &Trace) -> RepositoryError {
             format!("The {hook} hook stopped the commit, so Git made no commit."),
         );
     }
-    let has = |needles: &[&str]| needles.iter().any(|needle| printed.contains(needle));
-    if has(&[
-        "identity unknown",
-        "empty ident name",
-        "no email was given",
-        "no name was given",
-    ]) {
-        return RepositoryError::new(
-            ErrorKind::MissingIdentity {
-                output: said.to_owned(),
-            },
-            "Git does not know your name and email, so it made no commit. Set them with the commands below, then try again.",
-        );
+    if let Some(missing) = missing_identity(&printed, said, "it made no commit") {
+        return missing;
     }
+    let has = |needles: &[&str]| needles.iter().any(|needle| printed.contains(needle));
     if has(&[
         "nothing to commit",
         "nothing added to commit",

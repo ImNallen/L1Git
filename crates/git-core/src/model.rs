@@ -32,6 +32,13 @@ pub struct Tag {
     pub name: String,
     /// The commit the tag points at, through any annotated tag objects.
     pub oid: String,
+    /// What the ref holds: the commit for a lightweight tag, or the tag
+    /// object for an annotated one.
+    pub object: String,
+    /// Whether `object` is a tag object made under this tag's name. A
+    /// lightweight tag can hold another tag's object, as `git tag latest
+    /// v1.0` makes.
+    pub annotated: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -506,8 +513,8 @@ impl From<Oid> for String {
     }
 }
 
-/// A `refs/heads/*` name, the only kind of ref L1 Git moves. Remote-tracking refs,
-/// tags, and `HEAD` cannot be constructed.
+/// A `refs/heads/*` name. Remote-tracking refs, tags, and `HEAD` cannot be
+/// constructed.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub struct BranchRef(String);
@@ -535,6 +542,40 @@ impl TryFrom<String> for BranchRef {
                 "L1 Git changes only local branches, under refs/heads/.",
             ))
         }
+    }
+}
+
+/// A `refs/tags/*` name.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct TagRef(String);
+
+impl TagRef {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+    pub fn name(&self) -> &str {
+        &self.0["refs/tags/".len()..]
+    }
+}
+
+impl TryFrom<String> for TagRef {
+    type Error = RepositoryError;
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        if value.strip_prefix("refs/tags/").is_some_and(valid_ref_name) {
+            Ok(Self(value))
+        } else {
+            Err(RepositoryError::new(
+                ErrorKind::InvalidRef,
+                "L1 Git changes only tags under refs/tags/ here.",
+            ))
+        }
+    }
+}
+
+impl From<TagRef> for String {
+    fn from(value: TagRef) -> Self {
+        value.0
     }
 }
 
@@ -854,6 +895,8 @@ pub enum StaleReason {
     /// A branch's tip, or the worktrees that have it checked out, differ from
     /// the request or the undo entry.
     BranchChanged,
+    /// A tag no longer holds what the request or the undo entry names.
+    TagChanged,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

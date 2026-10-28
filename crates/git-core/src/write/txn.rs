@@ -413,6 +413,10 @@ impl<'r> RefTxn<'r> {
     pub(super) fn switch<'a>(&'a self, args: &[&'a str]) -> Write<'a> {
         Write::switch(self, args)
     }
+
+    pub(super) fn tag<'a>(&'a self, args: &[&'a str], message: &str) -> Write<'a> {
+        Write::tag(self, args, message)
+    }
 }
 
 pub(crate) struct Published {

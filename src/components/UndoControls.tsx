@@ -13,6 +13,7 @@ import {
   hookOutputTail,
   nextEntry,
   stepButton,
+  steppedText,
 } from "../domain/operations";
 import type { WritesView } from "../useWrites";
 
@@ -109,9 +110,7 @@ function StepNotice({ writes }: { writes: WritesView }) {
   return (
     <div ref={row} className="notice info-notice" role="status">
       <Info size={14} />
-      <span>
-        {notice.step === "undo" ? "Undid" : "Redid"} {notice.label}
-      </span>
+      <span>{steppedText(notice)}</span>
       <button
         aria-disabled={unavailable}
         onClick={() => {

@@ -24,6 +24,7 @@ const repositoryScreen: ActionContext = {
   picked: null,
   compare: null,
   sidebarBranch: null,
+  sidebarTag: null,
   rule: "none",
   worktree: null,
   history: { undo: null, redo: null },
@@ -56,6 +57,8 @@ function commands(): Commands {
     newBranch: vi.fn(),
     renameBranch: vi.fn(),
     deleteBranch: vi.fn(),
+    createTag: vi.fn(),
+    deleteTag: vi.fn(),
     openRepository: vi.fn(),
     jumpToRef: vi.fn(),
     showStash: vi.fn(),
@@ -201,6 +204,7 @@ describe("command palette", () => {
       "New branch from feature/fetch-retry…",
       "Rename feature/fetch-retry…",
       "Delete feature/fetch-retry…",
+      "Create tag…",
       "Add repository",
       "Toggle sidebar",
       "Toggle commit inspector",
@@ -324,6 +328,34 @@ describe("command palette", () => {
     expect(checkouts(sidebar(false, false))).toEqual(["Check out topic"]);
     expect(checkouts(sidebar(false, false, true))).toEqual([]);
     expect(checkouts({ ...repositoryScreen })).toEqual([]);
+  });
+
+  it("offers Create tag for a selected commit and Delete tag for the sidebar tag", () => {
+    const commit = { kind: "commit" as const, oid: "a".repeat(40) as Oid };
+    const tagWrites = (context: Partial<ActionContext>) =>
+      titles({ ...repositoryScreen, ...context }, "").filter((title) =>
+        title.includes(" tag"),
+      );
+    expect(tagWrites({ selection: commit })).toEqual(["Create tag…"]);
+    expect(
+      tagWrites({
+        selection: {
+          kind: "worktree",
+          root: "/work/l1-demo" as RepositoryRoot,
+        },
+      }),
+    ).toEqual([]);
+    expect(tagWrites({})).toEqual([]);
+    expect(tagWrites({ sidebarTag: { name: "v0.1.0" } })).toEqual([
+      "Delete tag v0.1.0…",
+    ]);
+    expect(
+      tagWrites({
+        selection: commit,
+        sidebarTag: { name: "v0.1.0" },
+        writing: true,
+      }),
+    ).toEqual([]);
   });
 
   it("offers a pick only for another commit", () => {

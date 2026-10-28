@@ -186,7 +186,13 @@ describe("real Rust transport contract", () => {
       (commit) => commit.subject === "feat(theme): add the L1 dark canvas",
     );
     expect(snapshot.tags).toEqual([
-      { reference: "refs/tags/v0.1.0", name: "v0.1.0", oid: theme?.oid },
+      {
+        reference: "refs/tags/v0.1.0",
+        name: "v0.1.0",
+        oid: theme?.oid,
+        object: expect.any(String),
+        annotated: true,
+      },
     ]);
     const squashed = snapshot.branches.find(
       (branch) => branch.reference === "refs/heads/feat/squashed",
@@ -537,7 +543,20 @@ describe("real Rust transport contract", () => {
       await (await post({ op: "refs", path: fixture.repository })).json(),
     ).data;
     expect(refs.name).toBe("l1-demo");
-    expect(refs.tags.map((tag) => tag.name)).toEqual(["v0.1.0"]);
+    const tagged = (revision: string) =>
+      execFileSync("git", ["-C", fixture.repository, "rev-parse", revision], {
+        encoding: "utf8",
+      }).trim();
+    expect(refs.tags).toEqual([
+      {
+        reference: "refs/tags/v0.1.0",
+        name: "v0.1.0",
+        oid: tagged("v0.1.0^{commit}"),
+        object: tagged("refs/tags/v0.1.0"),
+        annotated: true,
+      },
+    ]);
+    expect(refs.tags[0]?.object).not.toBe(refs.tags[0]?.oid);
     expect(refs.stashes).toEqual([]);
     expect(refs.submodules).toEqual([]);
     expect(refs.branches.map((branch) => branch.reference)).toEqual([
@@ -1742,6 +1761,126 @@ describe("real Rust writes, undo, and redo", () => {
       kind: "invalidRef",
       message: "'bad..name' is not a valid branch name.",
     });
+  });
+
+  it("creates a lightweight and an annotated tag, deletes an annotated one, and undoes and redoes each", async () => {
+    const path = clone();
+    const head = git(path, "rev-parse", "HEAD").trim();
+    const tags = () =>
+      git(
+        path,
+        "for-each-ref",
+        "--format=%(refname) %(objectname)",
+        "refs/tags/",
+      );
+    const tagWrite = (operation: object) => ({
+      op: "write",
+      path,
+      operation,
+      expect: {
+        head: {
+          kind: "attached",
+          reference: git(path, "symbolic-ref", "HEAD").trim(),
+          oid: head,
+        },
+      },
+    });
+    const written = async (operation: object) => {
+      const applied = writeEnvelope.parse(
+        await (await post(tagWrite(operation))).json(),
+      ).data;
+      expect(applied).toEqual({
+        id: expect.any(String),
+        root: path,
+        operation,
+      });
+      return applied;
+    };
+    const step = async (op: "undo" | "redo", id: string) =>
+      (op === "undo" ? undoEnvelope : redoEnvelope).parse(
+        await (await post({ op, path, id })).json(),
+      ).data;
+    const refusal = async (operation: object) =>
+      failure.parse(await (await post(tagWrite(operation))).json()).error;
+    const kind = (tag: string) => git(path, "cat-file", "-t", tag).trim();
+    const before = tags();
+
+    const light = await written({
+      kind: "createTag",
+      name: "v0.2.0",
+      at: head,
+      message: null,
+    });
+    expect(kind("v0.2.0")).toBe("commit");
+    expect(git(path, "rev-parse", "v0.2.0").trim()).toBe(head);
+    const annotated = await written({
+      kind: "createTag",
+      name: "v0.3.0",
+      at: head,
+      message: "Third release\n",
+    });
+    expect(kind("v0.3.0")).toBe("tag");
+    const body = git(path, "cat-file", "-p", "v0.3.0");
+    expect(body).toContain(`object ${head}\n`);
+    expect(body).toContain("tagger Ada <ada@example.test>");
+    expect(body.endsWith("\n\nThird release\n")).toBe(true);
+    const made = tags();
+    for (const applied of [annotated, light])
+      expect(await step("undo", applied.id)).toEqual(applied);
+    expect(tags()).toBe(before);
+    for (const applied of [light, annotated])
+      expect(await step("redo", applied.id)).toEqual(applied);
+    expect(tags()).toBe(made);
+
+    const object = git(path, "rev-parse", "refs/tags/v0.1.0").trim();
+    expect(kind(object)).toBe("tag");
+    const deleted = await written({
+      kind: "deleteTag",
+      tag: { reference: "refs/tags/v0.1.0", oid: object },
+    });
+    expect(git(path, "for-each-ref", "refs/tags/v0.1.0")).toBe("");
+    expect(await step("undo", deleted.id)).toEqual(deleted);
+    expect(git(path, "rev-parse", "refs/tags/v0.1.0").trim()).toBe(object);
+    expect(tags()).toBe(made);
+
+    expect(
+      await refusal({
+        kind: "createTag",
+        name: "v0..1",
+        at: head,
+        message: null,
+      }),
+    ).toEqual({
+      kind: "invalidRef",
+      message: "'v0..1' is not a valid tag name.",
+    });
+    git(path, "tag", "-f", "v0.1.0", "HEAD");
+    const moved = tags();
+    expect(
+      await refusal({
+        kind: "deleteTag",
+        tag: { reference: "refs/tags/v0.1.0", oid: object },
+      }),
+    ).toEqual({
+      kind: "staleView",
+      reason: "tagChanged",
+      message:
+        "v0.1.0 no longer points where L1 Git showed, so nothing changed. Refresh and try again.",
+    });
+    expect(
+      (
+        await rejected(
+          tagWrite({
+            kind: "createTag",
+            name: "v0.4.0",
+            at: head,
+            message: null,
+            extra: 1,
+          }),
+        )
+      ).status,
+    ).toBe(400);
+    expect(tags(), "no refusal changes a tag").toBe(moved);
   });
 
   it("checks out a local branch, a commit, and a remote branch it creates, and undoes each", async () => {

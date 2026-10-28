@@ -42,8 +42,20 @@ function snapshot(head: Record<string, unknown>) {
       },
     ],
     tags: [
-      { reference: "refs/tags/v1.0", name: "v1.0", oid: a },
-      { reference: "refs/tags/v0.9", name: "v0.9", oid: c },
+      {
+        reference: "refs/tags/v1.0",
+        name: "v1.0",
+        oid: a,
+        object: a,
+        annotated: false,
+      },
+      {
+        reference: "refs/tags/v0.9",
+        name: "v0.9",
+        oid: c,
+        object: c,
+        annotated: false,
+      },
     ],
     stashes: [],
     submodules: [],

@@ -25,6 +25,8 @@ pub(crate) enum LocalWrite {
     RenameBranch,
     DeleteBranch,
     Checkout,
+    CreateTag,
+    DeleteTag,
     Undo,
     Redo,
     UndoCheckout,
@@ -42,6 +44,8 @@ impl LocalWrite {
             | Self::CreateBranch
             | Self::RenameBranch
             | Self::DeleteBranch
+            | Self::CreateTag
+            | Self::DeleteTag
             | Self::Undo
             | Self::Redo => 120,
             Self::Discard => 300,
@@ -69,6 +73,8 @@ impl LocalWrite {
             Self::RenameBranch => "Renaming the branch",
             Self::DeleteBranch => "Deleting the branch",
             Self::Checkout => "Checking out",
+            Self::CreateTag => "Creating the tag",
+            Self::DeleteTag => "Deleting the tag",
             Self::Undo => "Undoing the change",
             Self::Redo => "Redoing the change",
             Self::UndoCheckout => "Undoing the checkout",
@@ -91,6 +97,8 @@ impl LocalWrite {
             Self::RenameBranch => "l1git rename branch",
             Self::DeleteBranch => "l1git delete branch",
             Self::Checkout => "l1git checkout",
+            Self::CreateTag => "l1git create tag",
+            Self::DeleteTag => "l1git delete tag",
             Self::Undo | Self::UndoCheckout => "l1git undo",
             Self::Redo | Self::RedoCheckout => "l1git redo",
         }
@@ -111,6 +119,7 @@ impl LocalWrite {
             Self::CreateBranch | Self::RenameBranch | Self::DeleteBranch => {
                 "L1 Git rereads the branch to see what changed."
             }
+            Self::CreateTag | Self::DeleteTag => "L1 Git rereads the tag to see what changed.",
             Self::Checkout | Self::UndoCheckout | Self::RedoCheckout => {
                 "L1 Git rereads HEAD to see whether Git moved it."
             }
@@ -233,6 +242,20 @@ impl<'a> Write<'a> {
             args: all,
             env: Vec::new(),
             input: None,
+            cap: Some(WRITE_STDOUT_CAP),
+            as_user: true,
+            lazy_fetch: false,
+        }
+    }
+
+    pub(crate) fn tag(txn: &'a RefTxn<'_>, args: &[&'a str], message: &str) -> Self {
+        let mut all = vec!["tag"];
+        all.extend(args);
+        Self {
+            dir: txn.root(),
+            args: all,
+            env: Vec::new(),
+            input: Some(message.as_bytes().to_vec()),
             cap: Some(WRITE_STDOUT_CAP),
             as_user: true,
             lazy_fetch: false,

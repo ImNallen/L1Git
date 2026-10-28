@@ -136,7 +136,15 @@ describe("branches reported for pruning", () => {
     const { store, reported } = harness();
     const tagged: RepositorySnapshot = {
       ...fresh,
-      tags: [{ reference: refSchema.parse("refs/tags/v1"), name: "v1", oid }],
+      tags: [
+        {
+          reference: refSchema.parse("refs/tags/v1"),
+          name: "v1",
+          oid,
+          object: oid,
+          annotated: false,
+        },
+      ],
       stashes: [
         { name: "stash@{0}", oid, message: "On main: wip", timestamp: 1 },
       ],

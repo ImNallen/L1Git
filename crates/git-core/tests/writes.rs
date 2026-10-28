@@ -61,11 +61,15 @@ fn git(path: &Path, args: &[&str]) -> String {
 fn init(root: &Path) {
     fs::create_dir(root).unwrap();
     git(root, &["init", "--quiet", "--initial-branch=main"]);
+    // A commit starts detached auto maintenance, whose objects/maintenance.lock
+    // can come and go while a test lists the object store.
     for (key, value) in [
         ("user.name", "Ada"),
         ("user.email", "ada@example.test"),
         ("commit.gpgSign", "false"),
         ("core.hooksPath", "/dev/null"),
+        ("maintenance.auto", "false"),
+        ("gc.auto", "0"),
     ] {
         git(root, &["config", key, value]);
     }

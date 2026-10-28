@@ -254,29 +254,44 @@ fn reads_tags_at_their_peeled_commits_and_includes_tag_only_history() {
         &fixture.repo,
         &["tag", "-a", "-m", "nested", "nested", "v1.0"],
     );
+    git(&fixture.repo, &["tag", "alias", "v1.0"]);
     git(&fixture.repo, &["tag", "tree", &tree]);
     git(
         &fixture.repo,
         &["tag", "-a", "-m", "tree", "tree-annotated", &tree],
     );
+    let object = |name: &str| git(&fixture.repo, &["rev-parse", name]);
     let result = snapshot(fixture.path()).unwrap();
     assert_eq!(
         result.tags,
         [
             Tag {
+                reference: "refs/tags/alias".into(),
+                name: "alias".into(),
+                oid: initial.clone(),
+                object: object("refs/tags/v1.0"),
+                annotated: false,
+            },
+            Tag {
                 reference: "refs/tags/light".into(),
                 name: "light".into(),
                 oid: tagged.clone(),
+                object: tagged.clone(),
+                annotated: false,
             },
             Tag {
                 reference: "refs/tags/nested".into(),
                 name: "nested".into(),
                 oid: initial.clone(),
+                object: object("refs/tags/nested"),
+                annotated: true,
             },
             Tag {
                 reference: "refs/tags/v1.0".into(),
                 name: "v1.0".into(),
                 oid: initial.clone(),
+                object: object("refs/tags/v1.0"),
+                annotated: true,
             },
         ]
     );
@@ -338,11 +353,15 @@ fn reads_tags_stashes_and_mapped_submodules_and_keeps_stashes_out_of_history() {
                 reference: "refs/tags/nightly".into(),
                 name: "nightly".into(),
                 oid: modules.clone(),
+                object: modules.clone(),
+                annotated: false,
             },
             Tag {
                 reference: "refs/tags/v1.0".into(),
                 name: "v1.0".into(),
                 oid: initial.clone(),
+                object: stash("refs/tags/v1.0"),
+                annotated: true,
             },
         ]
     );

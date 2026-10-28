@@ -4,6 +4,8 @@ import {
   branchWrite,
   checkoutWrite,
   commitWrite,
+  createTagWrite,
+  deleteTagWrite,
   describe,
   discardChoice,
   failureText,
@@ -11,9 +13,11 @@ import {
   movesRefs,
   partActions,
   partWrite,
+  refStep,
   rereadsRepository,
   shownPaths,
   stepButton,
+  steppedText,
   notMergedInto,
   startAt,
   writeFor,
@@ -1045,5 +1049,127 @@ group("checkout", () => {
         output: "lint failed",
       }),
     ).toEqual([]);
+  });
+});
+
+group("tag writes", () => {
+  const commit = oidSchema.parse("1a2b3c4".padEnd(40, "e"));
+  const annotated = {
+    reference: refSchema.parse("refs/tags/v0.1.0"),
+    name: "v0.1.0",
+    oid: commit,
+    object: oidSchema.parse("f".repeat(40)),
+    annotated: true,
+  };
+  const create = createTagWrite("v0.2.0", commit, "", head);
+  const remove = deleteTagWrite(annotated, head);
+
+  it("sends a blank message as a lightweight tag and any other text as typed", () => {
+    expect(create).toEqual({
+      operation: {
+        kind: "createTag",
+        name: "v0.2.0",
+        at: commit,
+        message: null,
+      },
+      expect: { head },
+    });
+    expect(createTagWrite("v0.2.0", commit, " \n\t", head).operation).toEqual({
+      kind: "createTag",
+      name: "v0.2.0",
+      at: commit,
+      message: null,
+    });
+    expect(
+      createTagWrite("v0.3.0", commit, "Release\n\nNotes ", head).operation,
+    ).toMatchObject({ message: "Release\n\nNotes " });
+  });
+
+  it("deletes what the ref holds, the tag object for an annotated tag", () => {
+    expect(remove).toEqual({
+      operation: {
+        kind: "deleteTag",
+        tag: { reference: "refs/tags/v0.1.0", oid: annotated.object },
+      },
+      expect: { head },
+    });
+  });
+
+  it("names each tag write and its undo and redo by the tag", () => {
+    expect(describe(create.operation)).toBe("Create tag v0.2.0");
+    expect(describe(remove.operation)).toBe("Delete tag v0.1.0");
+    expect(
+      steppedText({
+        kind: "stepped",
+        step: "undo",
+        label: describe(create.operation),
+      }),
+    ).toBe("Undid Create tag v0.2.0");
+    expect(
+      steppedText({
+        kind: "stepped",
+        step: "redo",
+        label: describe(remove.operation),
+      }),
+    ).toBe("Redid Delete tag v0.1.0");
+  });
+
+  it("rereads refs after a tag write, its undo, and its redo", () => {
+    expect(movesRefs(create.operation)).toBe(true);
+    expect(movesRefs(remove.operation)).toBe(true);
+  });
+
+  it("names the tag an undo or redo leaves and the one it removes", () => {
+    const made = refSchema.parse("refs/tags/v0.2.0");
+    expect(refStep(create.operation, "undo")).toEqual({
+      left: null,
+      gone: made,
+    });
+    expect(refStep(create.operation, "redo")).toEqual({
+      left: made,
+      gone: null,
+    });
+    expect(refStep(remove.operation, "undo")).toEqual({
+      left: annotated.reference,
+      gone: null,
+    });
+    expect(refStep(remove.operation, "redo")).toEqual({
+      left: null,
+      gone: annotated.reference,
+    });
+  });
+
+  it("shows the core's words when a tag moved before the delete or its undo, and rereads", () => {
+    const moved: Problem = {
+      kind: "staleView",
+      reason: "tagChanged",
+      message:
+        "v0.1.0 no longer points where L1 Git showed, so nothing changed. Refresh and try again.",
+    };
+    expect(rereadsRepository(moved)).toBe(true);
+    expect(
+      failureText(
+        {
+          kind: "failed",
+          action: "write",
+          label: "Delete tag v0.1.0",
+          problem: moved,
+          operation: remove.operation,
+        },
+        { kind: "unread" },
+      ),
+    ).toBe(`Could not delete tag v0.1.0. ${moved.message}`);
+    expect(
+      failureText(
+        {
+          kind: "failed",
+          action: "undo",
+          label: "Delete tag v0.1.0",
+          problem: moved,
+          entry: entryIdSchema.parse("18e1c91cc9cade98"),
+        },
+        { kind: "unread" },
+      ),
+    ).toBe(`Could not undo Delete tag v0.1.0. ${moved.message}`);
   });
 });

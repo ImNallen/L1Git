@@ -47,6 +47,7 @@ import { AppearanceSettings } from "./components/AppearanceSettings";
 import { AddRepositoryDialog } from "./components/AddRepositoryDialog";
 import { BranchDialog } from "./components/BranchDialog";
 import { CheckoutCommitDialog } from "./components/CheckoutCommitDialog";
+import { TagDialog } from "./components/TagDialog";
 import { DiscardDialog, DiscardPartDialog } from "./components/DiscardDialog";
 import { EditMessageDialog } from "./components/EditMessageDialog";
 import { COMMIT_SUMMARY_ID } from "./components/CommitBox";
@@ -61,20 +62,21 @@ import { PaneDivider } from "./components/PaneDivider";
 import { RepositoryTree } from "./components/RepositoryTree";
 import { UndoButtons, WriteNoticeRow } from "./components/UndoControls";
 import {
+  answeredInTagDialog,
   branchAsks,
-  branchStep,
   checkoutWrite,
   discardChoice,
-  isBranchOperation,
   nextEntry,
+  refStep,
   startAt,
   writeFor,
 } from "./domain/operations";
 import type {
   BranchAsk,
-  BranchStep,
   FileWrite,
+  RefStep,
   Step,
+  TagAsk,
   Write,
 } from "./domain/operations";
 import { swapEnds } from "./domain/comparison";
@@ -183,8 +185,9 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   } | null>(null);
   const [branchAsk, setBranchAsk] = useState<BranchAsk | null>(null);
   const [detaching, setDetaching] = useState<Oid | null>(null);
-  const [steppedBranch, setSteppedBranch] = useState<
-    (BranchStep & { root: RepositoryRoot }) | null
+  const [tagAsk, setTagAsk] = useState<TagAsk | null>(null);
+  const [steppedRef, setSteppedRef] = useState<
+    (RefStep & { root: RepositoryRoot }) | null
   >(null);
   const focusJumpedRow = useRef(false);
   const [palette, setPalette] = useState<{ picked: Oid | null } | null>(null);
@@ -414,6 +417,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     sameSelection(app.selection, { kind: "commit", oid: jumped.oid });
   const ruledBranch =
     jumped && isBranch(jumped) && (highlighted || hiddenJump) ? jumped : null;
+  const sidebarTag = jumped && !isBranch(jumped) ? jumped : null;
   const checkedOut = useMemo(
     () =>
       new Map(
@@ -427,6 +431,13 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     const ask = ruledBranch && branchAsks(ruledBranch)[kind];
     if (ask) setBranchAsk(ask);
   };
+  const askTag = (oid: Oid) =>
+    setTagAsk({
+      kind: "create",
+      at: oid,
+      subject:
+        snapshot?.commits.find((commit) => commit.oid === oid)?.subject ?? "",
+    });
   const selectedStash =
     snapshot &&
     selected?.kind === "commit" &&
@@ -585,6 +596,12 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     newBranch: askFor("create"),
     renameBranch: askFor("rename"),
     deleteBranch: askFor("delete"),
+    createTag: () => {
+      if (selected?.kind === "commit") askTag(selected.oid);
+    },
+    deleteTag: () => {
+      if (sidebarTag) setTagAsk({ kind: "delete", tag: sidebarTag });
+    },
     openRepository: (root) => {
       showRepository(root);
       if (root === snapshot?.root) return;
@@ -647,6 +664,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       local: ruledBranch.kind === "local",
       checkedOut: checkedOut.has(ruledBranch.reference),
     },
+    sidebarTag: sidebarTag && { name: sidebarTag.name },
     rule: rule.kind,
     worktree: selectedLists && {
       unstaged: selectedLists.get("unstaged")?.length ?? 0,
@@ -703,34 +721,27 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   }
   async function stepHistory(step: Step) {
     const entry = nextEntry(writes.history, step);
-    setSteppedBranch(null);
+    setSteppedRef(null);
     const outcome = await writes[step]();
     if (entry?.operation.kind === "checkout") refocusIfLost();
-    if (
-      outcome.kind === "applied" &&
-      entry !== null &&
-      isBranchOperation(entry.operation)
-    )
-      setSteppedBranch({
-        root: entry.root,
-        ...branchStep(entry.operation, step),
-      });
+    const moved = entry && refStep(entry.operation, step);
+    if (outcome.kind === "applied" && entry && moved)
+      setSteppedRef({ root: entry.root, ...moved });
   }
   useEffect(() => {
-    if (steppedBranch === null) return;
-    const { root, left, gone } = steppedBranch;
+    if (steppedRef === null) return;
+    const { root, left, gone } = steppedRef;
     const state = branchRefs.refs.get(root);
     const listed = (reference: FullRef) =>
-      state?.kind === "ready" &&
-      state.refs.branches.some((branch) => branch.reference === reference);
-    if ((left !== null && !listed(left.reference)) || (gone && listed(gone)))
-      return;
-    setSteppedBranch(null);
+      state?.kind === "ready" ? listedRef(state.refs, reference) : null;
+    const target = left === null ? null : listed(left);
+    if ((left !== null && target === null) || (gone && listed(gone))) return;
+    setSteppedRef(null);
     if (shownElement(focusedElement())) return;
-    if (left === null) return focusFallback();
+    if (target === null) return focusFallback();
     focusJumpedRow.current = true;
-    jumpTo(root, left);
-  }, [steppedBranch, branchRefs.refs]);
+    jumpTo(root, target);
+  }, [steppedRef, branchRefs.refs]);
   useEffect(() => {
     if (!focusJumpedRow.current) return;
     focusJumpedRow.current = false;
@@ -930,6 +941,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
               snapshot && { root: snapshot.root, checkedOutIn: checkedOut }
             }
             onBranchAsk={setBranchAsk}
+            onTagAsk={setTagAsk}
             onCheckout={(branch) => void checkout(startAt(branch))}
           />
         </div>
@@ -1116,6 +1128,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                         from: `commit ${oid.slice(0, 7)}`,
                       })
                     }
+                    onCreateTag={askTag}
                     onCheckout={setDetaching}
                   />
                   {fileDiff.kind !== "closed" && (
@@ -1332,6 +1345,33 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
           onClose={() => {
             setBranchAsk(null);
             requestAnimationFrame(focusNamedBranch);
+          }}
+        />
+      )}
+      {tagAsk && snapshot && (
+        <TagDialog
+          ask={tagAsk}
+          head={snapshot.head}
+          onWrite={async (write) => {
+            const { operation } = write;
+            const outcome = await writes.write(snapshot.root, write);
+            if (
+              outcome.kind === "failed" &&
+              operation.kind === "createTag" &&
+              answeredInTagDialog(outcome.problem)
+            )
+              writes.dismiss();
+            if (outcome.kind === "applied" && operation.kind === "deleteTag")
+              setSteppedRef({
+                root: snapshot.root,
+                left: null,
+                gone: operation.tag.reference,
+              });
+            return outcome;
+          }}
+          onClose={() => {
+            setTagAsk(null);
+            refocusIfLost();
           }}
         />
       )}

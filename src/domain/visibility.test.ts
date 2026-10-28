@@ -117,6 +117,8 @@ describe("branch visibility", () => {
           reference: refSchema.parse("refs/tags/v1"),
           name: "v1",
           oid: squashed,
+          object: squashed,
+          annotated: false,
         },
       ],
     };
