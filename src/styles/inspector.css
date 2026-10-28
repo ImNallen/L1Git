@@ -274,8 +274,17 @@
   gap: 6px;
   margin-top: 22px;
 }
-.worktree-group .changed-files-title {
+.worktree-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   margin: 0 0 4px;
+}
+.list-action {
+  height: 22px;
+  padding: 0 8px;
+  font-size: 11px;
 }
 .fitted-file-tree {
   display: flex;

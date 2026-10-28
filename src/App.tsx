@@ -27,8 +27,11 @@ import {
   matchesShortcut,
   PALETTE_SHORTCUT,
   paletteItems,
+  REDO_SHORTCUT,
   shortcutAction,
+  shortcutLabel,
   typingIn,
+  UNDO_SHORTCUT,
 } from "./actions";
 import type {
   ActionContext,
@@ -51,6 +54,9 @@ import { History, HistoryPlaceholder } from "./components/History";
 import type { HistoryHandle } from "./components/History";
 import { PaneDivider } from "./components/PaneDivider";
 import { RepositoryTree } from "./components/RepositoryTree";
+import { UndoButtons, WriteNoticeRow } from "./components/UndoControls";
+import { nextEntry, writeFor } from "./domain/operations";
+import type { FileWrite } from "./domain/operations";
 import { swapEnds } from "./domain/comparison";
 import { buildGraph } from "./domain/graph";
 import { trunkTips } from "./domain/highlight";
@@ -75,7 +81,7 @@ import {
   visibleCommits,
 } from "./domain/visibility";
 import type { VisibilityRule } from "./domain/visibility";
-import { historyRows } from "./domain/worktree";
+import { historyRows, listWrites, worktreeGroups } from "./domain/worktree";
 import { useExpandedRepositories } from "./expandedRepositories";
 import { useFetchSettings } from "./fetchSettings";
 import { useHistoryColumns } from "./historyColumns";
@@ -83,6 +89,7 @@ import { repositoryWarnings, useOverview } from "./overview";
 import { mac, macNative } from "./repositories";
 import { useRepositoryRefs } from "./useRepositoryRefs";
 import { useWorkspace } from "./useWorkspace";
+import { useWrites } from "./useWrites";
 
 /**
  * A branch jump. `pending` waits for the snapshot of `root` to load, then a
@@ -214,6 +221,43 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
         changes: app.changes.get(listedWorktree.root),
       }
     : null;
+  const writes = useWrites(snapshot?.root ?? null, {
+    worktree: app.rereadWorktree,
+    repository: app.rereadOpenRepository,
+  });
+  function writeFiles(
+    root: RepositoryRoot,
+    kind: FileWrite,
+    paths: readonly string[],
+  ) {
+    const changes = app.changes.get(root);
+    const write =
+      changes?.kind === "ready" ? writeFor(kind, changes.status, paths) : null;
+    return write === null ? Promise.resolve(false) : writes.write(root, write);
+  }
+  const selectedChanges =
+    app.compare === null ? selectedWorktree?.changes : undefined;
+  const selectedLists = useMemo(
+    () =>
+      selectedChanges?.kind === "ready"
+        ? new Map(
+            worktreeGroups(selectedChanges.status.entries).map((group) => [
+              group.side,
+              group.files.map((file) => file.path),
+            ]),
+          )
+        : null,
+    [selectedChanges],
+  );
+  function writeList(side: "unstaged" | "staged") {
+    const paths = selectedLists?.get(side);
+    if (selectedWorktree && paths)
+      void writeFiles(
+        selectedWorktree.worktree.root,
+        listWrites[side].kind,
+        paths,
+      );
+  }
   const loaded = useMemo(
     () => new Set(snapshot?.commits.map((commit) => commit.oid)),
     [snapshot],
@@ -307,13 +351,18 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     snapshot.stashes.some((stash) => stash.oid === selected.oid)
       ? { root: snapshot.root, oid: selected.oid }
       : null;
-  const refreshRef = useRef(app.refresh);
+  const rereadChanges = () => {
+    app.refreshChanges();
+    writes.rereadHistory();
+  };
+  const rereadAll = () => {
+    rereadChanges();
+    return app.refresh();
+  };
+  const refreshRef = useRef(rereadAll);
   const reloadRefsRef = useRef(branchRefs.reload);
   useEffect(() => {
-    refreshRef.current = () => {
-      app.refreshChanges();
-      return app.refresh();
-    };
+    refreshRef.current = rereadAll;
     reloadRefsRef.current = branchRefs.reload;
   });
   // Commits and branches made outside L1 Git show up when its window regains focus.
@@ -466,6 +515,10 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     showStash: (stash) => {
       if (snapshot) showStash(snapshot.root, stash);
     },
+    stageAll: () => writeList("unstaged"),
+    unstageAll: () => writeList("staged"),
+    undo: () => void writes.undo(),
+    redo: () => void writes.redo(),
   };
   const context: ActionContext = {
     screen,
@@ -492,6 +545,16 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       outOfView: hiddenJump !== null,
     },
     rule: rule.kind,
+    worktree: selectedLists && {
+      unstaged: selectedLists.get("unstaged")?.length ?? 0,
+      staged: selectedLists.get("staged")?.length ?? 0,
+    },
+    history: {
+      undo: nextEntry(writes.history, "undo")?.label ?? null,
+      redo: nextEntry(writes.history, "redo")?.label ?? null,
+    },
+    writing: writes.running !== null,
+    typing: false,
   };
   const keys = useRef({ context, commands, palette: palette !== null });
   useLayoutEffect(() => {
@@ -618,7 +681,13 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
         if (claimedWhilePaletteOpen(event, mac)) event.preventDefault();
         return;
       }
-      const action = shortcutAction({ ...context, dialogOpen }, event, mac);
+      const [origin] = event.composedPath();
+      const typing = typingIn(origin instanceof HTMLElement ? origin : null);
+      const action = shortcutAction(
+        { ...context, dialogOpen, typing },
+        event,
+        mac,
+      );
       if (action === null) return;
       event.preventDefault();
       action.run(commands);
@@ -748,6 +817,15 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                 )}
               </div>
               <div className="toolbar-actions">
+                {snapshot && (
+                  <UndoButtons
+                    writes={writes}
+                    shortcuts={{
+                      undo: shortcutLabel(UNDO_SHORTCUT, mac),
+                      redo: shortcutLabel(REDO_SHORTCUT, mac),
+                    }}
+                  />
+                )}
                 {openRepository && (
                   <button
                     className="button secondary"
@@ -781,6 +859,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                 {!inspectorVisible && inspectorToggle}
               </div>
             </header>
+            <WriteNoticeRow writes={writes} />
             {persistenceError && (
               <div className="notice error-notice" role="alert">
                 <TriangleAlert size={14} />
@@ -793,7 +872,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                 <span>
                   {current.error.message} The last successful view is retained.
                 </span>
-                <button onClick={() => void app.refresh()}>Try again</button>
+                <button onClick={() => void rereadAll()}>Try again</button>
               </div>
             )}
             {openRepository &&
@@ -868,7 +947,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                       onBack={closeFile}
                       onRetry={() => app.openFile(fileDiff.path, fileDiff.side)}
                       onRefresh={() => {
-                        app.refreshChanges();
+                        rereadChanges();
                         app.openFile(fileDiff.path, fileDiff.side);
                       }}
                       selectable={shows}
@@ -967,7 +1046,11 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                     toggleButton={inspectorToggle}
                     onRetry={app.retryDetail}
                     worktree={selectedWorktree}
-                    onRefreshChanges={app.refreshChanges}
+                    onRefreshChanges={rereadChanges}
+                    writes={{
+                      busy: writes.running !== null,
+                      write: writeFiles,
+                    }}
                   />
                 ) : (
                   <InspectorFrame toggleButton={inspectorToggle} />

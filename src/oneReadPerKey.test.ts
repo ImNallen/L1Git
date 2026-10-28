@@ -45,3 +45,16 @@ describe("one read per key", () => {
     expect(started).toEqual(["bad", "bad"]);
   });
 });
+
+describe("waiting for a read", () => {
+  it("resolves a request once a read that started after it finishes", async () => {
+    const { request, settle } = reads();
+    const order: string[] = [];
+    void request("a").then(() => order.push("first"));
+    void request("a").then(() => order.push("second"));
+    await settle("a");
+    expect(order).toEqual(["first"]);
+    await settle("a");
+    expect(order).toEqual(["first", "second"]);
+  });
+});

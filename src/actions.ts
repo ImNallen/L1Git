@@ -25,6 +25,10 @@ export type ActionContext = {
     outOfView: boolean;
   } | null;
   rule: VisibilityRule["kind"];
+  worktree: { unstaged: number; staged: number } | null;
+  history: { undo: string | null; redo: string | null };
+  writing: boolean;
+  typing: boolean;
 };
 
 export type Commands = {
@@ -50,14 +54,24 @@ export type Commands = {
   openRepository: (root: RepositoryRoot) => void;
   jumpToRef: (reference: FullRef) => void;
   showStash: (stash: Stash) => void;
+  stageAll: () => void;
+  unstageAll: () => void;
+  undo: () => void;
+  redo: () => void;
 };
 
 export type Shortcut = {
   key: string;
   modifier: "platform" | "cmdOrCtrl" | "unchecked";
+  shift?: true;
+  yieldsToTyping?: true;
 };
 
 export type ActionId =
+  | "stageAll"
+  | "unstageAll"
+  | "undo"
+  | "redo"
   | "fetch"
   | "fastForward"
   | "search"
@@ -103,8 +117,54 @@ const branchName = (context: ActionContext) =>
   context.sidebarBranch?.name ?? "";
 
 export const PALETTE_SHORTCUT: Shortcut = { key: "p", modifier: "platform" };
+export const UNDO_SHORTCUT: Shortcut = {
+  key: "z",
+  modifier: "platform",
+  yieldsToTyping: true,
+};
+export const REDO_SHORTCUT: Shortcut = { ...UNDO_SHORTCUT, shift: true };
 
 export const actions: readonly Action[] = [
+  {
+    id: "stageAll",
+    title: "Stage all",
+    available: (context) =>
+      onRepository(context) &&
+      !context.writing &&
+      (context.worktree?.unstaged ?? 0) > 0,
+    run: (commands) => commands.stageAll(),
+  },
+  {
+    id: "unstageAll",
+    title: "Unstage all",
+    available: (context) =>
+      onRepository(context) &&
+      !context.writing &&
+      (context.worktree?.staged ?? 0) > 0,
+    run: (commands) => commands.unstageAll(),
+  },
+  {
+    id: "undo",
+    title: (context) => `Undo ${context.history.undo ?? ""}`,
+    shortcut: UNDO_SHORTCUT,
+    available: (context) =>
+      keysFree(context) &&
+      !context.dialogOpen &&
+      !context.writing &&
+      context.history.undo !== null,
+    run: (commands) => commands.undo(),
+  },
+  {
+    id: "redo",
+    title: (context) => `Redo ${context.history.redo ?? ""}`,
+    shortcut: REDO_SHORTCUT,
+    available: (context) =>
+      keysFree(context) &&
+      !context.dialogOpen &&
+      !context.writing &&
+      context.history.redo !== null,
+    run: (commands) => commands.redo(),
+  },
   {
     id: "fetch",
     title: "Fetch",
@@ -306,7 +366,7 @@ export function matchesShortcut(
   if (shortcut.modifier === "cmdOrCtrl") return event.metaKey || event.ctrlKey;
   return (
     (mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey) &&
-    !event.shiftKey &&
+    event.shiftKey === (shortcut.shift === true) &&
     !event.altKey
   );
 }
@@ -320,6 +380,7 @@ export function shortcutAction(
     actions.find(
       (action) =>
         action.shortcut !== undefined &&
+        !(action.shortcut.yieldsToTyping && context.typing) &&
         matchesShortcut(action.shortcut, event, mac) &&
         action.available(context),
     ) ?? null
@@ -331,6 +392,7 @@ export function claimedWhilePaletteOpen(event: Key, mac: boolean): boolean {
     ({ shortcut }) =>
       shortcut !== undefined &&
       shortcut.modifier !== "unchecked" &&
+      !shortcut.yieldsToTyping &&
       matchesShortcut(shortcut, event, mac),
   );
 }
@@ -356,7 +418,8 @@ export function shortcutLabel(shortcut: Shortcut, mac: boolean): string {
   if (shortcut.modifier === "unchecked")
     return shortcut.key === "Escape" ? "Esc" : shortcut.key;
   const key = shortcut.key.toUpperCase();
-  return mac ? `⌘${key}` : `Ctrl+${key}`;
+  if (mac) return `${shortcut.shift ? "⇧" : ""}⌘${key}`;
+  return `Ctrl+${shortcut.shift ? "Shift+" : ""}${key}`;
 }
 
 export type PaletteKind = "action" | "repository" | "branch" | "tag" | "stash";

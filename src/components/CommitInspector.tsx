@@ -1,4 +1,10 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import type { ReactNode } from "react";
 import {
   ArrowLeftRight,
@@ -24,7 +30,7 @@ import type {
   RepositorySnapshot,
   Worktree,
 } from "../domain/repository";
-import { clampMessage, worktreeGroups } from "../domain/worktree";
+import { clampMessage, listWrites, worktreeGroups } from "../domain/worktree";
 import type {
   ListSide,
   WorktreeChanges,
@@ -33,8 +39,11 @@ import type {
 import type { RefLabel } from "../domain/refs";
 import type { Selection } from "../domain/selection";
 import { relativeTime } from "../domain/time";
+import type { FileWrite } from "../domain/operations";
 import type { DetailState } from "../useWorkspace";
+import { changedFileTreeInput, listsRow } from "../domain/changedFiles";
 import { ChangedFileTree, changeStatuses } from "./ChangedFileTree";
+import type { RowAction } from "./ChangedFileTree";
 import { RefBadge } from "./History";
 
 type Props = {
@@ -55,6 +64,16 @@ type Props = {
   onRetry: () => void;
   worktree: { worktree: Worktree; changes: WorktreeChanges | undefined } | null;
   onRefreshChanges: () => void;
+  writes: WorktreeWrites;
+};
+
+export type WorktreeWrites = {
+  busy: boolean;
+  write: (
+    worktree: RepositoryRoot,
+    kind: FileWrite,
+    paths: readonly string[],
+  ) => Promise<unknown>;
 };
 
 export function InspectorFrame({
@@ -137,6 +156,7 @@ export function CommitInspector({
   onRetry,
   worktree,
   onRefreshChanges,
+  writes,
 }: Props) {
   const [copy, setCopy] = useState<"idle" | "copied" | "failed">("idle");
   const [changesOpen, setChangesOpen] = useState(true);
@@ -176,6 +196,7 @@ export function CommitInspector({
             selectedFile={selectedFile}
             onSelectFile={onSelectFile}
             onRefresh={onRefreshChanges}
+            writes={writes}
           />
         ) : (
           <div className="inspector-empty">
@@ -574,27 +595,72 @@ type OpenedFile = { path: string; side: ListSide | null };
 
 const GROUP_MAX_ROWS = 12;
 
+type RowFocus = { row: string; side: ListSide };
+
 function WorktreeFiles({
   group: { title, files, side },
   selectedFile,
   onSelectFile,
+  busy,
+  onWrite,
+  onRowFocus,
+  refocusPath,
+  onFocused,
 }: {
   group: WorktreeGroup;
   selectedFile: OpenedFile | null;
   onSelectFile: (path: string, side: ListSide) => void;
+  busy: boolean;
+  onWrite: (
+    kind: FileWrite,
+    side: ListSide,
+    paths: string[],
+    row?: string,
+  ) => void;
+  onRowFocus: (focus: RowFocus) => void;
+  refocusPath: string | null;
+  onFocused: () => void;
 }) {
+  const { kind, row, all } = listWrites[side];
+  const action: RowAction = {
+    label: row,
+    disabled: busy,
+    run: (paths, target) => onWrite(kind, side, paths, target),
+  };
   return (
     <section className="worktree-group" aria-label={title}>
-      <h3 className="changed-files-title">
-        {title}
-        <span className="count">{files.length}</span>
-      </h3>
+      <header className="worktree-group-header">
+        <h3 className="changed-files-title">
+          {title}
+          <span className="count">{files.length}</span>
+        </h3>
+        {all !== null && (
+          <button
+            className="button secondary list-action"
+            aria-disabled={busy}
+            onClick={() => {
+              if (!busy)
+                onWrite(
+                  kind,
+                  side,
+                  files.map((file) => file.path),
+                );
+            }}
+          >
+            {all}
+          </button>
+        )}
+      </header>
       <ChangedFileTree
         key={files.map((file) => `${file.status}:${file.path}`).join("\0")}
         files={files}
         selectedPath={selectedFile?.side === side ? selectedFile.path : null}
         onSelectFile={(path) => onSelectFile(path, side)}
         maxRows={GROUP_MAX_ROWS}
+        action={action}
+        refocusPath={refocusPath}
+        onFocused={onFocused}
+        onRowFocus={(row) => onRowFocus({ row, side })}
       />
     </section>
   );
@@ -608,6 +674,7 @@ function WorktreeInspector({
   selectedFile,
   onSelectFile,
   onRefresh,
+  writes,
 }: {
   worktree: Worktree;
   changes: WorktreeChanges | undefined;
@@ -616,7 +683,58 @@ function WorktreeInspector({
   selectedFile: OpenedFile | null;
   onSelectFile: (path: string, side: ListSide) => void;
   onRefresh: () => void;
+  writes: WorktreeWrites;
 }) {
+  const [focusAfter, setFocusAfter] = useState<RowFocus | null>(null);
+  const clearFocus = useCallback(() => setFocusAfter(null), []);
+  const lastRow = useRef<RowFocus | null>(null);
+  const resume = useRef<RowFocus | null>(null);
+  const lists = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (writes.busy) {
+      resume.current ??= lists.current?.contains(document.activeElement)
+        ? lastRow.current
+        : null;
+      return;
+    }
+    if (resume.current !== null) setFocusAfter(resume.current);
+    resume.current = null;
+  }, [writes.busy]);
+  const groups =
+    changes?.kind === "ready"
+      ? worktreeGroups(changes.status.entries).filter(
+          (group) => group.files.length > 0,
+        )
+      : [];
+  const listsFocus = (group: WorktreeGroup) =>
+    focusAfter !== null && listsRow(group.files, focusAfter.row);
+  const focusTarget =
+    groups.find(
+      (group) => listsFocus(group) && group.side === focusAfter?.side,
+    ) ?? groups.find(listsFocus);
+  const unlisted = focusAfter !== null && focusTarget === undefined;
+  useEffect(() => {
+    if (unlisted) clearFocus();
+  }, [unlisted, clearFocus]);
+  const onWrite = (
+    kind: FileWrite,
+    side: ListSide,
+    paths: string[],
+    row?: string,
+  ) => {
+    const files = groups.find((group) => group.side === side)?.files ?? [];
+    const last = lastRow.current;
+    const first = changedFileTreeInput(files).paths.at(0);
+    resume.current =
+      row !== undefined
+        ? { row, side }
+        : last?.side === side && listsRow(files, last.row)
+          ? last
+          : first === undefined
+            ? null
+            : { row: first, side };
+    void writes.write(worktree.root, kind, paths);
+  };
   const { head } = worktree;
   const branch =
     head.kind === "detached"
@@ -691,17 +809,22 @@ function WorktreeInspector({
       ) : changes.status.entries.length === 0 ? (
         <p className="muted">No uncommitted changes.</p>
       ) : (
-        <div className="worktree-groups">
-          {worktreeGroups(changes.status.entries)
-            .filter((group) => group.files.length > 0)
-            .map((group) => (
-              <WorktreeFiles
-                key={group.title}
-                group={group}
-                selectedFile={selectedFile}
-                onSelectFile={onSelectFile}
-              />
-            ))}
+        <div className="worktree-groups" ref={lists}>
+          {groups.map((group) => (
+            <WorktreeFiles
+              key={group.title}
+              group={group}
+              selectedFile={selectedFile}
+              onSelectFile={onSelectFile}
+              busy={writes.busy}
+              onWrite={onWrite}
+              onRowFocus={(focus) => (lastRow.current = focus)}
+              refocusPath={
+                group === focusTarget ? (focusAfter?.row ?? null) : null
+              }
+              onFocused={clearFocus}
+            />
+          ))}
         </div>
       )}
     </div>
