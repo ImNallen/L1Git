@@ -45,6 +45,7 @@ import { useBranchVisibility } from "./branchVisibility";
 import type { ThemeSettings } from "./themes/catalog";
 import { AppearanceSettings } from "./components/AppearanceSettings";
 import { AddRepositoryDialog } from "./components/AddRepositoryDialog";
+import { BranchDialog } from "./components/BranchDialog";
 import { DiscardDialog, DiscardPartDialog } from "./components/DiscardDialog";
 import { EditMessageDialog } from "./components/EditMessageDialog";
 import { COMMIT_SUMMARY_ID } from "./components/CommitBox";
@@ -58,8 +59,21 @@ import type { HistoryHandle } from "./components/History";
 import { PaneDivider } from "./components/PaneDivider";
 import { RepositoryTree } from "./components/RepositoryTree";
 import { UndoButtons, WriteNoticeRow } from "./components/UndoControls";
-import { discardChoice, nextEntry, writeFor } from "./domain/operations";
-import type { FileWrite, Write } from "./domain/operations";
+import {
+  branchAsks,
+  branchStep,
+  discardChoice,
+  isBranchOperation,
+  nextEntry,
+  writeFor,
+} from "./domain/operations";
+import type {
+  BranchAsk,
+  BranchStep,
+  FileWrite,
+  Step,
+  Write,
+} from "./domain/operations";
 import { swapEnds } from "./domain/comparison";
 import { buildGraph } from "./domain/graph";
 import { trunkTips } from "./domain/highlight";
@@ -163,6 +177,11 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     skipped: number;
     returnFocus?: () => void;
   } | null>(null);
+  const [branchAsk, setBranchAsk] = useState<BranchAsk | null>(null);
+  const [steppedBranch, setSteppedBranch] = useState<
+    (BranchStep & { root: RepositoryRoot }) | null
+  >(null);
+  const focusJumpedRow = useRef(false);
   const [palette, setPalette] = useState<{ picked: Oid | null } | null>(null);
   const paletteReturn = useRef<Element | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -390,6 +409,19 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     sameSelection(app.selection, { kind: "commit", oid: jumped.oid });
   const ruledBranch =
     jumped && isBranch(jumped) && (highlighted || hiddenJump) ? jumped : null;
+  const checkedOut = useMemo(
+    () =>
+      new Map(
+        snapshot?.worktrees.flatMap(({ head, name }) =>
+          head.kind === "attached" ? [[head.reference, name] as const] : [],
+        ),
+      ),
+    [snapshot],
+  );
+  const askFor = (kind: keyof ReturnType<typeof branchAsks>) => () => {
+    const ask = ruledBranch && branchAsks(ruledBranch)[kind];
+    if (ask) setBranchAsk(ask);
+  };
   const selectedStash =
     snapshot &&
     selected?.kind === "commit" &&
@@ -542,6 +574,9 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     showAllBranches: () => {
       if (snapshot) setRule(snapshot.root, NO_RULE);
     },
+    newBranch: askFor("create"),
+    renameBranch: askFor("rename"),
+    deleteBranch: askFor("delete"),
     openRepository: (root) => {
       showRepository(root);
       if (root === snapshot?.root) return;
@@ -571,8 +606,8 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       flushSync(() => setInspectorOpen(true));
       document.getElementById(COMMIT_SUMMARY_ID)?.focus();
     },
-    undo: () => void writes.undo(),
-    redo: () => void writes.redo(),
+    undo: () => void stepHistory("undo"),
+    redo: () => void stepHistory("redo"),
     writeLines: parts.writeLines,
   };
   const context: ActionContext = {
@@ -601,6 +636,8 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       name: ruledBranch.name,
       visibility: branchVisibility(rule, ruledBranch.reference),
       outOfView: hiddenJump !== null,
+      local: ruledBranch.kind === "local",
+      checkedOut: checkedOut.has(ruledBranch.reference),
     },
     rule: rule.kind,
     worktree: selectedLists && {
@@ -639,6 +676,48 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       if (shownElement(focusedElement())) return;
     }
   };
+  const focusNamedBranch = () => {
+    if (shownElement(focusedElement())) return;
+    const named = document.querySelector<HTMLElement>(
+      ".repository-tree .branch-row[aria-current='true']",
+    );
+    if (named) named.focus();
+    else focusFallback();
+  };
+  async function stepHistory(step: Step) {
+    const entry = nextEntry(writes.history, step);
+    setSteppedBranch(null);
+    const outcome = await writes[step]();
+    if (
+      outcome.kind === "applied" &&
+      entry !== null &&
+      isBranchOperation(entry.operation)
+    )
+      setSteppedBranch({
+        root: entry.root,
+        ...branchStep(entry.operation, step),
+      });
+  }
+  useEffect(() => {
+    if (steppedBranch === null) return;
+    const { root, left, gone } = steppedBranch;
+    const state = branchRefs.refs.get(root);
+    const listed = (reference: FullRef) =>
+      state?.kind === "ready" &&
+      state.refs.branches.some((branch) => branch.reference === reference);
+    if ((left !== null && !listed(left.reference)) || (gone && listed(gone)))
+      return;
+    setSteppedBranch(null);
+    if (shownElement(focusedElement())) return;
+    if (left === null) return focusFallback();
+    focusJumpedRow.current = true;
+    jumpTo(root, left);
+  }, [steppedBranch, branchRefs.refs]);
+  useEffect(() => {
+    if (!focusJumpedRow.current) return;
+    focusJumpedRow.current = false;
+    focusNamedBranch();
+  }, [sidebarJump]);
   const closePalette = () => {
     flushSync(() => setPalette(null));
     const back = paletteReturn.current;
@@ -831,6 +910,10 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
               });
             }}
             onAdd={commands.addRepository}
+            writable={
+              snapshot && { root: snapshot.root, checkedOutIn: checkedOut }
+            }
+            onBranchAsk={setBranchAsk}
           />
         </div>
         {screen === "settings" && (
@@ -1009,6 +1092,13 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                     onToggleColumn={historyColumns.toggle}
                     editableHead={editableHead}
                     onEditMessage={() => setEditingMessage(true)}
+                    onNewBranch={(oid) =>
+                      setBranchAsk({
+                        kind: "create",
+                        at: { kind: "commit", oid },
+                        from: `commit ${oid.slice(0, 7)}`,
+                      })
+                    }
                   />
                   {fileDiff.kind !== "closed" && (
                     <FileDiffPane
@@ -1203,6 +1293,25 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
           onClose={() => {
             flushSync(() => setEditingMessage(false));
             focusFallback();
+          }}
+        />
+      )}
+      {branchAsk && snapshot && (
+        <BranchDialog
+          ask={branchAsk}
+          root={snapshot.root}
+          head={snapshot.head}
+          onWrite={async (write) => {
+            const outcome = await writes.write(snapshot.root, write);
+            const shownInDialog = write.operation.kind !== "deleteBranch";
+            if (outcome.kind === "failed" && shownInDialog) writes.dismiss();
+            if (!shownElement(focusedElement())) focusFallback();
+            return outcome;
+          }}
+          onNamedBranch={(branch) => jumpTo(snapshot.root, branch)}
+          onClose={() => {
+            setBranchAsk(null);
+            requestAnimationFrame(focusNamedBranch);
           }}
         />
       )}

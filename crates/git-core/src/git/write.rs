@@ -21,6 +21,9 @@ pub(crate) enum LocalWrite {
     EditMessage,
     Discard,
     DiscardPart,
+    CreateBranch,
+    RenameBranch,
+    DeleteBranch,
     Undo,
     Redo,
 }
@@ -33,6 +36,9 @@ impl LocalWrite {
             | Self::StagePart
             | Self::UnstagePart
             | Self::DiscardPart
+            | Self::CreateBranch
+            | Self::RenameBranch
+            | Self::DeleteBranch
             | Self::Undo
             | Self::Redo => 120,
             Self::Discard => 300,
@@ -51,6 +57,9 @@ impl LocalWrite {
             Self::EditMessage => "Editing the commit message",
             Self::Discard => "Discarding the changes",
             Self::DiscardPart => "Discarding part of the file",
+            Self::CreateBranch => "Creating the branch",
+            Self::RenameBranch => "Renaming the branch",
+            Self::DeleteBranch => "Deleting the branch",
             Self::Undo => "Undoing the change",
             Self::Redo => "Redoing the change",
         }
@@ -67,6 +76,9 @@ impl LocalWrite {
             Self::EditMessage => "l1git edit message",
             Self::Discard => "l1git discard",
             Self::DiscardPart => "l1git discard part",
+            Self::CreateBranch => "l1git create branch",
+            Self::RenameBranch => "l1git rename branch",
+            Self::DeleteBranch => "l1git delete branch",
             Self::Undo => "l1git undo",
             Self::Redo => "l1git redo",
         }
@@ -84,6 +96,9 @@ impl LocalWrite {
                 "Git may have finished the commit, so check the history."
             }
             Self::Discard | Self::DiscardPart => "No file changed.",
+            Self::CreateBranch | Self::RenameBranch | Self::DeleteBranch => {
+                "L1 Git rereads the branch to see what changed."
+            }
         }
     }
 }
@@ -190,6 +205,20 @@ impl<'a> Write<'a> {
             env: Vec::new(),
             input: Some(message.as_bytes().to_vec()),
             cap: None,
+            as_user: true,
+            lazy_fetch: false,
+        }
+    }
+
+    pub(crate) fn branch(txn: &'a RefTxn<'_>, args: &[&'a str]) -> Self {
+        let mut all = vec!["branch"];
+        all.extend(args);
+        Self {
+            dir: txn.root(),
+            args: all,
+            env: Vec::new(),
+            input: None,
+            cap: Some(WRITE_STDOUT_CAP),
             as_user: true,
             lazy_fetch: false,
         }

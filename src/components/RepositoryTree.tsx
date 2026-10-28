@@ -10,10 +10,14 @@ import {
   EyeOff,
   Focus,
   FolderGit2,
+  GitBranchPlus,
+  PencilLine,
   Plus,
   Search,
   Trash2,
 } from "lucide-react";
+import { branchAsks } from "../domain/operations";
+import type { BranchAsk } from "../domain/operations";
 import type { RecentRepository } from "../domain/recents";
 import { normalizeSearch } from "../domain/search";
 import type {
@@ -50,6 +54,11 @@ type Props = {
   onRule: (root: RepositoryRoot, rule: VisibilityRule) => void;
   onRemove: (root: RepositoryRoot) => void;
   onAdd: () => void;
+  writable: {
+    root: RepositoryRoot;
+    checkedOutIn: ReadonlyMap<FullRef, string>;
+  } | null;
+  onBranchAsk: (ask: BranchAsk) => void;
 };
 
 export function RepositoryTree({
@@ -68,6 +77,8 @@ export function RepositoryTree({
   onRule,
   onRemove,
   onAdd,
+  writable,
+  onBranchAsk,
 }: Props) {
   const [query, setQuery] = useState("");
   const [menu, setMenu] = useState<{
@@ -158,6 +169,34 @@ export function RepositoryTree({
       );
     const { root, branch } = target;
     const rule = ruleFor(root);
+    const asks = branchAsks(branch);
+    const elsewhere =
+      writable?.root === root
+        ? null
+        : "Open this repository to change its branches.";
+    const checkedOutIn = writable?.checkedOutIn.get(branch.reference);
+    const write = (
+      Icon: typeof Plus,
+      label: string,
+      ask: BranchAsk | null,
+      off: string | null,
+    ) =>
+      ask && (
+        <button
+          role="menuitem"
+          aria-disabled={off !== null}
+          title={off ?? undefined}
+          onClick={() => {
+            if (off !== null) return;
+            closeMenu();
+            onBranchAsk(ask);
+          }}
+        >
+          <Icon size={14} />
+          <span>{label}</span>
+          {off !== null && <small className="menu-reason">{off}</small>}
+        </button>
+      );
     const state = branchVisibility(rule, branch.reference);
     const apply = (next: VisibilityRule) => () => {
       onRule(root, next);
@@ -184,6 +223,18 @@ export function RepositoryTree({
             <Eye size={14} />
             <span>Show all branches</span>
           </button>
+        )}
+        <div className="menu-separator" role="separator" />
+        {write(GitBranchPlus, "New branch…", asks.create, elsewhere)}
+        {write(PencilLine, "Rename…", asks.rename, elsewhere)}
+        {write(
+          Trash2,
+          "Delete…",
+          asks.delete,
+          elsewhere ??
+            (checkedOutIn === undefined
+              ? null
+              : `Checked out in ${checkedOutIn}`),
         )}
       </>
     );

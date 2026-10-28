@@ -12,6 +12,31 @@ export const refSchema = z
   .string()
   .regex(/^refs\/.+\/.+$/)
   .brand<"FullRef">();
+export const localRefSchema = z
+  .string()
+  .regex(/^refs\/heads\/.+$/)
+  .brand<"FullRef">();
+export const remoteRefSchema = z
+  .string()
+  .regex(/^refs\/remotes\/.+\/.+$/)
+  .brand<"FullRef">();
+export const branchTipSchema = z.strictObject({
+  reference: localRefSchema,
+  oid: oidSchema,
+});
+export const startSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("commit"), oid: oidSchema }),
+  z.strictObject({
+    kind: z.literal("local"),
+    reference: localRefSchema,
+    oid: oidSchema,
+  }),
+  z.strictObject({
+    kind: z.literal("remote"),
+    reference: remoteRefSchema,
+    oid: oidSchema,
+  }),
+]);
 export const headSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("attached"),
@@ -301,12 +326,29 @@ export const operationSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("unstageLines"), ...linesPart }),
   z.strictObject({ kind: z.literal("discardHunk"), ...hunkPart }),
   z.strictObject({ kind: z.literal("discardLines"), ...linesPart }),
+  z.strictObject({
+    kind: z.literal("createBranch"),
+    name: z.string(),
+    at: startSchema,
+  }),
+  z.strictObject({
+    kind: z.literal("renameBranch"),
+    branch: branchTipSchema,
+    to: z.string(),
+  }),
+  z.strictObject({ kind: z.literal("deleteBranch"), branch: branchTipSchema }),
 ]);
 export const expectSchema = z.strictObject({ head: headSchema });
 export const appliedSchema = z.strictObject({
   id: entryIdSchema,
   root: rootSchema,
   operation: operationSchema,
+});
+export const branchMergedSchema = z.strictObject({
+  head: z.boolean(),
+  upstream: z
+    .strictObject({ reference: refSchema, merged: z.boolean() })
+    .nullable(),
 });
 export const undoHistorySchema = z.strictObject({
   undo: appliedSchema.nullable(),
@@ -318,6 +360,7 @@ const staleReasonSchema = z.enum([
   "pathNotChosen",
   "stagedChanged",
   "historyChanged",
+  "branchChanged",
 ]);
 const staleView = { kind: z.literal("staleView"), message: z.string() };
 export const repositoryErrorSchema = z.union([
@@ -404,6 +447,9 @@ export type Operation = z.infer<typeof operationSchema>;
 export type Expect = z.infer<typeof expectSchema>;
 export type Applied = z.infer<typeof appliedSchema>;
 export type UndoHistory = z.infer<typeof undoHistorySchema>;
+export type BranchTip = z.infer<typeof branchTipSchema>;
+export type Start = z.infer<typeof startSchema>;
+export type BranchMerged = z.infer<typeof branchMergedSchema>;
 export type Problem =
   | z.infer<typeof repositoryErrorSchema>
   | { kind: "transport" | "persistence"; message: string };

@@ -105,7 +105,7 @@ pub(super) fn advance(
         }
     };
     let reason = match reason {
-        None if !is_at(root, reference, to, *reads)? => Some(SkipReason::Changed),
+        None if !is_at(root, reference.as_str(), to, *reads)? => Some(SkipReason::Changed),
         reason => reason,
     };
     Ok(match reason {
@@ -137,15 +137,15 @@ fn still_checked_out(
         && git::text(&output.stdout) == format!("{}\n{}\n", from.as_str(), reference.as_str()))
 }
 
-fn is_at(
+pub(crate) fn is_at(
     root: &Path,
-    reference: &BranchRef,
+    reference: &str,
     to: &Oid,
     reads: Deadline,
 ) -> Result<bool, RepositoryError> {
     let output = git::run(
         root,
-        &["rev-parse", "--verify", "--quiet", reference.as_str()],
+        &["rev-parse", "--verify", "--quiet", reference],
         reads,
     )?;
     Ok(output.status.success() && git::line(&output.stdout) == to.as_str())

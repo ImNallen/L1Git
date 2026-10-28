@@ -406,3 +406,24 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.branch-name-input {
+  display: block;
+  width: 100%;
+  height: 35px;
+  padding: 0 10px;
+  background: var(--control-inset);
+  border: 1px solid var(--border-control);
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.branch-name-input:focus-visible {
+  outline: none;
+  border-color: var(--focus);
+}
+.branch-name-input[aria-invalid="true"] {
+  border-color: var(--error-border);
+}
+.branch-dialog .error-message {
+  margin-bottom: 0;
+}

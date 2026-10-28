@@ -524,28 +524,87 @@ impl BranchRef {
 impl TryFrom<String> for BranchRef {
     type Error = RepositoryError;
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        let valid = value.strip_prefix("refs/heads/").is_some_and(|name| {
-            !name.is_empty()
-                && !name.ends_with('/')
-                && !name.ends_with('.')
-                && !name.contains("..")
-                && !name.contains("@{")
-                && name != "@"
-                && name.split('/').all(|part| {
-                    !part.is_empty() && !part.starts_with('.') && !part.ends_with(".lock")
-                })
-                && name
-                    .chars()
-                    .all(|c| !c.is_control() && !" ~^:?*[\\".contains(c))
-        });
-        if valid {
+        if value
+            .strip_prefix("refs/heads/")
+            .is_some_and(valid_ref_name)
+        {
             Ok(Self(value))
         } else {
             Err(RepositoryError::new(
                 ErrorKind::InvalidRef,
-                "Only local branches can be fast-forwarded.",
+                "L1 Git changes only local branches, under refs/heads/.",
             ))
         }
+    }
+}
+
+/// The rules of `git check-ref-format` for the part of a ref after its
+/// `refs/<kind>/` prefix.
+fn valid_ref_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name.ends_with('/')
+        && !name.ends_with('.')
+        && !name.contains("..")
+        && !name.contains("@{")
+        && name != "@"
+        && name
+            .split('/')
+            .all(|part| !part.is_empty() && !part.starts_with('.') && !part.ends_with(".lock"))
+        && name
+            .chars()
+            .all(|c| !c.is_control() && !" ~^:?*[\\".contains(c))
+}
+
+/// Whether a local branch's tip is in the history of HEAD and of the
+/// branch's upstream.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchMerged {
+    /// False when HEAD is unborn.
+    pub head: bool,
+    /// None when the branch has no upstream, or its upstream ref is gone.
+    pub upstream: Option<UpstreamMerged>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct UpstreamMerged {
+    pub reference: String,
+    pub merged: bool,
+}
+
+/// A `refs/remotes/*` name, a remote-tracking branch a new branch can start
+/// from.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct RemoteRef(String);
+
+impl RemoteRef {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<String> for RemoteRef {
+    type Error = RepositoryError;
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        if value
+            .strip_prefix("refs/remotes/")
+            .is_some_and(|name| name.contains('/') && valid_ref_name(name))
+        {
+            Ok(Self(value))
+        } else {
+            Err(RepositoryError::new(
+                ErrorKind::InvalidRef,
+                "Start a branch from a remote-tracking branch under refs/remotes/.",
+            ))
+        }
+    }
+}
+
+impl From<RemoteRef> for String {
+    fn from(value: RemoteRef) -> Self {
+        value.0
     }
 }
 
@@ -786,6 +845,9 @@ pub enum StaleReason {
     StagedChanged,
     /// The entry is not the next one to undo or redo.
     HistoryChanged,
+    /// A branch's tip, or the worktrees that have it checked out, differ from
+    /// the request or the undo entry.
+    BranchChanged,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

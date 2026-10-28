@@ -1,14 +1,15 @@
 use crate::{
-    Advance, Applied, Blame, CommitDetail, Comparison, Coordinator, EntryId, Expect,
-    FastForwardReport, FetchMode, FilePatch, FileRevision, LineStats, Operation, RepositoryError,
-    RepositoryOverview, RepositoryRefs, RepositorySnapshot, Side, UndoHistory, WorktreePatch,
-    WorktreeStatus,
+    Advance, Applied, Blame, BranchMerged, BranchTip, CommitDetail, Comparison, Coordinator,
+    EntryId, Expect, FastForwardReport, FetchMode, FilePatch, FileRevision, LineStats, Operation,
+    RepositoryError, RepositoryOverview, RepositoryRefs, RepositorySnapshot, Side, UndoHistory,
+    WorktreePatch, WorktreeStatus,
     file_history::{blame_within, file_history_within},
     git::LocalRead,
     repository::{
         commit_detail_within, file_patch_within, line_stats_within, refs_within, snapshot_within,
     },
     status::{worktree_patch_within, worktree_status_within},
+    write::merged_within,
 };
 use serde::{Deserialize, Serialize};
 
@@ -76,6 +77,10 @@ pub enum Request {
     UndoHistory {
         path: String,
     },
+    BranchMerged {
+        path: String,
+        branch: BranchTip,
+    },
 }
 
 #[derive(Debug, Serialize)]
@@ -96,6 +101,7 @@ pub enum Response {
     Undo(Applied),
     Redo(Applied),
     UndoHistory(UndoHistory),
+    BranchMerged(BranchMerged),
 }
 
 pub fn run(coordinator: &Coordinator, request: Request) -> Result<Response, RepositoryError> {
@@ -156,5 +162,10 @@ pub fn run(coordinator: &Coordinator, request: Request) -> Result<Response, Repo
         Request::Undo { path, id } => Response::Undo(coordinator.undo(&path, id)?),
         Request::Redo { path, id } => Response::Redo(coordinator.redo(&path, id)?),
         Request::UndoHistory { path } => Response::UndoHistory(coordinator.undo_history(&path)?),
+        Request::BranchMerged { path, branch } => Response::BranchMerged(merged_within(
+            &path,
+            &branch,
+            deadline(LocalRead::BranchMerged),
+        )?),
     })
 }

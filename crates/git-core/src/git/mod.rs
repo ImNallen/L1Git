@@ -95,6 +95,7 @@ pub(crate) enum LocalRead {
     WorktreeStatus,
     WorktreePatch,
     BranchStatus,
+    BranchMerged,
     UndoHistory,
 }
 
@@ -106,6 +107,7 @@ impl LocalRead {
             | Self::LineStats
             | Self::WorktreeStatus
             | Self::WorktreePatch
+            | Self::BranchMerged
             | Self::UndoHistory => 30,
             Self::CommitDetail | Self::FilePatch => 20,
             Self::FileHistory | Self::Blame | Self::BranchStatus => 60,
@@ -124,6 +126,7 @@ impl LocalRead {
             Self::WorktreeStatus => "the worktree status",
             Self::WorktreePatch => "this file's changes",
             Self::BranchStatus => "the branch status",
+            Self::BranchMerged => "whether the branch is merged",
             Self::UndoHistory => "the undo history",
         }
     }

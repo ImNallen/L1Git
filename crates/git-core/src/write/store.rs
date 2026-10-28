@@ -202,10 +202,12 @@ impl LockedStore {
     ) -> Result<Log, RepositoryError> {
         let mut log = self.log()?;
         if let Some(id) = log.pending {
-            log = if self.landed(id, opened, deadline)? {
-                log.pushed(id)
-            } else {
-                log.without_pending()
+            log = match self.landed(id, opened, deadline)? {
+                Some(change) => {
+                    self.write(id, "change.json", &change)?;
+                    log.pushed(id)
+                }
+                None => log.without_pending(),
             };
             self.save(&log)?;
             self.forget(&log);
@@ -227,19 +229,19 @@ impl LockedStore {
         id: EntryId,
         opened: &Repo,
         deadline: WriteDeadline,
-    ) -> Result<bool, RepositoryError> {
+    ) -> Result<Option<Change>, RepositoryError> {
         let Ok((applied, change)) = self.record_of(id) else {
-            return Ok(false);
+            return Ok(None);
         };
         if change.keeps_overwritten_files() {
-            return Ok(true);
+            return Ok(Some(change));
         }
-        if applied.root == opened.root() {
+        if applied.root == opened.root() || change.repository_wide() {
             return change.landed(opened, deadline);
         }
         match opened.worktree(&applied.root, deadline.reads()) {
             Ok(repo) => change.landed(&repo, deadline),
-            Err(_) => Ok(false),
+            Err(_) => Ok(None),
         }
     }
 
@@ -265,7 +267,7 @@ impl LockedStore {
         operation: &Operation,
         change: &Change,
     ) -> Result<(Applied, Recorded<'_>), RepositoryError> {
-        let (applied, _, recorded) = self.record_with(txn, log, operation, |entry| {
+        let (applied, _, recorded) = self.record_with(txn.repo(), log, operation, |entry| {
             entry.keep(txn, &change.objects())?;
             Ok(change.clone())
         })?;
@@ -274,7 +276,7 @@ impl LockedStore {
 
     pub(super) fn record_with<C: Clone>(
         &self,
-        txn: &Txn<'_>,
+        repo: &Repo,
         log: &Log,
         operation: &Operation,
         fill: impl FnOnce(&EntryObjects) -> Result<C, RepositoryError>,
@@ -285,7 +287,7 @@ impl LockedStore {
         let id = EntryId::after(log.entries.last().copied());
         let applied = Applied {
             id,
-            root: txn.repo().root(),
+            root: repo.root(),
             operation: operation.clone(),
         };
         let entry = NewEntry {
@@ -415,6 +417,10 @@ impl Recorded<'_> {
 
     pub(super) fn replace(&self, change: &Change) -> io::Result<()> {
         self.store.write_file(self.id, "change.json", change)
+    }
+
+    pub(super) fn stay_pending(mut self) {
+        self.entry.kept = true;
     }
 
     /// Marks the write done once the index holds it. If the log cannot be
@@ -597,9 +603,8 @@ impl EntryObjects {
         if tips.is_empty() {
             return Ok(());
         }
-        let pack = self.objects.join("pack");
-        fs::create_dir_all(&pack).map_err(unwritable)?;
-        let base = pack.join("pack").to_string_lossy().into_owned();
+        fs::create_dir_all(self.objects.join("pack")).map_err(unwritable)?;
+        let base = pack_base(&self.objects);
         runner
             .git(&["pack-objects", "--revs", "-q", &base])
             .object_directory(&self.objects)
@@ -622,13 +627,7 @@ impl EntryObjects {
         if missing.is_empty() {
             return Ok(());
         }
-        let base = runner
-            .repo()
-            .objects
-            .join("pack")
-            .join("pack")
-            .to_string_lossy()
-            .into_owned();
+        let base = pack_base(&runner.repo().objects);
         runner
             .git(&["pack-objects", "--revs", "-q", &base])
             .alternate_object_directory(&self.objects)
@@ -637,6 +636,113 @@ impl EntryObjects {
             .succeeded()?;
         Ok(())
     }
+
+    pub(super) fn keep_branch(
+        &self,
+        runner: &impl Runner,
+        tip: &Oid,
+        name: &str,
+    ) -> Result<(), RepositoryError> {
+        let tips = std::slice::from_ref(tip);
+        if self.objects.exists() && missing(runner, Some(&self.objects), tips)?.is_empty() {
+            return Ok(());
+        }
+        let exclude = format!("--exclude={name}");
+        let listed = runner
+            .git(&[
+                "rev-list",
+                "--objects",
+                "--missing=allow-promisor",
+                tip.as_str(),
+                "--not",
+                &exclude,
+                LASTING_REFS[0],
+                LASTING_REFS[1],
+            ])
+            .uncapped()
+            .run(runner.deadline())?
+            .succeeded()?;
+        if listed.is_empty() {
+            return Ok(());
+        }
+        fs::create_dir_all(self.objects.join("pack")).map_err(unwritable)?;
+        let base = pack_base(&self.objects);
+        runner
+            .git(&["pack-objects", "-q", &base])
+            .object_directory(&self.objects)
+            .alternate_object_directory(&runner.repo().objects)
+            .input(listed)
+            .run(runner.deadline())?
+            .succeeded()?;
+        Ok(())
+    }
+
+    pub(super) fn bring_back_branch(
+        &self,
+        runner: &impl Runner,
+        tip: &Oid,
+    ) -> Result<(), RepositoryError> {
+        let mut present = runner.git(&["cat-file", "-e", tip.as_str()]);
+        let mut list = runner.git(&[
+            "rev-list",
+            "--objects",
+            "--missing=allow-promisor",
+            tip.as_str(),
+            "--not",
+            "--all",
+        ]);
+        if self.objects.exists() {
+            present = present.alternate_object_directory(&self.objects);
+            list = list.alternate_object_directory(&self.objects);
+        }
+        let lost = || {
+            RepositoryError::new(
+                ErrorKind::GitFailed,
+                "Git no longer has some of this branch's commits, and L1 Git's undo store does not hold them, so nothing changed. A branch or tag that shared them was likely deleted outside L1 Git and its commits pruned.",
+            )
+        };
+        // rev-list skips a missing tip under --missing=allow-promisor.
+        if present.run(runner.deadline())?.code() != Some(0) {
+            return Err(lost());
+        }
+        let listed = list.uncapped().run(runner.deadline())?;
+        if listed.code() != Some(0) {
+            return Err(lost());
+        }
+        let reached = listed
+            .stdout()
+            .split(|byte| *byte == b'\n')
+            .filter_map(|line| line.split(|byte| *byte == b' ').next())
+            .filter(|oid| !oid.is_empty())
+            .map(|oid| Oid::try_from(String::from_utf8_lossy(oid).into_owned()))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| crate::git::malformed())?;
+        let lacking = missing(runner, None, &reached)?;
+        if lacking.is_empty() {
+            return Ok(());
+        }
+        let base = pack_base(&runner.repo().objects);
+        runner
+            .git(&["pack-objects", "-q", &base])
+            .alternate_object_directory(&self.objects)
+            .input(lines(&lacking))
+            .run(runner.deadline())?
+            .succeeded()?;
+        Ok(())
+    }
+}
+
+/// The refs whose objects a branch's undo entry need not keep. A fetch with
+/// `--prune` drops remote-tracking refs, and a checkout moves HEAD.
+const LASTING_REFS: [&str; 2] = ["--branches", "--tags"];
+
+/// What `pack-objects` names its pack after in an object directory.
+fn pack_base(objects: &Path) -> String {
+    objects
+        .join("pack")
+        .join("pack")
+        .to_string_lossy()
+        .into_owned()
 }
 
 fn missing(

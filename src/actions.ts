@@ -24,6 +24,8 @@ export type ActionContext = {
     name: string;
     visibility: BranchVisibility;
     outOfView: boolean;
+    local: boolean;
+    checkedOut: boolean;
   } | null;
   rule: VisibilityRule["kind"];
   worktree: { unstaged: number; staged: number; discardable: number } | null;
@@ -52,6 +54,9 @@ export type Commands = {
   toggleHide: () => void;
   toggleSolo: () => void;
   showAllBranches: () => void;
+  newBranch: () => void;
+  renameBranch: () => void;
+  deleteBranch: () => void;
   openRepository: (root: RepositoryRoot) => void;
   jumpToRef: (reference: FullRef) => void;
   showStash: (stash: Stash) => void;
@@ -98,6 +103,9 @@ export type ActionId =
   | "toggleHide"
   | "toggleSolo"
   | "showAllBranches"
+  | "newBranch"
+  | "renameBranch"
+  | "deleteBranch"
   | "addRepository"
   | "toggleSidebar"
   | "toggleInspector"
@@ -341,6 +349,34 @@ export const actions: readonly Action[] = [
     title: "Show all branches",
     available: (context) => onRepository(context) && context.rule !== "none",
     run: (commands) => commands.showAllBranches(),
+  },
+  {
+    id: "newBranch",
+    title: (context) => `New branch from ${branchName(context)}…`,
+    available: (context) =>
+      onRepository(context) &&
+      !context.writing &&
+      context.sidebarBranch !== null,
+    run: (commands) => commands.newBranch(),
+  },
+  {
+    id: "renameBranch",
+    title: (context) => `Rename ${branchName(context)}…`,
+    available: (context) =>
+      onRepository(context) &&
+      !context.writing &&
+      context.sidebarBranch?.local === true,
+    run: (commands) => commands.renameBranch(),
+  },
+  {
+    id: "deleteBranch",
+    title: (context) => `Delete ${branchName(context)}…`,
+    available: (context) =>
+      onRepository(context) &&
+      !context.writing &&
+      context.sidebarBranch?.local === true &&
+      !context.sidebarBranch.checkedOut,
+    run: (commands) => commands.deleteBranch(),
   },
   {
     id: "addRepository",

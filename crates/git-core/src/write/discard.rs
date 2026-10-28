@@ -369,31 +369,32 @@ fn land(
     landings: &[Landing<'_>],
 ) -> Result<(Applied, Option<Published>), RepositoryError> {
     let root = &txn.repo().root;
-    let (applied, mut discard, recorded) = store.record_with(&txn, log, operation, |entry| {
-        let files = entry.files();
-        store::private_folder()
-            .create(&files)
-            .map_err(|error| failed("the undo history", &error))?;
-        let paths = landings
-            .iter()
-            .enumerate()
-            .map(|(at, landing)| {
-                let before = capture(root, landing.path, &files, format!("{at}.before"))?;
-                let after = match landing.after {
-                    After::Checkout => {
-                        capture(checkout, landing.path, &files, format!("{at}.after"))?
-                    }
-                    After::Absent => Content::Absent,
-                };
-                Ok(Discarded {
-                    path: landing.path.to_owned(),
-                    before,
-                    after,
+    let (applied, mut discard, recorded) =
+        store.record_with(txn.repo(), log, operation, |entry| {
+            let files = entry.files();
+            store::private_folder()
+                .create(&files)
+                .map_err(|error| failed("the undo history", &error))?;
+            let paths = landings
+                .iter()
+                .enumerate()
+                .map(|(at, landing)| {
+                    let before = capture(root, landing.path, &files, format!("{at}.before"))?;
+                    let after = match landing.after {
+                        After::Checkout => {
+                            capture(checkout, landing.path, &files, format!("{at}.after"))?
+                        }
+                        After::Absent => Content::Absent,
+                    };
+                    Ok(Discarded {
+                        path: landing.path.to_owned(),
+                        before,
+                        after,
+                    })
                 })
-            })
-            .collect::<Result<_, RepositoryError>>()?;
-        Ok(DiscardChange { paths })
-    })?;
+                .collect::<Result<_, RepositoryError>>()?;
+            Ok(DiscardChange { paths })
+        })?;
     let mut placed = 0;
     let failure: Option<RepositoryError> = discard
         .paths
@@ -1340,7 +1341,7 @@ mod tests {
                 |opened, store, log, deadline| {
                     let txn = Txn::begin(&opened, deadline)?;
                     let (applied, _, recorded) =
-                        store.record_with(&txn, &log, &operation, |_| {
+                        store.record_with(txn.repo(), &log, &operation, |_| {
                             Ok(DiscardChange {
                                 paths: vec![Discarded {
                                     path: "f".to_owned(),

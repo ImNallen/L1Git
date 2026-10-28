@@ -401,6 +401,10 @@ impl<'r> RefTxn<'r> {
     pub(super) fn update_refs<'a>(&'a self, reflog: &'a str, input: Vec<u8>) -> Write<'a> {
         Write::update_refs(self, reflog, input)
     }
+
+    pub(super) fn branch<'a>(&'a self, args: &[&'a str]) -> Write<'a> {
+        Write::branch(self, args)
+    }
 }
 
 pub(crate) struct Published {

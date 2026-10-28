@@ -75,6 +75,7 @@ impl Move {
         };
         let name = &self.name;
         let command = match (&self.old, &self.new) {
+            (Some(old), Some(new)) if old == new => format!("verify {name} {}", old.as_str()),
             (Some(old), Some(new)) => format!("update {name} {} {}", new.as_str(), old.as_str()),
             (None, Some(new)) => format!("create {name} {}", new.as_str()),
             (Some(old), None) => format!("delete {name} {}", old.as_str()),

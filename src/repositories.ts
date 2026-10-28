@@ -7,6 +7,7 @@ import type { Advance, FetchMode } from "./domain/overview";
 import {
   appliedSchema,
   blameSchema,
+  branchMergedSchema,
   detailSchema,
   fileHistorySchema,
   filePatchSchema,
@@ -19,6 +20,7 @@ import {
   worktreeStatusSchema,
 } from "./domain/repository";
 import type {
+  BranchTip,
   EntryId,
   Expect,
   Oid,
@@ -46,7 +48,8 @@ type RepositoryRequest =
   | { op: "write"; path: RepositoryRoot; operation: Operation; expect: Expect }
   | { op: "undo"; path: RepositoryRoot; id: EntryId }
   | { op: "redo"; path: RepositoryRoot; id: EntryId }
-  | { op: "undoHistory"; path: RepositoryRoot };
+  | { op: "undoHistory"; path: RepositoryRoot }
+  | { op: "branchMerged"; path: RepositoryRoot; branch: BranchTip };
 
 const responseSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("snapshot"), data: snapshotSchema }),
@@ -64,6 +67,7 @@ const responseSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("undo"), data: appliedSchema }),
   z.object({ op: z.literal("redo"), data: appliedSchema }),
   z.object({ op: z.literal("undoHistory"), data: undoHistorySchema }),
+  z.object({ op: z.literal("branchMerged"), data: branchMergedSchema }),
 ]);
 export const requestOps = responseSchema.options.map(
   (option) => option.shape.op.value,
@@ -205,6 +209,10 @@ export async function redo(path: RepositoryRoot, id: EntryId) {
 
 export async function undoHistory(path: RepositoryRoot) {
   return (await run({ op: "undoHistory", path })).data;
+}
+
+export async function branchMerged(path: RepositoryRoot, branch: BranchTip) {
+  return (await run({ op: "branchMerged", path, branch })).data;
 }
 
 export async function chooseDirectory(): Promise<string | null> {

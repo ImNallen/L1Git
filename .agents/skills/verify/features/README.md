@@ -9,6 +9,7 @@
 | [Change appearance](appearance.md)              | Choose System, Light, or Dark without losing the repository view      | Saved preference, live system changes, themed workspace and diffs        |
 | [Update behind branches](overview.md)           | Fetch saved repositories and fast-forward ready branches in one click | Moved refs match the count, blocked branches stay put, refreshed graph   |
 | [Stage, unstage, commit, discard, and undo](changes.md) | Stage, unstage, commit, amend, and discard, then undo and redo each write | Index, refs, and file bytes before and after, exact undo, stale-view and hook notices |
+| [Create, rename, and delete branches](refs.md) | Make, rename, and remove local branches, then undo and redo each | Refs, branch settings, and worktree HEADs before and after, Git's name reasons, stale and checked-out refusals |
 | [Read real repository data](reader.md)          | Receive accurate repository states                                    | Automated real Git and HTTP integration tests                            |
 
 Browser and native journeys use real working copies. Reader and build checks passed for the implementation baseline. UI journeys require a live verification pass.
