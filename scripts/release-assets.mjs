@@ -13,30 +13,22 @@ import {
 import { basename, join } from "node:path";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
-import { validatePlan } from "./release-plan.mjs";
+import {
+  compareVersions,
+  parseVersion,
+  validatePlan,
+} from "./release-plan.mjs";
 
-export const TARGETS = [
-  {
-    id: "macos-universal",
-    bundleDirectory: "target/universal-apple-darwin/release/bundle",
-    os: "macos-latest",
-    rustTargets: "aarch64-apple-darwin,x86_64-apple-darwin",
-    args: "--target universal-apple-darwin --bundles app,dmg",
-    extensions: ["dmg"],
-  },
-  {
-    id: "linux-x86_64",
-    bundleDirectory: "target/x86_64-unknown-linux-gnu/release/bundle",
-    os: "ubuntu-24.04",
-    rustTargets: "x86_64-unknown-linux-gnu",
-    args: "--target x86_64-unknown-linux-gnu --bundles appimage,deb",
-    extensions: ["AppImage", "deb"],
-  },
-];
+import {
+  TARGETS,
+  PUBLIC_KEY,
+  buildManifest,
+  bundleName,
+} from "./updater-manifest.mjs";
+export { TARGETS } from "./updater-manifest.mjs";
 
 const json = (value) => `${JSON.stringify(value, null, 2)}\n`;
 const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
-const identity = (plan) => plan.release;
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 function active(plan) {
@@ -58,7 +50,7 @@ export function githubApi(
     encoding: binary ? undefined : "utf8",
     maxBuffer: 1024 * 1024 * 1024,
   });
-  return binary ? output : JSON.parse(output);
+  return binary ? output : output.trim() ? JSON.parse(output) : null;
 }
 
 export async function restoreArtifact(
@@ -124,7 +116,7 @@ function files(directory) {
 }
 
 function assetName(plan, target, extension) {
-  return `L1Git_${plan.release.version}_${target.id}.${extension}`;
+  return bundleName(plan.release.version, target, extension);
 }
 
 export function stageAssets(plan, targetId, directory, output) {
@@ -164,12 +156,17 @@ export function stageAssets(plan, targetId, directory, output) {
       sha256: digest(bytes),
     };
   });
-  const manifest = { release: identity(plan), target: target.id, assets };
+  const manifest = { release: plan.release, target: target.id, assets };
   writeFileSync(join(output, `${target.id}.json`), json(manifest));
   return manifest;
 }
 
-export function verifyAssets(plan, directory) {
+export function verifyAssets(
+  plan,
+  directory,
+  publicKey = PUBLIC_KEY,
+  repository = "ImNallen/L1Git",
+) {
   active(plan);
   const paths = files(directory);
   const expected = new Set();
@@ -184,7 +181,7 @@ export function verifyAssets(plan, directory) {
     expected.add(manifestName);
     const manifest = JSON.parse(readFileSync(manifestPaths[0], "utf8"));
     if (
-      !same(manifest.release, identity(plan)) ||
+      !same(manifest.release, plan.release) ||
       manifest.target !== target.id ||
       manifest.assets?.length !== target.extensions.length
     )
@@ -213,19 +210,44 @@ export function verifyAssets(plan, directory) {
     throw new Error("Unexpected files in bundle artifacts.");
   assets.sort((a, b) => a.name.localeCompare(b.name));
   const manifest = {
-    release: identity(plan),
+    release: plan.release,
     assets: assets.map(({ path: _path, ...entry }) => entry),
   };
-  return { manifest, assets };
+  const feed = buildManifest({
+    repository,
+    plan,
+    publicKey,
+    files: Object.fromEntries(
+      assets.map((asset) => [asset.name, readFileSync(asset.path)]),
+    ),
+  });
+  return { manifest, assets, feed };
 }
 
-export async function publishRelease(plan, directory, remote) {
+export async function publishRelease(
+  plan,
+  directory,
+  remote,
+  { publicKey = PUBLIC_KEY, repository = "ImNallen/L1Git" } = {},
+) {
   if (plan.action !== "publish")
     throw new Error("Only a publish plan may write a release.");
-  const { manifest, assets } = verifyAssets(plan, directory);
+  const { manifest, assets, feed } = verifyAssets(
+    plan,
+    directory,
+    publicKey,
+    repository,
+  );
   const manifestBytes = Buffer.from(json(manifest));
+  const feedBytes = Buffer.from(json(feed));
   const uploads = [
     ...assets.map((entry) => ({ ...entry, bytes: readFileSync(entry.path) })),
+    {
+      name: "latest.json",
+      bytes: feedBytes,
+      size: feedBytes.length,
+      sha256: digest(feedBytes),
+    },
     {
       name: "release-manifest.json",
       size: manifestBytes.length,
@@ -239,6 +261,21 @@ export async function publishRelease(plan, directory, remote) {
   if (tag && tag !== r.sha)
     throw new Error(`Tag ${r.tag} points at another commit.`);
   let release = await remote.findRelease(r.tag);
+  if (r.channel === "stable" && release?.draft !== false) {
+    const version = parseVersion(r.version);
+    const newer = (await remote.stableTags()).find((tag) => {
+      const published = parseVersion(tag.slice(1));
+      return (
+        published &&
+        !published.nightly &&
+        compareVersions(published, version) >= 0
+      );
+    });
+    if (newer)
+      throw new Error(
+        `Stable ${r.tag} would not advance ${newer}. Start a new release attempt.`,
+      );
+  }
   if (!release) {
     const notes = await remote.notes(r);
     release = await remote.create({
@@ -272,6 +309,7 @@ export async function publishRelease(plan, directory, remote) {
     }
     const bytes = await remote.download(asset);
     if (
+      asset.state !== "uploaded" ||
       asset.size !== upload.size ||
       bytes.length !== upload.size ||
       digest(bytes) !== upload.sha256
@@ -290,7 +328,61 @@ export async function publishRelease(plan, directory, remote) {
     (await remote.commitOf(r.tag)) !== r.sha
   )
     throw new Error("Publication or tag verification failed.");
+  await reconcileNightlyFeed(plan, feedBytes, remote);
   return published;
+}
+
+export async function reconcileNightlyFeed(plan, bytes, remote) {
+  const marker = "<!-- l1git-nightly-feed -->";
+  let feed = await remote.findRelease("nightly");
+  if (!feed)
+    feed = await remote.create({
+      tag_name: "nightly",
+      target_commitish: plan.release.sha,
+      name: "Nightly update feed",
+      body: `${marker}\nStable and nightly releases update latest.json here. Download installers from versioned releases.`,
+      draft: false,
+      prerelease: true,
+      make_latest: "false",
+    });
+  if (
+    feed.draft ||
+    !feed.prerelease ||
+    !feed.body?.includes(marker) ||
+    feed.assets.some((asset) => asset.name !== "latest.json") ||
+    feed.assets.length > 1
+  )
+    throw new Error("Conflicting nightly feed release.");
+  const existing = feed.assets[0];
+  if (existing) {
+    const previous = await remote.download(existing);
+    if (existing.state !== "uploaded" || existing.size !== previous.length)
+      throw new Error("Existing nightly feed metadata conflicts.");
+    const version = parseVersion(JSON.parse(previous.toString("utf8")).version);
+    if (!version) throw new Error("Invalid existing nightly feed version.");
+    const order = compareVersions(version, parseVersion(plan.release.version));
+    if (order > 0) return;
+    if (order === 0) {
+      if (!previous.equals(bytes))
+        throw new Error(
+          "Same-version nightly feed conflicts with the release.",
+        );
+      return;
+    }
+    await remote.deleteAsset(existing.id);
+  }
+  const asset = await remote.upload(feed, {
+    name: "latest.json",
+    size: bytes.length,
+    bytes,
+  });
+  const served = await remote.download(asset);
+  if (
+    asset.state !== "uploaded" ||
+    asset.size !== bytes.length ||
+    !served.equals(bytes)
+  )
+    throw new Error("Nightly feed upload verification failed.");
 }
 
 export function githubRemote(
@@ -330,6 +422,20 @@ export function githubRemote(
       ).flat();
       return release;
     },
+    async stableTags() {
+      const pages = await api(`${base}/releases?per_page=100`, {
+        paginate: true,
+      });
+      return pages
+        .flat()
+        .filter(
+          (release) =>
+            !release.draft &&
+            release.published_at &&
+            release.tag_name.startsWith("v"),
+        )
+        .map((release) => release.tag_name);
+    },
     async notes(r) {
       return (
         await api(`${base}/releases/generate-notes`, {
@@ -367,6 +473,8 @@ export function githubRemote(
         rmSync(scratch, { recursive: true, force: true });
       }
     },
+    deleteAsset: (id) =>
+      api(`${base}/releases/assets/${id}`, { method: "DELETE" }),
     download: (asset) =>
       api(`${base}/releases/assets/${asset.id}`, { binary: true }),
     publish: (id, channel) =>
@@ -385,11 +493,19 @@ async function main() {
   if (command === "restore") {
     const restored = await restoreArtifact(planPath, args[0]);
     if (restored) {
-      const plan = JSON.parse(readFileSync(args[1], "utf8"));
+      const plan = args[1] ? JSON.parse(readFileSync(args[1], "utf8")) : null;
       const target = TARGETS.find(
         (entry) => `bundles-${entry.id}` === planPath,
       );
-      if (!target) throw new Error("Unknown artifact target.");
+      if (!target && planPath !== "dry-run-signing")
+        throw new Error("Unknown artifact target.");
+      if (planPath === "dry-run-signing") {
+        if (process.env.GITHUB_OUTPUT)
+          writeFileSync(process.env.GITHUB_OUTPUT, "restored=true\n", {
+            flag: "a",
+          });
+        return;
+      }
       // Completeness across targets is checked after all builds finish.
       const metadata = JSON.parse(
         readFileSync(join(args[0], `${target.id}.json`), "utf8"),
@@ -406,7 +522,16 @@ async function main() {
   const plan = JSON.parse(readFileSync(planPath, "utf8"));
   if (command === "stage") stageAssets(plan, args[0], args[1], args[2]);
   else if (command === "verify") {
-    const { manifest } = verifyAssets(plan, args[0]);
+    const publicKey = process.env.UPDATER_PUBKEY_FILE
+      ? readFileSync(process.env.UPDATER_PUBKEY_FILE, "utf8").trim()
+      : PUBLIC_KEY;
+    const { manifest, feed } = verifyAssets(
+      plan,
+      args[0],
+      publicKey,
+      process.env.GITHUB_REPOSITORY,
+    );
+    writeFileSync("latest.json", json(feed));
     writeFileSync(args[1] ?? "release-manifest.json", json(manifest));
     console.log(json(manifest));
   } else if (command === "publish") {

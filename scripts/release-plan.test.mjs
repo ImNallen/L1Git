@@ -51,6 +51,7 @@ const activePlan = () => ({
   release: {
     ...planRelease(facts(), git()).release,
     workflowSha: sha(4),
+    createdAt: "2026-10-23T08:30:00.000Z",
     runId: "100",
   },
 });

@@ -1679,6 +1679,7 @@ name = "l1-git"
 version = "0.1.0"
 dependencies = [
  "l1-git-core",
+ "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",

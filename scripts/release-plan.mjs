@@ -237,6 +237,7 @@ export function validatePlan(plan, runId, workflowSha) {
   )
     throw new Error("Invalid release identity.");
   if (
+    !Number.isFinite(Date.parse(r.createdAt)) ||
     !SHA.test(r.workflowSha) ||
     !/^\d+$/.test(r.runId) ||
     (runId && r.runId !== runId) ||
@@ -335,6 +336,7 @@ export async function resolvePlan(env, api, restore) {
     Object.assign(plan.release, {
       runId: env.GITHUB_RUN_ID,
       workflowSha: env.WORKFLOW_SHA ?? env.GITHUB_SHA,
+      createdAt: facts.now.toISOString(),
     });
   return validatePlan(
     plan,

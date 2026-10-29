@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { generateKeyPairSync, sign } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import {
   mkdtempSync,
@@ -14,11 +15,40 @@ import { tmpdir } from "node:os";
 import {
   TARGETS,
   githubRemote,
-  publishRelease,
+  publishRelease as publishActual,
   restoreArtifact,
-  stageAssets,
-  verifyAssets,
+  reconcileNightlyFeed,
+  stageAssets as stageActual,
+  verifyAssets as verifyActual,
 } from "./release-assets.mjs";
+
+const pair = generateKeyPairSync("ed25519");
+const keyId = Buffer.alloc(8, 7);
+const publicPacket = Buffer.concat([
+  Buffer.from("Ed"),
+  keyId,
+  pair.publicKey.export({ format: "der", type: "spki" }).subarray(-32),
+]);
+const publicKey = Buffer.from(
+  `untrusted comment: test key\n${publicPacket.toString("base64")}\n`,
+).toString("base64");
+function signature(bytes, version) {
+  const signed = sign(null, bytes, pair.privateKey);
+  const trusted = `timestamp:1792754582\tfile:bundle\tversion:${version}`;
+  const packet = Buffer.concat([Buffer.from("Ed"), keyId, signed]);
+  const global = sign(
+    null,
+    Buffer.concat([signed, Buffer.from(trusted)]),
+    pair.privateKey,
+  );
+  return Buffer.from(
+    `untrusted comment: test signature\n${packet.toString("base64")}\ntrusted comment: ${trusted}\n${global.toString("base64")}\n`,
+  ).toString("base64");
+}
+const stageAssets = stageActual;
+const verifyAssets = (p, dir) => verifyActual(p, dir, publicKey);
+const publishRelease = (p, dir, remote) =>
+  publishActual(p, dir, remote, { publicKey });
 
 const sha = "a".repeat(40);
 const plan = {
@@ -31,24 +61,31 @@ const plan = {
     sha,
     workflowSha: sha,
     runId: "100",
+    createdAt: "2026-10-23T08:30:00.000Z",
     previousTag: null,
     promotedFrom: null,
   },
 };
 
-function fixture(t) {
+function fixture(t, releasePlan = plan) {
   const dir = mkdtempSync(join(tmpdir(), "l1git-assets-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const staged = join(dir, "staged");
   for (const target of TARGETS) {
     const input = join(dir, target.id);
     mkdirSync(input);
-    for (const extension of target.extensions)
+    for (const extension of target.extensions) {
+      const payload = Buffer.from(
+        `package ${target.id} ${extension.replace(/\.sig$/, "")}`,
+      );
       writeFileSync(
         join(input, `bundle.${extension}`),
-        `package ${target.id} ${extension}`,
+        extension.endsWith(".sig")
+          ? signature(payload, releasePlan.release.version)
+          : payload,
       );
-    stageAssets(plan, target.id, input, staged);
+    }
+    stageAssets(releasePlan, target.id, input, staged);
   }
   return { dir, staged };
 }
@@ -56,6 +93,8 @@ function fixture(t) {
 function fakeRemote() {
   const state = {
     release: null,
+    feed: null,
+    nextId: 1,
     tag: null,
     writes: [],
     bytes: new Map(),
@@ -64,24 +103,38 @@ function fakeRemote() {
   };
   const remote = {
     commitOf: async () => state.tag,
-    findRelease: async () => state.release,
+    findRelease: async (tag) =>
+      tag === "nightly" ? state.feed : state.release,
     notes: async () => "Release notes",
+    stableTags: async () => [],
     create: async (data) => {
+      if (data.tag_name === "nightly") {
+        state.writes.push("feed create");
+        return (state.feed = { ...data, id: 2, assets: [] });
+      }
       state.writes.push("create");
       return (state.release = { ...data, id: 1, assets: [] });
     },
     upload: async (_release, upload) => {
       if (state.bytes.size === state.failAfterUploads)
         throw new Error("Upload interrupted");
-      state.writes.push(`upload ${upload.name}`);
+      state.writes.push(
+        `${_release.tag_name === "nightly" ? "feed upload" : "upload"} ${upload.name}`,
+      );
       const asset = {
-        id: state.bytes.size + 1,
+        id: state.nextId++,
+        state: "uploaded",
         name: upload.name,
         size: upload.size,
       };
       state.bytes.set(asset.id, upload.bytes);
-      state.release.assets.push(asset);
+      _release.assets.push(asset);
       return asset;
+    },
+    deleteAsset: async (id) => {
+      state.writes.push("feed delete");
+      state.bytes.delete(id);
+      state.feed.assets = state.feed.assets.filter((asset) => asset.id !== id);
     },
     download: async (asset) => state.bytes.get(asset.id),
     publish: async () => {
@@ -98,7 +151,7 @@ function fakeRemote() {
 test("registry defines macOS DMG and Linux AppImage/deb, staging verifies every hash", (t) => {
   const { staged } = fixture(t);
   const set = verifyAssets(plan, staged);
-  assert.equal(set.assets.length, 3);
+  assert.equal(set.assets.length, 6);
   assert.deepEqual(set.manifest.release, plan.release);
   for (const asset of set.assets)
     assert.equal(readFileSync(asset.path).length, asset.size);
@@ -122,6 +175,8 @@ test("missing, duplicate and unexpected bundles fail completeness", (t) => {
     () => stageAssets(plan, "macos-universal", empty, join(dir, "out")),
     /Expected one/,
   );
+  writeFileSync(join(empty, "one.app.tar.gz"), "a");
+  writeFileSync(join(empty, "one.app.tar.gz.sig"), "a");
   writeFileSync(join(empty, "one.dmg"), "a");
   writeFileSync(join(empty, "two.dmg"), "b");
   assert.throws(
@@ -158,7 +213,7 @@ test("partial draft resumes missing uploads using original artifacts", async (t)
   state.failAfterUploads = Infinity;
   await publishRelease(plan, staged, remote);
   assert.equal(state.release.draft, false);
-  assert.equal(state.release.assets.length, 4);
+  assert.equal(state.release.assets.length, 8);
   assert.equal(
     state.writes.filter((write) => write === `upload ${uploaded}`).length,
     1,
@@ -173,7 +228,10 @@ test("a lost publish response recovers as matching published success without wri
   await assert.rejects(publishRelease(plan, staged, remote), /Response lost/);
   const writes = [...state.writes];
   await publishRelease(plan, staged, remote);
-  assert.deepEqual(state.writes, writes);
+  assert.deepEqual(
+    state.writes.filter((write) => !write.startsWith("feed ")),
+    writes,
+  );
 });
 
 test("mismatching remote bytes and rebuilt signed assets are never overwritten", async (t) => {
@@ -330,6 +388,108 @@ test("staging ignores symlinks inside exploded app bundles", (t) => {
   symlinkSync("missing", join(appdir, ".DirIcon"));
   assert.equal(
     stageAssets(plan, "linux-x86_64", input, join(dir, "fresh")).assets.length,
-    2,
+    3,
   );
+});
+
+test("an old stable draft cannot publish after a newer stable, while matching published retries still succeed", async (t) => {
+  const stable = {
+    ...plan,
+    release: {
+      ...plan.release,
+      channel: "stable",
+      version: "0.2.0",
+      tag: "v0.2.0",
+    },
+  };
+  const { dir } = fixture(t, stable);
+  const staged = join(dir, "stable");
+  for (const target of TARGETS)
+    stageAssets(stable, target.id, join(dir, target.id), staged);
+  const { state, remote } = fakeRemote();
+  state.failAfterUploads = 1;
+  await assert.rejects(
+    publishRelease(stable, staged, remote),
+    /Upload interrupted/,
+  );
+  remote.stableTags = async () => ["v0.3.0"];
+  const writes = [...state.writes];
+  await assert.rejects(
+    publishRelease(stable, staged, remote),
+    /would not advance/,
+  );
+  assert.deepEqual(state.writes, writes);
+  remote.stableTags = async () => [];
+  state.failAfterUploads = Infinity;
+  await publishRelease(stable, staged, remote);
+  remote.stableTags = async () => ["v0.3.0"];
+  const publishedWrites = [...state.writes];
+  await publishRelease(stable, staged, remote);
+  assert.deepEqual(state.writes, publishedWrites);
+});
+
+test("stable updates the nightly feed, newer feeds never regress and retries are idempotent", async () => {
+  const { state, remote } = fakeRemote();
+  const bytes = (version) =>
+    Buffer.from(JSON.stringify({ version, platforms: {} }));
+  await reconcileNightlyFeed(plan, bytes(plan.release.version), remote);
+  const stable = {
+    ...plan,
+    release: { ...plan.release, version: "0.1.1", channel: "stable" },
+  };
+  await reconcileNightlyFeed(stable, bytes("0.1.1"), remote);
+  assert.equal(
+    JSON.parse((await remote.download(state.feed.assets[0])).toString())
+      .version,
+    "0.1.1",
+  );
+  assert.equal(
+    state.writes.filter((write) => write === "feed delete").length,
+    1,
+  );
+  const writes = [...state.writes];
+  await reconcileNightlyFeed(stable, bytes("0.1.1"), remote);
+  await reconcileNightlyFeed(plan, bytes(plan.release.version), remote);
+  assert.deepEqual(state.writes, writes);
+  await assert.rejects(
+    reconcileNightlyFeed(
+      stable,
+      Buffer.from(JSON.stringify({ version: "0.1.1", conflicting: true })),
+      remote,
+    ),
+    /Same-version.*conflicts/,
+  );
+});
+
+test("a failed mutable feed replacement resumes after the old asset was removed", async () => {
+  const { state, remote } = fakeRemote();
+  const first = Buffer.from(JSON.stringify({ version: plan.release.version }));
+  await reconcileNightlyFeed(plan, first, remote);
+  const stable = {
+    ...plan,
+    release: { ...plan.release, version: "0.1.1", channel: "stable" },
+  };
+  const bytes = Buffer.from(JSON.stringify({ version: "0.1.1" }));
+  const upload = remote.upload;
+  remote.upload = async () => {
+    throw new Error("feed upload interrupted");
+  };
+  await assert.rejects(
+    reconcileNightlyFeed(stable, bytes, remote),
+    /interrupted/,
+  );
+  assert.equal(state.feed.assets.length, 0);
+  remote.upload = upload;
+  await reconcileNightlyFeed(stable, bytes, remote);
+  assert.deepEqual(await remote.download(state.feed.assets[0]), bytes);
+});
+
+test("publication rejects an ephemeral PR key before remote writes", async (t) => {
+  const { staged } = fixture(t);
+  const { state, remote } = fakeRemote();
+  await assert.rejects(
+    publishActual(plan, staged, remote),
+    /signed by key.*trusts key/,
+  );
+  assert.deepEqual(state.writes, []);
 });
