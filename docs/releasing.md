@@ -1,6 +1,6 @@
 # Release L1 Git
 
-L1 Git publishes a universal macOS DMG and Linux x86_64 AppImage and deb to [GitHub Releases](https://github.com/ImNallen/L1Git/releases). Install Git separately and keep it available on `PATH`. Windows and an updater client are outside this workflow. Signed updater downloads and feeds are published for a future client integration.
+L1 Git publishes a universal macOS DMG and Linux x86_64 AppImage and deb to [GitHub Releases](https://github.com/ImNallen/L1Git/releases). Install Git separately and keep it available on `PATH`. Packaged macOS apps and Linux AppImages support signed in-app updates. Windows releases are outside this workflow.
 
 ## Publish a nightly
 
@@ -59,7 +59,7 @@ Set them through the repository's Actions secret settings. The dedicated updater
 
 Repository writers are trusted release maintainers. A stable tag can select an off-main commit, whose build scripts run with the signing secrets. Repository-level Actions secrets do not isolate those keys from writers who can change workflows. Before granting write or tag-creation access to less-trusted collaborators, move signing secrets into a protected environment and restrict release workflows and source commits to the approved branch policy.
 
-The release-only config enables `bundle.createUpdaterArtifacts` and supplies `plugins.updater.pubkey`. Installed-app update checks and UI require a separate client integration. The desktop crate declares the workspace `serde_json` dependency because Tauri generates references to it when embedding plugin configuration.
+The release-only config enables `bundle.createUpdaterArtifacts` and supplies `plugins.updater.pubkey`. The native updater requires a valid signature that binds the downloaded bytes to the announced version. The desktop crate declares the workspace `serde_json` dependency because Tauri generates references to it when embedding plugin configuration.
 
 For macOS publication, the temporary config sets `bundle.macOS.signingIdentity` to `null`, removing the checked-in ad hoc identity. Tauri imports the certificate and infers its signing identity. The workflow requires a Developer ID signature for the supplied team, validates the notarization staple on the app, submits the DMG for notarization, and staples and validates the DMG. Failure blocks publication. Development versions and signing settings stay unchanged.
 
@@ -80,6 +80,10 @@ pnpm test:release
 These tests also run in ordinary `pnpm test` and CI. CI accepts an optional `source_sha` input, and both CI jobs check out that source. Release scripts and their tests come from the workflow revision when checking or building older source. Existing checks and packaging use the selected source's application code and lockfiles.
 
 ## Read the updater feeds
+
+In the command palette, choose **Open Updates settings** to check for updates or select Stable or Nightly. The saved channel survives restart. Without a saved preference, the channel follows the installed build. The app checks at startup and hourly. Download and restart each require an explicit action. Switching channels never offers an older version.
+
+Before restart, the app asks for confirmation if any repository has an unsaved commit message or amend-aside message. Cancel preserves those messages. Installation refuses while repository work or draft tasks are running. The deb, browser preview, and development builds offer a manual download link.
 
 | Channel | Feed                                                                      |
 | ------- | ------------------------------------------------------------------------- |
