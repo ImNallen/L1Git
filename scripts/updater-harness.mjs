@@ -46,7 +46,7 @@ async function build() {
   const feed = `http://127.0.0.1:${port}/latest.json`;
   const env = {
     ...process.env,
-    CARGO_TARGET_DIR: join(directory, "target"),
+    CARGO_TARGET_DIR: process.env.CARGO_TARGET_DIR ?? join(directory, "target"),
     CARGO_PROFILE_RELEASE_OPT_LEVEL: "0",
     CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "256",
     L1GIT_FIXTURE_FEED: feed,
@@ -86,7 +86,7 @@ async function build() {
             updater: {
               pubkey: signer.publicKey,
               requireSignedVersion: true,
-              dangerInsecureTransportProtocol: true,
+              dangerousInsecureTransportProtocol: true,
             },
           },
         },
@@ -120,13 +120,26 @@ async function build() {
         await cp(source, app, { recursive: true });
       } else {
         artifact = join(directory, "successor.app.tar.gz");
-        await run("tar", [
-          "-czf",
-          artifact,
-          "-C",
-          dirname(source),
-          basename(source),
-        ]);
+        await run(
+          "tar",
+          ["-czf", artifact, "-C", dirname(source), basename(source)],
+          { ...process.env, COPYFILE_DISABLE: "1" },
+        );
+        const entries = execFileSync("tar", ["-tzf", artifact], {
+          encoding: "utf8",
+        })
+          .trim()
+          .split("\n");
+        if (
+          entries.some(
+            (entry) =>
+              !entry.startsWith(`${product}.app/`) ||
+              entry.split("/").some((part) => part.startsWith("._")),
+          )
+        )
+          throw new Error(
+            "Updater fixture archive contains unexpected metadata entries",
+          );
       }
     } else {
       const bundles = join(env.CARGO_TARGET_DIR, "release/bundle/appimage");

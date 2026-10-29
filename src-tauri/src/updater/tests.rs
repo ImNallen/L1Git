@@ -79,7 +79,7 @@ fn app_at_version(public_key: &str, version: &str) -> tauri::App<MockRuntime> {
     let mut context = mock_context(noop_assets());
     context.package_info_mut().version = version.parse().unwrap();
     context.config_mut().identifier = "dev.l1.git.updater-unit-tests".into();
-    context.config_mut().plugins.0.insert("updater".into(), serde_json::json!({ "pubkey": public_key, "requireSignedVersion": true, "dangerInsecureTransportProtocol": true }));
+    context.config_mut().plugins.0.insert("updater".into(), serde_json::json!({ "pubkey": public_key, "requireSignedVersion": true, "dangerousInsecureTransportProtocol": true }));
     mock_builder()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .build(context)
@@ -107,6 +107,16 @@ fn controller() -> Controller {
         preference_error: None,
         phase: Phase::Idle,
     }
+}
+
+#[test]
+fn loopback_fixture_transport_setting_is_recognized() {
+    let fixture = fixtures();
+    let app = app(fixture["publicKey"].as_str().unwrap());
+    let config: tauri_plugin_updater::Config =
+        serde_json::from_value(app.config().plugins.0["updater"].clone()).unwrap();
+    assert!(config.dangerous_insecure_transport_protocol);
+    assert!(config.require_signed_version);
 }
 
 #[test]
