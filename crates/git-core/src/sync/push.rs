@@ -197,8 +197,6 @@ fn prepare(
     if endpoint.is_empty() {
         return Ok(unavailable(PushUnavailable::UnsupportedConfiguration));
     }
-    // Length-delimited canonical inputs keep credentials inside core. This is
-    // freshness evidence, not an authorization token or a config-edit lock.
     let identity = vec![
         repository.root.to_string_lossy().into_owned(),
         repository.common_dir.to_string_lossy().into_owned(),
@@ -215,6 +213,7 @@ fn prepare(
         format!("remote.{remote}.fetch"),
         mirror_key,
         format!("remote.{remote}.receivepack"),
+        format!("remote.{remote}.vcs"),
         "core.hooksPath".into(),
         "core.sshCommand".into(),
         "push.gpgSign".into(),

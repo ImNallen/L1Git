@@ -373,6 +373,21 @@ fn refuses_unsupported_targets_without_publication() {
 }
 
 #[test]
+fn changed_remote_transport_refuses_a_prepared_push() {
+    let world = World::new();
+    let core = coordinator(&world);
+    commit(&world.work, "f", "two\n", "two");
+    let prepared = intent(&core, world.path());
+    let before = refs(&world.remote);
+    git(&world.work, &["config", "remote.origin.vcs", "ext"]);
+    assert_eq!(
+        core.push(world.path(), &prepared).unwrap().outcome,
+        PushOutcome::Stale
+    );
+    assert_eq!(refs(&world.remote), before);
+}
+
+#[test]
 fn stale_source_checkout_and_destination_do_not_publish() {
     let world = World::new();
     let core = coordinator(&world);
