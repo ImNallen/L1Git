@@ -1,3 +1,4 @@
+import type { PushControl } from "./domain/push";
 import { normalizeSearch } from "./domain/search";
 import type { FullRef, Oid, RepositoryRoot, Stash } from "./domain/repository";
 import type { Selection } from "./domain/selection";
@@ -15,6 +16,7 @@ export type ActionContext = {
   adding: boolean;
   searchable: boolean;
   inspectable: boolean;
+  push: PushControl | null;
   repository: { fetching: boolean; idle: boolean; ready: number } | null;
   file: { hasCommit: boolean; lineActions: readonly PartAction[] } | null;
   selection: Selection | null;
@@ -48,6 +50,7 @@ export type Commands = {
   toggleInspector: () => void;
   fetch: () => void;
   fastForward: () => void;
+  push: () => void;
   search: () => void;
   closeFile: () => void;
   showFile: (view: FileView) => void;
@@ -99,6 +102,7 @@ export type ActionId =
   | "redo"
   | "fetch"
   | "fastForward"
+  | "push"
   | "search"
   | "closeFile"
   | "unifiedDiff"
@@ -266,6 +270,15 @@ export const actions: readonly Action[] = [
       context.repository.idle &&
       context.repository.ready > 0,
     run: (commands) => commands.fastForward(),
+  },
+  {
+    id: "push",
+    title: (context) => context.push?.label ?? "Push",
+    available: (context) =>
+      onRepository(context) &&
+      !context.writing &&
+      context.push?.kind === "ready",
+    run: (commands) => commands.push(),
   },
   {
     id: "search",
@@ -570,6 +583,7 @@ export type PaletteItem = {
   /** Other names the search matches, ranked after the title. */
   aliases?: readonly string[];
   shortcut?: string;
+  disabled?: boolean;
   run: () => void;
 };
 
@@ -594,6 +608,15 @@ export function paletteItems(
     run: () => action.run(commands),
   }));
   if (!onRepository(context)) return listed;
+  if (context.push?.kind === "disabled")
+    listed.push({
+      id: "action:push",
+      kind: "action",
+      title: context.push.label,
+      detail: context.push.title,
+      disabled: true,
+      run: () => {},
+    });
   return [
     ...listed,
     ...repositories.map(

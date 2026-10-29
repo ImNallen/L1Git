@@ -11,6 +11,7 @@ import type {
 } from "./domain/overview";
 import { problemFrom } from "./domain/repository";
 import type { Problem, RepositoryRoot } from "./domain/repository";
+import type { PushIntent, PushOutcome, PushPreparation } from "./domain/push";
 import type { FetchInterval } from "./fetchSettings";
 
 export type RootState =
@@ -21,6 +22,7 @@ export type RootState =
 export type Activity =
   | { kind: "idle" }
   | { kind: "fetching" }
+  | { kind: "pushing"; root: RepositoryRoot }
   | { kind: "updating"; branches: ReadonlySet<BranchRef> };
 
 export type FetchStatus =
@@ -42,7 +44,17 @@ export type RootSync = {
   branches: ReadonlyMap<string, Divergence>;
 };
 
+export type PushState = {
+  availability: PushPreparation;
+  notice: {
+    intent: PushIntent;
+    outcome: PushOutcome;
+    refreshProblem: string | null;
+  } | null;
+};
+
 export type OverviewView = {
+  pushByRoot: ReadonlyMap<RepositoryRoot, PushState>;
   roots: ReadonlyMap<RepositoryRoot, RootState>;
   repositories: readonly RepositoryState[];
   syncByRoot: ReadonlyMap<RepositoryRoot, RootSync>;
@@ -51,6 +63,8 @@ export type OverviewView = {
 export type OverviewDeps = {
   overview: typeof repositories.overview;
   fastForward: typeof repositories.fastForward;
+  preparePush: typeof repositories.preparePush;
+  push: typeof repositories.push;
   now: () => number;
   every: (run: () => void, ms: number) => () => void;
   visible: () => boolean;
@@ -67,12 +81,20 @@ export type OverviewStore = {
   setInterval(minutes: FetchInterval): void;
   onRefsChanged(listener: (roots: RepositoryRoot[]) => void): () => void;
   refreshLocal(commonDir: RepositoryRoot): Promise<void>;
+  push(root: RepositoryRoot, intent: PushIntent): Promise<void>;
+  invalidatePush(commonDir: RepositoryRoot): void;
   dispose(): void;
 };
 
 type Request =
   | { kind: "fetch" }
-  | { kind: "fastForward"; advances: Map<BranchRef, Advance> };
+  | { kind: "fastForward"; advances: Map<BranchRef, Advance> }
+  | {
+      kind: "push";
+      root: RepositoryRoot;
+      intent: PushIntent;
+      owner: Extract<RootState, { kind: "open" }>;
+    };
 type Job = { request: Request; done: Promise<void>; finish: () => void };
 type Repository = Omit<RepositoryState, "commonDir" | "roots"> & {
   running: Job | null;
@@ -87,6 +109,8 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
   let tracked: readonly RepositoryRoot[] = [];
   const roots = new Map<RepositoryRoot, RootState>();
   const repos = new Map<RepositoryRoot, Repository>();
+  const pushes = new Map<RepositoryRoot, PushState>();
+  const preparations = new Map<RepositoryRoot, symbol>();
   let intervalMinutes: FetchInterval = 0;
   let stopTimer: (() => void) | null = null;
   let missedTick = false;
@@ -153,12 +177,60 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
       roots: new Map(roots),
       repositories: states,
       syncByRoot,
+      pushByRoot: new Map(pushes),
     };
   }
 
   function notifyRefsChanged(commonDir: RepositoryRoot) {
     const changed = rootsOf(commonDir);
     for (const listener of refListeners) listener(changed);
+  }
+
+  function invalidatePush(commonDir: RepositoryRoot) {
+    for (const root of rootsOf(commonDir)) {
+      preparations.set(root, Symbol());
+      pushes.set(root, {
+        availability: { kind: "loading" },
+        notice: pushes.get(root)?.notice ?? null,
+      });
+    }
+  }
+
+  async function prepareRoot(root: RepositoryRoot) {
+    const owner = roots.get(root);
+    if (owner?.kind !== "open") return;
+    const pending: PushState = {
+      availability: { kind: "loading" },
+      notice: pushes.get(root)?.notice ?? null,
+    };
+    const generation = Symbol();
+    preparations.set(root, generation);
+    pushes.set(root, pending);
+    emit();
+    let availability: PushPreparation;
+    try {
+      availability = await deps.preparePush(root);
+    } catch (error) {
+      availability = { kind: "failed", message: problemFrom(error).message };
+    }
+    if (roots.get(root) !== owner || preparations.get(root) !== generation)
+      return;
+    pushes.set(root, {
+      availability,
+      notice: pushes.get(root)?.notice ?? null,
+    });
+    emit();
+  }
+
+  async function prepareRoots(
+    commonDir: RepositoryRoot,
+    except?: RepositoryRoot,
+  ) {
+    await Promise.all(
+      rootsOf(commonDir)
+        .filter((root) => root !== except)
+        .map(prepareRoot),
+    );
   }
 
   async function open(root: RepositoryRoot) {
@@ -185,6 +257,8 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
         queue: [],
       });
       void enqueue(overview.commonDir, { kind: "fetch" });
+    } else {
+      void prepareRoot(root);
     }
     emit();
   }
@@ -196,7 +270,7 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
     if (request.kind === "fetch") {
       const joined = pending.find((job) => job.request.kind === "fetch");
       if (joined) return joined.done;
-    } else {
+    } else if (request.kind === "fastForward") {
       const queued = repo.queue.find(
         (job) => job.request.kind === "fastForward",
       );
@@ -236,8 +310,52 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
     repo: Repository,
     request: Request,
   ) {
-    const root = rootsOf(commonDir)[0];
+    const root = request.kind === "push" ? request.root : rootsOf(commonDir)[0];
     if (root === undefined) return;
+    if (request.kind === "push" && roots.get(root) !== request.owner) return;
+    invalidatePush(commonDir);
+    if (request.kind === "push") {
+      repo.activity = { kind: "pushing", root };
+      const generation = preparations.get(root);
+      emit();
+      let outcome: PushOutcome;
+      let refreshProblem: string | null = null;
+      let availability: PushPreparation;
+      try {
+        const report = await deps.push(root, request.intent);
+        outcome = report.outcome;
+        if (report.refresh.kind === "refreshed") {
+          repo.overview = report.refresh.overview;
+          availability = report.refresh.availability;
+        } else {
+          refreshProblem = report.refresh.message;
+          availability = { kind: "failed", message: refreshProblem };
+        }
+      } catch {
+        outcome = {
+          kind: "uncertain",
+          message:
+            "Could not receive the push result. Check the remote before retrying.",
+        };
+        availability = {
+          kind: "failed",
+          message: "Refresh to check the current push destination.",
+        };
+      }
+      if (repos.get(commonDir) !== repo) return;
+      const current = pushes.get(root);
+      if (current && roots.get(root) === request.owner)
+        pushes.set(root, {
+          availability:
+            preparations.get(root) === generation
+              ? availability
+              : current.availability,
+          notice: { intent: request.intent, outcome, refreshProblem },
+        });
+      notifyRefsChanged(commonDir);
+      await prepareRoots(commonDir, root);
+      return;
+    }
     if (request.kind === "fetch") {
       repo.activity = { kind: "fetching" };
       emit();
@@ -259,6 +377,7 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
           problem: problemFrom(error),
         };
       }
+      if (repos.get(commonDir) === repo) await prepareRoots(commonDir);
       return;
     }
     const advances = [...request.advances.values()];
@@ -289,6 +408,7 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
       repos.get(commonDir) === repo
     )
       notifyRefsChanged(commonDir);
+    if (repos.get(commonDir) === repo) await prepareRoots(commonDir);
   }
 
   function fetch(commonDir?: RepositoryRoot): Promise<void> {
@@ -303,16 +423,22 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
 
   async function refreshLocal(commonDir: RepositoryRoot) {
     const root = rootsOf(commonDir)[0];
-    if (root === undefined) return;
+    const owner = repos.get(commonDir);
+    if (root === undefined || !owner) return;
+    invalidatePush(commonDir);
+    emit();
     try {
       const overview = await deps.overview(root, "local");
       const repo = repos.get(commonDir);
-      if (repo) {
+      if (repo === owner) {
         repo.overview = overview;
         emit();
       }
     } finally {
-      if (repos.has(commonDir)) notifyRefsChanged(commonDir);
+      if (repos.get(commonDir) === owner) {
+        notifyRefsChanged(commonDir);
+        await prepareRoots(commonDir);
+      }
     }
   }
 
@@ -342,13 +468,26 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
       if (!changed) return;
       tracked = [...next];
       for (const root of [...roots.keys()])
-        if (!tracked.includes(root)) roots.delete(root);
+        if (!tracked.includes(root)) {
+          roots.delete(root);
+          pushes.delete(root);
+          preparations.delete(root);
+        }
       for (const commonDir of [...repos.keys()])
         if (rootsOf(commonDir).length === 0) repos.delete(commonDir);
       for (const root of tracked) if (!roots.has(root)) void open(root);
       emit();
     },
     fetch,
+    invalidatePush(commonDir) {
+      invalidatePush(commonDir);
+      emit();
+    },
+    push(root, intent) {
+      const owner = roots.get(root);
+      if (owner?.kind !== "open") return Promise.resolve();
+      return enqueue(owner.commonDir, { kind: "push", root, intent, owner });
+    },
     refreshLocal: (commonDir) => refreshLocal(commonDir).catch(() => {}),
     fastForward(commonDir, branch) {
       const repo = repos.get(commonDir);
@@ -400,6 +539,8 @@ export function overviewStore(): OverviewStore {
   singleton ??= createOverviewStore({
     overview: repositories.overview,
     fastForward: repositories.fastForward,
+    preparePush: repositories.preparePush,
+    push: repositories.push,
     now: Date.now,
     every(run, ms) {
       const handle = window.setInterval(run, ms);

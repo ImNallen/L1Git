@@ -19,6 +19,7 @@ const repositoryScreen: ActionContext = {
   searchable: true,
   inspectable: true,
   repository: { fetching: false, idle: true, ready: 0 },
+  push: null,
   file: null,
   selection: null,
   picked: null,
@@ -41,6 +42,7 @@ function commands(): Commands {
     toggleInspector: vi.fn(),
     fetch: vi.fn(),
     fastForward: vi.fn(),
+    push: vi.fn(),
     search: vi.fn(),
     closeFile: vi.fn(),
     showFile: vi.fn(),
@@ -699,4 +701,53 @@ describe("palette shortcut", () => {
     expect(typingIn({ tagName: "TABLE" })).toBe(false);
     expect(typingIn(null)).toBe(false);
   });
+});
+
+it("shows the prepared push destination and keeps unavailable push visible but disabled", async () => {
+  const { pushControl, pushIntentSchema } = await import("./domain/push");
+  const intent = pushIntentSchema.parse({
+    branch: "refs/heads/topic",
+    source: "a".repeat(40),
+    remote: "upstream",
+    destination: "refs/heads/release",
+    endpoint: "https://example.test/project",
+    fingerprint: "b".repeat(40),
+  });
+  const available = {
+    ...repositoryScreen,
+    push: pushControl({ kind: "ready", intent }, null),
+  };
+  const run = commands();
+  const item = paletteItems(available, run, true, [], null).find(
+    ({ id }) => id === "action:push",
+  );
+  expect(item?.title).toBe("Push to upstream/release");
+  item?.run();
+  expect(run.push).toHaveBeenCalledOnce();
+  const unavailable = {
+    ...repositoryScreen,
+    push: pushControl({ kind: "unavailable", reason: "noUpstream" }, null),
+  };
+  const disabled = paletteItems(unavailable, run, true, [], null).find(
+    ({ id }) => id === "action:push",
+  );
+  expect(disabled).toMatchObject({
+    title: "Push",
+    disabled: true,
+    detail: expect.stringContaining("no configured upstream"),
+  });
+  disabled?.run();
+  expect(run.push).toHaveBeenCalledOnce();
+  const busy = {
+    ...repositoryScreen,
+    push: pushControl(
+      { kind: "ready", intent },
+      "Wait for the current operation.",
+    ),
+  };
+  expect(
+    paletteItems(busy, run, true, [], null).find(
+      ({ id }) => id === "action:push",
+    ),
+  ).toMatchObject({ disabled: true });
 });

@@ -107,6 +107,10 @@ function harness() {
       });
     });
   const deps: OverviewDeps = {
+    preparePush: async () => ({ kind: "unavailable", reason: "noUpstream" }),
+    push: async () => {
+      throw new Error("Unexpected push");
+    },
     overview: (path, mode) => push(`${mode} ${path}`),
     fastForward: (path, sent) => {
       advances.push(sent);

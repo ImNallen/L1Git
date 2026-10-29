@@ -10,6 +10,7 @@ import { flushSync } from "react-dom";
 import {
   ArrowLeft,
   CloudDownload,
+  CloudUpload,
   EyeOff,
   FastForward,
   FolderGit2,
@@ -102,6 +103,7 @@ import type {
   Stash,
   Tag,
 } from "./domain/repository";
+import { pushControl, pushOutcomeText } from "./domain/push";
 import { sameSelection } from "./domain/selection";
 import type { Compare } from "./domain/comparison";
 import type { Selection } from "./domain/selection";
@@ -444,6 +446,28 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
           (repository) => repository.commonDir === openRootState.commonDir,
         ) ?? null)
       : null;
+  const openPush =
+    openRoot === null ? undefined : overview.pushByRoot.get(openRoot);
+  const publishControl = pushControl(
+    openPush?.availability,
+    writes.running !== null
+      ? "Wait for the current local write to finish."
+      : !openRepository
+        ? openRootState?.kind === "unavailable"
+          ? openRootState.problem.message
+          : "Checking the current repository…"
+        : openRepository.activity.kind !== "idle"
+          ? "Wait for this repository's current operation to finish."
+          : null,
+  );
+  const writeCommonDir = openRepository?.commonDir;
+  useEffect(() => {
+    if (writes.running === null || writeCommonDir === undefined) return;
+    overviewStore.invalidatePush(writeCommonDir);
+    return () => {
+      void overviewStore.refreshLocal(writeCommonDir);
+    };
+  }, [writes.running, writeCommonDir, overviewStore]);
   const openFetching = openRepository?.activity.kind === "fetching";
   const openReady = openRepository
     ? readyAdvances(openRepository.overview).length
@@ -506,6 +530,8 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   };
   const rereadAll = () => {
     rereadChanges();
+    if (openRepository)
+      void overviewStore.refreshLocal(openRepository.commonDir);
     return app.refresh();
   };
   const refreshRef = useRef(rereadAll);
@@ -613,6 +639,10 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     fetch: () => {
       if (openRepository) void overviewStore.fetch(openRepository.commonDir);
     },
+    push: () => {
+      if (openRoot && publishControl.kind === "ready")
+        void overviewStore.push(openRoot, publishControl.intent);
+    },
     fastForward: () => {
       if (openRepository)
         void overviewStore.updateAll(openRepository.commonDir);
@@ -701,6 +731,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     adding,
     searchable: snapshot !== null,
     inspectable: shown !== null,
+    push: openRoot ? publishControl : null,
     repository: openRepository && {
       fetching: openFetching,
       idle: openRepository.activity.kind === "idle",
@@ -1088,6 +1119,25 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                     <span>Fetch</span>
                   </button>
                 )}
+                {openRoot && (
+                  <button
+                    className="button secondary"
+                    disabled={publishControl.kind === "disabled"}
+                    onClick={commands.push}
+                    title={publishControl.title}
+                  >
+                    {openRepository?.activity.kind === "pushing" ? (
+                      <LoaderCircle size={14} className="spin" />
+                    ) : (
+                      <CloudUpload size={14} />
+                    )}
+                    <span>
+                      {openRepository?.activity.kind === "pushing"
+                        ? "Pushing…"
+                        : publishControl.label}
+                    </span>
+                  </button>
+                )}
                 {openRepository && openReady > 0 && (
                   <button
                     className="button secondary"
@@ -1107,6 +1157,26 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
               </div>
             </header>
             <WriteNoticeRow writes={writes} />
+            {openPush?.notice && (
+              <div
+                className={`notice ${openPush.notice.outcome.kind === "pushed" || openPush.notice.outcome.kind === "upToDate" ? "info-notice" : "error-notice"}`}
+                role={
+                  openPush.notice.outcome.kind === "pushed" ||
+                  openPush.notice.outcome.kind === "upToDate"
+                    ? "status"
+                    : "alert"
+                }
+              >
+                <CloudUpload size={14} />
+                <span>
+                  {pushOutcomeText(
+                    openPush.notice.outcome,
+                    openPush.notice.intent,
+                  )}{" "}
+                  {openPush.notice.refreshProblem}
+                </span>
+              </div>
+            )}
             {persistenceError && (
               <div className="notice error-notice" role="alert">
                 <TriangleAlert size={14} />

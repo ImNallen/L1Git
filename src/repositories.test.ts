@@ -170,3 +170,35 @@ describe("bridge transport", () => {
     );
   });
 });
+
+it("sends the prepared push intent unchanged and validates strict push outcomes", async () => {
+  const { pushIntentSchema } = await import("./domain/push");
+  const intent = pushIntentSchema.parse({
+    branch: "refs/heads/main",
+    source: oid,
+    remote: "origin",
+    destination: "refs/heads/reviewed",
+    endpoint: "Local or unrecognized remote",
+    fingerprint: "b".repeat(40),
+  });
+  const { preparePush, push } = await load(true);
+  invoke.mockResolvedValueOnce({
+    op: "preparePush",
+    data: { kind: "ready", intent },
+  });
+  expect(await preparePush(root)).toEqual({ kind: "ready", intent });
+  const report = {
+    outcome: { kind: "pushed" },
+    refresh: { kind: "failed", message: "Refresh needed." },
+  };
+  invoke.mockResolvedValueOnce({ op: "push", data: report });
+  expect(await push(root, intent)).toEqual(report);
+  expect(invoke).toHaveBeenLastCalledWith("repository_run", {
+    request: { op: "push", path: root, intent },
+  });
+  invoke.mockResolvedValueOnce({
+    op: "push",
+    data: { ...report, outcome: { kind: "pushed", message: "unexpected" } },
+  });
+  await expect(push(root, intent)).rejects.toHaveProperty("issues");
+});

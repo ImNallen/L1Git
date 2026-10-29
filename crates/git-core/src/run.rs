@@ -1,8 +1,8 @@
 use crate::{
     Advance, Applied, Blame, BranchMerged, BranchTip, CommitDetail, Comparison, Coordinator,
     EntryId, Expect, FastForwardReport, FetchMode, FilePatch, FileRevision, LineStats, Operation,
-    RepositoryError, RepositoryOverview, RepositoryRefs, RepositorySnapshot, Side, UndoHistory,
-    WorktreePatch, WorktreeStatus,
+    PushAvailability, PushIntent, PushReport, RepositoryError, RepositoryOverview, RepositoryRefs,
+    RepositorySnapshot, Side, UndoHistory, WorktreePatch, WorktreeStatus,
     file_history::{blame_within, file_history_within},
     git::LocalRead,
     repository::{
@@ -49,6 +49,13 @@ pub enum Request {
         path: String,
         mode: FetchMode,
     },
+    PreparePush {
+        path: String,
+    },
+    Push {
+        path: String,
+        intent: PushIntent,
+    },
     FastForward {
         path: String,
         advances: Vec<Advance>,
@@ -94,6 +101,8 @@ pub enum Response {
     FileHistory(Vec<FileRevision>),
     Blame(Blame),
     Overview(RepositoryOverview),
+    PreparePush(PushAvailability),
+    Push(PushReport),
     FastForward(FastForwardReport),
     WorktreeStatus(WorktreeStatus),
     WorktreePatch(WorktreePatch),
@@ -144,6 +153,8 @@ pub fn run(coordinator: &Coordinator, request: Request) -> Result<Response, Repo
             deadline(LocalRead::Blame),
         )?),
         Request::Overview { path, mode } => Response::Overview(coordinator.overview(&path, mode)?),
+        Request::PreparePush { path } => Response::PreparePush(coordinator.prepare_push(&path)?),
+        Request::Push { path, intent } => Response::Push(coordinator.push(&path, &intent)?),
         Request::FastForward { path, advances } => {
             Response::FastForward(coordinator.fast_forward(&path, &advances)?)
         }
