@@ -504,6 +504,11 @@ pub(crate) fn malformed() -> RepositoryError {
 }
 
 pub(crate) enum Mutation<'a> {
+    UpdateTracking {
+        reference: &'a str,
+        source: &'a Oid,
+        expected: Option<&'a Oid>,
+    },
     Push {
         remote: &'a str,
         source: &'a Oid,
@@ -536,6 +541,12 @@ impl Mutation<'_> {
                 destination,
             } => owned(&[
                 &format!("--config-env=remote.{remote}.mirror=L1GIT_PUSH_MIRROR"),
+                // Git reverses positive mappings when matching negative refspecs.
+                // The identity mapping makes this exclusion work with wildcard mappings.
+                "-c",
+                &format!("remote.{remote}.fetch={0}:{0}", destination.as_str()),
+                "-c",
+                &format!("remote.{remote}.fetch=^{}", destination.as_str()),
                 "-c",
                 "push.pushOption=",
                 "push",
@@ -546,6 +557,22 @@ impl Mutation<'_> {
                 "--",
                 remote,
                 &format!("{}:{}", source.as_str(), destination.as_str()),
+            ]),
+            Self::UpdateTracking {
+                reference,
+                source,
+                expected,
+            } => owned(&[
+                "update-ref",
+                "--no-deref",
+                "-m",
+                "l1git: push",
+                reference,
+                source.as_str(),
+                &expected.map_or_else(
+                    || "0".repeat(source.as_str().len()),
+                    |oid| oid.as_str().to_owned(),
+                ),
             ]),
             Self::Fetch { remote } => owned(&[
                 "fetch",

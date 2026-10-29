@@ -170,9 +170,18 @@ impl Coordinator {
         let locks = self.locks(&repository.common_dir);
         let _gate = lock_ignoring_poison(&locks.gate);
         let _slot = self.slots.acquire();
-        let current = {
+        let (current, updates) = {
             let _write = lock_ignoring_poison(&locks.write);
-            prepare_intent(&repository, intent, reads.renewed())?
+            let current = prepare_intent(&repository, intent, reads.renewed())?;
+            let updates = if current
+                == (PushAvailability::Ready {
+                    intent: intent.clone(),
+                }) {
+                tracking_updates(&repository.root, intent, reads.renewed())?
+            } else {
+                Vec::new()
+            };
+            (current, updates)
         };
         let mut outcome = if current
             != (PushAvailability::Ready {
@@ -196,17 +205,32 @@ impl Coordinator {
                 },
             }
         };
-        if intent.purpose == PushPurpose::Publish
-            && matches!(outcome, PushOutcome::Pushed | PushOutcome::UpToDate)
-        {
+        let mut tracking_refresh_failed = false;
+        if matches!(outcome, PushOutcome::Pushed | PushOutcome::UpToDate) {
             let _write = lock_ignoring_poison(&locks.write);
-            let tracking =
-                establish_tracking(&repository, intent, reads.renewed()).unwrap_or_else(|_| {
-                    TrackingOutcome::Failed {
+            for update in updates {
+                if !matches!(
+                    git::mutate(
+                        &repository.root,
+                        Mutation::UpdateTracking {
+                            reference: &update.reference,
+                            source: &intent.source,
+                            expected: update.expected.as_ref(),
+                        },
+                        self.limits.local_deadline
+                    ),
+                    Ok(git::Finished::Succeeded)
+                ) {
+                    tracking_refresh_failed = true;
+                }
+            }
+            if intent.purpose == PushPurpose::Publish {
+                let tracking = establish_tracking(&repository, intent, reads.renewed())
+                    .unwrap_or_else(|_| TrackingOutcome::Failed {
                         message: "Upstream setup failed. Check branch settings in Git.".into(),
-                    }
-                });
-            outcome = PushOutcome::Published { tracking };
+                    });
+                outcome = PushOutcome::Published { tracking };
+            }
         }
         let refresh = (|| {
             let overview = read::read(
@@ -226,6 +250,13 @@ impl Coordinator {
                 "Could not refresh local branch status. Refresh the repository to check its counts."
                     .into(),
         });
+        let refresh = if tracking_refresh_failed {
+            PushRefresh::Failed {
+            message: "The remote confirmed publication, but local tracking refs changed or could not be updated. Fetch to refresh branch counts.".into(),
+        }
+        } else {
+            refresh
+        };
         Ok(PushReport { outcome, refresh })
     }
 }
@@ -328,6 +359,101 @@ fn display_endpoint(purpose: PushPurpose, endpoint: &str) -> String {
     }
 }
 
+fn tracking_targets(
+    root: &Path,
+    remote: &str,
+    destination: &BranchRef,
+    reads: Deadline,
+) -> Result<Result<Vec<String>, PushUnavailable>, RepositoryError> {
+    let specs = values(root, &format!("remote.{remote}.fetch"), reads)?;
+    let matches_source = |pattern: &str| {
+        refspec_match(pattern, destination.as_str())
+            .or_else(|| refspec_match(pattern, destination.name()))
+            .or_else(|| refspec_match(pattern, destination.as_str().trim_start_matches("refs/")))
+    };
+    if specs
+        .iter()
+        .filter_map(|spec| spec.strip_prefix('^'))
+        .any(|pattern| matches_source(pattern).is_some())
+    {
+        return Ok(Ok(Vec::new()));
+    }
+    let mut targets = Vec::new();
+    for spec in specs {
+        let Some((from, to)) = spec.strip_prefix('+').unwrap_or(&spec).split_once(':') else {
+            continue;
+        };
+        let capture = matches_source(from);
+        if let Some(capture) = capture {
+            let target = to.replace('*', capture);
+            if !target.starts_with("refs/")
+                || target.starts_with("refs/heads/")
+                || target.starts_with("refs/tags/")
+                || [
+                    "refs/stash",
+                    "refs/replace/",
+                    "refs/notes/",
+                    "refs/bisect/",
+                    "refs/rewritten/",
+                    "refs/worktree/",
+                ]
+                .iter()
+                .any(|prefix| target.starts_with(prefix))
+                || !git::run(root, &["check-ref-format", &target], reads)?
+                    .status
+                    .success()
+                || git::run(
+                    root,
+                    &["symbolic-ref", "--quiet", "--no-recurse", &target],
+                    reads,
+                )?
+                .status
+                .code()
+                    != Some(1)
+            {
+                return Ok(Err(PushUnavailable::UnusableFetchMapping));
+            }
+            targets.push(target);
+        }
+    }
+    targets.sort();
+    targets.dedup();
+    Ok(Ok(targets))
+}
+
+struct TrackingUpdate {
+    reference: String,
+    expected: Option<Oid>,
+}
+
+fn tracking_updates(
+    root: &Path,
+    intent: &PushIntent,
+    reads: Deadline,
+) -> Result<Vec<TrackingUpdate>, RepositoryError> {
+    let targets = tracking_targets(root, &intent.remote, &intent.destination, reads)?
+        .map_err(|_| git::read_failed())?;
+    targets
+        .into_iter()
+        .map(|reference| {
+            let output = git::run(
+                root,
+                &["rev-parse", "--verify", "--quiet", &reference],
+                reads,
+            )?;
+            let expected = match output.status.code() {
+                Some(0) => Some(Oid::try_from(git::text(&output.stdout).trim().to_owned())?),
+                Some(1) => None,
+                _ => return Err(git::read_failed()),
+            };
+            Ok(TrackingUpdate {
+                reference,
+                expected,
+            })
+        })
+        .collect()
+}
+
 fn prepare_target(
     repository: &read::Repository,
     reads: Deadline,
@@ -342,6 +468,9 @@ fn prepare_target(
         Ok(endpoint) => endpoint,
         Err(reason) => return Ok(unavailable(reason)),
     };
+    if let Err(reason) = tracking_targets(root, remote, &destination, reads)? {
+        return Ok(unavailable(reason));
+    }
     let mirror_key = format!("remote.{remote}.mirror");
     let identity = vec![
         repository.root.to_string_lossy().into_owned(),
@@ -501,25 +630,6 @@ fn usable_mapping(
                 return Ok(false);
             }
             let target = to.replace('*', capture);
-            if !target.starts_with("refs/")
-                || target.starts_with("refs/heads/")
-                || target.starts_with("refs/tags/")
-                || [
-                    "refs/stash",
-                    "refs/replace/",
-                    "refs/notes/",
-                    "refs/bisect/",
-                    "refs/rewritten/",
-                    "refs/worktree/",
-                ]
-                .iter()
-                .any(|prefix| target.starts_with(prefix))
-                || !git::run(root, &["check-ref-format", &target], reads)?
-                    .status
-                    .success()
-            {
-                return Ok(false);
-            }
             targets.push(target);
         }
     }

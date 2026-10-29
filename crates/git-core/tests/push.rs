@@ -959,6 +959,198 @@ fn publishes_new_equal_and_fast_forward_without_touching_local_state() {
 }
 
 #[test]
+fn symbolic_tracking_refs_cannot_move_local_branches_on_publication() {
+    for existing_upstream in [false, true] {
+        for chained in [false, true] {
+            let world = World::new();
+            if !existing_upstream {
+                untracked(&world);
+            }
+            git(&world.work, &["branch", "unrelated"]);
+            commit(&world.work, "f", "two\n", "two");
+            git(
+                &world.work,
+                &[
+                    "config",
+                    "remote.origin.fetch",
+                    "+refs/heads/main:refs/remotes/origin/alias",
+                ],
+            );
+            if chained {
+                git(
+                    &world.work,
+                    &[
+                        "symbolic-ref",
+                        "refs/remotes/origin/next",
+                        "refs/heads/unrelated",
+                    ],
+                );
+            }
+            git(
+                &world.work,
+                &[
+                    "symbolic-ref",
+                    "refs/remotes/origin/alias",
+                    if chained {
+                        "refs/remotes/origin/next"
+                    } else {
+                        "refs/heads/unrelated"
+                    },
+                ],
+            );
+            let before = refs(&world.remote);
+            let local = refs(&world.work);
+            let core = coordinator(&world);
+            let availability = if existing_upstream {
+                core.prepare_push(world.path()).unwrap()
+            } else {
+                core.prepare_publish(
+                    world.path(),
+                    &l1_git_core::PublishChoice {
+                        remote: "origin".into(),
+                        destination: l1_git_core::BranchRef::try_from("refs/heads/main".to_owned())
+                            .unwrap(),
+                    },
+                )
+                .unwrap()
+            };
+            assert!(
+                matches!(availability, PushAvailability::Unavailable { .. }),
+                "{availability:?}"
+            );
+            git(
+                &world.work,
+                &[
+                    "update-ref",
+                    "--no-deref",
+                    "-d",
+                    "refs/remotes/origin/alias",
+                ],
+            );
+            let reviewed = if existing_upstream {
+                intent(&core, world.path())
+            } else {
+                publish_intent(&core, &world, "main")
+            };
+            git(
+                &world.work,
+                &[
+                    "symbolic-ref",
+                    "refs/remotes/origin/alias",
+                    "refs/heads/unrelated",
+                ],
+            );
+            assert_eq!(
+                core.push(world.path(), &reviewed).unwrap().outcome,
+                PushOutcome::Stale
+            );
+            assert_eq!(refs(&world.remote), before);
+            assert_eq!(refs(&world.work), local);
+        }
+    }
+}
+
+#[test]
+fn ordinary_push_refuses_tracking_updates_to_local_branches_and_tags() {
+    for source in ["refs/heads/main", "heads/main", "main"] {
+        for target in ["refs/heads/unrelated", "refs/tags/unrelated"] {
+            let world = World::new();
+            let core = coordinator(&world);
+            let reviewed = intent(&core, world.path());
+            git(
+                &world.work,
+                &[
+                    "config",
+                    "remote.origin.fetch",
+                    &format!("+{source}:{target}"),
+                ],
+            );
+            assert!(matches!(
+                core.prepare_push(world.path()).unwrap(),
+                PushAvailability::Unavailable { .. }
+            ));
+            let before = refs(&world.work);
+            let remote = refs(&world.remote);
+            assert_eq!(
+                core.push(world.path(), &reviewed).unwrap().outcome,
+                PushOutcome::Stale
+            );
+            assert_eq!(refs(&world.work), before);
+            assert_eq!(refs(&world.remote), remote);
+        }
+    }
+}
+
+#[test]
+fn hook_cannot_redirect_tracking_updates_to_a_local_branch() {
+    for publishing in [false, true] {
+        for mapping in [
+            "+refs/heads/main:refs/remotes/origin/alias",
+            "+refs/heads/*:refs/remotes/origin/*",
+        ] {
+            let world = World::new();
+            if publishing {
+                untracked(&world);
+            }
+            git(&world.work, &["branch", "unrelated"]);
+            let oid = commit(&world.work, "f", "two\n", "two");
+            git(&world.work, &["config", "remote.origin.fetch", mapping]);
+            let target = if mapping.contains('*') {
+                "refs/remotes/origin/main"
+            } else {
+                "refs/remotes/origin/alias"
+            };
+            publish_hook(
+                &world,
+                &format!("git symbolic-ref {target} refs/heads/unrelated\n"),
+            );
+            let core = coordinator(&world);
+            let reviewed = if publishing {
+                publish_intent(&core, &world, "main")
+            } else {
+                intent(&core, world.path())
+            };
+            let report = core.push(world.path(), &reviewed).unwrap();
+            assert!(
+                matches!(
+                    report.outcome,
+                    PushOutcome::Published { .. } | PushOutcome::Pushed
+                ),
+                "{report:?}"
+            );
+            assert_eq!(git(&world.work, &["rev-parse", "unrelated"]), world.initial);
+            assert_eq!(git(&world.remote, &["rev-parse", "main"]), oid);
+        }
+    }
+}
+
+#[test]
+fn changed_tracking_ref_is_preserved_after_confirmed_publication() {
+    let world = World::new();
+    let oid = commit(&world.work, "f", "two\n", "two");
+    let tree = git(&world.work, &["rev-parse", "HEAD^{tree}"]);
+    let newer = git(
+        &world.work,
+        &["commit-tree", &tree, "-p", &oid, "-m", "concurrent update"],
+    );
+    publish_hook(
+        &world,
+        &format!("git update-ref refs/remotes/origin/main {newer}\n"),
+    );
+    let core = coordinator(&world);
+    let report = core
+        .push(world.path(), &intent(&core, world.path()))
+        .unwrap();
+    assert_eq!(report.outcome, PushOutcome::Pushed);
+    assert!(matches!(report.refresh, PushRefresh::Failed { .. }));
+    assert_eq!(
+        git(&world.work, &["rev-parse", "refs/remotes/origin/main"]),
+        newer
+    );
+    assert_eq!(git(&world.remote, &["rev-parse", "main"]), oid);
+}
+
+#[test]
 fn publish_options_handle_no_remotes_partial_config_and_remote_policy() {
     let world = World::new();
     let core = coordinator(&world);

@@ -51,7 +51,7 @@ Use private fixture repositories in both browser and native sessions. The implem
 7. Install a temporary rejecting receive hook in the private bare remote. Confirm rejection changes neither remote refs nor tracking keys. Remove it. Hold the fixture common config's `config.lock`, then publish. Confirm the remote branch is published while the notice reports upstream setup failure. Verify both keys remain absent and the held lock is unchanged. Remove only the lock you created.
 8. Repeat the review, edit, confirm, and notice checks in Light and Dark. Save screenshots and before/after Git evidence outside the repository. Never publish to the fixture's display-only GitHub remote.
 
-Core tests also cover post-hook checkout, commit, and config changes, timeout after acceptance, staged-config failure, custom and negative fetch mappings, unrelated includes and worktree config, and publication surviving tracking or refresh failure.
+Core tests also prove that symbolic fetch targets and hook-created symbolic refs cannot move unrelated local branches. Concurrent tracking-ref updates survive publication and produce a separate refresh notice. Core tests also cover post-hook checkout, commit, and config changes, timeout after acceptance, staged-config failure, custom and negative fetch mappings, unrelated includes and worktree config, and publication surviving tracking or refresh failure.
 
 ## Gotchas
 
