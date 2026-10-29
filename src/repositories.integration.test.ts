@@ -38,7 +38,11 @@ import {
   worktreeStatusSchema,
 } from "./domain/repository";
 import type { WorktreeStatus } from "./domain/repository";
-import { pushAvailabilitySchema, pushReportSchema } from "./domain/push";
+import {
+  publishOptionsSchema,
+  pushAvailabilitySchema,
+  pushReportSchema,
+} from "./domain/push";
 import { requestOps } from "./repositories";
 
 const fixtureSchema = z.object({
@@ -2768,5 +2772,82 @@ describe("real Rust prepared current-branch push contract", () => {
     const prepared = await prepare(path);
     expect(prepared.kind).toBe("ready");
     expect(JSON.stringify(prepared)).not.toMatch(/secret|hidden|user:|token=/);
+  });
+
+  it("reviews an untracked branch through the real bridge and confirms tracking separately", async () => {
+    const path = join(fixture.root, "publication-contract");
+    const remote = join(fixture.root, "publication-contract.git");
+    git(fixture.root, "init", "--bare", remote);
+    git(fixture.root, "init", "--initial-branch=topic", path);
+    git(path, "config", "core.hooksPath", "/dev/null");
+    writeFileSync(join(path, "f"), "original\n");
+    git(path, "add", "f");
+    git(
+      path,
+      "-c",
+      "user.name=Ada",
+      "-c",
+      "user.email=ada@example.test",
+      "commit",
+      "-m",
+      "one",
+    );
+    const options = async () =>
+      answer("publishOptions", publishOptionsSchema).parse(
+        await (await post({ op: "publishOptions", path })).json(),
+      ).data;
+    expect(await options()).toMatchObject({ kind: "available", remotes: [] });
+    git(path, "remote", "add", "origin", remote);
+    expect(await options()).toMatchObject({
+      kind: "available",
+      branch: "refs/heads/topic",
+      remotes: [
+        {
+          name: "origin",
+          availability: { kind: "eligible", endpoint: remote },
+        },
+      ],
+    });
+    const prepared = answer("preparePublish", pushAvailabilitySchema).parse(
+      await (
+        await post({
+          op: "preparePublish",
+          path,
+          choice: { remote: "origin", destination: "refs/heads/reviewed" },
+        })
+      ).json(),
+    ).data;
+    if (prepared.kind !== "ready")
+      throw new Error("Expected a publication review");
+    expect(prepared.intent.purpose).toBe("publish");
+    expect(prepared.intent.source).toBe(git(path, "rev-parse", "HEAD"));
+    const before = local(path);
+    const report = await push(path, prepared.intent);
+    expect(report.outcome).toEqual({
+      kind: "published",
+      tracking: { kind: "set" },
+    });
+    expect(local(path)).toEqual(before);
+    expect(refs(remote)).toBe(`refs/heads/reviewed ${prepared.intent.source}`);
+    expect(git(path, "config", "--get-all", "branch.topic.remote")).toBe(
+      "origin",
+    );
+    expect(git(path, "config", "--get-all", "branch.topic.merge")).toBe(
+      "refs/heads/reviewed",
+    );
+    expect(await prepare(path)).toMatchObject({
+      kind: "ready",
+      intent: { purpose: "upstream", destination: "refs/heads/reviewed" },
+    });
+    expect((await push(path, prepared.intent)).outcome.kind).toBe("stale");
+    expect(
+      (
+        await rejected({
+          op: "preparePublish",
+          path,
+          choice: { remote: "origin", destination: "refs/tags/forbidden" },
+        })
+      ).status,
+    ).toBe(400);
   });
 });

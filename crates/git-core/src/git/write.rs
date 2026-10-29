@@ -515,6 +515,120 @@ impl Wrote {
     }
 }
 
+pub(crate) fn install_tracking(
+    root: &Path,
+    config: &Path,
+    branch: &crate::BranchRef,
+    remote: &str,
+    destination: &crate::BranchRef,
+    reads: Deadline,
+    unchanged: impl Fn() -> Result<bool, RepositoryError>,
+) -> Result<(), RepositoryError> {
+    use std::{fs, io::Write as _};
+    let failed = || {
+        RepositoryError::new(
+            ErrorKind::GitFailed,
+            "Could not set upstream atomically. Check Git's config lock and branch settings.",
+        )
+    };
+    let lock_path = config.with_extension("lock");
+    let mut lock = ConfigLock {
+        file: private_config_file(&lock_path).map_err(|_| failed())?,
+        path: lock_path,
+    };
+    let metadata = fs::symlink_metadata(config).map_err(|_| failed())?;
+    if !metadata.is_file() {
+        return Err(failed());
+    }
+    let bytes = fs::read(config).map_err(|_| failed())?;
+    let stage_path = config.with_extension(format!(
+        "l1git-{}-{}",
+        std::process::id(),
+        CONFIG_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    let stage_file = private_config_file(&stage_path).map_err(|_| failed())?;
+    drop(stage_file);
+    let stage = StagedConfig(stage_path);
+    fs::write(&stage.0, &bytes).map_err(|_| failed())?;
+    let stage_name = stage.0.to_str().ok_or_else(failed)?;
+    for (key, value) in [
+        (format!("branch.{}.remote", branch.name()), remote),
+        (
+            format!("branch.{}.merge", branch.name()),
+            destination.as_str(),
+        ),
+    ] {
+        let mut command = super::base(root, false);
+        command.args(["config", "--file", stage_name, "--replace-all", &key, value]);
+        let output = execute(command, reads, None, Some(1024))?;
+        if !output.status.success() {
+            return Err(failed());
+        }
+    }
+    if !unchanged()? || fs::read(config).map_err(|_| failed())? != bytes {
+        return Err(failed());
+    }
+    lock.file
+        .set_permissions(metadata.permissions())
+        .map_err(|_| failed())?;
+    lock.file
+        .write_all(&fs::read(&stage.0).map_err(|_| failed())?)
+        .map_err(|_| failed())?;
+    lock.file.sync_all().map_err(|_| failed())?;
+    if !unchanged()? {
+        return Err(failed());
+    }
+    if !lock.owns_path() {
+        return Err(failed());
+    }
+    fs::rename(&lock.path, config).map_err(|_| failed())?;
+    Ok(())
+}
+
+static CONFIG_SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+struct ConfigLock {
+    path: std::path::PathBuf,
+    file: std::fs::File,
+}
+
+impl ConfigLock {
+    fn owns_path(&self) -> bool {
+        if !std::fs::symlink_metadata(&self.path).is_ok_and(|metadata| metadata.is_file()) {
+            return false;
+        }
+        let owned = self.file.try_clone().and_then(same_file::Handle::from_file);
+        let current = same_file::Handle::from_path(&self.path);
+        matches!((owned, current), (Ok(owned), Ok(current)) if owned == current)
+    }
+}
+
+impl Drop for ConfigLock {
+    fn drop(&mut self) {
+        if self.owns_path() {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+}
+
+struct StagedConfig(std::path::PathBuf);
+impl Drop for StagedConfig {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+fn private_config_file(path: &Path) -> std::io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options.open(path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -528,5 +642,45 @@ mod tests {
             stderr: "warning: in the working copy of 'f', LF will be replaced by CRLF\nfatal: Unable to create '/r/.git/index.lock': File exists.\n\nAnother git process seems to be running in this repository.\n".into(),
         };
         assert_eq!(wrote.failed().kind, ErrorKind::LockHeld);
+    }
+
+    #[test]
+    fn staged_tracking_pair_is_not_installed_if_revalidation_fails() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path();
+        let config = root.join("config");
+        let original = b"[unrelated]\n value = keep\n";
+        std::fs::write(&config, original).unwrap();
+        let branch = crate::BranchRef::try_from("refs/heads/topic".to_owned()).unwrap();
+        let destination = crate::BranchRef::try_from("refs/heads/published".to_owned()).unwrap();
+        let result = install_tracking(
+            root,
+            &config,
+            &branch,
+            "origin",
+            &destination,
+            Deadline::start(
+                super::super::LocalRead::BranchStatus,
+                Duration::from_secs(30),
+            ),
+            || Ok(false),
+        );
+        assert!(result.is_err());
+        assert_eq!(std::fs::read(&config).unwrap(), original);
+        assert_eq!(std::fs::read_dir(root).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn cleanup_never_removes_a_replaced_config_lock() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.lock");
+        let lock = ConfigLock {
+            file: private_config_file(&path).unwrap(),
+            path: path.clone(),
+        };
+        std::fs::rename(&path, directory.path().join("old-lock")).unwrap();
+        std::fs::write(&path, b"another process").unwrap();
+        drop(lock);
+        assert_eq!(std::fs::read(path).unwrap(), b"another process");
     }
 }

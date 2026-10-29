@@ -1,8 +1,9 @@
 use crate::{
     Advance, Applied, Blame, BranchMerged, BranchTip, CommitDetail, Comparison, Coordinator,
     EntryId, Expect, FastForwardReport, FetchMode, FilePatch, FileRevision, LineStats, Operation,
-    PushAvailability, PushIntent, PushReport, RepositoryError, RepositoryOverview, RepositoryRefs,
-    RepositorySnapshot, Side, UndoHistory, WorktreePatch, WorktreeStatus,
+    PublishChoice, PublishOptions, PushAvailability, PushIntent, PushReport, RepositoryError,
+    RepositoryOverview, RepositoryRefs, RepositorySnapshot, Side, UndoHistory, WorktreePatch,
+    WorktreeStatus,
     file_history::{blame_within, file_history_within},
     git::LocalRead,
     repository::{
@@ -48,6 +49,13 @@ pub enum Request {
     Overview {
         path: String,
         mode: FetchMode,
+    },
+    PublishOptions {
+        path: String,
+    },
+    PreparePublish {
+        path: String,
+        choice: PublishChoice,
     },
     PreparePush {
         path: String,
@@ -101,6 +109,8 @@ pub enum Response {
     FileHistory(Vec<FileRevision>),
     Blame(Blame),
     Overview(RepositoryOverview),
+    PublishOptions(PublishOptions),
+    PreparePublish(PushAvailability),
     PreparePush(PushAvailability),
     Push(PushReport),
     FastForward(FastForwardReport),
@@ -153,6 +163,12 @@ pub fn run(coordinator: &Coordinator, request: Request) -> Result<Response, Repo
             deadline(LocalRead::Blame),
         )?),
         Request::Overview { path, mode } => Response::Overview(coordinator.overview(&path, mode)?),
+        Request::PublishOptions { path } => {
+            Response::PublishOptions(coordinator.publish_options(&path)?)
+        }
+        Request::PreparePublish { path, choice } => {
+            Response::PreparePublish(coordinator.prepare_publish(&path, &choice)?)
+        }
         Request::PreparePush { path } => Response::PreparePush(coordinator.prepare_push(&path)?),
         Request::Push { path, intent } => Response::Push(coordinator.push(&path, &intent)?),
         Request::FastForward { path, advances } => {

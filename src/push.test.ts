@@ -8,6 +8,7 @@ import {
 } from "./domain/push";
 
 const intent = pushIntentSchema.parse({
+  purpose: "upstream",
   branch: "refs/heads/local",
   source: "a".repeat(40),
   remote: "origin",
@@ -39,7 +40,9 @@ describe("push controls", () => {
         kind: "unavailable",
         reason,
       });
-      expect(pushControl(availability, null).kind).toBe("disabled");
+      expect(pushControl(availability, null).kind).toBe(
+        reason === "noUpstream" ? "publish" : "disabled",
+      );
       expect(pushDisabledReason(availability)?.length).toBeGreaterThan(20);
     }
     expect(pushDisabledReason(undefined)).toContain("Checking");

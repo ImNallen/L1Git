@@ -9,6 +9,7 @@ icu_normalizer = { version = "2", default-features = false, features = ["compile
 serde.workspace = true
 serde_json.workspace = true
 sha1_smol = "1"
+same-file = "1"
 url = "2"
 
 [target.'cfg(unix)'.dependencies]

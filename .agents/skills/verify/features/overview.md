@@ -33,10 +33,25 @@ Use a new browser tab at a private development origin and the fixture's private 
 4. Save `sync.dirty` before `sync.repository` in the private session. Open `sync.repository` and confirm the target remains its `main` upstream. Open `sync.dirty` and confirm the target is its `develop` upstream. Push the latter only if you intend to publish that fixture branch, and verify that no other remote ref moves.
 5. Create another local commit on `main`. Install a temporary rejecting `pre-receive` hook only in the fixture's bare remote. Click Push and confirm a visible **Push rejected** notice. The complete remote ref map stays unchanged. Remove that fixture hook and retry to confirm ordinary success.
 6. Once the toolbar shows its prepared target, change `branch.main.merge` externally to `refs/heads/alternate` without refreshing. Click the displayed Push control. Confirm a changed-destination notice, no remote ref movement, and a newly prepared **Push to origin/alternate** target. Restore the fixture's original merge setting and refresh.
-7. Create and check out a fixture branch without an upstream. Refresh the app. Confirm Push is disabled and its title explains that there is no configured upstream. Open the command palette and search for Push. Its disabled row shows the same reason and cannot execute with Enter or a click. Also check the detached and unborn fixture repositories for their specific reasons.
+7. Create and check out a fixture branch without an upstream. Refresh the app. Confirm the toolbar and palette offer **Publish branch…** and follow the publication journey below. Detached and unborn fixture repositories still show disabled Push controls with their specific reasons.
 8. Repeat the destination, successful notice, disabled reason, and palette checks in Light and Dark. Save screenshots and the before/after Git state outside the repository.
 
 An uncertain notice must never promise that nothing was published. The automated core tests cover a timeout after remote acceptance, capped porcelain, and a confirmed push followed by refresh failure. A live drive is still required for the toolbar, palette, notices, and outgoing badge.
+
+## Publish a branch without tracking
+
+Use private fixture repositories in both browser and native sessions. The implementation tests do not replace this live journey.
+
+1. Create and check out a fixture branch without tracking, for example `git switch -c publish-review`. Record its full OID, complete bare remote ref map, effective `branch.publish-review.remote` and `branch.publish-review.merge`, HEAD, index entries, file bytes, and Undo history.
+2. Refresh and click **Publish branch…** in the toolbar. Confirm a labelled modal traps focus and Escape closes it without changing refs or config. Open it from the palette. Confirm the destination defaults to `publish-review` and one eligible remote is selected automatically. With two eligible fixture remotes, confirm an explicit choice is required. With no remotes, confirm the actionable empty state and disabled review button.
+3. Choose the fixture remote and destination `reviewed-publication`. Click **Review publication**. Confirm the review shows `refs/heads/publish-review`, the exact full OID recorded in step 1, the remote name, `refs/heads/reviewed-publication`, and the effective push endpoint with credentials removed. Confirm the final button says **Publish branch**. No publication happens during preparation.
+4. Edit the destination to an invalid ref. Confirm the review disappears immediately, the button returns to **Review publication**, and submitting shows an error. Enter a valid destination and review it again. Change the remote while preparation is pending and confirm an older result cannot restore the previous review.
+5. Click **Publish branch**. Confirm a published notice with **Upstream set** and a refreshed ordinary **Push to <remote>/reviewed-publication** control. Verify only the reviewed bare remote branch changed, to the reviewed OID. Verify both effective tracking keys together. HEAD, the index, files, and Undo history remain unchanged. Ordinary Push now reports already up to date.
+6. On another untracked fixture branch, review publication, then make a local commit or change the selected remote's push URL externally. Confirm publication refuses the stale review and no remote ref or tracking key changes. Reopen and review the current state.
+7. Install a temporary rejecting receive hook in the private bare remote. Confirm rejection changes neither remote refs nor tracking keys. Remove it. Hold the fixture common config's `config.lock`, then publish. Confirm the remote branch is published while the notice reports upstream setup failure. Verify both keys remain absent and the held lock is unchanged. Remove only the lock you created.
+8. Repeat the review, edit, confirm, and notice checks in Light and Dark. Save screenshots and before/after Git evidence outside the repository. Never publish to the fixture's display-only GitHub remote.
+
+Core tests also cover post-hook checkout, commit, and config changes, timeout after acceptance, staged-config failure, custom and negative fetch mappings, unrelated includes and worktree config, and publication surviving tracking or refresh failure.
 
 ## Gotchas
 

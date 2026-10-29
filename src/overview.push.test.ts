@@ -10,6 +10,7 @@ const main = rootSchema.parse("/work/main");
 const linked = rootSchema.parse("/work/linked");
 const common = rootSchema.parse("/work/main/.git");
 const intent = pushIntentSchema.parse({
+  purpose: "upstream",
   branch: "refs/heads/linked",
   source: "a".repeat(40),
   remote: "origin",
@@ -227,4 +228,33 @@ it("refreshes surviving worktrees when the clicked root is removed during push",
   expect(h.store.getSnapshot().pushByRoot.get(main)?.availability.kind).toBe(
     "ready",
   );
+});
+
+it("queues publication through the existing network job and preserves tracking and refresh failures", async () => {
+  const publication = pushIntentSchema.parse({ ...intent, purpose: "publish" });
+  const h = harness({
+    push: async (path, clicked) => {
+      expect(path).toBe(linked);
+      expect(clicked).toEqual(publication);
+      return {
+        outcome: {
+          kind: "published",
+          tracking: { kind: "failed", message: "Config is locked." },
+        },
+        refresh: { kind: "failed", message: "Refresh failed." },
+      };
+    },
+  });
+  h.store.track([main, linked]);
+  await flush();
+  await h.store.push(linked, publication);
+  expect(h.store.getSnapshot().pushByRoot.get(linked)?.notice).toEqual({
+    intent: publication,
+    outcome: {
+      kind: "published",
+      tracking: { kind: "failed", message: "Config is locked." },
+    },
+    refreshProblem: "Refresh failed.",
+  });
+  expect(h.store.getSnapshot().pushByRoot.get(main)?.notice).toBeNull();
 });

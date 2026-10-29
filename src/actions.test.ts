@@ -706,6 +706,7 @@ describe("palette shortcut", () => {
 it("shows the prepared push destination and keeps unavailable push visible but disabled", async () => {
   const { pushControl, pushIntentSchema } = await import("./domain/push");
   const intent = pushIntentSchema.parse({
+    purpose: "upstream",
     branch: "refs/heads/topic",
     source: "a".repeat(40),
     remote: "upstream",
@@ -726,7 +727,7 @@ it("shows the prepared push destination and keeps unavailable push visible but d
   expect(run.push).toHaveBeenCalledOnce();
   const unavailable = {
     ...repositoryScreen,
-    push: pushControl({ kind: "unavailable", reason: "noUpstream" }, null),
+    push: pushControl({ kind: "unavailable", reason: "detached" }, null),
   };
   const disabled = paletteItems(unavailable, run, true, [], null).find(
     ({ id }) => id === "action:push",
@@ -734,7 +735,7 @@ it("shows the prepared push destination and keeps unavailable push visible but d
   expect(disabled).toMatchObject({
     title: "Push",
     disabled: true,
-    detail: expect.stringContaining("no configured upstream"),
+    detail: expect.stringContaining("Check out a branch"),
   });
   disabled?.run();
   expect(run.push).toHaveBeenCalledOnce();
@@ -750,4 +751,26 @@ it("shows the prepared push destination and keeps unavailable push visible but d
       ({ id }) => id === "action:push",
     ),
   ).toMatchObject({ disabled: true });
+});
+
+it("opens the publish review from the palette for an untracked branch", async () => {
+  const { pushControl } = await import("./domain/push");
+  const context = {
+    ...repositoryScreen,
+    push: pushControl({ kind: "unavailable", reason: "noUpstream" }, null),
+  };
+  const run = commands();
+  const item = paletteItems(context, run, true, [], null).find(
+    ({ id }) => id === "action:push",
+  );
+  expect(item?.title).toBe("Publish branch…");
+  expect(item?.disabled).not.toBe(true);
+  item?.run();
+  expect(run.push).toHaveBeenCalledOnce();
+  expect(
+    pushControl(
+      { kind: "unavailable", reason: "noUpstream" },
+      "Wait for fetch.",
+    ).kind,
+  ).toBe("disabled");
 });

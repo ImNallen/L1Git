@@ -439,3 +439,17 @@
 .tag-dialog .tag-message-label {
   margin-top: 16px;
 }
+
+.publish-details dd {
+  margin: 0 0 0.7rem;
+  overflow-wrap: anywhere;
+}
+
+.publish-details dt {
+  font-weight: 600;
+}
+
+.publish-dialog select {
+  width: 100%;
+  margin-bottom: 1rem;
+}
