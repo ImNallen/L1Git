@@ -23,6 +23,21 @@ Use the fixture's `sync` paths. Before the journey, record `for-each-ref refs/he
 
 After the journey, record the same Git state. Only `main`, `release`, and remote-tracking refs may differ. Git 2.48 or later can also create `refs/remotes/origin/HEAD` during the first fetch.
 
+## Push the current branch
+
+Use a new browser tab at a private development origin and the fixture's private `sync` remote. Follow the active host's browser-driver restrictions. Never clear user recents. API tests and a bundle build do not prove this rendered journey.
+
+1. Record the complete bare remote ref map with `git -C <sync.remote> for-each-ref --format='%(refname) %(objectname)'`. Record HEAD, `status --porcelain`, `ls-files -s`, file bytes, and the app's Undo history for each saved worktree.
+2. Open `sync.repository` on `main` after fast-forwarding it. Create one local commit through the commit inspector. Confirm the sidebar shows one outgoing commit. The toolbar and command palette both say **Push to origin/main**. The toolbar title names the source branch, destination, and redacted endpoint. Record local state and Undo history again before Push.
+3. Click **Push to origin/main**. Confirm a spinner while it runs, then a pushed notice and zero outgoing commits without clicking Fetch. Compare the complete remote ref map. Only `refs/heads/main` may move, to the exact local commit recorded before the click. HEAD, the index, files, and Undo history stay unchanged by Push. Push again and confirm an already-up-to-date notice.
+4. Save `sync.dirty` before `sync.repository` in the private session. Open `sync.repository` and confirm the target remains its `main` upstream. Open `sync.dirty` and confirm the target is its `develop` upstream. Push the latter only if you intend to publish that fixture branch, and verify that no other remote ref moves.
+5. Create another local commit on `main`. Install a temporary rejecting `pre-receive` hook only in the fixture's bare remote. Click Push and confirm a visible **Push rejected** notice. The complete remote ref map stays unchanged. Remove that fixture hook and retry to confirm ordinary success.
+6. Once the toolbar shows its prepared target, change `branch.main.merge` externally to `refs/heads/alternate` without refreshing. Click the displayed Push control. Confirm a changed-destination notice, no remote ref movement, and a newly prepared **Push to origin/alternate** target. Restore the fixture's original merge setting and refresh.
+7. Create and check out a fixture branch without an upstream. Refresh the app. Confirm Push is disabled and its title explains that there is no configured upstream. Open the command palette and search for Push. Its disabled row shows the same reason and cannot execute with Enter or a click. Also check the detached and unborn fixture repositories for their specific reasons.
+8. Repeat the destination, successful notice, disabled reason, and palette checks in Light and Dark. Save screenshots and the before/after Git state outside the repository.
+
+An uncertain notice must never promise that nothing was published. The automated core tests cover a timeout after remote acceptance, capped porcelain, and a confirmed push followed by refresh failure. A live drive is still required for the toolbar, palette, notices, and outgoing badge.
+
 ## Gotchas
 
 Adding a repository also fetches it, so reload or push a new remote commit before checking the launch fetch. **Fast-forward (N)** counts only the open repository and is disabled while that repository fetches or fast-forwards. Store behavior that a live drive cannot reach quickly, such as coalesced requests, per-repository scoping, and the hidden-window interval, is covered in `src/overview.test.ts`.
