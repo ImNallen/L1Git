@@ -373,7 +373,9 @@ fn a_missing_identity_answers_missing_identity() {
     repo.staged_edit("a.txt", "two\n");
     repo.git(&["config", "user.useConfigOnly", "true"]);
     repo.git(&["config", "user.name", ""]);
-    let error = repo.write(Kind::Commit, "Who\n").unwrap_err();
+    let error = repo
+        .write(Kind::Commit, &"Who\n".repeat(262_144))
+        .unwrap_err();
     let ErrorKind::MissingIdentity { output } = &error.kind else {
         panic!("{error:?}");
     };
