@@ -1,6 +1,8 @@
 mod write;
 
-pub(crate) use write::{LocalWrite, Write, WriteDeadline, Wrote, install_tracking};
+pub(crate) use write::{
+    LocalWrite, Write, WriteDeadline, Wrote, install_config_values, install_tracking,
+};
 
 use crate::{BranchRef, ErrorKind, Oid, RepositoryError};
 use std::{

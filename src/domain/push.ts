@@ -58,6 +58,23 @@ export const publishOptionsSchema = z.discriminatedUnion("kind", [
 export type PublishOptions = z.infer<typeof publishOptionsSchema>;
 export type PublishChoice = z.infer<typeof publishChoiceSchema>;
 
+export const addRemoteInputSchema = z.strictObject({
+  name: z.string().min(1),
+  url: z.string().min(1),
+});
+export const addRemoteReportSchema = z.strictObject({
+  name: z.string().min(1),
+  refresh: z.discriminatedUnion("kind", [
+    z.strictObject({
+      kind: z.literal("refreshed"),
+      options: publishOptionsSchema,
+    }),
+    z.strictObject({ kind: z.literal("failed"), message: z.string() }),
+  ]),
+});
+export type AddRemoteInput = z.infer<typeof addRemoteInputSchema>;
+export type AddRemoteReport = z.infer<typeof addRemoteReportSchema>;
+
 export const trackingOutcomeSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("set") }),
   z.strictObject({ kind: z.literal("failed"), message: z.string() }),

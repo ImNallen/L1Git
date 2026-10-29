@@ -524,13 +524,32 @@ pub(crate) fn install_tracking(
     reads: Deadline,
     unchanged: impl Fn() -> Result<bool, RepositoryError>,
 ) -> Result<(), RepositoryError> {
+    install_config_values(
+        root,
+        config,
+        &[
+            (format!("branch.{}.remote", branch.name()), remote),
+            (
+                format!("branch.{}.merge", branch.name()),
+                destination.as_str(),
+            ),
+        ],
+        reads,
+        unchanged,
+        "Could not set upstream atomically. Check Git's config lock and branch settings.",
+    )
+}
+
+pub(crate) fn install_config_values(
+    root: &Path,
+    config: &Path,
+    values: &[(String, &str)],
+    reads: Deadline,
+    unchanged: impl Fn() -> Result<bool, RepositoryError>,
+    failure_message: &'static str,
+) -> Result<(), RepositoryError> {
     use std::{fs, io::Write as _};
-    let failed = || {
-        RepositoryError::new(
-            ErrorKind::GitFailed,
-            "Could not set upstream atomically. Check Git's config lock and branch settings.",
-        )
-    };
+    let failed = || RepositoryError::new(ErrorKind::GitFailed, failure_message);
     let lock_path = config.with_extension("lock");
     let mut lock = ConfigLock {
         file: private_config_file(&lock_path).map_err(|_| failed())?,
@@ -551,15 +570,9 @@ pub(crate) fn install_tracking(
     let stage = StagedConfig(stage_path);
     fs::write(&stage.0, &bytes).map_err(|_| failed())?;
     let stage_name = stage.0.to_str().ok_or_else(failed)?;
-    for (key, value) in [
-        (format!("branch.{}.remote", branch.name()), remote),
-        (
-            format!("branch.{}.merge", branch.name()),
-            destination.as_str(),
-        ),
-    ] {
+    for (key, value) in values {
         let mut command = super::base(root, false);
-        command.args(["config", "--file", stage_name, "--replace-all", &key, value]);
+        command.args(["config", "--file", stage_name, "--replace-all", key, value]);
         let output = execute(command, reads, None, Some(1024))?;
         if !output.status.success() {
             return Err(failed());
@@ -575,7 +588,7 @@ pub(crate) fn install_tracking(
         .write_all(&fs::read(&stage.0).map_err(|_| failed())?)
         .map_err(|_| failed())?;
     lock.file.sync_all().map_err(|_| failed())?;
-    if !unchanged()? {
+    if !unchanged()? || fs::read(config).map_err(|_| failed())? != bytes {
         return Err(failed());
     }
     if !lock.owns_path() {
@@ -668,6 +681,54 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(std::fs::read(&config).unwrap(), original);
         assert_eq!(std::fs::read_dir(root).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn failed_second_config_edit_never_installs_the_first() {
+        let directory = tempfile::tempdir().unwrap();
+        let config = directory.path().join("config");
+        let original = b"[unrelated]\n value = keep\n";
+        std::fs::write(&config, original).unwrap();
+        let result = install_config_values(
+            directory.path(),
+            &config,
+            &[
+                ("remote.origin.url".into(), "secret"),
+                ("invalid".into(), "no"),
+            ],
+            Deadline::of(super::super::LocalRead::BranchStatus),
+            || Ok(true),
+            "Failed",
+        );
+        assert!(result.is_err());
+        assert_eq!(std::fs::read(&config).unwrap(), original);
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn external_common_config_edit_survives_final_guard() {
+        let directory = tempfile::tempdir().unwrap();
+        let config = directory.path().join("config");
+        std::fs::write(&config, b"[unrelated]\n value = before\n").unwrap();
+        let calls = std::cell::Cell::new(0);
+        let external = b"[unrelated]\n value = external\n";
+        let result = install_config_values(
+            directory.path(),
+            &config,
+            &[("remote.origin.url".into(), "secret")],
+            Deadline::of(super::super::LocalRead::BranchStatus),
+            || {
+                calls.set(calls.get() + 1);
+                if calls.get() == 2 {
+                    std::fs::write(&config, external).unwrap();
+                }
+                Ok(true)
+            },
+            "Failed",
+        );
+        assert!(result.is_err());
+        assert_eq!(std::fs::read(&config).unwrap(), external);
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
     }
 
     #[test]

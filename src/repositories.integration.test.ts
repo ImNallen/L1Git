@@ -39,6 +39,7 @@ import {
 } from "./domain/repository";
 import type { WorktreeStatus } from "./domain/repository";
 import {
+  addRemoteReportSchema,
   publishOptionsSchema,
   pushAvailabilitySchema,
   pushReportSchema,
@@ -2850,4 +2851,88 @@ describe("real Rust prepared current-branch push contract", () => {
       ).status,
     ).toBe(400);
   });
+});
+
+it("adds a real remote through the shared bridge before explicit review and publication", async () => {
+  const endpoint = join(fixture.root, "add-remote-endpoint.git");
+  execFileSync("git", ["init", "--quiet", "--bare", endpoint]);
+  const endpointRefs = () =>
+    execFileSync(
+      "git",
+      ["-C", endpoint, "for-each-ref", "--format=%(refname) %(objectname)"],
+      { encoding: "utf8" },
+    ).trim();
+  const path = join(fixture.root, "add-remote-bridge");
+  mkdirSync(path);
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-C", path, ...args], { encoding: "utf8" });
+  git("init", "--quiet", "--initial-branch=main");
+  git(
+    "-c",
+    "user.name=Ada",
+    "-c",
+    "user.email=ada@example.test",
+    "-c",
+    "commit.gpgsign=false",
+    "-c",
+    "core.hooksPath=/dev/null",
+    "commit",
+    "--allow-empty",
+    "--quiet",
+    "-m",
+    "initial",
+  );
+  const refs = git("show-ref");
+  const request = {
+    op: "addRemote",
+    path,
+    remote: { name: "origin", url: endpoint },
+  };
+  const report = answer("addRemote", addRemoteReportSchema).parse(
+    await (await post(request)).json(),
+  ).data;
+  expect(report).toMatchObject({
+    name: "origin",
+    refresh: {
+      kind: "refreshed",
+      options: {
+        kind: "available",
+        remotes: [{ name: "origin", availability: { kind: "eligible" } }],
+      },
+    },
+  });
+  expect(git("config", "--get", "remote.origin.url").trim()).toBe(endpoint);
+  expect(git("config", "--get", "remote.origin.fetch").trim()).toBe(
+    "+refs/heads/*:refs/remotes/origin/*",
+  );
+  expect(git("show-ref")).toBe(refs);
+  expect(git("config", "--list")).not.toContain("branch.main.");
+  expect(endpointRefs()).toBe("");
+  const duplicate = await (await post(request)).json();
+  expect(duplicate).toMatchObject({ ok: false, error: { kind: "gitFailed" } });
+  const prepared = answer("preparePublish", pushAvailabilitySchema).parse(
+    await (
+      await post({
+        op: "preparePublish",
+        path,
+        choice: {
+          remote: "origin",
+          destination: "refs/heads/reviewed-addition",
+        },
+      })
+    ).json(),
+  ).data;
+  expect(prepared.kind).toBe("ready");
+  if (prepared.kind !== "ready") throw new Error("Expected explicit review");
+  expect(endpointRefs()).toBe("");
+  const published = answer("push", pushReportSchema).parse(
+    await (await post({ op: "push", path, intent: prepared.intent })).json(),
+  ).data;
+  expect(published.outcome).toEqual({
+    kind: "published",
+    tracking: { kind: "set" },
+  });
+  expect(endpointRefs()).toBe(
+    `refs/heads/reviewed-addition ${prepared.intent.source}`,
+  );
 });

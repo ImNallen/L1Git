@@ -1477,6 +1477,12 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
         <PublishDialog
           key={publishingRoot}
           root={publishingRoot}
+          onRemoteAdded={() => {
+            const state = overview.roots.get(publishingRoot);
+            if (state?.kind === "open")
+              void overviewStore.refreshLocal(state.commonDir);
+            void app.rereadOpenRepository(publishingRoot);
+          }}
           onPublish={(intent) => {
             void overviewStore.push(publishingRoot, intent);
           }}
