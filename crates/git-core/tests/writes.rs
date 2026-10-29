@@ -2606,6 +2606,56 @@ fn stash_pop_and_its_undo_round_trip_the_worktree_and_the_same_commit() {
 }
 
 #[test]
+fn stash_pop_undo_restores_the_commit_after_gc() {
+    let repo = Repo::committed(&[("a", "a\n")]);
+    let coordinator = repo.coordinator();
+    repo.put("a", "a2\n");
+    stash_push(&coordinator, &repo, "s1", false, &[]).unwrap();
+    let oid = stash_list(&repo)
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .to_owned();
+    let popped = stash_pop(&coordinator, &repo, 0).unwrap();
+    assert_eq!(stash_list(&repo), "");
+    repo.git(&["gc", "--quiet", "--prune=now"]);
+    let gone = git_output(&repo.root, &["cat-file", "-e", &oid]);
+    assert!(
+        !gone.status.success(),
+        "gc left the popped stash commit in the repository"
+    );
+    coordinator.undo(repo.path(), popped.id).unwrap();
+    let restored = stash_list(&repo);
+    assert_eq!(restored.split_whitespace().next(), Some(oid.as_str()));
+    assert_eq!(file_text(&repo, "a"), "a\n");
+}
+
+#[test]
+fn stash_pop_of_an_edit_already_on_the_branch_drops_the_entry() {
+    let repo = Repo::committed(&[("a", "a\n")]);
+    let coordinator = repo.coordinator();
+    repo.put("a", "a2\n");
+    stash_push(&coordinator, &repo, "s1", false, &[]).unwrap();
+    let oid = stash_list(&repo)
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .to_owned();
+    repo.put("a", "a2\n");
+    repo.git(&["add", "a"]);
+    repo.git(&["commit", "--quiet", "-m", "same edit"]);
+    let popped = stash_pop(&coordinator, &repo, 0).unwrap();
+    assert_eq!(stash_list(&repo), "");
+    assert_eq!(file_text(&repo, "a"), "a2\n");
+    assert!(repo.status().is_empty());
+    coordinator.undo(repo.path(), popped.id).unwrap();
+    let restored = stash_list(&repo);
+    assert_eq!(restored.split_whitespace().next(), Some(oid.as_str()));
+    assert_eq!(file_text(&repo, "a"), "a2\n");
+    assert!(repo.status().is_empty());
+}
+
+#[test]
 fn stash_push_refuses_an_assume_unchanged_file_whose_bytes_differ() {
     let repo = Repo::committed(&[("a", "a\n")]);
     let coordinator = repo.coordinator();

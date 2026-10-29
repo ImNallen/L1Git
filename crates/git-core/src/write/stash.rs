@@ -407,16 +407,25 @@ fn record_and_finish(
         Verdict::Keep { presence, trouble } => (presence, trouble),
     };
     let (presence, trouble) = match (&before.intent, code, trouble) {
-        (Intent::Pop { listed }, Some(0), None) => match finish_drop(&txn, listed) {
-            Ok(()) => (Presence::Removed(listed.clone()), None),
-            Err(error) if error.kind == ErrorKind::Raced || is_stash_changed(&error) => {
-                (Presence::Kept(listed.clone()), Some(error))
-            }
-            Err(error) => {
+        (Intent::Pop { listed }, Some(0), None) => {
+            if let Err(error) = store
+                .entry(applied.id)
+                .keep_stash(txn.runner(), &listed.oid)
+            {
                 recorded.stay_pending();
                 return Err(error);
             }
-        },
+            match finish_drop(&txn, listed) {
+                Ok(()) => (Presence::Removed(listed.clone()), None),
+                Err(error) if error.kind == ErrorKind::Raced || is_stash_changed(&error) => {
+                    (Presence::Kept(listed.clone()), Some(error))
+                }
+                Err(error) => {
+                    recorded.stay_pending();
+                    return Err(error);
+                }
+            }
+        }
         (_, _, trouble) => (presence, trouble),
     };
     let change = match build_settled(repo, &files, &before, &now, presence) {
@@ -573,6 +582,12 @@ fn judge_apply(
     }
     let files_changed = any_file_changed(&repo.root, files, &before.captured)?;
     if !files_changed && index_diff.is_empty() {
+        if pop && code == Some(0) {
+            return Ok(Verdict::Keep {
+                presence: Presence::Kept(listed.clone()),
+                trouble: None,
+            });
+        }
         return Ok(Verdict::Leave(if code == Some(0) || code.is_none() {
             RepositoryError::new(ErrorKind::UnchangedPath, "Git changed nothing.")
         } else {
