@@ -402,3 +402,49 @@ fn real_commands_check_download_switch_track_and_keep_verified_bytes_until_expli
         assert!(matches!(refused.state, UpdateState::Available { .. }));
     });
 }
+
+#[test]
+#[ignore = "requires the disposable packaged feed started by scripts/updater-harness.mjs"]
+fn packaged_fixture_feed_downloads_the_exact_signed_successor() {
+    let directory = PathBuf::from(
+        std::env::var("L1GIT_PACKAGED_FIXTURE_DIR").expect("set the disposable harness directory"),
+    );
+    let metadata: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(directory.join("harness.json")).unwrap()).unwrap();
+    assert!(
+        metadata["identifier"]
+            .as_str()
+            .unwrap()
+            .starts_with("dev.l1.git.updater-fixture.")
+    );
+    let config: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(directory.join("version-1.json")).unwrap()).unwrap();
+    let app = app_at_version(
+        config["plugins"]["updater"]["pubkey"].as_str().unwrap(),
+        metadata["installedVersion"].as_str().unwrap(),
+    );
+    tauri::async_runtime::block_on(async {
+        let update = app
+            .updater_builder()
+            .endpoints(vec![metadata["feed"].as_str().unwrap().parse().unwrap()])
+            .unwrap()
+            .no_proxy()
+            .build()
+            .unwrap()
+            .check()
+            .await
+            .unwrap()
+            .expect("signed successor");
+        assert_eq!(
+            update.version,
+            metadata["successorVersion"].as_str().unwrap()
+        );
+        let bytes = update.download(|_, _| {}, || {}).await.unwrap();
+        let artifact = std::fs::read(metadata["artifact"].as_str().unwrap()).unwrap();
+        assert!(!bytes.is_empty());
+        assert!(
+            bytes == artifact,
+            "download must equal the packaged successor bytes"
+        );
+    });
+}
