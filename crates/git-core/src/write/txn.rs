@@ -268,9 +268,15 @@ impl<'r> Txn<'r> {
             root: self.repo.root.clone(),
             deadline: self.deadline,
             skip_worktree: change.touches_skip_worktree(),
-            worktree_updated: matches!(change, Change::Discard(_)),
+            worktree_updated: matches!(change, Change::Discard(_) | Change::Stash(_)),
             hooks: self.hooks.any(),
         })
+    }
+
+    /// Replaces the index and returns the hook to run after the caller saves
+    /// the log. A stash step stores or drops the stash between those two.
+    pub(super) fn publish_index(&mut self, change: &Change) -> Result<Published, RepositoryError> {
+        self.publish(change)
     }
 }
 
@@ -416,6 +422,10 @@ impl<'r> RefTxn<'r> {
 
     pub(super) fn tag<'a>(&'a self, args: &[&'a str], message: &str) -> Write<'a> {
         Write::tag(self, args, message)
+    }
+
+    pub(super) fn stash<'a>(&'a self, args: &[&'a str]) -> Write<'a> {
+        Write::stash(self, args)
     }
 }
 

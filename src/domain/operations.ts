@@ -14,8 +14,10 @@ import type {
   Oid,
   Operation,
   Problem,
+  RepositoryRoot,
   Start,
   StatusEntry,
+  Stash,
   Tag,
   WorktreePatch,
   WorktreeStatus,
@@ -27,6 +29,10 @@ type BranchOperation = Extract<
   { kind: "createBranch" | "renameBranch" | "deleteBranch" }
 >;
 type TagOperation = Extract<Operation, { kind: "createTag" | "deleteTag" }>;
+type StashOperation = Extract<
+  Operation,
+  { kind: "stashPush" | "stashApply" | "stashPop" | "stashDrop" }
+>;
 type CommitOperation = Extract<
   Operation,
   { kind: "commit" | "amend" | "editMessage" }
@@ -124,10 +130,19 @@ export function partWrite(
   return { operation, expect: { head: status.head } };
 }
 
+export const isStashOperation = (
+  operation: Operation,
+): operation is StashOperation =>
+  operation.kind === "stashPush" ||
+  operation.kind === "stashApply" ||
+  operation.kind === "stashPop" ||
+  operation.kind === "stashDrop";
+
 export const movesRefs = (operation: Operation) =>
   "message" in operation ||
   isBranchOperation(operation) ||
   isTagOperation(operation) ||
+  isStashOperation(operation) ||
   operation.kind === "checkout";
 
 export type BranchAsk =
@@ -248,6 +263,68 @@ export const deleteTagWrite = (tag: Tag, head: Head): Write => ({
   },
   expect: { head },
 });
+
+const stashTip = (stash: Stash) => ({ name: stash.name, oid: stash.oid });
+
+export const stashPushWrite = (
+  message: string,
+  untracked: boolean,
+  paths: readonly string[],
+  head: Head,
+): Write => ({
+  operation: { kind: "stashPush", message, untracked, paths: [...paths] },
+  expect: { head },
+});
+
+export const stashApplyWrite = (stash: Stash, head: Head): Write => ({
+  operation: { kind: "stashApply", stash: stashTip(stash) },
+  expect: { head },
+});
+
+export const stashPopWrite = (stash: Stash, head: Head): Write => ({
+  operation: { kind: "stashPop", stash: stashTip(stash) },
+  expect: { head },
+});
+
+export const stashDropWrite = (stash: Stash, head: Head): Write => ({
+  operation: { kind: "stashDrop", stash: stashTip(stash) },
+  expect: { head },
+});
+
+const stashBranch = /^(?:WIP on|On) ([^:]*): /;
+
+/** The worktree apply and pop change. A selected worktree wins. Otherwise the one worktree checked out on the branch Git names in the stash message, then the repository that was added. */
+export function worktreeForStash(
+  repository: {
+    root: RepositoryRoot;
+    head: Head;
+    worktrees: readonly { root: RepositoryRoot; head: Head }[];
+  },
+  message: string,
+  selected: { root: RepositoryRoot; head: Head } | null,
+): { root: RepositoryRoot; head: Head } {
+  if (selected) return selected;
+  const branch = stashBranch.exec(message)?.[1];
+  if (branch && branch !== "(no branch)") {
+    const reference = `refs/heads/${branch}`;
+    const matches = repository.worktrees.filter(
+      (worktree) =>
+        worktree.head.kind === "attached" &&
+        worktree.head.reference === reference,
+    );
+    const worktree = matches[0];
+    if (matches.length === 1 && worktree) {
+      return { root: worktree.root, head: worktree.head };
+    }
+  }
+  return { root: repository.root, head: repository.head };
+}
+
+export const noticeLabel = (step: Step, operation: Operation, label: string) =>
+  step === "undo" &&
+  (operation.kind === "stashPop" || operation.kind === "stashDrop")
+    ? `${label}. The entry returns at stash@{0}`
+    : label;
 
 export const branchWrite = (operation: BranchOperation, head: Head): Write => ({
   operation,
@@ -390,6 +467,16 @@ export function describe(operation: Operation): string {
       return `Create tag ${operation.name}`;
     case "deleteTag":
       return `Delete tag ${operation.tag.reference.replace(/^refs\/tags\//, "")}`;
+    case "stashPush":
+      return operation.message.trim() === ""
+        ? "Stash changes"
+        : `Stash ${quoted(operation.message)}`;
+    case "stashApply":
+      return `Apply ${operation.stash.name}`;
+    case "stashPop":
+      return `Pop ${operation.stash.name}`;
+    case "stashDrop":
+      return `Drop ${operation.stash.name}`;
   }
   if ("message" in operation)
     return `${commitVerbs[operation.kind]} ${quoted(operation.message)}`;
@@ -480,7 +567,8 @@ export const rereadsRepository = (problem: Problem) =>
   problem.kind === "staleView" &&
   (problem.reason === "headMoved" ||
     problem.reason === "branchChanged" ||
-    problem.reason === "tagChanged");
+    problem.reason === "tagChanged" ||
+    problem.reason === "stashChanged");
 
 function listed(paths: readonly string[]): string {
   const shown =
@@ -502,6 +590,7 @@ function staleCause(problem: KnownStale, step: Step | null): string {
     case "pathChanged":
     case "branchChanged":
     case "tagChanged":
+    case "stashChanged":
       return problem.message;
     case "pathNotChosen": {
       const { paths } = problem;
@@ -551,6 +640,7 @@ export function failureText(
       problem.reason === "pathChanged" ||
       problem.reason === "branchChanged" ||
       problem.reason === "tagChanged" ||
+      problem.reason === "stashChanged" ||
       (part && problem.reason === "pathNotChosen")
     )
       return `${what} ${problem.message}`;

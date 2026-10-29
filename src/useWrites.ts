@@ -5,6 +5,7 @@ import {
   describe,
   movesRefs,
   nextEntry,
+  noticeLabel,
   rereadsRepository,
 } from "./domain/operations";
 import type {
@@ -146,7 +147,11 @@ export function useWrites(
           : { kind: "failed", ...job, label, problem: outcome.problem }
         : action === "write"
           ? null
-          : { kind: "stepped", step: action, label };
+          : {
+              kind: "stepped",
+              step: action,
+              label: noticeLabel(action, operation, label),
+            };
     update(repository, (writes) => ({ ...writes, running: null, notice }));
     return outcome;
   }

@@ -87,6 +87,7 @@ export type WorktreeWrites = {
     paths: readonly string[],
     returnFocus?: () => void,
   ) => void;
+  confirmStash: (worktree: RepositoryRoot, paths: readonly string[]) => void;
   lostFocus: () => void;
 };
 
@@ -619,6 +620,7 @@ function WorktreeFiles({
   onWrite,
   discardable,
   onDiscard,
+  onStash,
   onRowFocus,
   refocusPath,
   onFocused,
@@ -635,6 +637,7 @@ function WorktreeFiles({
   ) => void;
   discardable: ReadonlySet<string>;
   onDiscard: (paths: string[], row?: string) => void;
+  onStash: (paths: string[]) => void;
   onRowFocus: (focus: RowFocus) => void;
   refocusPath: string | null;
   onFocused: () => void;
@@ -655,6 +658,11 @@ function WorktreeFiles({
       run: onDiscard,
       appliesTo: discardable,
     });
+  actions.push({
+    label: "Stash…",
+    disabled: busy,
+    run: (paths) => onStash(paths),
+  });
   const discardAll =
     discarding && files.some((file) => discardable.has(file.path));
   return (
@@ -815,7 +823,20 @@ function WorktreeInspector({
         )?.name ?? head.reference.replace(/^refs\/heads\//, ""));
   return (
     <div className="inspector-content">
-      <h2>Uncommitted changes</h2>
+      <header className="worktree-group-header">
+        <h2>Uncommitted changes</h2>
+        {changes?.kind === "ready" && changes.status.entries.length > 0 && (
+          <button
+            className="button secondary list-action"
+            aria-disabled={writes.busy}
+            onClick={() => {
+              if (!writes.busy) writes.confirmStash(worktree.root, []);
+            }}
+          >
+            Stash…
+          </button>
+        )}
+      </header>
       <dl className="commit-metadata">
         <div className="meta-row">
           <dt className="visually-hidden">Worktree</dt>
@@ -890,6 +911,7 @@ function WorktreeInspector({
               busy={writes.busy}
               onWrite={onWrite}
               discardable={discardable}
+              onStash={(paths) => writes.confirmStash(worktree.root, paths)}
               onDiscard={(paths, row) =>
                 writes.confirmDiscard(
                   worktree.root,

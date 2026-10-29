@@ -83,6 +83,10 @@ export const stashSchema = z.object({
   message: z.string(),
   timestamp: z.number().int(),
 });
+export const stashTipSchema = z.strictObject({
+  name: z.string(),
+  oid: oidSchema,
+});
 export const submoduleSchema = z.object({
   path: z.string(),
   oid: oidSchema,
@@ -355,6 +359,15 @@ export const operationSchema = z.discriminatedUnion("kind", [
     message: z.string().nullable(),
   }),
   z.strictObject({ kind: z.literal("deleteTag"), tag: tagTipSchema }),
+  z.strictObject({
+    kind: z.literal("stashPush"),
+    message: z.string(),
+    untracked: z.boolean(),
+    paths: z.array(z.string()),
+  }),
+  z.strictObject({ kind: z.literal("stashApply"), stash: stashTipSchema }),
+  z.strictObject({ kind: z.literal("stashPop"), stash: stashTipSchema }),
+  z.strictObject({ kind: z.literal("stashDrop"), stash: stashTipSchema }),
 ]);
 export const expectSchema = z.strictObject({ head: headSchema });
 export const appliedSchema = z.strictObject({
@@ -380,6 +393,7 @@ const staleReasonSchema = z.enum([
   "historyChanged",
   "branchChanged",
   "tagChanged",
+  "stashChanged",
 ]);
 const staleView = { kind: z.literal("staleView"), message: z.string() };
 export const repositoryErrorSchema = z.union([

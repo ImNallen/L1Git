@@ -110,6 +110,49 @@ impl IndexChange {
             .flat_map(|path| path.before.iter().chain(&path.after))
             .any(|entry| entry.skip_worktree)
     }
+
+    pub(super) fn empty(head: Head) -> Self {
+        Self {
+            head,
+            paths: Vec::new(),
+        }
+    }
+
+    /// Every path whose rows differ. An empty result is a real change record:
+    /// undo still compares `head`. A name that is not UTF-8 is refused.
+    pub(super) fn differing(
+        head: Head,
+        before: &Rows,
+        after: &Rows,
+    ) -> Result<Self, RepositoryError> {
+        let mut paths = Vec::new();
+        for path in differences(before, after) {
+            let Some(path) = str::from_utf8(path).ok() else {
+                return Err(RepositoryError::new(
+                    ErrorKind::UnsupportedPath,
+                    "A file name that is not valid UTF-8 changed, which L1 Git cannot stash. Rename that file, or stash it with Git.",
+                ));
+            };
+            paths.push(PathChange {
+                path: path.to_owned(),
+                before: at(before, path).to_vec(),
+                after: at(after, path).to_vec(),
+            });
+        }
+        Ok(Self { head, paths })
+    }
+
+    pub(super) fn head(&self) -> Head {
+        self.head.clone()
+    }
+
+    pub(super) fn is_empty(&self) -> bool {
+        self.paths.is_empty()
+    }
+
+    pub(super) fn path_names(&self) -> impl Iterator<Item = &str> {
+        self.paths.iter().map(|path| path.path.as_str())
+    }
 }
 
 /// The object an entry names, unless the repository never needs it from the
@@ -758,6 +801,36 @@ pub(super) fn read(txn: &Txn<'_>) -> Result<Rows, RepositoryError> {
             .run(txn.deadline())?
             .succeeded()?,
     )
+}
+
+pub(super) fn read_worktree(
+    root: &Path,
+    deadline: crate::git::Deadline,
+) -> Result<(Rows, Vec<u8>), RepositoryError> {
+    let raw = git::read(root, &LS_FILES, deadline)?;
+    Ok((parse_debug(&raw)?, raw))
+}
+
+pub(super) fn parse_rows(output: &[u8]) -> Result<Rows, RepositoryError> {
+    parse_debug(output)
+}
+
+pub(super) fn stored_blobs(rows: &Rows) -> Vec<Oid> {
+    let objects: BTreeSet<Oid> = rows
+        .values()
+        .flat_map(|entries| entries.iter().filter_map(stored))
+        .cloned()
+        .collect();
+    objects.into_iter().collect()
+}
+
+pub(super) fn stored_blobs_of(rows: &Rows, paths: &[String]) -> Vec<Oid> {
+    let objects: BTreeSet<Oid> = paths
+        .iter()
+        .flat_map(|path| at(rows, path).iter().filter_map(stored))
+        .cloned()
+        .collect();
+    objects.into_iter().collect()
 }
 
 fn put(txn: &Txn<'_>, targets: &[(&str, &[IndexEntry])]) -> Result<(), RepositoryError> {

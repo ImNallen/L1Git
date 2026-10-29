@@ -29,7 +29,12 @@ export type ActionContext = {
   } | null;
   sidebarTag: { name: string } | null;
   rule: VisibilityRule["kind"];
-  worktree: { unstaged: number; staged: number; discardable: number } | null;
+  worktree: {
+    unstaged: number;
+    staged: number;
+    conflicts?: number;
+    discardable: number;
+  } | null;
   history: { undo: string | null; redo: string | null };
   writing: boolean;
   typing: boolean;
@@ -67,6 +72,7 @@ export type Commands = {
   stageAll: () => void;
   unstageAll: () => void;
   discardAll: () => void;
+  stashChanges: () => void;
   focusCommit: () => void;
   undo: () => void;
   redo: () => void;
@@ -87,6 +93,7 @@ export type ActionId =
   | "stageAll"
   | "unstageAll"
   | "discardAll"
+  | "stashChanges"
   | "focusCommit"
   | "undo"
   | "redo"
@@ -197,6 +204,18 @@ export const actions: readonly Action[] = [
       !context.writing &&
       (context.worktree?.discardable ?? 0) > 0,
     run: (commands) => commands.discardAll(),
+  },
+  {
+    id: "stashChanges",
+    title: "Stash changes…",
+    available: (context) =>
+      onRepository(context) &&
+      !context.writing &&
+      (context.worktree?.unstaged ?? 0) +
+        (context.worktree?.staged ?? 0) +
+        (context.worktree?.conflicts ?? 0) >
+        0,
+    run: (commands) => commands.stashChanges(),
   },
   {
     id: "focusCommit",

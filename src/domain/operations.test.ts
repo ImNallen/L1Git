@@ -8,6 +8,7 @@ import {
   deleteTagWrite,
   describe,
   discardChoice,
+  noticeLabel,
   failureText,
   hookOutputTail,
   movesRefs,
@@ -16,6 +17,11 @@ import {
   refStep,
   rereadsRepository,
   shownPaths,
+  stashApplyWrite,
+  stashDropWrite,
+  stashPopWrite,
+  stashPushWrite,
+  worktreeForStash,
   stepButton,
   steppedText,
   notMergedInto,
@@ -1171,5 +1177,143 @@ group("tag writes", () => {
         { kind: "unread" },
       ),
     ).toBe(`Could not undo Delete tag v0.1.0. ${moved.message}`);
+  });
+});
+
+group("stash writes", () => {
+  const oid = oidSchema.parse("a".repeat(40));
+  const stash = {
+    name: "stash@{1}",
+    oid,
+    message: "On main: only-a",
+    timestamp: 0,
+  };
+  const dropped = stashDropWrite(stash, head).operation;
+  const popped = stashPopWrite(stash, head).operation;
+
+  it("sends the message, the untracked flag, and the paths the user chose", () => {
+    expect(stashPushWrite("only-a", false, ["a"], head)).toEqual({
+      operation: {
+        kind: "stashPush",
+        message: "only-a",
+        untracked: false,
+        paths: ["a"],
+      },
+      expect: { head },
+    });
+    expect(stashPushWrite("", true, [], head).operation).toEqual({
+      kind: "stashPush",
+      message: "",
+      untracked: true,
+      paths: [],
+    });
+  });
+
+  it("applies, pops, and drops the stash entry the user saw", () => {
+    expect(stashApplyWrite(stash, head).operation).toEqual({
+      kind: "stashApply",
+      stash: { name: "stash@{1}", oid },
+    });
+    expect(popped).toEqual({
+      kind: "stashPop",
+      stash: { name: "stash@{1}", oid },
+    });
+    expect(dropped).toEqual({
+      kind: "stashDrop",
+      stash: { name: "stash@{1}", oid },
+    });
+  });
+
+  it("names each stash write, and undo of a pop or a drop says the entry returns at stash@{0}", () => {
+    expect(describe(stashPushWrite("", false, [], head).operation)).toBe(
+      "Stash changes",
+    );
+    expect(
+      describe(stashPushWrite("only-a", false, ["a"], head).operation),
+    ).toBe("Stash “only-a”");
+    expect(describe(stashApplyWrite(stash, head).operation)).toBe(
+      "Apply stash@{1}",
+    );
+    expect(describe(popped)).toBe("Pop stash@{1}");
+    expect(describe(dropped)).toBe("Drop stash@{1}");
+    const undone = (operation: typeof dropped) =>
+      steppedText({
+        kind: "stepped",
+        step: "undo",
+        label: noticeLabel("undo", operation, describe(operation)),
+      });
+    expect(undone(dropped)).toBe(
+      "Undid Drop stash@{1}. The entry returns at stash@{0}",
+    );
+    expect(undone(popped)).toBe(
+      "Undid Pop stash@{1}. The entry returns at stash@{0}",
+    );
+    expect(
+      steppedText({
+        kind: "stepped",
+        step: "redo",
+        label: noticeLabel("redo", dropped, describe(dropped)),
+      }),
+    ).toBe("Redid Drop stash@{1}");
+  });
+
+  it("applies and pops in the open worktree, or the one on the stash's branch", () => {
+    const develop = {
+      kind: "attached" as const,
+      reference: refSchema.parse("refs/heads/develop"),
+      oid: oidSchema.parse("d".repeat(40)),
+    };
+    const linkedWorktree = {
+      root: rootSchema.parse("/work/sync-develop"),
+      head: develop,
+    };
+    const repository = {
+      root: rootSchema.parse("/work/sync-demo"),
+      head,
+      worktrees: [
+        { root: rootSchema.parse("/work/sync-demo"), head },
+        linkedWorktree,
+      ],
+    };
+    const linked = { root: linkedWorktree.root, head: develop };
+    const added = { root: repository.root, head };
+    expect(worktreeForStash(repository, "On develop: wip", linked)).toEqual(
+      linked,
+    );
+    expect(worktreeForStash(repository, "On develop: wip", null)).toEqual(
+      linked,
+    );
+    expect(worktreeForStash(repository, "On main: wip", added)).toEqual(added);
+    expect(
+      worktreeForStash(repository, "WIP on (no branch): abc", null),
+    ).toEqual(added);
+  });
+
+  it("rereads refs after a stash write and when the entry moved", () => {
+    for (const operation of [
+      stashPushWrite("x", false, [], head).operation,
+      stashApplyWrite(stash, head).operation,
+      popped,
+      dropped,
+    ])
+      expect(movesRefs(operation)).toBe(true);
+    const moved = {
+      ...stale("stashChanged"),
+      message:
+        "stash@{1} no longer holds the stash you saw. Refresh and try again.",
+    };
+    expect(rereadsRepository(moved)).toBe(true);
+    expect(
+      failureText(
+        {
+          kind: "failed",
+          action: "write",
+          label: "Apply stash@{1}",
+          problem: moved,
+          operation: stashApplyWrite(stash, head).operation,
+        },
+        { kind: "unread" },
+      ),
+    ).toBe(`Could not apply stash@{1}. ${moved.message}`);
   });
 });

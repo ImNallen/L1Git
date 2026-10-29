@@ -23,5 +23,6 @@ pub use run::{Request, Response, run};
 pub use status::{worktree_patch, worktree_status};
 pub use sync::{Coordinator, Limits};
 pub use write::{
-    Applied, BranchTip, EntryId, Expect, LinePick, LineSide, Operation, Start, TagTip, UndoHistory,
+    Applied, BranchTip, EntryId, Expect, LinePick, LineSide, Operation, Start, StashTip, TagTip,
+    UndoHistory,
 };

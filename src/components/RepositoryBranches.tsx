@@ -73,6 +73,10 @@ type Props = {
     event: ReactMouseEvent<HTMLElement> | ReactKeyboardEvent<HTMLElement>,
     tag: Tag,
   ) => void;
+  onStashMenu: (
+    event: ReactMouseEvent<HTMLElement> | ReactKeyboardEvent<HTMLElement>,
+    stash: Stash,
+  ) => void;
   onCheckout: ((branch: Branch) => void) | null;
 };
 
@@ -91,6 +95,7 @@ export function RepositoryBranches({
   onRule,
   onMenu,
   onTagMenu,
+  onStashMenu,
   onCheckout,
 }: Props) {
   const checkableAtFirstClick = useRef<FullRef | null>(null);
@@ -195,6 +200,10 @@ export function RepositoryBranches({
         key={stash.name}
         className={`branch-row stash-row ${selected ? "selected" : ""}`}
         onClick={() => onStash(stash)}
+        onContextMenu={(event) => onStashMenu(event, stash)}
+        onKeyDown={(event) => {
+          if (opensMenu(event)) onStashMenu(event, stash);
+        }}
         title={`${stash.name} · ${stash.message} · Show changes`}
         aria-current={selected ? "true" : undefined}
       >

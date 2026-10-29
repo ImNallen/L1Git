@@ -20,6 +20,7 @@ import {
   Palette,
   Settings,
   Plus,
+  Trash2,
   TriangleAlert,
 } from "lucide-react";
 import {
@@ -48,6 +49,8 @@ import { AddRepositoryDialog } from "./components/AddRepositoryDialog";
 import { BranchDialog } from "./components/BranchDialog";
 import { CheckoutCommitDialog } from "./components/CheckoutCommitDialog";
 import { TagDialog } from "./components/TagDialog";
+import { StashDialog } from "./components/StashDialog";
+import { ConfirmDialog } from "./components/ConfirmDialog";
 import { DiscardDialog, DiscardPartDialog } from "./components/DiscardDialog";
 import { EditMessageDialog } from "./components/EditMessageDialog";
 import { COMMIT_SUMMARY_ID } from "./components/CommitBox";
@@ -69,6 +72,10 @@ import {
   nextEntry,
   refStep,
   startAt,
+  stashApplyWrite,
+  stashDropWrite,
+  stashPopWrite,
+  worktreeForStash,
   writeFor,
 } from "./domain/operations";
 import type {
@@ -87,6 +94,7 @@ import { refLabels } from "./domain/refs";
 import type {
   Branch,
   FullRef,
+  Head,
   Oid,
   RepositoryRefs,
   RepositoryRoot,
@@ -186,6 +194,13 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   const [branchAsk, setBranchAsk] = useState<BranchAsk | null>(null);
   const [detaching, setDetaching] = useState<Oid | null>(null);
   const [tagAsk, setTagAsk] = useState<TagAsk | null>(null);
+  const [stashing, setStashing] = useState<{
+    root: RepositoryRoot;
+    paths: string[];
+    untracked: boolean;
+    head: Head;
+  } | null>(null);
+  const [droppingStash, setDroppingStash] = useState<Stash | null>(null);
   const [steppedRef, setSteppedRef] = useState<
     (RefStep & { root: RepositoryRoot }) | null
   >(null);
@@ -302,6 +317,47 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     const choice = discardChoice(changes.status, paths);
     const write = writeFor("discard", changes.status, choice.paths);
     if (write !== null) setDiscarding({ root, write, ...choice, returnFocus });
+  }
+  function askStash(root: RepositoryRoot, paths: readonly string[]) {
+    const changes = app.changes.get(root);
+    if (changes?.kind !== "ready") return;
+    const named = new Set(paths);
+    const untracked =
+      paths.length > 0 &&
+      changes.status.entries.some(
+        (entry) =>
+          entry.kind === "untracked" &&
+          !entry.path.endsWith("/") &&
+          named.has(entry.path),
+      );
+    setStashing({
+      root,
+      paths: [...paths],
+      untracked,
+      head: changes.status.head,
+    });
+  }
+  function stashAction(action: "apply" | "pop" | "drop", stash: Stash) {
+    if (!snapshot) return;
+    if (action === "drop") {
+      setDroppingStash(stash);
+      return;
+    }
+    const target = worktreeForStash(
+      snapshot,
+      stash.message,
+      selectedWorktree
+        ? {
+            root: selectedWorktree.worktree.root,
+            head: selectedWorktree.worktree.head,
+          }
+        : null,
+    );
+    const write =
+      action === "apply"
+        ? stashApplyWrite(stash, target.head)
+        : stashPopWrite(stash, target.head);
+    void writes.write(target.root, write);
   }
   const rootChanges = snapshot ? app.changes.get(snapshot.root) : undefined;
   const headStatus = rootChanges?.kind === "ready" ? rootChanges.status : null;
@@ -627,6 +683,9 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       if (selectedWorktree && paths)
         askDiscard(selectedWorktree.worktree.root, paths);
     },
+    stashChanges: () => {
+      if (selectedWorktree) askStash(selectedWorktree.worktree.root, []);
+    },
     focusCommit: () => {
       flushSync(() => setInspectorOpen(true));
       document.getElementById(COMMIT_SUMMARY_ID)?.focus();
@@ -669,6 +728,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     worktree: selectedLists && {
       unstaged: selectedLists.get("unstaged")?.length ?? 0,
       staged: selectedLists.get("staged")?.length ?? 0,
+      conflicts: selectedLists.get("conflict")?.length ?? 0,
       discardable:
         selectedChanges?.kind === "ready"
           ? discardChoice(
@@ -942,6 +1002,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
             }
             onBranchAsk={setBranchAsk}
             onTagAsk={setTagAsk}
+            onStashAction={stashAction}
             onCheckout={(branch) => void checkout(startAt(branch))}
           />
         </div>
@@ -1254,6 +1315,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                         return outcome;
                       },
                       confirmDiscard: askDiscard,
+                      confirmStash: askStash,
                       lostFocus: () => checkLostFocus((count) => count + 1),
                     }}
                   />
@@ -1381,6 +1443,39 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
           onConfirm={() => void checkout({ kind: "commit", oid: detaching })}
           onClose={() => setDetaching(null)}
         />
+      )}
+      {stashing && (
+        <StashDialog
+          paths={stashing.paths}
+          includeUntracked={stashing.untracked}
+          head={stashing.head}
+          onWrite={async (write) => {
+            const outcome = await writes.write(stashing.root, write);
+            if (outcome.kind === "failed") writes.dismiss();
+            return outcome;
+          }}
+          onClose={() => setStashing(null)}
+        />
+      )}
+      {droppingStash && snapshot && (
+        <ConfirmDialog
+          icon={Trash2}
+          title={`Drop ${droppingStash.name}?`}
+          closeLabel="Close drop stash"
+          confirm="Drop stash"
+          onConfirm={() => {
+            void writes.write(
+              snapshot.root,
+              stashDropWrite(droppingStash, snapshot.head),
+            );
+            setDroppingStash(null);
+          }}
+          onClose={() => setDroppingStash(null)}
+        >
+          <p>
+            {droppingStash.message} Undo puts this entry back at stash@{"{0}"}.
+          </p>
+        </ConfirmDialog>
       )}
       {discarding && (
         <DiscardDialog

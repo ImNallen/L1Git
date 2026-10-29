@@ -7,9 +7,11 @@ mod branches;
 mod checkout;
 mod commit;
 mod discard;
+mod files;
 mod index;
 mod partial;
 mod refs;
+mod stash;
 mod store;
 mod tags;
 mod txn;
@@ -24,6 +26,7 @@ pub use branches::{BranchTip, Start};
 use partial::{Action, Part, Picks};
 pub use partial::{LinePick, LineSide};
 use serde::{Deserialize, Serialize};
+pub use stash::StashTip;
 use std::{
     fmt,
     path::{Path, PathBuf},
@@ -132,6 +135,23 @@ pub enum Operation {
     },
     /// Undo puts the ref back at the same object.
     DeleteTag { tag: TagTip },
+    /// Saves worktree changes with `git stash push`. An empty `paths` list
+    /// saves every change. An empty `message` leaves Git's "WIP on ..." text.
+    /// Undo puts the captured bytes and index rows back, then drops this stash
+    /// commit. Redo stores that same commit again.
+    StashPush {
+        message: String,
+        untracked: bool,
+        paths: Vec<String>,
+    },
+    /// Applies `stash` with `git stash apply --index`. The entry stays in the
+    /// list, and undo refuses unless it is still listed.
+    StashApply { stash: StashTip },
+    /// Applies `stash` and, when that is clean, drops it. A conflict keeps
+    /// the entry.
+    StashPop { stash: StashTip },
+    /// Drops `stash`. Undo stores that same commit at `stash@{0}`.
+    StashDrop { stash: StashTip },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -207,6 +227,7 @@ enum Change {
     Branch(branches::BranchChange),
     Checkout(checkout::CheckoutChange),
     Tag(tags::TagChange),
+    Stash(stash::StashChange),
 }
 
 impl From<discard::DiscardChange> for Change {
@@ -233,11 +254,18 @@ impl From<tags::TagChange> for Change {
     }
 }
 
+impl From<stash::StashChange> for Change {
+    fn from(change: stash::StashChange) -> Self {
+        Self::Stash(change)
+    }
+}
+
 impl Change {
     fn objects(&self) -> Objects {
         match self {
             Self::Index(change) => Objects::exact(change.objects()),
             Self::Ref(change) => change.objects(),
+            Self::Stash(change) => Objects::exact(change.objects()),
             Self::Discard(_) | Self::Branch(_) | Self::Checkout(_) | Self::Tag(_) => {
                 Objects::default()
             }
@@ -294,6 +322,9 @@ impl Change {
                 store.save(step.log())?;
                 trouble.map_or(Ok(None), Err)
             }
+            Self::Stash(change) => {
+                stash::step(repo, store, entry, change, step, direction, deadline)
+            }
         }
     }
 
@@ -301,6 +332,8 @@ impl Change {
         match (self, direction) {
             (Self::Checkout(_), Direction::Undo) => Some(LocalWrite::UndoCheckout),
             (Self::Checkout(_), Direction::Redo) => Some(LocalWrite::RedoCheckout),
+            (Self::Stash(_), Direction::Undo) => Some(LocalWrite::UndoStash),
+            (Self::Stash(_), Direction::Redo) => Some(LocalWrite::RedoStash),
             (
                 Self::Index(_) | Self::Ref(_) | Self::Discard(_) | Self::Branch(_) | Self::Tag(_),
                 _,
@@ -311,6 +344,7 @@ impl Change {
     fn landed(
         &self,
         repo: &Repo,
+        entry: &EntryObjects,
         deadline: WriteDeadline,
     ) -> Result<Option<Self>, RepositoryError> {
         match self {
@@ -321,12 +355,16 @@ impl Change {
                 Ok(checkout::landed(repo, change, deadline)?.map(Self::Checkout))
             }
             Self::Tag(change) => Ok(tags::landed(repo, change, deadline)?.map(Self::Tag)),
+            Self::Stash(change) => {
+                Ok(stash::landed(repo, entry, change, deadline)?.map(Self::Stash))
+            }
         }
     }
 
     const fn repository_wide(&self) -> bool {
         match self {
             Self::Branch(_) | Self::Tag(_) => true,
+            Self::Stash(change) => change.repository_wide(),
             Self::Index(_) | Self::Ref(_) | Self::Discard(_) | Self::Checkout(_) => false,
         }
     }
@@ -334,9 +372,12 @@ impl Change {
     const fn keeps_overwritten_files(&self) -> bool {
         match self {
             Self::Discard(_) => true,
-            Self::Index(_) | Self::Ref(_) | Self::Branch(_) | Self::Checkout(_) | Self::Tag(_) => {
-                false
-            }
+            Self::Index(_)
+            | Self::Ref(_)
+            | Self::Branch(_)
+            | Self::Checkout(_)
+            | Self::Tag(_)
+            | Self::Stash(_) => false,
         }
     }
 
@@ -345,13 +386,19 @@ impl Change {
             Self::Discard(change) => {
                 discard::remove_copies_beside(Path::new(&applied.root), applied.id, change);
             }
-            Self::Index(_) | Self::Ref(_) | Self::Branch(_) | Self::Checkout(_) | Self::Tag(_) => {}
+            Self::Index(_)
+            | Self::Ref(_)
+            | Self::Branch(_)
+            | Self::Checkout(_)
+            | Self::Tag(_)
+            | Self::Stash(_) => {}
         }
     }
 
     fn touches_skip_worktree(&self) -> bool {
         match self {
             Self::Index(change) => change.touches_skip_worktree(),
+            Self::Stash(change) => change.touches_skip_worktree(),
             Self::Ref(_)
             | Self::Discard(_)
             | Self::Branch(_)
@@ -400,6 +447,10 @@ impl Operation {
             Self::Checkout { .. } => LocalWrite::Checkout,
             Self::CreateTag { .. } => LocalWrite::CreateTag,
             Self::DeleteTag { .. } => LocalWrite::DeleteTag,
+            Self::StashPush { .. } => LocalWrite::StashPush,
+            Self::StashApply { .. } => LocalWrite::StashApply,
+            Self::StashPop { .. } => LocalWrite::StashPop,
+            Self::StashDrop { .. } => LocalWrite::StashDrop,
         }
     }
 
@@ -474,6 +525,16 @@ impl Operation {
                 branch(tags::create(&writing, name, at, message.as_deref()))
             }
             Self::DeleteTag { tag } => branch(tags::delete(&writing, tag)),
+            Self::StashPush {
+                message,
+                untracked,
+                paths,
+            } => stash::push(&writing, expect, message, *untracked, paths),
+            Self::StashApply { stash } => stash::apply(&writing, expect, stash, false),
+            Self::StashPop { stash } => stash::apply(&writing, expect, stash, true),
+            Self::StashDrop { stash } => {
+                stash::drop_stash(&writing, stash).map(|applied| (applied, None))
+            }
         }
     }
 }
