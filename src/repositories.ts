@@ -2,11 +2,13 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { z } from "zod";
 import {
+  addRemoteInputSchema,
+  addRemoteReportSchema,
   publishOptionsSchema,
   pushAvailabilitySchema,
   pushReportSchema,
 } from "./domain/push";
-import type { PublishChoice, PushIntent } from "./domain/push";
+import type { AddRemoteInput, PublishChoice, PushIntent } from "./domain/push";
 import { fastForwardReportSchema, overviewSchema } from "./domain/overview";
 import type { Comparison } from "./domain/comparison";
 import type { Advance, FetchMode } from "./domain/overview";
@@ -49,6 +51,7 @@ type RepositoryRequest =
   | { op: "blame"; path: RepositoryRoot; oid: Oid; file: string }
   | { op: "overview"; path: RepositoryRoot; mode: FetchMode }
   | { op: "publishOptions"; path: RepositoryRoot }
+  | { op: "addRemote"; path: RepositoryRoot; remote: AddRemoteInput }
   | { op: "preparePublish"; path: RepositoryRoot; choice: PublishChoice }
   | { op: "preparePush"; path: RepositoryRoot }
   | { op: "push"; path: RepositoryRoot; intent: PushIntent }
@@ -71,6 +74,7 @@ const responseSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("blame"), data: blameSchema }),
   z.object({ op: z.literal("overview"), data: overviewSchema }),
   z.object({ op: z.literal("publishOptions"), data: publishOptionsSchema }),
+  z.object({ op: z.literal("addRemote"), data: addRemoteReportSchema }),
   z.object({ op: z.literal("preparePublish"), data: pushAvailabilitySchema }),
   z.object({ op: z.literal("preparePush"), data: pushAvailabilitySchema }),
   z.object({ op: z.literal("push"), data: pushReportSchema }),
@@ -249,6 +253,15 @@ export async function push(path: RepositoryRoot, intent: PushIntent) {
 
 export async function publishOptions(path: RepositoryRoot) {
   return (await run({ op: "publishOptions", path })).data;
+}
+export async function addRemote(path: RepositoryRoot, remote: AddRemoteInput) {
+  return (
+    await run({
+      op: "addRemote",
+      path,
+      remote: addRemoteInputSchema.parse(remote),
+    })
+  ).data;
 }
 export async function preparePublish(
   path: RepositoryRoot,

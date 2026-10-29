@@ -262,3 +262,45 @@ it.each([true, false])(
       });
   },
 );
+
+it.each([true, false])(
+  "adds a remote over native=%s and parses saved refresh failure",
+  async (native) => {
+    const { addRemote } = await load(native);
+    const remote = { name: "origin", url: "../endpoint" };
+    const report = {
+      name: "origin",
+      refresh: { kind: "failed", message: "Added. Reload remotes." },
+    };
+    if (native) invoke.mockResolvedValueOnce({ op: "addRemote", data: report });
+    else
+      fetch.mockResolvedValueOnce(
+        Response.json({ ok: true, op: "addRemote", data: report }),
+      );
+    expect(await addRemote(root, remote)).toEqual(report);
+    if (native)
+      expect(invoke).toHaveBeenLastCalledWith("repository_run", {
+        request: { op: "addRemote", path: root, remote },
+      });
+    else
+      expect(JSON.parse(fetch.mock.calls.at(-1)?.[1]?.body ?? "")).toEqual({
+        op: "addRemote",
+        path: root,
+        remote,
+      });
+    if (native)
+      invoke.mockResolvedValueOnce({
+        op: "addRemote",
+        data: { ...report, url: remote.url },
+      });
+    else
+      fetch.mockResolvedValueOnce(
+        Response.json({
+          ok: true,
+          op: "addRemote",
+          data: { ...report, url: remote.url },
+        }),
+      );
+    await expect(addRemote(root, remote)).rejects.toHaveProperty("issues");
+  },
+);

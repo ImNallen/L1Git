@@ -1,9 +1,9 @@
 use crate::{
-    Advance, Applied, Blame, BranchMerged, BranchTip, CommitDetail, Comparison, Coordinator,
-    EntryId, Expect, FastForwardReport, FetchMode, FilePatch, FileRevision, LineStats, Operation,
-    PublishChoice, PublishOptions, PushAvailability, PushIntent, PushReport, RepositoryError,
-    RepositoryOverview, RepositoryRefs, RepositorySnapshot, Side, UndoHistory, WorktreePatch,
-    WorktreeStatus,
+    AddRemote, AddRemoteReport, Advance, Applied, Blame, BranchMerged, BranchTip, CommitDetail,
+    Comparison, Coordinator, EntryId, Expect, FastForwardReport, FetchMode, FilePatch,
+    FileRevision, LineStats, Operation, PublishChoice, PublishOptions, PushAvailability,
+    PushIntent, PushReport, RepositoryError, RepositoryOverview, RepositoryRefs,
+    RepositorySnapshot, Side, UndoHistory, WorktreePatch, WorktreeStatus,
     file_history::{blame_within, file_history_within},
     git::LocalRead,
     repository::{
@@ -52,6 +52,10 @@ pub enum Request {
     },
     PublishOptions {
         path: String,
+    },
+    AddRemote {
+        path: String,
+        remote: AddRemote,
     },
     PreparePublish {
         path: String,
@@ -110,6 +114,7 @@ pub enum Response {
     Blame(Blame),
     Overview(RepositoryOverview),
     PublishOptions(PublishOptions),
+    AddRemote(AddRemoteReport),
     PreparePublish(PushAvailability),
     PreparePush(PushAvailability),
     Push(PushReport),
@@ -165,6 +170,9 @@ pub fn run(coordinator: &Coordinator, request: Request) -> Result<Response, Repo
         Request::Overview { path, mode } => Response::Overview(coordinator.overview(&path, mode)?),
         Request::PublishOptions { path } => {
             Response::PublishOptions(coordinator.publish_options(&path)?)
+        }
+        Request::AddRemote { path, remote } => {
+            Response::AddRemote(coordinator.add_remote(&path, &remote)?)
         }
         Request::PreparePublish { path, choice } => {
             Response::PreparePublish(coordinator.prepare_publish(&path, &choice)?)

@@ -2,11 +2,13 @@ mod advance;
 mod fetch;
 mod push;
 mod read;
+mod remote;
 pub use push::{
     PublishChoice, PublishOptions, PublishRemote, PublishRemoteAvailability, PushAvailability,
     PushIntent, PushOutcome, PushPurpose, PushRefresh, PushReport, PushUnavailable,
     TrackingOutcome,
 };
+pub use remote::{AddRemote, AddRemoteRefresh, AddRemoteReport};
 
 pub(crate) use advance::is_at;
 pub(crate) use read::in_progress;
@@ -50,9 +52,11 @@ impl Default for Limits {
 
 /// Owns every Git command that contacts a remote, moves a ref, or writes, and
 /// the undo history. Keep one per process. Per Git common dir it runs at most
-/// one fetch, push, or fast-forward at a time (the gate) and at most one write, undo,
-/// redo, or fast-forward ref move at a time (the write lock). A write never
-/// takes the gate, so it never waits for a fetch. At most `network_slots`
+/// one fetch, push, fast-forward, or config addition at a time (the gate) and at
+/// most one write, undo, redo, ref move, or config addition at a time (the write
+/// lock). Ordinary writes never take the gate, so they never wait for a fetch.
+/// Push, fast-forward, and config addition take the gate before the write lock.
+/// At most `network_slots`
 /// remote operations run at once. Local reads take no lock.
 pub struct Coordinator {
     limits: Limits,
