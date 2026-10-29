@@ -1,0 +1,392 @@
+name: Release
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Release channel
+        type: choice
+        options: [nightly, stable]
+        default: nightly
+      version:
+        description: Plain stable X.Y.Z override. Defaults to the latest nightly's core version.
+        type: string
+        required: false
+  push:
+    tags:
+      - "v*.*.*"
+      - "!v*-nightly.*"
+  pull_request:
+    paths:
+      - .github/workflows/ci.yml
+      - .github/workflows/release.yml
+      - scripts/**
+      - src-tauri/**
+      - Cargo.toml
+      - Cargo.lock
+      - package.json
+      - pnpm-lock.yaml
+      - docs/releasing.md
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('release-pr-{0}', github.ref) || 'release' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  queue: ${{ github.event_name == 'pull_request' && 'single' || 'max' }}
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      action: ${{ steps.plan.outputs.action }}
+      version: ${{ steps.plan.outputs.version }}
+      sha: ${{ steps.plan.outputs.sha }}
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+      - id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ github.sha }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+          INPUT_CHANNEL: ${{ inputs.channel }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          RUN_STARTED_AT=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .created_at)
+          export RUN_STARTED_AT
+          node scripts/release-plan.mjs
+      - uses: actions/upload-artifact@v4
+        if: steps.plan.outputs.restored != 'true'
+        with:
+          name: release-plan
+          path: plan.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: Require signing inputs before building a publication
+        if: steps.plan.outputs.action == 'publish'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          missing=()
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD; do
+            [[ -n "${!name}" ]] || missing+=("$name")
+          done
+          if (( ${#missing[@]} )); then
+            echo "::error::Set the signing secrets listed in docs/releasing.md. Missing: ${missing[*]}"
+            exit 1
+          fi
+
+      - name: Restore the disposable PR signing key
+        id: test-key
+        if: steps.plan.outputs.action == 'dry-run'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release-assets.mjs restore dry-run-signing dry-run-signing
+      - uses: pnpm/action-setup@v4
+        if: steps.plan.outputs.action == 'dry-run' && steps.test-key.outputs.restored != 'true'
+      - name: Generate an ephemeral updater key for this PR run
+        if: steps.plan.outputs.action == 'dry-run' && steps.test-key.outputs.restored != 'true'
+        run: |
+          [[ "$GITHUB_RUN_ATTEMPT" == 1 ]] || { echo 'Original PR signing artifact is missing. Start a new run.'; exit 1; }
+          pnpm install --frozen-lockfile
+          mkdir -p dry-run-signing
+          pnpm tauri signer generate --ci --password '' --write-keys dry-run-signing/updater.key > "$RUNNER_TEMP/test-key-generation.log"
+      - uses: actions/upload-artifact@v4
+        if: steps.plan.outputs.action == 'dry-run' && steps.test-key.outputs.restored != 'true'
+        with:
+          name: dry-run-signing
+          path: dry-run-signing/*
+          retention-days: 30
+          if-no-files-found: error
+
+  ci:
+    needs: plan
+    if: needs.plan.outputs.action != 'skip'
+    uses: ./.github/workflows/ci.yml
+    with:
+      source_sha: ${{ needs.plan.outputs.sha }}
+    permissions:
+      contents: read
+
+  build:
+    name: Build ${{ matrix.id }}
+    needs: [plan, ci]
+    if: needs.plan.outputs.action != 'skip'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+      APPIMAGE_EXTRACT_AND_RUN: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          persist-credentials: false
+      - name: Check out release tooling from the workflow revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .release-tools
+          sparse-checkout: scripts
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-plan
+          path: .plan
+      - uses: actions/download-artifact@v4
+        if: needs.plan.outputs.action == 'dry-run'
+        with:
+          name: dry-run-signing
+          path: .test-signing
+      - name: Restore a successful immutable build before considering a rebuild
+        id: restore
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET: ${{ matrix.id }}
+        run: node .release-tools/scripts/release-assets.mjs restore "bundles-$TARGET" staged .plan/plan.json
+      - uses: pnpm/action-setup@v4
+        if: steps.restore.outputs.restored != 'true'
+      - uses: dtolnay/rust-toolchain@1.93.0
+        if: steps.restore.outputs.restored != 'true'
+        with:
+          targets: ${{ matrix.rustTargets }}
+      - uses: Swatinem/rust-cache@v2
+        if: steps.restore.outputs.restored != 'true'
+        with:
+          prefix-key: release-${{ matrix.id }}
+      - name: Install Linux packaging and smoke-test tools
+        if: steps.restore.outputs.restored != 'true' && runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential curl wget file libxdo-dev libssl-dev \
+            libayatana-appindicator3-dev librsvg2-dev libwebkit2gtk-4.1-dev patchelf pkg-config xdg-utils xvfb xauth
+      - if: steps.restore.outputs.restored != 'true'
+        run: pnpm install --frozen-lockfile
+      - name: Stamp the build version and remove the development signing identity
+        if: steps.restore.outputs.restored != 'true'
+        env:
+          ACTION: ${{ needs.plan.outputs.action }}
+          BUNDLE_DIRECTORY: ${{ matrix.bundleDirectory }}
+        run: |
+          rm -rf "$BUNDLE_DIRECTORY"
+          if [[ "$ACTION" == dry-run ]]; then public_key=$(cat .test-signing/updater.key.pub); else public_key=$(cat .release-tools/scripts/updater-public-key.txt); fi
+          jq -n --arg version "$VERSION" --arg pubkey "$public_key" \
+            '{version:$version,bundle:{createUpdaterArtifacts:true},plugins:{updater:{pubkey:$pubkey}}}' > release.conf.json
+          if [[ "$RUNNER_OS" == macOS && "$ACTION" == publish ]]; then
+            jq '.bundle.macOS.signingIdentity = null' release.conf.json > release-signed.conf.json
+            mv release-signed.conf.json release.conf.json
+          fi
+      - name: Package with the disposable PR updater key
+        if: steps.restore.outputs.restored != 'true' && needs.plan.outputs.action == 'dry-run'
+        env:
+          BUILD_ARGS: ${{ matrix.args }}
+        run: |
+          TAURI_SIGNING_PRIVATE_KEY=$(cat .test-signing/updater.key)
+          export TAURI_SIGNING_PRIVATE_KEY
+          export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=''
+          read -r -a build_args <<< "$BUILD_ARGS"
+          pnpm tauri build --ci "${build_args[@]}" --config release.conf.json -- --locked
+      - name: Sign Linux updater artifacts for publication
+        if: steps.restore.outputs.restored != 'true' && needs.plan.outputs.action == 'publish' && runner.os == 'Linux'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          BUILD_ARGS: ${{ matrix.args }}
+        run: |
+          read -r -a build_args <<< "$BUILD_ARGS"
+          pnpm tauri build --ci "${build_args[@]}" --config release.conf.json -- --locked
+      - name: Sign and notarize macOS for publication
+        if: steps.restore.outputs.restored != 'true' && needs.plan.outputs.action == 'publish' && runner.os == 'macOS'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          BUILD_ARGS: ${{ matrix.args }}
+        run: |
+          read -r -a build_args <<< "$BUILD_ARGS"
+          pnpm tauri build --ci "${build_args[@]}" --config release.conf.json -- --locked
+          app="target/universal-apple-darwin/release/bundle/macos/L1 Git.app"
+          codesign --verify --deep --strict "$app"
+          codesign -dv --verbose=4 "$app" 2> signature.txt
+          grep -q '^Authority=Developer ID Application:' signature.txt
+          grep -q "^TeamIdentifier=$APPLE_TEAM_ID$" signature.txt
+          xcrun stapler validate "$app"
+          dmg=(target/universal-apple-darwin/release/bundle/dmg/*.dmg)
+          [[ ${#dmg[@]} == 1 && -f "${dmg[0]}" ]]
+          xcrun notarytool submit "${dmg[0]}" --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait
+          xcrun stapler staple "${dmg[0]}"
+          xcrun stapler validate "${dmg[0]}"
+          spctl --assess --type open --context context:primary-signature "${dmg[0]}"
+      - name: Verify both macOS slices and app/package versions
+        if: steps.restore.outputs.restored != 'true' && runner.os == 'macOS'
+        env:
+          ACTION: ${{ needs.plan.outputs.action }}
+        run: |
+          app="target/universal-apple-darwin/release/bundle/macos/L1 Git.app"
+          executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")
+          archs=$(lipo -archs "$app/Contents/MacOS/$executable")
+          [[ " $archs " == *" arm64 "* && " $archs " == *" x86_64 "* ]]
+          actual=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")
+          [[ "$actual" == "$VERSION" ]]
+          dmg=(target/universal-apple-darwin/release/bundle/dmg/*.dmg)
+          [[ ${#dmg[@]} == 1 && -f "${dmg[0]}" ]]
+          mount="$RUNNER_TEMP/l1git-dmg"
+          mkdir -p "$mount"
+          hdiutil attach "${dmg[0]}" -mountpoint "$mount" -nobrowse -readonly
+          trap 'hdiutil detach "$mount"' EXIT
+          cmp "$app/Contents/Info.plist" "$mount/L1 Git.app/Contents/Info.plist"
+          cmp "$app/Contents/MacOS/$executable" "$mount/L1 Git.app/Contents/MacOS/$executable"
+          archive=(target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz)
+          [[ ${#archive[@]} == 1 && -f "${archive[0]}" ]]
+          mkdir -p "$RUNNER_TEMP/updater-app"
+          tar -xzf "${archive[0]}" -C "$RUNNER_TEMP/updater-app"
+          cmp "$app/Contents/Info.plist" "$RUNNER_TEMP/updater-app/L1 Git.app/Contents/Info.plist"
+          cmp "$app/Contents/MacOS/$executable" "$RUNNER_TEMP/updater-app/L1 Git.app/Contents/MacOS/$executable"
+          codesign --verify --deep --strict "$RUNNER_TEMP/updater-app/L1 Git.app"
+          if [[ "$ACTION" == publish ]]; then xcrun stapler validate "$RUNNER_TEMP/updater-app/L1 Git.app"; fi
+      - name: Inspect Linux package metadata and smoke-test both packages
+        if: steps.restore.outputs.restored != 'true' && runner.os == 'Linux'
+        run: |
+          root="$PWD/target/x86_64-unknown-linux-gnu/release/bundle"
+          deb=("$root"/deb/*.deb)
+          image=("$root"/appimage/*.AppImage)
+          [[ ${#deb[@]} == 1 && -f "${deb[0]}" && ${#image[@]} == 1 && -f "${image[0]}" ]]
+          [[ "$(dpkg-deb -f "${deb[0]}" Version)" == "$VERSION" ]]
+          [[ "$(dpkg-deb -f "${deb[0]}" Architecture)" == amd64 ]]
+          dpkg-deb -x "${deb[0]}" "$RUNNER_TEMP/deb"
+          file "$RUNNER_TEMP/deb/usr/bin/l1-git" | grep -q 'ELF 64-bit.*x86-64'
+          git --version
+          smoke() {
+            local status=0
+            timeout 15s xvfb-run -a "$@" > "$RUNNER_TEMP/smoke.log" 2>&1 || status=$?
+            cat "$RUNNER_TEMP/smoke.log"
+            [[ "$status" == 124 ]]
+            ! grep -Eiq 'error while loading shared libraries|symbol lookup error|panicked at|segmentation fault' "$RUNNER_TEMP/smoke.log"
+          }
+          smoke "$RUNNER_TEMP/deb/usr/bin/l1-git"
+          chmod +x "${image[0]}"
+          (cd "$RUNNER_TEMP" && "${image[0]}" --appimage-extract > /dev/null)
+          file "$RUNNER_TEMP/squashfs-root/usr/bin/l1-git" | grep -q 'ELF 64-bit.*x86-64'
+          deb_id=$(readelf -n "$RUNNER_TEMP/deb/usr/bin/l1-git" | awk '/Build ID:/ {print $3}')
+          image_id=$(readelf -n "$RUNNER_TEMP/squashfs-root/usr/bin/l1-git" | awk '/Build ID:/ {print $3}')
+          [[ -n "$deb_id" && "$deb_id" == "$image_id" ]]
+          [[ "${image[0]##*/}" == *"_$VERSION"_* ]]
+          smoke "${image[0]}"
+      - name: Stage verified bundles with release metadata
+        if: steps.restore.outputs.restored != 'true'
+        env:
+          TARGET: ${{ matrix.id }}
+          BUNDLE_DIRECTORY: ${{ matrix.bundleDirectory }}
+        run: node .release-tools/scripts/release-assets.mjs stage .plan/plan.json "$TARGET" "$BUNDLE_DIRECTORY" staged
+      - uses: actions/upload-artifact@v4
+        if: steps.restore.outputs.restored != 'true'
+        with:
+          name: bundles-${{ matrix.id }}
+          path: staged/*
+          if-no-files-found: error
+          retention-days: 30
+
+  verify:
+    needs: [plan, ci, build]
+    if: needs.plan.outputs.action != 'skip'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          sparse-checkout: scripts
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-plan
+          path: .plan
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bundles-*
+          path: assets
+      - uses: actions/download-artifact@v4
+        if: needs.plan.outputs.action == 'dry-run'
+        with:
+          name: dry-run-signing
+          path: .test-signing
+      - name: Verify the complete asset set and updater signatures before release writes
+        env:
+          UPDATER_PUBKEY_FILE: ${{ needs.plan.outputs.action == 'dry-run' && '.test-signing/updater.key.pub' || 'scripts/updater-public-key.txt' }}
+        run: node scripts/release-assets.mjs verify .plan/plan.json assets release-manifest.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-manifest-${{ github.run_attempt }}
+          path: |
+            release-manifest.json
+            latest.json
+          retention-days: 30
+      - name: Report packaging dry run
+        if: needs.plan.outputs.action == 'dry-run'
+        run: echo 'All required bundles and metadata verified. macOS uses ad hoc signing; updater signatures use the disposable PR key. See bundles-* and release-manifest artifacts.' >> "$GITHUB_STEP_SUMMARY"
+
+  publish:
+    needs: [plan, ci, build, verify]
+    if: needs.plan.outputs.action == 'publish'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          sparse-checkout: scripts
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-plan
+          path: .plan
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bundles-*
+          path: assets
+      - name: Publish or verify the matching published release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release-assets.mjs publish .plan/plan.json assets

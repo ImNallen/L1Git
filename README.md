@@ -2,6 +2,8 @@
 
 L1 Git is a desktop Git client in the L1 family, built with Tauri 2, React, and TypeScript. This slice browses real local repositories. It reads branches, commit history, and commit details. Its Rust core can also fetch remotes, fast-forward local branches that are strictly behind their upstream, push the current branch to its configured upstream, and publish a branch to an existing remote. It can stage and unstage files, commit, amend, and edit the last commit's message from the inspector, create, rename, and delete branches, check out branches and commits, create and delete tags, stash, apply, pop, and drop changes, and undo and redo each of those writes, through one guarded write path in the core. L1 Git never merges or rebases. Fast-forward refuses a checked-out branch whose tracked files have uncommitted changes.
 
+See [Releasing L1 Git](docs/releasing.md) for nightly and stable downloads, signing setup, and recovery.
+
 ## Run the desktop app
 
 Install Git 2.45 or later, Node.js 26, pnpm 10.32.1, Rust 1.93 or later, and the native Tauri build dependencies. On macOS, install Xcode and its command-line tools.
