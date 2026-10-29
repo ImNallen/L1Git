@@ -530,14 +530,19 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   };
   const rereadAll = () => {
     rereadChanges();
-    if (openRepository)
-      void overviewStore.refreshLocal(openRepository.commonDir);
     return app.refresh();
   };
+  const refreshRepository = () => {
+    if (openRepository)
+      void overviewStore.refreshLocal(openRepository.commonDir);
+    return rereadAll();
+  };
   const refreshRef = useRef(rereadAll);
+  const refreshRepositoryRef = useRef(refreshRepository);
   const reloadRefsRef = useRef(branchRefs.reload);
   useEffect(() => {
     refreshRef.current = rereadAll;
+    refreshRepositoryRef.current = refreshRepository;
     reloadRefsRef.current = branchRefs.reload;
   });
   // Commits and branches made outside L1 Git show up when its window regains focus.
@@ -546,7 +551,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     const reread = () => {
       if (document.hidden || performance.now() - last < 1000) return;
       last = performance.now();
-      void refreshRef.current();
+      void refreshRepositoryRef.current();
       reloadRefsRef.current();
     };
     window.addEventListener("focus", reread);
@@ -1189,7 +1194,9 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                 <span>
                   {current.error.message} The last successful view is retained.
                 </span>
-                <button onClick={() => void rereadAll()}>Try again</button>
+                <button onClick={() => void refreshRepository()}>
+                  Try again
+                </button>
               </div>
             )}
             {openRepository &&
