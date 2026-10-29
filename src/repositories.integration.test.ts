@@ -38,6 +38,7 @@ import {
   worktreeStatusSchema,
 } from "./domain/repository";
 import type { WorktreeStatus } from "./domain/repository";
+import { pushAvailabilitySchema, pushReportSchema } from "./domain/push";
 import { requestOps } from "./repositories";
 
 const fixtureSchema = z.object({
@@ -2580,4 +2581,192 @@ describe("real Rust read deadlines", () => {
       if (ownSleep) process.kill(pid, "SIGKILL");
     }
   }, 20_000);
+});
+
+describe("real Rust prepared current-branch push contract", () => {
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")),
+  );
+  const git = (path: string, ...args: string[]) =>
+    execFileSync("git", ["-C", path, ...args], {
+      encoding: "utf8",
+      env,
+    }).trim();
+  const prepare = async (path: string) =>
+    answer("preparePush", pushAvailabilitySchema).parse(
+      await (await post({ op: "preparePush", path })).json(),
+    ).data;
+  const push = async (path: string, intent: unknown) =>
+    answer("push", pushReportSchema).parse(
+      await (await post({ op: "push", path, intent })).json(),
+    ).data;
+  const refs = (path: string) =>
+    git(path, "for-each-ref", "--format=%(refname) %(objectname)");
+  const local = (path: string) => ({
+    head: git(path, "rev-parse", "HEAD"),
+    index: git(path, "ls-files", "-s"),
+    file: readFileSync(join(path, "f"), "utf8"),
+  });
+
+  it("publishes only the reviewed upstream and refreshes outgoing counts without a fetch", async () => {
+    const path = join(fixture.root, "push-contract");
+    const remote = join(fixture.root, "push-contract.git");
+    git(fixture.root, "init", "--initial-branch=main", path);
+    git(fixture.root, "init", "--bare", remote);
+    git(path, "config", "core.hooksPath", "/dev/null");
+    writeFileSync(join(path, "f"), "one\n");
+    git(path, "add", "f");
+    git(
+      path,
+      "-c",
+      "user.name=Ada",
+      "-c",
+      "user.email=ada@example.test",
+      "commit",
+      "-m",
+      "one",
+    );
+    git(path, "remote", "add", "origin", remote);
+    git(path, "push", "origin", "HEAD:refs/heads/reviewed");
+    git(path, "config", "branch.main.remote", "origin");
+    git(path, "config", "branch.main.merge", "refs/heads/reviewed");
+    const beforeRemote = refs(remote);
+    const initial = git(path, "rev-parse", "HEAD");
+    git(
+      path,
+      "-c",
+      "user.name=Ada",
+      "-c",
+      "user.email=ada@example.test",
+      "commit",
+      "--allow-empty",
+      "-m",
+      "two",
+    );
+    const expected = git(path, "rev-parse", "HEAD");
+    writeFileSync(join(path, "f"), "dirty\n");
+    const before = local(path);
+    const history = await (await post({ op: "undoHistory", path })).json();
+    const prepared = await prepare(path);
+    expect(prepared.kind).toBe("ready");
+    if (prepared.kind !== "ready")
+      throw new Error("Expected configured upstream");
+    expect(prepared.intent).toMatchObject({
+      branch: "refs/heads/main",
+      source: expected,
+      remote: "origin",
+      destination: "refs/heads/reviewed",
+    });
+    const report = await push(path, prepared.intent);
+    expect(report.outcome.kind).toBe("pushed");
+    expect(report.refresh.kind).toBe("refreshed");
+    if (report.refresh.kind === "refreshed")
+      expect(
+        report.refresh.overview.branches.find(({ name }) => name === "main")
+          ?.state.kind,
+      ).toBe("upToDate");
+    expect(refs(remote)).toBe(beforeRemote.replace(initial, expected));
+    expect(local(path)).toEqual(before);
+    expect(await (await post({ op: "undoHistory", path })).json()).toEqual(
+      history,
+    );
+    expect((await push(path, prepared.intent)).outcome.kind).toBe("upToDate");
+    expect(
+      (
+        await push(path, {
+          ...prepared.intent,
+          destination: "refs/heads/unreviewed",
+        })
+      ).outcome.kind,
+    ).toBe("stale");
+    expect(refs(remote)).toBe(beforeRemote.replace(initial, expected));
+    expect(
+      (
+        await rejected({
+          op: "push",
+          path,
+          intent: { ...prepared.intent, force: true },
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await rejected({
+          op: "push",
+          path,
+          intent: { ...prepared.intent, source: "HEAD" },
+        })
+      ).status,
+    ).toBe(400);
+
+    const hooks = join(fixture.root, "push-hooks");
+    mkdirSync(hooks);
+    const hook = join(hooks, "pre-push");
+    writeFileSync(
+      hook,
+      "#!/bin/sh\ngit config remote.origin.fetch 'invalid:ref:spec'\n",
+    );
+    chmodSync(hook, 0o755);
+    git(path, "config", "core.hooksPath", hooks);
+    git(
+      path,
+      "-c",
+      "user.name=Ada",
+      "-c",
+      "user.email=ada@example.test",
+      "commit",
+      "--allow-empty",
+      "-m",
+      "three",
+    );
+    const current = await prepare(path);
+    if (current.kind !== "ready")
+      throw new Error("Expected configured upstream");
+    const accepted = await push(path, current.intent);
+    expect(accepted.outcome.kind).toBe("pushed");
+    expect(accepted.refresh.kind).toBe("failed");
+    expect(refs(remote)).toBe(
+      beforeRemote.replace(initial, current.intent.source),
+    );
+  });
+
+  it("returns explicit unavailable states and never leaks endpoint credentials", async () => {
+    expect(await prepare(fixture.unborn)).toEqual({
+      kind: "unavailable",
+      reason: "unborn",
+    });
+    expect(await prepare(fixture.detached)).toEqual({
+      kind: "unavailable",
+      reason: "detached",
+    });
+    const path = join(fixture.root, "push-redaction");
+    git(fixture.root, "init", "--initial-branch=main", path);
+    git(
+      path,
+      "-c",
+      "user.name=Ada",
+      "-c",
+      "user.email=ada@example.test",
+      "commit",
+      "--allow-empty",
+      "-m",
+      "one",
+    );
+    expect(await prepare(path)).toEqual({
+      kind: "unavailable",
+      reason: "noUpstream",
+    });
+    git(
+      path,
+      "remote",
+      "add",
+      "origin",
+      "https://user:secret@example.invalid/repo?token=hidden",
+    );
+    git(path, "config", "branch.main.remote", "origin");
+    git(path, "config", "branch.main.merge", "refs/heads/main");
+    const prepared = await prepare(path);
+    expect(prepared.kind).toBe("ready");
+    expect(JSON.stringify(prepared)).not.toMatch(/secret|hidden|user:|token=/);
+  });
 });

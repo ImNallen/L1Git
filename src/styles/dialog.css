@@ -338,6 +338,9 @@
   background: color-mix(in srgb, var(--primary-bg) 16%, var(--row-selected));
   box-shadow: inset 2px 0 0 var(--primary-bg);
 }
+.command-palette-results li[aria-disabled="true"] .command-palette-title {
+  color: var(--muted);
+}
 .command-palette-title {
   flex-shrink: 0;
   max-width: 70%;

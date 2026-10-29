@@ -87,7 +87,7 @@ export function CommandPalette({ items, onClose, onRun }: Props) {
             } else if (event.key === "Enter") {
               event.preventDefault();
               const item = results[current];
-              if (item) onRun(item);
+              if (item && !item.disabled) onRun(item);
             }
           }}
         />
@@ -110,11 +110,15 @@ export function CommandPalette({ items, onClose, onRun }: Props) {
               id={`command-palette-${index}`}
               role="option"
               aria-selected={index === current}
+              aria-disabled={item.disabled || undefined}
+              title={item.detail}
               onMouseMove={() => {
                 if (index !== current) setActiveId(item.id);
               }}
               onMouseDown={(event) => event.preventDefault()}
-              onClick={() => onRun(item)}
+              onClick={() => {
+                if (!item.disabled) onRun(item);
+              }}
             >
               <span className="command-palette-title">{item.title}</span>
               {item.detail && (

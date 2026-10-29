@@ -1,6 +1,8 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { z } from "zod";
+import { pushAvailabilitySchema, pushReportSchema } from "./domain/push";
+import type { PushIntent } from "./domain/push";
 import { fastForwardReportSchema, overviewSchema } from "./domain/overview";
 import type { Comparison } from "./domain/comparison";
 import type { Advance, FetchMode } from "./domain/overview";
@@ -42,6 +44,8 @@ type RepositoryRequest =
   | { op: "fileHistory"; path: RepositoryRoot; oid: Oid; file: string }
   | { op: "blame"; path: RepositoryRoot; oid: Oid; file: string }
   | { op: "overview"; path: RepositoryRoot; mode: FetchMode }
+  | { op: "preparePush"; path: RepositoryRoot }
+  | { op: "push"; path: RepositoryRoot; intent: PushIntent }
   | { op: "fastForward"; path: RepositoryRoot; advances: Advance[] }
   | { op: "worktreeStatus"; path: RepositoryRoot }
   | { op: "worktreePatch"; path: RepositoryRoot; file: string; side: Side }
@@ -60,6 +64,8 @@ const responseSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("fileHistory"), data: fileHistorySchema }),
   z.object({ op: z.literal("blame"), data: blameSchema }),
   z.object({ op: z.literal("overview"), data: overviewSchema }),
+  z.object({ op: z.literal("preparePush"), data: pushAvailabilitySchema }),
+  z.object({ op: z.literal("push"), data: pushReportSchema }),
   z.object({ op: z.literal("fastForward"), data: fastForwardReportSchema }),
   z.object({ op: z.literal("worktreeStatus"), data: worktreeStatusSchema }),
   z.object({ op: z.literal("worktreePatch"), data: worktreePatchSchema }),
@@ -223,4 +229,12 @@ export async function chooseDirectory(): Promise<string | null> {
     multiple: false,
   });
   return typeof result === "string" ? result : null;
+}
+
+export async function preparePush(path: RepositoryRoot) {
+  return (await run({ op: "preparePush", path })).data;
+}
+
+export async function push(path: RepositoryRoot, intent: PushIntent) {
+  return (await run({ op: "push", path, intent })).data;
 }
