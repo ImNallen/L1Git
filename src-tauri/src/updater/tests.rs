@@ -439,12 +439,17 @@ fn packaged_fixture_feed_downloads_the_exact_signed_successor() {
             .endpoints(vec![metadata["feed"].as_str().unwrap().parse().unwrap()])
             .unwrap()
             .no_proxy()
+            .timeout(Duration::from_secs(30))
             .build()
             .unwrap()
             .check()
             .await
             .unwrap()
             .expect("signed successor");
+        assert_eq!(
+            update.timeout, None,
+            "manifest deadline must not limit downloads"
+        );
         assert_eq!(
             update.version,
             metadata["successorVersion"].as_str().unwrap()
