@@ -66,6 +66,10 @@ jobs:
           node-version: 26
           cache: pnpm
       - uses: dtolnay/rust-toolchain@1.93.0
+        with:
+          components: clippy
       - uses: Swatinem/rust-cache@v2
       - run: pnpm install --frozen-lockfile
+      - run: cargo clippy --locked -p l1-git --all-targets -- -D warnings
+      - run: cargo test --locked -p l1-git
       - run: pnpm tauri build --debug

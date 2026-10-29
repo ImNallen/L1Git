@@ -20,7 +20,10 @@
         "minHeight": 540,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
-        "trafficLightPosition": { "x": 16, "y": 31 },
+        "trafficLightPosition": {
+          "x": 16,
+          "y": 31
+        },
         "dragDropEnabled": false
       }
     ],
@@ -38,6 +41,14 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "macOS": { "signingIdentity": "-" }
+    "macOS": {
+      "signingIdentity": "-"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDNFNDRBMENGNEJGRTBCMkEKUldRcUMvNUx6NkJFUHZ5cG1EdWtVZ0NITlRkRDZ3cnFoTWRDaXNsYkM4eStCNnZFZXVuQU94YmQK",
+      "requireSignedVersion": true
+    }
   }
 }

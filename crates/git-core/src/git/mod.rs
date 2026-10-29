@@ -277,10 +277,12 @@ fn execute(
             }
         }
     };
-    if let Some(writer) = writer
-        && !matches!(writer.join(), Ok(Ok(())))
-    {
-        return Err(deadline.broken());
+    if let Some(writer) = writer {
+        match writer.join() {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) if error.kind() == io::ErrorKind::BrokenPipe && !status.success() => {}
+            _ => return Err(deadline.broken()),
+        }
     }
     Ok(Ran {
         status,
@@ -1038,5 +1040,19 @@ mod tests {
         assert_eq!(kept("drop\nkept\nend\n", 9), "…kept\nend\n");
         assert_eq!(kept("aaaaaaaaaabbbb\n", 5), "…bbbb\n");
         assert_eq!(kept("aaaaabbbbb", 5), "…bbbbb");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_successful_command_that_refuses_its_input_is_not_reported_as_successful() {
+        let mut command = Command::new("sh");
+        command.args(["-c", "exec 0<&-; exit 0"]);
+        let result = execute(
+            command,
+            Deadline::of(LocalRead::Snapshot),
+            Some(vec![b'x'; 1024 * 1024]),
+            None,
+        );
+        assert!(matches!(result, Err(error) if error.kind == ErrorKind::GitFailed));
     }
 }

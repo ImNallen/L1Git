@@ -25,11 +25,11 @@ If the Add dialog says the reader is unavailable, check the bridge log and both 
 
 ## Drive
 
-Follow the mapped journeys with accessible names from live snapshots. Start with [Add and restore repositories](features/repositories.md), then [Browse the commit graph](features/history.md), then [Inspect a commit](features/inspector.md), then [Read a file diff](features/diff.md), then [Change appearance](features/appearance.md), then [Update behind branches](features/overview.md), then [Stage, unstage, commit, discard, and undo](features/changes.md), then [Create, rename, delete, and check out branches, and create and delete tags](features/refs.md). The separate [reader contract](features/reader.md) has automated coverage.
+Follow the mapped journeys with accessible names from live snapshots. Start with [Add and restore repositories](features/repositories.md), then [Browse the commit graph](features/history.md), then [Inspect a commit](features/inspector.md), then [Read a file diff](features/diff.md), then [Change appearance](features/appearance.md), then [Update behind branches](features/overview.md), then [Stage, unstage, commit, discard, and undo](features/changes.md), then [Create, rename, delete, and check out branches, and create and delete tags](features/refs.md). Then follow [Check, download and install app updates](features/updates.md) with a disposable packaged app and parent-owned desktop session. The separate [reader contract](features/reader.md) has automated coverage.
 
 Use **Cmd/Ctrl+O** to add a repository, **Escape** to cancel, **Cmd+F** on macOS or **Ctrl+F** elsewhere to open loaded-history search, and **Cmd+P** on macOS or **Ctrl+P** elsewhere to open the command palette. **Cmd+Z** on macOS or **Ctrl+Z** elsewhere undoes the last write, and adding Shift redoes it. Escape also closes an open file diff. The native dialog traps focus. Pane separators support pointer dragging and arrow keys. At narrow widths the inspector starts hidden; **Toggle commit inspector** opens it as an overlay.
 
-Run `cargo test --locked`, `pnpm test`, `pnpm build`, `pnpm format:check`, and `cargo fmt --all --check` after code changes. No network account is required.
+Run `cargo test --locked`, `cargo test --locked -p l1-git`, `pnpm test`, `pnpm build`, `pnpm format:check`, and `cargo fmt --all --check` after code changes. No network account is required.
 
 ## Evidence
 

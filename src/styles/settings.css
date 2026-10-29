@@ -425,3 +425,46 @@
   padding: 12px 16px;
   border-top: 1px solid var(--border);
 }
+
+.update-actions {
+  display: flex;
+  gap: 8px;
+  margin: 16px 0;
+}
+
+.update-progress {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.update-progress progress {
+  width: 100%;
+  accent-color: var(--primary-bg);
+}
+
+.update-notes {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  line-height: 1.6;
+}
+
+.update-affordance {
+  min-width: 0;
+  font-size: 11px;
+}
+
+.update-affordance span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.update-affordance svg {
+  flex-shrink: 0;
+}
+
+.installing-blocker {
+  text-align: center;
+}

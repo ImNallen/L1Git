@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as repositories from "./repositories";
-import { restoreUndone } from "./commitDrafts";
+import { beginDraftTask, restoreUndone } from "./commitDrafts";
 import {
   describe,
   movesRefs,
@@ -105,55 +105,61 @@ export function useWrites(
   ): Promise<Outcome> {
     const { action } = job;
     if (root === null || inFlight.current.has(root)) return { kind: "busy" };
+    const finishDraftTask = beginDraftTask();
+    if (!finishDraftTask) return { kind: "busy" };
     const repository = root;
-    inFlight.current.add(repository);
-    update(repository, (writes) => ({
-      ...writes,
-      running: { action, label },
-    }));
-    let outcome: Exclude<Outcome, { kind: "busy" }>;
     try {
-      outcome = { kind: "applied", applied: await request() };
-    } catch (error) {
-      outcome = { kind: "failed", problem: problemFrom(error) };
+      inFlight.current.add(repository);
+      update(repository, (writes) => ({
+        ...writes,
+        running: { action, label },
+      }));
+      let outcome: Exclude<Outcome, { kind: "busy" }>;
+      try {
+        outcome = { kind: "applied", applied: await request() };
+      } catch (error) {
+        outcome = { kind: "failed", problem: problemFrom(error) };
+      }
+      const changed =
+        outcome.kind === "applied" ? outcome.applied.root : worktree;
+      if (outcome.kind === "failed" && rereadsRepository(outcome.problem))
+        reread.repository(repository);
+      if (
+        outcome.kind === "applied" &&
+        action === "undo" &&
+        operation.kind === "commit"
+      )
+        restoreUndone(changed, operation.message);
+      if (movesRefs(operation)) await reread.refs(changed, repository);
+      await Promise.all([
+        readHistory(repository),
+        reread.worktree(worktree),
+        changed === worktree ? null : reread.worktree(changed),
+      ]);
+      const notice: WriteNotice | null =
+        outcome.kind === "failed"
+          ? job.action === "write"
+            ? {
+                kind: "failed",
+                ...job,
+                label,
+                problem: outcome.problem,
+                operation,
+              }
+            : { kind: "failed", ...job, label, problem: outcome.problem }
+          : action === "write"
+            ? null
+            : {
+                kind: "stepped",
+                step: action,
+                label: noticeLabel(action, operation, label),
+              };
+      update(repository, (writes) => ({ ...writes, running: null, notice }));
+      return outcome;
+    } finally {
+      inFlight.current.delete(repository);
+      finishDraftTask();
     }
-    const changed =
-      outcome.kind === "applied" ? outcome.applied.root : worktree;
-    if (outcome.kind === "failed" && rereadsRepository(outcome.problem))
-      reread.repository(repository);
-    if (
-      outcome.kind === "applied" &&
-      action === "undo" &&
-      operation.kind === "commit"
-    )
-      restoreUndone(changed, operation.message);
-    if (movesRefs(operation)) await reread.refs(changed, repository);
-    await Promise.all([
-      readHistory(repository),
-      reread.worktree(worktree),
-      changed === worktree ? null : reread.worktree(changed),
-    ]);
-    inFlight.current.delete(repository);
-    const notice: WriteNotice | null =
-      outcome.kind === "failed"
-        ? job.action === "write"
-          ? {
-              kind: "failed",
-              ...job,
-              label,
-              problem: outcome.problem,
-              operation,
-            }
-          : { kind: "failed", ...job, label, problem: outcome.problem }
-        : action === "write"
-          ? null
-          : {
-              kind: "stepped",
-              step: action,
-              label: noticeLabel(action, operation, label),
-            };
-    update(repository, (writes) => ({ ...writes, running: null, notice }));
-    return outcome;
   }
 
   const writes = (root === null ? undefined : byRoot.get(root)) ?? idle;
