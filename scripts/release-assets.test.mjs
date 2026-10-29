@@ -107,6 +107,7 @@ function fakeRemote() {
       tag === "nightly" ? state.feed : state.release,
     notes: async () => "Release notes",
     stableTags: async () => [],
+    latestFeed: async () => null,
     create: async (data) => {
       if (data.tag_name === "nightly") {
         state.writes.push("feed create");
@@ -132,9 +133,15 @@ function fakeRemote() {
       return asset;
     },
     deleteAsset: async (id) => {
-      state.writes.push("feed delete");
+      state.writes.push(
+        state.feed?.assets.some((asset) => asset.id === id)
+          ? "feed delete"
+          : "delete",
+      );
       state.bytes.delete(id);
-      state.feed.assets = state.feed.assets.filter((asset) => asset.id !== id);
+      for (const release of [state.release, state.feed])
+        if (release)
+          release.assets = release.assets.filter((asset) => asset.id !== id);
     },
     download: async (asset) => state.bytes.get(asset.id),
     publish: async () => {
@@ -288,6 +295,7 @@ test("GitHub lookup errors fail closed; annotated tags are peeled", async () => 
   });
   await assert.rejects(remote.findRelease(plan.release.tag), /HTTP 403/);
   await assert.rejects(remote.commitOf(plan.release.tag), /HTTP 403/);
+  await assert.rejects(remote.latestFeed(), /HTTP 403/);
   const annotated = githubRemote("ImNallen/L1Git", async (endpoint) =>
     endpoint.includes("matching-refs")
       ? [
@@ -301,6 +309,43 @@ test("GitHub lookup errors fail closed; annotated tags are peeled", async () => 
       : { object: { type: "commit", sha } },
   );
   assert.equal(await annotated.commitOf(plan.release.tag), sha);
+});
+
+test("feed recovery selects the highest published owned version and validates its download", async () => {
+  const entry = (id, version, published) => ({
+    id,
+    tag_name: `v${version}`,
+    published_at: published,
+    draft: false,
+    body: `<!-- l1git-source:${sha} -->`,
+  });
+  const releases = [
+    entry(1, "0.2.0", "2026-10-29T12:00:00Z"),
+    entry(2, "0.3.0", "2026-10-29T11:00:00Z"),
+    {
+      ...entry(3, "99.0.0", "2026-10-29T13:00:00Z"),
+      body: "Unrelated release",
+    },
+  ];
+  const bytes = Buffer.from(JSON.stringify({ version: "0.3.0" }));
+  const asset = {
+    id: 10,
+    name: "latest.json",
+    state: "uploaded",
+    size: bytes.length,
+  };
+  const remote = githubRemote("ImNallen/L1Git", async (endpoint) => {
+    if (endpoint.includes("/releases?")) return [releases];
+    if (endpoint.includes("/releases/2/assets?")) return [[asset]];
+    if (endpoint.endsWith("/releases/assets/10")) return bytes;
+    throw new Error(`Unexpected API request ${endpoint}`);
+  });
+  assert.deepEqual(await remote.latestFeed(), bytes);
+  asset.size++;
+  await assert.rejects(remote.latestFeed(), /metadata conflicts/);
+  asset.size = bytes.length;
+  asset.state = "starter";
+  await assert.rejects(remote.latestFeed(), /no complete updater feed/);
 });
 
 test("artifact restore distinguishes missing, expired and API failure", async () => {
@@ -492,4 +537,61 @@ test("publication rejects an ephemeral PR key before remote writes", async (t) =
     /signed by key.*trusts key/,
   );
   assert.deepEqual(state.writes, []);
+});
+
+test("an older retry repairs an interrupted feed with the newest published version", async () => {
+  const { state, remote } = fakeRemote();
+  const bytes = (version) => Buffer.from(JSON.stringify({ version }));
+  const release = (version) => ({
+    ...plan,
+    release: { ...plan.release, version },
+  });
+  await reconcileNightlyFeed(release("0.2.0"), bytes("0.2.0"), remote);
+  remote.latestFeed = async () => bytes("0.3.0");
+  const upload = remote.upload;
+  remote.upload = async () => {
+    throw new Error("Upload interrupted");
+  };
+  await assert.rejects(
+    reconcileNightlyFeed(release("0.3.0"), bytes("0.3.0"), remote),
+    /interrupted/,
+  );
+  assert.equal(state.feed.assets.length, 0);
+  remote.upload = upload;
+  await reconcileNightlyFeed(release("0.1.0"), bytes("0.1.0"), remote);
+  assert.deepEqual(await remote.download(state.feed.assets[0]), bytes("0.3.0"));
+});
+
+test("a failed upload's empty starter asset is recovered in an owned draft", async (t) => {
+  const { staged } = fixture(t);
+  const { state, remote } = fakeRemote();
+  const upload = remote.upload;
+  remote.upload = async (release, entry) => {
+    const asset = {
+      id: state.nextId++,
+      state: "starter",
+      name: entry.name,
+      size: 0,
+    };
+    release.assets.push(asset);
+    state.bytes.set(asset.id, Buffer.alloc(0));
+    throw new Error("HTTP 502");
+  };
+  await assert.rejects(publishRelease(plan, staged, remote), /HTTP 502/);
+  remote.upload = upload;
+  await publishRelease(plan, staged, remote);
+  assert.equal(state.release.draft, false);
+  assert.ok(state.writes.includes("delete"));
+  assert.ok(state.release.assets.every((asset) => asset.state === "uploaded"));
+});
+
+test("an empty starter asset on the owned rolling feed is recovered", async () => {
+  const { state, remote } = fakeRemote();
+  const bytes = Buffer.from(JSON.stringify({ version: plan.release.version }));
+  await reconcileNightlyFeed(plan, bytes, remote);
+  state.feed.assets[0].state = "starter";
+  state.feed.assets[0].size = 0;
+  state.bytes.set(state.feed.assets[0].id, Buffer.alloc(0));
+  await reconcileNightlyFeed(plan, bytes, remote);
+  assert.deepEqual(await remote.download(state.feed.assets[0]), bytes);
 });

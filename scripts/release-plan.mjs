@@ -291,7 +291,6 @@ export const localGit = {
 };
 
 export async function resolvePlan(env, api, restore) {
-  // Restore before querying release history, even if midnight or another release passed.
   if (await restore("release-plan", ".release-plan")) {
     return validatePlan(
       JSON.parse(readFileSync(".release-plan/plan.json", "utf8")),

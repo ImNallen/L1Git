@@ -15,6 +15,7 @@ import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
 import {
   compareVersions,
+  parseReleases,
   parseVersion,
   validatePlan,
 } from "./release-plan.mjs";
@@ -302,6 +303,10 @@ export async function publishRelease(
     throw new Error("Unexpected or duplicate remote assets.");
   for (const upload of uploads) {
     let asset = release.assets.find((entry) => entry.name === upload.name);
+    if (release.draft && asset?.state === "starter" && asset.size === 0) {
+      await remote.deleteAsset(asset.id);
+      asset = null;
+    }
     if (!asset) {
       if (!release.draft)
         throw new Error(`Published release is missing ${upload.name}.`);
@@ -318,7 +323,6 @@ export async function publishRelease(
         `Remote bytes conflict for ${upload.name}. Assets are never overwritten.`,
       );
   }
-  // A failed publish response is recovered by verifying this same published release on rerun.
   if (release.draft) await remote.publish(release.id, r.channel);
   const published = await remote.findRelease(r.tag);
   if (
@@ -333,6 +337,20 @@ export async function publishRelease(
 }
 
 export async function reconcileNightlyFeed(plan, bytes, remote) {
+  let desired = parseVersion(plan.release.version);
+  const latest = await remote.latestFeed();
+  if (latest) {
+    const newest = parseVersion(JSON.parse(latest.toString("utf8")).version);
+    const order = compareVersions(newest, desired);
+    if (order > 0) {
+      bytes = latest;
+      desired = newest;
+    } else if (order === 0 && !latest.equals(bytes)) {
+      throw new Error(
+        "Same-version published feed conflicts with the release.",
+      );
+    }
+  }
   const marker = "<!-- l1git-nightly-feed -->";
   let feed = await remote.findRelease("nightly");
   if (!feed)
@@ -353,14 +371,18 @@ export async function reconcileNightlyFeed(plan, bytes, remote) {
     feed.assets.length > 1
   )
     throw new Error("Conflicting nightly feed release.");
-  const existing = feed.assets[0];
+  let existing = feed.assets[0];
+  if (existing?.state === "starter" && existing.size === 0) {
+    await remote.deleteAsset(existing.id);
+    existing = null;
+  }
   if (existing) {
     const previous = await remote.download(existing);
     if (existing.state !== "uploaded" || existing.size !== previous.length)
       throw new Error("Existing nightly feed metadata conflicts.");
     const version = parseVersion(JSON.parse(previous.toString("utf8")).version);
     if (!version) throw new Error("Invalid existing nightly feed version.");
-    const order = compareVersions(version, parseVersion(plan.release.version));
+    const order = compareVersions(version, desired);
     if (order > 0) return;
     if (order === 0) {
       if (!previous.equals(bytes))
@@ -436,6 +458,40 @@ export function githubRemote(
         )
         .map((release) => release.tag_name);
     },
+    async latestFeed() {
+      const pages = await api(`${base}/releases?per_page=100`, {
+        paginate: true,
+      });
+      const newest = parseReleases(pages.flat())
+        .filter((release) => release.sha)
+        .sort((a, b) => compareVersions(b.version, a.version))[0];
+      if (!newest) return null;
+      const release = pages
+        .flat()
+        .find((entry) => entry.tag_name === newest.tag);
+      const assets = (
+        await api(`${base}/releases/${release.id}/assets?per_page=100`, {
+          paginate: true,
+        })
+      )
+        .flat()
+        .filter((asset) => asset.name === "latest.json");
+      if (assets.length !== 1 || assets[0].state !== "uploaded")
+        throw new Error(
+          `Published ${newest.tag} has no complete updater feed.`,
+        );
+      const bytes = await api(`${base}/releases/assets/${assets[0].id}`, {
+        binary: true,
+      });
+      if (
+        bytes.length !== assets[0].size ||
+        JSON.parse(bytes.toString("utf8")).version !== newest.version.text
+      )
+        throw new Error(
+          `Published ${newest.tag} updater feed metadata conflicts.`,
+        );
+      return bytes;
+    },
     async notes(r) {
       return (
         await api(`${base}/releases/generate-notes`, {
@@ -506,7 +562,6 @@ async function main() {
           });
         return;
       }
-      // Completeness across targets is checked after all builds finish.
       const metadata = JSON.parse(
         readFileSync(join(args[0], `${target.id}.json`), "utf8"),
       );
