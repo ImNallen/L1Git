@@ -57,6 +57,8 @@ Real publication requires all seven repository secrets. Missing inputs stop the 
 
 Set them through the repository's Actions secret settings. The dedicated updater public key is `scripts/updater-public-key.txt`. Keep an offline backup of the private key and password. This implementation never reads the maintainer's private-key files.
 
+Repository writers are trusted release maintainers. A stable tag can select an off-main commit, whose build scripts run with the signing secrets. Repository-level Actions secrets do not isolate those keys from writers who can change workflows. Before granting write or tag-creation access to less-trusted collaborators, move signing secrets into a protected environment and restrict release workflows and source commits to the approved branch policy.
+
 The release-only config enables `bundle.createUpdaterArtifacts` and supplies `plugins.updater.pubkey`. Installed-app update checks and UI require a separate client integration. The desktop crate declares the workspace `serde_json` dependency because Tauri generates references to it when embedding plugin configuration.
 
 For macOS publication, the temporary config sets `bundle.macOS.signingIdentity` to `null`, removing the checked-in ad hoc identity. Tauri imports the certificate and infers its signing identity. The workflow requires a Developer ID signature for the supplied team, validates the notarization staple on the app, submits the DMG for notarization, and staples and validates the DMG. Failure blocks publication. Development versions and signing settings stay unchanged.
