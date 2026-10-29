@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   TARGETS,
+  githubApi,
   githubRemote,
   publishRelease as publishActual,
   restoreArtifact,
@@ -51,6 +52,42 @@ const publishRelease = (p, dir, remote) =>
   publishActual(p, dir, remote, { publicKey });
 
 const sha = "a".repeat(40);
+
+test("binary response decoding does not force a release-asset Accept header", () => {
+  const directory = mkdtempSync(join(tmpdir(), "l1git-gh-headers-"));
+  const previousPath = process.env.PATH;
+  try {
+    writeFileSync(
+      join(directory, "gh"),
+      "#!/usr/bin/env node\nprocess.stdout.write(JSON.stringify(process.argv.slice(2)));\n",
+      { mode: 0o755 },
+    );
+    process.env.PATH = `${directory}:${previousPath}`;
+    const artifactArgs = JSON.parse(
+      githubApi("repos/ImNallen/L1Git/actions/artifacts/1/zip", {
+        binary: true,
+      }).toString(),
+    );
+    assert.deepEqual(artifactArgs, [
+      "api",
+      "repos/ImNallen/L1Git/actions/artifacts/1/zip",
+    ]);
+    const releaseArgs = JSON.parse(
+      githubApi("repos/ImNallen/L1Git/releases/assets/1", {
+        binary: true,
+        accept: "application/octet-stream",
+      }).toString(),
+    );
+    assert.deepEqual(releaseArgs.slice(-2), [
+      "-H",
+      "Accept: application/octet-stream",
+    ]);
+  } finally {
+    process.env.PATH = previousPath;
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 const plan = {
   action: "publish",
   reason: "Test",

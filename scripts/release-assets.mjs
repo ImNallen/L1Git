@@ -39,12 +39,12 @@ function active(plan) {
 
 export function githubApi(
   endpoint,
-  { method, data, paginate = false, binary = false } = {},
+  { method, data, paginate = false, binary = false, accept } = {},
 ) {
   const args = ["api", endpoint];
   if (method) args.push("--method", method);
   if (paginate) args.push("--paginate", "--slurp");
-  if (binary) args.push("-H", "Accept: application/octet-stream");
+  if (accept) args.push("-H", `Accept: ${accept}`);
   if (data) args.push("--input", "-");
   const output = execFileSync("gh", args, {
     input: data ? JSON.stringify(data) : undefined,
@@ -482,6 +482,7 @@ export function githubRemote(
         );
       const bytes = await api(`${base}/releases/assets/${assets[0].id}`, {
         binary: true,
+        accept: "application/octet-stream",
       });
       if (
         bytes.length !== assets[0].size ||
@@ -532,7 +533,10 @@ export function githubRemote(
     deleteAsset: (id) =>
       api(`${base}/releases/assets/${id}`, { method: "DELETE" }),
     download: (asset) =>
-      api(`${base}/releases/assets/${asset.id}`, { binary: true }),
+      api(`${base}/releases/assets/${asset.id}`, {
+        binary: true,
+        accept: "application/octet-stream",
+      }),
     publish: (id, channel) =>
       api(`${base}/releases/${id}`, {
         method: "PATCH",
