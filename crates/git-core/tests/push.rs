@@ -651,6 +651,47 @@ fn no_upstream_and_ambiguous_merge_are_unavailable() {
 }
 
 #[test]
+fn pre_push_hook_output_preserves_complete_publication_status() {
+    let world = World::new();
+    let core = coordinator(&world);
+    let hooks = world.file("hooks");
+    fs::create_dir(&hooks).unwrap();
+    let script = world.script(
+        "pre-push",
+        "echo 'pre-push checks passed'\nprintf 'To run lint: use the project script\\nchecks\\tpassed\\n'\n",
+    );
+    fs::copy(script, hooks.join("pre-push")).unwrap();
+    git(
+        &world.work,
+        &["config", "core.hooksPath", hooks.to_str().unwrap()],
+    );
+    let oid = commit(&world.work, "f", "two\n", "two");
+    let before = refs(&world.remote);
+    let prepared = intent(&core, world.path());
+    assert_eq!(
+        core.push(world.path(), &prepared).unwrap().outcome,
+        PushOutcome::Pushed
+    );
+    only_main(&world, &before, &oid);
+    assert_eq!(
+        core.push(world.path(), &prepared).unwrap().outcome,
+        PushOutcome::UpToDate
+    );
+    only_main(&world, &before, &oid);
+    let reject = world.script("reject", "exit 1\n");
+    fs::copy(reject, world.remote.join("hooks/pre-receive")).unwrap();
+    commit(&world.work, "f", "three\n", "three");
+    let before_rejection = refs(&world.remote);
+    assert!(matches!(
+        core.push(world.path(), &intent(&core, world.path()))
+            .unwrap()
+            .outcome,
+        PushOutcome::Rejected { .. }
+    ));
+    assert_eq!(refs(&world.remote), before_rejection);
+}
+
+#[test]
 fn capped_hook_output_cannot_confirm_publication_and_does_not_deadlock() {
     let world = World::new();
     let core = coordinator(&world);

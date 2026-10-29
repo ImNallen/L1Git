@@ -270,10 +270,16 @@ fn publication(captured: Captured, source: &Oid, destination: &BranchRef) -> Pus
         };
     }
     let lines: Vec<_> = stdout.lines().collect();
-    let [header, record, "Done"] = lines.as_slice() else {
+    let [prefix @ .., header, record, "Done"] = lines.as_slice() else {
         return uncertain();
     };
-    if !header.starts_with("To ") || !stdout.ends_with('\n') {
+    if stdout.starts_with('…')
+        || prefix
+            .iter()
+            .any(|line| matches!(line.as_bytes(), [_, b'\t', ..]))
+        || !header.starts_with("To ")
+        || !stdout.ends_with('\n')
+    {
         return uncertain();
     }
     let fields: Vec<_> = record.split('\t').collect();
@@ -331,6 +337,9 @@ mod tests {
             " \ta:refs/heads/other\tx\nDone\n",
             " \ta:refs/heads/main\tx\n \tb:refs/heads/other\tx\nDone\n",
             "To local\n!\ta:refs/heads/main\t[rejected] reason\nWrong\n",
+            "…hook output\nTo local\n \ta:refs/heads/main\tupdated\nDone\n",
+            "To other\n \ta:refs/heads/other\tupdated\nDone\nTo local\n \ta:refs/heads/main\tupdated\nDone\n",
+            "hook output\nTo local\n \ta:refs/heads/main\tupdated\nDone",
         ] {
             let stdout = output.replace("a:", &format!("{source}:"));
             assert!(
