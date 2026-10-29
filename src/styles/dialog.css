@@ -453,3 +453,19 @@
   width: 100%;
   margin-bottom: 1rem;
 }
+
+.publish-dialog .remote-editor {
+  min-width: 0;
+  margin: 18px 0 0;
+  padding: 16px;
+  border: 1px solid var(--border-control);
+  border-radius: 6px;
+}
+.publish-dialog .remote-editor legend {
+  padding: 0 6px;
+  color: var(--text-heading);
+  font-size: 12px;
+}
+.publish-dialog .remote-editor input + label {
+  margin-top: 16px;
+}

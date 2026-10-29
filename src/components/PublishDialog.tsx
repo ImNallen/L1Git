@@ -16,47 +16,96 @@ type Options =
   | { kind: "loaded"; options: PublishOptions }
   | { kind: "failed"; message: string };
 
+type RemoteEditor =
+  | { kind: "closed" }
+  | { kind: "editing"; name: string; url: string; error: string | null }
+  | { kind: "saving"; name: string }
+  | { kind: "savedNeedsRefresh"; name: string; message: string };
+
 type Props = {
   root: RepositoryRoot;
   onPublish: (intent: PushIntent) => void;
   onClose: () => void;
+  onRemoteAdded: () => void;
 };
 
-export function PublishDialog({ root, onPublish, onClose }: Props) {
+export function PublishDialog({
+  root,
+  onPublish,
+  onClose,
+  onRemoteAdded,
+}: Props) {
   const dialog = useRef<HTMLDialogElement>(null);
   const remoteInput = useRef<HTMLSelectElement>(null);
   const reviewHeading = useRef<HTMLHeadingElement>(null);
   const titleId = useId();
+  const remoteNameInput = useRef<HTMLInputElement>(null);
+  const remoteUrlInput = useRef<HTMLInputElement>(null);
+  const reviewButton = useRef<HTMLButtonElement>(null);
+  const nextFocus = useRef<"remote" | "review">("remote");
+  const lifetime = useRef(0);
+  const optionsGeneration = useRef(0);
+  const saving = useRef(false);
+  const [editor, setEditor] = useState<RemoteEditor>({ kind: "closed" });
   const [options, setOptions] = useState<Options>({ kind: "loading" });
   const [remote, setRemote] = useState("");
   const [destination, setDestination] = useState("");
   const [review, dispatch] = useReducer(publishReview, initialPublishReview);
   useEffect(() => {
     dialog.current?.showModal();
-    let current = true;
+    const current = ++lifetime.current;
+    const generation = ++optionsGeneration.current;
+    saving.current = false;
+    nextFocus.current = "remote";
+    setEditor({ kind: "closed" });
+    setOptions({ kind: "loading" });
+    setRemote("");
+    setDestination("");
+    dispatch({ kind: "edit" });
     repositories.publishOptions(root).then(
       (loaded) => {
-        if (!current) return;
+        if (
+          lifetime.current !== current ||
+          optionsGeneration.current !== generation
+        )
+          return;
         setOptions({ kind: "loaded", options: loaded });
         if (loaded.kind === "available") {
           const defaults = publishDefaults(loaded);
           setDestination(defaults.destination);
           setRemote(defaults.remote);
         }
-        requestAnimationFrame(() => remoteInput.current?.focus());
       },
-      (error: unknown) =>
-        current &&
-        setOptions({ kind: "failed", message: problemFrom(error).message }),
+      () => {
+        if (
+          lifetime.current === current &&
+          optionsGeneration.current === generation
+        )
+          setOptions({
+            kind: "failed",
+            message: "Could not load remotes. Reload and try again.",
+          });
+      },
     );
     return () => {
-      current = false;
+      ++lifetime.current;
+      ++optionsGeneration.current;
     };
   }, [root]);
   useEffect(() => {
     if (review.step.kind === "review") reviewHeading.current?.focus();
   }, [review.step.kind]);
+  useEffect(() => {
+    if (editor.kind === "editing") remoteNameInput.current?.focus();
+    if (editor.kind === "closed" && options.kind === "loaded") {
+      if (nextFocus.current === "review") reviewButton.current?.focus();
+      else remoteInput.current?.focus();
+    }
+  }, [editor.kind, options.kind]);
   const close = () => {
+    if (saving.current) return;
+    ++lifetime.current;
+    ++optionsGeneration.current;
     dialog.current?.close();
     onClose();
   };
@@ -65,12 +114,16 @@ export function PublishDialog({ root, onPublish, onClose }: Props) {
       ? options.options
       : null;
   const canPrepare =
+    editor.kind === "closed" &&
     available !== null &&
-    remote !== "" &&
+    available.remotes.some(
+      (item) => item.name === remote && item.availability.kind === "eligible",
+    ) &&
     destination !== "" &&
     review.step.kind !== "preparing";
   async function prepare() {
     if (!canPrepare) return;
+    const current = lifetime.current;
     const generation = review.generation;
     dispatch({ kind: "prepare" });
     try {
@@ -79,6 +132,7 @@ export function PublishDialog({ root, onPublish, onClose }: Props) {
         destination: `refs/heads/${destination}`,
       });
       const result = await repositories.preparePublish(root, choice);
+      if (lifetime.current !== current) return;
       if (result.kind === "ready" && result.intent.purpose === "publish")
         dispatch({ kind: "prepared", generation, intent: result.intent });
       else
@@ -90,12 +144,118 @@ export function PublishDialog({ root, onPublish, onClose }: Props) {
             "Could not prepare publication. Refresh and try again.",
         });
     } catch (error) {
+      if (lifetime.current !== current) return;
       dispatch({
         kind: "failed",
         generation,
         message: problemFrom(error).message,
       });
     }
+  }
+  function openEditor() {
+    nextFocus.current = "review";
+    ++optionsGeneration.current;
+    dispatch({ kind: "edit" });
+    setEditor({ kind: "editing", name: "origin", url: "", error: null });
+  }
+  async function reloadRemotes() {
+    if (saving.current) return;
+    const current = lifetime.current;
+    const generation = ++optionsGeneration.current;
+    const saved = editor.kind === "savedNeedsRefresh" ? editor : null;
+    dispatch({ kind: "edit" });
+    setOptions({ kind: "loading" });
+    try {
+      const loaded = await repositories.publishOptions(root);
+      if (
+        lifetime.current !== current ||
+        optionsGeneration.current !== generation
+      )
+        return;
+      setOptions({ kind: "loaded", options: loaded });
+      if (saved) {
+        setRemote(saved.name);
+        setEditor({ kind: "closed" });
+      }
+      if (loaded.kind === "available") {
+        const defaults = publishDefaults(loaded);
+        setDestination((value) => value || defaults.destination);
+        if (!saved)
+          setRemote((value) =>
+            loaded.remotes.some((item) => item.name === value)
+              ? value
+              : defaults.remote,
+          );
+      }
+    } catch {
+      if (
+        lifetime.current !== current ||
+        optionsGeneration.current !== generation
+      )
+        return;
+      setOptions({
+        kind: "failed",
+        message: "Could not load remotes. Reload and try again.",
+      });
+    }
+  }
+  async function addRemote() {
+    if (editor.kind !== "editing" || saving.current) return;
+    if (!editor.name || !editor.url) {
+      setEditor({ ...editor, error: "Enter a remote name and endpoint." });
+      return;
+    }
+    const current = lifetime.current;
+    const input = { name: editor.name, url: editor.url };
+    ++optionsGeneration.current;
+    saving.current = true;
+    setEditor({ kind: "saving", name: input.name });
+    let report;
+    try {
+      report = await repositories.addRemote(root, input);
+    } catch (error) {
+      if (lifetime.current !== current) return;
+      saving.current = false;
+      const problem = problemFrom(error);
+      if (problem.kind === "transport") {
+        setEditor({ kind: "closed" });
+        setOptions({
+          kind: "failed",
+          message:
+            "Could not confirm whether the remote was added. Reload remotes before trying again.",
+        });
+      } else {
+        setEditor({
+          kind: "editing",
+          name: input.name,
+          url: "",
+          error: problem.message,
+        });
+        requestAnimationFrame(() => {
+          if (lifetime.current === current) remoteUrlInput.current?.focus();
+        });
+      }
+      return;
+    }
+    if (lifetime.current !== current) return;
+    saving.current = false;
+    setRemote(report.name);
+    if (report.refresh.kind === "refreshed") {
+      setOptions({ kind: "loaded", options: report.refresh.options });
+      if (report.refresh.options.kind === "available") {
+        const defaults = publishDefaults(report.refresh.options);
+        setDestination((value) => value || defaults.destination);
+      }
+      setEditor({ kind: "closed" });
+    } else {
+      setEditor({
+        kind: "savedNeedsRefresh",
+        name: report.name,
+        message: report.refresh.message,
+      });
+      setOptions({ kind: "failed", message: report.refresh.message });
+    }
+    onRemoteAdded();
   }
   return (
     <dialog
@@ -113,6 +273,11 @@ export function PublishDialog({ root, onPublish, onClose }: Props) {
       <form
         onSubmit={(event) => {
           event.preventDefault();
+          if (editor.kind !== "closed") {
+            if (editor.kind === "editing") void addRemote();
+            return;
+          }
+          if (!canPrepare) return;
           if (review.step.kind === "review") {
             onPublish(review.step.intent);
             close();
@@ -127,6 +292,7 @@ export function PublishDialog({ root, onPublish, onClose }: Props) {
             type="button"
             className="icon-button"
             onClick={close}
+            disabled={editor.kind === "saving"}
             aria-label="Close publish branch"
           >
             <X size={17} />
@@ -134,11 +300,10 @@ export function PublishDialog({ root, onPublish, onClose }: Props) {
         </div>
         <h1 id={titleId}>Publish branch</h1>
         <p>
-          Choose an existing remote and destination. Review the commit before
-          publishing.
+          Choose a remote and destination. Review the commit before publishing.
         </p>
         {options.kind === "loading" && <p role="status">Loading remotes…</p>}
-        {options.kind === "failed" && (
+        {options.kind === "failed" && editor.kind === "closed" && (
           <p role="alert" className="error-message">
             {options.message}
           </p>
@@ -149,10 +314,9 @@ export function PublishDialog({ root, onPublish, onClose }: Props) {
           )}
         {available && (
           <>
-            {available.remotes.length === 0 && (
+            {available.remotes.length === 0 && editor.kind === "closed" && (
               <p role="status">
-                No remotes configured. Add a remote with Git, then reopen
-                Publish branch.
+                No remotes configured. Add a remote to continue.
               </p>
             )}
             <label htmlFor={`${titleId}-remote`}>Remote</label>
@@ -160,6 +324,7 @@ export function PublishDialog({ root, onPublish, onClose }: Props) {
               id={`${titleId}-remote`}
               ref={remoteInput}
               value={remote}
+              disabled={editor.kind !== "closed"}
               onChange={(event) => {
                 setRemote(event.target.value);
                 dispatch({ kind: "edit" });
@@ -187,6 +352,7 @@ export function PublishDialog({ root, onPublish, onClose }: Props) {
               autoCapitalize="off"
               spellCheck={false}
               value={destination}
+              disabled={editor.kind !== "closed"}
               aria-invalid={review.step.kind === "failed"}
               aria-describedby={
                 review.step.kind === "failed" ? `${titleId}-error` : undefined
@@ -228,11 +394,125 @@ export function PublishDialog({ root, onPublish, onClose }: Props) {
             )}
           </>
         )}
+        {editor.kind === "closed" && (
+          <button
+            type="button"
+            className="button secondary"
+            onClick={openEditor}
+            disabled={options.kind === "failed"}
+          >
+            Add remote…
+          </button>
+        )}
+        {(editor.kind === "editing" || editor.kind === "saving") && (
+          <fieldset
+            className="remote-editor"
+            disabled={editor.kind === "saving"}
+          >
+            <legend>Add remote</legend>
+            <p>
+              Connect an existing Git endpoint. Adding a remote does not fetch
+              or publish.
+            </p>
+            <label htmlFor={`${titleId}-remote-name`}>Remote name</label>
+            <input
+              id={`${titleId}-remote-name`}
+              ref={remoteNameInput}
+              className="branch-name-input"
+              autoComplete="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              value={editor.name}
+              onChange={(event) => {
+                if (editor.kind === "editing")
+                  setEditor({
+                    ...editor,
+                    name: event.target.value,
+                    error: null,
+                  });
+              }}
+            />
+            <label htmlFor={`${titleId}-remote-url`}>
+              URL or filesystem path
+            </label>
+            <input
+              id={`${titleId}-remote-url`}
+              ref={remoteUrlInput}
+              className="branch-name-input"
+              autoComplete="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              value={editor.kind === "editing" ? editor.url : ""}
+              aria-invalid={editor.kind === "editing" && editor.error !== null}
+              aria-describedby={`${titleId}-remote-error`}
+              onChange={(event) => {
+                if (editor.kind === "editing")
+                  setEditor({
+                    ...editor,
+                    url: event.target.value,
+                    error: null,
+                  });
+              }}
+            />
+            {editor.kind === "editing" && editor.error && (
+              <p
+                id={`${titleId}-remote-error`}
+                role="alert"
+                className="error-message"
+              >
+                {editor.error}
+              </p>
+            )}
+            <div className="dialog-actions">
+              <button
+                type="button"
+                className="button secondary"
+                disabled={editor.kind === "saving"}
+                onClick={() => {
+                  setEditor({ kind: "closed" });
+                  if (options.kind === "loading") void reloadRemotes();
+                }}
+              >
+                Cancel add remote
+              </button>
+              <button
+                type="submit"
+                className="button primary"
+                disabled={editor.kind === "saving"}
+              >
+                {editor.kind === "saving" && (
+                  <LoaderCircle size={14} className="spin" />
+                )}
+                {editor.kind === "saving" ? "Adding remote…" : "Add remote"}
+              </button>
+            </div>
+          </fieldset>
+        )}
+        {editor.kind === "savedNeedsRefresh" && (
+          <p role="status">{editor.message}</p>
+        )}
+        {(editor.kind === "savedNeedsRefresh" ||
+          (editor.kind === "closed" && options.kind === "failed")) && (
+          <button
+            type="button"
+            className="button secondary"
+            disabled={options.kind === "loading"}
+            onClick={() => void reloadRemotes()}
+          >
+            {options.kind === "loading" ? "Loading remotes…" : "Reload remotes"}
+          </button>
+        )}
         <div className="dialog-actions">
-          <button type="button" className="button secondary" onClick={close}>
+          <button
+            type="button"
+            className="button secondary"
+            onClick={close}
+            disabled={editor.kind === "saving"}
+          >
             Cancel
           </button>
           <button
+            ref={reviewButton}
             type="submit"
             className="button primary"
             disabled={!canPrepare}
