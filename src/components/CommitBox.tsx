@@ -2,7 +2,13 @@ import { useEffect, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { LoaderCircle, TriangleAlert } from "lucide-react";
 import * as repositories from "../repositories";
-import { amendsHead, clearSubmitted, useCommitDraft } from "../commitDrafts";
+import {
+  amendsHead,
+  beginDraftTask,
+  clearSubmitted,
+  useCommitDraft,
+  useDraftImpact,
+} from "../commitDrafts";
 import {
   identityCommands,
   loadMessage,
@@ -48,13 +54,14 @@ export function CommitBox({
   const { root, head } = status;
   const [current, setDraft] = useCommitDraft(root);
   const { draft, amend } = current;
+  const { frozen } = useDraftImpact();
   const [loading, setLoading] = useState(false);
   const [problem, setProblem] = useState<Problem | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const amending = amend !== null;
   const stale = amend !== null && !amendsHead(current, head);
   useEffect(() => {
-    if (!stale) return;
+    if (!stale || frozen) return;
     setDraft({ draft: amend.draftAside, amend: null });
     setProblem({
       kind: "staleView",
@@ -62,22 +69,25 @@ export function CommitBox({
       message:
         "HEAD moved since L1 Git loaded its message, so Amend is off again and your draft is back.",
     });
-  }, [stale, amend, setDraft]);
+  }, [stale, amend, setDraft, frozen]);
   const ready =
     draft.summary.trim() !== "" &&
     (staged > 0 || amending) &&
     !busy &&
     !loading &&
-    !submitting;
+    !submitting &&
+    !frozen;
 
   async function toggleAmend(checked: boolean) {
-    if (loading || submitting) return;
+    if (loading || submitting || frozen) return;
     setProblem(null);
     if (!checked) {
       if (amend) setDraft({ draft: amend.draftAside, amend: null });
       return;
     }
     if (head.kind === "unborn") return;
+    const finishDraftTask = beginDraftTask();
+    if (!finishDraftTask) return;
     setLoading(true);
     try {
       const loaded = loadMessage(await commitMessage(root, head.oid));
@@ -89,27 +99,34 @@ export function CommitBox({
       setProblem(problemFrom(error));
     } finally {
       setLoading(false);
+      finishDraftTask();
     }
   }
 
   async function submit() {
     if (!ready || stale) return;
-    const sent = current;
-    const kind = !amending ? "commit" : staged > 0 ? "amend" : "editMessage";
-    const message = messageFor(draft, amend?.loaded ?? null);
-    setSubmitting(true);
-    setProblem(null);
-    const outcome = await onCommit(root, commitWrite(kind, status, message));
-    setSubmitting(false);
-    if (outcome.kind === "busy") return;
-    if (outcome.kind === "applied") {
-      clearSubmitted(root, sent);
-      return;
+    const finishDraftTask = beginDraftTask();
+    if (!finishDraftTask) return;
+    try {
+      const sent = current;
+      const kind = !amending ? "commit" : staged > 0 ? "amend" : "editMessage";
+      const message = messageFor(draft, amend?.loaded ?? null);
+      setSubmitting(true);
+      setProblem(null);
+      const outcome = await onCommit(root, commitWrite(kind, status, message));
+      if (outcome.kind === "busy") return;
+      if (outcome.kind === "applied") {
+        clearSubmitted(root, sent);
+        return;
+      }
+      const { problem } = outcome;
+      if (problem.kind === "raced") clearSubmitted(root, sent);
+      if (problem.kind === "hookFailed" || problem.kind === "missingIdentity")
+        setProblem(problem);
+    } finally {
+      setSubmitting(false);
+      finishDraftTask();
     }
-    const { problem } = outcome;
-    if (problem.kind === "raced") clearSubmitted(root, sent);
-    if (problem.kind === "hookFailed" || problem.kind === "missingIdentity")
-      setProblem(problem);
   }
 
   const keys = messageKeys(() => void submit());
@@ -130,7 +147,7 @@ export function CommitBox({
         autoComplete="off"
         spellCheck
         value={draft.summary}
-        readOnly={loading}
+        readOnly={loading || frozen}
         onChange={(event) =>
           setDraft({ draft: { ...draft, summary: event.target.value }, amend })
         }
@@ -143,7 +160,7 @@ export function CommitBox({
         rows={3}
         spellCheck
         value={draft.description}
-        readOnly={loading}
+        readOnly={loading || frozen}
         onChange={(event) =>
           setDraft({
             draft: { ...draft, description: event.target.value },
@@ -157,8 +174,8 @@ export function CommitBox({
           <input
             type="checkbox"
             checked={amending}
-            disabled={head.kind === "unborn"}
-            aria-disabled={loading || submitting}
+            disabled={head.kind === "unborn" || frozen}
+            aria-disabled={loading || submitting || frozen}
             onChange={(event) => void toggleAmend(event.target.checked)}
           />
           Amend previous commit

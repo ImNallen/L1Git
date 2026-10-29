@@ -117,6 +117,12 @@ import {
 import type { VisibilityRule } from "./domain/visibility";
 import { historyRows, listWrites, worktreeGroups } from "./domain/worktree";
 import { useExpandedRepositories } from "./expandedRepositories";
+import { useUpdates } from "./updates";
+import {
+  UpdatesSettings,
+  UpdateAffordance,
+  InstallingBlocker,
+} from "./components/UpdatesSettings";
 import { useFetchSettings } from "./fetchSettings";
 import { useHistoryColumns } from "./historyColumns";
 import { repositoryWarnings, useOverview } from "./overview";
@@ -170,6 +176,7 @@ function listedRef(
 const settingsSections = [
   { section: "appearance", label: "Appearance", Icon: Palette },
   { section: "fetching", label: "Fetching", Icon: CloudDownload },
+  { section: "updates", label: "Updates", Icon: CloudDownload },
 ] as const;
 
 export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
@@ -179,6 +186,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   const [settingsSection, setSettingsSection] =
     useState<SettingsSection>("appearance");
   const fetchSettings = useFetchSettings();
+  const updates = useUpdates();
   const { view: overview, store: overviewStore } = useOverview(
     app.catalog.entries.map((entry) => entry.root),
     fetchSettings.intervalMinutes,
@@ -1064,6 +1072,10 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
           </nav>
         )}
         <footer className="sidebar-bottom">
+          <UpdateAffordance
+            state={updates.snapshot.state}
+            onOpen={() => commands.openSettings("updates")}
+          />
           {screen === "settings" ? (
             <button className="settings-back" onClick={leaveSettings}>
               <ArrowLeft size={15} /> Back
@@ -1436,6 +1448,8 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
             </header>
             {settingsSection === "appearance" ? (
               <AppearanceSettings appearance={appearance} />
+            ) : settingsSection === "updates" ? (
+              <UpdatesSettings updates={updates} />
             ) : (
               <FetchSettings
                 intervalMinutes={fetchSettings.intervalMinutes}
@@ -1446,6 +1460,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
           </>
         )}
       </main>
+      <InstallingBlocker state={updates.snapshot.state} />
       {palette && (
         <CommandPalette
           items={paletteItems(

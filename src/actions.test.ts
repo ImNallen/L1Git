@@ -129,6 +129,15 @@ const key = (
 });
 
 describe("command palette", () => {
+  it("routes Open Updates settings to the Updates section", () => {
+    const handlers = commands();
+    const item = paletteItems(repositoryScreen, handlers, false, [], null).find(
+      (item) => item.id === "action:updatesSettings",
+    );
+    if (!item) throw new Error("Updates command is missing");
+    item.run();
+    expect(handlers.openSettings).toHaveBeenCalledExactlyOnceWith("updates");
+  });
   it("ranks a prefix, then word starts, then letters in order", () => {
     expect(titles(repositoryScreen, "fetch")).toEqual([
       "Fetch",
@@ -155,6 +164,7 @@ describe("command palette", () => {
       "Open Settings",
       "Open Appearance settings",
       "Open Fetching settings",
+      "Open Updates settings",
       "l1-demo",
       "sync",
       "main",
@@ -168,11 +178,13 @@ describe("command palette", () => {
     expect(titles(settings, "")).toEqual([
       "Toggle sidebar",
       "Open Fetching settings",
+      "Open Updates settings",
       "Back to repository",
     ]);
     expect(titles(settings, "fetch")).toEqual(["Open Fetching settings"]);
     expect(titles({ ...settings, section: "fetching" }, "settings")).toEqual([
       "Open Appearance settings",
+      "Open Updates settings",
     ]);
   });
 
@@ -214,6 +226,7 @@ describe("command palette", () => {
       "Open Settings",
       "Open Appearance settings",
       "Open Fetching settings",
+      "Open Updates settings",
       "l1-demo",
       "sync",
       "main",

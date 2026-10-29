@@ -79,3 +79,52 @@ describe("restoreUndone", () => {
     clearSubmitted(root, draftOf(root));
   });
 });
+
+import { beginDraftTask, draftImpact, freezeDrafts } from "./commitDrafts";
+
+it("requires consent for inactive-root drafts and amend-aside messages", () => {
+  const inactive = rootSchema.parse("/work/inactive");
+  const saved = { summary: "Aside", description: "Body" };
+  setDraft(root, {
+    draft: { summary: "Visible", description: "" },
+    amend: null,
+  });
+  setDraft(inactive, {
+    draft: { summary: "Amend", description: "" },
+    amend: { draftAside: saved, head: oid("a"), loaded: loadMessage("Amend") },
+  });
+  expect(draftImpact().drafts).toEqual([
+    { root, messages: 1, amending: false },
+    { root: inactive, messages: 2, amending: true },
+  ]);
+  clearSubmitted(root, draftOf(root));
+  clearSubmitted(inactive, draftOf(inactive));
+});
+
+it("refuses freeze through async result application, then blocks new tasks without dropping setters", async () => {
+  const finish = beginDraftTask();
+  if (!finish) throw new Error("Task was refused");
+  const before = draftImpact().revision;
+  expect(freezeDrafts(before)).toEqual({ kind: "busy" });
+  await Promise.resolve();
+  restoreUndone(root, "Restored asynchronously");
+  expect(freezeDrafts(draftImpact().revision)).toEqual({ kind: "busy" });
+  finish();
+  expect(freezeDrafts(before)).toEqual({ kind: "changed" });
+  const current = draftOf(root);
+  const frozen = freezeDrafts(draftImpact().revision);
+  if (frozen.kind !== "frozen") throw new Error("Freeze was refused");
+  expect(beginDraftTask()).toBeNull();
+  expect(() =>
+    setDraft(root, {
+      draft: { summary: "Unexpected", description: "" },
+      amend: null,
+    }),
+  ).toThrow("frozen");
+  expect(draftOf(root)).toBe(current);
+  frozen.release();
+  frozen.release();
+  expect(draftOf(root)).toBe(current);
+  expect(draftImpact().frozen).toBe(false);
+  clearSubmitted(root, current);
+});
