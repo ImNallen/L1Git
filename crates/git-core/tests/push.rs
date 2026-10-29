@@ -631,7 +631,7 @@ fn no_upstream_and_ambiguous_merge_are_unavailable() {
     assert_eq!(
         core.prepare_push(world.path()).unwrap(),
         PushAvailability::Unavailable {
-            reason: PushUnavailable::NoUpstream
+            reason: PushUnavailable::UnsupportedConfiguration
         }
     );
     git(
@@ -821,4 +821,714 @@ fn authentication_refusal_never_opens_configured_askpass() {
     assert!(matches!(outcome, PushOutcome::Failed { .. }), "{outcome:?}");
     assert!(!marker.exists(), "an authentication prompt was opened");
     assert_eq!(refs(&world.remote), before);
+}
+
+fn untracked(world: &World) {
+    git(&world.work, &["config", "--unset", "branch.main.remote"]);
+    git(&world.work, &["config", "--unset", "branch.main.merge"]);
+}
+
+fn publish_intent(core: &Coordinator, world: &World, destination: &str) -> PushIntent {
+    let choice = l1_git_core::PublishChoice {
+        remote: "origin".into(),
+        destination: l1_git_core::BranchRef::try_from(format!("refs/heads/{destination}")).unwrap(),
+    };
+    match core.prepare_publish(world.path(), &choice).unwrap() {
+        PushAvailability::Ready { intent } => intent,
+        other => panic!("{other:?}"),
+    }
+}
+
+fn no_tracking(world: &World) {
+    for suffix in ["remote", "merge"] {
+        assert_eq!(
+            git_command(
+                &world.work,
+                &["config", "--get-all", &format!("branch.main.{suffix}")]
+            )
+            .output()
+            .unwrap()
+            .status
+            .code(),
+            Some(1)
+        );
+    }
+}
+
+fn tracking(world: &World, destination: &str) {
+    assert_eq!(
+        git(&world.work, &["config", "--get-all", "branch.main.remote"]),
+        "origin"
+    );
+    assert_eq!(
+        git(&world.work, &["config", "--get-all", "branch.main.merge"]),
+        format!("refs/heads/{destination}")
+    );
+}
+
+fn publish_hook(world: &World, body: &str) {
+    let hooks = world.file("publish-hooks");
+    fs::create_dir(&hooks).unwrap();
+    fs::copy(world.script("publish-hook", body), hooks.join("pre-push")).unwrap();
+    git(
+        &world.work,
+        &["config", "core.hooksPath", hooks.to_str().unwrap()],
+    );
+}
+
+#[test]
+fn publishes_new_equal_and_fast_forward_without_touching_local_state() {
+    for destination in ["new-target", "main"] {
+        for advance in [false, true] {
+            let world = World::new();
+            untracked(&world);
+            if advance {
+                commit(&world.work, "f", "two\n", "two");
+            }
+            fs::write(world.work.join("dirty"), "untracked\n").unwrap();
+            fs::write(world.work.join("f"), "staged\n").unwrap();
+            git(&world.work, &["add", "f"]);
+            fs::write(world.work.join("f"), "unstaged\n").unwrap();
+            let core = coordinator(&world);
+            publish_hook(
+                &world,
+                "git config unrelated.fromHook preserved\ngit config url./unrelated/.insteadOf never-used:\n",
+            );
+            let before_refs = refs(&world.remote);
+            let head = git(&world.work, &["rev-parse", "HEAD"]);
+            let index = fs::read(world.work.join(".git/index")).unwrap();
+            let status = git(&world.work, &["status", "--porcelain"]);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(
+                    world.work.join(".git/config"),
+                    fs::Permissions::from_mode(0o640),
+                )
+                .unwrap();
+            }
+            let intent = publish_intent(&core, &world, destination);
+            let report = core.push(world.path(), &intent).unwrap();
+            assert_eq!(
+                report.outcome,
+                PushOutcome::Published {
+                    tracking: l1_git_core::TrackingOutcome::Set
+                }
+            );
+            let after = refs(&world.remote);
+            let target = format!("refs/heads/{destination} ");
+            let mut expected: Vec<_> = before_refs
+                .lines()
+                .filter(|line| !line.starts_with(&target))
+                .map(str::to_owned)
+                .collect();
+            expected.push(format!("{target}{head}"));
+            expected.sort();
+            assert_eq!(after, expected.join("\n"));
+            tracking(&world, destination);
+            assert_eq!(
+                git(&world.work, &["config", "unrelated.fromHook"]),
+                "preserved"
+            );
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                assert_eq!(
+                    fs::metadata(world.work.join(".git/config"))
+                        .unwrap()
+                        .permissions()
+                        .mode()
+                        & 0o777,
+                    0o640
+                );
+            }
+            assert_eq!(git(&world.work, &["rev-parse", "HEAD"]), head);
+            assert_eq!(fs::read(world.work.join(".git/index")).unwrap(), index);
+            assert_eq!(git(&world.work, &["status", "--porcelain"]), status);
+            assert_eq!(
+                fs::read_to_string(world.work.join("f")).unwrap(),
+                "unstaged\n"
+            );
+            assert_eq!(
+                fs::read_to_string(world.work.join("dirty")).unwrap(),
+                "untracked\n"
+            );
+            assert!(!world.undo().exists());
+        }
+    }
+}
+
+#[test]
+fn symbolic_tracking_refs_cannot_move_local_branches_on_publication() {
+    for existing_upstream in [false, true] {
+        for chained in [false, true] {
+            let world = World::new();
+            if !existing_upstream {
+                untracked(&world);
+            }
+            git(&world.work, &["branch", "unrelated"]);
+            commit(&world.work, "f", "two\n", "two");
+            git(
+                &world.work,
+                &[
+                    "config",
+                    "remote.origin.fetch",
+                    "+refs/heads/main:refs/remotes/origin/alias",
+                ],
+            );
+            if chained {
+                git(
+                    &world.work,
+                    &[
+                        "symbolic-ref",
+                        "refs/remotes/origin/next",
+                        "refs/heads/unrelated",
+                    ],
+                );
+            }
+            git(
+                &world.work,
+                &[
+                    "symbolic-ref",
+                    "refs/remotes/origin/alias",
+                    if chained {
+                        "refs/remotes/origin/next"
+                    } else {
+                        "refs/heads/unrelated"
+                    },
+                ],
+            );
+            let before = refs(&world.remote);
+            let local = refs(&world.work);
+            let core = coordinator(&world);
+            let availability = if existing_upstream {
+                core.prepare_push(world.path()).unwrap()
+            } else {
+                core.prepare_publish(
+                    world.path(),
+                    &l1_git_core::PublishChoice {
+                        remote: "origin".into(),
+                        destination: l1_git_core::BranchRef::try_from("refs/heads/main".to_owned())
+                            .unwrap(),
+                    },
+                )
+                .unwrap()
+            };
+            assert!(
+                matches!(availability, PushAvailability::Unavailable { .. }),
+                "{availability:?}"
+            );
+            git(
+                &world.work,
+                &[
+                    "update-ref",
+                    "--no-deref",
+                    "-d",
+                    "refs/remotes/origin/alias",
+                ],
+            );
+            let reviewed = if existing_upstream {
+                intent(&core, world.path())
+            } else {
+                publish_intent(&core, &world, "main")
+            };
+            git(
+                &world.work,
+                &[
+                    "symbolic-ref",
+                    "refs/remotes/origin/alias",
+                    "refs/heads/unrelated",
+                ],
+            );
+            assert_eq!(
+                core.push(world.path(), &reviewed).unwrap().outcome,
+                PushOutcome::Stale
+            );
+            assert_eq!(refs(&world.remote), before);
+            assert_eq!(refs(&world.work), local);
+        }
+    }
+}
+
+#[test]
+fn ordinary_push_refuses_tracking_updates_to_local_branches_and_tags() {
+    for source in ["refs/heads/main", "heads/main", "main"] {
+        for target in ["refs/heads/unrelated", "refs/tags/unrelated"] {
+            let world = World::new();
+            let core = coordinator(&world);
+            let reviewed = intent(&core, world.path());
+            git(
+                &world.work,
+                &[
+                    "config",
+                    "remote.origin.fetch",
+                    &format!("+{source}:{target}"),
+                ],
+            );
+            assert!(matches!(
+                core.prepare_push(world.path()).unwrap(),
+                PushAvailability::Unavailable { .. }
+            ));
+            let before = refs(&world.work);
+            let remote = refs(&world.remote);
+            assert_eq!(
+                core.push(world.path(), &reviewed).unwrap().outcome,
+                PushOutcome::Stale
+            );
+            assert_eq!(refs(&world.work), before);
+            assert_eq!(refs(&world.remote), remote);
+        }
+    }
+}
+
+#[test]
+fn hook_cannot_redirect_tracking_updates_to_a_local_branch() {
+    for publishing in [false, true] {
+        for mapping in [
+            "+refs/heads/main:refs/remotes/origin/alias",
+            "+refs/heads/*:refs/remotes/origin/*",
+        ] {
+            let world = World::new();
+            if publishing {
+                untracked(&world);
+            }
+            git(&world.work, &["branch", "unrelated"]);
+            let oid = commit(&world.work, "f", "two\n", "two");
+            git(&world.work, &["config", "remote.origin.fetch", mapping]);
+            let target = if mapping.contains('*') {
+                "refs/remotes/origin/main"
+            } else {
+                "refs/remotes/origin/alias"
+            };
+            publish_hook(
+                &world,
+                &format!("git symbolic-ref {target} refs/heads/unrelated\n"),
+            );
+            let core = coordinator(&world);
+            let reviewed = if publishing {
+                publish_intent(&core, &world, "main")
+            } else {
+                intent(&core, world.path())
+            };
+            let report = core.push(world.path(), &reviewed).unwrap();
+            assert!(
+                matches!(
+                    report.outcome,
+                    PushOutcome::Published { .. } | PushOutcome::Pushed
+                ),
+                "{report:?}"
+            );
+            assert_eq!(git(&world.work, &["rev-parse", "unrelated"]), world.initial);
+            assert_eq!(git(&world.remote, &["rev-parse", "main"]), oid);
+        }
+    }
+}
+
+#[test]
+fn changed_tracking_ref_is_preserved_after_confirmed_publication() {
+    let world = World::new();
+    let oid = commit(&world.work, "f", "two\n", "two");
+    let tree = git(&world.work, &["rev-parse", "HEAD^{tree}"]);
+    let newer = git(
+        &world.work,
+        &["commit-tree", &tree, "-p", &oid, "-m", "concurrent update"],
+    );
+    publish_hook(
+        &world,
+        &format!("git update-ref refs/remotes/origin/main {newer}\n"),
+    );
+    let core = coordinator(&world);
+    let report = core
+        .push(world.path(), &intent(&core, world.path()))
+        .unwrap();
+    assert_eq!(report.outcome, PushOutcome::Pushed);
+    assert!(matches!(report.refresh, PushRefresh::Failed { .. }));
+    assert_eq!(
+        git(&world.work, &["rev-parse", "refs/remotes/origin/main"]),
+        newer
+    );
+    assert_eq!(git(&world.remote, &["rev-parse", "main"]), oid);
+}
+
+#[test]
+fn publish_options_handle_no_remotes_partial_config_and_remote_policy() {
+    let world = World::new();
+    let core = coordinator(&world);
+    git(&world.work, &["config", "--unset", "branch.main.merge"]);
+    assert!(matches!(
+        core.publish_options(world.path()).unwrap(),
+        l1_git_core::PublishOptions::Unavailable {
+            reason: PushUnavailable::UnsupportedConfiguration
+        }
+    ));
+    git(&world.work, &["config", "--unset", "branch.main.remote"]);
+    git(&world.work, &["config", "remote.origin.mirror", "true"]);
+    let options = serde_json::to_value(core.publish_options(world.path()).unwrap()).unwrap();
+    assert_eq!(options["remotes"][0]["availability"]["reason"], "mirror");
+    git(&world.work, &["remote", "remove", "origin"]);
+    let options = serde_json::to_value(core.publish_options(world.path()).unwrap()).unwrap();
+    assert_eq!(options["remotes"], serde_json::json!([]));
+}
+
+#[test]
+fn stale_publish_source_target_and_config_never_send_or_set_tracking() {
+    for change in [
+        "source",
+        "remote",
+        "mapping",
+        "tracking",
+        "destination",
+        "purpose",
+        "fingerprint",
+        "rewrite",
+    ] {
+        let world = World::new();
+        untracked(&world);
+        let core = coordinator(&world);
+        let mut intent = publish_intent(&core, &world, "reviewed");
+        match change {
+            "source" => {
+                commit(&world.work, "f", "two\n", "two");
+            }
+            "remote" => {
+                git(
+                    &world.work,
+                    &["config", "remote.origin.pushurl", "/different.git"],
+                );
+            }
+            "rewrite" => {
+                git(
+                    &world.work,
+                    &[
+                        "config",
+                        "url./changed/.insteadOf",
+                        world.remote.to_str().unwrap(),
+                    ],
+                );
+            }
+            "mapping" => {
+                git(
+                    &world.work,
+                    &[
+                        "config",
+                        "remote.origin.fetch",
+                        "+refs/heads/*:refs/remotes/custom/*",
+                    ],
+                );
+            }
+            "tracking" => {
+                git(&world.work, &["config", "branch.main.remote", "other"]);
+            }
+            "destination" => {
+                intent.destination =
+                    l1_git_core::BranchRef::try_from("refs/heads/unreviewed".to_owned()).unwrap();
+            }
+            "purpose" => intent.purpose = l1_git_core::PushPurpose::Upstream,
+            "fingerprint" => intent.fingerprint = "a".repeat(40),
+            _ => unreachable!(),
+        }
+        let before = refs(&world.remote);
+        assert_eq!(
+            core.push(world.path(), &intent).unwrap().outcome,
+            PushOutcome::Stale,
+            "{change}"
+        );
+        assert_eq!(refs(&world.remote), before);
+        if change != "tracking" {
+            no_tracking(&world);
+        }
+    }
+}
+
+#[test]
+fn publish_rejection_and_uncertainty_never_set_tracking() {
+    for scenario in ["diverged", "refused", "uncertain"] {
+        let world = World::new();
+        untracked(&world);
+        let core = coordinator(&world);
+        if scenario == "diverged" {
+            world.colleague_pushes("main", "colleague", "new\n");
+            commit(&world.work, "local", "new\n", "diverge");
+        } else if scenario == "refused" {
+            commit(&world.work, "local", "new\n", "new");
+            fs::copy(
+                world.script("reject-publication", "exit 1\n"),
+                world.remote.join("hooks/pre-receive"),
+            )
+            .unwrap();
+        } else {
+            publish_hook(&world, "exit 1\n");
+        }
+        let before = refs(&world.remote);
+        let report = core
+            .push(world.path(), &publish_intent(&core, &world, "main"))
+            .unwrap();
+        assert!(
+            matches!(
+                report.outcome,
+                PushOutcome::Rejected { .. } | PushOutcome::Uncertain { .. }
+            ),
+            "{report:?}"
+        );
+        no_tracking(&world);
+        assert_eq!(refs(&world.remote), before);
+    }
+}
+
+#[test]
+fn post_hook_changes_skip_tracking_but_keep_exact_publication() {
+    for script in [
+        "git switch --quiet -c other\n",
+        "git -c user.name=Ada -c user.email=ada@example.test commit --quiet --allow-empty -m hook\n",
+        "git config branch.main.remote another\n",
+        "git config remote.origin.fetch invalid:ref:spec\n",
+        "git config remote.origin.pushurl /not-reviewed.git\n",
+    ] {
+        let world = World::new();
+        untracked(&world);
+        let core = coordinator(&world);
+        publish_hook(&world, script);
+        let intent = publish_intent(&core, &world, "reviewed");
+        let report = core.push(world.path(), &intent).unwrap();
+        assert!(
+            matches!(
+                report.outcome,
+                PushOutcome::Published {
+                    tracking: l1_git_core::TrackingOutcome::SkippedChanged { .. }
+                        | l1_git_core::TrackingOutcome::Failed { .. }
+                }
+            ),
+            "{report:?}"
+        );
+        assert_eq!(
+            git(&world.remote, &["rev-parse", "reviewed"]),
+            intent.source.as_str()
+        );
+        if !script.contains("branch.main.remote") {
+            no_tracking(&world);
+        }
+        assert_eq!(
+            git_command(&world.work, &["config", "--get", "branch.other.remote"])
+                .output()
+                .unwrap()
+                .status
+                .code(),
+            Some(1)
+        );
+        if script.contains("invalid:ref:spec") {
+            assert!(matches!(report.refresh, PushRefresh::Failed { .. }));
+        }
+    }
+}
+
+#[test]
+fn config_lock_failure_is_atomic_and_preserves_the_unowned_lock() {
+    let world = World::new();
+    untracked(&world);
+    let core = coordinator(&world);
+    let intent = publish_intent(&core, &world, "published");
+    let config = fs::read(world.work.join(".git/config")).unwrap();
+    fs::write(world.work.join(".git/config.lock"), "another process").unwrap();
+    let report = core.push(world.path(), &intent).unwrap();
+    assert!(matches!(
+        report.outcome,
+        PushOutcome::Published {
+            tracking: l1_git_core::TrackingOutcome::Failed { .. }
+        }
+    ));
+    assert_eq!(
+        git(&world.remote, &["rev-parse", "published"]),
+        intent.source.as_str()
+    );
+    no_tracking(&world);
+    assert_eq!(fs::read(world.work.join(".git/config")).unwrap(), config);
+    assert_eq!(
+        fs::read_to_string(world.work.join(".git/config.lock")).unwrap(),
+        "another process"
+    );
+}
+
+#[test]
+fn custom_mapping_includes_worktree_config_and_fresh_unrelated_edits_work() {
+    let world = World::new();
+    untracked(&world);
+    let core = coordinator(&world);
+    let include = world.file("unrelated-config");
+    fs::write(&include, "[unrelated]\n value = included\n").unwrap();
+    git(
+        &world.work,
+        &["config", "include.path", include.to_str().unwrap()],
+    );
+    git(
+        &world.work,
+        &["config", "extensions.worktreeConfig", "true"],
+    );
+    git(
+        &world.work,
+        &["config", "--worktree", "unrelated.worktree", "kept"],
+    );
+    git(
+        &world.work,
+        &[
+            "config",
+            "remote.origin.fetch",
+            "+refs/heads/*:refs/remotes/custom/*",
+        ],
+    );
+    git(&world.work, &["switch", "--quiet", "-c", "spare"]);
+    let linked = world.worktree("linked-publish", "main");
+    let choice = l1_git_core::PublishChoice {
+        remote: "origin".into(),
+        destination: l1_git_core::BranchRef::try_from("refs/heads/custom".to_owned()).unwrap(),
+    };
+    let PushAvailability::Ready { intent } = core
+        .prepare_publish(linked.to_str().unwrap(), &choice)
+        .unwrap()
+    else {
+        panic!("not ready")
+    };
+    git(&world.work, &["config", "unrelated.fresh", "preserved"]);
+    let report = core.push(linked.to_str().unwrap(), &intent).unwrap();
+    assert_eq!(
+        report.outcome,
+        PushOutcome::Published {
+            tracking: l1_git_core::TrackingOutcome::Set
+        }
+    );
+    assert_eq!(
+        git(&linked, &["rev-parse", "main@{upstream}"]),
+        intent.source.as_str()
+    );
+    assert_eq!(
+        git(&world.work, &["config", "unrelated.fresh"]),
+        "preserved"
+    );
+    assert_eq!(git(&world.work, &["config", "unrelated.value"]), "included");
+    assert_eq!(
+        git(&world.work, &["config", "--worktree", "unrelated.worktree"]),
+        "kept"
+    );
+}
+
+#[test]
+fn relevant_negative_and_ambiguous_fetch_mappings_are_unavailable() {
+    for mapping in [
+        "^refs/heads/blocked",
+        "+refs/heads/blocked:refs/remotes/other/blocked",
+        "+refs/heads/*:refs/heads/*",
+        "+refs/heads/other:refs/remotes/origin/blocked",
+        "+refs/heads/blocked:refs/stash",
+    ] {
+        let world = World::new();
+        untracked(&world);
+        let core = coordinator(&world);
+        git(
+            &world.work,
+            &["config", "--add", "remote.origin.fetch", mapping],
+        );
+        let choice = l1_git_core::PublishChoice {
+            remote: "origin".into(),
+            destination: l1_git_core::BranchRef::try_from("refs/heads/blocked".to_owned()).unwrap(),
+        };
+        assert_eq!(
+            core.prepare_publish(world.path(), &choice).unwrap(),
+            PushAvailability::Unavailable {
+                reason: PushUnavailable::UnusableFetchMapping
+            }
+        );
+        no_tracking(&world);
+    }
+    let world = World::new();
+    untracked(&world);
+    git(
+        &world.work,
+        &[
+            "config",
+            "--add",
+            "remote.origin.fetch",
+            "^refs/heads/unrelated",
+        ],
+    );
+    assert_eq!(
+        publish_intent(&coordinator(&world), &world, "allowed").purpose,
+        l1_git_core::PushPurpose::Publish
+    );
+}
+
+#[test]
+fn confirmed_publication_survives_tracking_and_refresh_failure_and_keeps_fresh_config() {
+    let world = World::new();
+    untracked(&world);
+    let core = coordinator(&world);
+    publish_hook(
+        &world,
+        "git config unrelated.fromHook preserved\ngit config remote.broken.url /not-used.git\ngit config remote.broken.fetch invalid:ref:spec\n",
+    );
+    let intent = publish_intent(&core, &world, "published");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(
+            world.work.join(".git/config"),
+            fs::Permissions::from_mode(0o640),
+        )
+        .unwrap();
+    }
+    let report = core.push(world.path(), &intent).unwrap();
+    assert!(matches!(
+        report.outcome,
+        PushOutcome::Published {
+            tracking: l1_git_core::TrackingOutcome::Failed { .. }
+        }
+    ));
+    assert!(matches!(report.refresh, PushRefresh::Failed { .. }));
+    assert_eq!(
+        git(&world.remote, &["rev-parse", "published"]),
+        intent.source.as_str()
+    );
+    assert_eq!(
+        git(&world.work, &["config", "unrelated.fromHook"]),
+        "preserved"
+    );
+    no_tracking(&world);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            fs::metadata(world.work.join(".git/config"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o640
+        );
+    }
+}
+
+#[test]
+fn a_timeout_after_remote_acceptance_does_not_set_tracking() {
+    let world = World::new();
+    untracked(&world);
+    let core = Coordinator::new(
+        Limits {
+            push_deadline: Duration::from_secs(2),
+            ..Limits::default()
+        },
+        world.undo(),
+    );
+    fs::copy(
+        world.script("slow-receive", "sleep 10\n"),
+        world.remote.join("hooks/post-receive"),
+    )
+    .unwrap();
+    let intent = publish_intent(&core, &world, "published");
+    assert!(matches!(
+        core.push(world.path(), &intent).unwrap().outcome,
+        PushOutcome::Uncertain { .. }
+    ));
+    assert_eq!(
+        git(&world.remote, &["rev-parse", "published"]),
+        intent.source.as_str()
+    );
+    no_tracking(&world);
 }

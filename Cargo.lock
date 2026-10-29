@@ -1690,6 +1690,7 @@ version = "0.1.0"
 dependencies = [
  "icu_normalizer",
  "libc",
+ "same-file",
  "serde",
  "serde_json",
  "sha1_smol",

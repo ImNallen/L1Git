@@ -3,7 +3,9 @@ mod fetch;
 mod push;
 mod read;
 pub use push::{
-    PushAvailability, PushIntent, PushOutcome, PushRefresh, PushReport, PushUnavailable,
+    PublishChoice, PublishOptions, PublishRemote, PublishRemoteAvailability, PushAvailability,
+    PushIntent, PushOutcome, PushPurpose, PushRefresh, PushReport, PushUnavailable,
+    TrackingOutcome,
 };
 
 pub(crate) use advance::is_at;

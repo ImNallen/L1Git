@@ -47,6 +47,7 @@ import { useBranchVisibility } from "./branchVisibility";
 import type { ThemeSettings } from "./themes/catalog";
 import { AppearanceSettings } from "./components/AppearanceSettings";
 import { AddRepositoryDialog } from "./components/AddRepositoryDialog";
+import { PublishDialog } from "./components/PublishDialog";
 import { BranchDialog } from "./components/BranchDialog";
 import { CheckoutCommitDialog } from "./components/CheckoutCommitDialog";
 import { TagDialog } from "./components/TagDialog";
@@ -193,6 +194,9 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     skipped: number;
     returnFocus?: () => void;
   } | null>(null);
+  const [publishingRoot, setPublishingRoot] = useState<RepositoryRoot | null>(
+    null,
+  );
   const [branchAsk, setBranchAsk] = useState<BranchAsk | null>(null);
   const [detaching, setDetaching] = useState<Oid | null>(null);
   const [tagAsk, setTagAsk] = useState<TagAsk | null>(null);
@@ -647,6 +651,8 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     push: () => {
       if (openRoot && publishControl.kind === "ready")
         void overviewStore.push(openRoot, publishControl.intent);
+      else if (openRoot && publishControl.kind === "publish")
+        setPublishingRoot(openRoot);
     },
     fastForward: () => {
       if (openRepository)
@@ -1164,8 +1170,9 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
             <WriteNoticeRow writes={writes} />
             {openPush?.notice && (
               <div
-                className={`notice ${openPush.notice.outcome.kind === "pushed" || openPush.notice.outcome.kind === "upToDate" ? "info-notice" : "error-notice"}`}
+                className={`notice ${openPush.notice.outcome.kind === "published" || openPush.notice.outcome.kind === "pushed" || openPush.notice.outcome.kind === "upToDate" ? "info-notice" : "error-notice"}`}
                 role={
+                  openPush.notice.outcome.kind === "published" ||
                   openPush.notice.outcome.kind === "pushed" ||
                   openPush.notice.outcome.kind === "upToDate"
                     ? "status"
@@ -1462,6 +1469,19 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
           }}
           onClose={() => {
             flushSync(() => setEditingMessage(false));
+            focusFallback();
+          }}
+        />
+      )}
+      {publishingRoot && (
+        <PublishDialog
+          key={publishingRoot}
+          root={publishingRoot}
+          onPublish={(intent) => {
+            void overviewStore.push(publishingRoot, intent);
+          }}
+          onClose={() => {
+            setPublishingRoot(null);
             focusFallback();
           }}
         />

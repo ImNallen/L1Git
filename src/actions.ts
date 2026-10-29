@@ -277,7 +277,7 @@ export const actions: readonly Action[] = [
     available: (context) =>
       onRepository(context) &&
       !context.writing &&
-      context.push?.kind === "ready",
+      (context.push?.kind === "ready" || context.push?.kind === "publish"),
     run: (commands) => commands.push(),
   },
   {

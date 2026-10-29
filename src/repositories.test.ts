@@ -174,6 +174,7 @@ describe("bridge transport", () => {
 it("sends the prepared push intent unchanged and validates strict push outcomes", async () => {
   const { pushIntentSchema } = await import("./domain/push");
   const intent = pushIntentSchema.parse({
+    purpose: "upstream",
     branch: "refs/heads/main",
     source: oid,
     remote: "origin",
@@ -202,3 +203,62 @@ it("sends the prepared push intent unchanged and validates strict push outcomes"
   });
   await expect(push(root, intent)).rejects.toHaveProperty("issues");
 });
+
+it.each([true, false])(
+  "shares publication options, preparation, and confirmed tracking outcomes across native=%s",
+  async (native) => {
+    const { publishOptions, preparePublish, push } = await load(native);
+    const { publishChoiceSchema, pushIntentSchema } =
+      await import("./domain/push");
+    const choice = publishChoiceSchema.parse({
+      remote: "origin",
+      destination: "refs/heads/release",
+    });
+    const intent = pushIntentSchema.parse({
+      purpose: "publish",
+      branch: "refs/heads/topic",
+      source: oid,
+      ...choice,
+      endpoint: "/remote.git",
+      fingerprint: "b".repeat(40),
+    });
+    const options = {
+      kind: "available",
+      branch: intent.branch,
+      source: oid,
+      remotes: [
+        {
+          name: "origin",
+          availability: { kind: "eligible", endpoint: intent.endpoint },
+        },
+      ],
+    };
+    const reply = (op: string, data: unknown) => {
+      if (native) invoke.mockResolvedValueOnce({ op, data });
+      else fetch.mockResolvedValueOnce(Response.json({ ok: true, op, data }));
+    };
+    reply("publishOptions", options);
+    expect(await publishOptions(root)).toEqual(options);
+    reply("preparePublish", { kind: "ready", intent });
+    expect(await preparePublish(root, choice)).toEqual({
+      kind: "ready",
+      intent,
+    });
+    const report = {
+      outcome: { kind: "published", tracking: { kind: "set" } },
+      refresh: { kind: "failed", message: "Refresh failed." },
+    };
+    reply("push", report);
+    expect(await push(root, intent)).toEqual(report);
+    if (native)
+      expect(invoke).toHaveBeenLastCalledWith("repository_run", {
+        request: { op: "push", path: root, intent },
+      });
+    else
+      expect(JSON.parse(fetch.mock.calls.at(-1)?.[1]?.body ?? "")).toEqual({
+        op: "push",
+        path: root,
+        intent,
+      });
+  },
+);

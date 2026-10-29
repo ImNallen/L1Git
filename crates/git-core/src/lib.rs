@@ -22,8 +22,9 @@ pub use repository::{
 pub use run::{Request, Response, run};
 pub use status::{worktree_patch, worktree_status};
 pub use sync::{
-    Coordinator, Limits, PushAvailability, PushIntent, PushOutcome, PushRefresh, PushReport,
-    PushUnavailable,
+    Coordinator, Limits, PublishChoice, PublishOptions, PublishRemote, PublishRemoteAvailability,
+    PushAvailability, PushIntent, PushOutcome, PushPurpose, PushRefresh, PushReport,
+    PushUnavailable, TrackingOutcome,
 };
 pub use write::{
     Applied, BranchTip, EntryId, Expect, LinePick, LineSide, Operation, Start, StashTip, TagTip,
