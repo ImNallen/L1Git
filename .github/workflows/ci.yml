@@ -1,6 +1,12 @@
 name: CI
 
 on:
+  workflow_call:
+    inputs:
+      source_sha:
+        description: Exact application source commit to check
+        required: false
+        type: string
   pull_request:
   push:
     branches: [main]
@@ -9,7 +15,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}-${{ inputs.source_sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -18,6 +24,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -33,6 +41,16 @@ jobs:
       - run: cargo clippy --locked --all-targets -- -D warnings
       - run: cargo test --locked
       - run: pnpm test
+      - name: Check release tooling from the workflow revision
+        if: inputs.source_sha != ''
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .release-tools
+          sparse-checkout: scripts
+          persist-credentials: false
+      - if: inputs.source_sha != ''
+        run: node --test .release-tools/scripts/release-plan.test.mjs .release-tools/scripts/release-assets.test.mjs .release-tools/scripts/updater-manifest.test.mjs
       - run: pnpm build
 
   desktop:
@@ -40,6 +58,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:

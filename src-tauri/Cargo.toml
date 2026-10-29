@@ -9,5 +9,6 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 l1-git-core = { path = "../crates/git-core" }
+serde_json.workspace = true
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
