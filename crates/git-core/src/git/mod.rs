@@ -6,7 +6,7 @@ use crate::{BranchRef, ErrorKind, Oid, RepositoryError};
 use std::{
     io::{self, Read, Write as _},
     path::Path,
-    process::{Child, ChildStderr, Command, ExitStatus, Stdio},
+    process::{Child, Command, ExitStatus, Stdio},
     sync::{
         Mutex, MutexGuard, PoisonError,
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -210,7 +210,7 @@ impl Deadline {
 struct Ran {
     status: ExitStatus,
     stdout: Capped,
-    stderr: Stderr,
+    stderr: CapturedPipe,
 }
 
 /// Spawns Git in its own process group so an expired deadline stops every
@@ -237,7 +237,7 @@ fn execute(
         .take()
         .zip(input)
         .map(|(mut stdin, input)| thread::spawn(move || stdin.write_all(&input)));
-    let stderr = Stderr::drain(child.child.stderr.take());
+    let stderr = CapturedPipe::drain(child.child.stderr.take());
     let Some(mut pipe) = child.child.stdout.take() else {
         child.stop();
         return Err(deadline.broken());
@@ -425,7 +425,7 @@ pub(crate) enum Capped {
 pub(crate) struct CappedRun {
     pub(crate) code: Option<i32>,
     pub(crate) stdout: Capped,
-    stderr: Stderr,
+    stderr: CapturedPipe,
 }
 
 impl CappedRun {
@@ -504,6 +504,11 @@ pub(crate) fn malformed() -> RepositoryError {
 }
 
 pub(crate) enum Mutation<'a> {
+    Push {
+        remote: &'a str,
+        source: &'a Oid,
+        destination: &'a BranchRef,
+    },
     Fetch {
         remote: &'a str,
     },
@@ -525,6 +530,23 @@ impl Mutation<'_> {
     fn args(&self) -> Vec<String> {
         let owned = |args: &[&str]| args.iter().map(|arg| (*arg).to_owned()).collect();
         match self {
+            Self::Push {
+                remote,
+                source,
+                destination,
+            } => owned(&[
+                &format!("--config-env=remote.{remote}.mirror=L1GIT_PUSH_MIRROR"),
+                "-c",
+                "push.pushOption=",
+                "push",
+                "--porcelain",
+                "--no-force",
+                "--no-follow-tags",
+                "--recurse-submodules=no",
+                "--",
+                remote,
+                &format!("{}:{}", source.as_str(), destination.as_str()),
+            ]),
             Self::Fetch { remote } => owned(&[
                 "fetch",
                 "--prune",
@@ -576,12 +598,12 @@ const TERMINATE_GRACE: Duration = Duration::from_secs(2);
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(1);
 const SPAWN_POLL: Duration = Duration::from_micros(100);
 
-/// A process that Git starts, such as a clean filter, can keep stderr open
-/// after Git exits.
-struct Stderr(mpsc::Receiver<Vec<u8>>);
+/// A process that Git starts, such as a hook, can keep a pipe open after
+/// Git exits.
+struct CapturedPipe(mpsc::Receiver<Vec<u8>>);
 
-impl Stderr {
-    fn drain(pipe: Option<ChildStderr>) -> Self {
+impl CapturedPipe {
+    fn drain<R: Read + Send + 'static>(pipe: Option<R>) -> Self {
         let (sender, receiver) = mpsc::channel();
         if let Some(mut pipe) = pipe {
             thread::spawn(move || {
@@ -594,7 +616,7 @@ impl Stderr {
     fn after_exit(self) -> Vec<u8> {
         self.0
             .recv_timeout(INHERITED_STDERR_WAIT)
-            .unwrap_or_default()
+            .unwrap_or_else(|_| "…".as_bytes().to_vec())
     }
 }
 
@@ -607,7 +629,10 @@ fn marked_tail(pipe: &mut impl Read, cap: usize) -> Vec<u8> {
             Ok(0) => break,
             Ok(read) => kept.extend_from_slice(&chunk[..read]),
             Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-            Err(_) => break,
+            Err(_) => {
+                cut = true;
+                break;
+            }
         }
         if kept.len() > 2 * cap {
             kept.drain(..kept.len() - cap);
@@ -633,20 +658,51 @@ pub(crate) fn mutate(
     mutation: Mutation<'_>,
     deadline: Duration,
 ) -> Result<Finished, RepositoryError> {
-    // A partial clone must download the blobs of the tree it checks out.
+    Ok(match capture_mutation(path, mutation, deadline)? {
+        Captured::Completed { success: true, .. } => Finished::Succeeded,
+        Captured::Completed { stderr, .. } => Finished::Failed { stderr },
+        Captured::TimedOut => Finished::TimedOut,
+    })
+}
+
+pub(crate) enum Captured {
+    Completed {
+        success: bool,
+        stdout: Vec<u8>,
+        stderr: String,
+    },
+    TimedOut,
+}
+
+pub(crate) fn capture_mutation(
+    path: &Path,
+    mutation: Mutation<'_>,
+    deadline: Duration,
+) -> Result<Captured, RepositoryError> {
     let merge = matches!(mutation, Mutation::MergeFastForward { .. });
+    let capture = matches!(mutation, Mutation::Push { .. });
     let mut command = base(path, merge);
     if merge {
         command.env("GIT_REFLOG_ACTION", "l1git fast-forward");
     }
+    if capture {
+        command
+            .env("L1GIT_PUSH_MIRROR", "false")
+            .env("GIT_ASKPASS", "/usr/bin/false");
+    }
     without_prompts(&mut command)
         .args(mutation.args())
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
+        .stdout(if capture {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .stderr(Stdio::piped());
     let started = Instant::now();
     let mut child = Group::spawn(command)?;
-    let stderr = Stderr::drain(child.child.stderr.take());
+    let stderr = CapturedPipe::drain(child.child.stderr.take());
+    let stdout = CapturedPipe::drain(child.child.stdout.take());
     let failed = |error: io::Error| {
         RepositoryError::new(ErrorKind::GitFailed, format!("Could not run Git: {error}"))
     };
@@ -661,17 +717,15 @@ pub(crate) fn mutate(
         if exited {
             let status = child.wait().map_err(failed)?;
             let stderr = stderr.after_exit();
-            return Ok(if status.success() {
-                Finished::Succeeded
-            } else {
-                Finished::Failed {
-                    stderr: text(&stderr),
-                }
+            return Ok(Captured::Completed {
+                success: status.success(),
+                stdout: stdout.after_exit(),
+                stderr: text(&stderr),
             });
         }
         if started.elapsed() >= deadline {
             child.stop();
-            return Ok(Finished::TimedOut);
+            return Ok(Captured::TimedOut);
         }
         thread::sleep(POLL);
     }

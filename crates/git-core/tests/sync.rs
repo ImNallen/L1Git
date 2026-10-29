@@ -148,6 +148,7 @@ fn commit(path: &Path, file: &str, contents: &str, message: &str) -> String {
 fn limits() -> Limits {
     Limits {
         fetch_deadline: Duration::from_secs(2),
+        push_deadline: Duration::from_secs(2),
         local_deadline: Duration::from_secs(30),
         network_slots: NonZeroUsize::new(4).unwrap(),
     }

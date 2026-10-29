@@ -21,7 +21,10 @@ pub use repository::{
 };
 pub use run::{Request, Response, run};
 pub use status::{worktree_patch, worktree_status};
-pub use sync::{Coordinator, Limits};
+pub use sync::{
+    Coordinator, Limits, PushAvailability, PushIntent, PushOutcome, PushRefresh, PushReport,
+    PushUnavailable,
+};
 pub use write::{
     Applied, BranchTip, EntryId, Expect, LinePick, LineSide, Operation, Start, StashTip, TagTip,
     UndoHistory,

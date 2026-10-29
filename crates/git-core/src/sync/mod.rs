@@ -1,6 +1,10 @@
 mod advance;
 mod fetch;
+mod push;
 mod read;
+pub use push::{
+    PushAvailability, PushIntent, PushOutcome, PushRefresh, PushReport, PushUnavailable,
+};
 
 pub(crate) use advance::is_at;
 pub(crate) use read::in_progress;
@@ -22,10 +26,12 @@ use std::{
 pub struct Limits {
     /// How long one remote may take to fetch.
     pub fetch_deadline: Duration,
+    /// How long one ordinary push may take.
+    pub push_deadline: Duration,
     /// How long a probe, ref move, or worktree fast-forward may take. A partial
     /// clone downloads blobs during the fast-forward.
     pub local_deadline: Duration,
-    /// Fetches that may run at once across all repositories.
+    /// Remote operations that may run at once across all repositories.
     pub network_slots: NonZeroUsize,
 }
 
@@ -33,6 +39,7 @@ impl Default for Limits {
     fn default() -> Self {
         Self {
             fetch_deadline: Duration::from_secs(300),
+            push_deadline: Duration::from_secs(300),
             local_deadline: Duration::from_secs(120),
             network_slots: NonZeroUsize::new(4).unwrap(),
         }
@@ -41,10 +48,10 @@ impl Default for Limits {
 
 /// Owns every Git command that contacts a remote, moves a ref, or writes, and
 /// the undo history. Keep one per process. Per Git common dir it runs at most
-/// one fetch or fast-forward at a time (the gate) and at most one write, undo,
+/// one fetch, push, or fast-forward at a time (the gate) and at most one write, undo,
 /// redo, or fast-forward ref move at a time (the write lock). A write never
 /// takes the gate, so it never waits for a fetch. At most `network_slots`
-/// fetches run at once. Local reads take no lock.
+/// remote operations run at once. Local reads take no lock.
 pub struct Coordinator {
     limits: Limits,
     read_cap: Option<Duration>,
