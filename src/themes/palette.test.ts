@@ -86,13 +86,15 @@ it("derives a light and a dark variant for each of the five seeded families", ()
 const WCAG_AA_TEXT_CONTRAST = 4.5;
 
 it.each(derived.map((v) => [v.id, v.palette] as const))(
-  "keeps %s muted text at AA 4.5:1, and the rest as readable as L1",
+  "keeps %s muted, dim, and faint text at AA 4.5:1, and the rest as readable as L1",
   (_, p) => {
     expect(ratio(p.foreground, p.background)).toBeGreaterThanOrEqual(7);
-    expect(ratio(p.muted, p.background)).toBeGreaterThanOrEqual(
-      WCAG_AA_TEXT_CONTRAST,
-    );
-    expect(ratio(p.textDim, p.background)).toBeGreaterThanOrEqual(3);
+    for (const token of ["muted", "textDim", "textFaint"] as const)
+      for (const surface of [p.background, p.sidebar])
+        expect(ratio(p[token], surface)).toBeGreaterThanOrEqual(
+          WCAG_AA_TEXT_CONTRAST,
+        );
+    expect(ratio(p.borderInput, p.controlInset)).toBeGreaterThanOrEqual(3);
     expect(ratio(p.accentForeground, p.accent)).toBeGreaterThanOrEqual(3);
   },
 );
@@ -149,18 +151,18 @@ it("starts each theme's lanes from L1's lane nearest its accent and keeps L1's o
     "#ff7488",
     "#c387ff",
     "#a5e837",
-    "#3970f7",
+    "#4e83f9",
   ]);
   expect(
     Object.fromEntries(builtInLanes.map(([id, , lanes]) => [id, lanes[0]])),
   ).toEqual({
     "l1-light": "#1b4ed8",
-    "l1-dark": "#346bf1",
-    "grove-light": "#0b9387",
+    "l1-dark": "#4a7ef4",
+    "grove-light": "#0d756d",
     "grove-dark": "#32d6c1",
     "ocean-light": "#1a4cd6",
-    "ocean-dark": "#3870f7",
-    "ember-light": "#d87602",
+    "ocean-dark": "#4e83f9",
+    "ember-light": "#b35207",
     "ember-dark": "#ff7488",
     "iris-light": "#9231e8",
     "iris-dark": "#c286ff",
@@ -193,12 +195,12 @@ it.each(builtInLanes)(
 );
 
 it.each(derived.map((v) => [v.id, v.palette] as const))(
-  "keeps %s lanes at 3:1 on the canvas, with initials and ref names at 3:1 on each lane",
+  "keeps %s lanes at 3:1 on the canvas, with initials and ref names at 4.5:1 on each lane",
   (_, p) => {
     for (const lane of LANES) {
       expect(ratio(p[lane], p.background)).toBeGreaterThanOrEqual(3);
-      expect(ratio(p.onLane, p[lane])).toBeGreaterThanOrEqual(3);
-      expect(ratio(p.refOnLane, p[lane])).toBeGreaterThanOrEqual(3);
+      expect(ratio(p.onLane, p[lane])).toBeGreaterThanOrEqual(4.5);
+      expect(ratio(p.refOnLane, p[lane])).toBeGreaterThanOrEqual(4.5);
     }
   },
 );
@@ -283,7 +285,7 @@ it("tints error washes toward the red a theme brings", () => {
 it("starts lanes from L1's blue when the accent is grey", () => {
   for (const accent of ["#808080", "#7f8081"]) {
     const p = derivePalette("dark", "#0a0a0a", accent);
-    expect([p.graphLane1, p.graphLane3]).toEqual(["#346bf1", "#fbbf24"]);
+    expect([p.graphLane1, p.graphLane3]).toEqual(["#4a7ef4", "#fbbf24"]);
   }
 });
 
@@ -305,10 +307,10 @@ it("colours keywords with the accent and turns the rest of the code with it", ()
     grove.syntaxKeyword,
     grove.syntaxString,
     grove.syntaxComment,
-  ]).toEqual(["#72daa7", "#fbb76d", "#828684"]);
+  ]).toEqual(["#72daa7", "#fbb76d", "#939795"]);
   expect([
     ember.syntaxKeyword,
     ember.syntaxString,
     ember.syntaxComment,
-  ]).toEqual(["#8c3800", "#6e4087", "#747170"]);
+  ]).toEqual(["#8c3800", "#6e4087", "#686665"]);
 });

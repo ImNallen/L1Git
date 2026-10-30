@@ -151,7 +151,15 @@
 .history-table:focus-within tr.selected td {
   background: color-mix(in srgb, var(--primary-bg) 16%, var(--row-selected));
 }
-.commit-description {
+/* Keyboard focus also gets the bar the sidebar and blame rows use. */
+.history-table:focus-visible tr.selected td:first-child {
+  box-shadow: inset 2px 0 0 var(--focus-bar);
+}
+/* With nothing selected yet, the header shows that the grid has focus. */
+.history-table:focus-visible:not(:has(tr.selected)) th {
+  box-shadow: inset 0 -2px 0 var(--focus-bar);
+}
+.commit-cell {
   min-width: 0;
   width: 100%;
   height: 36px;
@@ -178,7 +186,7 @@
   min-width: 0;
 }
 .ref-cell > *,
-.commit-description,
+.commit-cell,
 .text-cell > *,
 .changes-cell > *,
 .graph-node,
@@ -190,7 +198,7 @@
   tr:not(.lit)
   :is(
     .ref-cell > *,
-    .commit-description,
+    .commit-cell,
     .text-cell > *,
     .changes-cell > *,
     .graph-node
@@ -205,7 +213,7 @@
   color: var(--ref-on-lane);
   border-radius: 4px;
   padding: 3px 6px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 550;
   white-space: nowrap;
   overflow: hidden;

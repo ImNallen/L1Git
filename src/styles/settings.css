@@ -466,7 +466,7 @@
   flex-shrink: 0;
   overflow: hidden;
   border-radius: 50%;
-  border: 1px solid var(--border-control);
+  border: 1px solid var(--border-input);
 }
 .theme-color-chip input {
   position: absolute;
@@ -476,12 +476,17 @@
   opacity: 0;
   cursor: pointer;
 }
+/* The input is transparent, so its outline would be too; the chip carries the focus ring. */
+.theme-color-chip:has(input:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
 .theme-input {
   height: 30px;
   min-width: 0;
   padding: 0 9px;
   background: var(--control-inset);
-  border: 1px solid var(--border-control);
+  border: 1px solid var(--border-input);
   border-radius: 6px;
   font-size: 12px;
 }

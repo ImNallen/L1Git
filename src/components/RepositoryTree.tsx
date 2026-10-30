@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type {
   KeyboardEvent as ReactKeyboardEvent,
   MouseEvent as ReactMouseEvent,
@@ -39,6 +39,7 @@ import type { RefsState } from "../useRepositoryRefs";
 import { ContextMenu, opensMenu } from "./ContextMenu";
 import { RepositoryBranches } from "./RepositoryBranches";
 import { SyncCounts } from "./SyncCounts";
+import { useRovingRows } from "./useRovingRows";
 
 type Props = {
   entries: RecentRepository[];
@@ -90,6 +91,8 @@ export function RepositoryTree({
   onCheckout,
 }: Props) {
   const [query, setQuery] = useState("");
+  const tree = useRef<HTMLElement>(null);
+  useRovingRows(tree);
   const [menu, setMenu] = useState<{
     target:
       | { kind: "repository"; entry: RecentRepository }
@@ -378,7 +381,11 @@ export function RepositoryTree({
           <Plus size={18} />
         </button>
       </div>
-      <nav className="repository-tree" aria-label="Repositories and branches">
+      <nav
+        ref={tree}
+        className="repository-tree"
+        aria-label="Repositories and branches"
+      >
         {entriesShown.map((entry) => {
           const active = entry.root === activePath;
           const open = expanded.has(entry.root);

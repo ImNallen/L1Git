@@ -28,6 +28,7 @@ export const STYLESHEET_TOKENS = {
   border: "--border",
   borderControl: "--border-control",
   borderStrong: "--border-strong",
+  borderInput: "--border-input",
   separator: "--separator",
   foreground: "--text",
   textHeading: "--text-heading",

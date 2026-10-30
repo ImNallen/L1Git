@@ -11,7 +11,7 @@ import type { FileDiffState } from "../useWorkspace";
 import { Diff } from "./FilePatchView";
 import type { DiffStyle, Parts } from "./FilePatchView";
 import { FileBlame, FileHistory } from "./FileRevisions";
-import type { Revision } from "./FileRevisions";
+import { revisionOf } from "./revision";
 
 export type { DiffStyle };
 
@@ -45,17 +45,6 @@ type Props = {
   parts: Parts | null;
   writes: WritesView;
 };
-
-/** History and blame read the file in the target commit, which a worktree does not have. */
-export function revisionOf(state: Props["state"]): Revision | null {
-  if (state.side !== null || state.comparison.target.kind !== "commit")
-    return null;
-  return {
-    root: state.root,
-    oid: state.comparison.target.oid,
-    path: state.path,
-  };
-}
 
 export function FileDiffPane({
   ref,

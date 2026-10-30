@@ -179,13 +179,13 @@
 }
 .eyebrow {
   text-transform: uppercase;
-  font-size: 9px;
+  font-size: 10px;
   letter-spacing: 2px;
   color: var(--accent-muted);
   margin-bottom: 7px;
 }
 .empty-shortcut {
-  font-size: 10px;
+  font-size: 11px;
   margin-top: 15px;
   color: var(--text-faint);
   display: flex;
@@ -196,14 +196,14 @@ kbd {
   border: 1px solid var(--border-control);
   border-radius: 4px;
   padding: 2px 4px;
-  font-size: 9px;
+  font-size: 10px;
   color: var(--muted);
   background: var(--control);
 }
 .empty-scope {
   margin-top: 60px;
   color: var(--text-faint);
-  font-size: 10px;
+  font-size: 11px;
   display: flex;
   align-items: center;
   gap: 7px;
@@ -256,8 +256,14 @@ kbd {
     padding-right: 9px;
     padding-left: 9px;
   }
+  /* Hidden visually, not from the accessibility tree, so the button keeps its visible name. */
   .toolbar-actions .button span {
-    display: none;
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
   .toolbar-actions .button {
     width: 30px;
@@ -432,7 +438,7 @@ kbd {
   resize: vertical;
   color: inherit;
   background: var(--control-inset);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-input);
   border-radius: 4px;
   padding: 6px;
 }

@@ -149,7 +149,7 @@ const fits = Object.fromEntries(
 );
 
 // Ref names and initials keep 3:1 on every lane.
-const LANE_INK_MINIMUM = 3;
+const LANE_INK_MINIMUM = 4.5;
 const LANE_INKS = new Set(["refOnLane", "onLane"]);
 
 function fitToken(token, fitted, target) {
