@@ -11,7 +11,10 @@ struct Fixture {
 impl Fixture {
     fn new(conflict: bool) -> Self {
         let temp = tempfile::tempdir().unwrap();
-        let root = temp.path().canonicalize().unwrap().join("repository");
+        let root = temp.path().to_path_buf();
+        #[cfg(not(windows))]
+        let root = root.canonicalize().unwrap();
+        let root = root.join("repository");
         fs::create_dir(&root).unwrap();
         let fixture = Self {
             undo: temp.path().join("undo"),

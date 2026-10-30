@@ -267,9 +267,28 @@ impl Record {
                 if path.is_dir() {
                     sync_files(&path)?;
                 } else {
-                    fs::File::open(&path)
-                        .and_then(|file| file.sync_all())
-                        .map_err(storage)?;
+                    #[cfg(windows)]
+                    let permissions = fs::metadata(&path).map_err(storage)?.permissions();
+                    #[cfg(windows)]
+                    if permissions.readonly() {
+                        let mut writable = permissions.clone();
+                        #[expect(
+                            clippy::permissions_set_readonly_false,
+                            reason = "Windows readonly is a file attribute; original permissions are restored below"
+                        )]
+                        writable.set_readonly(false);
+                        fs::set_permissions(&path, writable).map_err(storage)?;
+                    }
+                    let synced = fs::OpenOptions::new()
+                        .read(true)
+                        .write(cfg!(windows))
+                        .open(&path)
+                        .and_then(|file| file.sync_all());
+                    #[cfg(windows)]
+                    let restored = fs::set_permissions(&path, permissions);
+                    synced.map_err(storage)?;
+                    #[cfg(windows)]
+                    restored.map_err(storage)?;
                 }
             }
             sync_dir(path)
