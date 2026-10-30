@@ -529,21 +529,6 @@
   line-height: 1.6;
 }
 
-.update-affordance {
-  min-width: 0;
-  font-size: 11px;
-}
-
-.update-affordance span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.update-affordance svg {
-  flex-shrink: 0;
-}
-
 .installing-blocker {
   text-align: center;
 }

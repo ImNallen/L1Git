@@ -117,6 +117,7 @@ import type { VisibilityRule } from "./domain/visibility";
 import { historyRows, listWrites, worktreeGroups } from "./domain/worktree";
 import { useExpandedRepositories } from "./expandedRepositories";
 import { useUpdates } from "./updates";
+import { useUpdateRestart } from "./components/UpdateRestart";
 import {
   UpdatesSettings,
   UpdateAffordance,
@@ -180,6 +181,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     useState<SettingsSection>("appearance");
   const fetchSettings = useFetchSettings();
   const updates = useUpdates();
+  const updateRestart = useUpdateRestart(updates);
   const { view: overview, store: overviewStore } = useOverview(
     app.catalog.entries.map((entry) => entry.root),
     fetchSettings.intervalMinutes,
@@ -1048,10 +1050,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
           />
         </div>
         <footer className="sidebar-bottom">
-          <UpdateAffordance
-            state={updates.snapshot.state}
-            onOpen={() => commands.openSettings("updates")}
-          />
           <button
             ref={settingsRef}
             className="icon-button"
@@ -1061,6 +1059,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
           >
             <Settings size={16} />
           </button>
+          <UpdateAffordance updates={updates} restart={updateRestart} />
         </footer>
       </aside>
       {sidebarOpen && (
@@ -1402,7 +1401,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
           {settingsSection === "appearance" ? (
             <AppearanceSettings appearance={appearance} />
           ) : settingsSection === "updates" ? (
-            <UpdatesSettings updates={updates} />
+            <UpdatesSettings updates={updates} restart={updateRestart} />
           ) : (
             <FetchSettings
               intervalMinutes={fetchSettings.intervalMinutes}
@@ -1412,6 +1411,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
           )}
         </SettingsDialog>
       )}
+      {updateRestart.dialog}
       <InstallingBlocker state={updates.snapshot.state} />
       {palette && (
         <CommandPalette
