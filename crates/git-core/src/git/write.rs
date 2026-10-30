@@ -12,6 +12,7 @@ use std::{
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LocalWrite {
+    SaveConflict,
     StageFiles,
     UnstageFiles,
     StagePart,
@@ -42,7 +43,8 @@ pub(crate) enum LocalWrite {
 impl LocalWrite {
     pub(crate) const fn budget(self) -> Duration {
         Duration::from_secs(match self {
-            Self::StageFiles
+            Self::SaveConflict
+            | Self::StageFiles
             | Self::UnstageFiles
             | Self::StagePart
             | Self::UnstagePart
@@ -72,6 +74,7 @@ impl LocalWrite {
 
     pub(super) const fn doing(self) -> &'static str {
         match self {
+            Self::SaveConflict => "Saving the conflict result",
             Self::StageFiles => "Staging the files",
             Self::UnstageFiles => "Unstaging the files",
             Self::StagePart => "Staging part of the file",
@@ -102,6 +105,7 @@ impl LocalWrite {
 
     const fn reflog_action(self) -> &'static str {
         match self {
+            Self::SaveConflict => "l1git save conflict",
             Self::StageFiles => "l1git stage",
             Self::UnstageFiles => "l1git unstage",
             Self::StagePart => "l1git stage part",
@@ -137,7 +141,7 @@ impl LocalWrite {
             Self::Commit | Self::Amend | Self::EditMessage => {
                 "Git may have finished the commit, so check the history."
             }
-            Self::Discard | Self::DiscardPart => "No file changed.",
+            Self::SaveConflict | Self::Discard | Self::DiscardPart => "No file changed.",
             Self::CreateBranch | Self::RenameBranch | Self::DeleteBranch => {
                 "L1 Git rereads the branch to see what changed."
             }

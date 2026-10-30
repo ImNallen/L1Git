@@ -12,13 +12,8 @@ import {
   detailSchema,
   worktreeStatusSchema,
 } from "./domain/repository";
-import {
-  clearSubmitted,
-  draftImpact,
-  draftOf,
-  freezeDrafts,
-  setDraft,
-} from "./commitDrafts";
+import { draftImpact, freezeDrafts } from "./draftProtection";
+import { clearSubmitted, draftOf, setDraft } from "./commitDrafts";
 
 vi.mock("./repositories", () => ({
   mac: false,

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { RotateCw, X } from "lucide-react";
-import { draftImpact, useDraftImpact } from "../commitDrafts";
-import type { DraftImpact } from "../commitDrafts";
+import { draftImpact, useDraftImpact } from "../draftProtection";
+import type { DraftImpact } from "../draftProtection";
 import type { CandidateId, Updates } from "../updates";
 
 type RestartConsent = {
@@ -34,7 +34,7 @@ export function useUpdateRestart(updates: Updates) {
     const current = draftImpact();
     if (current.tasks || current.frozen || pending.current) {
       setProblem(
-        "Commit message work is still finishing. Wait for it to finish, then try again. Your drafts are intact.",
+        "Draft work is still finishing. Wait for it to finish, then try again. Your drafts are intact.",
       );
       return;
     }
@@ -58,7 +58,7 @@ export function useUpdateRestart(updates: Updates) {
           impact: draftImpact(),
           message:
             result.kind === "busy"
-              ? "Commit message work is still finishing. Wait, then review and confirm again."
+              ? "Draft work is still finishing. Wait, then review and confirm again."
               : "Your drafts changed. Review the updated list and confirm again.",
         };
       });
@@ -111,6 +111,7 @@ function RestartDialog({
     dialog.current?.close();
     onClose();
   };
+  const hasDrafts = impact.drafts.length > 0 || impact.resolutions.length > 0;
   const count = impact.drafts.reduce(
     (total, draft) => total + draft.messages,
     0,
@@ -169,12 +170,29 @@ function RestartDialog({
       ) : (
         <p>There are no unsaved commit drafts.</p>
       )}
+      {impact.resolutions.length > 0 && (
+        <>
+          <p>
+            Unsaved conflict results will also be lost. This affects{" "}
+            {impact.resolutions.length}{" "}
+            {impact.resolutions.length === 1 ? "file" : "files"}, including
+            inactive worktrees.
+          </p>
+          <ul className="dialog-paths" aria-label="Unsaved conflict results">
+            {impact.resolutions.map(({ root, path }) => (
+              <li key={`${root}/${path}`}>
+                {root}/{path}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
       {(message || busy || pending) && (
         <p role="alert" className="settings-error">
           {pending
             ? "Installing update…"
             : busy
-              ? "Commit message work is still finishing. Wait before confirming."
+              ? "Draft work is still finishing. Wait before confirming."
               : message}
         </p>
       )}
@@ -189,13 +207,11 @@ function RestartDialog({
         </button>
         <button
           type="button"
-          className={`button ${impact.drafts.length ? "danger" : "primary"}`}
+          className={`button ${hasDrafts ? "danger" : "primary"}`}
           disabled={busy || pending}
           onClick={onConfirm}
         >
-          {impact.drafts.length
-            ? "Discard drafts and restart"
-            : "Restart and install"}
+          {hasDrafts ? "Discard drafts and restart" : "Restart and install"}
         </button>
       </div>
     </dialog>

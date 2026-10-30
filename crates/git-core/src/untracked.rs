@@ -9,6 +9,30 @@ use std::{
     path::Path,
 };
 
+pub(crate) fn read_regular_bounded(
+    root: &Path,
+    path: &str,
+    limit: usize,
+) -> Result<Vec<u8>, RepositoryError> {
+    match open_without_following_links(root, path).map_err(unreadable)? {
+        Found::File {
+            file,
+            #[cfg(windows)]
+            parents,
+            ..
+        } => {
+            let mut bytes = Vec::new();
+            file.take(limit as u64 + 1)
+                .read_to_end(&mut bytes)
+                .map_err(unreadable)?;
+            #[cfg(windows)]
+            drop(parents);
+            Ok(bytes)
+        }
+        Found::Changed | Found::Link(_) | Found::Directory | Found::Other => Err(changed()),
+    }
+}
+
 /// Reads without following links first, so Git's diff can be checked against worktree bytes.
 pub(crate) fn untracked(
     root: &Path,

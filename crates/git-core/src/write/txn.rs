@@ -268,7 +268,10 @@ impl<'r> Txn<'r> {
             root: self.repo.root.clone(),
             deadline: self.deadline,
             skip_worktree: change.touches_skip_worktree(),
-            worktree_updated: matches!(change, Change::Discard(_) | Change::Stash(_)),
+            worktree_updated: matches!(
+                change,
+                Change::Resolution(_) | Change::Discard(_) | Change::Stash(_)
+            ),
             hooks: self.hooks.any(),
         })
     }

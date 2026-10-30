@@ -6,11 +6,10 @@ import { createUpdatesClient } from "../updates";
 import type { UpdateTransport } from "../updates";
 import {
   beginDraftTask,
-  clearSubmitted,
   draftImpact,
-  draftOf,
-  setDraft,
-} from "../commitDrafts";
+  publishResolutionImpact,
+} from "../draftProtection";
+import { clearSubmitted, draftOf, setDraft } from "../commitDrafts";
 import { useUpdateRestart } from "./UpdateRestart";
 import { loadMessage } from "../domain/commitMessage";
 import { oidSchema, rootSchema } from "../domain/repository";
@@ -115,6 +114,7 @@ beforeEach(async () => {
 afterEach(async () => {
   await act(async () => reactRoot.unmount());
   container.remove();
+  publishResolutionImpact([]);
   clearSubmitted(root, draftOf(root));
   clearSubmitted(inactive, draftOf(inactive));
   vi.unstubAllGlobals();
@@ -216,9 +216,7 @@ it.each(["settings", "sidebar"] as const)(
       finish = beginDraftTask();
     });
     await restartFrom(entry);
-    expect(container.textContent).toContain(
-      "Commit message work is still finishing",
-    );
+    expect(container.textContent).toContain("Draft work is still finishing");
     expect(container.querySelector("dialog[open]")).toBeNull();
     await act(async () => finish?.());
     await restartFrom(entry);
@@ -528,3 +526,22 @@ it.each(["settings", "sidebar"] as const)(
     await act(async () => finish?.());
   },
 );
+
+it("counts unsaved conflict results in inactive worktrees in restart consent", async () => {
+  publishResolutionImpact([{ root: inactive, path: "conflict.txt" }]);
+  await state({ kind: "downloaded", candidate, message: null });
+  await render();
+  await restartFrom("settings");
+  expect(container.textContent).toContain(
+    "Unsaved conflict results will also be lost. This affects 1 file",
+  );
+  expect(container.textContent).toContain(`${inactive}/conflict.txt`);
+  expect(confirm().textContent).toBe("Discard drafts and restart");
+  publishResolutionImpact([
+    { root: inactive, path: "conflict.txt" },
+    { root, path: "second.txt" },
+  ]);
+  await act(async () => confirm().click());
+  expect(container.textContent).toContain("Your drafts changed");
+  expect(container.textContent).toContain("This affects 2 files");
+});

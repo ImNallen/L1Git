@@ -14,6 +14,8 @@ import type { Comparison } from "./domain/comparison";
 import type { Advance, FetchMode } from "./domain/overview";
 import {
   appliedSchema,
+  conflictFileSchema,
+  operationSchema,
   blameSchema,
   branchMergedSchema,
   detailSchema,
@@ -56,6 +58,7 @@ type RepositoryRequest =
   | { op: "preparePush"; path: RepositoryRoot }
   | { op: "push"; path: RepositoryRoot; intent: PushIntent }
   | { op: "fastForward"; path: RepositoryRoot; advances: Advance[] }
+  | { op: "conflictFile"; path: RepositoryRoot; file: string }
   | { op: "worktreeStatus"; path: RepositoryRoot }
   | { op: "worktreePatch"; path: RepositoryRoot; file: string; side: Side }
   | { op: "write"; path: RepositoryRoot; operation: Operation; expect: Expect }
@@ -80,6 +83,7 @@ const responseSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("push"), data: pushReportSchema }),
   z.object({ op: z.literal("fastForward"), data: fastForwardReportSchema }),
   z.object({ op: z.literal("worktreeStatus"), data: worktreeStatusSchema }),
+  z.object({ op: z.literal("conflictFile"), data: conflictFileSchema }),
   z.object({ op: z.literal("worktreePatch"), data: worktreePatchSchema }),
   z.object({ op: z.literal("write"), data: appliedSchema }),
   z.object({ op: z.literal("undo"), data: appliedSchema }),
@@ -103,13 +107,16 @@ type Answer<R extends RepositoryRequest> = Extract<
 >;
 
 async function send(request: RepositoryRequest): Promise<unknown> {
+  const serialized = JSON.stringify(request);
+  if (new TextEncoder().encode(serialized).length > 4 * 1024 * 1024)
+    throw new Error("This request exceeds the 4 MiB transport limit.");
   if (native) return invoke<unknown>("repository_run", { request });
   let response: Response;
   try {
     response = await fetch("/api/run", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(request),
+      body: serialized,
     });
   } catch {
     throw new Error(
@@ -197,6 +204,10 @@ export async function fastForward(path: RepositoryRoot, advances: Advance[]) {
   return (await run({ op: "fastForward", path, advances })).data;
 }
 
+export async function conflictFile(path: RepositoryRoot, file: string) {
+  return (await run({ op: "conflictFile", path, file })).data;
+}
+
 export async function worktreeStatus(path: RepositoryRoot) {
   return (await run({ op: "worktreeStatus", path })).data;
 }
@@ -214,7 +225,14 @@ export async function write(
   operation: Operation,
   expect: Expect,
 ) {
-  return (await run({ op: "write", path, operation, expect })).data;
+  return (
+    await run({
+      op: "write",
+      path,
+      operation: operationSchema.parse(operation),
+      expect,
+    })
+  ).data;
 }
 
 export async function undo(path: RepositoryRoot, id: EntryId) {

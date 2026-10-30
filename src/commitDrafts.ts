@@ -1,4 +1,5 @@
 import { useCallback, useSyncExternalStore } from "react";
+import { draftImpact, publishCommitImpact } from "./draftProtection";
 import { emptyDraft, splitMessage } from "./domain/commitMessage";
 import type { Draft, Loaded } from "./domain/commitMessage";
 import type { Head, Oid, RepositoryRoot } from "./domain/repository";
@@ -15,19 +16,9 @@ const listeners = new Set<() => void>();
 const isBlank = ({ draft, amend }: CommitDraft) =>
   amend === null && draft.summary === "" && draft.description === "";
 
-export type DraftImpact = {
-  revision: number;
-  frozen: boolean;
-  tasks: number;
-  drafts: { root: RepositoryRoot; messages: number; amending: boolean }[];
-};
-let restart: DraftImpact = { revision: 0, frozen: false, tasks: 0, drafts: [] };
-
 function changed() {
-  restart = {
-    ...restart,
-    revision: restart.revision + 1,
-    drafts: [...drafts].map(([root, { draft, amend }]) => ({
+  publishCommitImpact(
+    [...drafts].map(([root, { draft, amend }]) => ({
       root,
       messages:
         Number(draft.summary !== "" || draft.description !== "") +
@@ -38,48 +29,13 @@ function changed() {
         ),
       amending: amend !== null,
     })),
-  };
+  );
   for (const listener of listeners) listener();
-}
-
-export const draftImpact = () => restart;
-export const useDraftImpact = () =>
-  useSyncExternalStore(subscribe, draftImpact, draftImpact);
-
-export function beginDraftTask(): (() => void) | null {
-  if (restart.frozen) return null;
-  restart = { ...restart, tasks: restart.tasks + 1 };
-  changed();
-  let active = true;
-  return () => {
-    if (!active) return;
-    active = false;
-    restart = { ...restart, tasks: restart.tasks - 1 };
-    changed();
-  };
-}
-
-export function freezeDrafts(
-  revision: number,
-): { kind: "changed" | "busy" } | { kind: "frozen"; release: () => void } {
-  if (restart.frozen || restart.tasks > 0) return { kind: "busy" };
-  if (revision !== restart.revision) return { kind: "changed" };
-  restart = { ...restart, frozen: true };
-  for (const listener of listeners) listener();
-  let active = true;
-  return {
-    kind: "frozen",
-    release: () => {
-      if (!active) return;
-      active = false;
-      restart = { ...restart, frozen: false };
-      for (const listener of listeners) listener();
-    },
-  };
 }
 
 export function setDraft(root: RepositoryRoot, next: CommitDraft) {
-  if (restart.frozen) throw new Error("Commit drafts are frozen for restart.");
+  if (draftImpact().frozen)
+    throw new Error("Commit drafts are frozen for restart.");
   if (isBlank(next)) drafts.delete(root);
   else drafts.set(root, next);
   changed();

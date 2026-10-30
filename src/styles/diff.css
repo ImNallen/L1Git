@@ -280,3 +280,66 @@
   opacity: 0.5;
   cursor: default;
 }
+
+.conflict-resolver {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+}
+.conflict-source,
+.conflict-result {
+  min-width: 0;
+}
+.conflict-source {
+  border-bottom: 1px solid var(--border);
+}
+.conflict-source .conflict-code {
+  max-height: 28vh;
+  overflow: auto;
+}
+.conflict-result .conflict-code {
+  min-height: 180px;
+  overflow: auto;
+}
+.conflict-toolbar,
+.resolution-draft-list {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 14px;
+}
+.conflict-toolbar .diff-style {
+  margin-left: auto;
+}
+.conflict-toolbar span,
+.conflict-help {
+  font-size: 12px;
+  color: var(--muted);
+}
+.conflict-help {
+  margin: 0;
+  padding: 0 14px 10px;
+}
+.resolution-draft-list {
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.resolution-dialog {
+  width: min(1100px, 92vw);
+  height: 85vh;
+  padding: 0;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.resolution-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+.resolution-dialog > .conflict-toolbar {
+  justify-content: space-between;
+}

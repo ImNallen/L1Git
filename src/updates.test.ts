@@ -1,13 +1,8 @@
 import { expect, it, vi } from "vitest";
 import { createUpdatesClient, parseUpdateSnapshot } from "./updates";
 import type { UpdateTransport } from "./updates";
-import {
-  beginDraftTask,
-  clearSubmitted,
-  draftImpact,
-  draftOf,
-  setDraft,
-} from "./commitDrafts";
+import { beginDraftTask, draftImpact } from "./draftProtection";
+import { clearSubmitted, draftOf, setDraft } from "./commitDrafts";
 import { rootSchema } from "./domain/repository";
 
 const snapshot = (revision: number, state: unknown, track = "stable") => ({

@@ -15,3 +15,5 @@
 | [Read real repository data](reader.md)                                                | Receive accurate repository states                                                                             | Automated real Git and HTTP integration tests                                                                                                              |
 
 Browser and native journeys use real working copies. Reader and build checks passed for the implementation baseline. UI journeys require a live verification pass.
+
+The [conflict resolver journey](changes.md#resolve-a-stash-text-conflict) covers source versions, Pierre choices and editing, separate Save and Mark resolved, ordered Undo/Redo, retained drafts, and restart protection.

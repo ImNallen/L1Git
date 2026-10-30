@@ -439,6 +439,70 @@ pub struct Stages {
     pub theirs: Option<IndexObject>,
 }
 
+pub const CONFLICT_TEXT_LIMIT: usize = 256 * 1024;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ConflictFile {
+    Editable {
+        snapshot: Box<ConflictSnapshot>,
+    },
+    External {
+        root: String,
+        path: String,
+        reason: ConflictUnsupported,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ConflictSnapshot {
+    pub root: String,
+    pub path: String,
+    pub head: Head,
+    pub entry: StatusEntry,
+    pub version: ConflictVersion,
+    pub base: String,
+    pub current: String,
+    pub incoming: String,
+    pub working: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(try_from = "String", into = "String")]
+pub struct ConflictVersion(String);
+
+impl TryFrom<String> for ConflictVersion {
+    type Error = &'static str;
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        if value.len() == 40
+            && value
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        {
+            Ok(Self(value))
+        } else {
+            Err("Use the conflict version that L1 Git read.")
+        }
+    }
+}
+impl From<ConflictVersion> for String {
+    fn from(value: ConflictVersion) -> Self {
+        value.0
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ConflictUnsupported {
+    Structural,
+    Binary,
+    Encoding,
+    TooLarge,
+    SpecialFile,
+    Attributes,
+}
+
 /// `Staged` compares HEAD, or the empty tree before the first commit, with the
 /// index. `Unstaged` compares the index with the working tree.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
