@@ -43,6 +43,13 @@ pub struct MergeReview {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MergeAttention {
+    ExternalOperation,
+    RecoveryRequired,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(
     tag = "kind",
     rename_all = "camelCase",
@@ -91,6 +98,7 @@ pub enum MergeState {
     },
     Attention {
         session: Option<MergeSession>,
+        reason: MergeAttention,
         message: String,
     },
 }
@@ -453,12 +461,12 @@ fn state(
             | SessionPhase::Active
             | SessionPhase::Finishing { .. }
             | SessionPhase::Aborting => {
-                return Ok(MergeState::Attention { session: Some(record.session.clone()), message: "Merge recovery needs attention. Git's state does not prove a safe continuation or the merge-owned paths. Preserve the session files and resolve the operation externally; L1 Git will not reset or guess.".into() });
+                return Ok(MergeState::Attention { session: Some(record.session.clone()), reason: MergeAttention::RecoveryRequired, message: "Merge recovery needs attention. Git's state does not prove a safe continuation or the merge-owned paths. Preserve the session files and resolve the operation externally; L1 Git will not reset or guess.".into() });
             }
         }
     }
     if !sync::in_progress(&repo.root, deadline.reads())?.is_empty() {
-        Ok(MergeState::Attention { session: None, message: "A Git operation started outside this merge session is in progress. Finish or abort it with Git, then refresh.".into() })
+        Ok(MergeState::Attention { session: None, reason: MergeAttention::ExternalOperation, message: "A Git operation started outside this merge session is in progress. Finish or abort it with Git, then refresh.".into() })
     } else {
         Ok(MergeState::Idle)
     }
@@ -750,6 +758,7 @@ impl Coordinator {
                 Ok(record) => state(repo, record.as_ref(), deadline),
                 Err(error) => Ok(MergeState::Attention {
                     session: None,
+                    reason: MergeAttention::RecoveryRequired,
                     message: error.message,
                 }),
             },
@@ -1029,6 +1038,7 @@ pub(super) fn journal(
         MergeState::Attention {
             session: Some(_),
             message,
+            ..
         } => Err(refused(message)),
         MergeState::Attention { session: None, .. } | MergeState::Idle => Ok(None),
     }

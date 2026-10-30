@@ -1,3 +1,5 @@
+import type { MergeState } from "../domain/merge";
+import { mergeAllows } from "../domain/merge";
 import { useDraftImpact } from "../draftProtection";
 import { canMark, resolutionKey, resolutionOf } from "../resolutionDrafts";
 import {
@@ -78,6 +80,7 @@ type Props = {
 
 export type WorktreeWrites = {
   busy: boolean;
+  merge?: MergeState | null;
   write: (
     worktree: RepositoryRoot,
     kind: FileWrite,
@@ -615,6 +618,7 @@ const GROUP_MAX_ROWS = 12;
 type RowFocus = { row: string; side: ListSide };
 
 function WorktreeFiles({
+  managed,
   resolvable,
   group: { title, files, side },
   selectedFile,
@@ -629,6 +633,7 @@ function WorktreeFiles({
   onFocused,
 }: {
   group: WorktreeGroup;
+  managed: boolean;
   resolvable: ReadonlySet<string>;
   selectedFile: OpenedFile | null;
   onSelectFile: (path: string, side: ListSide) => void;
@@ -651,25 +656,26 @@ function WorktreeFiles({
     {
       label: row,
       disabled: busy,
-      ...(side === "conflict" ? { appliesTo: resolvable } : {}),
+      appliesTo: resolvable,
       run: (paths, target) => onWrite(kind, side, paths, target),
     },
   ];
   const discarding = side === "unstaged";
-  if (discarding)
+  if (discarding && !managed)
     actions.push({
       label: "Discard changes…",
       disabled: busy,
       run: onDiscard,
       appliesTo: discardable,
     });
-  actions.push({
-    label: "Stash…",
-    disabled: busy,
-    run: (paths) => onStash(paths),
-  });
+  if (!managed)
+    actions.push({
+      label: "Stash…",
+      disabled: busy,
+      run: (paths) => onStash(paths),
+    });
   const discardAll =
-    discarding && files.some((file) => discardable.has(file.path));
+    !managed && discarding && files.some((file) => discardable.has(file.path));
   return (
     <section className="worktree-group" aria-label={title}>
       <header className="worktree-group-header">
@@ -680,9 +686,11 @@ function WorktreeFiles({
         {all !== null && (
           <button
             className="button secondary list-action"
-            aria-disabled={busy}
+            aria-disabled={
+              busy || files.some((file) => !resolvable.has(file.path))
+            }
             onClick={() => {
-              if (!busy)
+              if (!busy && files.every((file) => resolvable.has(file.path)))
                 onWrite(
                   kind,
                   side,
@@ -831,17 +839,19 @@ function WorktreeInspector({
     <div className="inspector-content">
       <header className="worktree-group-header">
         <h2>Uncommitted changes</h2>
-        {changes?.kind === "ready" && changes.status.entries.length > 0 && (
-          <button
-            className="button secondary list-action"
-            aria-disabled={writes.busy}
-            onClick={() => {
-              if (!writes.busy) writes.confirmStash(worktree.root, []);
-            }}
-          >
-            Stash…
-          </button>
-        )}
+        {changes?.kind === "ready" &&
+          changes.status.entries.length > 0 &&
+          (!writes.merge || writes.merge.kind === "idle") && (
+            <button
+              className="button secondary list-action"
+              aria-disabled={writes.busy}
+              onClick={() => {
+                if (!writes.busy) writes.confirmStash(worktree.root, []);
+              }}
+            >
+              Stash…
+            </button>
+          )}
       </header>
       <dl className="commit-metadata">
         <div className="meta-row">
@@ -912,6 +922,11 @@ function WorktreeInspector({
             <WorktreeFiles
               key={group.title}
               group={group}
+              managed={
+                writes.merge !== undefined &&
+                writes.merge !== null &&
+                writes.merge.kind !== "idle"
+              }
               resolvable={
                 new Set(
                   group.files
@@ -919,7 +934,21 @@ function WorktreeInspector({
                       const draft = resolutionOf(
                         resolutionKey(worktree.root, path),
                       );
-                      return draft === null || canMark(draft);
+                      const owned = mergeAllows(writes.merge ?? null, {
+                        kind:
+                          group.side === "staged"
+                            ? "unstageFiles"
+                            : "stageFiles",
+                        entries: changes.status.entries.filter(
+                          (entry) => entry.path === path,
+                        ),
+                      });
+                      return (
+                        owned &&
+                        (group.side !== "conflict" ||
+                          draft === null ||
+                          canMark(draft))
+                      );
                     })
                     .map(({ path }) => path),
                 )
@@ -948,16 +977,17 @@ function WorktreeInspector({
           ))}
         </div>
       )}
-      {changes?.kind === "ready" && (
-        <CommitBox
-          status={changes.status}
-          staged={
-            groups.find((group) => group.side === "staged")?.files.length ?? 0
-          }
-          busy={writes.busy}
-          onCommit={writes.commit}
-        />
-      )}
+      {changes?.kind === "ready" &&
+        (!writes.merge || writes.merge.kind === "idle") && (
+          <CommitBox
+            status={changes.status}
+            staged={
+              groups.find((group) => group.side === "staged")?.files.length ?? 0
+            }
+            busy={writes.busy}
+            onCommit={writes.commit}
+          />
+        )}
     </div>
   );
 }

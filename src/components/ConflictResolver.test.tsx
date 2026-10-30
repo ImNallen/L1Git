@@ -5,15 +5,20 @@ import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import * as repositories from "../repositories";
 import { conflictSnapshotSchema, appliedSchema } from "../domain/repository";
 import { ConflictResolver } from "./ConflictResolver";
+import { mergeStateSchema } from "../domain/merge";
 import { draftImpact } from "../draftProtection";
 import {
+  chooseResolution,
   reloadResolution,
   resolutionKey,
   resolutionOf,
 } from "../resolutionDrafts";
 import type { WritesView } from "../useWrites";
 
-vi.mock("../repositories", () => ({ conflictFile: vi.fn() }));
+vi.mock("../repositories", () => ({
+  conflictFile: vi.fn(),
+  mergeState: vi.fn(),
+}));
 Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
   configurable: true,
   value: () => ({
@@ -21,6 +26,7 @@ Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
     measureText: (text: string) => ({ width: text.length * 8 }),
   }),
 });
+
 const snapshot = conflictSnapshotSchema.parse({
   root: "/work/component",
   path: "f.txt",
@@ -65,6 +71,7 @@ const writes: WritesView = {
   write,
   undo: async () => ({ kind: "busy" }),
   redo: async () => ({ kind: "busy" }),
+  merge: async () => ({ kind: "busy" }),
   dismiss: () => {},
   rereadHistory: () => {},
 };
@@ -98,6 +105,7 @@ async function render(refresh = 0) {
 beforeEach(async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.clearAllMocks();
+  vi.mocked(repositories.mergeState).mockResolvedValue({ kind: "idle" });
   vi.mocked(repositories.conflictFile).mockResolvedValue({
     kind: "editable",
     snapshot,
@@ -228,4 +236,58 @@ it("retains typed text through refresh, editor Undo, unmount and reopen", async 
   await render(2);
   await act(async () => button("Edit").click());
   expect(resolutionOf(key)?.text).toBe(kept);
+});
+
+it("keeps recovery read-only while preserving resolution for an external operation", async () => {
+  vi.mocked(repositories.mergeState).mockResolvedValue({
+    kind: "attention",
+    session: null,
+    reason: "recoveryRequired",
+    message: "Preserve the corrupt session record.",
+  });
+  await render(1);
+  expect(button("Mark resolved").disabled).toBe(true);
+  expect(host.textContent).toContain("Preserve the corrupt session");
+  vi.mocked(repositories.mergeState).mockResolvedValue({
+    kind: "attention",
+    session: null,
+    reason: "externalOperation",
+    message: "Finish the external operation with Git.",
+  });
+  await render(2);
+  expect(button("Mark resolved").disabled).toBe(false);
+});
+
+it("blocks Save and Mark outside a managed merge's footprint without losing draft text", async () => {
+  const state = mergeStateSchema.parse({
+    kind: "active",
+    session: {
+      id: "a".repeat(16),
+      review: {
+        root: snapshot.root,
+        destination: { reference: "refs/heads/main", oid: "a".repeat(40) },
+        source: { reference: "refs/remotes/origin/main", oid: "b".repeat(40) },
+        tracking: { remote: "origin", merge: "refs/heads/main", fetch: [] },
+      },
+      footprint: ["another.txt"],
+      suggestedMessage: "Merge upstream",
+    },
+    unresolved: [snapshot.path],
+    staged: "c".repeat(40),
+    tree: null,
+    upstreamMoved: false,
+  });
+  vi.mocked(repositories.mergeState).mockResolvedValue(state);
+  await render(1);
+  expect(button("Mark resolved").disabled).toBe(true);
+  expect(host.textContent).toContain("outside the merge's affected paths");
+  const draft = resolutionOf(key);
+  if (!draft) throw new Error("Missing resolution draft");
+  await act(async () =>
+    chooseResolution(key, draft.editorEpoch, "keep this resolution"),
+  );
+  expect(button("Save result").disabled).toBe(true);
+  await act(async () => button("Save result").click());
+  expect(write).not.toHaveBeenCalled();
+  expect(resolutionOf(key)?.text).toBe("keep this resolution");
 });

@@ -11,10 +11,11 @@ A desktop Git client for macOS, Linux, and Windows. Browse your repositories, re
 - Commit, amend, and edit your last commit's message.
 - Manage branches, tags, and stashes. Browse multiple repositories and linked worktrees.
 - Fetch, fast-forward branches, and push or publish the current branch.
+- Merge a diverged branch with its reviewed upstream, resolve text conflicts, and finish or abort.
 - Undo and redo local edits made through the app, including commits and discarded changes.
 - Choose light or dark themes, create your own, or import themes from VS Code and Open VSX.
 
-L1 Git does not merge, rebase, or force-push. Fetch, fast-forward, push, and remote setup have no Undo entry.
+L1 Git does not rebase or force-push. Fetch, fast-forward, push, remote setup, and merge Start, Finish, and Abort have no Undo entry. Merge resolution edits have Undo and Redo until you finish or abort.
 
 ## Get started
 
@@ -60,7 +61,7 @@ pnpm dev
 
 Open <http://127.0.0.1:1422>. The preview uses the same Rust core through a local development bridge. Enter an absolute repository path in the Add dialog.
 
-To try the app with sample repositories, run `pnpm fixture` and open the printed `repository` path. Use `pnpm fixture:large` for a larger test repository. Both commands create temporary local repositories.
+To try the app with sample repositories, run `pnpm fixture` and open the printed `repository` path. Use `pnpm fixture:large` for a larger test repository. These commands create temporary local repositories. `pnpm fixture:merge` creates clean and conflicting upstream merges for testing.
 
 ## Check and build
 

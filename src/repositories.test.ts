@@ -304,3 +304,23 @@ it.each([true, false])(
     await expect(addRemote(root, remote)).rejects.toHaveProperty("issues");
   },
 );
+
+it.each([true, false])(
+  "validates merge state through native=%s transport",
+  async (native) => {
+    const api = await load(native);
+    const data = {
+      kind: "attention",
+      reason: "recoveryRequired",
+      session: null,
+      message: "Resolve the foreign operation with Git.",
+    };
+    if (native) invoke.mockResolvedValueOnce({ op: "mergeState", data });
+    else reply(200, { ok: true, op: "mergeState", data });
+    expect(await api.mergeState(root)).toEqual(data);
+    const invalid = { op: "mergeState", data: { ...data, force: true } };
+    if (native) invoke.mockResolvedValueOnce(invalid);
+    else reply(200, { ok: true, ...invalid });
+    await expect(api.mergeState(root)).rejects.toThrow();
+  },
+);

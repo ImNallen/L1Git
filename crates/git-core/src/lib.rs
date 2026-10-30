@@ -29,7 +29,7 @@ pub use sync::{
     PushOutcome, PushPurpose, PushRefresh, PushReport, PushUnavailable, TrackingOutcome,
 };
 pub use write::{
-    Applied, BranchTip, EntryId, Expect, LinePick, LineSide, MergeAction, MergeOutcome,
-    MergeReport, MergeReview, MergeSession, MergeSource, MergeState, MergeTracking, Operation,
-    Start, StashTip, TagTip, UndoHistory,
+    Applied, BranchTip, EntryId, Expect, LinePick, LineSide, MergeAction, MergeAttention,
+    MergeOutcome, MergeReport, MergeReview, MergeSession, MergeSource, MergeState, MergeTracking,
+    Operation, Start, StashTip, TagTip, UndoHistory,
 };

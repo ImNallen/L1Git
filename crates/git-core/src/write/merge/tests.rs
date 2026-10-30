@@ -946,3 +946,50 @@ fn forced_duplicate_checkout_cannot_move_an_active_destination_from_another_work
         session.id
     );
 }
+
+#[test]
+fn foreign_operation_and_corrupt_session_have_distinct_attention_reasons() {
+    let f = Fixture::new(false);
+    let coordinator = f.coordinator();
+    fs::write(
+        f.root.join(".git/CHERRY_PICK_HEAD"),
+        f.git(&["rev-parse", "upstream"]),
+    )
+    .unwrap();
+    assert!(matches!(
+        coordinator.merge_state(f.path()).unwrap(),
+        MergeState::Attention {
+            reason: MergeAttention::ExternalOperation,
+            session: None,
+            ..
+        }
+    ));
+    fs::remove_file(f.root.join(".git/CHERRY_PICK_HEAD")).unwrap();
+    f.start(&coordinator);
+    let (repo, record, _) = f.record();
+    fs::write(
+        directory(&repo, record.session.id).join("state.json"),
+        "{corrupt",
+    )
+    .unwrap();
+    assert!(matches!(
+        coordinator.merge_state(f.path()).unwrap(),
+        MergeState::Attention {
+            reason: MergeAttention::RecoveryRequired,
+            session: None,
+            ..
+        }
+    ));
+    assert!(coordinator.undo_history(f.path()).is_err());
+    assert!(
+        coordinator
+            .merge(
+                f.path(),
+                &MergeAction::Abort {
+                    session: record.session.id
+                }
+            )
+            .is_err()
+    );
+    assert!(f.root.join(".git/MERGE_HEAD").exists());
+}

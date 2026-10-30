@@ -3026,3 +3026,145 @@ it("roundtrips bounded conflict text through the real bridge without storing res
   expect(oversized.ok).toBe(false);
   expect(readFileSync(join(root, "f"), "utf8")).toBe(text);
 });
+
+describe("managed upstream merge", () => {
+  it("recovers Active in a fresh bridge process, resolves, and finishes the exact parents", async () => {
+    const { mergeReviewSchema, mergeStateSchema, mergeReportSchema } =
+      await import("./domain/merge");
+    const path = join(fixture.root, "managed merge");
+    mkdirSync(path);
+    const git = (...args: string[]) =>
+      execFileSync("git", ["-C", path, ...args], {
+        encoding: "utf8",
+        env: Object.fromEntries(
+          Object.entries(process.env).filter(
+            ([key]) => !key.startsWith("GIT_"),
+          ),
+        ),
+        stdio: ["ignore", "pipe", "pipe"],
+      }).trim();
+    git("init", "-b", "main");
+    for (const [key, value] of [
+      ["user.name", "Merge bridge"],
+      ["user.email", "merge@example.test"],
+      ["commit.gpgSign", "false"],
+      ["core.hooksPath", "/dev/null"],
+      ["gc.auto", "0"],
+    ] as const)
+      git("config", key, value);
+    writeFileSync(join(path, "file.txt"), "base\n");
+    git("add", ".");
+    git("commit", "-m", "base");
+    git("switch", "-c", "source");
+    writeFileSync(join(path, "file.txt"), "incoming\n");
+    git("commit", "-am", "source");
+    git("switch", "main");
+    writeFileSync(join(path, "file.txt"), "current\n");
+    git("commit", "-am", "destination");
+    git("branch", "--set-upstream-to=source");
+    const review = answer("mergeReview", mergeReviewSchema).parse(
+      await (await post({ op: "mergeReview", path })).json(),
+    ).data;
+    expect(
+      (
+        await rejected({
+          op: "merge",
+          path,
+          action: { kind: "start", review, force: true },
+        })
+      ).status,
+    ).toBe(400);
+    const started = answer("merge", mergeReportSchema).parse(
+      await (
+        await post({ op: "merge", path, action: { kind: "start", review } })
+      ).json(),
+    ).data;
+    expect(started.state.kind).toBe("active");
+    expect(git("rev-parse", "HEAD")).toBe(review.destination.oid);
+    const fresh = await startBridge({});
+    async function request(op: string, fields: object = {}) {
+      return (
+        await fetch(`${fresh.endpoint}/api/run`, {
+          method: "POST",
+          headers: { Origin: origin, "Content-Type": "application/json" },
+          body: JSON.stringify({ op, path, ...fields }),
+        })
+      ).json();
+    }
+    try {
+      const recovered = answer("mergeState", mergeStateSchema).parse(
+        await request("mergeState"),
+      ).data;
+      expect(recovered).toEqual(started.state);
+      const conflict = answer("conflictFile", conflictFileSchema).parse(
+        await request("conflictFile", { file: "file.txt" }),
+      ).data;
+      if (conflict.kind !== "editable")
+        throw new Error("Expected editable merge conflict");
+      const saved = answer("write", appliedSchema).parse(
+        await request("write", {
+          operation: {
+            kind: "saveConflict",
+            path: "file.txt",
+            version: conflict.snapshot.version,
+            text: "resolved\n",
+          },
+          expect: { head: conflict.snapshot.head },
+        }),
+      ).data;
+      const status = answer("worktreeStatus", worktreeStatusSchema).parse(
+        await request("worktreeStatus"),
+      ).data;
+      const marked = answer("write", appliedSchema).parse(
+        await request("write", {
+          operation: { kind: "stageFiles", entries: status.entries },
+          expect: { head: status.head },
+        }),
+      ).data;
+      answer("undo", appliedSchema).parse(
+        await request("undo", { id: marked.id }),
+      );
+      answer("undo", appliedSchema).parse(
+        await request("undo", { id: saved.id }),
+      );
+      answer("redo", appliedSchema).parse(
+        await request("redo", { id: saved.id }),
+      );
+      answer("redo", appliedSchema).parse(
+        await request("redo", { id: marked.id }),
+      );
+      const ready = answer("mergeState", mergeStateSchema).parse(
+        await request("mergeState"),
+      ).data;
+      if (ready.kind !== "active" || !ready.tree)
+        throw new Error("Expected resolved merge");
+      const action = {
+        kind: "finish",
+        session: ready.session.id,
+        staged: ready.staged,
+        tree: ready.tree,
+        message: "Merge reviewed source",
+      };
+      const finished = answer("merge", mergeReportSchema).parse(
+        await request("merge", { action }),
+      ).data;
+      expect(finished.outcome.kind).toBe("finished");
+      expect(git("show", "-s", "--format=%P", "HEAD")).toBe(
+        `${review.destination.oid} ${review.source.oid}`,
+      );
+      expect(git("show", "HEAD:file.txt")).toBe("resolved");
+      expect(
+        answer("merge", mergeReportSchema).parse(
+          await request("merge", { action }),
+        ).data,
+      ).toEqual(finished);
+      expect(await request("undo", { id: marked.id })).toMatchObject({
+        ok: false,
+        error: { kind: "staleView" },
+      });
+    } finally {
+      fresh.bridge.kill();
+      await once(fresh.bridge, "exit");
+    }
+  }, 30_000);
+});

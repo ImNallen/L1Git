@@ -1,3 +1,10 @@
+import {
+  mergeReviewSchema,
+  mergeStateSchema,
+  mergeActionSchema,
+  mergeReportSchema,
+} from "./domain/merge";
+import type { MergeAction } from "./domain/merge";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { z } from "zod";
@@ -44,6 +51,9 @@ export const mac = navigator.userAgent.includes("Mac");
 export const macNative = native && mac;
 
 type RepositoryRequest =
+  | { op: "mergeReview"; path: RepositoryRoot }
+  | { op: "mergeState"; path: RepositoryRoot }
+  | { op: "merge"; path: RepositoryRoot; action: MergeAction }
   | { op: "snapshot"; path: string }
   | { op: "refs"; path: RepositoryRoot }
   | { op: "commitDetail"; path: string; comparison: Comparison }
@@ -68,6 +78,9 @@ type RepositoryRequest =
   | { op: "branchMerged"; path: RepositoryRoot; branch: BranchTip };
 
 const responseSchema = z.discriminatedUnion("op", [
+  z.object({ op: z.literal("mergeReview"), data: mergeReviewSchema }),
+  z.object({ op: z.literal("mergeState"), data: mergeStateSchema }),
+  z.object({ op: z.literal("merge"), data: mergeReportSchema }),
   z.object({ op: z.literal("snapshot"), data: snapshotSchema }),
   z.object({ op: z.literal("refs"), data: refsSchema }),
   z.object({ op: z.literal("commitDetail"), data: detailSchema }),
@@ -286,4 +299,16 @@ export async function preparePublish(
   choice: PublishChoice,
 ) {
   return (await run({ op: "preparePublish", path, choice })).data;
+}
+
+export async function mergeReview(path: RepositoryRoot) {
+  return (await run({ op: "mergeReview", path })).data;
+}
+export async function mergeState(path: RepositoryRoot) {
+  return (await run({ op: "mergeState", path })).data;
+}
+export async function merge(path: RepositoryRoot, action: MergeAction) {
+  return (
+    await run({ op: "merge", path, action: mergeActionSchema.parse(action) })
+  ).data;
 }
