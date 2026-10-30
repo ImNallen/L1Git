@@ -4,11 +4,11 @@ Use disposable repositories from `pnpm fixture`. The parent owns the desktop and
 
 ## Check availability and channels
 
-1. Open the command palette with **Cmd/Ctrl+P** and choose **Open Updates settings**. Confirm the installed version, Stable or Nightly channel, and **Check for updates** action.
+1. Open the command palette with **Cmd/Ctrl+P** and choose **Open General settings**. In Updates, confirm the installed version, Stable or Nightly channel, and **Check for updates** action.
 2. Confirm Settings stays first in the sidebar footer and a compact updater icon stays at its bottom-right. In a browser preview, focus or hover the disabled updater and confirm the browser explanation. In a native development build, confirm the development explanation. On non-AppImage Linux, confirm the package-manager explanation. Settings also has these explanations and a manual release link. These environments cannot install updates.
 3. In a packaged release, choose **Check for updates** from the sidebar icon. Confirm checking, current, available, or a useful failure with **Retry check** without opening Settings. Confirm busy controls are disabled, status changes have polite announcements, and details appear on hover or keyboard focus. Current and failed checks allow another check. Startup and hourly checks require no interaction. Neither check downloads an artifact.
 4. Select Nightly, restart the test app, and confirm the preference survives. A missing preference defaults to the installed build's channel. Select Stable from a newer nightly and confirm that an older Stable release never offers a downgrade.
-5. On availability, confirm the sidebar icon offers **Download update** directly. Open Updates settings separately and confirm rendered release notes appear as text, including any HTML-like text.
+5. On availability, confirm the sidebar icon offers **Download update** directly. Open General settings separately and confirm rendered release notes appear as text, including any HTML-like text.
 
 ## Verify a disposable signed upgrade
 

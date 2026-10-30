@@ -129,19 +129,18 @@ const key = (
 });
 
 describe("command palette", () => {
-  it("routes Open Updates settings to the Updates section", () => {
+  it("routes Open General settings to the General section", () => {
     const handlers = commands();
     const item = paletteItems(repositoryScreen, handlers, false, [], null).find(
-      (item) => item.id === "action:updatesSettings",
+      (item) => item.id === "action:generalSettings",
     );
-    if (!item) throw new Error("Updates command is missing");
+    if (!item) throw new Error("General command is missing");
     item.run();
-    expect(handlers.openSettings).toHaveBeenCalledExactlyOnceWith("updates");
+    expect(handlers.openSettings).toHaveBeenCalledExactlyOnceWith("general");
   });
   it("ranks a prefix, then word starts, then letters in order", () => {
     expect(titles(repositoryScreen, "fetch")).toEqual([
       "Fetch",
-      "Open Fetching settings",
       "feature/fetch-retry",
     ]);
     expect(titles(repositoryScreen, "main")).toEqual(["main", "origin/main"]);
@@ -163,8 +162,7 @@ describe("command palette", () => {
       "Toggle commit inspector",
       "Open Settings",
       "Open Appearance settings",
-      "Open Fetching settings",
-      "Open Updates settings",
+      "Open General settings",
       "l1-demo",
       "sync",
       "main",
@@ -177,14 +175,12 @@ describe("command palette", () => {
     const settings: ActionContext = { ...repositoryScreen, screen: "settings" };
     expect(titles(settings, "")).toEqual([
       "Toggle sidebar",
-      "Open Fetching settings",
-      "Open Updates settings",
+      "Open General settings",
       "Back to repository",
     ]);
-    expect(titles(settings, "fetch")).toEqual(["Open Fetching settings"]);
-    expect(titles({ ...settings, section: "fetching" }, "settings")).toEqual([
+    expect(titles(settings, "general")).toEqual(["Open General settings"]);
+    expect(titles({ ...settings, section: "general" }, "settings")).toEqual([
       "Open Appearance settings",
-      "Open Updates settings",
     ]);
   });
 
@@ -225,8 +221,7 @@ describe("command palette", () => {
       "Toggle commit inspector",
       "Open Settings",
       "Open Appearance settings",
-      "Open Fetching settings",
-      "Open Updates settings",
+      "Open General settings",
       "l1-demo",
       "sync",
       "main",

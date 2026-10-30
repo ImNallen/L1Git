@@ -55,7 +55,7 @@ import { DiscardDialog, DiscardPartDialog } from "./components/DiscardDialog";
 import { EditMessageDialog } from "./components/EditMessageDialog";
 import { COMMIT_SUMMARY_ID } from "./components/CommitBox";
 import { CommandPalette } from "./components/CommandPalette";
-import { FetchSettings } from "./components/FetchSettings";
+import { GeneralSettings } from "./components/GeneralSettings";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { CommitInspector, InspectorFrame } from "./components/CommitInspector";
 import { FileDiffPane, revisionOf } from "./components/FileDiffPane";
@@ -119,7 +119,6 @@ import { useExpandedRepositories } from "./expandedRepositories";
 import { useUpdates } from "./updates";
 import { useUpdateRestart } from "./components/UpdateRestart";
 import {
-  UpdatesSettings,
   UpdateAffordance,
   InstallingBlocker,
 } from "./components/UpdatesSettings";
@@ -178,7 +177,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   const app = useWorkspace();
   const [screen, setScreen] = useState<Screen>("repository");
   const [settingsSection, setSettingsSection] =
-    useState<SettingsSection>("appearance");
+    useState<SettingsSection>("general");
   const fetchSettings = useFetchSettings();
   const updates = useUpdates();
   const updateRestart = useUpdateRestart(updates);
@@ -1400,13 +1399,15 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
         >
           {settingsSection === "appearance" ? (
             <AppearanceSettings appearance={appearance} />
-          ) : settingsSection === "updates" ? (
-            <UpdatesSettings updates={updates} restart={updateRestart} />
           ) : (
-            <FetchSettings
-              intervalMinutes={fetchSettings.intervalMinutes}
-              onIntervalChange={fetchSettings.setIntervalMinutes}
-              persistenceError={fetchSettings.persistenceError}
+            <GeneralSettings
+              fetching={{
+                intervalMinutes: fetchSettings.intervalMinutes,
+                onIntervalChange: fetchSettings.setIntervalMinutes,
+                persistenceError: fetchSettings.persistenceError,
+              }}
+              updates={updates}
+              restart={updateRestart}
             />
           )}
         </SettingsDialog>

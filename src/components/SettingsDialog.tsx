@@ -1,12 +1,11 @@
 import { useLayoutEffect, useRef } from "react";
 import type { ReactNode } from "react";
-import { CloudDownload, Palette, X } from "lucide-react";
+import { Settings, Palette, X } from "lucide-react";
 import type { SettingsSection } from "../actions";
 
 const settingsSections = [
+  { section: "general", label: "General", Icon: Settings },
   { section: "appearance", label: "Appearance", Icon: Palette },
-  { section: "fetching", label: "Fetching", Icon: CloudDownload },
-  { section: "updates", label: "Updates", Icon: CloudDownload },
 ] as const satisfies readonly {
   section: SettingsSection;
   label: string;

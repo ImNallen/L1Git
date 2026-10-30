@@ -6,7 +6,7 @@ import type { PartAction } from "./domain/operations";
 import type { BranchVisibility, VisibilityRule } from "./domain/visibility";
 
 export type Screen = "repository" | "settings";
-export type SettingsSection = "appearance" | "fetching" | "updates";
+export type SettingsSection = "general" | "appearance";
 export type FileView = "unified" | "split" | "history" | "blame";
 
 export type ActionContext = {
@@ -129,8 +129,7 @@ export type ActionId =
   | "toggleInspector"
   | "openSettings"
   | "appearanceSettings"
-  | "fetchingSettings"
-  | "updatesSettings"
+  | "generalSettings"
   | "leaveSettings";
 
 export type Action = {
@@ -477,18 +476,11 @@ export const actions: readonly Action[] = [
     run: (commands) => commands.openSettings("appearance"),
   },
   {
-    id: "fetchingSettings",
-    title: "Open Fetching settings",
+    id: "generalSettings",
+    title: "Open General settings",
     available: (context) =>
-      onRepository(context) || context.section !== "fetching",
-    run: (commands) => commands.openSettings("fetching"),
-  },
-  {
-    id: "updatesSettings",
-    title: "Open Updates settings",
-    available: (context) =>
-      onRepository(context) || context.section !== "updates",
-    run: (commands) => commands.openSettings("updates"),
+      onRepository(context) || context.section !== "general",
+    run: (commands) => commands.openSettings("general"),
   },
   {
     id: "leaveSettings",

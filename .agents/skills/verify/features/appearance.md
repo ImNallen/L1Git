@@ -6,11 +6,11 @@ Floating settings dialog, section navigation, System, Light, and Dark modes, sav
 
 ## How to get to it (user POV)
 
-Click **Settings** at the bottom of the repository sidebar. A centered dialog opens over the visible repository, with **Appearance**, **Fetching**, and **Updates** navigation, a **Settings / Appearance** header, and **Close settings**. Settings also works before adding a repository. With the sidebar hidden, open Settings through the command palette.
+Click **Settings** at the bottom of the repository sidebar. A centered dialog opens over the visible repository, with **General** and **Appearance** navigation, a **Settings / General** header, and **Close settings**. Settings also works before adding a repository. With the sidebar hidden, open Settings through the command palette.
 
 ## Driving it with T3 preview
 
-1. Open Settings. Confirm Appearance is selected and Color scheme offers System, Light, and Dark. A fresh preference defaults to System. Confirm the island has rounded corners, a compact header, and a blurred backdrop over the repository. Tab through the dialog and confirm focus stays inside it. Select Fetching and Updates, then return to Appearance. Confirm the selected navigation entry and breadcrumb follow each section.
+1. Open Settings, then select Appearance. Confirm Appearance is selected and Color scheme offers System, Light, and Dark. A fresh preference defaults to System. Confirm the island has rounded corners, a compact header, and a blurred backdrop over the repository. Tab through the dialog and confirm focus stays inside it. Select General and confirm Fetching and Updates share the page, then return to Appearance. Confirm the selected navigation entry and breadcrumb follow each section.
 2. Select Light. Confirm the entire page changes immediately. Return to the repository and inspect the toolbar, history, graph, inspector, file tree, and Add dialog. Read a text diff in Unified and Split layouts. Both the diff and the tree must use light colors.
 3. Repeat with Dark. Confirm the dark palette covers the same controls and views.
 4. Select System. Use `preview_set_appearance` with Light, then Dark. Confirm the page follows each change while System remains selected. Choose Light explicitly, emulate Dark, and confirm the explicit choice wins. Repeat with explicit Dark against an emulated Light system.
