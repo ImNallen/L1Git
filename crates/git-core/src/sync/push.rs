@@ -672,7 +672,7 @@ fn establish_tracking(
     }
     git::install_tracking(
         &repository.root,
-        &repository.common_dir.join("config"),
+        &repository.git_config,
         &intent.branch,
         &intent.remote,
         &intent.destination,

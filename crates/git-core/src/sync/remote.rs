@@ -75,7 +75,7 @@ impl Coordinator {
         let fetch = format!("+refs/heads/*:refs/remotes/{}/*", remote.name);
         git::install_config_values(
             &repository.root,
-            &repository.common_dir.join("config"),
+            &repository.git_config,
             &[
                 (format!("remote.{}.url", remote.name), remote.url.as_str()),
                 (format!("remote.{}.fetch", remote.name), fetch.as_str()),
