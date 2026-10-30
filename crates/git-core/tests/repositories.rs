@@ -1295,6 +1295,7 @@ fn file_patch_leaves_non_ascii_names_unquoted() {
 }
 
 #[test]
+#[cfg(unix)]
 fn file_patch_reports_non_utf8_file_names_as_unsupported() {
     use std::os::unix::ffi::OsStrExt;
     let fixture = Fixture::new();
@@ -2254,7 +2255,9 @@ fn worktree_patch_writes_untracked_patches_byte_identical_to_git() {
     for (name, content) in files {
         fs::write(fixture.repo.join(name), content).unwrap();
     }
-    let mut names: Vec<&str> = files.iter().map(|(name, _)| *name).collect();
+    let names: Vec<&str> = files.iter().map(|(name, _)| *name).collect();
+    #[cfg(unix)]
+    let mut names = names;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;

@@ -192,10 +192,10 @@ function fakeRemote() {
   return { state, remote };
 }
 
-test("registry defines macOS DMG and Linux AppImage/deb, staging verifies every hash", (t) => {
+test("registry defines macOS, Linux and Windows bundles, staging verifies every hash", (t) => {
   const { staged } = fixture(t);
   const set = verifyAssets(plan, staged);
-  assert.equal(set.assets.length, 6);
+  assert.equal(set.assets.length, 8);
   assert.deepEqual(set.manifest.release, plan.release);
   for (const asset of set.assets)
     assert.equal(readFileSync(asset.path).length, asset.size);
@@ -257,7 +257,7 @@ test("partial draft resumes missing uploads using original artifacts", async (t)
   state.failAfterUploads = Infinity;
   await publishRelease(plan, staged, remote);
   assert.equal(state.release.draft, false);
-  assert.equal(state.release.assets.length, 8);
+  assert.equal(state.release.assets.length, 10);
   assert.equal(
     state.writes.filter((write) => write === `upload ${uploaded}`).length,
     1,

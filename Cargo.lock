@@ -1799,6 +1799,7 @@ dependencies = [
  "sha1_smol",
  "tempfile",
  "url",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

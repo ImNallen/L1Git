@@ -561,7 +561,7 @@ mod tests {
     use std::{path::PathBuf, process::Command};
 
     struct Repo {
-        directory: tempfile::TempDir,
+        _directory: tempfile::TempDir,
         root: PathBuf,
         coordinator: Coordinator,
     }
@@ -573,7 +573,7 @@ mod tests {
             fs::create_dir(&root).unwrap();
             let coordinator = Coordinator::new(Limits::default(), directory.path().join("undo"));
             let repo = Self {
-                directory,
+                _directory: directory,
                 root,
                 coordinator,
             };
@@ -623,8 +623,9 @@ mod tests {
             String::from_utf8(output.stdout).unwrap()
         }
 
+        #[cfg(unix)]
         fn undo(&self) -> PathBuf {
-            self.directory.path().join("undo")
+            self._directory.path().join("undo")
         }
 
         fn request(&self, paths: &[&str]) -> (Operation, Expect) {
@@ -677,6 +678,7 @@ mod tests {
         )
     }
 
+    #[cfg(unix)]
     fn entries(undo: &Path) -> Vec<PathBuf> {
         fs::read_dir(undo)
             .unwrap()
@@ -686,6 +688,7 @@ mod tests {
             .collect()
     }
 
+    #[cfg(unix)]
     fn lock_entries(entries: &[PathBuf], mode: u32) {
         use std::os::unix::fs::PermissionsExt;
         for entry in entries {
@@ -765,6 +768,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn a_discard_that_cannot_record_where_it_stopped_puts_back_what_it_discarded() {
         let repo = Repo::new(&[("first", "one\n"), ("second", "one\n")]);
         repo.put("first", "two\n");
@@ -791,6 +795,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn a_discard_that_can_neither_record_where_it_stopped_nor_put_back_names_what_it_kept() {
         let repo = Repo::new(&[("first", "one\n"), ("second", "one\n")]);
         repo.put("first", "two\n");

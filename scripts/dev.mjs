@@ -24,10 +24,14 @@ build.on("exit", (code) => {
     process.exitCode = code ?? 1;
     return;
   }
-  const bridge = spawn("./target/debug/l1-git-dev-bridge", [], {
-    cwd: root,
-    stdio: ["ignore", "inherit", "inherit"],
-  });
+  const bridge = spawn(
+    `./target/debug/l1-git-dev-bridge${process.platform === "win32" ? ".exe" : ""}`,
+    [],
+    {
+      cwd: root,
+      stdio: ["ignore", "inherit", "inherit"],
+    },
+  );
   const vite = spawn(process.execPath, ["node_modules/vite/bin/vite.js"], {
     cwd: root,
     stdio: "inherit",

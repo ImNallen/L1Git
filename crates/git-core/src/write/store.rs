@@ -45,6 +45,10 @@ struct Identity {
 
 impl Identity {
     fn of(common_dir: &Path) -> Result<Self, RepositoryError> {
+        #[cfg(windows)]
+        let (metadata, (device, inode)) =
+            crate::windows_fs::metadata(common_dir).map_err(unreadable)?;
+        #[cfg(not(windows))]
         let metadata = fs::metadata(common_dir).map_err(unreadable)?;
         let created = metadata
             .created()
@@ -60,7 +64,15 @@ impl Identity {
                 created,
             })
         }
-        #[cfg(not(unix))]
+        #[cfg(windows)]
+        {
+            Ok(Self {
+                device,
+                inode,
+                created,
+            })
+        }
+        #[cfg(not(any(unix, windows)))]
         {
             Ok(Self {
                 device: 0,
@@ -824,9 +836,12 @@ fn lines(oids: &[Oid]) -> Vec<u8> {
 }
 
 pub(super) fn private_folder() -> fs::DirBuilder {
+    #[cfg(unix)]
     let mut builder = fs::DirBuilder::new();
     #[cfg(unix)]
     std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+    #[cfg(not(unix))]
+    let builder = fs::DirBuilder::new();
     builder
 }
 

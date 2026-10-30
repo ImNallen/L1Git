@@ -54,12 +54,23 @@ jobs:
       - run: pnpm build
 
   desktop:
-    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-2022]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.source_sha || github.sha }}
+      - name: Require source with Windows support
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (!(Test-Path src-tauri/tauri.windows.conf.json) -or !(Test-Path crates/git-core/tests/platform.rs)) {
+            throw 'Selected source predates Windows support. Select a newer nightly or source commit that includes the Windows port.'
+          }
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -70,6 +81,14 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
       - run: pnpm install --frozen-lockfile
+      - name: Exercise Windows repository and process boundaries
+        if: runner.os == 'Windows'
+        run: |
+          git config --global core.autocrlf false
+          cargo test --locked -p l1-git-core --lib --test platform --test add_remote
+      - name: Check Windows core and bridge
+        if: runner.os == 'Windows'
+        run: cargo clippy --locked -p l1-git-core -p l1-git-dev-bridge --lib --bins -- -D warnings
       - run: cargo clippy --locked -p l1-git --all-targets -- -D warnings
       - run: cargo test --locked -p l1-git
       - run: pnpm tauri build --debug

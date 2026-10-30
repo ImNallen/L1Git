@@ -24,7 +24,14 @@ pub(crate) fn untracked(
         Found::File {
             file: handle,
             executable,
-        } => regular(root, file, handle, executable, deadline)?,
+            #[cfg(windows)]
+            parents,
+        } => {
+            let patch = regular(root, file, handle, executable, deadline);
+            #[cfg(windows)]
+            drop(parents);
+            patch?
+        }
         Found::Link(target) => {
             let oid = hash(root, &["--no-filters"], target.clone(), deadline)?;
             PatchBytes::Text(link_patch(file, &oid, &target))
@@ -235,7 +242,12 @@ fn link_patch(file: &str, oid: &str, target: &[u8]) -> Vec<u8> {
 
 enum Found {
     Changed,
-    File { file: fs::File, executable: bool },
+    File {
+        file: fs::File,
+        executable: bool,
+        #[cfg(windows)]
+        parents: Vec<fs::File>,
+    },
     Link(Vec<u8>),
     Directory,
     Other,
@@ -342,7 +354,74 @@ fn open_without_following_links(root: &Path, file: &str) -> io::Result<Found> {
     }
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn open_without_following_links(root: &Path, file: &str) -> io::Result<Found> {
+    use crate::windows_fs::{open_at, open_root, reparse_tag};
+    use std::os::windows::fs::MetadataExt;
+    use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
+
+    let root_handle = open_root(root)?;
+    if root_handle.metadata()?.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        return Ok(Found::Changed);
+    }
+    let mut parents = vec![root_handle];
+    let mut names = file.trim_end_matches('/').split('/').peekable();
+    while let Some(name) = names.next() {
+        let handle = open_at(parents.last().unwrap(), name)?;
+        let metadata = handle.metadata()?;
+        if names.peek().is_some() {
+            if !metadata.is_dir() || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+            {
+                return Ok(Found::Changed);
+            }
+            parents.push(handle);
+            continue;
+        }
+        return Ok(
+            if reparse_tag(&handle)?
+                == windows_sys::Win32::System::SystemServices::IO_REPARSE_TAG_SYMLINK
+            {
+                Found::Link(windows_link_bytes(&fs::read_link(root.join(file))?)?)
+            } else if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+                Found::Other
+            } else if metadata.is_dir() {
+                Found::Directory
+            } else if metadata.is_file() {
+                Found::File {
+                    file: handle,
+                    executable: false,
+                    parents,
+                }
+            } else {
+                Found::Other
+            },
+        );
+    }
+    Err(io::Error::from(io::ErrorKind::InvalidInput))
+}
+
+#[cfg(windows)]
+fn windows_link_bytes(target: &Path) -> io::Result<Vec<u8>> {
+    let target = target
+        .to_str()
+        .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidData))?;
+    let target = target
+        .strip_prefix(r"\??\")
+        .or_else(|| target.strip_prefix(r"\\?\"))
+        .or_else(|| target.strip_prefix(r"\DosDevices\"))
+        .unwrap_or(target);
+    let target = if target
+        .get(..4)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(r"UNC\"))
+    {
+        format!("//{}", &target[4..])
+    } else {
+        target.to_owned()
+    };
+    Ok(target.replace('\\', "/").into_bytes())
+}
+
+#[cfg(not(any(unix, windows)))]
 fn open_without_following_links(_root: &Path, _file: &str) -> io::Result<Found> {
     Err(io::Error::from(io::ErrorKind::Unsupported))
 }
@@ -391,5 +470,63 @@ mod unix_tests {
             open_without_following_links(&root, "real"),
             Ok(Found::Directory)
         ));
+    }
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::{Found, open_without_following_links, windows_link_bytes};
+    use std::{fs, path::Path, process::Command};
+
+    #[test]
+    fn link_targets_match_git_for_windows_normalization() {
+        for (native, git) in [
+            (r"dir\file", "dir/file"),
+            (r"\\?\C:\dir\file", "C:/dir/file"),
+            (r"\??\UNC\server\share\file", "//server/share/file"),
+            (r"\DosDevices\C:\file", "C:/file"),
+        ] {
+            assert_eq!(
+                windows_link_bytes(Path::new(native)).unwrap(),
+                git.as_bytes()
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_a_junction_parent_and_keeps_regular_parents_pinned() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("root");
+        let outside = temp.path().join("outside");
+        fs::create_dir(&root).unwrap();
+        fs::create_dir(&outside).unwrap();
+        fs::write(outside.join("secret"), "outside").unwrap();
+        let junction = root.join("junction");
+        assert!(
+            Command::new("cmd")
+                .args(["/D", "/C", "mklink", "/J"])
+                .arg(&junction)
+                .arg(&outside)
+                .output()
+                .unwrap()
+                .status
+                .success()
+        );
+        assert!(matches!(
+            open_without_following_links(&root, "junction/secret").unwrap(),
+            Found::Changed
+        ));
+        assert!(matches!(
+            open_without_following_links(&root, "junction").unwrap(),
+            Found::Other
+        ));
+        fs::create_dir(root.join("nested")).unwrap();
+        fs::write(root.join("nested/file"), "inside").unwrap();
+        let found = open_without_following_links(&root, "nested/file").unwrap();
+        assert!(matches!(found, Found::File { .. }));
+        assert!(fs::rename(root.join("nested"), root.join("moved")).is_err());
+        drop(found);
+        fs::rename(root.join("nested"), root.join("moved")).unwrap();
+        fs::remove_dir(junction).unwrap();
     }
 }

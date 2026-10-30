@@ -496,6 +496,9 @@ pub(crate) fn worktree_file_patch(
 pub(crate) fn check(file: &str) -> Result<(), RepositoryError> {
     let components: Vec<_> = Path::new(file).components().collect();
     if components.is_empty()
+        || (cfg!(windows)
+            && (file.contains(['\\', ':'])
+                || file.split('/').any(|name| name.ends_with([' ', '.']))))
         || !components
             .iter()
             .all(|component| matches!(component, Component::Normal(_)))

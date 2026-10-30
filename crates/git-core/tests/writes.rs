@@ -182,6 +182,7 @@ impl Repo {
         self.git_dir_names(|name| name.starts_with("sharedindex."))
     }
 
+    #[cfg(unix)]
     fn index_info(&self, info: &[u8]) {
         use std::io::Write as _;
         let mut child = git_command(&self.root, &["update-index", "-z", "--index-info"])

@@ -1,6 +1,6 @@
 # Release L1 Git
 
-L1 Git publishes a universal macOS DMG and Linux x86_64 AppImage and deb to [GitHub Releases](https://github.com/ImNallen/L1Git/releases). Install Git separately and keep it available on `PATH`. Packaged macOS apps and Linux AppImages support signed in-app updates. Windows releases are outside this workflow.
+L1 Git publishes a universal macOS DMG, Linux x86_64 AppImage and deb, and a Windows x64 NSIS installer to [GitHub Releases](https://github.com/ImNallen/L1Git/releases). Install Git separately and keep it available on `PATH`. Packaged macOS apps, Linux AppImages, and Windows NSIS installations support signed in-app updates. Windows installers install for the current user and bootstrap WebView2 when needed. Windows updater signatures authenticate downloads. The workflow does not apply an Authenticode certificate to the installer or executable.
 
 ## Publish a nightly
 
@@ -29,6 +29,8 @@ gh workflow run release.yml --repo ImNallen/L1Git --ref main -f channel=stable -
 ```
 
 Overrides accept plain `X.Y.Z`, without a leading `v`. Every stable version must exceed the highest published stable version. The nightly tag must still resolve to its recorded source SHA, and that commit must belong to main. Promotion reruns full CI on that source and builds new packages with the stable version.
+
+The selected source must include Windows support. Nightlies and hand-picked commits from before the Windows port cannot be rebuilt by this all-platform workflow. Publish a nightly containing the port before promoting it to stable. CI rejects older sources before the Windows build.
 
 ## Publish a hand-picked stable commit
 
@@ -65,11 +67,13 @@ For macOS publication, the temporary config sets `bundle.macOS.signingIdentity` 
 
 ## Validate release changes in a pull request
 
-Changes to the release workflow, CI, scripts, package inputs, Tauri sources, or this guide run packaging for both platforms. PR jobs have read permissions, skip every repository-secret step, and never publish. macOS packages use ad hoc signing. The plan job generates a disposable updater key with the pinned Tauri CLI. Its `dry-run-signing` artifact is intentionally public test material, shared by both builds and the verifier. It is never trusted for publication and is retained only to recover this run. A full rerun restores that key instead of generating a different one.
+Changes to the release workflow, CI, scripts, package inputs, Tauri sources, or this guide run packaging for all three platforms. PR jobs have read permissions, skip every repository-secret step, and never publish. macOS packages use ad hoc signing. The plan job generates a disposable updater key with the pinned Tauri CLI. Its `dry-run-signing` artifact is intentionally public test material, shared by all builds and the verifier. It is never trusted for publication and is retained only to recover this run. A full rerun restores that key instead of generating a different one.
 
-Download the `bundles-macos-universal` and `bundles-linux-x86_64` workflow artifacts. The read-only verification job requires the DMG, app archive, AppImage, deb, and both updater signatures. It also checks release metadata, sizes, and SHA-256 hashes. The app archive and AppImage signatures must cryptographically bind both their bytes and the planned application version. The generated `latest.json` and checksum manifest are workflow artifacts. On publication, `release-manifest.json` is also a release download with source, version, workflow revision, run identity, promotion source, and hashes.
+Download the `bundles-macos-universal`, `bundles-linux-x86_64`, and `bundles-windows-x86_64` workflow artifacts. The read-only verification job requires the DMG, app archive, AppImage, deb, Windows installer, and all three updater signatures. It also checks release metadata, sizes, and SHA-256 hashes. The app archive, AppImage, and Windows installer signatures must cryptographically bind both their bytes and the planned application version. The generated `latest.json` and checksum manifest are workflow artifacts. On publication, `release-manifest.json` is also a release download with source, version, workflow revision, run identity, promotion source, and hashes.
 
 The macOS check inspects both the DMG and updater app archive. It requires arm64 and x86_64 executable slices, the planned app version, and identical app metadata and executable inside the mounted DMG. Linux checks deb version and architecture, extracts both packages, checks their ELF architecture, and starts each under Xvfb for 15 seconds. A successful smoke check means the process stays running without known loader or panic errors. It does not exercise every Git operation or prove behavior on every Linux distribution.
+
+The Windows check silently installs the NSIS package into a temporary directory, verifies its version and x64 GUI executable, and requires the installed L1 Git window to stay open for 15 seconds. It then stops and uninstalls that disposable app. This proves installation and startup. Windows core CI separately tests repository reads and writes, junction refusal, and process-tree cancellation. A full installed Windows update cycle is not covered by the macOS and Linux updater driver.
 
 Run the policy and publication tests locally:
 
@@ -90,7 +94,7 @@ Before restart, the app asks for confirmation if any repository has an unsaved c
 | Stable  | `https://github.com/ImNallen/L1Git/releases/latest/download/latest.json`  |
 | Nightly | `https://github.com/ImNallen/L1Git/releases/download/nightly/latest.json` |
 
-Every versioned release includes `latest.json` with `darwin-aarch64`, `darwin-x86_64`, and `linux-x86_64`. Both macOS entries use the same universal `.app.tar.gz`. Linux uses the AppImage. Each entry includes the validated updater signature and a URL to an immutable versioned download. The deb and DMG remain manual installers.
+Every versioned release includes `latest.json` with `darwin-aarch64`, `darwin-x86_64`, `linux-x86_64`, and `windows-x86_64`. Both macOS entries use the same universal `.app.tar.gz`. Linux uses the AppImage. Windows uses the NSIS `.exe`. Each entry includes the validated updater signature and a URL to an immutable versioned download. The deb and DMG remain manual installers.
 
 A stable publication sets GitHub's latest release and updates the rolling nightly feed. A nightly publication updates only the nightly feed. The single publisher owns both. A matching retry performs no versioned asset writes and repairs an interrupted feed replacement if needed. Recovery reads the feed from the highest versioned release owned by this workflow, so an older retry cannot restore an older feed after an interrupted replacement. Different bytes for the same feed version fail. The rolling `nightly` release has a workflow ownership marker. A conflicting existing release is refused.
 
@@ -110,4 +114,4 @@ All non-PR release runs share a workflow-level concurrency group before planning
 actionlint -ignore 'unexpected key "queue" for "concurrency"' .github/workflows/ci.yml .github/workflows/release.yml
 ```
 
-Build jobs only upload workflow artifacts. The sole publisher has `contents: write` and runs after CI, both builds, and read-only completeness verification. No deployment or version-bump commits are produced. Versioned release assets are immutable. Only the rolling nightly feed asset is replaced.
+Build jobs only upload workflow artifacts. The sole publisher has `contents: write` and runs after CI, all builds, and read-only completeness verification. No deployment or version-bump commits are produced. Versioned release assets are immutable. Only the rolling nightly feed asset is replaced.

@@ -358,6 +358,11 @@ pub(super) fn capture(
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Content::Absent),
         Err(error) => Err(error),
         Ok(metadata) if metadata.is_symlink() => {
+            #[cfg(windows)]
+            return Err(unsupported(format!(
+                "L1 Git cannot discard or stash the symbolic link {path} on Windows because Undo cannot restore it. The link was left unchanged."
+            )));
+            #[cfg(not(windows))]
             fs::read_link(&file).map(|target| Content::Symlink {
                 target: link_bytes(target),
             })
@@ -487,11 +492,23 @@ pub(super) struct Stat {
 
 impl Stat {
     pub(super) fn of(file: &Path) -> io::Result<Option<Self>> {
-        let metadata = match fs::symlink_metadata(file) {
+        #[cfg(windows)]
+        let read = crate::windows_fs::metadata(file);
+        #[cfg(not(windows))]
+        let read = fs::symlink_metadata(file);
+        let metadata = match read {
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
             other => other?,
         };
-        Ok(Some(Self::from(&metadata)))
+        #[cfg(windows)]
+        let (metadata, identity) = metadata;
+        let stat = Self::from(&metadata);
+        #[cfg(windows)]
+        let stat = Self {
+            identity: Some(identity),
+            ..stat
+        };
+        Ok(Some(stat))
     }
 }
 
@@ -551,7 +568,7 @@ impl From<&fs::Metadata> for Stat {
             folder: metadata.is_dir(),
             identity: None,
             size: metadata.len(),
-            mode: 0,
+            mode: u32::from(metadata.permissions().readonly()),
             modified: since(metadata.modified()),
             changed: since(metadata.created()),
         }
@@ -559,11 +576,18 @@ impl From<&fs::Metadata> for Stat {
 }
 
 #[cfg(not(unix))]
-fn permissions(_metadata: &fs::Metadata) -> u32 {
-    0
+fn permissions(metadata: &fs::Metadata) -> u32 {
+    u32::from(metadata.permissions().readonly())
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+pub(super) fn set_permissions(file: &Path, readonly: u32) -> io::Result<()> {
+    let mut permissions = fs::metadata(file)?.permissions();
+    permissions.set_readonly(readonly != 0);
+    fs::set_permissions(file, permissions)
+}
+
+#[cfg(not(any(unix, windows)))]
 pub(super) fn set_permissions(_file: &Path, _permissions: u32) -> io::Result<()> {
     Ok(())
 }
@@ -584,6 +608,29 @@ fn symlink(_target: &[u8], _link: &Path) -> io::Result<()> {
 mod tests {
     use super::fold_for_any_disk;
     use super::fold_round;
+
+    #[cfg(windows)]
+    #[test]
+    fn refuses_to_capture_a_native_link_before_a_destructive_write() {
+        let temp = tempfile::tempdir().unwrap();
+        let outside = temp.path().join("outside");
+        std::fs::create_dir(&outside).unwrap();
+        let link = temp.path().join("link");
+        assert!(
+            std::process::Command::new("cmd")
+                .args(["/D", "/C", "mklink", "/J"])
+                .arg(&link)
+                .arg(&outside)
+                .output()
+                .unwrap()
+                .status
+                .success()
+        );
+        let error = super::capture(temp.path(), "link", temp.path(), "copy".into()).unwrap_err();
+        assert_eq!(error.kind, crate::ErrorKind::UnsupportedPath);
+        assert!(std::fs::symlink_metadata(&link).unwrap().is_symlink());
+        std::fs::remove_dir(link).unwrap();
+    }
 
     #[test]
     fn every_character_settles_within_the_fold_rounds() {
