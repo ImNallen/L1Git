@@ -499,7 +499,7 @@ fn interrupted_intents_reconcile_without_replaying_git() {
         };
         record.save(&repo).unwrap();
         let reopened = f.coordinator();
-        if phase == "starting" {
+        if phase != "finishing" {
             assert!(matches!(
                 reopened.merge_state(f.path()).unwrap(),
                 MergeState::Attention { .. }
@@ -945,6 +945,144 @@ fn forced_duplicate_checkout_cannot_move_an_active_destination_from_another_work
         active(coordinator.merge_state(f.path()).unwrap()).id,
         session.id
     );
+}
+
+#[test]
+fn forced_duplicate_checkout_cannot_start_a_second_merge_for_the_same_destination() {
+    let f = Fixture::new(false);
+    let coordinator = f.coordinator();
+    let linked = f.root.parent().unwrap().join("duplicate-merge");
+    let path = linked.to_str().unwrap();
+    f.git(&["worktree", "add", "--force", path, "main"]);
+    let review = coordinator.review_merge(path).unwrap();
+    let session = f.start(&coordinator);
+
+    let error = coordinator
+        .merge(path, &MergeAction::Start { review })
+        .unwrap_err();
+    assert!(error.message.contains("destination of an unfinished merge"));
+    assert_eq!(
+        active(coordinator.merge_state(f.path()).unwrap()).id,
+        session.id
+    );
+    assert_eq!(coordinator.merge_state(path).unwrap(), MergeState::Idle);
+    assert!(git(&linked, &["status", "--porcelain"]).is_empty());
+    assert_eq!(
+        f.git(&["rev-parse", "HEAD"]),
+        session.review.destination.oid.as_str()
+    );
+}
+
+#[test]
+fn missing_unrelated_worktree_does_not_block_an_ordinary_commit() {
+    let f = Fixture::new(false);
+    let coordinator = f.coordinator();
+    let linked = f.root.parent().unwrap().join("missing-unrelated");
+    f.git(&[
+        "worktree",
+        "add",
+        "-b",
+        "unrelated",
+        linked.to_str().unwrap(),
+    ]);
+    fs::remove_dir_all(&linked).unwrap();
+    f.put("other.txt", "healthy worktree edit\n");
+    f.stage(&coordinator, "other.txt");
+    let status = worktree_status(f.path()).unwrap();
+
+    coordinator
+        .write(
+            f.path(),
+            &Operation::Commit {
+                message: "Commit in the healthy worktree".into(),
+                staged: status.staged_stamp,
+            },
+            &Expect { head: status.head },
+        )
+        .unwrap();
+    assert_eq!(f.git(&["show", "HEAD:other.txt"]), "healthy worktree edit");
+    assert!(f.git(&["status", "--porcelain"]).is_empty());
+}
+
+#[test]
+#[cfg(unix)]
+fn start_never_adopts_an_unrelated_edit_made_during_the_merge() {
+    let f = Fixture::new(false);
+    let coordinator = f.coordinator();
+    f.hook(
+        "post-index-change",
+        "printf 'independent external edit\\n' > other.txt\n\
+         env -u GIT_INDEX_FILE git -c core.hooksPath=/dev/null add other.txt",
+    );
+    let review = coordinator.review_merge(f.path()).unwrap();
+    let _ = coordinator.merge(f.path(), &MergeAction::Start { review });
+    assert_eq!(
+        fs::read_to_string(f.root.join("other.txt")).unwrap(),
+        "independent external edit\n"
+    );
+    f.git(&["config", "core.hooksPath", "/dev/null"]);
+    let (_, record, _) = f.record();
+    let aborted = coordinator.merge(
+        f.path(),
+        &MergeAction::Abort {
+            session: record.session.id,
+        },
+    );
+    assert_eq!(
+        fs::read_to_string(f.root.join("other.txt")).unwrap(),
+        "independent external edit\n"
+    );
+    assert!(aborted.is_err());
+}
+
+#[test]
+fn interrupted_private_abort_cannot_reopen_resolution_history() {
+    let f = Fixture::new(true);
+    let coordinator = f.coordinator();
+    f.start(&coordinator);
+    let (repo, mut record, deadline) = f.record();
+    record.phase = SessionPhase::Aborting;
+    record.save(&repo).unwrap();
+    let txn = MergeIndexTxn::begin(&repo, deadline).unwrap();
+    txn.runner()
+        .git(&["update-index", "--refresh"])
+        .run(deadline)
+        .unwrap();
+    txn.abort().run(deadline).unwrap().succeeded().unwrap();
+    drop(txn);
+
+    assert!(matches!(
+        f.coordinator().merge_state(f.path()).unwrap(),
+        MergeState::Attention {
+            reason: MergeAttention::RecoveryRequired,
+            ..
+        }
+    ));
+    assert!(!f.git(&["ls-files", "-u"]).is_empty());
+    assert!(!f.root.join(".git/MERGE_HEAD").exists());
+    assert!(f.coordinator().undo_history(f.path()).is_err());
+}
+
+#[test]
+fn nondefault_merge_strategy_configuration_refuses_before_mutation() {
+    for (key, value) in [
+        ("branch.main.mergeOptions", "--strategy=ours"),
+        ("pull.twohead", "ours"),
+    ] {
+        let f = Fixture::new(false);
+        let coordinator = f.coordinator();
+        f.git(&["config", key, value]);
+        let review = coordinator.review_merge(f.path()).unwrap();
+        let before = review.destination.oid.clone();
+        let error = coordinator
+            .merge(f.path(), &MergeAction::Start { review })
+            .unwrap_err();
+        assert!(error.message.contains("default merge strategy options"));
+        assert_eq!(f.git(&["rev-parse", "HEAD"]), before.as_str());
+        assert!(f.git(&["status", "--porcelain"]).is_empty());
+        assert!(!f.root.join(".git/MERGE_HEAD").exists());
+        assert_eq!(coordinator.merge_state(f.path()).unwrap(), MergeState::Idle);
+    }
 }
 
 #[test]

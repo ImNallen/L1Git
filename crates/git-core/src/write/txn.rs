@@ -35,18 +35,14 @@ struct Hooks {
 }
 
 impl Hooks {
-    fn of(repo: &Repo, deadline: WriteDeadline) -> Result<Self, RepositoryError> {
-        let found = git::run(
-            &repo.root,
-            &[
-                "config",
-                "-z",
-                "--get-regexp",
-                r"^hook\..*\.event$",
-                "^post-index-change$",
-            ],
-            deadline.reads(),
-        )?;
+    fn of(
+        repo: &Repo,
+        deadline: WriteDeadline,
+        event: Option<&str>,
+    ) -> Result<Self, RepositoryError> {
+        let mut args = vec!["config", "-z", "--get-regexp", r"^hook\..*\.event$"];
+        args.extend(event);
+        let found = git::run(&repo.root, &args, deadline.reads())?;
         let disabled = match found.status.code() {
             Some(0) => found
                 .stdout
@@ -91,7 +87,7 @@ fn private(repo: &Repo, name: &str) -> PathBuf {
 impl<'r> Txn<'r> {
     pub(super) fn begin(repo: &'r Repo, deadline: WriteDeadline) -> Result<Self, RepositoryError> {
         let held = HeldIndexLock::begin()?;
-        let hooks = Hooks::of(repo, deadline)?;
+        let hooks = Hooks::of(repo, deadline, Some("^post-index-change$"))?;
         let lock = repo.index.with_extension("lock");
         match fs::File::options().write(true).create_new(true).open(&lock) {
             Ok(_) => {}
@@ -251,6 +247,20 @@ impl<'r> Txn<'r> {
     }
 
     fn publish(&mut self, change: &Change) -> Result<Published, RepositoryError> {
+        self.publish_flags(
+            change.touches_skip_worktree(),
+            matches!(
+                change,
+                Change::Resolution(_) | Change::Discard(_) | Change::Stash(_)
+            ),
+        )
+    }
+
+    fn publish_flags(
+        &mut self,
+        skip_worktree: bool,
+        worktree_updated: bool,
+    ) -> Result<Published, RepositoryError> {
         let renamed = if self.copy.exists() {
             fs::rename(&self.copy, &self.lock)
                 .and_then(|()| fs::rename(&self.lock, &self.repo.index))
@@ -267,11 +277,8 @@ impl<'r> Txn<'r> {
         Ok(Published {
             root: self.repo.root.clone(),
             deadline: self.deadline,
-            skip_worktree: change.touches_skip_worktree(),
-            worktree_updated: matches!(
-                change,
-                Change::Resolution(_) | Change::Discard(_) | Change::Stash(_)
-            ),
+            skip_worktree,
+            worktree_updated,
             hooks: self.hooks.any(),
         })
     }
@@ -399,11 +406,21 @@ impl<'r> MergeTxn<'r> {
         Outside::begin(repo, deadline).map(Self)
     }
 
-    pub(crate) fn root(&self) -> &Path {
-        self.0.root()
+    pub(super) const fn runner(&self) -> &Outside<'r> {
+        &self.0
+    }
+}
+
+pub(crate) struct MergeIndexTxn<'r>(Txn<'r>);
+
+impl<'r> MergeIndexTxn<'r> {
+    pub(super) fn begin(repo: &'r Repo, deadline: WriteDeadline) -> Result<Self, RepositoryError> {
+        let mut txn = Txn::begin(repo, deadline)?;
+        txn.hooks = Hooks::of(repo, deadline, None)?;
+        Ok(Self(txn))
     }
 
-    pub(super) const fn runner(&self) -> &Outside<'r> {
+    pub(crate) const fn runner(&self) -> &Txn<'r> {
         &self.0
     }
 
@@ -413,6 +430,26 @@ impl<'r> MergeTxn<'r> {
 
     pub(super) fn abort(&self) -> Write<'_> {
         Write::merge(self, None)
+    }
+
+    pub(super) fn publish(mut self) -> Result<Published, RepositoryError> {
+        let durable = |error| {
+            RepositoryError::new(
+                ErrorKind::GitFailed,
+                format!("L1 Git could not durably publish the merge index: {error}"),
+            )
+        };
+        fs::File::options()
+            .write(true)
+            .open(self.0.copy())
+            .and_then(|file| file.sync_all())
+            .map_err(durable)?;
+        let published = self.0.publish_flags(false, true)?;
+        #[cfg(unix)]
+        fs::File::open(&self.0.repo.git_dir)
+            .and_then(|file| file.sync_all())
+            .map_err(durable)?;
+        Ok(published)
     }
 }
 

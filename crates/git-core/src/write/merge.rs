@@ -1,5 +1,6 @@
 use super::{
-    BranchTip, Change, CommitTxn, EntryId, MergeTxn, Operation, Repo, commit, index,
+    BranchTip, Change, CommitTxn, EntryId, MergeIndexTxn, MergeTxn, Operation, Published, Repo,
+    commit, index,
     store::{EntryObjects, Identity, LockedStore, Objects},
     txn::Runner,
 };
@@ -278,7 +279,6 @@ impl Record {
 }
 
 fn load(repo: &Repo) -> Result<Option<Record>, RepositoryError> {
-    // Check every parent before following the pointer, including on read-only discovery.
     for path in [repo.git_dir.join("l1git"), base(repo)] {
         match fs::symlink_metadata(&path) {
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -408,10 +408,6 @@ fn reconcile(repo: &Repo, deadline: WriteDeadline) -> Result<Option<Record>, Rep
         }
         SessionPhase::Aborting if baseline(repo, &record, deadline)? => {
             record.close(repo, MergeOutcome::Aborted)?;
-        }
-        SessionPhase::Aborting if owned(repo, &record, deadline)? => {
-            record.phase = SessionPhase::Active;
-            record.save(repo)?;
         }
         SessionPhase::Starting
         | SessionPhase::Active
@@ -616,6 +612,15 @@ fn safe_index(repo: &Repo, deadline: WriteDeadline) -> Result<(), RepositoryErro
         ));
     }
     let (rows, _) = index::read_worktree(&repo.root, deadline.reads())?;
+    ordinary_index(&rows)?;
+    let sparse = config(repo, "core.sparseCheckout", deadline)?;
+    if sparse.iter().any(|value| value != "false" && value != "0") {
+        return Err(refused("Merge upstream does not support sparse checkout."));
+    }
+    Ok(())
+}
+
+fn ordinary_index(rows: &index::Rows) -> Result<(), RepositoryError> {
     if rows
         .values()
         .flatten()
@@ -625,11 +630,62 @@ fn safe_index(repo: &Repo, deadline: WriteDeadline) -> Result<(), RepositoryErro
             "Merge needs an index without skip-worktree, assume-unchanged, or intent-to-add entries. Restore an ordinary index before starting or continuing.",
         ));
     }
-    let sparse = config(repo, "core.sparseCheckout", deadline)?;
-    if sparse.iter().any(|value| value != "false" && value != "0") {
-        return Err(refused("Merge upstream does not support sparse checkout."));
-    }
     Ok(())
+}
+
+fn index_paths(
+    txn: &MergeIndexTxn<'_>,
+    parent: &Oid,
+    deadline: WriteDeadline,
+) -> Result<Vec<String>, RepositoryError> {
+    let output = txn
+        .runner()
+        .git(&[
+            "diff-index",
+            "--cached",
+            "--no-renames",
+            "--name-only",
+            "-z",
+            parent.as_str(),
+            "--",
+        ])
+        .run(deadline)?
+        .succeeded()?;
+    output
+        .split(|byte| *byte == 0)
+        .filter(|path| !path.is_empty())
+        .map(|path| String::from_utf8(path.to_vec()).map_err(|_| git::malformed()))
+        .collect()
+}
+
+fn aborted_index(
+    repo: &Repo,
+    record: &Record,
+    txn: &MergeIndexTxn<'_>,
+    deadline: WriteDeadline,
+) -> Result<bool, RepositoryError> {
+    if repo.head(deadline)? != expected_head(&record.session)
+        || !sync::in_progress(&repo.root, deadline.reads())?.is_empty()
+        || marker(repo, "MERGE_AUTOSTASH")?.is_some()
+        || !index_paths(txn, &record.session.review.destination.oid, deadline)?.is_empty()
+    {
+        return Ok(false);
+    }
+    let changed = txn
+        .runner()
+        .git(&["diff-files", "--name-only", "-z", "--no-ext-diff", "--"])
+        .run(deadline)?
+        .succeeded()?;
+    Ok(changed
+        .split(|byte| *byte == 0)
+        .filter(|path| !path.is_empty())
+        .all(|path| {
+            !record
+                .session
+                .footprint
+                .iter()
+                .any(|owned| owned.as_bytes() == path)
+        }))
 }
 
 fn refuse_untracked_collisions(
@@ -786,7 +842,31 @@ impl Coordinator {
                         "The reviewed branch, upstream, or tracking configuration changed. Review the merge again.",
                     ));
                 }
+                guard_refs(
+                    repo,
+                    &[shown.destination.reference.as_str().to_owned()],
+                    deadline,
+                )?;
                 safe_index(repo, deadline)?;
+                let txn = MergeIndexTxn::begin(repo, deadline)?;
+                ordinary_index(&index::read(txn.runner())?)?;
+                if review(repo, deadline)? != *shown {
+                    return Err(refused(
+                        "The merge review changed before index ownership was acquired. Review again.",
+                    ));
+                }
+                if !config(
+                    repo,
+                    &format!("branch.{}.mergeOptions", shown.destination.reference.name()),
+                    deadline,
+                )?
+                .is_empty()
+                    || !config(repo, "pull.twohead", deadline)?.is_empty()
+                {
+                    return Err(refused(
+                        "Managed merges require the default merge strategy options. Run the configured merge with Git instead.",
+                    ));
+                }
                 if !status::entries(&repo.root, Untracked::No, deadline.reads())?
                     .0
                     .is_empty()
@@ -823,21 +903,19 @@ impl Coordinator {
                 )?;
                 record.save(repo)?;
                 persist(&base(repo).join("current.json"), &id)?;
-                let txn = MergeTxn::begin(repo, deadline)?;
                 let ran = txn.start(&shown.source.oid).run(deadline);
                 let deadline = deadline.renewed();
                 if owned(repo, &record, deadline)? {
-                    // Only this uninterrupted observation can establish ownership of the merge output.
                     if ran.is_err() {
                         return Err(refused(
                             "Merge was interrupted. Its affected paths cannot be proved; preserve the session and resolve it externally.",
                         ));
                     }
-                    let entries = status::entries(&repo.root, Untracked::No, deadline.reads())?.0;
-                    record.session.footprint = paths(&entries).into_iter().collect();
-                    let conflicts = entries
-                        .iter()
-                        .any(|entry| matches!(entry, StatusEntry::Unmerged { .. }));
+                    record.session.footprint = index_paths(&txn, &shown.destination.oid, deadline)?;
+                    let conflicts = index::read(txn.runner())?
+                        .values()
+                        .flatten()
+                        .any(|entry| entry.stage != 0);
                     let problem = match ran {
                         Ok(wrote) if wrote.code() == Some(1) && conflicts => None,
                         result => result
@@ -845,12 +923,17 @@ impl Coordinator {
                             .err()
                             .map(|error| error.message),
                     };
+                    record.save(repo)?;
+                    let published = txn.publish()?;
                     record.phase = SessionPhase::Active;
                     record.save(repo)?;
-                    return Ok(MergeReport {
-                        state: state(repo, Some(&record), deadline)?,
-                        outcome: MergeOutcome::Started { problem },
-                    });
+                    return Ok((
+                        MergeReport {
+                            state: state(repo, Some(&record), deadline)?,
+                            outcome: MergeOutcome::Started { problem },
+                        },
+                        Some(published),
+                    ));
                 }
                 let problem = ran.and_then(|wrote| wrote.succeeded()).err().map_or_else(
                     || "Git did not leave the reviewed merge active.".into(),
@@ -859,10 +942,13 @@ impl Coordinator {
                 if baseline(repo, &record, deadline)? {
                     let outcome = MergeOutcome::NotStarted { problem };
                     record.close(repo, outcome.clone())?;
-                    return Ok(MergeReport {
-                        state: MergeState::Idle,
-                        outcome,
-                    });
+                    return Ok((
+                        MergeReport {
+                            state: MergeState::Idle,
+                            outcome,
+                        },
+                        None,
+                    ));
                 }
                 return Err(refused(format!(
                     "{problem} Merge recovery needs attention. No automatic reset was attempted."
@@ -875,10 +961,13 @@ impl Coordinator {
             };
             let mut record = load_id(repo, *id)?;
             if let SessionPhase::Closed { outcome } = &record.phase {
-                return Ok(MergeReport {
-                    state: state(repo, current.as_ref(), deadline)?,
-                    outcome: outcome.clone(),
-                });
+                return Ok((
+                    MergeReport {
+                        state: state(repo, current.as_ref(), deadline)?,
+                        outcome: outcome.clone(),
+                    },
+                    None,
+                ));
             }
             if current.as_ref().map(|record| record.session.id) != Some(*id)
                 || !matches!(record.phase, SessionPhase::Active)
@@ -973,10 +1062,13 @@ impl Coordinator {
                             ));
                         }
                         record.close(repo, outcome.clone())?;
-                        return Ok(MergeReport {
-                            state: state(repo, Some(&record), deadline)?,
-                            outcome,
-                        });
+                        return Ok((
+                            MergeReport {
+                                state: state(repo, Some(&record), deadline)?,
+                                outcome,
+                            },
+                            None,
+                        ));
                     }
                     if owned(repo, &record, deadline)? {
                         record.phase = SessionPhase::Active;
@@ -985,6 +1077,17 @@ impl Coordinator {
                     Err(result.err().unwrap_or_else(|| refused("Git did not create the reviewed merge commit. Inspect the merge state before retrying.")))
                 }
                 MergeAction::Abort { .. } => {
+                    let txn = MergeIndexTxn::begin(repo, deadline)?;
+                    ordinary_index(&index::read(txn.runner())?)?;
+                    within_footprint(
+                        &record.session,
+                        paths(&status::entries(&repo.root, Untracked::No, deadline.reads())?.0),
+                    )?;
+                    if !owned(repo, &record, deadline)? {
+                        return Err(refused(
+                            "The merge changed before Abort acquired index ownership. Refresh and inspect its state.",
+                        ));
+                    }
                     if marker(repo, "ORIG_HEAD")?.as_deref()
                         != Some(record.session.review.destination.oid.as_str())
                     {
@@ -994,7 +1097,6 @@ impl Coordinator {
                     }
                     record.phase = SessionPhase::Aborting;
                     record.save(repo)?;
-                    let txn = MergeTxn::begin(repo, deadline)?;
                     // Restored index rows have no stat cache; refresh it before Git's reset-merge check.
                     let refreshed = txn
                         .runner()
@@ -1008,23 +1110,27 @@ impl Coordinator {
                         .run(deadline)
                         .and_then(|wrote| wrote.succeeded());
                     let deadline = deadline.renewed();
-                    if baseline(repo, &record, deadline)? {
+                    if aborted_index(repo, &record, &txn, deadline)? {
+                        let published = txn.publish()?;
                         record.close(repo, MergeOutcome::Aborted)?;
-                        return Ok(MergeReport {
-                            state: MergeState::Idle,
-                            outcome: MergeOutcome::Aborted,
-                        });
-                    }
-                    if owned(repo, &record, deadline)? {
-                        record.phase = SessionPhase::Active;
-                        record.save(repo)?;
+                        return Ok((
+                            MergeReport {
+                                state: MergeState::Idle,
+                                outcome: MergeOutcome::Aborted,
+                            },
+                            Some(published),
+                        ));
                     }
                     Err(result.err().unwrap_or_else(|| refused("Git did not restore the clean starting state. Preserve your work and inspect the merge externally.")))
                 }
                 MergeAction::Start { .. } => unreachable!(),
             }
         };
-        self.merge_locked(path, write, work)
+        let (report, published): (_, Option<Published>) = self.merge_locked(path, write, work)?;
+        if let Some(published) = published {
+            published.run_hook();
+        }
+        Ok(report)
     }
 }
 
@@ -1153,10 +1259,21 @@ pub(super) fn guard_refs(
         &["worktree", "list", "--porcelain", "-z"],
         deadline.reads(),
     )?;
-    for field in output.split(|byte| *byte == 0) {
-        if let Some(path) = field.strip_prefix(b"worktree ") {
+    let fields: Vec<_> = output.split(|byte| *byte == 0).collect();
+    for record in fields.split(|field| field.is_empty()) {
+        if let Some(path) = record
+            .iter()
+            .find_map(|field| field.strip_prefix(b"worktree "))
+        {
             let path = std::str::from_utf8(path).map_err(|_| git::malformed())?;
-            let target = repo.worktree(path, deadline.reads())?;
+            let related = record
+                .iter()
+                .filter_map(|field| field.strip_prefix(b"branch "))
+                .any(|branch| names.iter().any(|name| name.as_bytes() == branch));
+            let target = match repo.worktree(path, deadline.reads()) {
+                Err(error) if error.kind == ErrorKind::MissingPath && !related => continue,
+                result => result?,
+            };
             if let Some(record) = reconcile(&target, deadline)?
                 && !matches!(record.phase, SessionPhase::Closed { .. })
                 && names

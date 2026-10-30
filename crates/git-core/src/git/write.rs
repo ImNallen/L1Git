@@ -1,7 +1,7 @@
 use super::{Capped, Deadline, Work, base, execute, text, too_old, without_prompts};
 use crate::{
     ErrorKind, RepositoryError, StaleReason, stderr,
-    write::{CommitTxn, HOOK_OFF, MergeTxn, Outside, Published, RefTxn, ScratchIndex, Txn},
+    write::{CommitTxn, HOOK_OFF, MergeIndexTxn, Outside, Published, RefTxn, ScratchIndex, Txn},
 };
 use std::{
     ffi::OsStr,
@@ -283,7 +283,7 @@ impl<'a> Write<'a> {
         }
     }
 
-    pub(crate) fn merge(txn: &'a MergeTxn<'_>, source: Option<&'a crate::Oid>) -> Self {
+    pub(crate) fn merge(txn: &'a MergeIndexTxn<'_>, source: Option<&'a crate::Oid>) -> Self {
         let args = match source {
             Some(source) => vec![
                 "merge",
@@ -296,15 +296,9 @@ impl<'a> Write<'a> {
             ],
             None => vec!["merge", "--abort"],
         };
-        Self {
-            dir: txn.root(),
-            args,
-            env: Vec::new(),
-            input: None,
-            cap: None,
-            as_user: true,
-            lazy_fetch: false,
-        }
+        Self::new(txn.runner(), txn.runner().root(), &args)
+            .uncapped()
+            .lazy_fetch_unprompted()
     }
 
     pub(crate) fn branch(txn: &'a RefTxn<'_>, args: &[&'a str]) -> Self {

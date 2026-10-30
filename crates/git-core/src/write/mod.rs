@@ -42,7 +42,7 @@ use std::{
 use store::{EntryObjects, LockedStore, Log, Objects, Position, Step};
 pub use tags::TagTip;
 pub(crate) use txn::{
-    CommitTxn, HOOK_OFF, MergeTxn, Outside, Published, RefTxn, ScratchIndex, Txn,
+    CommitTxn, HOOK_OFF, MergeIndexTxn, MergeTxn, Outside, Published, RefTxn, ScratchIndex, Txn,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
