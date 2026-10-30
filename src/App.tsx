@@ -325,20 +325,28 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
         changes: app.changes.get(listedWorktree.root),
       }
     : null;
-  const [mergeTarget, setMergeTarget] = useState<RepositoryRoot | null>(null);
+  const [mergeTarget, setMergeTarget] = useState<{
+    openedRoot: RepositoryRoot;
+    target: RepositoryRoot;
+  } | null>(null);
   const [mergeReviewOpen, setMergeReviewOpen] = useState(false);
-  const mergeRoot = snapshot?.worktrees.some(
-    (worktree) => worktree.root === mergeTarget,
-  )
-    ? mergeTarget
-    : (snapshot?.root ?? null);
+  const mergeRoot =
+    mergeTarget !== null &&
+    mergeTarget.openedRoot === snapshot?.root &&
+    snapshot?.worktrees.some((worktree) => worktree.root === mergeTarget.target)
+      ? mergeTarget.target
+      : (snapshot?.root ?? null);
   const mergeChanges =
     mergeRoot === null ? undefined : app.changes.get(mergeRoot);
   const [mergeRead, refreshMerge] = useMergeState(mergeRoot, mergeChanges);
   const mergeState = mergeRead.kind === "ready" ? mergeRead.value : null;
   useEffect(() => {
-    if (selected?.kind === "worktree") setMergeTarget(selected.root);
-  }, [selected]);
+    setMergeTarget(null);
+  }, [snapshot?.root]);
+  useEffect(() => {
+    if (selected?.kind === "worktree" && snapshot)
+      setMergeTarget({ openedRoot: snapshot.root, target: selected.root });
+  }, [selected, snapshot?.root]);
   useEffect(() => {
     setMergeReviewOpen(false);
   }, [mergeRoot]);
@@ -1263,8 +1271,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
               <MergeControls
                 key={mergeRoot}
                 root={mergeRoot}
-                worktrees={snapshot.worktrees}
-                onTarget={setMergeTarget}
                 read={mergeRead}
                 refresh={rereadChanges}
                 eligible={mergeEligible}

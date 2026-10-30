@@ -114,7 +114,7 @@
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar) var(--panel-raised);
 }
-.file-history-list:focus {
+.file-history-list:focus-visible:has(.file-revision[aria-selected="true"]) {
   outline: none;
 }
 .file-revision {
@@ -133,8 +133,8 @@
   background: var(--row-selected);
 }
 .file-history-list:focus-visible .file-revision[aria-selected="true"] {
-  background: color-mix(in srgb, var(--primary-bg) 16%, var(--row-selected));
-  box-shadow: inset 2px 0 0 var(--primary-bg);
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }
 .file-revision-oid,
 .file-revision-path {
@@ -183,11 +183,6 @@
 }
 .blame-entry:hover:not(:disabled) {
   background: var(--row-hover);
-}
-.blame-entry:focus-visible {
-  outline: none;
-  background: color-mix(in srgb, var(--primary-bg) 16%, var(--row-selected));
-  box-shadow: inset 2px 0 0 var(--primary-bg);
 }
 .blame-author {
   flex-shrink: 0;
@@ -270,10 +265,6 @@
     var(--diffs-fg, var(--text-strong)) 14%,
     var(--diffs-bg, var(--panel-raised))
   );
-}
-.hunk-bar-button:focus-visible {
-  outline: 2px solid var(--primary-bg);
-  outline-offset: 1px;
 }
 .line-bar [aria-disabled="true"],
 .hunk-bar-button[aria-disabled="true"] {

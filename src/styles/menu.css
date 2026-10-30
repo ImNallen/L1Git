@@ -23,12 +23,6 @@
 .context-menu [role^="menuitem"]:hover:not([aria-disabled="true"]) {
   background: var(--row-hover);
 }
-.context-menu [role^="menuitem"]:focus-visible,
-.context-menu [role^="menuitem"]:focus-visible:hover {
-  outline: none;
-  background: color-mix(in srgb, var(--primary-bg) 10%, var(--panel-raised));
-  box-shadow: inset 2px 0 0 var(--blue);
-}
 .context-menu svg {
   flex-shrink: 0;
   color: var(--muted);

@@ -21,6 +21,7 @@ export function ConflictChoices({
         theme: options.theme,
         themeType: options.themeType,
         disableFileHeader: options.disableFileHeader,
+        unsafeCSS: options.unsafeCSS,
       });
       result.render({ file, containerWrapper: host.current });
       return () => result.cleanUp();

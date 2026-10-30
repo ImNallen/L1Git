@@ -4,6 +4,7 @@ import { DIFFS_TAG_NAME } from "@pierre/diffs";
 import type { SelectedLineRange } from "@pierre/diffs";
 import { FileX2, TriangleAlert } from "lucide-react";
 import { FileDiff, Virtualizer } from "@pierre/diffs/react";
+import focusStyles from "../styles/focus.css?inline";
 import { diffTheme } from "../themes/diffTheme";
 import type { Appearance } from "../themes/palette";
 import { hunkAnchor, parsedFiles } from "../domain/lineSelection";
@@ -109,6 +110,7 @@ function Patch({
     () =>
       ({
         theme: diffTheme(theme, painted),
+        unsafeCSS: focusStyles,
         themeType: theme,
         diffStyle,
         disableFileHeader: !barOnTop,

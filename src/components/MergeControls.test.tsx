@@ -44,8 +44,6 @@ let host: HTMLDivElement;
 let root: ReturnType<typeof createRoot>;
 const props: Parameters<typeof MergeControls>[0] = {
   root: review.root,
-  worktrees: [],
-  onTarget: () => {},
   read: { kind: "ready", value: active },
   refresh,
   eligible: false,
@@ -81,6 +79,42 @@ afterEach(async () => {
   publishResolutionImpact([]);
   clearSubmitted(review.root, draftOf(review.root));
   vi.unstubAllGlobals();
+});
+it("keeps the ordinary history free of an idle or loading merge panel", async () => {
+  await act(async () =>
+    root.render(
+      <MergeControls
+        {...props}
+        read={{ kind: "ready", value: { kind: "idle" } }}
+      />,
+    ),
+  );
+  expect(host.querySelector('[aria-label="Upstream merge"]')).toBeNull();
+  await act(async () =>
+    root.render(<MergeControls {...props} read={{ kind: "loading" }} />),
+  );
+  expect(host.querySelector('[aria-label="Upstream merge"]')).toBeNull();
+});
+it("offers a relevant merge action without the generic worktree and refresh toolbar", async () => {
+  const onReview = vi.fn();
+  await act(async () =>
+    root.render(
+      <MergeControls
+        {...props}
+        read={{ kind: "ready", value: { kind: "idle" } }}
+        eligible
+        onReview={onReview}
+      />,
+    ),
+  );
+  expect(host.querySelector('[aria-label="Merge worktree"]')).toBeNull();
+  expect(host.textContent).not.toContain("Refresh merge");
+  await act(async () => button("Merge upstream…").click());
+  expect(onReview).toHaveBeenCalledOnce();
+  await act(async () => root.render(<MergeControls {...props} />));
+  expect(host.textContent).not.toContain("Refresh merge");
+  expect(button("Finish merge")).toBeDefined();
+  expect(button("Abort merge…")).toBeDefined();
 });
 it("protects unsaved conflict text from Finish while permitting reviewed Abort", async () => {
   publishResolutionImpact([{ root: review.root, path: "conflict.txt" }]);

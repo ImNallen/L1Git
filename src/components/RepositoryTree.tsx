@@ -365,13 +365,15 @@ export function RepositoryTree({
   return (
     <>
       <div className="sidebar-search">
-        <Search size={15} />
-        <input
-          aria-label="Filter repositories and refs"
-          placeholder="Search"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-        />
+        <label className="sidebar-search-field">
+          <Search size={15} aria-hidden="true" />
+          <input
+            aria-label="Filter repositories and refs"
+            placeholder="Search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+        </label>
         <button
           className="icon-button"
           onClick={onAdd}
@@ -417,7 +419,10 @@ export function RepositoryTree({
                   className="repository-open"
                   title={entry.root}
                   aria-current={active ? "true" : undefined}
-                  onClick={() => onSelect(entry.root)}
+                  onClick={() => {
+                    onSelect(entry.root);
+                    onToggle(entry.root);
+                  }}
                 >
                   <span>{entry.name}</span>
                 </button>

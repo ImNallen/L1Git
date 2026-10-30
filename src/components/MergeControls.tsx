@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { GitMerge, X } from "lucide-react";
 import * as repositories from "../repositories";
 import type { MergeAction, MergeReview, MergeState } from "../domain/merge";
-import type { RepositoryRoot, Worktree } from "../domain/repository";
+import type { RepositoryRoot } from "../domain/repository";
 import { problemFrom } from "../domain/repository";
 import { useRead } from "../useRead";
 import type { Read } from "../useRead";
@@ -35,8 +35,6 @@ export function MergePair({ review }: { review: MergeReview }) {
 
 export function MergeControls({
   root,
-  worktrees,
-  onTarget,
   read,
   refresh,
   eligible,
@@ -48,8 +46,6 @@ export function MergeControls({
   onInspect,
 }: {
   root: RepositoryRoot;
-  worktrees: readonly Worktree[];
-  onTarget: (root: RepositoryRoot) => void;
   read: Read<MergeState>;
   refresh: () => void;
   eligible: boolean;
@@ -111,32 +107,16 @@ export function MergeControls({
     return result;
   }
   const state = read.kind === "ready" ? read.value : null;
+  if (
+    !notice &&
+    !reviewOpen &&
+    (read.kind === "loading" || (state?.kind === "idle" && !eligible))
+  )
+    return null;
   return (
     <section className="merge-controls" aria-label="Upstream merge">
-      <div className="merge-actions">
-        {worktrees.length > 1 && (
-          <label>
-            Worktree{" "}
-            <select
-              aria-label="Merge worktree"
-              value={root}
-              disabled={busy || frozen}
-              onChange={(event) => {
-                const worktree = worktrees.find(
-                  (worktree) => worktree.root === event.target.value,
-                );
-                if (worktree) onTarget(worktree.root);
-              }}
-            >
-              {worktrees.map((worktree) => (
-                <option key={worktree.root} value={worktree.root}>
-                  {worktree.name}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-        {state?.kind === "idle" && eligible && (
+      {state?.kind === "idle" && eligible && (
+        <div className="merge-actions">
           <button
             className="button secondary"
             disabled={busy || frozen}
@@ -144,16 +124,8 @@ export function MergeControls({
           >
             <GitMerge size={14} /> Merge upstream…
           </button>
-        )}
-        {read.kind === "loading" && <span>Checking merge state…</span>}
-        <button
-          className="button secondary"
-          disabled={busy || frozen}
-          onClick={refresh}
-        >
-          Refresh merge
-        </button>
-      </div>
+        </div>
+      )}
       {notice && (
         <div
           role={notice.error ? "alert" : "status"}
