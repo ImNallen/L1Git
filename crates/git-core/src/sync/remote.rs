@@ -83,8 +83,7 @@ impl Coordinator {
             reads,
             absent,
             SAVE_FAILED,
-        )
-        .map_err(|_| failed())?;
+        )?;
         gate.last_fetch = None;
         drop(write);
         // Independent global, include, and worktree configs cannot share config.lock.
@@ -255,7 +254,7 @@ mod tests {
         drop(gate);
         assert!(rx.recv_timeout(Duration::from_millis(600)).is_err());
         drop(write);
-        assert!(rx.recv_timeout(Duration::from_secs(5)).unwrap().is_ok());
+        rx.recv_timeout(Duration::from_secs(5)).unwrap().unwrap();
         drop(permits);
         job.join().unwrap();
     }

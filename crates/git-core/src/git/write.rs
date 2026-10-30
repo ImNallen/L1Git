@@ -549,52 +549,76 @@ pub(crate) fn install_config_values(
     failure_message: &'static str,
 ) -> Result<(), RepositoryError> {
     use std::{fs, io::Write as _};
-    let failed = || RepositoryError::new(ErrorKind::GitFailed, failure_message);
+    let failed = |step: &str| {
+        RepositoryError::new(
+            ErrorKind::GitFailed,
+            format!("{failure_message} Could not {step}."),
+        )
+    };
     let lock_path = config.with_extension("lock");
     let mut lock = ConfigLock {
-        file: private_config_file(&lock_path).map_err(|_| failed())?,
+        file: private_config_file(&lock_path)
+            .map_err(|error| failed(&format!("create the config lock ({error})")))?,
         path: lock_path,
     };
-    let metadata = fs::symlink_metadata(config).map_err(|_| failed())?;
+    let metadata = fs::symlink_metadata(config)
+        .map_err(|error| failed(&format!("inspect the config ({error})")))?;
     if !metadata.is_file() {
-        return Err(failed());
+        return Err(failed("replace a non-file config"));
     }
-    let bytes = fs::read(config).map_err(|_| failed())?;
+    let bytes = fs::read(config).map_err(|error| failed(&format!("read the config ({error})")))?;
     let stage_path = config.with_extension(format!(
         "l1git-{}-{}",
         std::process::id(),
         CONFIG_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     ));
-    let stage_file = private_config_file(&stage_path).map_err(|_| failed())?;
+    let stage_file = private_config_file(&stage_path)
+        .map_err(|error| failed(&format!("create the staged config ({error})")))?;
     drop(stage_file);
     let stage = StagedConfig(stage_path);
-    fs::write(&stage.0, &bytes).map_err(|_| failed())?;
-    let stage_name = stage.0.to_str().ok_or_else(failed)?;
+    fs::write(&stage.0, &bytes)
+        .map_err(|error| failed(&format!("write the staged config ({error})")))?;
+    let stage_name = stage
+        .0
+        .to_str()
+        .ok_or_else(|| failed("encode the staged config path"))?;
     for (key, value) in values {
         let mut command = super::base(root, false);
         command.args(["config", "--file", stage_name, "--replace-all", key, value]);
         let output = execute(command, reads, None, Some(1024))?;
         if !output.status.success() {
-            return Err(failed());
+            return Err(failed("edit the staged config with Git"));
         }
     }
-    if !unchanged()? || fs::read(config).map_err(|_| failed())? != bytes {
-        return Err(failed());
+    if !unchanged()?
+        || fs::read(config).map_err(|error| failed(&format!("recheck the config ({error})")))?
+            != bytes
+    {
+        return Err(failed("save over an externally changed config"));
     }
     lock.file
         .set_permissions(metadata.permissions())
-        .map_err(|_| failed())?;
+        .map_err(|error| failed(&format!("preserve config permissions ({error})")))?;
     lock.file
-        .write_all(&fs::read(&stage.0).map_err(|_| failed())?)
-        .map_err(|_| failed())?;
-    lock.file.sync_all().map_err(|_| failed())?;
-    if !unchanged()? || fs::read(config).map_err(|_| failed())? != bytes {
-        return Err(failed());
+        .write_all(
+            &fs::read(&stage.0)
+                .map_err(|error| failed(&format!("read the staged config ({error})")))?,
+        )
+        .map_err(|error| failed(&format!("write the config lock ({error})")))?;
+    lock.file
+        .sync_all()
+        .map_err(|error| failed(&format!("flush the config lock ({error})")))?;
+    if !unchanged()?
+        || fs::read(config).map_err(|error| failed(&format!("recheck the config ({error})")))?
+            != bytes
+    {
+        return Err(failed("save over an externally changed config"));
     }
     if !lock.owns_path() {
-        return Err(failed());
+        return Err(failed("verify config lock ownership"));
     }
-    fs::rename(&lock.path, config).map_err(|_| failed())?;
+    fs::rename(&lock.path, config)
+        .map_err(|error| failed(&format!("replace the config ({error})")))?;
     Ok(())
 }
 
