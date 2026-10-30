@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { File, EditProvider } from "@pierre/diffs/react";
 import { Editor, type EditorFactory } from "@pierre/diffs/edit";
+import focusStyles from "../styles/focus.css?inline";
 import { RotateCcw } from "lucide-react";
 import { diffTheme } from "../themes/diffTheme";
 import type { Appearance } from "../themes/palette";
@@ -363,6 +364,7 @@ function ResultEditor({
 function editorOptions(theme: Appearance, painted: boolean) {
   return {
     theme: diffTheme(theme, painted),
+    unsafeCSS: focusStyles,
     themeType: theme,
     disableFileHeader: true,
   };

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { FILE_TREE_DENSITY_PRESETS } from "@pierre/trees";
 import type { GitStatus } from "@pierre/trees";
 import { FileTree, useFileTree } from "@pierre/trees/react";
+import focusStyles from "../styles/focus.css?inline";
 import {
   changedFileTreeInput,
   changedPathAt,
@@ -48,16 +49,6 @@ type Props = {
 
 const ITEM_HEIGHT = FILE_TREE_DENSITY_PRESETS.compact.itemHeight;
 
-export const keyboardFocusOnly = `
-  [data-type="item"]:focus-visible {
-    background-color: color-mix(in srgb, var(--primary-bg) 10%, var(--canvas));
-    box-shadow: inset 2px 0 0 var(--blue);
-  }
-  [data-type="item"][data-item-selected="true"]:focus-visible {
-    background-color: color-mix(in srgb, var(--primary-bg) 10%, var(--nav-selected-bg));
-  }
-`;
-
 export function ChangedFileTree({
   files,
   selectedPath,
@@ -89,7 +80,7 @@ export function ChangedFileTree({
     initialExpansion,
     flattenEmptyDirectories,
     density: "compact",
-    unsafeCSS: keyboardFocusOnly,
+    unsafeCSS: focusStyles,
     composition:
       actions.length > 0
         ? {

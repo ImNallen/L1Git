@@ -25,11 +25,36 @@
 }
 .sidebar-search {
   height: 40px;
-  margin: 4px 12px 10px;
+  margin: 4px 8px 10px;
   display: flex;
   align-items: center;
   color: var(--muted);
+  gap: 6px;
+}
+.sidebar-search > .icon-button {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+}
+.sidebar-search-field {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
   gap: 8px;
+  cursor: text;
+}
+.sidebar-search-field:hover,
+.sidebar-search-field:focus-within {
+  background: var(--control-hover);
+}
+.sidebar-search-field:focus-within {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }
 .sidebar-search input {
   background: none;
@@ -38,6 +63,9 @@
   flex: 1;
   font-size: 12px;
   height: 30px;
+}
+.sidebar-search-field input:focus-visible {
+  outline: none;
 }
 input::placeholder {
   color: var(--text-dim);
@@ -76,7 +104,7 @@ input::placeholder {
   height: 36px;
 }
 .repository-row:hover {
-  background: var(--control);
+  background: var(--control-hover);
 }
 .repository-toggle {
   display: flex;
@@ -118,7 +146,7 @@ input::placeholder {
   font-size: 12px;
 }
 .tree-section:hover {
-  background: var(--row-hover);
+  background: var(--control-hover);
 }
 .tree-section .count,
 .branch-folder .count {
@@ -160,7 +188,7 @@ input::placeholder {
   font-size: 11px;
 }
 .branch-row:hover:not(:disabled) {
-  background: var(--row-hover);
+  background: var(--control-hover);
 }
 .branch-row.selected {
   background: var(--nav-selected-bg);
@@ -185,7 +213,7 @@ input::placeholder {
   padding-right: 34px;
 }
 .branch-item:hover > .branch-row:not(.selected, .head) {
-  background: var(--row-hover);
+  background: var(--control-hover);
 }
 .branch-item.hidden > .branch-row {
   color: var(--text-dim);
@@ -271,19 +299,21 @@ input::placeholder {
 }
 .sidebar-bottom {
   position: relative;
-  height: 29px;
-  min-height: 29px;
+  min-height: 36px;
   display: flex;
   align-items: center;
   gap: 7px;
   color: var(--text-faint);
   font-size: 11px;
-  padding: 0 15px;
+  padding: 0 8px 8px;
 }
 .sidebar-updater {
   display: inline-flex;
   margin-left: auto;
   border-radius: 5px;
+}
+.sidebar-updater .icon-button:hover:not(:disabled, [aria-disabled="true"]) {
+  background: transparent;
 }
 .update-tooltip {
   display: none;
@@ -302,7 +332,6 @@ input::placeholder {
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
-.sidebar-updater:hover .update-tooltip,
 .sidebar-updater:focus-within .update-tooltip {
   display: block;
 }
@@ -345,55 +374,11 @@ input::placeholder {
   display: none;
 }
 
-.app {
-  --focus-bar: var(--blue);
-  --focus-tint: color-mix(in srgb, var(--primary-bg) 10%, var(--sidebar));
-}
-.sidebar button:focus-visible,
-.sidebar-updater:focus-visible,
-.sidebar button:focus-visible:hover:not(:disabled) {
-  outline: none;
-  background: var(--focus-tint);
-  box-shadow: inset 2px 0 0 var(--focus-bar);
-}
-.sidebar .branch-row.selected:focus-visible,
-.sidebar .branch-row.selected:focus-visible:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--primary-bg) 10%, var(--nav-selected-bg));
-}
-.sidebar .branch-row.head:not(.selected):focus-visible,
-.sidebar .branch-row.head:not(.selected):focus-visible:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--primary-bg) 10%, var(--success-bg));
-}
-.sidebar .branch-item:hover > .branch-row:focus-visible:not(.selected, .head) {
-  background: var(--focus-tint);
-}
-.sidebar-toggle:focus-visible,
-.sidebar-toggle:focus-visible:hover:not(:disabled) {
-  outline: none;
-  background: var(--focus-tint);
-}
-.sidebar .icon-button:focus-visible,
-.sidebar-updater:focus-visible,
-.sidebar .icon-button:focus-visible:hover:not(:disabled),
-.sidebar-toggle:focus-visible,
-.sidebar-toggle:focus-visible:hover:not(:disabled),
-.sidebar-bottom button:focus-visible,
-.sidebar-bottom button:focus-visible:hover:not(:disabled),
-.sidebar .repository-toggle:focus-visible,
-.sidebar .repository-toggle:focus-visible:hover:not(:disabled),
-.sidebar-empty button:focus-visible,
-.sidebar-empty button:focus-visible:hover:not(:disabled) {
-  box-shadow: inset 0 -2px 0 var(--focus-bar);
-}
-.repository-toggle:focus-visible {
-  border-radius: 6px 0 0 6px;
-}
 .sidebar .repository-open:focus-visible,
-.sidebar .repository-open:focus-visible:hover:not(:disabled) {
-  background: none;
-  box-shadow: none;
+.sidebar .repository-toggle:focus-visible {
+  outline: none;
 }
-.repository-row:has(> .repository-open:focus-visible) {
-  background: var(--focus-tint);
-  box-shadow: inset 2px 0 0 var(--focus-bar);
+.repository-row:has(> :focus-visible) {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }

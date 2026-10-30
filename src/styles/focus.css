@@ -1,0 +1,27 @@
+:root {
+  --focus-ring: 2px solid var(--focus);
+  --focus-ring-offset: -2px;
+}
+:where(
+  button,
+  a[href],
+  input,
+  textarea,
+  select,
+  summary,
+  [tabindex],
+  [contenteditable="true"]
+):focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+.button.primary:focus-visible {
+  box-shadow: inset 0 0 0 4px var(--panel-raised);
+}
+/* Pierre's unlayered editor styles otherwise override its unsafeCSS layer. */
+[data-content]:focus-visible,
+[data-input-box] input:focus-visible,
+[data-search-icon]:focus-visible {
+  outline: var(--focus-ring) !important;
+  outline-offset: var(--focus-ring-offset) !important;
+}

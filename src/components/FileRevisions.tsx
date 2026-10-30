@@ -3,6 +3,7 @@ import type { KeyboardEvent } from "react";
 import { FileX2, LoaderCircle, TriangleAlert } from "lucide-react";
 import { File, Virtualizer } from "@pierre/diffs/react";
 import type { LineAnnotation } from "@pierre/diffs/react";
+import focusStyles from "../styles/focus.css?inline";
 import * as repositories from "../repositories";
 import { singleCommit } from "../domain/comparison";
 import { SHORT_OID_MIN_LENGTH } from "../domain/shortOid";
@@ -188,6 +189,7 @@ export function FileBlame({
   const options = useMemo(
     () => ({
       theme: diffTheme(theme, painted),
+      unsafeCSS: focusStyles,
       themeType: theme,
       disableFileHeader: true,
       onLineNumberClick: ({ lineNumber }: { lineNumber: number }) => {

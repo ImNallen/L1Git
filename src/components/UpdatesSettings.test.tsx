@@ -275,6 +275,55 @@ it("shows manual update guidance on browser, dev and non-AppImage Linux and a re
   expect(container.textContent).toContain("Could not reach update server");
 });
 
+it("hides the sidebar updater in development while keeping Settings guidance", async () => {
+  await render();
+  await state({ kind: "unavailable", reason: "development" });
+  expect(container.querySelector(".sidebar-updater")).toBeNull();
+  expect(container.textContent).toContain("development builds");
+  expect(button("Check for updates").disabled).toBe(true);
+  expect(container.querySelector("a")?.href).toBe(
+    "https://github.com/ImNallen/L1Git/releases",
+  );
+});
+
+it("spins the sidebar arrows while checking and stops or offers a download", async () => {
+  await render(false);
+  expect(sidebar().disabled).toBe(false);
+  expect(sidebar().querySelector(".lucide-refresh-cw")).not.toBeNull();
+  expect(sidebar().querySelector(".spin")).toBeNull();
+
+  transport.invoke.mockResolvedValue(snapshot({ kind: "checking" }));
+  await act(async () => sidebar().click());
+  expect(transport.invoke.mock.calls.at(-1)?.[0]).toEqual({
+    name: "updater_check",
+  });
+  expect(sidebar().disabled).toBe(true);
+  expect(sidebar().querySelector(".lucide-refresh-cw.spin")).not.toBeNull();
+
+  await state({ kind: "current" });
+  expect(sidebar().disabled).toBe(false);
+  expect(sidebar().getAttribute("aria-label")).toBe("Check for updates");
+  expect(sidebar().querySelector(".lucide-refresh-cw")).not.toBeNull();
+  expect(sidebar().querySelector(".spin")).toBeNull();
+
+  transport.invoke.mockResolvedValue(snapshot({ kind: "checking" }));
+  await act(async () => sidebar().click());
+  expect(transport.invoke.mock.calls.at(-1)?.[0]).toEqual({
+    name: "updater_check",
+  });
+  expect(sidebar().querySelector(".lucide-refresh-cw.spin")).not.toBeNull();
+  await state({ kind: "available", candidate, message: null });
+  expect(sidebar().disabled).toBe(false);
+  expect(sidebar().getAttribute("aria-label")).toBe("Download update");
+  expect(sidebar().querySelector(".lucide-download")).not.toBeNull();
+  expect(sidebar().querySelector(".spin")).toBeNull();
+  expect(
+    transport.invoke.mock.calls.filter(
+      ([command]) => command.name === "updater_download",
+    ),
+  ).toHaveLength(0);
+});
+
 it("checks, downloads and confirms from the sidebar without mounting Settings", async () => {
   await render(false);
   expect(sidebar().getAttribute("aria-label")).toBe("Check for updates");
@@ -364,7 +413,6 @@ it("keeps the sidebar available for current and failed checks and disables every
   }
   for (const [reason, guidance] of [
     ["browser", "browser preview"],
-    ["development", "development builds"],
     ["manualLinux", "package manager"],
     ["unsupported", "this platform"],
   ]) {

@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef } from "react";
-import { Download, LoaderCircle, RotateCw } from "lucide-react";
+import { Download, LoaderCircle, RefreshCw, RotateCw } from "lucide-react";
 import type { Updates, UpdateState } from "../updates";
 import type { UpdateRestart } from "./UpdateRestart";
 
@@ -188,6 +188,8 @@ export function UpdateAffordance({
 }) {
   const statusId = useId();
   const { state, track, preferenceError } = updates.snapshot;
+  if (state.kind === "unavailable" && state.reason === "development")
+    return null;
   const progress =
     state.kind === "downloading" && state.total !== null
       ? `${Math.min(100, Math.floor((state.received / state.total) * 100))}%`
@@ -198,11 +200,11 @@ export function UpdateAffordance({
       case "current":
         return {
           label: "Check for updates",
-          Icon: RotateCw,
+          Icon: RefreshCw,
           run: updates.check,
         };
       case "failed":
-        return { label: "Retry check", Icon: RotateCw, run: updates.check };
+        return { label: "Retry check", Icon: RefreshCw, run: updates.check };
       case "available":
         return {
           label: state.message ? "Retry download" : "Download update",
@@ -218,7 +220,7 @@ export function UpdateAffordance({
       case "checking":
         return {
           label: "Checking for updates…",
-          Icon: LoaderCircle,
+          Icon: RefreshCw,
           run: null,
         };
       case "downloading":
@@ -234,7 +236,7 @@ export function UpdateAffordance({
       case "unavailable":
         return {
           label: "In-app updates unavailable",
-          Icon: Download,
+          Icon: RefreshCw,
           run: null,
         };
       default: {
@@ -274,7 +276,11 @@ export function UpdateAffordance({
       >
         <Icon
           size={16}
-          className={Icon === LoaderCircle ? "spin" : undefined}
+          className={
+            state.kind === "checking" || Icon === LoaderCircle
+              ? "spin"
+              : undefined
+          }
           aria-hidden="true"
         />
       </button>

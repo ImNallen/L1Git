@@ -11,7 +11,7 @@ Open L1 Git with a fresh profile or origin. The empty screen and toolbar both ex
 ## Driving it with T3 preview
 
 1. Open **Add repository**. In the dialog named **Add a repository**, fill **Repository path** with the fixture's `repository` path. Submit **Add repository** inside the dialog.
-2. Confirm `l1-demo` appears in the sidebar and `main` appears as checked-out HEAD in the toolbar. Hover the repository name to see its canonical path, which can be `/private/tmp/...` on macOS.
+2. Confirm `l1-demo` appears in the sidebar and `main` appears as checked-out HEAD in the toolbar. Click the repository name twice to hide and show its sections while keeping the repository open in the workspace. Hover the repository name to see its canonical path, which can be `/private/tmp/...` on macOS.
 3. Create an empty `subfolder` directory in the fixture and add it, then add a symlink to the repository. Confirm there is still one entry for that canonical root.
 4. Add the fixture's `detached` path. Confirm a separate `detached-worktree` entry and a detached HEAD label.
 5. Reload. Confirm both entries remain and the last active repository reopens.

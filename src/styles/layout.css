@@ -7,13 +7,34 @@
   cursor: col-resize;
   touch-action: none;
 }
+.pane-divider::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 5px;
+  height: 26px;
+  border-radius: 999px;
+  background: var(--border-strong);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
 .pane-divider::after {
   content: "";
   position: absolute;
-  inset: 0 -3px;
+  inset: 0 -6px;
 }
-.pane-divider:hover,
-.pane-divider:focus-visible {
+.pane-divider:hover::before {
+  background: var(--text-faint);
+}
+.app .pane-divider:focus-visible {
+  outline: none;
+}
+.pane-divider:focus-visible::before {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+.pane-divider:active::before {
   background: var(--focus);
 }
 .workspace {
@@ -376,8 +397,8 @@ kbd {
   color: var(--text-strong);
 }
 .settings-options input:focus-visible + span {
-  outline: 2px solid var(--focus);
-  outline-offset: -2px;
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }
 .settings-error {
   color: var(--error-text);
