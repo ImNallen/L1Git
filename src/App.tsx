@@ -6,8 +6,9 @@ import {
   useDraftImpact,
 } from "./draftProtection";
 import { canMark, resolutionKey, resolutionOf } from "./resolutionDrafts";
-import { RetainedResolution } from "./components/ConflictResolver";
 import {
+  Suspense,
+  lazy,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -67,7 +68,7 @@ import { CommandPalette } from "./components/CommandPalette";
 import { GeneralSettings } from "./components/GeneralSettings";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { CommitInspector, InspectorFrame } from "./components/CommitInspector";
-import { FileDiffPane, revisionOf } from "./components/FileDiffPane";
+import { revisionOf } from "./components/revision";
 import type { DiffStyle, FileDiffHandle } from "./components/FileDiffPane";
 import { History, HistoryPlaceholder } from "./components/History";
 import type { HistoryHandle } from "./components/History";
@@ -170,6 +171,19 @@ type JumpTarget = Branch | Tag;
 
 const isBranch = (target: JumpTarget): target is Branch => "kind" in target;
 
+// Diffs, highlighting, and the conflict editor load after startup, since no file is open at launch.
+const diffViews = () => import("./components/FileDiffPane");
+const resolutionViews = () => import("./components/ConflictResolver");
+const FileDiffPane = lazy(() =>
+  diffViews().then((m) => ({ default: m.FileDiffPane })),
+);
+const RetainedResolution = lazy(() =>
+  resolutionViews().then((m) => ({ default: m.RetainedResolution })),
+);
+
+// Below this the default sidebar leaves the history too narrow for its columns.
+const NARROW_SIDEBAR = "(max-width: 939px)";
+
 function listedRef(
   refs: Pick<RepositoryRefs, "branches" | "tags">,
   reference: FullRef,
@@ -224,7 +238,9 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   const focusJumpedRow = useRef(false);
   const [palette, setPalette] = useState<{ picked: Oid | null } | null>(null);
   const paletteReturn = useRef<Element | null>(null);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(
+    () => !window.matchMedia(NARROW_SIDEBAR).matches,
+  );
   const [inspectorOpen, setInspectorOpen] = useState(
     () => window.innerWidth >= 1100,
   );
@@ -1069,6 +1085,19 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     media.addEventListener("change", narrow);
     return () => media.removeEventListener("change", narrow);
   }, []);
+  useEffect(() => {
+    // Fetch them once launch has painted, so the first file opens without waiting.
+    void diffViews();
+    void resolutionViews();
+  }, []);
+  useEffect(() => {
+    const media = window.matchMedia(NARROW_SIDEBAR);
+    const narrow = () => {
+      if (media.matches) setSidebarOpen(false);
+    };
+    media.addEventListener("change", narrow);
+    return () => media.removeEventListener("change", narrow);
+  }, []);
 
   return (
     <div
@@ -1387,26 +1416,30 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                     onCheckout={setDetaching}
                   />
                   {fileDiff.kind !== "closed" && (
-                    <FileDiffPane
-                      ref={fileDiffRef}
-                      state={fileDiff}
-                      diffStyle={diffStyle}
-                      theme={appearance.variant.appearance}
-                      painted={
-                        Object.keys(appearance.variant.palette).length > 0
-                      }
-                      onDiffStyle={setDiffStyle}
-                      onBack={closeFile}
-                      onRetry={() => app.openFile(fileDiff.path, fileDiff.side)}
-                      onRefresh={() => {
-                        rereadChanges();
-                        app.openFile(fileDiff.path, fileDiff.side);
-                      }}
-                      selectable={shows}
-                      onSelectCommit={selectCommit}
-                      parts={parts.view}
-                      writes={writes}
-                    />
+                    <Suspense>
+                      <FileDiffPane
+                        ref={fileDiffRef}
+                        state={fileDiff}
+                        diffStyle={diffStyle}
+                        theme={appearance.variant.appearance}
+                        painted={
+                          Object.keys(appearance.variant.palette).length > 0
+                        }
+                        onDiffStyle={setDiffStyle}
+                        onBack={closeFile}
+                        onRetry={() =>
+                          app.openFile(fileDiff.path, fileDiff.side)
+                        }
+                        onRefresh={() => {
+                          rereadChanges();
+                          app.openFile(fileDiff.path, fileDiff.side);
+                        }}
+                        selectable={shows}
+                        onSelectCommit={selectCommit}
+                        parts={parts.view}
+                        writes={writes}
+                      />
+                    </Suspense>
                   )}
                 </>
               ) : opening ? (
@@ -1527,15 +1560,17 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
         </div>
       </main>
       {retained && (
-        <RetainedResolution
-          {...retained}
-          refresh={app.changes.get(retained.root)}
-          theme={appearance.variant.appearance}
-          painted={Object.keys(appearance.variant.palette).length > 0}
-          writes={writes}
-          onClose={() => setRetained(null)}
-          onResolved={() => setRetained(null)}
-        />
+        <Suspense>
+          <RetainedResolution
+            {...retained}
+            refresh={app.changes.get(retained.root)}
+            theme={appearance.variant.appearance}
+            painted={Object.keys(appearance.variant.palette).length > 0}
+            writes={writes}
+            onClose={() => setRetained(null)}
+            onResolved={() => setRetained(null)}
+          />
+        </Suspense>
       )}
       {screen === "settings" && (
         <SettingsDialog
