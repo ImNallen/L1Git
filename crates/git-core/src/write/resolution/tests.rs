@@ -129,7 +129,8 @@ fn stash_apply_and_pop_save_mark_and_two_ordered_undo_redo_steps() {
         let index = f.git(&["ls-files", "--stage"]);
         fs::write(f.root.join("g"), "unrelated\n").unwrap();
         f.git(&["add", "g"]);
-        let unrelated = f.git(&["ls-files", "--stage", "g"]);
+        f.git(&["update-index", "--assume-unchanged", "g"]);
+        let unrelated = f.git(&["ls-files", "--stage", "--debug", "g"]);
         let saved = f.save(&seen, "resolved\n").unwrap();
         assert_eq!(f.bytes(), b"resolved\n");
         assert_eq!(
@@ -161,7 +162,7 @@ fn stash_apply_and_pop_save_mark_and_two_ordered_undo_redo_steps() {
         assert_eq!(f.bytes(), b"resolved\n");
         f.coordinator.redo(f.path(), marked.id).unwrap();
         assert!(f.git(&["ls-files", "-u"]).is_empty());
-        assert_eq!(f.git(&["ls-files", "--stage", "g"]), unrelated);
+        assert_eq!(f.git(&["ls-files", "--stage", "--debug", "g"]), unrelated);
         assert_eq!(f.git(&["stash", "list"]).lines().count(), 1);
         let encoded = serde_json::to_string(&saved).unwrap();
         assert!(!encoded.contains("resolved\\n"));
@@ -307,13 +308,14 @@ fn preserves_crlf_no_final_newline_and_mode_without_cleaning_restored_bytes() {
     for original in ["one\r\ntwo\r\n", "one\r\ntwo", "one\ntwo", ""] {
         let f = Fixture::new(false);
         f.put(original);
-        files::set_permissions(&f.root.join("dir/f"), 0o755).unwrap();
+        let permissions = if cfg!(unix) { 0o755 } else { 0 };
+        files::set_permissions(&f.root.join("dir/f"), permissions).unwrap();
         fs::write(f.root.join(".gitattributes"), "dir/f text eol=crlf\n").unwrap();
         let saved = f.save(&f.snapshot(), "result\r\nlast").unwrap();
         assert_eq!(f.bytes(), b"result\r\nlast");
         assert_eq!(
             files::permissions(&fs::metadata(f.root.join("dir/f")).unwrap()),
-            0o755
+            permissions
         );
         f.coordinator.undo(f.path(), saved.id).unwrap();
         assert_eq!(f.bytes(), original.as_bytes());
@@ -417,4 +419,155 @@ fn stopped_undo_and_redo_can_be_repeated_without_losing_the_journal() {
     assert_eq!(f.bytes(), b"result\n");
     fs::remove_file(f.root.join(".fail-resolution-stepped")).unwrap();
     f.coordinator.redo(f.path(), saved.id).unwrap();
+}
+
+#[test]
+fn actual_journal_write_failures_keep_post_placement_evidence_only() {
+    for after in [false, true] {
+        let f = Fixture::new(false);
+        f.settle().unwrap();
+        let folder = fs::read_dir(&f.undo)
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        let blocker = folder.join("log.json.new");
+        if after {
+            let blocker = blocker.clone();
+            AFTER_PLACEMENT.with_borrow_mut(|hook| {
+                *hook = Some(Box::new(move || fs::create_dir(blocker).unwrap()))
+            });
+        } else {
+            fs::create_dir(&blocker).unwrap();
+        }
+        let seen = f.snapshot();
+        let error = f.save(&seen, "saved\n").unwrap_err();
+        assert_eq!(
+            f.bytes(),
+            if after {
+                b"saved\n".to_vec()
+            } else {
+                seen.working.as_bytes().to_vec()
+            }
+        );
+        if after {
+            assert!(error.message.contains("placed on disk"));
+            let log: serde_json::Value =
+                serde_json::from_slice(&fs::read(folder.join("log.json")).unwrap()).unwrap();
+            let id = log["pending"].as_str().unwrap();
+            assert_eq!(
+                fs::read(folder.join("entries").join(id).join("files/before")).unwrap(),
+                seen.working.as_bytes()
+            );
+            assert_eq!(
+                fs::read(folder.join("entries").join(id).join("files/after")).unwrap(),
+                b"saved\n"
+            );
+        }
+        fs::remove_dir(blocker).unwrap();
+        f.settle().unwrap();
+        assert_eq!(f.history().undo.is_some(), after);
+    }
+}
+
+#[test]
+fn changed_stage_objects_and_modes_are_not_silently_saved() {
+    use std::io::Write;
+    use std::process::Stdio;
+    for mode in ["100644", "100755", "120000", "160000"] {
+        let f = Fixture::new(false);
+        let seen = f.snapshot();
+        let oid = if mode == "160000" {
+            f.git(&["rev-parse", "HEAD"])
+        } else {
+            fs::write(f.root.join("blob"), "changed incoming\n").unwrap();
+            f.git(&["hash-object", "-w", "blob"])
+        };
+        let mut child = f
+            .command(&["update-index", "--index-info"])
+            .stdin(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(format!("{mode} {} 3\tdir/f\n", oid.trim()).as_bytes())
+            .unwrap();
+        assert!(child.wait().unwrap().success());
+        let before = f.bytes();
+        assert!(f.save(&seen, "resolved\n").is_err());
+        assert_eq!(f.bytes(), before);
+    }
+}
+
+#[test]
+fn corrupt_pending_records_retain_the_file_copies() {
+    let f = Fixture::new(false);
+    let seen = f.snapshot();
+    f.fail("placed");
+    assert!(f.save(&seen, "saved\n").is_err());
+    let folder = fs::read_dir(&f.undo)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let log: serde_json::Value =
+        serde_json::from_slice(&fs::read(folder.join("log.json")).unwrap()).unwrap();
+    let entry = folder
+        .join("entries")
+        .join(log["pending"].as_str().unwrap());
+    let change = fs::read(entry.join("change.json")).unwrap();
+    fs::write(entry.join("change.json"), "broken").unwrap();
+    assert!(f.settle().is_err());
+    assert_eq!(
+        fs::read(entry.join("files/before")).unwrap(),
+        seen.working.as_bytes()
+    );
+    assert_eq!(fs::read(entry.join("files/after")).unwrap(), b"saved\n");
+    fs::write(entry.join("change.json"), change).unwrap();
+    f.settle().unwrap();
+    assert!(f.history().undo.is_some());
+}
+
+#[test]
+fn failed_rename_has_no_history_but_failed_index_publication_keeps_saved_bytes() {
+    for after in [false, true] {
+        let f = Fixture::new(false);
+        let seen = f.snapshot();
+        let index = fs::read(f.root.join(".git/index")).unwrap();
+        if after {
+            let copy = f
+                .root
+                .join(format!(".git/l1git-index.{}", std::process::id()));
+            AFTER_PLACEMENT.with_borrow_mut(|hook| {
+                *hook = Some(Box::new(move || {
+                    fs::remove_file(&copy).unwrap();
+                    fs::create_dir(copy).unwrap();
+                }))
+            });
+        } else {
+            BEFORE_PLACEMENT.with_borrow_mut(|hook| {
+                *hook = Some(Box::new(|prepared| fs::remove_file(prepared).unwrap()))
+            });
+        }
+        assert!(f.save(&seen, "saved\n").is_err());
+        assert_eq!(fs::read(f.root.join(".git/index")).unwrap(), index);
+        assert_eq!(
+            f.bytes(),
+            if after {
+                b"saved\n".to_vec()
+            } else {
+                seen.working.as_bytes().to_vec()
+            }
+        );
+        f.settle().unwrap();
+        assert_eq!(f.history().undo.is_some(), after);
+        if let Some(saved) = f.history().undo {
+            f.coordinator.undo(f.path(), saved.id).unwrap();
+            assert_eq!(f.bytes(), seen.working.as_bytes());
+        }
+    }
 }

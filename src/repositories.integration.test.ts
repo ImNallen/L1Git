@@ -1,4 +1,4 @@
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import {
@@ -24,6 +24,8 @@ import {
 import type { RepositoryOverview } from "./domain/overview";
 import {
   appliedSchema,
+  conflictFileSchema,
+  CONFLICT_TEXT_LIMIT,
   branchMergedSchema,
   blameSchema,
   detailSchema,
@@ -2935,4 +2937,92 @@ it("adds a real remote through the shared bridge before explicit review and publ
   expect(endpointRefs()).toBe(
     `refs/heads/reviewed-addition ${prepared.intent.source}`,
   );
+});
+
+it("roundtrips bounded conflict text through the real bridge without storing result text in history", async () => {
+  const root = join(fixture.root, "resolution-transport");
+  mkdirSync(root);
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-C", root, ...args], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  git("init", "-q", "-b", "main");
+  git("config", "user.name", "Ada");
+  git("config", "user.email", "ada@example.test");
+  git("config", "core.hooksPath", "/dev/null");
+  writeFileSync(join(root, "f"), "base\n");
+  git("add", "f");
+  git("commit", "-qm", "base");
+  writeFileSync(join(root, "f"), "incoming\n");
+  git("stash", "push", "-qm", "incoming");
+  writeFileSync(join(root, "f"), "current\n");
+  git("add", "f");
+  git("commit", "-qm", "current");
+  expect(spawnSync("git", ["-C", root, "stash", "pop"]).status).toBe(1);
+  const source = answer("conflictFile", conflictFileSchema).parse(
+    await (await post({ op: "conflictFile", path: root, file: "f" })).json(),
+  ).data;
+  if (source.kind !== "editable")
+    throw new Error("Expected an editable stash conflict");
+  const { snapshot } = source;
+  const text = "\u0001".repeat(CONFLICT_TEXT_LIMIT);
+  const request = {
+    op: "write",
+    path: root,
+    expect: { head: snapshot.head },
+    operation: {
+      kind: "saveConflict",
+      path: "f",
+      version: snapshot.version,
+      text,
+    },
+  };
+  expect(Buffer.byteLength(JSON.stringify(request))).toBeLessThan(
+    4 * 1024 * 1024,
+  );
+  const response = await (await post(request)).json();
+  const saved = answer("write", appliedSchema).parse(response).data;
+  expect(JSON.stringify(response)).not.toContain('"text"');
+  expect(readFileSync(join(root, "f"), "utf8")).toBe(text);
+  const history = await (await post({ op: "undoHistory", path: root })).text();
+  expect(history.length).toBeLessThan(1024);
+  expect(history).not.toContain('"text"');
+  expect(git("ls-files", "-u").split("\n").filter(Boolean)).toHaveLength(3);
+  answer("undo", appliedSchema).parse(
+    await (await post({ op: "undo", path: root, id: saved.id })).json(),
+  );
+  expect(readFileSync(join(root, "f"), "utf8")).toBe(snapshot.working);
+  answer("redo", appliedSchema).parse(
+    await (await post({ op: "redo", path: root, id: saved.id })).json(),
+  );
+  expect(readFileSync(join(root, "f"), "utf8")).toBe(text);
+  const fresh = answer("conflictFile", conflictFileSchema).parse(
+    await (await post({ op: "conflictFile", path: root, file: "f" })).json(),
+  ).data;
+  if (fresh.kind !== "editable")
+    throw new Error("Expected the saved conflict to remain editable");
+  const missing = await (
+    await post({
+      ...request,
+      operation: {
+        kind: "saveConflict",
+        path: "f",
+        version: fresh.snapshot.version,
+      },
+    })
+  ).json();
+  expect(missing.ok).toBe(false);
+  const oversized = await (
+    await post({
+      ...request,
+      operation: {
+        ...request.operation,
+        version: fresh.snapshot.version,
+        text: "x".repeat(CONFLICT_TEXT_LIMIT + 1),
+      },
+    })
+  ).json();
+  expect(oversized.ok).toBe(false);
+  expect(readFileSync(join(root, "f"), "utf8")).toBe(text);
 });

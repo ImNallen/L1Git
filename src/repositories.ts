@@ -68,7 +68,6 @@ type RepositoryRequest =
   | { op: "branchMerged"; path: RepositoryRoot; branch: BranchTip };
 
 const responseSchema = z.discriminatedUnion("op", [
-  z.object({ op: z.literal("conflictFile"), data: conflictFileSchema }),
   z.object({ op: z.literal("snapshot"), data: snapshotSchema }),
   z.object({ op: z.literal("refs"), data: refsSchema }),
   z.object({ op: z.literal("commitDetail"), data: detailSchema }),
@@ -84,6 +83,7 @@ const responseSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("push"), data: pushReportSchema }),
   z.object({ op: z.literal("fastForward"), data: fastForwardReportSchema }),
   z.object({ op: z.literal("worktreeStatus"), data: worktreeStatusSchema }),
+  z.object({ op: z.literal("conflictFile"), data: conflictFileSchema }),
   z.object({ op: z.literal("worktreePatch"), data: worktreePatchSchema }),
   z.object({ op: z.literal("write"), data: appliedSchema }),
   z.object({ op: z.literal("undo"), data: appliedSchema }),

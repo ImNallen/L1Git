@@ -13,7 +13,7 @@ use crate::{
     repository, status,
 };
 use serde::{Deserialize, Serialize};
-use std::{fs, io::Read, path::Path};
+use std::{fs, path::Path};
 
 const SAVE: files::Verb = files::Verb {
     verb: "save",
@@ -82,25 +82,8 @@ fn text(bytes: Vec<u8>) -> Result<String, ConflictUnsupported> {
     Ok(text)
 }
 
-fn disk(path: &Path) -> Result<Vec<u8>, RepositoryError> {
-    let shown = path.to_string_lossy();
-    let mut bytes = Vec::new();
-    {
-        let mut options = fs::OpenOptions::new();
-        options.read(true);
-        #[cfg(unix)]
-        std::os::unix::fs::OpenOptionsExt::custom_flags(
-            &mut options,
-            libc::O_NOFOLLOW | libc::O_NONBLOCK,
-        );
-        options.open(path)
-    }
-    .and_then(|file| {
-        file.take((CONFLICT_TEXT_LIMIT + 1) as u64)
-            .read_to_end(&mut bytes)
-    })
-    .map_err(|error| files::failed(&shown, &error))?;
-    Ok(bytes)
+fn disk(repo: &Repo, path: &str) -> Result<Vec<u8>, RepositoryError> {
+    crate::untracked::read_regular_bounded(&repo.root, path, CONFLICT_TEXT_LIMIT)
 }
 
 fn scope(repo: &Repo, path: &str) -> Result<Vec<Option<(u64, u64)>>, RepositoryError> {
@@ -128,6 +111,18 @@ fn scope(repo: &Repo, path: &str) -> Result<Vec<Option<(u64, u64)>>, RepositoryE
                 .and_then(|stat| stat.identity))
         })
         .collect()
+}
+
+fn same_repository(repo: &Repo, path: &str, deadline: Deadline) -> Result<(), RepositoryError> {
+    let live = Repo::open(&repo.root(), deadline)?;
+    if live.root != repo.root
+        || live.git_dir != repo.git_dir
+        || live.common_dir != repo.common_dir
+        || live.index != repo.index
+    {
+        return Err(files::changed(path));
+    }
+    Ok(())
 }
 
 fn transforms(
@@ -212,7 +207,7 @@ fn capture(repo: &Repo, path: &str, deadline: Deadline) -> Result<Capture, Repos
     if metadata.len() > CONFLICT_TEXT_LIMIT as u64 {
         return Ok(Capture::External(ConflictUnsupported::TooLarge));
     }
-    let working = match text(disk(&repo.root.join(path))?) {
+    let working = match text(disk(repo, path)?) {
         Ok(text) => text,
         Err(reason) => return Ok(Capture::External(reason)),
     };
@@ -239,10 +234,11 @@ fn capture(repo: &Repo, path: &str, deadline: Deadline) -> Result<Capture, Repos
         || target != index::at(&index::read_worktree(&repo.root, deadline)?.0, path)
         || scope != self::scope(repo, path)?
         || transforms != self::transforms(repo, path, deadline)?.0
-        || working.as_bytes() != disk(&repo.root.join(path))?
+        || working.as_bytes() != disk(repo, path)?
     {
         return Err(files::changed(path));
     }
+    same_repository(repo, path, deadline)?;
     let object = |row: &index::IndexEntry| {
         Some(IndexObject {
             mode: row.mode,
@@ -332,15 +328,18 @@ pub(super) fn save(
         fs::symlink_metadata(repo.root.join(path)).map_err(|error| files::failed(path, &error))?;
     let permissions = files::permissions(&metadata);
     fs::write(&prepared, result)
-        .and_then(|()| files::set_permissions(&prepared, permissions))
-        .and_then(|()| fs::File::open(&prepared)?.sync_all())
+        .and_then(|()| {
+            let file = fs::OpenOptions::new().write(true).open(&prepared)?;
+            files::set_permissions(&prepared, permissions)?;
+            file.sync_all()
+        })
         .map_err(|error| files::failed(path, &error))?;
     let (applied, change, recorded) = store.record_with(repo, log, operation, |entry| {
         let copies = entry.files();
         store::private_folder()
             .create(&copies)
             .map_err(|error| files::failed(path, &error))?;
-        let bytes = disk(&repo.root.join(path))?;
+        let bytes = disk(repo, path)?;
         files::unchanged(&repo.root, path, &seen.stat)?;
         if bytes != seen.snapshot.working.as_bytes() {
             return Err(files::changed(path));
@@ -383,10 +382,24 @@ pub(super) fn save(
     if fresh.snapshot.version != *version {
         return Err(files::changed(path));
     }
+    files::guard(&repo.root, &index::read(&txn)?, &[path], &SAVE)?;
+    if scope(repo, path)? != seen.scope {
+        return Err(files::changed(path));
+    }
     files::unchanged(&repo.root, path, &seen.stat)?;
+    #[cfg(test)]
+    BEFORE_PLACEMENT.with_borrow_mut(|hook| {
+        if let Some(hook) = hook.take() {
+            hook(&prepared);
+        }
+    });
     files::place(&repo.root, applied.id, path, &change.file.after, &prepared)?;
     let placed = (|| {
         checkpoint("placed", repo)?;
+        #[cfg(unix)]
+        fs::File::open(repo.root.join(path).parent().ok_or_else(git::malformed)?)
+            .and_then(|folder| folder.sync_all())
+            .map_err(|error| files::failed(path, &error))?;
         if !files::holds(
             &repo.root,
             path,
@@ -478,7 +491,26 @@ pub(super) fn step(
         &pending,
         direction,
         &files::STASH_WORDS,
-        |_| {},
+        |_| {
+            same_repository(repo, path, txn.deadline().reads())?;
+            repo.head_as_seen(
+                &Expect {
+                    head: change.head.clone(),
+                },
+                txn.deadline(),
+            )?;
+            if index::at(
+                &index::read_worktree(&repo.root, txn.deadline().reads())?.0,
+                path,
+            ) != change.rows
+                || transforms(repo, path, txn.deadline().reads())?.0 != change.transforms
+                || scope(repo, path)? != change.scope
+            {
+                return Err(files::changed(path));
+            }
+            files::guard(&repo.root, &rows, &[path], &SAVE)?;
+            Ok(())
+        },
     )?;
     checkpoint("stepped", repo)
 }
@@ -495,7 +527,23 @@ fn checkpoint(_point: &str, _repo: &Repo) -> Result<(), RepositoryError> {
     Ok(())
 }
 #[cfg(test)]
+type PlacementHook = Box<dyn FnOnce(&Path)>;
+
+#[cfg(test)]
+thread_local! {
+    static BEFORE_PLACEMENT: std::cell::RefCell<Option<PlacementHook>> = const { std::cell::RefCell::new(None) };
+    static AFTER_PLACEMENT: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
 fn checkpoint(point: &str, repo: &Repo) -> Result<(), RepositoryError> {
+    if point == "placed" {
+        AFTER_PLACEMENT.with_borrow_mut(|hook| {
+            if let Some(hook) = hook.take() {
+                hook();
+            }
+        });
+    }
     if repo.root.join(format!(".fail-resolution-{point}")).exists() {
         Err(RepositoryError::new(
             ErrorKind::GitFailed,

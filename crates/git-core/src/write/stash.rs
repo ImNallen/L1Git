@@ -738,7 +738,7 @@ pub(super) fn step(
             &pending,
             direction,
             &STASH_WORDS,
-            |_| {},
+            |_| Ok(()),
         )?;
         if restored == Restored::Staged || placing {
             let mut names: Vec<&str> = files.iter().map(|change| change.path.as_str()).collect();

@@ -524,7 +524,10 @@ fn place_step(
         &pending,
         direction,
         &DISCARD_WORDS,
-        before_placing,
+        |path| {
+            before_placing(path);
+            Ok(())
+        },
     )
 }
 

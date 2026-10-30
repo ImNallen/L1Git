@@ -152,7 +152,7 @@ pub(super) fn place_checked(
     pending: &[Placement],
     direction: Direction,
     words: &StepWords,
-    before_placing: impl Fn(&str),
+    before_placing: impl Fn(&str) -> Result<(), RepositoryError>,
 ) -> Result<(), RepositoryError> {
     if pending.is_empty() {
         return Ok(());
@@ -171,7 +171,7 @@ pub(super) fn place_checked(
         .iter()
         .zip(&prepared)
         .try_for_each(|(placement, temporary)| {
-            before_placing(&placement.path);
+            before_placing(&placement.path)?;
             unchanged(root, &placement.path, &placement.stat)?;
             place(root, id, &placement.path, &placement.to, temporary)?;
             placed += 1;

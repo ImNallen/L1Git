@@ -242,9 +242,7 @@ impl LockedStore {
         opened: &Repo,
         deadline: WriteDeadline,
     ) -> Result<Option<Change>, RepositoryError> {
-        let Ok((applied, change)) = self.record_of(id) else {
-            return Ok(None);
-        };
+        let (applied, change) = self.record_of(id)?;
         if change.keeps_overwritten_files() {
             return Ok(Some(change));
         }
@@ -443,11 +441,13 @@ impl Recorded<'_> {
                 File::open(path)?.sync_all()?;
                 Ok(())
             } else {
-                File::open(path)?.sync_all()
+                fs::OpenOptions::new().write(true).open(path)?.sync_all()
             }
         }
         sync(&self.entry.dir).map_err(unwritable)?;
-        File::open(self.store.dir.join("log.json"))
+        fs::OpenOptions::new()
+            .write(true)
+            .open(self.store.dir.join("log.json"))
             .and_then(|file| file.sync_all())
             .map_err(unwritable)?;
         #[cfg(unix)]
