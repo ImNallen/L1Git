@@ -721,24 +721,25 @@ fn timeout_after_commit_observes_landed_state_and_stops_hook_descendants() {
 
 #[test]
 fn ignored_or_untracked_collision_never_overwrites_the_file() {
-    for ignored in [false, true] {
+    for (ignored, name) in [
+        (false, "incoming.txt"),
+        (true, "incoming.txt"),
+        (true, "INCOMING.txt"),
+    ] {
         let f = Fixture::new(false);
         let coordinator = f.coordinator();
         if ignored {
             f.git(&["config", "core.excludesFile", ".git/excludes"]);
-            fs::write(f.root.join(".git/excludes"), "incoming.txt\n").unwrap();
+            fs::write(f.root.join(".git/excludes"), format!("{name}\n")).unwrap();
         }
-        f.put("incoming.txt", "precious collision\n");
+        f.put(name, "precious collision\n");
         let shown = coordinator.review_merge(f.path()).unwrap();
         let error = coordinator
             .merge(f.path(), &MergeAction::Start { review: shown })
             .unwrap_err();
-        assert!(
-            error.message.contains("incoming.txt"),
-            "ignored={ignored} {error:?}"
-        );
+        assert!(error.message.contains(name), "ignored={ignored} {error:?}");
         assert_eq!(
-            fs::read_to_string(f.root.join("incoming.txt")).unwrap(),
+            fs::read_to_string(f.root.join(name)).unwrap(),
             "precious collision\n"
         );
     }
@@ -797,4 +798,151 @@ fn external_head_or_merge_head_changes_keep_evidence_and_block_abort() {
         );
         assert!(f.root.join(".git/l1git/merge/current.json").exists());
     }
+}
+
+#[test]
+fn simultaneous_linked_worktree_sessions_have_independent_journals_and_closure() {
+    let f = Fixture::new(true);
+    let coordinator = f.coordinator();
+    let linked = f.root.parent().unwrap().join("linked merge");
+    let path = linked.to_str().unwrap();
+    f.git(&["worktree", "add", "-b", "linked", path]);
+    git(&linked, &["branch", "--set-upstream-to=upstream"]);
+    let first = f.start(&coordinator);
+    let review = coordinator.review_merge(path).unwrap();
+    let second = active(
+        coordinator
+            .merge(path, &MergeAction::Start { review })
+            .unwrap()
+            .state,
+    );
+    assert_ne!(first.id, second.id);
+    fs::write(linked.join("conflict.txt"), "linked resolution\n").unwrap();
+    let status = worktree_status(path).unwrap();
+    let entry = coordinator
+        .write(
+            path,
+            &Operation::StageFiles {
+                entries: status.entries,
+            },
+            &Expect { head: status.head },
+        )
+        .unwrap();
+    assert!(coordinator.undo(f.path(), entry.id).is_err());
+    coordinator
+        .merge(f.path(), &MergeAction::Abort { session: first.id })
+        .unwrap();
+    assert_eq!(active(coordinator.merge_state(path).unwrap()).id, second.id);
+    assert_eq!(
+        coordinator.undo_history(path).unwrap().undo.unwrap().id,
+        entry.id
+    );
+    coordinator.undo(path, entry.id).unwrap();
+    coordinator
+        .merge(path, &MergeAction::Abort { session: second.id })
+        .unwrap();
+    assert_eq!(git(&linked, &["status", "--porcelain"]), "");
+}
+
+#[test]
+fn moved_destination_invalidates_start_review_without_writing_merge_metadata() {
+    let f = Fixture::new(false);
+    let coordinator = f.coordinator();
+    let review = coordinator.review_merge(f.path()).unwrap();
+    f.git(&["commit", "--allow-empty", "-m", "moved"]);
+    assert!(
+        coordinator
+            .merge(f.path(), &MergeAction::Start { review })
+            .is_err()
+    );
+    assert!(!f.root.join(".git/MERGE_HEAD").exists());
+}
+
+#[test]
+fn pinned_source_survives_remote_rewrite_and_gc() {
+    let f = Fixture::new(false);
+    let coordinator = f.coordinator();
+    let session = f.start(&coordinator);
+    f.git(&[
+        "update-ref",
+        "refs/heads/upstream",
+        session.review.destination.oid.as_str(),
+    ]);
+    f.git(&["reflog", "expire", "--expire=now", "--all"]);
+    f.git(&["gc", "--prune=now"]);
+    let report = f.finish(&coordinator);
+    assert!(matches!(report.outcome, MergeOutcome::Finished { .. }));
+    assert_eq!(
+        f.git(&["show", "-s", "--format=%P", "HEAD"]),
+        format!(
+            "{} {}",
+            session.review.destination.oid.as_str(),
+            session.review.source.oid.as_str()
+        )
+    );
+}
+
+#[test]
+fn forced_duplicate_checkout_cannot_move_an_active_destination_from_another_worktree() {
+    let f = Fixture::new(false);
+    let coordinator = f.coordinator();
+    let linked = f.root.parent().unwrap().join("duplicate");
+    let path = linked.to_str().unwrap();
+    f.git(&["worktree", "add", "--force", path, "main"]);
+    let status = worktree_status(path).unwrap();
+    let entry = coordinator
+        .write(
+            path,
+            &Operation::EditMessage {
+                message: "Reviewed destination".into(),
+            },
+            &Expect { head: status.head },
+        )
+        .unwrap();
+    let session = f.start(&coordinator);
+    assert!(
+        coordinator
+            .undo(path, entry.id)
+            .unwrap_err()
+            .message
+            .contains("destination of an unfinished merge")
+    );
+    fs::write(linked.join("other.txt"), "another worktree's change\n").unwrap();
+    git(&linked, &["add", "other.txt"]);
+    let status = worktree_status(path).unwrap();
+    for operation in [
+        Operation::Commit {
+            message: "new commit".into(),
+            staged: status.staged_stamp.clone(),
+        },
+        Operation::Amend {
+            message: "amended commit".into(),
+            staged: status.staged_stamp.clone(),
+        },
+        Operation::EditMessage {
+            message: "rewritten commit".into(),
+        },
+    ] {
+        assert!(
+            coordinator
+                .write(
+                    path,
+                    &operation,
+                    &Expect {
+                        head: status.head.clone()
+                    }
+                )
+                .unwrap_err()
+                .message
+                .contains("destination of an unfinished merge")
+        );
+    }
+    assert_eq!(
+        f.git(&["rev-parse", "HEAD"]),
+        session.review.destination.oid.as_str()
+    );
+    assert_eq!(
+        active(coordinator.merge_state(f.path()).unwrap()).id,
+        session.id
+    );
 }

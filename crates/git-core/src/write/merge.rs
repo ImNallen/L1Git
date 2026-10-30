@@ -639,15 +639,19 @@ fn refuse_untracked_collisions(
             })
             .collect()
     };
-    let incoming = names(&["ls-tree", "-r", "-z", "--name-only", source.as_str()])?;
+    let incoming: Vec<_> = names(&["ls-tree", "-r", "-z", "--name-only", source.as_str()])?
+        .iter()
+        .map(|path| super::files::fold_for_any_disk(path))
+        .collect();
     // No exclude rules: ignored files need the same protection as other untracked files.
     let untracked = names(&["ls-files", "--others", "-z"])?;
     let collisions: Vec<_> = untracked
         .into_iter()
         .filter(|path| {
-            let path = path.trim_end_matches('/');
+            // Conservatively include aliases on case- or normalization-insensitive disks.
+            let path = super::files::fold_for_any_disk(path.trim_end_matches('/'));
             incoming.iter().any(|target| {
-                target == path
+                *target == path
                     || target.starts_with(&format!("{path}/"))
                     || path.starts_with(&format!("{target}/"))
             })
@@ -758,20 +762,56 @@ impl Coordinator {
             MergeAction::Finish { .. } => LocalWrite::MergeFinish,
             MergeAction::Abort { .. } => LocalWrite::MergeAbort,
         };
-        self.merge_locked(path, write, |repo, base_store, deadline| {
+        let work = |repo: &Repo, base_store: &LockedStore, deadline: WriteDeadline| {
             let current = reconcile(repo, deadline)?;
             if let MergeAction::Start { review: shown } = action {
-                if state(repo, current.as_ref(), deadline)? != MergeState::Idle { return Err(refused("Finish or resolve the current Git operation first.")) }
+                if state(repo, current.as_ref(), deadline)? != MergeState::Idle {
+                    return Err(refused(
+                        "Finish or resolve the current Git operation first.",
+                    ));
+                }
                 base_store.settled_log(repo, deadline)?;
-                if review(repo, deadline)? != *shown { return Err(RepositoryError::stale(StaleReason::HeadMoved, "The reviewed branch, upstream, or tracking configuration changed. Review the merge again.")) }
+                if review(repo, deadline)? != *shown {
+                    return Err(RepositoryError::stale(
+                        StaleReason::HeadMoved,
+                        "The reviewed branch, upstream, or tracking configuration changed. Review the merge again.",
+                    ));
+                }
                 safe_index(repo, deadline)?;
-                if !status::entries(&repo.root, Untracked::No, deadline.reads())?.0.is_empty() { return Err(refused("Merge upstream needs a clean tracked worktree and index. Commit or stash your changes first.")) }
+                if !status::entries(&repo.root, Untracked::No, deadline.reads())?
+                    .0
+                    .is_empty()
+                {
+                    return Err(refused(
+                        "Merge upstream needs a clean tracked worktree and index. Commit or stash your changes first.",
+                    ));
+                }
                 refuse_untracked_collisions(repo, &shown.source.oid, deadline)?;
-                for dir in [repo.git_dir.join("l1git"), base(repo)] { checked_dir(&dir)?; }
+                for dir in [repo.git_dir.join("l1git"), base(repo)] {
+                    checked_dir(&dir)?;
+                }
                 let id = EntryId::after(current.as_ref().map(|record| record.session.id));
                 checked_dir(&directory(repo, id))?;
-                let mut record = Record { version: 1, identity: Identity::of(&repo.git_dir)?, session: MergeSession { id, review: shown.clone(), footprint: Vec::new(), suggested_message: format!("Merge {} into {}", shown.source.reference, shown.destination.reference.name()) }, phase: SessionPhase::Starting };
-                record.keep(repo, deadline, vec![shown.destination.oid.clone(), shown.source.oid.clone()])?;
+                let mut record = Record {
+                    version: 1,
+                    identity: Identity::of(&repo.git_dir)?,
+                    session: MergeSession {
+                        id,
+                        review: shown.clone(),
+                        footprint: Vec::new(),
+                        suggested_message: format!(
+                            "Merge {} into {}",
+                            shown.source.reference,
+                            shown.destination.reference.name()
+                        ),
+                    },
+                    phase: SessionPhase::Starting,
+                };
+                record.keep(
+                    repo,
+                    deadline,
+                    vec![shown.destination.oid.clone(), shown.source.oid.clone()],
+                )?;
                 record.save(repo)?;
                 persist(&base(repo).join("current.json"), &id)?;
                 let txn = MergeTxn::begin(repo, deadline)?;
@@ -779,83 +819,203 @@ impl Coordinator {
                 let deadline = deadline.renewed();
                 if owned(repo, &record, deadline)? {
                     // Only this uninterrupted observation can establish ownership of the merge output.
-                    if ran.is_err() { return Err(refused("Merge was interrupted. Its affected paths cannot be proved; preserve the session and resolve it externally.")) }
+                    if ran.is_err() {
+                        return Err(refused(
+                            "Merge was interrupted. Its affected paths cannot be proved; preserve the session and resolve it externally.",
+                        ));
+                    }
                     let entries = status::entries(&repo.root, Untracked::No, deadline.reads())?.0;
                     record.session.footprint = paths(&entries).into_iter().collect();
-                    let conflicts = entries.iter().any(|entry| matches!(entry, StatusEntry::Unmerged { .. }));
-                    let problem = match ran { Ok(wrote) if wrote.code() == Some(1) && conflicts => None, result => result.and_then(|wrote| wrote.succeeded()).err().map(|error| error.message) };
+                    let conflicts = entries
+                        .iter()
+                        .any(|entry| matches!(entry, StatusEntry::Unmerged { .. }));
+                    let problem = match ran {
+                        Ok(wrote) if wrote.code() == Some(1) && conflicts => None,
+                        result => result
+                            .and_then(|wrote| wrote.succeeded())
+                            .err()
+                            .map(|error| error.message),
+                    };
                     record.phase = SessionPhase::Active;
                     record.save(repo)?;
-                    return Ok(MergeReport { state: state(repo, Some(&record), deadline)?, outcome: MergeOutcome::Started { problem } });
+                    return Ok(MergeReport {
+                        state: state(repo, Some(&record), deadline)?,
+                        outcome: MergeOutcome::Started { problem },
+                    });
                 }
-                let problem = ran.and_then(|wrote| wrote.succeeded()).err().map_or_else(|| "Git did not leave the reviewed merge active.".into(), |error| error.message);
+                let problem = ran.and_then(|wrote| wrote.succeeded()).err().map_or_else(
+                    || "Git did not leave the reviewed merge active.".into(),
+                    |error| error.message,
+                );
                 if baseline(repo, &record, deadline)? {
                     let outcome = MergeOutcome::NotStarted { problem };
                     record.close(repo, outcome.clone())?;
-                    return Ok(MergeReport { state: MergeState::Idle, outcome });
+                    return Ok(MergeReport {
+                        state: MergeState::Idle,
+                        outcome,
+                    });
                 }
-                return Err(refused(format!("{problem} Merge recovery needs attention. No automatic reset was attempted.")));
+                return Err(refused(format!(
+                    "{problem} Merge recovery needs attention. No automatic reset was attempted."
+                )));
             }
-            let (MergeAction::Finish { session: id, .. } | MergeAction::Abort { session: id }) = action else { unreachable!() };
+            let (MergeAction::Finish { session: id, .. } | MergeAction::Abort { session: id }) =
+                action
+            else {
+                unreachable!()
+            };
             let mut record = load_id(repo, *id)?;
-            if let SessionPhase::Closed { outcome } = &record.phase { return Ok(MergeReport { state: state(repo, current.as_ref(), deadline)?, outcome: outcome.clone() }); }
-            if current.as_ref().map(|record| record.session.id) != Some(*id) || !matches!(record.phase, SessionPhase::Active) || !owned(repo, &record, deadline)? {
-                return Err(refused("The merge session changed or needs recovery. Refresh and inspect its state before continuing."));
+            if let SessionPhase::Closed { outcome } = &record.phase {
+                return Ok(MergeReport {
+                    state: state(repo, current.as_ref(), deadline)?,
+                    outcome: outcome.clone(),
+                });
             }
-            let journal = LockedStore::lock(&directory(repo, *id).join("undo"), &repo.common_dir, deadline.reads())?;
+            if current.as_ref().map(|record| record.session.id) != Some(*id)
+                || !matches!(record.phase, SessionPhase::Active)
+                || !owned(repo, &record, deadline)?
+            {
+                return Err(refused(
+                    "The merge session changed or needs recovery. Refresh and inspect its state before continuing.",
+                ));
+            }
+            let journal = LockedStore::lock(
+                &directory(repo, *id).join("undo"),
+                &repo.common_dir,
+                deadline.reads(),
+            )?;
             journal.settled_log(repo, deadline)?;
             safe_index(repo, deadline)?;
             let (entries, stamp) = status::entries(&repo.root, Untracked::No, deadline.reads())?;
             within_footprint(&record.session, paths(&entries))?;
             match action {
-                MergeAction::Finish { staged, tree, message, .. } => {
-                    if message.trim().is_empty() { return Err(refused("Write a merge commit message.")) }
-                    if entries.iter().any(|entry| matches!(entry, StatusEntry::Unmerged { .. })) { return Err(refused("Resolve and stage every conflict before finishing the merge.")) }
-                    if stamp != *staged || staged_tree(repo, deadline)? != *tree { return Err(RepositoryError::stale(StaleReason::StagedChanged, "The staged merge result changed. Review it again before finishing.")) }
-                    if !git::read(&repo.root, &["diff", "--name-only", "-z", "--no-ext-diff"], deadline.reads())?.is_empty() { return Err(refused("Stage or preserve the remaining tracked edits before finishing the merge.")) }
+                MergeAction::Finish {
+                    staged,
+                    tree,
+                    message,
+                    ..
+                } => {
+                    if message.trim().is_empty() {
+                        return Err(refused("Write a merge commit message."));
+                    }
+                    if entries
+                        .iter()
+                        .any(|entry| matches!(entry, StatusEntry::Unmerged { .. }))
+                    {
+                        return Err(refused(
+                            "Resolve and stage every conflict before finishing the merge.",
+                        ));
+                    }
+                    if stamp != *staged || staged_tree(repo, deadline)? != *tree {
+                        return Err(RepositoryError::stale(
+                            StaleReason::StagedChanged,
+                            "The staged merge result changed. Review it again before finishing.",
+                        ));
+                    }
+                    if !git::read(
+                        &repo.root,
+                        &["diff", "--name-only", "-z", "--no-ext-diff"],
+                        deadline.reads(),
+                    )?
+                    .is_empty()
+                    {
+                        return Err(refused(
+                            "Stage or preserve the remaining tracked edits before finishing the merge.",
+                        ));
+                    }
                     record.keep(repo, deadline, vec![tree.clone()])?;
                     record.phase = SessionPhase::Finishing { tree: tree.clone() };
                     record.save(repo)?;
                     let txn = CommitTxn::begin(repo, deadline)?;
-                    let trace = directory(repo, record.session.id).join(format!("finish-{}.json", EntryId::after(None)));
+                    record.objects(repo).bring_back(
+                        txn.runner(),
+                        &Objects::exact(vec![
+                            record.session.review.destination.oid.clone(),
+                            record.session.review.source.oid.clone(),
+                        ]),
+                    )?;
+                    let trace = directory(repo, record.session.id)
+                        .join(format!("finish-{}.json", EntryId::after(None)));
                     let refs = trace.with_extension("refs");
-                    let result = txn.commit(&["--allow-empty"], message).traces(&trace, &refs).run(deadline).and_then(|wrote| wrote.succeeded());
+                    let result = txn
+                        .commit(&["--allow-empty"], message)
+                        .traces(&trace, &refs)
+                        .run(deadline)
+                        .and_then(|wrote| wrote.succeeded());
                     let deadline = deadline.renewed();
                     if let Some(mut outcome) = landed(repo, &record, tree, deadline)? {
                         if let MergeOutcome::Finished { problem, .. } = &mut outcome
-                            && let Err(error) = result {
-                            *problem = Some(format!("The merge commit landed, but {} {}", error.message, problem.as_deref().unwrap_or("Inspect the commit before pushing.")));
+                            && let Err(error) = result
+                        {
+                            *problem = Some(format!(
+                                "The merge commit landed, but {} {}",
+                                error.message,
+                                problem
+                                    .as_deref()
+                                    .unwrap_or("Inspect the commit before pushing.")
+                            ));
                         }
                         if let MergeOutcome::Finished { problem, .. } = &mut outcome
-                            && let Some(hook) = failed_hook(&trace) {
-                            *problem = Some(format!("{} {hook}", problem.as_deref().unwrap_or("The merge commit landed.")));
+                            && let Some(hook) = failed_hook(&trace)
+                        {
+                            *problem = Some(format!(
+                                "{} {hook}",
+                                problem.as_deref().unwrap_or("The merge commit landed.")
+                            ));
                         }
                         record.close(repo, outcome.clone())?;
-                        return Ok(MergeReport { state: state(repo, Some(&record), deadline)?, outcome });
+                        return Ok(MergeReport {
+                            state: state(repo, Some(&record), deadline)?,
+                            outcome,
+                        });
                     }
-                    if owned(repo, &record, deadline)? { record.phase = SessionPhase::Active; record.save(repo)?; }
+                    if owned(repo, &record, deadline)? {
+                        record.phase = SessionPhase::Active;
+                        record.save(repo)?;
+                    }
                     Err(result.err().unwrap_or_else(|| refused("Git did not create the reviewed merge commit. Inspect the merge state before retrying.")))
                 }
                 MergeAction::Abort { .. } => {
-                    if marker(repo, "ORIG_HEAD")?.as_deref() != Some(record.session.review.destination.oid.as_str()) { return Err(refused("ORIG_HEAD changed outside this merge. Abort is unsafe; preserve your work and resolve it externally.")) }
+                    if marker(repo, "ORIG_HEAD")?.as_deref()
+                        != Some(record.session.review.destination.oid.as_str())
+                    {
+                        return Err(refused(
+                            "ORIG_HEAD changed outside this merge. Abort is unsafe; preserve your work and resolve it externally.",
+                        ));
+                    }
                     record.phase = SessionPhase::Aborting;
                     record.save(repo)?;
                     let txn = MergeTxn::begin(repo, deadline)?;
                     // Restored index rows have no stat cache; refresh it before Git's reset-merge check.
-                    let refreshed = txn.runner().git(&["update-index", "--refresh"]).run(deadline)?;
-                    if !matches!(refreshed.code(), Some(0 | 1)) { refreshed.succeeded()?; }
-                    let result = txn.abort().run(deadline).and_then(|wrote| wrote.succeeded());
+                    let refreshed = txn
+                        .runner()
+                        .git(&["update-index", "--refresh"])
+                        .run(deadline)?;
+                    if !matches!(refreshed.code(), Some(0 | 1)) {
+                        refreshed.succeeded()?;
+                    }
+                    let result = txn
+                        .abort()
+                        .run(deadline)
+                        .and_then(|wrote| wrote.succeeded());
                     let deadline = deadline.renewed();
                     if baseline(repo, &record, deadline)? {
                         record.close(repo, MergeOutcome::Aborted)?;
-                        return Ok(MergeReport { state: MergeState::Idle, outcome: MergeOutcome::Aborted });
+                        return Ok(MergeReport {
+                            state: MergeState::Idle,
+                            outcome: MergeOutcome::Aborted,
+                        });
                     }
-                    if owned(repo, &record, deadline)? { record.phase = SessionPhase::Active; record.save(repo)?; }
+                    if owned(repo, &record, deadline)? {
+                        record.phase = SessionPhase::Active;
+                        record.save(repo)?;
+                    }
                     Err(result.err().unwrap_or_else(|| refused("Git did not restore the clean starting state. Preserve your work and inspect the merge externally.")))
                 }
                 MergeAction::Start { .. } => unreachable!(),
             }
-        })
+        };
+        self.merge_locked(path, write, work)
     }
 }
 
@@ -959,7 +1119,14 @@ fn guard_branches(
     operation: &Operation,
     deadline: WriteDeadline,
 ) -> Result<(), RepositoryError> {
-    let names = branch_names(operation);
+    let mut names = branch_names(operation);
+    if matches!(
+        operation,
+        Operation::Commit { .. } | Operation::Amend { .. } | Operation::EditMessage { .. }
+    ) && let Head::Attached { reference, .. } = repo.head(deadline)?
+    {
+        names.push(reference);
+    }
     if names.is_empty() {
         return Ok(());
     }
