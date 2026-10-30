@@ -15,6 +15,7 @@
     "test": "pnpm test:release && cargo build -p l1-git-dev-bridge && vitest run src",
     "test:core": "cargo test -p l1-git-core",
     "tauri": "tauri",
+    "icon:macos": "node scripts/generate-macos-icon.mjs",
     "format": "prettier --write src scripts package.json tsconfig.json vite.config.ts src-tauri/*.json src-tauri/capabilities/*.json",
     "format:check": "prettier --check src scripts package.json tsconfig.json vite.config.ts src-tauri/*.json src-tauri/capabilities/*.json",
     "test:release": "node --test scripts/release-plan.test.mjs scripts/release-assets.test.mjs scripts/updater-manifest.test.mjs",
