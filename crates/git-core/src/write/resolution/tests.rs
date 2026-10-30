@@ -538,14 +538,14 @@ fn failed_rename_has_no_history_but_failed_index_publication_keeps_saved_bytes()
         let f = Fixture::new(false);
         let seen = f.snapshot();
         let index = fs::read(f.root.join(".git/index")).unwrap();
+        let lock = f.root.join(".git/index.lock");
         if after {
-            let copy = f
-                .root
-                .join(format!(".git/l1git-index.{}", std::process::id()));
+            let blocked = lock.clone();
             AFTER_PLACEMENT.with_borrow_mut(|hook| {
                 *hook = Some(Box::new(move || {
-                    fs::remove_file(&copy).unwrap();
-                    fs::create_dir(copy).unwrap();
+                    fs::remove_file(&blocked).unwrap();
+                    fs::create_dir(&blocked).unwrap();
+                    fs::write(blocked.join("occupied"), "foreign lock").unwrap();
                 }))
             });
         } else {
@@ -553,7 +553,13 @@ fn failed_rename_has_no_history_but_failed_index_publication_keeps_saved_bytes()
                 *hook = Some(Box::new(|prepared| fs::remove_file(prepared).unwrap()))
             });
         }
-        assert!(f.save(&seen, "saved\n").is_err());
+        assert!(
+            f.save(&seen, "saved\n").is_err(),
+            "failure after placement: {after}"
+        );
+        if after {
+            fs::remove_dir_all(lock).unwrap();
+        }
         assert_eq!(fs::read(f.root.join(".git/index")).unwrap(), index);
         assert_eq!(
             f.bytes(),

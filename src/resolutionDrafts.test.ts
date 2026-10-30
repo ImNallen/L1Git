@@ -123,6 +123,21 @@ it("keeps dirty text and its baseline through navigation, refresh, disappearing 
   ]);
 });
 
+it("forgets a clean draft when the conflict disappears externally", async () => {
+  const active = editor();
+  vi.mocked(repositories.conflictFile).mockResolvedValueOnce({
+    kind: "external",
+    root: snapshot.root,
+    path: snapshot.path,
+    reason: "structural",
+  });
+  await readResolution(snapshot.root, snapshot.path);
+  expect(resolutionOf(key)).toBeNull();
+  completeEditor(key, active.epoch, active.session, snapshot.working);
+  expect(resolutionOf(key)).toBeNull();
+  expect(draftImpact().resolutions).toEqual([]);
+});
+
 it("fences late completion after choices and after another editor attaches", () => {
   const old = editor();
   old.edit("typed\n");

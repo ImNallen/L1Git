@@ -87,6 +87,11 @@ function fresh(snapshot: ConflictSnapshot): ResolutionDraft {
 function observe(key: string, source: ConflictFile) {
   const draft = resolutionOf(key);
   if (draft?.phase.kind !== "editing" && draft !== null) return;
+  if (source.kind === "external" && draft && !isDirty(draft)) {
+    editors.delete(key);
+    publish(key, null);
+    return;
+  }
   if (source.kind === "editable" && (!draft || !isDirty(draft))) {
     if (draft?.snapshot.version === source.snapshot.version)
       publish(key, {
