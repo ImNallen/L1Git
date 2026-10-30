@@ -73,12 +73,13 @@ test("real Tauri signatures verify both payload and signed app version", () => {
   );
 });
 
-test("feed names three updater platforms with a shared universal macOS archive", () => {
+test("feed names four updater platforms with a shared universal macOS archive", () => {
   const feed = build();
   assert.deepEqual(Object.keys(feed.platforms).sort(), [
     "darwin-aarch64",
     "darwin-x86_64",
     "linux-x86_64",
+    "windows-x86_64",
   ]);
   assert.deepEqual(
     feed.platforms["darwin-aarch64"],
@@ -89,6 +90,7 @@ test("feed names three updater platforms with a shared universal macOS archive",
     /ImNallen\/L1Git\/releases\/download\/v0.1.5-nightly.*macos-universal.app.tar.gz$/,
   );
   assert.match(feed.platforms["linux-x86_64"].url, /linux-x86_64.AppImage$/);
+  assert.match(feed.platforms["windows-x86_64"].url, /windows-x86_64.exe$/);
   assert.equal(feed.version, version);
   assert.equal(feed.pub_date, plan.release.createdAt);
 });

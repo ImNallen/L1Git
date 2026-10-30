@@ -292,14 +292,7 @@ fn linked_worktrees_share_target_and_serialize_concurrent_additions() {
     let linked = root.join("linked");
     git(
         &root,
-        &[
-            "worktree",
-            "add",
-            "--quiet",
-            "-b",
-            "linked",
-            linked.to_str().unwrap(),
-        ],
+        &["worktree", "add", "--quiet", "-b", "linked", "linked"],
     );
     let core = Arc::new(core(&root));
     let jobs: Vec<_> = [root.clone(), linked.clone()]

@@ -9,6 +9,8 @@ mod status;
 mod stderr;
 mod sync;
 mod untracked;
+#[cfg(windows)]
+mod windows_fs;
 mod write;
 
 pub use exit_signals::{OnQuit, stop_git_on_exit_signals};

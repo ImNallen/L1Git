@@ -1,3 +1,5 @@
+#[cfg(windows)]
+mod windows;
 mod write;
 
 pub(crate) use write::{
@@ -248,15 +250,27 @@ fn execute(
     thread::spawn(move || {
         let _ = sender.send(capped(&mut pipe, cap));
     });
-    let stdout = match receiver.recv_timeout(deadline.remaining()) {
-        Ok(Ok(stdout)) => stdout,
-        Ok(Err(_)) => {
-            child.stop();
-            return Err(deadline.broken());
-        }
-        Err(_) => {
-            child.stop();
-            return Err(deadline.expired());
+    let stdout = loop {
+        #[cfg(windows)]
+        let wait = deadline.remaining().min(POLL);
+        #[cfg(not(windows))]
+        let wait = deadline.remaining();
+        match receiver.recv_timeout(wait) {
+            Ok(Ok(stdout)) => break stdout,
+            Ok(Err(_)) => {
+                child.stop();
+                return Err(deadline.broken());
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) if !deadline.remaining().is_zero() => {
+                #[cfg(windows)]
+                if matches!(child.exited(), Ok(true)) {
+                    child.job.terminate();
+                }
+            }
+            Err(_) => {
+                child.stop();
+                return Err(deadline.expired());
+            }
         }
     };
     let mut pause = FIRST_EXIT_POLL;
@@ -762,10 +776,15 @@ pub(crate) fn capture_mutation(
     }
 }
 
-/// The process group of every Git command that has not been reaped. Each
-/// command leads its own group, and its pid cannot be reused until it is
-/// reaped, so a listed pid always names that command's group.
-static RUNNING: Mutex<Vec<u32>> = Mutex::new(Vec::new());
+/// Unix process-group IDs remain unreaped until unlisted. Windows job handles
+/// retain their process trees after the original Git process exits.
+struct Running {
+    pid: u32,
+    #[cfg(windows)]
+    job: std::sync::Arc<windows::Job>,
+}
+
+static RUNNING: Mutex<Vec<Running>> = Mutex::new(Vec::new());
 static STOPPING: AtomicBool = AtomicBool::new(false);
 /// Commands between the `STOPPING` check and their entry in `RUNNING`.
 static SPAWNING: AtomicUsize = AtomicUsize::new(0);
@@ -794,7 +813,7 @@ impl Drop for HeldIndexLock {
     }
 }
 
-fn running() -> MutexGuard<'static, Vec<u32>> {
+fn running() -> MutexGuard<'static, Vec<Running>> {
     RUNNING.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
@@ -817,6 +836,8 @@ impl Drop for Spawning {
 /// stops every process it started, such as a clean filter.
 struct Group {
     child: Child,
+    #[cfg(windows)]
+    job: std::sync::Arc<windows::Job>,
     reaped: bool,
 }
 
@@ -830,11 +851,22 @@ impl Group {
         }
         #[cfg(unix)]
         std::os::unix::process::CommandExt::process_group(&mut command, 0);
+        #[cfg(windows)]
+        let job = std::sync::Arc::new(windows::Job::new().map_err(spawn_error)?);
+        #[cfg(windows)]
+        let child = job.spawn(&mut command).map_err(spawn_error)?;
+        #[cfg(not(windows))]
         let child = command.spawn().map_err(spawn_error)?;
-        running().push(child.id());
+        running().push(Running {
+            pid: child.id(),
+            #[cfg(windows)]
+            job: std::sync::Arc::clone(&job),
+        });
         drop(spawning);
         let group = Self {
             child,
+            #[cfg(windows)]
+            job,
             reaped: false,
         };
         if STOPPING.load(Ordering::SeqCst) {
@@ -874,6 +906,12 @@ impl Group {
     }
 
     fn signal(&mut self, signal: Signal) {
+        #[cfg(windows)]
+        {
+            let _ = signal;
+            self.job.terminate();
+        }
+        #[cfg(not(windows))]
         if self.exited().is_ok() {
             signal_group(self.child.id(), signal);
         }
@@ -887,6 +925,8 @@ impl Group {
     /// killed, so nothing it started outlives the process.
     fn reap(&mut self) -> io::Result<ExitStatus> {
         self.unlist();
+        #[cfg(windows)]
+        self.job.terminate();
         if STOPPING.load(Ordering::SeqCst) {
             self.signal(Signal::Kill);
         }
@@ -896,12 +936,11 @@ impl Group {
 
     fn unlist(&self) {
         let pid = self.child.id();
-        running().retain(|listed| *listed != pid);
+        running().retain(|listed| listed.pid != pid);
     }
 
-    /// Git deletes its lock files on SIGTERM but cannot on SIGKILL. SIGKILL
-    /// then reaches every process Git started, including one that ignores
-    /// SIGTERM. Returns whether Git exited.
+    /// Unix gives Git time to remove locks on SIGTERM before SIGKILL. Windows
+    /// terminates its job immediately. Returns whether Git exited.
     fn halt(&mut self) -> bool {
         self.signal(Signal::Terminate);
         let exited = self.exited_within(TERMINATE_GRACE);
@@ -959,7 +998,7 @@ fn child_exited(pid: u32) -> io::Result<bool> {
     Ok(info.si_signo != 0)
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 fn child_exited(_pid: u32) -> io::Result<bool> {
     Ok(false)
 }
@@ -992,9 +1031,15 @@ pub fn stop_all_git() {
 /// cannot while this holds the lock. The check also skips a child the system
 /// reaped on its own.
 fn signal_listed(signal: Signal) {
-    for pid in running().iter() {
-        if child_exited(*pid).is_ok() {
-            signal_group(*pid, signal);
+    for process in running().iter() {
+        #[cfg(windows)]
+        {
+            let _ = signal;
+            process.job.terminate();
+        }
+        #[cfg(not(windows))]
+        if child_exited(process.pid).is_ok() {
+            signal_group(process.pid, signal);
         }
     }
 }
@@ -1023,7 +1068,7 @@ fn signal_group(pid: u32, signal: Signal) {
     }
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 fn signal_group(_pid: u32, _signal: Signal) {}
 
 #[cfg(test)]

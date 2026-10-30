@@ -4,7 +4,6 @@ use l1_git_core::{
 };
 use std::{
     fs,
-    os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     process::{Command, Stdio},
 };
@@ -377,7 +376,9 @@ fn refuses_to_tag_a_tree_a_blob_or_a_tag_object() {
 }
 
 #[test]
+#[cfg(unix)]
 fn signs_an_annotated_tag_when_tag_force_sign_annotated_asks() {
+    use std::os::unix::fs::PermissionsExt;
     let repo = Repo::new();
     let gpg = repo.root.parent().unwrap().join("gpg");
     fs::write(

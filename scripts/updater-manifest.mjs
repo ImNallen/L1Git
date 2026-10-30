@@ -32,6 +32,14 @@ export const TARGETS = [
       { extension: "deb", platforms: [] },
     ],
   },
+  {
+    id: "windows-x86_64",
+    bundleDirectory: "target/x86_64-pc-windows-msvc/release/bundle",
+    os: "windows-2022",
+    rustTargets: "x86_64-pc-windows-msvc",
+    args: "--target x86_64-pc-windows-msvc --bundles nsis",
+    bundles: [{ extension: "exe", platforms: ["windows-x86_64"] }],
+  },
 ].map((target) => ({
   ...target,
   extensions: target.bundles.flatMap((bundle) =>

@@ -77,6 +77,7 @@ pub(crate) fn in_progress(
 pub(super) struct Repository {
     pub root: PathBuf,
     pub common_dir: PathBuf,
+    pub git_config: PathBuf,
 }
 
 pub(super) fn open(path: &str, reads: Deadline) -> Result<Repository, RepositoryError> {
@@ -86,8 +87,13 @@ pub(super) fn open(path: &str, reads: Deadline) -> Result<Repository, Repository
         &["rev-parse", "--path-format=absolute", "--git-common-dir"],
         reads,
     )?;
-    let common_dir = repository::canonical(&git::line(&output))?;
-    Ok(Repository { root, common_dir })
+    let git_common_dir = git::line(&output);
+    let common_dir = repository::canonical(&git_common_dir)?;
+    Ok(Repository {
+        root,
+        common_dir,
+        git_config: Path::new(&git_common_dir).join("config"),
+    })
 }
 
 /// A worktree path can contain a newline, so each record ends with NUL and
