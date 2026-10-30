@@ -1,7 +1,7 @@
 use super::{Capped, Deadline, Work, base, execute, text, too_old, without_prompts};
 use crate::{
     ErrorKind, RepositoryError, StaleReason, stderr,
-    write::{CommitTxn, HOOK_OFF, Outside, Published, RefTxn, ScratchIndex, Txn},
+    write::{CommitTxn, HOOK_OFF, MergeIndexTxn, Outside, Published, RefTxn, ScratchIndex, Txn},
 };
 use std::{
     ffi::OsStr,
@@ -12,6 +12,9 @@ use std::{
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LocalWrite {
+    MergeStart,
+    MergeFinish,
+    MergeAbort,
     SaveConflict,
     StageFiles,
     UnstageFiles,
@@ -57,7 +60,10 @@ impl LocalWrite {
             | Self::Undo
             | Self::Redo => 120,
             Self::Discard => 300,
-            Self::Commit
+            Self::MergeStart
+            | Self::MergeFinish
+            | Self::MergeAbort
+            | Self::Commit
             | Self::Amend
             | Self::EditMessage
             | Self::Checkout
@@ -74,6 +80,9 @@ impl LocalWrite {
 
     pub(super) const fn doing(self) -> &'static str {
         match self {
+            Self::MergeStart => "Starting the merge",
+            Self::MergeFinish => "Finishing the merge",
+            Self::MergeAbort => "Aborting the merge",
             Self::SaveConflict => "Saving the conflict result",
             Self::StageFiles => "Staging the files",
             Self::UnstageFiles => "Unstaging the files",
@@ -105,6 +114,9 @@ impl LocalWrite {
 
     const fn reflog_action(self) -> &'static str {
         match self {
+            Self::MergeStart => "l1git merge start",
+            Self::MergeFinish => "l1git merge finish",
+            Self::MergeAbort => "l1git merge abort",
             Self::SaveConflict => "l1git save conflict",
             Self::StageFiles => "l1git stage",
             Self::UnstageFiles => "l1git unstage",
@@ -132,6 +144,9 @@ impl LocalWrite {
 
     pub(super) const fn left_behind(self) -> &'static str {
         match self {
+            Self::MergeStart | Self::MergeFinish | Self::MergeAbort => {
+                "L1 Git rereads the merge state to see what changed."
+            }
             Self::StageFiles
             | Self::UnstageFiles
             | Self::StagePart
@@ -266,6 +281,24 @@ impl<'a> Write<'a> {
             as_user: true,
             lazy_fetch: false,
         }
+    }
+
+    pub(crate) fn merge(txn: &'a MergeIndexTxn<'_>, source: Option<&'a crate::Oid>) -> Self {
+        let args = match source {
+            Some(source) => vec![
+                "merge",
+                "--no-ff",
+                "--no-commit",
+                "--no-autostash",
+                "--no-overwrite-ignore",
+                "--no-edit",
+                source.as_str(),
+            ],
+            None => vec!["merge", "--abort"],
+        };
+        Self::new(txn.runner(), txn.runner().root(), &args)
+            .uncapped()
+            .lazy_fetch_unprompted()
     }
 
     pub(crate) fn branch(txn: &'a RefTxn<'_>, args: &[&'a str]) -> Self {

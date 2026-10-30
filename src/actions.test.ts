@@ -30,6 +30,8 @@ const repositoryScreen: ActionContext = {
   worktree: null,
   history: { undo: null, redo: null },
   writing: false,
+  merging: false,
+  mergeAvailable: false,
   typing: false,
 };
 
@@ -42,6 +44,7 @@ function commands(): Commands {
     toggleInspector: vi.fn(),
     fetch: vi.fn(),
     fastForward: vi.fn(),
+    mergeUpstream: vi.fn(),
     push: vi.fn(),
     search: vi.fn(),
     closeFile: vi.fn(),
@@ -781,4 +784,22 @@ it("opens the publish review from the palette for an untracked branch", async ()
       "Wait for fetch.",
     ).kind,
   ).toBe("disabled");
+});
+
+it("offers Merge upstream only when eligible and excludes ordinary destructive actions during a merge", () => {
+  const items = (context: ActionContext) =>
+    paletteItems(context, commands(), false, [], null).map((item) => item.id);
+  expect(items({ ...repositoryScreen, mergeAvailable: true })).toContain(
+    "action:mergeUpstream",
+  );
+  expect(items(repositoryScreen)).not.toContain("action:mergeUpstream");
+  const active = items({
+    ...repositoryScreen,
+    merging: true,
+    worktree: { unstaged: 1, staged: 1, discardable: 1 },
+    history: { undo: "Save result", redo: null },
+  });
+  expect(active).toContain("action:undo");
+  for (const name of ["focusCommit", "discardAll", "stashChanges"])
+    expect(active).not.toContain(`action:${name}`);
 });

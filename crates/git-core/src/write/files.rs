@@ -254,7 +254,7 @@ fn no_other_names(
     Ok(())
 }
 
-fn fold_for_any_disk(name: &str) -> String {
+pub(super) fn fold_for_any_disk(name: &str) -> String {
     if name.is_ascii() {
         return name.to_ascii_lowercase();
     }

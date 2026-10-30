@@ -391,3 +391,51 @@ kbd {
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+.merge-controls {
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  max-height: 42vh;
+  overflow: auto;
+  font-size: 12px;
+}
+.merge-controls p {
+  margin: 6px 0;
+}
+.merge-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.merge-pair {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px 12px;
+}
+.merge-pair dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.merge-pair code {
+  display: block;
+  font-size: 11px;
+  user-select: text;
+}
+.merge-message {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0;
+}
+.merge-message textarea {
+  min-height: 56px;
+  resize: vertical;
+  color: inherit;
+  background: var(--control-inset);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px;
+}
+.merge-dialog {
+  width: min(620px, 90vw);
+}

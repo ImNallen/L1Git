@@ -290,3 +290,19 @@ it("shares revision, tasks and freeze with commit drafts and protects newer text
   expect(write).not.toHaveBeenCalled();
   frozen.release();
 });
+
+it("discards only the merge drafts consented to and retains newer text", async () => {
+  const { resolutionConsent, discardConsentedResolutions } =
+    await import("./resolutionDrafts");
+  const editing = editor();
+  editing.edit("consented\n");
+  const consent = resolutionConsent(snapshot.root, [snapshot.path]);
+  editing.edit("newer precious text\n");
+  discardConsentedResolutions(consent);
+  expect(draft().text).toBe("newer precious text\n");
+  expect(resolutionConsent(snapshot.root, ["unrelated.txt"])).toEqual([]);
+  discardConsentedResolutions(
+    resolutionConsent(snapshot.root, [snapshot.path]),
+  );
+  expect(resolutionOf(key)).toBeNull();
+});

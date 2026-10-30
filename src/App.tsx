@@ -1,3 +1,6 @@
+import { MergeControls } from "./components/MergeControls";
+import { useMergeState } from "./useMergeState";
+import { mergeAllows } from "./domain/merge";
 import {
   draftImpact as currentDraftImpact,
   useDraftImpact,
@@ -306,22 +309,49 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
         changes: app.changes.get(listedWorktree.root),
       }
     : null;
-  const writes = useWrites(snapshot?.root ?? null, {
-    worktree: app.rereadWorktree,
-    repository: app.rereadOpenRepository,
-    refs: (worktree, repository) => {
-      const state =
-        overview.roots.get(worktree) ?? overview.roots.get(repository);
-      if (state?.kind === "open")
-        void overviewStore.refreshLocal(state.commonDir);
-      return app.rereadOpenRepository(repository);
+  const [mergeTarget, setMergeTarget] = useState<RepositoryRoot | null>(null);
+  const [mergeReviewOpen, setMergeReviewOpen] = useState(false);
+  const mergeRoot = snapshot?.worktrees.some(
+    (worktree) => worktree.root === mergeTarget,
+  )
+    ? mergeTarget
+    : (snapshot?.root ?? null);
+  const mergeChanges =
+    mergeRoot === null ? undefined : app.changes.get(mergeRoot);
+  const [mergeRead, refreshMerge] = useMergeState(mergeRoot, mergeChanges);
+  const mergeState = mergeRead.kind === "ready" ? mergeRead.value : null;
+  useEffect(() => {
+    if (selected?.kind === "worktree") setMergeTarget(selected.root);
+  }, [selected]);
+  useEffect(() => {
+    setMergeReviewOpen(false);
+  }, [mergeRoot]);
+  const writes = useWrites(
+    snapshot?.root ?? null,
+    {
+      worktree: app.rereadWorktree,
+      repository: app.rereadOpenRepository,
+      refs: (worktree, repository) => {
+        const state =
+          overview.roots.get(worktree) ?? overview.roots.get(repository);
+        if (state?.kind === "open")
+          void overviewStore.refreshLocal(state.commonDir);
+        return app.rereadOpenRepository(repository);
+      },
     },
-  });
+    mergeRoot,
+  );
   const parts = useParts({
     fileDiff,
     changes: app.changes,
     diffStyle,
-    busy: writes.running !== null,
+    busy:
+      writes.running !== null ||
+      (mergeRoot !== null &&
+        fileDiff.kind !== "closed" &&
+        fileDiff.root === mergeRoot &&
+        mergeState !== null &&
+        mergeState.kind !== "idle"),
     write: writes.write,
     selectRange: app.selectRange,
     lostFocus: () => checkLostFocus((count) => count + 1),
@@ -342,7 +372,10 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     const changes = app.changes.get(root);
     const write =
       changes?.kind === "ready" ? writeFor(kind, changes.status, paths) : null;
-    return write === null ? Promise.resolve(false) : writes.write(root, write);
+    return write === null ||
+      (root === mergeRoot && !mergeAllows(mergeState, write.operation))
+      ? Promise.resolve(false)
+      : writes.write(root, write);
   }
   function askDiscard(
     root: RepositoryRoot,
@@ -542,6 +575,19 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       ),
     [snapshot],
   );
+  const mergeHead = snapshot?.worktrees.find(
+    (worktree) => worktree.root === mergeRoot,
+  )?.head;
+  const mergeEligible =
+    mergeHead?.kind === "attached" &&
+    openRepository?.overview.branches.some(
+      (branch) =>
+        String(branch.reference) === String(mergeHead.reference) &&
+        branch.state.kind === "diverged",
+    ) === true;
+  const mergeBusy =
+    writes.running !== null || openRepository?.activity.kind !== "idle";
+  const mergeActive = mergeState !== null && mergeState.kind !== "idle";
   const askFor = (kind: keyof ReturnType<typeof branchAsks>) => () => {
     const ask = ruledBranch && branchAsks(ruledBranch)[kind];
     if (ask) setBranchAsk(ask);
@@ -562,6 +608,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   const rereadChanges = () => {
     app.refreshChanges();
     writes.rereadHistory();
+    refreshMerge();
   };
   const rereadAll = () => {
     rereadChanges();
@@ -685,6 +732,10 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       else if (openRoot && publishControl.kind === "publish")
         setPublishingRoot(openRoot);
     },
+    mergeUpstream: () => {
+      if (mergeEligible && !mergeBusy && mergeState?.kind === "idle")
+        setMergeReviewOpen(true);
+    },
     fastForward: () => {
       if (openRepository)
         void overviewStore.updateAll(openRepository.commonDir);
@@ -769,7 +820,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   const context: ActionContext = {
     screen,
     section: settingsSection,
-    dialogOpen: false,
+    dialogOpen: mergeReviewOpen,
     adding,
     searchable: snapshot !== null,
     inspectable: shown !== null,
@@ -815,6 +866,8 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       redo: nextEntry(writes.history, "redo")?.label ?? null,
     },
     writing: writes.running !== null,
+    merging: mergeActive,
+    mergeAvailable: mergeEligible && !mergeBusy && mergeState?.kind === "idle",
     typing: false,
   };
   const keys = useRef({ context, commands, palette: palette !== null });
@@ -1177,6 +1230,26 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
               </div>
             </header>
             <WriteNoticeRow writes={writes} />
+            {mergeRoot && snapshot && (
+              <MergeControls
+                key={mergeRoot}
+                root={mergeRoot}
+                worktrees={snapshot.worktrees}
+                onTarget={setMergeTarget}
+                read={mergeRead}
+                refresh={rereadChanges}
+                eligible={mergeEligible}
+                busy={mergeBusy}
+                reviewOpen={mergeReviewOpen}
+                onReview={() => setMergeReviewOpen(true)}
+                onCloseReview={() => setMergeReviewOpen(false)}
+                run={(action) => writes.merge(mergeRoot, action)}
+                onInspect={() => {
+                  select({ kind: "worktree", root: mergeRoot });
+                  setInspectorOpen(true);
+                }}
+              />
+            )}
             {draftImpact.resolutions.length > 0 && (
               <div
                 className="resolution-draft-list"
@@ -1430,6 +1503,10 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                     onRefreshChanges={rereadChanges}
                     writes={{
                       busy: writes.running !== null,
+                      merge:
+                        selectedWorktree?.worktree.root === mergeRoot
+                          ? mergeState
+                          : null,
                       write: writeFiles,
                       commit: async (worktree, write) => {
                         const outcome = await writes.write(worktree, write);

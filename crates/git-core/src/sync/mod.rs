@@ -127,6 +127,12 @@ impl Coordinator {
         work()
     }
 
+    pub(crate) fn gated<T>(&self, common_dir: &Path, work: impl FnOnce() -> T) -> T {
+        let locks = self.locks(common_dir);
+        let _gate = lock_ignoring_poison(&locks.gate);
+        work()
+    }
+
     /// The local branches of the repository containing `path`. With
     /// `FetchMode::Remote`, fetch its remotes first, unless a fetch of the same
     /// repository finished after this call started.
@@ -185,14 +191,17 @@ impl Coordinator {
             .iter()
             .map(|request| {
                 let _write = lock_ignoring_poison(&locks.write);
-                advance::advance(&repository.root, request, deadline, &mut reads).unwrap_or_else(
-                    |error| AdvanceOutcome::Skipped {
-                        reference: request.reference.clone(),
-                        reason: SkipReason::Failed {
-                            message: error.message,
-                        },
-                    },
+                self.guard_merge_refs(
+                    &repository.root,
+                    &[request.reference.as_str().to_owned()],
+                    || advance::advance(&repository.root, request, deadline, &mut reads),
                 )
+                .unwrap_or_else(|error| AdvanceOutcome::Skipped {
+                    reference: request.reference.clone(),
+                    reason: SkipReason::Failed {
+                        message: error.message,
+                    },
+                })
             })
             .collect();
         Ok(FastForwardReport {

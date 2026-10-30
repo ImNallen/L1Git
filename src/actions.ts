@@ -39,6 +39,8 @@ export type ActionContext = {
   } | null;
   history: { undo: string | null; redo: string | null };
   writing: boolean;
+  merging: boolean;
+  mergeAvailable: boolean;
   typing: boolean;
 };
 
@@ -50,6 +52,7 @@ export type Commands = {
   toggleInspector: () => void;
   fetch: () => void;
   fastForward: () => void;
+  mergeUpstream: () => void;
   push: () => void;
   search: () => void;
   closeFile: () => void;
@@ -101,6 +104,7 @@ export type ActionId =
   | "undo"
   | "redo"
   | "fetch"
+  | "mergeUpstream"
   | "fastForward"
   | "push"
   | "search"
@@ -206,6 +210,7 @@ export const actions: readonly Action[] = [
     available: (context) =>
       onRepository(context) &&
       !context.writing &&
+      !context.merging &&
       (context.worktree?.discardable ?? 0) > 0,
     run: (commands) => commands.discardAll(),
   },
@@ -215,6 +220,7 @@ export const actions: readonly Action[] = [
     available: (context) =>
       onRepository(context) &&
       !context.writing &&
+      !context.merging &&
       (context.worktree?.unstaged ?? 0) +
         (context.worktree?.staged ?? 0) +
         (context.worktree?.conflicts ?? 0) >
@@ -227,6 +233,7 @@ export const actions: readonly Action[] = [
     available: (context) =>
       onRepository(context) &&
       !context.writing &&
+      !context.merging &&
       (context.worktree?.staged ?? 0) > 0,
     run: (commands) => commands.focusCommit(),
   },
@@ -260,6 +267,15 @@ export const actions: readonly Action[] = [
       context.repository !== null &&
       !context.repository.fetching,
     run: (commands) => commands.fetch(),
+  },
+  {
+    id: "mergeUpstream",
+    title: "Merge upstream…",
+    available: (context) =>
+      onRepository(context) &&
+      !context.writing &&
+      context.mergeAvailable === true,
+    run: (commands) => commands.mergeUpstream(),
   },
   {
     id: "fastForward",
@@ -395,6 +411,7 @@ export const actions: readonly Action[] = [
     available: (context) =>
       onRepository(context) &&
       !context.writing &&
+      !context.merging &&
       context.sidebarBranch !== null &&
       !context.sidebarBranch.checkedOut,
     run: (commands) => commands.checkout(),
@@ -405,6 +422,7 @@ export const actions: readonly Action[] = [
     available: (context) =>
       onRepository(context) &&
       !context.writing &&
+      !context.merging &&
       context.sidebarBranch !== null,
     run: (commands) => commands.newBranch(),
   },
@@ -414,6 +432,7 @@ export const actions: readonly Action[] = [
     available: (context) =>
       onRepository(context) &&
       !context.writing &&
+      !context.merging &&
       context.sidebarBranch?.local === true,
     run: (commands) => commands.renameBranch(),
   },
@@ -423,6 +442,7 @@ export const actions: readonly Action[] = [
     available: (context) =>
       onRepository(context) &&
       !context.writing &&
+      !context.merging &&
       context.sidebarBranch?.local === true &&
       !context.sidebarBranch.checkedOut,
     run: (commands) => commands.deleteBranch(),
@@ -433,6 +453,7 @@ export const actions: readonly Action[] = [
     available: (context) =>
       onRepository(context) &&
       !context.writing &&
+      !context.merging &&
       context.selection?.kind === "commit",
     run: (commands) => commands.createTag(),
   },
@@ -440,7 +461,10 @@ export const actions: readonly Action[] = [
     id: "deleteTag",
     title: (context) => `Delete tag ${context.sidebarTag?.name ?? ""}…`,
     available: (context) =>
-      onRepository(context) && !context.writing && context.sidebarTag !== null,
+      onRepository(context) &&
+      !context.writing &&
+      !context.merging &&
+      context.sidebarTag !== null,
     run: (commands) => commands.deleteTag(),
   },
   {

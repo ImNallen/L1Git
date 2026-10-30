@@ -20,6 +20,7 @@ vi.mock("./repositories", () => ({
   commitDetail: vi.fn(),
   undoHistory: vi.fn(),
   undo: vi.fn(),
+  merge: vi.fn(),
 }));
 const status = worktreeStatusSchema.parse({
   root: "/fixture/draft-tasks",
@@ -195,4 +196,43 @@ it("defers a stale amend restoration during freeze and applies it when the freez
   await act(async () => release?.());
   expect(draftOf(status.root).amend).toBeNull();
   expect(draftOf(status.root).draft.summary).toBe("Aside");
+});
+
+it("keeps merge in the shared write task through landed-error refreshes and excludes Undo", async () => {
+  const { mergeActionSchema } = await import("./domain/merge");
+  const refreshing = deferred<void>();
+  vi.mocked(repositories.merge).mockRejectedValueOnce({
+    kind: "timedOut",
+    message: "May have landed",
+  });
+  vi.mocked(repositories.undoHistory).mockResolvedValue({
+    undo: applied,
+    redo: null,
+  });
+  reread.refs.mockReturnValueOnce(refreshing.promise);
+  const action = mergeActionSchema.parse({
+    kind: "abort",
+    session: "a".repeat(16),
+  });
+  function MergeView() {
+    const writes = useWrites(status.root, reread);
+    return (
+      <>
+        <button onClick={() => void writes.merge(status.root, action)}>
+          Abort
+        </button>
+        <button onClick={() => void writes.undo()}>Undo</button>
+      </>
+    );
+  }
+  await act(async () => reactRoot.render(<MergeView />));
+  const [abort, undo] = container.querySelectorAll("button");
+  await act(async () => abort?.click());
+  expect(draftImpact().tasks).toBe(1);
+  expect(freezeDrafts(draftImpact().revision)).toEqual({ kind: "busy" });
+  await act(async () => undo?.click());
+  expect(repositories.undo).not.toHaveBeenCalled();
+  await act(async () => refreshing.resolve());
+  expect(reread.worktree).toHaveBeenCalledWith(status.root);
+  expect(draftImpact().tasks).toBe(0);
 });

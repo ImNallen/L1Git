@@ -9,6 +9,7 @@ mod commit;
 mod discard;
 mod files;
 mod index;
+mod merge;
 mod partial;
 mod refs;
 mod resolution;
@@ -19,11 +20,15 @@ mod txn;
 
 use crate::{
     Coordinator, ErrorKind, Head, Oid, RepositoryError, StagedStamp, StaleReason, StatusEntry,
-    git::{self, Deadline, LocalRead, LocalWrite, WriteDeadline},
+    git::{self, Deadline, LocalWrite, WriteDeadline},
     repository,
 };
 pub(crate) use branches::merged_within;
 pub use branches::{BranchTip, Start};
+pub use merge::{
+    MergeAction, MergeAttention, MergeOutcome, MergeReport, MergeReview, MergeSession, MergeSource,
+    MergeState, MergeTracking,
+};
 use partial::{Action, Part, Picks};
 pub use partial::{LinePick, LineSide};
 pub(crate) use resolution::conflict_file_within;
@@ -34,9 +39,11 @@ use std::{
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
-use store::{EntryObjects, LockedStore, Log, Objects, Position, Step, Store};
+use store::{EntryObjects, LockedStore, Log, Objects, Position, Step};
 pub use tags::TagTip;
-pub(crate) use txn::{CommitTxn, HOOK_OFF, Outside, Published, RefTxn, ScratchIndex, Txn};
+pub(crate) use txn::{
+    CommitTxn, HOOK_OFF, MergeIndexTxn, MergeTxn, Outside, Published, RefTxn, ScratchIndex, Txn,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(
@@ -696,7 +703,10 @@ impl Coordinator {
         let (applied, published) = self.locked(
             path,
             operation.local_write(),
-            |repo, store, log, deadline| operation.write(&repo, store, &log, deadline, expect),
+            |repo, store, log, deadline| {
+                merge::admit(&repo, operation, deadline)?;
+                operation.write(&repo, store, &log, deadline, expect)
+            },
         )?;
         if let Some(published) = published {
             published.run_hook();
@@ -716,15 +726,14 @@ impl Coordinator {
         self.step(path, id, Direction::Redo)
     }
 
-    /// The next entry to undo and the next to redo. Takes no lock.
+    /// Reads the current worktree's history after reconciling its merge session.
     pub fn undo_history(&self, path: &str) -> Result<UndoHistory, RepositoryError> {
-        let repo = Repo::open(path, self.deadline(LocalRead::UndoHistory))?;
-        let store = Store::open(self.undo_dir(), &repo.common_dir)?;
-        let log = store.log()?;
-        let applied = |id: Option<EntryId>| id.map(|id| store.applied(id)).transpose();
-        Ok(UndoHistory {
-            undo: applied(log.next_undo())?,
-            redo: applied(log.next_redo())?,
+        self.locked(path, LocalWrite::Undo, |_, store, log, _| {
+            let applied = |id: Option<EntryId>| id.map(|id| store.applied(id)).transpose();
+            Ok(UndoHistory {
+                undo: applied(log.next_undo())?,
+                redo: applied(log.next_redo())?,
+            })
         })
     }
 
@@ -740,8 +749,14 @@ impl Coordinator {
         self.writing(&common_dir, || {
             let store = LockedStore::lock(self.undo_dir(), &common_dir, deadline.reads())?;
             let deadline = deadline.renewed();
-            let log = store.settled_log(&repo, deadline)?;
-            work(repo, &store, log, deadline)
+            if let Some(dir) = merge::journal(&repo, deadline)? {
+                let session = LockedStore::lock(&dir, &common_dir, deadline.reads())?;
+                let log = session.settled_log(&repo, deadline)?;
+                work(repo, &session, log, deadline)
+            } else {
+                let log = store.settled_log(&repo, deadline)?;
+                work(repo, &store, log, deadline)
+            }
         })
     }
 
@@ -753,12 +768,13 @@ impl Coordinator {
     ) -> Result<Applied, RepositoryError> {
         let (applied, published) =
             self.locked(path, direction.write(), |opened, store, log, deadline| {
+                let (applied, change) = store.record_of(id)?;
+                merge::admit_step(&opened, &applied, &change, deadline)?;
                 let step = match log.position(id, direction) {
                     Position::Next(step) => step,
                     Position::AlreadyDone => return Ok((store.applied(id)?, None)),
                     Position::Elsewhere => return Err(store::history_changed()),
                 };
-                let (applied, change) = store.record_of(id)?;
                 let deadline = change
                     .step_write(direction)
                     .map_or(deadline, |write| self.write_deadline(write));

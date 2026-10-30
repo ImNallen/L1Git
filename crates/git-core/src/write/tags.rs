@@ -421,7 +421,11 @@ mod tests {
         git(&root, &["gc", "--quiet", "--prune=now"]);
 
         let history = coordinator.undo_history(path).unwrap();
-        assert_eq!(history.undo, None, "the stopped write is still pending");
+        assert_eq!(
+            history.undo.unwrap().operation,
+            operation,
+            "history discovery settles the stopped write"
+        );
         let head = repository::head(&root, Deadline::of(git::LocalRead::Refs)).unwrap();
         let made = coordinator
             .write(

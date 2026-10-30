@@ -7,6 +7,8 @@ import type { Appearance } from "../themes/palette";
 import { conflictTextSchema, problemFrom } from "../domain/repository";
 import type { ConflictFile, RepositoryRoot } from "../domain/repository";
 import { useDraftImpact } from "../draftProtection";
+import { useMergeState } from "../useMergeState";
+import { mergeAllows } from "../domain/merge";
 import {
   attachEditor,
   canMark,
@@ -72,6 +74,7 @@ export function ConflictResolver({
     | { kind: "ready"; source: ConflictFile }
     | { kind: "error"; message: string }
   >({ kind: "loading" });
+  const [mergeRead] = useMergeState(root, read);
   const [retry, setRetry] = useState(0);
   const [source, setSource] = useState<"base" | "current" | "incoming">(
     "current",
@@ -137,6 +140,12 @@ export function ConflictResolver({
     );
   const dirty = isDirty(draft);
   const stale = isStale(draft);
+  const allowed =
+    mergeRead.kind === "ready" &&
+    mergeAllows(mergeRead.value, {
+      kind: "stageFiles",
+      entries: [draft.snapshot.entry],
+    });
   const busy =
     frozen || draft.phase.kind !== "editing" || writes.running !== null;
   const problem = draft.phase.kind === "editing" ? draft.phase.problem : null;
@@ -194,7 +203,12 @@ export function ConflictResolver({
             <button
               className="button primary"
               disabled={
-                busy || read.kind === "loading" || !dirty || stale || !valid
+                busy ||
+                !allowed ||
+                read.kind === "loading" ||
+                !dirty ||
+                stale ||
+                !valid
               }
               onClick={() => void saveResolution(key, writes.write)}
             >
@@ -202,7 +216,9 @@ export function ConflictResolver({
             </button>
             <button
               className="button secondary"
-              disabled={busy || read.kind === "loading" || !canMark(draft)}
+              disabled={
+                busy || !allowed || read.kind === "loading" || !canMark(draft)
+              }
               onClick={() =>
                 void markResolution(key, writes.write).then((marked) => {
                   if (marked) onResolved();
@@ -216,6 +232,17 @@ export function ConflictResolver({
             Save changes the working file. Review the result, then Mark resolved
             stages it. Undo reverses these two actions separately.
           </p>
+          {!allowed && (
+            <p role="status">
+              {mergeRead.kind === "loading"
+                ? "Checking merge state…"
+                : mergeRead.kind === "error"
+                  ? mergeRead.error.message
+                  : mergeRead.value.kind === "attention"
+                    ? mergeRead.value.message
+                    : "This path is outside the merge's affected paths. Preserve it externally before continuing."}
+            </p>
+          )}
           {(stale || problem || read.kind === "error" || !valid) && (
             <div className="notice error-notice" role="alert">
               {stale

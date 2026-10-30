@@ -1,3 +1,4 @@
+import type { MergeAction, MergeReport } from "./domain/merge";
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as repositories from "./repositories";
 import { beginDraftTask } from "./draftProtection";
@@ -28,7 +29,7 @@ import { oneReadPerKey } from "./oneReadPerKey";
 
 export type Writes = {
   history: History;
-  running: { action: "write" | Step; label: string } | null;
+  running: { action: "write" | "merge" | Step; label: string } | null;
   notice: WriteNotice | null;
 };
 
@@ -57,6 +58,7 @@ export function useWrites(
       repository: RepositoryRoot,
     ) => Promise<void>;
   },
+  historyRoot: RepositoryRoot | null = root,
 ) {
   const [byRoot, setByRoot] = useState<ReadonlyMap<RepositoryRoot, Writes>>(
     new Map(),
@@ -93,8 +95,8 @@ export function useWrites(
     ),
   );
   const rereadHistory = useCallback(() => {
-    if (root !== null) void readHistory(root);
-  }, [root, readHistory]);
+    if (historyRoot !== null) void readHistory(historyRoot);
+  }, [historyRoot, readHistory]);
   useEffect(rereadHistory, [rereadHistory]);
 
   async function run(
@@ -105,16 +107,7 @@ export function useWrites(
     request: () => Promise<Applied>,
   ): Promise<Outcome> {
     const { action } = job;
-    if (root === null || inFlight.current.has(root)) return { kind: "busy" };
-    const finishDraftTask = beginDraftTask();
-    if (!finishDraftTask) return { kind: "busy" };
-    const repository = root;
-    try {
-      inFlight.current.add(repository);
-      update(repository, (writes) => ({
-        ...writes,
-        running: { action, label },
-      }));
+    return task(action, label, async (repository) => {
       let outcome: Exclude<Outcome, { kind: "busy" }>;
       try {
         outcome = { kind: "applied", applied: await request() };
@@ -133,7 +126,7 @@ export function useWrites(
         restoreUndone(changed, operation.message);
       if (movesRefs(operation)) await reread.refs(changed, repository);
       await Promise.all([
-        readHistory(repository),
+        readHistory(historyRoot ?? worktree),
         reread.worktree(worktree),
         changed === worktree ? null : reread.worktree(changed),
       ]);
@@ -157,17 +150,70 @@ export function useWrites(
               };
       update(repository, (writes) => ({ ...writes, running: null, notice }));
       return outcome;
+    });
+  }
+
+  async function task<T>(
+    action: "write" | "merge" | Step,
+    label: string,
+    work: (repository: RepositoryRoot) => Promise<T>,
+  ): Promise<T | { kind: "busy" }> {
+    if (root === null || inFlight.current.has(root)) return { kind: "busy" };
+    const finishDraftTask = beginDraftTask();
+    if (!finishDraftTask) return { kind: "busy" };
+    const repository = root;
+    inFlight.current.add(repository);
+    update(repository, (writes) => ({ ...writes, running: { action, label } }));
+    try {
+      return await work(repository);
     } finally {
+      update(repository, (writes) => ({ ...writes, running: null }));
       inFlight.current.delete(repository);
       finishDraftTask();
     }
   }
 
-  const writes = (root === null ? undefined : byRoot.get(root)) ?? idle;
+  async function merge(
+    worktree: RepositoryRoot,
+    action: MergeAction,
+  ): Promise<MergeCommandOutcome> {
+    return task(
+      "merge",
+      `${action.kind === "start" ? "Start" : action.kind === "finish" ? "Finish" : "Abort"} merge`,
+      async (repository) => {
+        let outcome: Exclude<MergeCommandOutcome, { kind: "busy" }>;
+        try {
+          outcome = {
+            kind: "merged",
+            report: await repositories.merge(worktree, action),
+          };
+        } catch (error) {
+          outcome = { kind: "failed", problem: problemFrom(error) };
+        }
+        try {
+          await reread.refs(worktree, repository);
+        } finally {
+          await Promise.all([
+            readHistory(historyRoot ?? worktree),
+            reread.worktree(worktree),
+          ]);
+        }
+        return outcome;
+      },
+    );
+  }
+
+  const current = (root === null ? undefined : byRoot.get(root)) ?? idle;
+  const writes = {
+    ...current,
+    history:
+      (historyRoot === null ? undefined : byRoot.get(historyRoot))?.history ??
+      idle.history,
+  };
 
   function step(action: Step) {
     const entry = nextEntry(writes.history, action);
-    if (root === null || entry === null)
+    if (historyRoot === null || entry === null)
       return Promise.resolve<Outcome>({ kind: "busy" });
     const { id } = entry;
     return run(
@@ -175,12 +221,13 @@ export function useWrites(
       entry.label,
       entry.root,
       entry.operation,
-      () => repositories[action](root, id),
+      () => repositories[action](historyRoot, id),
     );
   }
 
   return {
     ...writes,
+    merge,
     write: (worktree: RepositoryRoot, { operation, expect }: Write) =>
       run({ action: "write" }, describe(operation), worktree, operation, () =>
         repositories.write(worktree, operation, expect),
@@ -195,3 +242,8 @@ export function useWrites(
 }
 
 export type WritesView = ReturnType<typeof useWrites>;
+
+export type MergeCommandOutcome =
+  | { kind: "merged"; report: MergeReport }
+  | { kind: "failed"; problem: Problem }
+  | { kind: "busy" };

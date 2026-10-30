@@ -370,3 +370,32 @@ export async function markResolution(
     done();
   }
 }
+
+export function resolutionConsent(
+  root: RepositoryRoot,
+  paths: readonly string[],
+) {
+  return [...drafts].filter(
+    ([, draft]) =>
+      draft.snapshot.root === root && paths.includes(draft.snapshot.path),
+  );
+}
+
+export function discardConsentedResolutions(
+  consent: ReturnType<typeof resolutionConsent>,
+) {
+  if (draftImpact().frozen) return;
+  for (const [key, shown] of consent) {
+    const current = resolutionOf(key);
+    if (
+      !current ||
+      current.revision !== shown.revision ||
+      current.editorEpoch !== shown.editorEpoch ||
+      current.text !== shown.text
+    )
+      continue;
+    invalidateReads(key);
+    editors.delete(key);
+    publish(key, null);
+  }
+}
