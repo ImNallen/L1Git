@@ -15,7 +15,7 @@
   align-items: center;
   justify-content: space-between;
   padding: 0 20px;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--text-dim);
 }
 .inspector-content {
@@ -163,7 +163,7 @@
 }
 .meta-secondary {
   color: var(--text-dim);
-  font-size: 10px;
+  font-size: 11px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -202,7 +202,7 @@
   border-radius: 8px;
   background: var(--row-hover);
   color: var(--text-dim);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 500;
 }
 .change-summary {
@@ -248,7 +248,7 @@
   --trees-status-modified-override: var(--warning);
 }
 .copy-error {
-  font-size: 10px;
+  font-size: 11px;
   margin: 0 0 12px;
   color: var(--error-text);
   overflow-wrap: anywhere;
@@ -334,7 +334,7 @@
   width: 100%;
   padding: 7px 9px;
   background: var(--control-inset);
-  border: 1px solid var(--border-control);
+  border: 1px solid var(--border-input);
   border-radius: 6px;
   color: var(--text-input);
   font: inherit;

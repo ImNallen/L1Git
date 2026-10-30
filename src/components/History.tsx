@@ -229,7 +229,7 @@ function WorktreeDescription({ row }: { row: WorktreeRow }) {
       : changeSummary(row.changes.status.entries);
   return (
     <button
-      className="commit-description"
+      className="commit-cell"
       tabIndex={-1}
       aria-label={`Uncommitted changes in ${row.worktree.name}, ${summary}`}
     >
@@ -1071,7 +1071,7 @@ export function History({
                   </td>
                   <td role="gridcell">
                     <button
-                      className="commit-description"
+                      className="commit-cell"
                       tabIndex={-1}
                       aria-label={`${commit.subject}, ${commit.author}, ${commit.oid.slice(0, 7)}`}
                     >

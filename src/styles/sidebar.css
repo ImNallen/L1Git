@@ -227,7 +227,7 @@ input::placeholder {
   color: var(--blue);
 }
 .branch-head {
-  font-size: 8px;
+  font-size: 10px;
   letter-spacing: 0.5px;
   color: var(--accent-muted);
 }
@@ -239,7 +239,7 @@ input::placeholder {
   flex-shrink: 0;
   color: var(--text-dim);
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: 11px;
 }
 .branch-row.static:hover {
   background: none;
@@ -248,7 +248,7 @@ input::placeholder {
   color: var(--text-icon);
 }
 .unborn small {
-  font-size: 10px;
+  font-size: 11px;
 }
 .tree-hint {
   color: var(--text-dim);
@@ -277,7 +277,7 @@ input::placeholder {
   align-items: center;
   gap: 7px;
   color: var(--text-faint);
-  font-size: 10px;
+  font-size: 11px;
   padding: 0 15px;
 }
 .sidebar-updater {
@@ -327,7 +327,7 @@ input::placeholder {
   flex-shrink: 0;
   gap: 6px;
   margin-right: 4px;
-  font-size: 10px;
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
 .sync-counts > span {
