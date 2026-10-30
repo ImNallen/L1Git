@@ -285,14 +285,11 @@ kbd {
   min-height: 0;
   min-width: 0;
 }
-.repository-workspace[hidden] {
-  display: none;
-}
 .settings-page {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 52px 48px;
+  padding: 32px 36px;
 }
 .settings-content {
   max-width: 900px;
@@ -306,7 +303,7 @@ kbd {
   outline: none;
 }
 .settings-description {
-  margin: 0 0 42px;
+  margin: 0 0 32px;
   color: var(--muted);
   line-height: 1.6;
 }

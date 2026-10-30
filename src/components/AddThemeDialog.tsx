@@ -51,18 +51,23 @@ export function AddThemeDialog({ onAdd, onClose }: Props) {
   const [dragging, setDragging] = useState(false);
   useEffect(() => dialog.current?.showModal(), []);
 
+  const close = () => {
+    dialog.current?.close();
+    onClose();
+  };
+
   async function importFiles(files: readonly File[]) {
     const { families, errors } = await readFiles(files);
     if (families.length > 0) onAdd(families);
     if (errors.length > 0) setErrors(errors);
-    else onClose();
+    else close();
   }
 
   function importJson() {
     const result = parseThemeFile(json);
     if (!result.ok) return setErrors([result.error]);
     onAdd([result.family]);
-    onClose();
+    close();
   }
 
   return (
@@ -72,10 +77,10 @@ export function AddThemeDialog({ onAdd, onClose }: Props) {
       aria-labelledby="add-theme-title"
       onCancel={(event) => {
         event.preventDefault();
-        onClose();
+        close();
       }}
       onClick={(event) => {
-        if (event.target === event.currentTarget) onClose();
+        if (event.target === event.currentTarget) close();
       }}
       onDragOver={holdDrop}
       onDrop={holdDrop}
@@ -87,7 +92,7 @@ export function AddThemeDialog({ onAdd, onClose }: Props) {
         <button
           type="button"
           className="icon-button"
-          onClick={onClose}
+          onClick={close}
           aria-label="Close add theme"
         >
           <X size={17} />
@@ -98,7 +103,7 @@ export function AddThemeDialog({ onAdd, onClose }: Props) {
       <ThemeSearch
         onImported={(family) => {
           onAdd([family]);
-          onClose();
+          close();
         }}
       />
       <div className="theme-import-divider">or import a file</div>
@@ -162,7 +167,7 @@ export function AddThemeDialog({ onAdd, onClose }: Props) {
         </ul>
       )}
       <div className="dialog-actions">
-        <button type="button" className="button secondary" onClick={onClose}>
+        <button type="button" className="button secondary" onClick={close}>
           Cancel
         </button>
         <button

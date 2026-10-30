@@ -8,7 +8,6 @@ import {
 } from "react";
 import { flushSync } from "react-dom";
 import {
-  ArrowLeft,
   CloudDownload,
   CloudUpload,
   EyeOff,
@@ -18,7 +17,6 @@ import {
   LoaderCircle,
   PanelLeft,
   PanelRight,
-  Palette,
   Settings,
   Plus,
   Trash2,
@@ -58,6 +56,7 @@ import { EditMessageDialog } from "./components/EditMessageDialog";
 import { COMMIT_SUMMARY_ID } from "./components/CommitBox";
 import { CommandPalette } from "./components/CommandPalette";
 import { FetchSettings } from "./components/FetchSettings";
+import { SettingsDialog } from "./components/SettingsDialog";
 import { CommitInspector, InspectorFrame } from "./components/CommitInspector";
 import { FileDiffPane, revisionOf } from "./components/FileDiffPane";
 import type { DiffStyle, FileDiffHandle } from "./components/FileDiffPane";
@@ -172,12 +171,6 @@ function listedRef(
     null
   );
 }
-
-const settingsSections = [
-  { section: "appearance", label: "Appearance", Icon: Palette },
-  { section: "fetching", label: "Fetching", Icon: CloudDownload },
-  { section: "updates", label: "Updates", Icon: CloudDownload },
-] as const;
 
 export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   const appearance = useAppearance(initialTheme);
@@ -1002,9 +995,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
         hidden={!sidebarOpen}
         className="sidebar"
         style={{ width: sidebarWidth }}
-        aria-label={
-          screen === "settings" ? "Settings sidebar" : "Repository sidebar"
-        }
+        aria-label="Repository sidebar"
       >
         <div className="brand" data-tauri-drag-region>
           {sidebarOpen && sidebarToggle}
@@ -1015,12 +1006,12 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
             </span>
           </span>
         </div>
-        <div className="repository-navigation" hidden={screen === "settings"}>
+        <div className="repository-navigation">
           <RepositoryTree
             entries={app.catalog.entries}
             expanded={expansion.expanded}
             refs={branchRefs.refs}
-            activePath={screen === "repository" ? activePath : null}
+            activePath={activePath}
             highlighted={
               snapshot && jumped && highlighted
                 ? { root: snapshot.root, reference: jumped.reference }
@@ -1056,41 +1047,20 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
             onCheckout={(branch) => void checkout(startAt(branch))}
           />
         </div>
-        {screen === "settings" && (
-          <nav className="settings-navigation" aria-label="Settings">
-            {settingsSections.map(({ section, label, Icon }) => (
-              <button
-                key={section}
-                className="settings-nav-item"
-                aria-current={settingsSection === section ? "page" : undefined}
-                onClick={() => setSettingsSection(section)}
-              >
-                <Icon size={16} />
-                {label}
-              </button>
-            ))}
-          </nav>
-        )}
         <footer className="sidebar-bottom">
           <UpdateAffordance
             state={updates.snapshot.state}
             onOpen={() => commands.openSettings("updates")}
           />
-          {screen === "settings" ? (
-            <button className="settings-back" onClick={leaveSettings}>
-              <ArrowLeft size={15} /> Back
-            </button>
-          ) : (
-            <button
-              ref={settingsRef}
-              className="icon-button"
-              aria-label="Settings"
-              title="Settings"
-              onClick={() => commands.openSettings()}
-            >
-              <Settings size={16} />
-            </button>
-          )}
+          <button
+            ref={settingsRef}
+            className="icon-button"
+            aria-label="Settings"
+            title="Settings"
+            onClick={() => commands.openSettings()}
+          >
+            <Settings size={16} />
+          </button>
         </footer>
       </aside>
       {sidebarOpen && (
@@ -1104,10 +1074,10 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
         />
       )}
       <main className="workspace">
-        <div className="repository-workspace" hidden={screen !== "repository"}>
+        <div className="repository-workspace">
           <div className="repository-content">
             <header className="toolbar" data-tauri-drag-region>
-              {screen === "repository" && !sidebarOpen && sidebarToggle}
+              {!sidebarOpen && sidebarToggle}
               <div className="breadcrumb" data-tauri-drag-region>
                 {shown ? (
                   <span className="repository-name" title={shown.root}>
@@ -1422,44 +1392,26 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
             </>
           )}
         </div>
-        {screen === "settings" && (
-          <>
-            <header className="toolbar settings-toolbar" data-tauri-drag-region>
-              {!sidebarOpen && sidebarToggle}
-              <nav
-                className="breadcrumb"
-                aria-label="Breadcrumb"
-                data-tauri-drag-region
-              >
-                <span className="muted" data-tauri-drag-region>
-                  Settings
-                </span>
-                <span className="breadcrumb-slash" data-tauri-drag-region>
-                  /
-                </span>
-                <span aria-current="page" data-tauri-drag-region>
-                  {
-                    settingsSections.find(
-                      ({ section }) => section === settingsSection,
-                    )?.label
-                  }
-                </span>
-              </nav>
-            </header>
-            {settingsSection === "appearance" ? (
-              <AppearanceSettings appearance={appearance} />
-            ) : settingsSection === "updates" ? (
-              <UpdatesSettings updates={updates} />
-            ) : (
-              <FetchSettings
-                intervalMinutes={fetchSettings.intervalMinutes}
-                onIntervalChange={fetchSettings.setIntervalMinutes}
-                persistenceError={fetchSettings.persistenceError}
-              />
-            )}
-          </>
-        )}
       </main>
+      {screen === "settings" && (
+        <SettingsDialog
+          section={settingsSection}
+          onSectionChange={setSettingsSection}
+          onClose={leaveSettings}
+        >
+          {settingsSection === "appearance" ? (
+            <AppearanceSettings appearance={appearance} />
+          ) : settingsSection === "updates" ? (
+            <UpdatesSettings updates={updates} />
+          ) : (
+            <FetchSettings
+              intervalMinutes={fetchSettings.intervalMinutes}
+              onIntervalChange={fetchSettings.setIntervalMinutes}
+              persistenceError={fetchSettings.persistenceError}
+            />
+          )}
+        </SettingsDialog>
+      )}
       <InstallingBlocker state={updates.snapshot.state} />
       {palette && (
         <CommandPalette
