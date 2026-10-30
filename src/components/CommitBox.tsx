@@ -2,13 +2,8 @@ import { useEffect, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { LoaderCircle, TriangleAlert } from "lucide-react";
 import * as repositories from "../repositories";
-import {
-  amendsHead,
-  beginDraftTask,
-  clearSubmitted,
-  useCommitDraft,
-  useDraftImpact,
-} from "../commitDrafts";
+import { beginDraftTask, useDraftImpact } from "../draftProtection";
+import { amendsHead, clearSubmitted, useCommitDraft } from "../commitDrafts";
 import {
   identityCommands,
   loadMessage,

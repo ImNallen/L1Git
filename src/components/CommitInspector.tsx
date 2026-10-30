@@ -1,3 +1,5 @@
+import { useDraftImpact } from "../draftProtection";
+import { canMark, resolutionKey, resolutionOf } from "../resolutionDrafts";
 import {
   useCallback,
   useEffect,
@@ -613,6 +615,7 @@ const GROUP_MAX_ROWS = 12;
 type RowFocus = { row: string; side: ListSide };
 
 function WorktreeFiles({
+  resolvable,
   group: { title, files, side },
   selectedFile,
   onSelectFile,
@@ -626,6 +629,7 @@ function WorktreeFiles({
   onFocused,
 }: {
   group: WorktreeGroup;
+  resolvable: ReadonlySet<string>;
   selectedFile: OpenedFile | null;
   onSelectFile: (path: string, side: ListSide) => void;
   busy: boolean;
@@ -647,6 +651,7 @@ function WorktreeFiles({
     {
       label: row,
       disabled: busy,
+      ...(side === "conflict" ? { appliesTo: resolvable } : {}),
       run: (paths, target) => onWrite(kind, side, paths, target),
     },
   ];
@@ -734,6 +739,7 @@ function WorktreeInspector({
   onRefresh: () => void;
   writes: WorktreeWrites;
 }) {
+  useDraftImpact();
   const [focusAfter, setFocusAfter] = useState<RowFocus | null>(null);
   const clearFocus = useCallback(() => setFocusAfter(null), []);
   const lastRow = useRef<RowFocus | null>(null);
@@ -906,6 +912,18 @@ function WorktreeInspector({
             <WorktreeFiles
               key={group.title}
               group={group}
+              resolvable={
+                new Set(
+                  group.files
+                    .filter(({ path }) => {
+                      const draft = resolutionOf(
+                        resolutionKey(worktree.root, path),
+                      );
+                      return draft === null || canMark(draft);
+                    })
+                    .map(({ path }) => path),
+                )
+              }
               selectedFile={selectedFile}
               onSelectFile={onSelectFile}
               busy={writes.busy}

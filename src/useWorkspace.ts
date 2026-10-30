@@ -457,16 +457,30 @@ export function useWorkspace() {
       state.root === key.root &&
       state.path === key.path;
     if (!keepShown) setFileDiff({ kind: "loading", ...key });
+    const changes =
+      key.side === null ? null : changesRef.current.get(key.selection.root);
+    const conflict =
+      changes?.kind === "ready"
+        ? changes.status.entries.find(
+            (entry) => entry.path === path && entry.kind === "unmerged",
+          )
+        : null;
     const reading: Promise<WorktreePatch> =
-      key.side === null
-        ? repositories
-            .filePatch(key.root, key.comparison, key.path)
-            .then((diff) => ({ kind: "diff", diff }))
-        : repositories.worktreePatch(
-            key.selection.root,
-            key.path,
-            patchSide(key.side),
-          );
+      key.side === "conflict" && conflict?.kind === "unmerged"
+        ? Promise.resolve({
+            kind: "conflicted",
+            conflict: conflict.conflict,
+            diff: null,
+          })
+        : key.side === null
+          ? repositories
+              .filePatch(key.root, key.comparison, key.path)
+              .then((diff) => ({ kind: "diff", diff }))
+          : repositories.worktreePatch(
+              key.selection.root,
+              key.path,
+              patchSide(key.side),
+            );
     void reading.then(
       (patch) =>
         setFileDiff((state) =>

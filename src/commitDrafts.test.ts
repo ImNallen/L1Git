@@ -80,7 +80,7 @@ describe("restoreUndone", () => {
   });
 });
 
-import { beginDraftTask, draftImpact, freezeDrafts } from "./commitDrafts";
+import { beginDraftTask, draftImpact, freezeDrafts } from "./draftProtection";
 
 it("requires consent for inactive-root drafts and amend-aside messages", () => {
   const inactive = rootSchema.parse("/work/inactive");

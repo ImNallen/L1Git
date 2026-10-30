@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as repositories from "./repositories";
-import { beginDraftTask, restoreUndone } from "./commitDrafts";
+import { beginDraftTask } from "./draftProtection";
+import { restoreUndone } from "./commitDrafts";
 import {
   describe,
   movesRefs,

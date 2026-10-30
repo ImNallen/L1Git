@@ -1,4 +1,10 @@
 import {
+  draftImpact as currentDraftImpact,
+  useDraftImpact,
+} from "./draftProtection";
+import { canMark, resolutionKey, resolutionOf } from "./resolutionDrafts";
+import { RetainedResolution } from "./components/ConflictResolver";
+import {
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -242,6 +248,21 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     (sidebarOpen ? settingsRef : sidebarToggleRef).current?.focus();
   }, [sidebarOpen]);
   const { workspace, current, fileDiff, closeFile } = app;
+  const draftImpact = useDraftImpact();
+  const [retained, setRetained] = useState<{
+    root: RepositoryRoot;
+    path: string;
+  } | null>(null);
+  useEffect(() => {
+    if (draftImpact.resolutions.length === 0) return;
+    const protect = (event: BeforeUnloadEvent) => {
+      if (currentDraftImpact().frozen) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", protect);
+    return () => window.removeEventListener("beforeunload", protect);
+  }, [draftImpact.resolutions.length]);
   const fileOpen = fileDiff.kind !== "closed";
   const busy = workspace.kind === "loading" || workspace.kind === "opening";
   const snapshot = current?.snapshot ?? null;
@@ -310,6 +331,14 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     kind: FileWrite,
     paths: readonly string[],
   ) {
+    if (
+      kind === "stageFiles" &&
+      paths.some((path) => {
+        const draft = resolutionOf(resolutionKey(root, path));
+        return draft !== null && !canMark(draft);
+      })
+    )
+      return Promise.resolve(false);
     const changes = app.changes.get(root);
     const write =
       changes?.kind === "ready" ? writeFor(kind, changes.status, paths) : null;
@@ -1148,6 +1177,34 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
               </div>
             </header>
             <WriteNoticeRow writes={writes} />
+            {draftImpact.resolutions.length > 0 && (
+              <div
+                className="resolution-draft-list"
+                aria-label="Unsaved conflict results"
+              >
+                <span>Unsaved conflict results</span>
+                {draftImpact.resolutions.map(({ root, path }) => (
+                  <button
+                    className="button secondary"
+                    key={resolutionKey(root, path)}
+                    title={`${root}/${path}`}
+                    onClick={() => {
+                      closeFile();
+                      void (
+                        snapshot?.root === root ||
+                        snapshot?.worktrees.some(
+                          (worktree) => worktree.root === root,
+                        )
+                          ? Promise.resolve()
+                          : app.selectRepository(root)
+                      ).then(() => setRetained({ root, path }));
+                    }}
+                  >
+                    {path}
+                  </button>
+                ))}
+              </div>
+            )}
             {openPush?.notice && (
               <div
                 className={`notice ${openPush.notice.outcome.kind === "published" || openPush.notice.outcome.kind === "pushed" || openPush.notice.outcome.kind === "upToDate" ? "info-notice" : "error-notice"}`}
@@ -1275,6 +1332,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                       selectable={shows}
                       onSelectCommit={selectCommit}
                       parts={parts.view}
+                      writes={writes}
                     />
                   )}
                 </>
@@ -1391,6 +1449,17 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
           )}
         </div>
       </main>
+      {retained && (
+        <RetainedResolution
+          {...retained}
+          refresh={app.changes.get(retained.root)}
+          theme={appearance.variant.appearance}
+          painted={Object.keys(appearance.variant.palette).length > 0}
+          writes={writes}
+          onClose={() => setRetained(null)}
+          onResolved={() => setRetained(null)}
+        />
+      )}
       {screen === "settings" && (
         <SettingsDialog
           section={settingsSection}

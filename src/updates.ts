@@ -2,7 +2,7 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { z } from "zod";
-import { freezeDrafts } from "./commitDrafts";
+import { freezeDrafts } from "./draftProtection";
 
 const trackSchema = z.enum(["stable", "nightly"]);
 const candidateSchema = z.object({

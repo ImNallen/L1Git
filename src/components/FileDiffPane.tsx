@@ -1,4 +1,6 @@
 import { useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
+import { ConflictResolver } from "./ConflictResolver";
+import type { WritesView } from "../useWrites";
 import type { Ref } from "react";
 import { ArrowLeft, FileX2, LoaderCircle, TriangleAlert } from "lucide-react";
 import type { Appearance } from "../themes/palette";
@@ -41,6 +43,7 @@ type Props = {
   selectable: (oid: Oid) => boolean;
   onSelectCommit: (oid: Oid) => void;
   parts: Parts | null;
+  writes: WritesView;
 };
 
 /** History and blame read the file in the target commit, which a worktree does not have. */
@@ -67,6 +70,7 @@ export function FileDiffPane({
   selectable,
   onSelectCommit,
   parts,
+  writes,
 }: Props) {
   const backRef = useRef<HTMLButtonElement>(null);
   const [mode, setMode] = useState<"diff" | "history" | "blame">("diff");
@@ -111,29 +115,42 @@ export function FileDiffPane({
         {state.side !== null && (
           <span className="file-diff-side">{sideLabels[state.side]}</span>
         )}
-        <div className="diff-style" role="group" aria-label="File view">
-          {VIEWS.map(({ view: each, label }) => {
-            const needsCommit =
-              revision === null && (each === "history" || each === "blame");
-            return (
-              <button
-                key={each}
-                aria-pressed={view === each}
-                disabled={needsCommit}
-                title={
-                  needsCommit
-                    ? "History and blame need a commit. Select a commit to read this file's history."
-                    : undefined
-                }
-                onClick={() => choose(each)}
-              >
-                {label}
-              </button>
-            );
-          })}
-        </div>
+        {state.side !== "conflict" && (
+          <div className="diff-style" role="group" aria-label="File view">
+            {VIEWS.map(({ view: each, label }) => {
+              const needsCommit =
+                revision === null && (each === "history" || each === "blame");
+              return (
+                <button
+                  key={each}
+                  aria-pressed={view === each}
+                  disabled={needsCommit}
+                  title={
+                    needsCommit
+                      ? "History and blame need a commit. Select a commit to read this file's history."
+                      : undefined
+                  }
+                  onClick={() => choose(each)}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </header>
-      {revision !== null && view === "history" ? (
+      {state.side === "conflict" ? (
+        <ConflictResolver
+          key={`${state.selection.root}:${state.path}`}
+          root={state.selection.root}
+          path={state.path}
+          refresh={state}
+          theme={theme}
+          painted={painted}
+          writes={writes}
+          onResolved={onBack}
+        />
+      ) : revision !== null && view === "history" ? (
         <FileHistory revision={revision} {...look} />
       ) : revision !== null && view === "blame" ? (
         <FileBlame
