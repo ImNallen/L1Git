@@ -228,9 +228,14 @@ mod tests {
                 .success()
         );
         let root = directory.path().canonicalize().unwrap();
+        let read_timeout = if cfg!(windows) {
+            Duration::from_secs(5)
+        } else {
+            Duration::from_millis(500)
+        };
+        let lock_wait = read_timeout + Duration::from_millis(100);
         let core = Arc::new(
-            Coordinator::new(Limits::default(), root.join("undo"))
-                .cap_reads(Duration::from_millis(500)),
+            Coordinator::new(Limits::default(), root.join("undo")).cap_reads(read_timeout),
         );
         let locks = core.locks(&root.join(".git"));
         let gate = lock_ignoring_poison(&locks.gate);
@@ -250,11 +255,13 @@ mod tests {
             ))
             .unwrap();
         });
-        assert!(rx.recv_timeout(Duration::from_millis(600)).is_err());
+        assert!(rx.recv_timeout(lock_wait).is_err());
         drop(gate);
-        assert!(rx.recv_timeout(Duration::from_millis(600)).is_err());
+        assert!(rx.recv_timeout(lock_wait).is_err());
         drop(write);
-        rx.recv_timeout(Duration::from_secs(5)).unwrap().unwrap();
+        rx.recv_timeout(read_timeout + Duration::from_secs(5))
+            .unwrap()
+            .unwrap();
         drop(permits);
         job.join().unwrap();
     }
