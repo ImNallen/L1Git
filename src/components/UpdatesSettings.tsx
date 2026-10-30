@@ -1,8 +1,7 @@
-import { useEffect, useRef, useState } from "react";
-import { Download, LoaderCircle, RotateCw, X } from "lucide-react";
-import { draftImpact, useDraftImpact } from "../commitDrafts";
-import type { DraftImpact } from "../commitDrafts";
-import type { CandidateId, Updates, UpdateState } from "../updates";
+import { useEffect, useId, useRef } from "react";
+import { Download, LoaderCircle, RotateCw } from "lucide-react";
+import type { Updates, UpdateState } from "../updates";
+import type { UpdateRestart } from "./UpdateRestart";
 
 const releases = "https://github.com/ImNallen/L1Git/releases";
 const unavailable = {
@@ -42,49 +41,17 @@ function statusText(state: UpdateState, track: string): string {
   }
 }
 
-export function UpdatesSettings({ updates }: { updates: Updates }) {
+export function UpdatesSettings({
+  updates,
+  restart,
+}: {
+  updates: Updates;
+  restart: UpdateRestart;
+}) {
   const { snapshot, problem } = updates;
   const { state, track } = snapshot;
   const heading = useRef<HTMLHeadingElement>(null);
-  const [consent, setConsent] = useState<{
-    candidate: CandidateId;
-    impact: DraftImpact;
-    message: string | null;
-  } | null>(null);
-  const [restartProblem, setRestartProblem] = useState<string | null>(null);
-  const impact = useDraftImpact();
   useEffect(() => heading.current?.focus(), []);
-
-  function requestRestart(candidate: CandidateId) {
-    const current = draftImpact();
-    if (current.tasks || current.frozen) {
-      setRestartProblem(
-        "Commit message work is still finishing. Wait for it to finish, then try again. Your drafts are intact.",
-      );
-      return;
-    }
-    setRestartProblem(null);
-    setConsent({ candidate, impact: current, message: null });
-  }
-  async function confirmRestart() {
-    if (!consent) return;
-    const result = await updates.restart(
-      consent.candidate,
-      consent.impact.revision,
-    );
-    if (result.kind !== "accepted") {
-      setConsent({
-        ...consent,
-        impact: draftImpact(),
-        message:
-          result.kind === "busy"
-            ? "Commit message work is still finishing. Wait, then review and confirm again."
-            : "Your drafts changed. Review the updated list and confirm again.",
-      });
-      return;
-    }
-    setConsent(null);
-  }
 
   const locked = state.kind === "installing" || state.kind === "unavailable";
   const checking =
@@ -125,7 +92,7 @@ export function UpdatesSettings({ updates }: { updates: Updates }) {
                   checked={track === value}
                   disabled={locked}
                   onChange={() => {
-                    setConsent(null);
+                    restart.cancel();
                     void updates.selectTrack(value);
                   }}
                 />
@@ -181,7 +148,7 @@ export function UpdatesSettings({ updates }: { updates: Updates }) {
             <button
               type="button"
               className="button primary"
-              onClick={() => requestRestart(state.candidate.id)}
+              onClick={() => restart.request(state.candidate.id)}
             >
               <RotateCw size={14} />
               Restart and install
@@ -194,9 +161,9 @@ export function UpdatesSettings({ updates }: { updates: Updates }) {
               {state.message}
             </p>
           )}
-        {(problem || snapshot.preferenceError || restartProblem) && (
+        {(problem || snapshot.preferenceError || restart.problem) && (
           <p className="settings-error" role="alert">
-            {problem ?? snapshot.preferenceError ?? restartProblem}
+            {problem ?? snapshot.preferenceError ?? restart.problem}
           </p>
         )}
         {"candidate" in state && state.candidate.notes && (
@@ -212,159 +179,121 @@ export function UpdatesSettings({ updates }: { updates: Updates }) {
           </a>
         </p>
       </div>
-      {consent && (
-        <RestartDialog
-          impact={consent.impact}
-          message={consent.message}
-          busy={impact.tasks > 0}
-          onConfirm={() => void confirmRestart()}
-          onClose={() => setConsent(null)}
-        />
-      )}
     </section>
   );
 }
 
-function RestartDialog({
-  impact,
-  message,
-  busy,
-  onConfirm,
-  onClose,
-}: {
-  impact: DraftImpact;
-  message: string | null;
-  busy: boolean;
-  onConfirm: () => void;
-  onClose: () => void;
-}) {
-  const dialog = useRef<HTMLDialogElement>(null);
-  const cancel = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    dialog.current?.showModal();
-    cancel.current?.focus();
-  }, []);
-  const close = () => {
-    dialog.current?.close();
-    onClose();
-  };
-  const count = impact.drafts.reduce(
-    (total, draft) => total + draft.messages,
-    0,
-  );
-  return (
-    <dialog
-      ref={dialog}
-      className="add-dialog"
-      aria-labelledby="restart-title"
-      onCancel={(event) => {
-        event.preventDefault();
-        close();
-      }}
-      onClick={(event) => {
-        if (event.target === event.currentTarget) close();
-      }}
-    >
-      <div className="dialog-title">
-        <div className="dialog-icon">
-          <RotateCw size={20} />
-        </div>
-        <button
-          type="button"
-          className="icon-button"
-          aria-label="Close restart confirmation"
-          onClick={close}
-        >
-          <X size={17} />
-        </button>
-      </div>
-      <h1 id="restart-title">Restart and install update?</h1>
-      <p>
-        L1 Git will close and restart. Files and commits on disk stay intact.
-      </p>
-      {impact.drafts.length > 0 ? (
-        <>
-          <p>
-            All unsaved commit messages will be lost, including messages in
-            inactive repositories and messages set aside while amending. This
-            affects {count} {count === 1 ? "message" : "messages"} in{" "}
-            {impact.drafts.length}{" "}
-            {impact.drafts.length === 1 ? "repository" : "repositories"}.
-          </p>
-          <ul
-            className="dialog-paths"
-            aria-label="Repositories with unsaved drafts"
-          >
-            {impact.drafts.map(({ root, messages, amending }) => (
-              <li key={root}>
-                {root} ({messages} {messages === 1 ? "message" : "messages"}
-                {amending ? ", amend in progress" : ""})
-              </li>
-            ))}
-          </ul>
-        </>
-      ) : (
-        <p>There are no unsaved commit drafts.</p>
-      )}
-      {(message || busy) && (
-        <p role="alert" className="settings-error">
-          {busy
-            ? "Commit message work is still finishing. Wait before confirming."
-            : message}
-        </p>
-      )}
-      <div className="dialog-actions">
-        <button
-          type="button"
-          className="button secondary"
-          ref={cancel}
-          onClick={close}
-        >
-          Cancel
-        </button>
-        <button
-          type="button"
-          className={`button ${impact.drafts.length ? "danger" : "primary"}`}
-          disabled={busy}
-          onClick={onConfirm}
-        >
-          {impact.drafts.length
-            ? "Discard drafts and restart"
-            : "Restart and install"}
-        </button>
-      </div>
-    </dialog>
-  );
-}
-
 export function UpdateAffordance({
-  state,
-  onOpen,
+  updates,
+  restart,
 }: {
-  state: UpdateState;
-  onOpen: () => void;
+  updates: Updates;
+  restart: UpdateRestart;
 }) {
-  if (
-    state.kind !== "available" &&
-    state.kind !== "downloaded" &&
-    state.kind !== "downloading"
-  )
-    return null;
+  const statusId = useId();
+  const { state, track, preferenceError } = updates.snapshot;
+  const progress =
+    state.kind === "downloading" && state.total !== null
+      ? `${Math.min(100, Math.floor((state.received / state.total) * 100))}%`
+      : null;
+  const action = (() => {
+    switch (state.kind) {
+      case "idle":
+      case "current":
+        return {
+          label: "Check for updates",
+          Icon: RotateCw,
+          run: updates.check,
+        };
+      case "failed":
+        return { label: "Retry check", Icon: RotateCw, run: updates.check };
+      case "available":
+        return {
+          label: state.message ? "Retry download" : "Download update",
+          Icon: Download,
+          run: () => updates.download(state.candidate.id),
+        };
+      case "downloaded":
+        return {
+          label: "Restart and install",
+          Icon: RotateCw,
+          run: () => restart.request(state.candidate.id),
+        };
+      case "checking":
+        return {
+          label: "Checking for updates…",
+          Icon: LoaderCircle,
+          run: null,
+        };
+      case "downloading":
+        return {
+          label: progress
+            ? `Downloading update… ${progress}`
+            : "Downloading update…",
+          Icon: LoaderCircle,
+          run: null,
+        };
+      case "installing":
+        return { label: "Installing update…", Icon: LoaderCircle, run: null };
+      case "unavailable":
+        return {
+          label: "In-app updates unavailable",
+          Icon: Download,
+          run: null,
+        };
+      default: {
+        const exhaustive: never = state;
+        return exhaustive;
+      }
+    }
+  })();
+  const detail = [
+    state.kind === "unavailable" ? null : action.label,
+    statusText(state, track === "stable" ? "Stable" : "Nightly"),
+    updates.problem,
+    preferenceError,
+    restart.problem,
+    state.kind === "available" || state.kind === "downloaded"
+      ? state.message
+      : null,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const { Icon } = action;
   return (
-    <button
-      type="button"
-      className="update-affordance settings-back"
-      onClick={onOpen}
+    <span
+      className="sidebar-updater"
+      role="group"
+      tabIndex={action.run === null ? 0 : undefined}
+      aria-label="App updates"
+      aria-describedby={action.run === null ? statusId : undefined}
     >
-      <Download size={14} />
-      <span>
-        {state.kind === "downloaded"
-          ? "Update ready to install"
-          : state.kind === "downloading"
-            ? "Downloading update…"
-            : "Update available"}
+      <button
+        type="button"
+        className="icon-button"
+        aria-label={action.label}
+        aria-describedby={statusId}
+        disabled={action.run === null}
+        onClick={() => void action.run?.()}
+      >
+        <Icon
+          size={16}
+          className={Icon === LoaderCircle ? "spin" : undefined}
+          aria-hidden="true"
+        />
+      </button>
+      <span className="update-tooltip" aria-hidden="true">
+        {detail}
       </span>
-    </button>
+      <span
+        id={statusId}
+        className="visually-hidden"
+        role="status"
+        aria-live="polite"
+      >
+        {detail}
+      </span>
+    </span>
   );
 }
 

@@ -270,6 +270,7 @@ input::placeholder {
   font-size: 12px;
 }
 .sidebar-bottom {
+  position: relative;
   height: 29px;
   min-height: 29px;
   display: flex;
@@ -278,6 +279,32 @@ input::placeholder {
   color: var(--text-faint);
   font-size: 10px;
   padding: 0 15px;
+}
+.sidebar-updater {
+  display: inline-flex;
+  margin-left: auto;
+  border-radius: 5px;
+}
+.update-tooltip {
+  display: none;
+  position: absolute;
+  right: 15px;
+  bottom: calc(100% + 8px);
+  z-index: 10;
+  width: max-content;
+  max-width: calc(100% - 30px);
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--panel-raised);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.sidebar-updater:hover .update-tooltip,
+.sidebar-updater:focus-within .update-tooltip {
+  display: block;
 }
 .status-dot {
   display: inline-block;
@@ -323,6 +350,7 @@ input::placeholder {
   --focus-tint: color-mix(in srgb, var(--primary-bg) 10%, var(--sidebar));
 }
 .sidebar button:focus-visible,
+.sidebar-updater:focus-visible,
 .sidebar button:focus-visible:hover:not(:disabled) {
   outline: none;
   background: var(--focus-tint);
@@ -345,6 +373,7 @@ input::placeholder {
   background: var(--focus-tint);
 }
 .sidebar .icon-button:focus-visible,
+.sidebar-updater:focus-visible,
 .sidebar .icon-button:focus-visible:hover:not(:disabled),
 .sidebar-toggle:focus-visible,
 .sidebar-toggle:focus-visible:hover:not(:disabled),
