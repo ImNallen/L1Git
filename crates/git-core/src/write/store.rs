@@ -37,14 +37,14 @@ pub(super) struct LockedStore {
 /// never reaches the new repository.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct Identity {
+pub(super) struct Identity {
     device: u64,
     inode: u64,
     created: Option<u64>,
 }
 
 impl Identity {
-    fn of(common_dir: &Path) -> Result<Self, RepositoryError> {
+    pub(super) fn of(common_dir: &Path) -> Result<Self, RepositoryError> {
         #[cfg(windows)]
         let (metadata, (device, inode)) =
             crate::windows_fs::metadata(common_dir).map_err(unreadable)?;
@@ -628,6 +628,13 @@ pub(super) struct EntryObjects {
 }
 
 impl EntryObjects {
+    pub(super) fn for_merge(dir: &Path, id: EntryId) -> Self {
+        Self {
+            id,
+            objects: dir.join("objects"),
+        }
+    }
+
     pub(super) const fn id(&self) -> EntryId {
         self.id
     }

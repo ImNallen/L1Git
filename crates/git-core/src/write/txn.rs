@@ -392,6 +392,30 @@ impl<'r> CommitTxn<'r> {
     }
 }
 
+pub(crate) struct MergeTxn<'r>(Outside<'r>);
+
+impl<'r> MergeTxn<'r> {
+    pub(super) fn begin(repo: &'r Repo, deadline: WriteDeadline) -> Result<Self, RepositoryError> {
+        Outside::begin(repo, deadline).map(Self)
+    }
+
+    pub(crate) fn root(&self) -> &Path {
+        self.0.root()
+    }
+
+    pub(super) const fn runner(&self) -> &Outside<'r> {
+        &self.0
+    }
+
+    pub(super) fn start<'a>(&'a self, source: &'a crate::Oid) -> Write<'a> {
+        Write::merge(self, Some(source))
+    }
+
+    pub(super) fn abort(&self) -> Write<'_> {
+        Write::merge(self, None)
+    }
+}
+
 pub(crate) struct RefTxn<'r>(Outside<'r>);
 
 impl<'r> RefTxn<'r> {
@@ -569,7 +593,8 @@ mod tests {
             let crashed = if published { "M  f\n" } else { " M f\n" };
             assert_eq!(status(), format!("{crashed} M g\n"), "{published}");
             let history = coordinator.undo_history(path).unwrap();
-            assert_eq!((history.undo, history.redo), (None, None), "{published}");
+            assert_eq!(history.undo.is_some(), published);
+            assert_eq!(history.redo, None);
 
             let (operation, expect) = stage(path, "g");
             let staged = coordinator.write(path, &operation, &expect).unwrap();
