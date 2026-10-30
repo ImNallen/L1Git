@@ -254,6 +254,7 @@ impl LockedStore {
         }
         match opened.worktree(&applied.root, deadline.reads()) {
             Ok(repo) => change.landed(&repo, &entry, deadline),
+            Err(error) if matches!(change, Change::Resolution(_)) => Err(error),
             Err(_) => Ok(None),
         }
     }
@@ -430,6 +431,38 @@ impl Recorded<'_> {
 
     pub(super) fn replace(&self, change: &Change) -> io::Result<()> {
         self.store.write_file(self.id, "change.json", change)
+    }
+
+    pub(super) fn durable(&self) -> Result<(), RepositoryError> {
+        fn sync(path: &Path) -> io::Result<()> {
+            if path.is_dir() {
+                for child in fs::read_dir(path)? {
+                    sync(&child?.path())?;
+                }
+                #[cfg(unix)]
+                File::open(path)?.sync_all()?;
+                Ok(())
+            } else {
+                File::open(path)?.sync_all()
+            }
+        }
+        sync(&self.entry.dir).map_err(unwritable)?;
+        File::open(self.store.dir.join("log.json"))
+            .and_then(|file| file.sync_all())
+            .map_err(unwritable)?;
+        #[cfg(unix)]
+        File::open(&self.store.dir)
+            .and_then(|file| file.sync_all())
+            .map_err(unwritable)?;
+        Ok(())
+    }
+
+    pub(super) fn confirm_checked(mut self) -> Result<(), RepositoryError> {
+        self.entry.kept = true;
+        let done = self.log.pushed(self.id);
+        self.store.save(&done)?;
+        self.store.forget(&done);
+        Ok(())
     }
 
     pub(super) fn stay_pending(mut self) {

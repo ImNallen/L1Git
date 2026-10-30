@@ -1,7 +1,7 @@
 use crate::{
     AddRemote, AddRemoteReport, Advance, Applied, Blame, BranchMerged, BranchTip, CommitDetail,
-    Comparison, Coordinator, EntryId, Expect, FastForwardReport, FetchMode, FilePatch,
-    FileRevision, LineStats, Operation, PublishChoice, PublishOptions, PushAvailability,
+    Comparison, ConflictFile, Coordinator, EntryId, Expect, FastForwardReport, FetchMode,
+    FilePatch, FileRevision, LineStats, Operation, PublishChoice, PublishOptions, PushAvailability,
     PushIntent, PushReport, RepositoryError, RepositoryOverview, RepositoryRefs,
     RepositorySnapshot, Side, UndoHistory, WorktreePatch, WorktreeStatus,
     file_history::{blame_within, file_history_within},
@@ -75,6 +75,10 @@ pub enum Request {
     WorktreeStatus {
         path: String,
     },
+    ConflictFile {
+        path: String,
+        file: String,
+    },
     WorktreePatch {
         path: String,
         file: String,
@@ -121,6 +125,7 @@ pub enum Response {
     FastForward(FastForwardReport),
     WorktreeStatus(WorktreeStatus),
     WorktreePatch(WorktreePatch),
+    ConflictFile(ConflictFile),
     Write(Applied),
     Undo(Applied),
     Redo(Applied),
@@ -186,6 +191,9 @@ pub fn run(coordinator: &Coordinator, request: Request) -> Result<Response, Repo
             &path,
             deadline(LocalRead::WorktreeStatus),
         )?),
+        Request::ConflictFile { path, file } => Response::ConflictFile(
+            crate::write::conflict_file_within(&path, &file, deadline(LocalRead::ConflictFile))?,
+        ),
         Request::WorktreePatch { path, file, side } => Response::WorktreePatch(
             worktree_patch_within(&path, &file, side, deadline(LocalRead::WorktreePatch))?,
         ),

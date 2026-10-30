@@ -291,6 +291,66 @@ export const worktreePatchSchema = z.discriminatedUnion("kind", [
     diff: filePatchSchema.nullable(),
   }),
 ]);
+export const CONFLICT_TEXT_LIMIT = 256 * 1024;
+export const conflictTextSchema = z
+  .string()
+  .refine(
+    (text) =>
+      new TextEncoder().encode(text).length <= CONFLICT_TEXT_LIMIT &&
+      !text.includes("\0"),
+    "Use UTF-8 text without NUL bytes, up to 256 KiB.",
+  );
+export const conflictVersionSchema = z
+  .string()
+  .regex(/^[a-f0-9]{40}$/)
+  .brand<"ConflictVersion">();
+const conflictObjectSchema = z.strictObject({
+  mode: z.enum(["100644", "100755"]),
+  oid: oidSchema,
+});
+export const conflictSnapshotSchema = z.strictObject({
+  root: rootSchema,
+  path: z.string().max(4096),
+  head: headSchema,
+  entry: z.strictObject({
+    kind: z.literal("unmerged"),
+    path: z.string(),
+    conflict: z.literal("bothModified"),
+    submodule: z.null(),
+    stages: z.strictObject({
+      base: conflictObjectSchema,
+      ours: conflictObjectSchema,
+      theirs: conflictObjectSchema,
+    }),
+  }),
+  version: conflictVersionSchema,
+  base: conflictTextSchema,
+  current: conflictTextSchema,
+  incoming: conflictTextSchema,
+  working: conflictTextSchema,
+});
+export const conflictFileSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("editable"),
+    snapshot: conflictSnapshotSchema,
+  }),
+  z.strictObject({
+    kind: z.literal("external"),
+    root: rootSchema,
+    path: z.string(),
+    reason: z.enum([
+      "structural",
+      "binary",
+      "encoding",
+      "tooLarge",
+      "specialFile",
+      "attributes",
+    ]),
+  }),
+]);
+export type ConflictFile = z.infer<typeof conflictFileSchema>;
+export type ConflictSnapshot = z.infer<typeof conflictSnapshotSchema>;
+
 export const entryIdSchema = z
   .string()
   .regex(/^[0-9a-f]{16}$/)
@@ -310,7 +370,7 @@ const linesPart = {
   lines: z.array(linePickSchema),
   shown: z.string(),
 };
-export const operationSchema = z.discriminatedUnion("kind", [
+const otherOperationSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("stageFiles"),
     entries: z.array(statusEntrySchema),
@@ -369,11 +429,24 @@ export const operationSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("stashPop"), stash: stashTipSchema }),
   z.strictObject({ kind: z.literal("stashDrop"), stash: stashTipSchema }),
 ]);
+const saveConflictDescriptor = z.strictObject({
+  kind: z.literal("saveConflict"),
+  path: z.string().max(4096),
+  version: conflictVersionSchema,
+});
+export const operationSchema = z.discriminatedUnion("kind", [
+  ...otherOperationSchema.options,
+  saveConflictDescriptor.extend({ text: conflictTextSchema }),
+]);
+const recordedOperationSchema = z.union([
+  otherOperationSchema,
+  saveConflictDescriptor.transform((operation) => ({ ...operation, text: "" })),
+]);
 export const expectSchema = z.strictObject({ head: headSchema });
 export const appliedSchema = z.strictObject({
   id: entryIdSchema,
   root: rootSchema,
-  operation: operationSchema,
+  operation: recordedOperationSchema,
 });
 export const branchMergedSchema = z.strictObject({
   head: z.boolean(),

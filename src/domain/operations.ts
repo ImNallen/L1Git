@@ -455,6 +455,8 @@ function sharedFolder(paths: readonly string[]): string {
 
 export function describe(operation: Operation): string {
   switch (operation.kind) {
+    case "saveConflict":
+      return `Save conflict result for ${operation.path}`;
     case "createBranch":
       return `Create branch ${operation.name}`;
     case "renameBranch":

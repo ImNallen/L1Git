@@ -480,7 +480,7 @@ pub(super) fn copy_beside(id: EntryId, file: &Path) -> PathBuf {
     file.with_file_name(name)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(super) struct Stat {
     folder: bool,
     pub(super) identity: Option<(u64, u64)>,
@@ -528,7 +528,7 @@ impl From<&fs::Metadata> for Stat {
 }
 
 #[cfg(unix)]
-fn permissions(metadata: &fs::Metadata) -> u32 {
+pub(super) fn permissions(metadata: &fs::Metadata) -> u32 {
     use std::os::unix::fs::PermissionsExt;
     metadata.permissions().mode() & 0o7777
 }
@@ -576,7 +576,7 @@ impl From<&fs::Metadata> for Stat {
 }
 
 #[cfg(not(unix))]
-fn permissions(metadata: &fs::Metadata) -> u32 {
+pub(super) fn permissions(metadata: &fs::Metadata) -> u32 {
     u32::from(metadata.permissions().readonly())
 }
 

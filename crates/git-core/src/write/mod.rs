@@ -11,6 +11,7 @@ mod files;
 mod index;
 mod partial;
 mod refs;
+mod resolution;
 mod stash;
 mod store;
 mod tags;
@@ -25,6 +26,7 @@ pub(crate) use branches::merged_within;
 pub use branches::{BranchTip, Start};
 use partial::{Action, Part, Picks};
 pub use partial::{LinePick, LineSide};
+pub(crate) use resolution::conflict_file_within;
 use serde::{Deserialize, Serialize};
 pub use stash::StashTip;
 use std::{
@@ -48,6 +50,12 @@ pub enum Operation {
     /// entries are `worktreeStatus` entries, sent back unchanged. An unmerged
     /// path is marked resolved.
     StageFiles { entries: Vec<StatusEntry> },
+    SaveConflict {
+        path: String,
+        version: crate::ConflictVersion,
+        #[serde(skip_serializing, default)]
+        text: Option<String>,
+    },
     /// Puts each entry's paths back to HEAD's version in the index, or
     /// removes them before the first commit. Unmerged paths are refused.
     UnstageFiles { entries: Vec<StatusEntry> },
@@ -222,12 +230,19 @@ impl fmt::Display for EntryId {
 #[serde(tag = "domain", rename_all = "camelCase")]
 enum Change {
     Index(index::IndexChange),
+    Resolution(resolution::ResolutionChange),
     Ref(refs::RefChange),
     Discard(discard::DiscardChange),
     Branch(branches::BranchChange),
     Checkout(checkout::CheckoutChange),
     Tag(tags::TagChange),
     Stash(stash::StashChange),
+}
+
+impl From<resolution::ResolutionChange> for Change {
+    fn from(change: resolution::ResolutionChange) -> Self {
+        Self::Resolution(change)
+    }
 }
 
 impl From<discard::DiscardChange> for Change {
@@ -266,9 +281,11 @@ impl Change {
             Self::Index(change) => Objects::exact(change.objects()),
             Self::Ref(change) => change.objects(),
             Self::Stash(change) => Objects::exact(change.objects()),
-            Self::Discard(_) | Self::Branch(_) | Self::Checkout(_) | Self::Tag(_) => {
-                Objects::default()
-            }
+            Self::Resolution(_)
+            | Self::Discard(_)
+            | Self::Branch(_)
+            | Self::Checkout(_)
+            | Self::Tag(_) => Objects::default(),
         }
     }
 
@@ -291,6 +308,11 @@ impl Change {
                     }
                     Restored::Staged => Ok(Some(txn.commit_step(store, step, self)?)),
                 }
+            }
+            Self::Resolution(change) => {
+                let txn = Txn::begin(repo, deadline)?;
+                resolution::step(&txn, entry, change, direction)?;
+                Ok(Some(txn.commit_step(store, step, self)?))
             }
             Self::Ref(change) => {
                 refs::restore(repo, entry, change, direction, deadline)?;
@@ -335,7 +357,12 @@ impl Change {
             (Self::Stash(_), Direction::Undo) => Some(LocalWrite::UndoStash),
             (Self::Stash(_), Direction::Redo) => Some(LocalWrite::RedoStash),
             (
-                Self::Index(_) | Self::Ref(_) | Self::Discard(_) | Self::Branch(_) | Self::Tag(_),
+                Self::Resolution(_)
+                | Self::Index(_)
+                | Self::Ref(_)
+                | Self::Discard(_)
+                | Self::Branch(_)
+                | Self::Tag(_),
                 _,
             ) => None,
         }
@@ -348,6 +375,9 @@ impl Change {
         deadline: WriteDeadline,
     ) -> Result<Option<Self>, RepositoryError> {
         match self {
+            Self::Resolution(change) => {
+                Ok(resolution::landed(repo, entry, change, deadline)?.then(|| self.clone()))
+            }
             Self::Index(change) => Ok(index::landed(repo, change, deadline)?.then(|| self.clone())),
             Self::Ref(_) | Self::Discard(_) => Ok(Some(self.clone())),
             Self::Branch(change) => Ok(branches::landed(repo, change, deadline)?.map(Self::Branch)),
@@ -365,14 +395,19 @@ impl Change {
         match self {
             Self::Branch(_) | Self::Tag(_) => true,
             Self::Stash(change) => change.repository_wide(),
-            Self::Index(_) | Self::Ref(_) | Self::Discard(_) | Self::Checkout(_) => false,
+            Self::Resolution(_)
+            | Self::Index(_)
+            | Self::Ref(_)
+            | Self::Discard(_)
+            | Self::Checkout(_) => false,
         }
     }
 
     const fn keeps_overwritten_files(&self) -> bool {
         match self {
             Self::Discard(_) => true,
-            Self::Index(_)
+            Self::Resolution(_)
+            | Self::Index(_)
             | Self::Ref(_)
             | Self::Branch(_)
             | Self::Checkout(_)
@@ -383,6 +418,7 @@ impl Change {
 
     fn remove_copies_beside(&self, applied: &Applied) {
         match self {
+            Self::Resolution(change) => resolution::remove_copy_beside(applied, change),
             Self::Discard(change) => {
                 discard::remove_copies_beside(Path::new(&applied.root), applied.id, change);
             }
@@ -399,7 +435,8 @@ impl Change {
         match self {
             Self::Index(change) => change.touches_skip_worktree(),
             Self::Stash(change) => change.touches_skip_worktree(),
-            Self::Ref(_)
+            Self::Resolution(_)
+            | Self::Ref(_)
             | Self::Discard(_)
             | Self::Branch(_)
             | Self::Checkout(_)
@@ -432,6 +469,7 @@ impl Direction {
 impl Operation {
     fn local_write(&self) -> LocalWrite {
         match self {
+            Self::SaveConflict { .. } => LocalWrite::SaveConflict,
             Self::StageFiles { .. } => LocalWrite::StageFiles,
             Self::UnstageFiles { .. } => LocalWrite::UnstageFiles,
             Self::Commit { .. } => LocalWrite::Commit,
@@ -491,6 +529,18 @@ impl Operation {
             discard::discard_part(repo, store, log, deadline, expect, self, &part)
         };
         match self {
+            Self::SaveConflict {
+                path,
+                version,
+                text,
+            } => resolution::save(
+                &writing,
+                expect,
+                path,
+                version,
+                text.as_deref()
+                    .ok_or_else(|| files::unsupported("Save result needs result text.".into()))?,
+            ),
             Self::StageFiles { entries } => index(index::Command::Stage, entries),
             Self::UnstageFiles { entries } => index(index::Command::Unstage, entries),
             Self::Commit { message, staged } => commit(commit::Kind::New(staged), message),
