@@ -7,7 +7,7 @@ import { useRovingRows } from "./useRovingRows";
 vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
 afterEach(() => document.body.replaceChildren());
 
-function Tree() {
+function Tree({ searching = false }: { searching?: boolean }) {
   const nav = useRef<HTMLElement>(null);
   const [open, setOpen] = useState(true);
   useRovingRows(nav);
@@ -27,6 +27,9 @@ function Tree() {
         {open && (
           <>
             <button aria-expanded="true">Local</button>
+            <button aria-expanded="true" disabled={searching}>
+              feat
+            </button>
             <div className="branch-item">
               <button aria-current="true">main</button>
               <button className="branch-visibility" tabIndex={-1}>
@@ -41,10 +44,10 @@ function Tree() {
   );
 }
 
-function render() {
+function render(searching = false) {
   const host = document.createElement("div");
   document.body.append(host);
-  act(() => createRoot(host).render(<Tree />));
+  act(() => createRoot(host).render(<Tree searching={searching} />));
   return host;
 }
 
@@ -92,5 +95,14 @@ it("collapses with Left, returns to the repository, and expands with Right", () 
   press("ArrowRight");
   expect(expanded(host)).toBe("true");
   press("ArrowRight");
+  expect(document.activeElement?.textContent).toBe("Local");
+});
+
+it("steps over folders that search disables", () => {
+  const host = render(true);
+  act(() => button(host, "Local").focus());
+  press("ArrowDown");
+  expect(document.activeElement?.textContent).toBe("main");
+  press("ArrowUp");
   expect(document.activeElement?.textContent).toBe("Local");
 });

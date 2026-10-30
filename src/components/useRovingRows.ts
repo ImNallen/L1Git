@@ -1,7 +1,8 @@
 import { useEffect, type RefObject } from "react";
 
 // The repository chevrons and hover-only visibility toggles stay out: arrows stand in for the first, the context menu for the second.
-const ROW = "button:not(.repository-toggle, .branch-visibility)";
+// Search disables folder toggles, which cannot take focus, so they drop out too.
+const ROW = "button:not(.repository-toggle, .branch-visibility, :disabled)";
 const SKIPPED = ".repository-toggle, .branch-visibility";
 
 /**
@@ -87,7 +88,11 @@ export function useRovingRows(container: RefObject<HTMLElement | null>) {
 
     sync();
     const observer = new MutationObserver(sync);
-    observer.observe(root, { childList: true, subtree: true });
+    observer.observe(root, {
+      childList: true,
+      subtree: true,
+      attributeFilter: ["disabled"],
+    });
     root.addEventListener("focusin", onFocusIn);
     root.addEventListener("keydown", onKeyDown);
     return () => {
