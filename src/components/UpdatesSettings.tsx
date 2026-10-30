@@ -50,9 +50,6 @@ export function UpdatesSettings({
 }) {
   const { snapshot, problem } = updates;
   const { state, track } = snapshot;
-  const heading = useRef<HTMLHeadingElement>(null);
-  useEffect(() => heading.current?.focus(), []);
-
   const locked = state.kind === "installing" || state.kind === "unavailable";
   const checking =
     state.kind === "checking" ||
@@ -60,125 +57,124 @@ export function UpdatesSettings({
     state.kind === "downloaded";
   const trackLabel = track === "stable" ? "Stable" : "Nightly";
   return (
-    <section className="settings-page" aria-labelledby="updates-heading">
-      <div className="settings-content">
-        <h1 id="updates-heading" ref={heading} tabIndex={-1}>
-          Updates
-        </h1>
-        <p className="settings-description">
-          Installed version {snapshot.installedVersion}. Downloads and restart
-          always need your action.
-        </p>
-        <h2 className="settings-section-title">Release channel</h2>
-        <div className="settings-row">
-          <div>
-            <h3 id="update-channel">Update channel</h3>
-            <p id="update-channel-description">
-              Stable releases or early Nightly builds. Switching channels waits
-              for a newer version and never downgrades.
-            </p>
-          </div>
-          <div
-            className="settings-options"
-            role="radiogroup"
-            aria-labelledby="update-channel"
-            aria-describedby="update-channel-description"
-          >
-            {(["stable", "nightly"] as const).map((value) => (
-              <label key={value}>
-                <input
-                  type="radio"
-                  name="update-channel"
-                  checked={track === value}
-                  disabled={locked}
-                  onChange={() => {
-                    restart.cancel();
-                    void updates.selectTrack(value);
-                  }}
-                />
-                <span>{value === "stable" ? "Stable" : "Nightly"}</span>
-              </label>
-            ))}
-          </div>
+    <section
+      className="general-settings-group"
+      aria-labelledby="updates-heading"
+    >
+      <h2 id="updates-heading" className="general-settings-title">
+        Updates
+      </h2>
+      <p className="settings-description">
+        Installed version {snapshot.installedVersion}. Downloads and restart
+        always need your action.
+      </p>
+      <p className="settings-section-title">Release channel</p>
+      <div className="settings-row">
+        <div>
+          <h3 id="update-channel">Update channel</h3>
+          <p id="update-channel-description">
+            Stable releases or early Nightly builds. Switching channels waits
+            for a newer version and never downgrades.
+          </p>
         </div>
-        <h2 className="settings-section-title">App updates</h2>
-        <p role="status" aria-live="polite">
-          {statusText(state, trackLabel)}
-        </p>
-        {state.kind === "downloading" && (
-          <div className="update-progress">
-            <progress
-              aria-label="Update download"
-              value={state.total === null ? undefined : state.received}
-              max={state.total ?? undefined}
-            />
-            <span>
-              {state.received.toLocaleString()} bytes
-              {state.total === null
-                ? ""
-                : ` of ${state.total.toLocaleString()}`}
-            </span>
-          </div>
-        )}
-        <div className="update-actions">
+        <div
+          className="settings-options"
+          role="radiogroup"
+          aria-labelledby="update-channel"
+          aria-describedby="update-channel-description"
+        >
+          {(["stable", "nightly"] as const).map((value) => (
+            <label key={value}>
+              <input
+                type="radio"
+                name="update-channel"
+                checked={track === value}
+                disabled={locked}
+                onChange={() => {
+                  restart.cancel();
+                  void updates.selectTrack(value);
+                }}
+              />
+              <span>{value === "stable" ? "Stable" : "Nightly"}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+      <p className="settings-section-title">App updates</p>
+      <p role="status" aria-live="polite">
+        {statusText(state, trackLabel)}
+      </p>
+      {state.kind === "downloading" && (
+        <div className="update-progress">
+          <progress
+            aria-label="Update download"
+            value={state.total === null ? undefined : state.received}
+            max={state.total ?? undefined}
+          />
+          <span>
+            {state.received.toLocaleString()} bytes
+            {state.total === null ? "" : ` of ${state.total.toLocaleString()}`}
+          </span>
+        </div>
+      )}
+      <div className="update-actions">
+        <button
+          type="button"
+          className="button secondary"
+          disabled={locked || checking}
+          onClick={() => void updates.check()}
+        >
+          {state.kind === "checking" ? (
+            <LoaderCircle size={14} className="spin" />
+          ) : (
+            <RotateCw size={14} />
+          )}{" "}
+          {state.kind === "failed" ? "Retry check" : "Check for updates"}
+        </button>
+        {state.kind === "available" && (
           <button
             type="button"
-            className="button secondary"
-            disabled={locked || checking}
-            onClick={() => void updates.check()}
+            className="button primary"
+            onClick={() => void updates.download(state.candidate.id)}
           >
-            {state.kind === "checking" ? (
-              <LoaderCircle size={14} className="spin" />
-            ) : (
-              <RotateCw size={14} />
-            )}{" "}
-            {state.kind === "failed" ? "Retry check" : "Check for updates"}
+            <Download size={14} />
+            {state.message ? "Retry download" : "Download update"}
           </button>
-          {state.kind === "available" && (
-            <button
-              type="button"
-              className="button primary"
-              onClick={() => void updates.download(state.candidate.id)}
-            >
-              <Download size={14} />
-              {state.message ? "Retry download" : "Download update"}
-            </button>
-          )}
-          {state.kind === "downloaded" && (
-            <button
-              type="button"
-              className="button primary"
-              onClick={() => restart.request(state.candidate.id)}
-            >
-              <RotateCw size={14} />
-              Restart and install
-            </button>
-          )}
-        </div>
-        {(state.kind === "available" || state.kind === "downloaded") &&
-          state.message && (
-            <p className="settings-error" role="alert">
-              {state.message}
-            </p>
-          )}
-        {(problem || snapshot.preferenceError || restart.problem) && (
+        )}
+        {state.kind === "downloaded" && (
+          <button
+            type="button"
+            className="button primary"
+            onClick={() => restart.request(state.candidate.id)}
+          >
+            <RotateCw size={14} />
+            Restart and install
+          </button>
+        )}
+      </div>
+      {(state.kind === "available" || state.kind === "downloaded") &&
+        state.message && (
           <p className="settings-error" role="alert">
-            {problem ?? snapshot.preferenceError ?? restart.problem}
+            {state.message}
           </p>
         )}
-        {"candidate" in state && state.candidate.notes && (
-          <>
-            <h2 className="settings-section-title">Release notes</h2>
-            <pre className="update-notes">{state.candidate.notes}</pre>
-          </>
-        )}
-        <p className="settings-description">
-          L1 Git checks at startup and hourly.{" "}
-          <a href={releases} target="_blank" rel="noreferrer">
-            Download releases manually
-          </a>
+      {(problem || snapshot.preferenceError || restart.problem) && (
+        <p className="settings-error" role="alert">
+          {problem ?? snapshot.preferenceError ?? restart.problem}
         </p>
-      </div>
+      )}
+      {"candidate" in state && state.candidate.notes && (
+        <>
+          <p className="settings-section-title">Release notes</p>
+          <pre className="update-notes">{state.candidate.notes}</pre>
+        </>
+      )}
+      <p className="settings-description">
+        L1 Git checks at startup and hourly.{" "}
+        <a href={releases} target="_blank" rel="noreferrer">
+          Download releases manually
+        </a>
+      </p>
     </section>
   );
 }

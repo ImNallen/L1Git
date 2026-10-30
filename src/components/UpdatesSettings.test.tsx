@@ -303,7 +303,9 @@ it("checks, downloads and confirms from the sidebar without mounting Settings", 
   expect(
     container.querySelectorAll('dialog[aria-labelledby="restart-title"]'),
   ).toHaveLength(1);
-  expect(container.querySelector(".settings-page")).toBeNull();
+  expect(
+    container.querySelector('[aria-labelledby="updates-heading"]'),
+  ).toBeNull();
   expect(
     transport.invoke.mock.calls.filter(
       ([command]) => command.name === "updater_install",
