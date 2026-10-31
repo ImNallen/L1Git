@@ -1,13 +1,6 @@
 import { MergeControls } from "./components/MergeControls";
 import { Suspense } from "react";
-import {
-  EyeOff,
-  FolderGit2,
-  Info,
-  Settings,
-  Plus,
-  TriangleAlert,
-} from "lucide-react";
+import { EyeOff, FolderGit2, Info, Plus, TriangleAlert } from "lucide-react";
 import { REDO_SHORTCUT, shortcutLabel, UNDO_SHORTCUT } from "./actions";
 import { useAppearance } from "./appearance";
 import { useBranchVisibility } from "./branchVisibility";
@@ -18,15 +11,11 @@ import { SettingsDialog } from "./components/SettingsDialog";
 import { CommitInspector, InspectorFrame } from "./components/CommitInspector";
 import { History, HistoryPlaceholder } from "./components/History";
 import { PaneDivider } from "./components/PaneDivider";
-import { RepositoryTree } from "./components/RepositoryTree";
 import { UndoButtons, WriteNoticeRow } from "./components/UndoControls";
 import { useExpandedRepositories } from "./expandedRepositories";
 import { useUpdates } from "./updates";
 import { useUpdateRestart } from "./components/UpdateRestart";
-import {
-  UpdateAffordance,
-  InstallingBlocker,
-} from "./components/UpdatesSettings";
+import { InstallingBlocker } from "./components/UpdatesSettings";
 import { useFetchSettings } from "./fetchSettings";
 import { useHistoryColumns } from "./historyColumns";
 import { repositoryWarnings, useOverview } from "./overview";
@@ -50,6 +39,7 @@ import {
   StashHost,
 } from "./shell/Hosts";
 import { useNavigation } from "./shell/useNavigation";
+import { Sidebar } from "./shell/Sidebar";
 import { useRefWrites, useUndoSteps } from "./shell/useRefWrites";
 import {
   BranchHost,
@@ -87,8 +77,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   const {
     sidebarOpen,
     inspectorVisible,
-    sidebarWidth,
-    setSidebarWidth,
     inspectorWidth,
     setInspectorWidth,
     sidebarToggleRef,
@@ -222,70 +210,21 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     <div
       className={`app ${macNative ? "native-mac" : ""} ${sidebarOpen ? "" : "sidebar-hidden"}`}
     >
-      <aside
-        hidden={!sidebarOpen}
-        className="sidebar"
-        style={{ width: sidebarWidth }}
-        aria-label="Repository sidebar"
-      >
-        <div className="brand" data-tauri-drag-region>
-          {sidebarOpen && sidebarToggle}
-          <span data-tauri-drag-region>
-            L1{" "}
-            <span className="muted" data-tauri-drag-region>
-              Git
-            </span>
-          </span>
-        </div>
-        <div className="repository-navigation">
-          <RepositoryTree
-            entries={app.catalog.entries}
-            expanded={expansion.expanded}
-            refs={branchRefs.refs}
-            activePath={activePath}
-            highlighted={nav.sidebar.highlighted}
-            selectedStash={nav.sidebar.selectedStash}
-            sync={overview.syncByRoot}
-            onSelect={nav.sidebar.onSelect}
-            onToggle={(root) =>
-              expansion.setExpanded(root, !expansion.expanded.has(root))
-            }
-            onJump={nav.sidebar.onJump}
-            onStash={nav.sidebar.onStash}
-            ruleFor={nav.sidebar.ruleFor}
-            onRule={nav.sidebar.onRule}
-            onRemove={nav.sidebar.onRemove}
-            onAdd={nav.sidebar.onAdd}
-            writable={refWrites.sidebarActions.writable}
-            onBranchAsk={refWrites.sidebarActions.onBranchAsk}
-            onTagAsk={refWrites.sidebarActions.onTagAsk}
-            onStashAction={refWrites.sidebarActions.onStashAction}
-            onCheckout={refWrites.sidebarActions.onCheckout}
-          />
-        </div>
-        <footer className="sidebar-bottom">
-          <button
-            ref={settings.settingsRef}
-            className="icon-button"
-            aria-label="Settings"
-            title="Settings"
-            onClick={() => commands.openSettings()}
-          >
-            <Settings size={16} />
-          </button>
-          <UpdateAffordance updates={updates} restart={updateRestart} />
-        </footer>
-      </aside>
-      {sidebarOpen && (
-        <PaneDivider
-          label="Resize repository sidebar"
-          width={sidebarWidth}
-          min={210}
-          max={400}
-          direction={1}
-          onResize={setSidebarWidth}
-        />
-      )}
+      <Sidebar
+        layout={layout}
+        toggle={sidebarToggle}
+        settings={settings}
+        commands={commands}
+        entries={app.catalog.entries}
+        expansion={expansion}
+        refs={branchRefs.refs}
+        activePath={activePath}
+        sync={overview.syncByRoot}
+        navigation={nav.sidebar}
+        refActions={refWrites.sidebarActions}
+        updates={updates}
+        restart={updateRestart}
+      />
       <main className="workspace">
         <div className="repository-workspace">
           <div className="repository-content">
