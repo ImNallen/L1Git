@@ -16,13 +16,9 @@ import {
 } from "react";
 import { flushSync } from "react-dom";
 import {
-  CloudDownload,
-  CloudUpload,
   EyeOff,
-  FastForward,
   FolderGit2,
   Info,
-  LoaderCircle,
   Settings,
   Plus,
   Trash2,
@@ -45,7 +41,6 @@ import { useBranchVisibility } from "./branchVisibility";
 import type { ThemeSettings } from "./themes/catalog";
 import { AppearanceSettings } from "./components/AppearanceSettings";
 import { AddRepositoryDialog } from "./components/AddRepositoryDialog";
-import { PublishDialog } from "./components/PublishDialog";
 import { BranchDialog } from "./components/BranchDialog";
 import { CheckoutCommitDialog } from "./components/CheckoutCommitDialog";
 import { TagDialog } from "./components/TagDialog";
@@ -86,7 +81,6 @@ import type {
   Write,
 } from "./domain/operations";
 import { swapEnds } from "./domain/comparison";
-import { readyAdvances } from "./domain/overview";
 import type {
   FullRef,
   Head,
@@ -95,7 +89,6 @@ import type {
   Start,
   Stash,
 } from "./domain/repository";
-import { pushControl, pushOutcomeText } from "./domain/push";
 import type { Compare } from "./domain/comparison";
 import type { Selection } from "./domain/selection";
 import { branchVisibility, NO_RULE, toggleRule } from "./domain/visibility";
@@ -118,7 +111,8 @@ import { useWorkspace } from "./useWorkspace";
 import { composeActions, defineSlice } from "./shell/actionSlices";
 import { focusedElement, shownElement } from "./shell/dom";
 import { InspectorToggle, SidebarToggle } from "./shell/LayoutToggles";
-import { openedRepository } from "./shell/sync";
+import { openedRepository, useSyncControls } from "./shell/sync";
+import { PublishHost, PushNotice, SyncButtons } from "./shell/SyncRegions";
 import { useActiveWorktree } from "./shell/useActiveWorktree";
 import { useFocus, useFocusRecovery } from "./shell/useFocus";
 import { useHistoryPane } from "./shell/useHistoryPane";
@@ -176,9 +170,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     skipped: number;
     returnFocus?: () => void;
   } | null>(null);
-  const [publishingRoot, setPublishingRoot] = useState<RepositoryRoot | null>(
-    null,
-  );
   const [branchAsk, setBranchAsk] = useState<BranchAsk | null>(null);
   const [detaching, setDetaching] = useState<Oid | null>(null);
   const [tagAsk, setTagAsk] = useState<TagAsk | null>(null);
@@ -238,11 +229,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     visibility.prune,
   );
   const opened = openedRepository(overview, shown?.root ?? null);
-  const {
-    root: openRoot,
-    state: openRootState,
-    repository: openRepository,
-  } = opened;
+  const openRepository = opened.repository;
   const history = useHistoryPane({
     snapshot,
     ruleFor: visibility.ruleFor,
@@ -278,6 +265,12 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     reloadRefs: branchRefs.reload,
   });
   const { writes, rereadChanges, refreshRepository } = loop;
+  const sync = useSyncControls(
+    overviewStore,
+    overview,
+    opened,
+    loop.writes.running !== null,
+  );
   const parts = useParts({
     fileDiff,
     changes: app.changes,
@@ -398,24 +391,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     root: RepositoryRoot;
     reference: FullRef;
   } | null>(null);
-  const openPush =
-    openRoot === null ? undefined : overview.pushByRoot.get(openRoot);
-  const publishControl = pushControl(
-    openPush?.availability,
-    writes.running !== null
-      ? "Wait for the current local write to finish."
-      : !openRepository
-        ? openRootState?.kind === "unavailable"
-          ? openRootState.problem.message
-          : "Checking the current repository…"
-        : openRepository.activity.kind !== "idle"
-          ? "Wait for this repository's current operation to finish."
-          : null,
-  );
-  const openFetching = openRepository?.activity.kind === "fetching";
-  const openReady = openRepository
-    ? readyAdvances(openRepository.overview).length
-    : 0;
   const {
     jumped,
     jumpedUnloaded,
@@ -594,31 +569,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       endCompare,
     },
   });
-  const syncActions = defineSlice({
-    context: {
-      push: openRoot ? publishControl : null,
-      repository: openRepository && {
-        fetching: openFetching,
-        idle: openRepository.activity.kind === "idle",
-        ready: openReady,
-      },
-    },
-    commands: {
-      fetch: () => {
-        if (openRepository) void overviewStore.fetch(openRepository.commonDir);
-      },
-      push: () => {
-        if (openRoot && publishControl.kind === "ready")
-          void overviewStore.push(openRoot, publishControl.intent);
-        else if (openRoot && publishControl.kind === "publish")
-          setPublishingRoot(openRoot);
-      },
-      fastForward: () => {
-        if (openRepository)
-          void overviewStore.updateAll(openRepository.commonDir);
-      },
-    },
-  });
   const diffActions = defineSlice({
     context: {
       file:
@@ -712,7 +662,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     paletteActions,
     history.actions,
     navigationActions,
-    syncActions,
+    sync.actions,
     loop.actions,
     diffActions,
     stagingActions,
@@ -975,55 +925,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                     }}
                   />
                 )}
-                {openRepository && (
-                  <button
-                    className="button secondary"
-                    disabled={openFetching}
-                    onClick={commands.fetch}
-                    title="Download new commits from this repository's remotes."
-                  >
-                    {openFetching ? (
-                      <LoaderCircle size={14} className="spin" />
-                    ) : (
-                      <CloudDownload size={14} />
-                    )}
-                    <span>Fetch</span>
-                  </button>
-                )}
-                {openRoot && (
-                  <button
-                    className="button secondary"
-                    disabled={publishControl.kind === "disabled"}
-                    onClick={commands.push}
-                    title={publishControl.title}
-                  >
-                    {openRepository?.activity.kind === "pushing" ? (
-                      <LoaderCircle size={14} className="spin" />
-                    ) : (
-                      <CloudUpload size={14} />
-                    )}
-                    <span>
-                      {openRepository?.activity.kind === "pushing"
-                        ? "Pushing…"
-                        : publishControl.label}
-                    </span>
-                  </button>
-                )}
-                {openRepository && openReady > 0 && (
-                  <button
-                    className="button secondary"
-                    disabled={openRepository.activity.kind !== "idle"}
-                    onClick={commands.fastForward}
-                    title={`Fast-forward ${openReady === 1 ? "1 branch that is" : `${openReady} branches that are`} behind and clean. Never merges or rebases.`}
-                  >
-                    {openRepository.activity.kind === "updating" ? (
-                      <LoaderCircle size={14} className="spin" />
-                    ) : (
-                      <FastForward size={14} />
-                    )}
-                    <span>Fast-forward ({openReady})</span>
-                  </button>
-                )}
+                <SyncButtons sync={sync} commands={commands} />
                 {!inspectorVisible && inspectorToggle}
               </div>
             </header>
@@ -1074,27 +976,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                 ))}
               </div>
             )}
-            {openPush?.notice && (
-              <div
-                className={`notice ${openPush.notice.outcome.kind === "published" || openPush.notice.outcome.kind === "pushed" || openPush.notice.outcome.kind === "upToDate" ? "info-notice" : "error-notice"}`}
-                role={
-                  openPush.notice.outcome.kind === "published" ||
-                  openPush.notice.outcome.kind === "pushed" ||
-                  openPush.notice.outcome.kind === "upToDate"
-                    ? "status"
-                    : "alert"
-                }
-              >
-                <CloudUpload size={14} />
-                <span>
-                  {pushOutcomeText(
-                    openPush.notice.outcome,
-                    openPush.notice.intent,
-                  )}{" "}
-                  {openPush.notice.refreshProblem}
-                </span>
-              </div>
-            )}
+            <PushNotice push={sync.push} />
             {persistenceError && (
               <div className="notice error-notice" role="alert">
                 <TriangleAlert size={14} />
@@ -1388,20 +1270,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
           }}
         />
       )}
-      {publishingRoot && (
-        <PublishDialog
-          key={publishingRoot}
-          root={publishingRoot}
-          onRemoteAdded={() => loop.remoteAdded(publishingRoot)}
-          onPublish={(intent) => {
-            void overviewStore.push(publishingRoot, intent);
-          }}
-          onClose={() => {
-            setPublishingRoot(null);
-            focusFallback();
-          }}
-        />
-      )}
+      <PublishHost sync={sync} loop={loop} focus={focus} />
       {branchAsk && snapshot && (
         <BranchDialog
           ask={branchAsk}
