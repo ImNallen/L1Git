@@ -1,4 +1,5 @@
 import { paletteItems } from "../actions";
+import { AddRepositoryDialog } from "../components/AddRepositoryDialog";
 import { CommandPalette } from "../components/CommandPalette";
 import { DiscardDialog, DiscardPartDialog } from "../components/DiscardDialog";
 import { StashDialog } from "../components/StashDialog";
@@ -8,6 +9,7 @@ import { mac } from "../repositories";
 import type { WritesView } from "../useWrites";
 import type { ComposedActions } from "./actionSlices";
 import type { DiffPane } from "./useDiffPane";
+import type { Navigation } from "./useNavigation";
 import type { Palette } from "./usePalette";
 import type { Staging } from "./useStaging";
 
@@ -95,5 +97,16 @@ export function PaletteHost({
       onClose={palette.close}
       onRun={palette.run}
     />
+  );
+}
+
+export function AddRepositoryHost({
+  nav,
+}: {
+  nav: Pick<Navigation, "adding" | "closeAdd" | "addRepository">;
+}) {
+  if (!nav.adding) return null;
+  return (
+    <AddRepositoryDialog onAdd={nav.addRepository} onClose={nav.closeAdd} />
   );
 }

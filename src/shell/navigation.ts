@@ -7,6 +7,7 @@ import type {
   RepositorySnapshot,
   Tag,
 } from "../domain/repository";
+import type { Compare } from "../domain/comparison";
 import { sameSelection } from "../domain/selection";
 import type { Selection } from "../domain/selection";
 
@@ -97,3 +98,21 @@ export function jumpView({
     sidebarTag,
   };
 }
+
+declare const userSelection: unique symbol;
+
+/**
+ * Selection changes the user makes in History, the inspector, and the merge
+ * panel. `select`, `compareWith`, and `endCompare` clear the sidebar jump
+ * first, which keeps the hidden-jump notice and the branch commands honest.
+ * Only `useNavigation` mints one; its jump flows call `app.select` directly.
+ */
+export type UserSelection = {
+  readonly [userSelection]: true;
+  readonly selection: Selection | null;
+  readonly compare: Compare | null;
+  select: (next: Selection) => void;
+  compareWith: (next: Compare) => void;
+  endCompare: () => void;
+  swapCompare: () => void;
+};

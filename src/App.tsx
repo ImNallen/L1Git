@@ -1,12 +1,5 @@
 import { MergeControls } from "./components/MergeControls";
-import {
-  Suspense,
-  useEffect,
-  useEffectEvent,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { Suspense, useState } from "react";
 import { flushSync } from "react-dom";
 import {
   EyeOff,
@@ -22,7 +15,6 @@ import { useAppearance } from "./appearance";
 import { useBranchVisibility } from "./branchVisibility";
 import type { ThemeSettings } from "./themes/catalog";
 import { AppearanceSettings } from "./components/AppearanceSettings";
-import { AddRepositoryDialog } from "./components/AddRepositoryDialog";
 import { BranchDialog } from "./components/BranchDialog";
 import { CheckoutCommitDialog } from "./components/CheckoutCommitDialog";
 import { TagDialog } from "./components/TagDialog";
@@ -47,19 +39,8 @@ import {
   stashPopWrite,
   worktreeForStash,
 } from "./domain/operations";
-import type { BranchAsk, RefStep, Step, TagAsk } from "./domain/operations";
-import { swapEnds } from "./domain/comparison";
-import type {
-  FullRef,
-  Oid,
-  RepositoryRoot,
-  Start,
-  Stash,
-} from "./domain/repository";
-import type { Compare } from "./domain/comparison";
-import type { Selection } from "./domain/selection";
-import { branchVisibility, NO_RULE, toggleRule } from "./domain/visibility";
-import type { VisibilityRule } from "./domain/visibility";
+import type { BranchAsk, Step, TagAsk } from "./domain/operations";
+import type { Oid, Start, Stash } from "./domain/repository";
 import { useExpandedRepositories } from "./expandedRepositories";
 import { useUpdates } from "./updates";
 import { useUpdateRestart } from "./components/UpdateRestart";
@@ -86,9 +67,11 @@ import { useDiffPane } from "./shell/useDiffPane";
 import {
   DiscardHost,
   DiscardPartHost,
+  AddRepositoryHost,
   PaletteHost,
   StashHost,
 } from "./shell/Hosts";
+import { useNavigation } from "./shell/useNavigation";
 import { usePalette, useShortcuts } from "./shell/usePalette";
 import { useStaging } from "./shell/useStaging";
 import { useMergePanel, useResolutionDrafts } from "./shell/useMergePanel";
@@ -99,16 +82,14 @@ import {
 import { useWriteLoop } from "./shell/useWriteLoop";
 import { useSettingsScreen } from "./shell/useSettingsScreen";
 import { FileDiffPane, usePrefetchLazyViews } from "./shell/lazyViews";
-import { isBranch, jumpView, listedRef } from "./shell/navigation";
+import { isBranch } from "./shell/navigation";
 import { workspaceView } from "./shell/workspaceView";
-import type { Jump, JumpTarget } from "./shell/navigation";
 
 export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   const appearance = useAppearance(initialTheme);
   const app = useWorkspace();
   const view = workspaceView(app);
-  const { snapshot, settled, shown, opening, busy, fileOpen, activePath } =
-    view;
+  const { snapshot, shown, opening, busy, fileOpen, activePath } = view;
   const fetchSettings = useFetchSettings();
   const updates = useUpdates();
   const updateRestart = useUpdateRestart(updates);
@@ -136,27 +117,11 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     refocusIfLost,
   } = focus;
   const palette = usePalette(focus);
-  const [adding, setAdding] = useState(false);
   const [editingMessage, setEditingMessage] = useState(false);
-  const [headOf, setHeadOf] = useState<RepositoryRoot | null>(null);
   const [branchAsk, setBranchAsk] = useState<BranchAsk | null>(null);
   const [detaching, setDetaching] = useState<Oid | null>(null);
   const [tagAsk, setTagAsk] = useState<TagAsk | null>(null);
   const [droppingStash, setDroppingStash] = useState<Stash | null>(null);
-  const [steppedRef, setSteppedRef] = useState<
-    (RefStep & { root: RepositoryRoot }) | null
-  >(null);
-  const focusJumpedRow = useRef(false);
-  const [jump, setJump] = useState<Jump | null>(null);
-  // The branch or tag last selected in each repository, so it stays highlighted after a round trip.
-  const [lastBranch, setLastBranch] = useState<
-    ReadonlyMap<RepositoryRoot, FullRef>
-  >(new Map());
-  const gridFocus = useRef<{
-    root: RepositoryRoot;
-    from: Element | null;
-    cancel: AbortController;
-  } | null>(null);
   const { workspace, current, fileDiff, closeFile } = app;
   const expansion = useExpandedRepositories(app.catalog);
   const historyColumns = useHistoryColumns();
@@ -183,7 +148,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     selection: app.selection,
     focus,
   });
-  const { model, rule, loaded, visibleOids, placement, shows } = history;
+  const { model, rule, placement, shows } = history;
   const selected = app.selection;
   const active = useActiveWorktree(snapshot, app.selection, app.changes);
   const loop = useWriteLoop({
@@ -201,20 +166,21 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     opened,
     loop.writes.running !== null,
   );
-  const merge = useMergePanel({
-    snapshot,
-    active,
-    opened,
-    writes,
-    rereadChanges,
-    selecting: { select },
-    openInspector: layout.openInspector,
+  const nav = useNavigation({
+    app,
+    view,
+    history,
+    visibility,
+    expansion,
+    sidebarRefs: branchRefs.refs,
+    settings,
+    focus,
+    layout,
+    paletteOpen: palette.open,
   });
-  const drafts = useResolutionDrafts({
-    snapshot,
-    closeFile,
-    selectRepository: app.selectRepository,
-  });
+  useFocusRecovery(focus);
+  const { jumped, jumpedUnloaded, hiddenJump, ruledBranch, sidebarTag } =
+    nav.jump;
   const diff = useDiffPane({ app, writes, active, focus });
   const { parts } = diff;
   const staging = useStaging({
@@ -227,6 +193,20 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     focus,
   });
   const { selectedWorktree } = staging;
+  const merge = useMergePanel({
+    snapshot,
+    active,
+    opened,
+    writes,
+    rereadChanges,
+    selecting: nav.selecting,
+    openInspector: layout.openInspector,
+  });
+  const drafts = useResolutionDrafts({
+    snapshot,
+    closeFile,
+    selectRepository: app.selectRepository,
+  });
   function stashAction(action: "apply" | "pop" | "drop", stash: Stash) {
     if (!snapshot) return;
     if (action === "drop") {
@@ -253,41 +233,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   const headStatus = rootChanges?.kind === "ready" ? rootChanges.status : null;
   const editableHead =
     headStatus?.head.kind === "unborn" ? null : (headStatus?.head.oid ?? null);
-  const selectCommit = (oid: Oid) => select({ kind: "commit", oid });
-  // A stash clicked in another repository, selected once its snapshot loads.
-  const [pendingStash, setPendingStash] = useState<{
-    root: RepositoryRoot;
-    oid: Oid;
-  } | null>(null);
-  const [sidebarJump, setSidebarJump] = useState<{
-    root: RepositoryRoot;
-    reference: FullRef;
-  } | null>(null);
-  const {
-    jumped,
-    jumpedUnloaded,
-    hiddenJump,
-    highlighted,
-    ruledBranch,
-    sidebarTag,
-  } = jumpView({
-    snapshot,
-    jump,
-    lastBranch,
-    sidebarJump,
-    selection: app.selection,
-    loaded,
-    visibleOids,
-  });
-  const checkedOut = useMemo(
-    () =>
-      new Map(
-        snapshot?.worktrees.flatMap(({ head, name }) =>
-          head.kind === "attached" ? [[head.reference, name] as const] : [],
-        ),
-      ),
-    [snapshot],
-  );
   const askFor = (kind: keyof ReturnType<typeof branchAsks>) => () => {
     const ask = ruledBranch && branchAsks(ruledBranch)[kind];
     if (ask) setBranchAsk(ask);
@@ -299,132 +244,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       subject:
         snapshot?.commits.find((commit) => commit.oid === oid)?.subject ?? "",
     });
-  const selectedStash =
-    snapshot &&
-    selected?.kind === "commit" &&
-    snapshot.stashes.some((stash) => stash.oid === selected.oid)
-      ? { root: snapshot.root, oid: selected.oid }
-      : null;
-  function cancelGridFocus() {
-    gridFocus.current?.cancel.abort();
-    gridFocus.current = null;
-  }
-  function showRepository(root: RepositoryRoot) {
-    cancelGridFocus();
-    setSidebarJump(null);
-    settings.toRepository();
-    expansion.setExpanded(root, true);
-    if (root !== snapshot?.root) void app.selectRepository(root);
-  }
-  function jumpTo(root: RepositoryRoot, target: JumpTarget) {
-    closeFile();
-    const pending = root !== snapshot?.root;
-    if (pending) showRepository(root);
-    else if (visibleOids.has(target.oid))
-      app.select({ kind: "commit", oid: target.oid });
-    setSidebarJump({ root, reference: target.reference });
-    setLastBranch((previous) => new Map(previous).set(root, target.reference));
-    setJump((previous) => ({
-      root,
-      reference: target.reference,
-      seq: (previous?.seq ?? 0) + 1,
-      pending,
-    }));
-  }
-  function select(next: Selection) {
-    setSidebarJump(null);
-    app.select(next);
-  }
-  function compareWith(next: Compare) {
-    setSidebarJump(null);
-    app.compareWith(next);
-  }
-  function endCompare() {
-    setSidebarJump(null);
-    app.endCompare();
-  }
-  function setRule(root: RepositoryRoot, next: VisibilityRule) {
-    setSidebarJump(null);
-    visibility.setRule(root, next);
-  }
-  function showStash(root: RepositoryRoot, stash: Stash) {
-    closeFile();
-    if (root === snapshot?.root) select({ kind: "commit", oid: stash.oid });
-    else {
-      showRepository(root);
-      setPendingStash({ root, oid: stash.oid });
-    }
-  }
-  function showInGraph(root: RepositoryRoot, target: JumpTarget) {
-    setSidebarJump(null);
-    if (isBranch(target)) visibility.reveal(root, target.reference);
-    else visibility.setRule(root, NO_RULE);
-    app.select({ kind: "commit", oid: target.oid });
-    setJump((previous) => ({
-      root,
-      reference: target.reference,
-      seq: (previous?.seq ?? 0) + 1,
-      pending: false,
-    }));
-    historyRef.current?.focus();
-  }
-  const navigationActions = defineSlice({
-    context: {
-      adding,
-      selection: selected,
-      compare: app.compare && { swappable: swapEnds(app.compare) !== null },
-      sidebarBranch: ruledBranch && {
-        name: ruledBranch.name,
-        visibility: branchVisibility(rule, ruledBranch.reference),
-        outOfView: hiddenJump !== null,
-        local: ruledBranch.kind === "local",
-        checkedOut: checkedOut.has(ruledBranch.reference),
-      },
-      sidebarTag: sidebarTag && { name: sidebarTag.name },
-      rule: rule.kind,
-    },
-    commands: {
-      addRepository: () => setAdding(true),
-      openRepository: (root: RepositoryRoot) => {
-        showRepository(root);
-        if (root === snapshot?.root) return;
-        const cancel = new AbortController();
-        for (const type of ["pointerdown", "keydown"])
-          window.addEventListener(type, cancelGridFocus, {
-            capture: true,
-            signal: cancel.signal,
-          });
-        gridFocus.current = { root, from: focusedElement(), cancel };
-      },
-      jumpToRef: (reference: FullRef) => {
-        const target = snapshot && listedRef(snapshot, reference);
-        if (snapshot && target) jumpTo(snapshot.root, target);
-      },
-      showStash: (stash: Stash) => {
-        if (snapshot) showStash(snapshot.root, stash);
-      },
-      toggleHide: () => {
-        if (snapshot && hiddenJump) showInGraph(snapshot.root, hiddenJump);
-        else if (snapshot && ruledBranch)
-          setRule(
-            snapshot.root,
-            toggleRule(rule, "hide", ruledBranch.reference),
-          );
-      },
-      toggleSolo: () => {
-        if (snapshot && ruledBranch)
-          setRule(
-            snapshot.root,
-            toggleRule(rule, "solo", ruledBranch.reference),
-          );
-      },
-      showAllBranches: () => {
-        if (snapshot) setRule(snapshot.root, NO_RULE);
-      },
-      swapCompare: app.swapCompare,
-      endCompare,
-    },
-  });
   const refWriteActions = defineSlice({
     context: {},
     commands: {
@@ -461,92 +280,19 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   }
   async function stepHistory(step: Step) {
     const entry = nextEntry(writes.history, step);
-    setSteppedRef(null);
+    nav.followRefStep(null);
     const outcome = await writes[step]();
     if (entry?.operation.kind === "checkout") refocusIfLost();
     const moved = entry && refStep(entry.operation, step);
     if (outcome.kind === "applied" && entry && moved)
-      setSteppedRef({ root: entry.root, ...moved });
+      nav.followRefStep({ root: entry.root, ...moved });
   }
-  const jumpToStepped = useEffectEvent(jumpTo);
-  const focusJumpedBranch = useEffectEvent(focusNamedBranch);
-  useEffect(() => {
-    if (steppedRef === null) return;
-    const { root, left, gone } = steppedRef;
-    const state = branchRefs.refs.get(root);
-    const listed = (reference: FullRef) =>
-      state?.kind === "ready" ? listedRef(state.refs, reference) : null;
-    const target = left === null ? null : listed(left);
-    if ((left !== null && target === null) || (gone && listed(gone))) return;
-    setSteppedRef(null);
-    if (shownElement(focusedElement())) return;
-    if (target === null) return focusFallback();
-    focusJumpedRow.current = true;
-    jumpToStepped(root, target);
-  }, [steppedRef, branchRefs.refs, focusFallback]);
-  useEffect(() => {
-    if (!focusJumpedRow.current) return;
-    focusJumpedRow.current = false;
-    focusJumpedBranch();
-  }, [sidebarJump]);
-  useEffect(() => {
-    const pending = gridFocus.current;
-    if (pending === null) return;
-    if (snapshot?.root === pending.root) {
-      const focused = focusedElement();
-      if (
-        !palette.open &&
-        (focused === pending.from ||
-          focused === document.body ||
-          focused === sidebarToggleRef.current ||
-          focused?.closest(".history-table"))
-      )
-        historyRef.current?.focus();
-    } else if (workspace.kind !== "error") return;
-    cancelGridFocus();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs when the opened repository arrives or fails; the palette only gates the focus
-  }, [snapshot?.root, workspace.kind, sidebarToggleRef, historyRef]);
-  async function addRepository(path: string, signal: AbortSignal) {
-    const added = await app.addRepository(path, signal);
-    if (added.kind === "opened") {
-      setSidebarJump(null);
-      expansion.setExpanded(added.root, true);
-    }
-    return added.kind === "failed" ? added.problem : null;
-  }
-  const appSelect = app.select;
-  useEffect(() => {
-    if (jump === null) return;
-    if (app.activeRoot !== jump.root) setJump(null);
-    else if (jump.pending && settled?.root === jump.root) {
-      const target = listedRef(settled, jump.reference);
-      if (target && visibleOids.has(target.oid))
-        appSelect({ kind: "commit", oid: target.oid });
-      setJump({ ...jump, pending: false, seq: jump.seq + 1 });
-    }
-  }, [jump, settled, visibleOids, app.activeRoot, appSelect]);
-  useEffect(() => {
-    if (headOf === null || settled === null) return;
-    if (settled.root === headOf && settled.head.kind !== "unborn")
-      appSelect({ kind: "commit", oid: settled.head.oid });
-    setHeadOf(null);
-  }, [headOf, settled, appSelect]);
-  useFocusRecovery(focus);
-  useEffect(() => {
-    if (pendingStash === null) return;
-    if (app.activeRoot !== pendingStash.root) setPendingStash(null);
-    else if (settled?.root === pendingStash.root) {
-      if (settled.stashes.some((stash) => stash.oid === pendingStash.oid))
-        appSelect({ kind: "commit", oid: pendingStash.oid });
-      setPendingStash(null);
-    }
-  }, [pendingStash, settled, app.activeRoot, appSelect]);
   const actions = composeActions(
     settings.actions,
     layout.actions,
     palette.actions,
     history.actions,
-    navigationActions,
+    nav.actions,
     sync.actions,
     loop.actions,
     diff.actions,
@@ -594,34 +340,21 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
             expanded={expansion.expanded}
             refs={branchRefs.refs}
             activePath={activePath}
-            highlighted={
-              snapshot && jumped && highlighted
-                ? { root: snapshot.root, reference: jumped.reference }
-                : null
-            }
-            selectedStash={selectedStash}
+            highlighted={nav.sidebar.highlighted}
+            selectedStash={nav.sidebar.selectedStash}
             sync={overview.syncByRoot}
-            onSelect={showRepository}
+            onSelect={nav.sidebar.onSelect}
             onToggle={(root) =>
               expansion.setExpanded(root, !expansion.expanded.has(root))
             }
-            onJump={jumpTo}
-            onStash={showStash}
-            ruleFor={visibility.ruleFor}
-            onRule={setRule}
-            onRemove={(root) => {
-              app.removeRepository(root);
-              expansion.setExpanded(root, false);
-              visibility.setRule(root, NO_RULE);
-              setLastBranch((previous) => {
-                const next = new Map(previous);
-                next.delete(root);
-                return next;
-              });
-            }}
-            onAdd={commands.addRepository}
+            onJump={nav.sidebar.onJump}
+            onStash={nav.sidebar.onStash}
+            ruleFor={nav.sidebar.ruleFor}
+            onRule={nav.sidebar.onRule}
+            onRemove={nav.sidebar.onRemove}
+            onAdd={nav.sidebar.onAdd}
             writable={
-              snapshot && { root: snapshot.root, checkedOutIn: checkedOut }
+              snapshot && { root: snapshot.root, checkedOutIn: nav.checkedOut }
             }
             onBranchAsk={setBranchAsk}
             onTagAsk={setTagAsk}
@@ -719,7 +452,9 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                     ? "is outside the soloed branches."
                     : "is hidden in the graph."}
                 </span>
-                <button onClick={() => showInGraph(snapshot.root, hiddenJump)}>
+                <button
+                  onClick={() => nav.showInGraph(snapshot.root, hiddenJump)}
+                >
                   {isBranch(hiddenJump)
                     ? `Show ${hiddenJump.name}`
                     : "Show all branches"}
@@ -748,10 +483,10 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                     rule={model.rule}
                     selection={app.selection}
                     compare={app.compare}
-                    revealSeq={jump?.seq ?? 0}
-                    onSelect={select}
-                    onCompare={compareWith}
-                    onEndCompare={endCompare}
+                    revealSeq={nav.revealSeq}
+                    onSelect={nav.selecting.select}
+                    onCompare={nav.selecting.compareWith}
+                    onEndCompare={nav.selecting.endCompare}
                     onOpenFirstFile={app.openFirstFile}
                     onCancelOpen={app.cancelOpenFirstFile}
                     scrollTopOf={app.scrollTopOf}
@@ -793,7 +528,9 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                           app.openFile(fileDiff.path, fileDiff.side);
                         }}
                         selectable={shows}
-                        onSelectCommit={selectCommit}
+                        onSelectCommit={(oid) =>
+                          nav.selecting.select({ kind: "commit", oid })
+                        }
                         parts={parts.view}
                         writes={writes}
                       />
@@ -823,7 +560,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                     </button>
                     <button
                       className="button primary"
-                      onClick={() => setAdding(true)}
+                      onClick={commands.addRepository}
                     >
                       Choose another folder
                     </button>
@@ -843,7 +580,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                   </p>
                   <button
                     className="button primary"
-                    onClick={() => setAdding(true)}
+                    onClick={commands.addRepository}
                   >
                     <Plus size={16} />
                     Add repository
@@ -884,7 +621,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                     snapshot={snapshot}
                     refs={placement.refs}
                     lane={placement.lane}
-                    onSelect={select}
+                    onSelect={nav.selecting.select}
                     onSwap={app.swapCompare}
                     selectedFile={fileDiff.kind !== "closed" ? fileDiff : null}
                     onSelectFile={app.openFile}
@@ -942,7 +679,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
           status={headStatus}
           onSave={async (worktree, write) => {
             const outcome = await writes.write(worktree, write);
-            if (outcome.kind === "applied") setHeadOf(worktree);
+            if (outcome.kind === "applied") nav.selectHeadAfter(worktree);
             return outcome;
           }}
           onClose={() => {
@@ -966,7 +703,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
             if (!shownElement(focusedElement())) focusFallback();
             return outcome;
           }}
-          onNamedBranch={(branch) => jumpTo(snapshot.root, branch)}
+          onNamedBranch={(branch) => nav.jumpTo(snapshot.root, branch)}
           onClose={() => {
             setBranchAsk(null);
             requestAnimationFrame(focusNamedBranch);
@@ -987,7 +724,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
             )
               writes.dismiss();
             if (outcome.kind === "applied" && operation.kind === "deleteTag")
-              setSteppedRef({
+              nav.followRefStep({
                 root: snapshot.root,
                 left: null,
                 gone: operation.tag.reference,
@@ -1030,12 +767,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       )}
       <DiscardHost staging={staging} writes={writes} />
       <DiscardPartHost diff={diff} />
-      {adding && (
-        <AddRepositoryDialog
-          onAdd={addRepository}
-          onClose={() => setAdding(false)}
-        />
-      )}
+      <AddRepositoryHost nav={nav} />
     </div>
   );
 }

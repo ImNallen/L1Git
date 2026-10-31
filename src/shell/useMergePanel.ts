@@ -6,10 +6,10 @@ import {
   useDraftImpact,
 } from "../draftProtection";
 import type { RepositoryRoot, RepositorySnapshot } from "../domain/repository";
-import type { Selection } from "../domain/selection";
 import type { WritesView } from "../useWrites";
 import { defineSlice } from "./actionSlices";
 import type { ActionSlice } from "./actionSlices";
+import type { UserSelection } from "./navigation";
 import type { OpenedRepository } from "./sync";
 import type { ActiveWorktree } from "./useActiveWorktree";
 
@@ -40,7 +40,8 @@ export function useMergePanel({
   opened: OpenedRepository;
   writes: Pick<WritesView, "running" | "merge">;
   rereadChanges: () => void;
-  selecting: { select: (next: Selection) => void };
+  /** The user selects the worktree, which clears the sidebar jump. */
+  selecting: UserSelection;
   openInspector: () => void;
 }): MergePanel {
   const [reviewOpen, setReviewOpen] = useState(false);
