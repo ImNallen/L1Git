@@ -26,7 +26,7 @@ import {
 } from "lucide-react";
 import { githubHandle, initials } from "../domain/author";
 import { sameComparison } from "../domain/comparison";
-import type { Compare, Comparison } from "../domain/comparison";
+import type { Comparison } from "../domain/comparison";
 import type {
   ChangedFile,
   Commit,
@@ -41,7 +41,6 @@ import type {
   WorktreeChanges,
   WorktreeGroup,
 } from "../domain/worktree";
-import type { RefLabel } from "../domain/refs";
 import type { Selection } from "../domain/selection";
 import { relativeTime } from "../domain/time";
 import { discardablePaths } from "../domain/operations";
@@ -52,6 +51,8 @@ import {
   listsRow,
   rowsAfterThenBefore,
 } from "../domain/changedFiles";
+import type { UserSelection } from "../shell/navigation";
+import type { CommitPlacement } from "../shell/useHistoryPane";
 import type { Outcome } from "../useWrites";
 import { ChangedFileTree, changeStatuses } from "./ChangedFileTree";
 import { CommitBox } from "./CommitBox";
@@ -61,15 +62,10 @@ import { RefBadge } from "./History";
 type Props = {
   state: DetailState;
   root: RepositoryRoot;
-  selection: Selection | null;
-  compare: Compare | null;
+  selecting: UserSelection;
   comparison: Comparison | null;
   snapshot: RepositorySnapshot;
-  refs: readonly RefLabel[];
-  /** The selected commit's graph lane, null when a rule hides its row or it is outside the loaded history. */
-  lane: number | null;
-  onSelect: (selection: Selection) => void;
-  onSwap: () => void;
+  placement: CommitPlacement;
   selectedFile: OpenedFile | null;
   onSelectFile: (path: string, side: ListSide | null) => void;
   toggleButton: ReactNode;
@@ -163,14 +159,10 @@ function CommitMessage({ body }: { body: string }) {
 export function CommitInspector({
   state,
   root,
-  selection,
-  compare,
+  selecting,
   comparison,
   snapshot,
-  refs,
-  lane,
-  onSelect,
-  onSwap,
+  placement,
   selectedFile,
   onSelectFile,
   toggleButton,
@@ -179,6 +171,13 @@ export function CommitInspector({
   onRefreshChanges,
   writes,
 }: Props) {
+  const {
+    selection,
+    compare,
+    select: onSelect,
+    swapCompare: onSwap,
+  } = selecting;
+  const { refs, lane } = placement;
   const [copy, setCopy] = useState<"idle" | "copied" | "failed">("idle");
   const [changesOpen, setChangesOpen] = useState(true);
   useEffect(() => {

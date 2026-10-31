@@ -44,32 +44,17 @@ export function WorkspacePanes({
         <>
           <History
             ref={focus.historyRef}
-            snapshot={model.snapshot}
-            visibleCommits={model.visibleCommits}
-            visibleOids={model.visibleOids}
-            rows={model.rows}
-            graph={model.graph}
-            rule={model.rule}
-            selection={app.selection}
-            compare={app.compare}
+            model={model}
+            selecting={nav.selecting}
             revealSeq={nav.revealSeq}
-            onSelect={nav.selecting.select}
-            onCompare={nav.selecting.compareWith}
-            onEndCompare={nav.selecting.endCompare}
+            columns={columns}
+            commitActions={commitActions}
             onOpenFirstFile={app.openFirstFile}
             onCancelOpen={app.cancelOpenFirstFile}
             scrollTopOf={app.scrollTopOf}
             onScroll={app.rememberScroll}
             busy={view.busy}
             hidden={view.fileOpen}
-            trunk={model.trunk}
-            visibleColumns={columns.visible}
-            onToggleColumn={columns.toggle}
-            editableHead={commitActions.editableHead}
-            onEditMessage={commitActions.onEditMessage}
-            onNewBranch={commitActions.onNewBranch}
-            onCreateTag={commitActions.onCreateTag}
-            onCheckout={commitActions.onCheckout}
           />
           {fileDiff.kind !== "closed" && (
             <Suspense>

@@ -29,6 +29,7 @@ export type HistoryModel = {
   rows: readonly HistoryRow[];
   graph: Graph;
   rule: VisibilityRule;
+  /** Tips of the default branch, which the highlight treats as trunk. */
   trunk: Oid[];
 };
 
@@ -40,6 +41,7 @@ export type HistoryColumnsGroup = {
 /** The selected commit's labels and lane, for the inspector header. */
 export type CommitPlacement = {
   refs: readonly RefLabel[];
+  /** Null when a rule hides the commit's row or it is outside the loaded history. */
   lane: number | null;
 };
 

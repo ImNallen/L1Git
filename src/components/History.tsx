@@ -29,7 +29,7 @@ import { mac } from "../repositories";
 import { compareRows, comparedRowId } from "../domain/comparison";
 import type { Compare } from "../domain/comparison";
 import { diffstatBlocks } from "../domain/diffstat";
-import type { Graph, GraphRow, RowId } from "../domain/graph";
+import type { GraphRow, RowId } from "../domain/graph";
 import { highlightBranch } from "../domain/highlight";
 import type { RowHighlight } from "../domain/highlight";
 import {
@@ -48,22 +48,25 @@ import {
   stepMatch,
 } from "../domain/search";
 import { historyPlace, rowSelection, selectedRowId } from "../domain/selection";
-import type { Selection } from "../domain/selection";
 import { changeSummary } from "../domain/worktree";
 import type { HistoryRow, WorktreeRow } from "../domain/worktree";
 import { SHORT_OID_MIN_LENGTH, uniqueShortOids } from "../domain/shortOid";
 import { relativeTime } from "../domain/time";
 import { branchVisibility } from "../domain/visibility";
-import type { VisibilityRule } from "../domain/visibility";
 import type {
   Commit,
   LineStats,
   Oid,
   RepositoryRoot,
-  RepositorySnapshot,
 } from "../domain/repository";
 import { columnLayout, historyColumns } from "../historyColumns";
 import type { ColumnId } from "../historyColumns";
+import type { UserSelection } from "../shell/navigation";
+import type {
+  HistoryColumnsGroup,
+  HistoryModel,
+} from "../shell/useHistoryPane";
+import type { CommitActions } from "../shell/useRefWrites";
 import { useLineStats } from "../useLineStats";
 import { ContextMenu } from "./ContextMenu";
 import { HistorySearch } from "./HistorySearch";
@@ -438,18 +441,11 @@ type Search = { root: RepositoryRoot; query: string };
 
 type Props = {
   ref?: Ref<HistoryHandle>;
-  snapshot: RepositorySnapshot;
-  visibleCommits: readonly Commit[];
-  visibleOids: ReadonlySet<Oid>;
-  rows: readonly HistoryRow[];
-  graph: Graph;
-  rule: VisibilityRule;
-  selection: Selection | null;
-  compare: Compare | null;
+  model: HistoryModel;
+  selecting: UserSelection;
   revealSeq: number;
-  onSelect: (selection: Selection) => void;
-  onCompare: (compare: Compare) => void;
-  onEndCompare: () => void;
+  columns: HistoryColumnsGroup;
+  commitActions: CommitActions;
   onOpenFirstFile: () => void;
   onCancelOpen: () => void;
   /** Where the history of `root` was scrolled when it was last shown. */
@@ -457,46 +453,41 @@ type Props = {
   onScroll: (root: RepositoryRoot, scrollTop: number) => void;
   busy: boolean;
   hidden: boolean;
-  /** Tips of the default branch, which the highlight treats as trunk. */
-  trunk: Oid[];
-  visibleColumns: ReadonlySet<ColumnId>;
-  onToggleColumn: (id: ColumnId) => void;
-  editableHead: Oid | null;
-  onEditMessage: () => void;
-  onNewBranch: (oid: Oid) => void;
-  onCreateTag: (oid: Oid) => void;
-  onCheckout: (oid: Oid) => void;
 };
 
 export function History({
   ref,
-  snapshot,
-  visibleCommits: commits,
-  visibleOids: known,
-  rows,
-  graph,
-  rule,
-  selection,
-  compare,
+  model,
+  selecting,
   revealSeq,
-  onSelect,
-  onCompare,
-  onEndCompare,
+  columns,
+  commitActions,
   onOpenFirstFile,
   onCancelOpen,
   scrollTopOf,
   onScroll,
   busy,
   hidden,
-  trunk,
-  visibleColumns,
-  onToggleColumn,
-  editableHead,
-  onEditMessage,
-  onNewBranch,
-  onCreateTag,
-  onCheckout,
 }: Props) {
+  const {
+    snapshot,
+    visibleCommits: commits,
+    visibleOids: known,
+    rows,
+    graph,
+    rule,
+    trunk,
+  } = model;
+  const {
+    selection,
+    compare,
+    select: onSelect,
+    compareWith: onCompare,
+    endCompare: onEndCompare,
+  } = selecting;
+  const { visible: visibleColumns, toggle: onToggleColumn } = columns;
+  const { editableHead, onEditMessage, onNewBranch, onCreateTag, onCheckout } =
+    commitActions;
   const selectedOid = selection?.kind === "commit" ? selection.oid : null;
   const selectedId = selectedRowId(selection);
   const comparedId = compare && comparedRowId(compare);

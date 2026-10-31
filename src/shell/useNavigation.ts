@@ -28,6 +28,7 @@ export type RefStepTarget = RefStep & { root: RepositoryRoot };
 
 /** RepositoryTree's navigation props. */
 export type SidebarNavigation = {
+  /** The branch or tag last jumped to in the open repository. */
   highlighted: { root: RepositoryRoot; reference: FullRef } | null;
   selectedStash: { root: RepositoryRoot; oid: Oid } | null;
   onSelect: (root: RepositoryRoot) => void;
