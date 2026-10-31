@@ -171,7 +171,7 @@ impl Coordinator {
         let _gate = lock_ignoring_poison(&locks.gate);
         let _slot = self.slots.acquire();
         let (current, updates) = {
-            let _write = lock_ignoring_poison(&locks.write);
+            let _write = locks.write_lock();
             let current = prepare_intent(&repository, intent, reads.renewed())?;
             let updates = if current
                 == (PushAvailability::Ready {
@@ -207,7 +207,7 @@ impl Coordinator {
         };
         let mut tracking_refresh_failed = false;
         if matches!(outcome, PushOutcome::Pushed | PushOutcome::UpToDate) {
-            let _write = lock_ignoring_poison(&locks.write);
+            let _write = locks.write_lock();
             for update in updates {
                 if !matches!(
                     git::mutate(

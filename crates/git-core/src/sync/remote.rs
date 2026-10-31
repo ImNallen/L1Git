@@ -62,7 +62,7 @@ impl Coordinator {
         let repository = read::open(path, reads).map_err(|_| failed())?;
         let locks = self.locks(&repository.common_dir);
         let mut gate = lock_ignoring_poison(&locks.gate);
-        let write = lock_ignoring_poison(&locks.write);
+        let write = locks.write_lock();
         let reads = reads.renewed();
         validate(&repository.root, remote, reads)?;
         let absent = || remote_absent(&repository.root, &remote.name, reads);
@@ -239,7 +239,7 @@ mod tests {
         );
         let locks = core.locks(&root.join(".git"));
         let gate = lock_ignoring_poison(&locks.gate);
-        let write = lock_ignoring_poison(&locks.write);
+        let write = locks.write_lock();
         let permits: Vec<_> = (0..core.limits.network_slots.get())
             .map(|_| core.slots.acquire())
             .collect();

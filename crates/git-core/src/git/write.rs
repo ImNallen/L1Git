@@ -41,6 +41,7 @@ pub(crate) enum LocalWrite {
     RedoCheckout,
     UndoStash,
     RedoStash,
+    RefreshIndex,
 }
 
 impl LocalWrite {
@@ -59,6 +60,7 @@ impl LocalWrite {
             | Self::DeleteTag
             | Self::Undo
             | Self::Redo => 120,
+            Self::RefreshIndex => 30,
             Self::Discard => 300,
             Self::MergeStart
             | Self::MergeFinish
@@ -109,6 +111,7 @@ impl LocalWrite {
             Self::RedoCheckout => "Redoing the checkout",
             Self::UndoStash => "Undoing the stash change",
             Self::RedoStash => "Redoing the stash change",
+            Self::RefreshIndex => "Refreshing the index",
         }
     }
 
@@ -139,6 +142,7 @@ impl LocalWrite {
             Self::StashDrop => "l1git stash drop",
             Self::Undo | Self::UndoCheckout | Self::UndoStash => "l1git undo",
             Self::Redo | Self::RedoCheckout | Self::RedoStash => "l1git redo",
+            Self::RefreshIndex => "l1git refresh",
         }
     }
 
@@ -152,7 +156,8 @@ impl LocalWrite {
             | Self::StagePart
             | Self::UnstagePart
             | Self::Undo
-            | Self::Redo => "The index is unchanged.",
+            | Self::Redo
+            | Self::RefreshIndex => "The index is unchanged.",
             Self::Commit | Self::Amend | Self::EditMessage => {
                 "Git may have finished the commit, so check the history."
             }
@@ -436,6 +441,15 @@ impl<'a> Write<'a> {
     }
 
     pub(crate) fn run(self, deadline: WriteDeadline) -> Result<Wrote, RepositoryError> {
+        self.run_unless(deadline, None)
+    }
+
+    /// Stops Git once `stop` turns true, and then answers an error.
+    pub(crate) fn run_unless(
+        self,
+        deadline: WriteDeadline,
+        stop: Option<&dyn Fn() -> bool>,
+    ) -> Result<Wrote, RepositoryError> {
         let WriteDeadline { write, deadline } = deadline;
         let mut command = if self.as_user {
             as_user(self.dir)
@@ -451,7 +465,7 @@ impl<'a> Write<'a> {
         for (key, value) in self.env {
             command.env(key, value);
         }
-        let ran = execute(command, deadline, self.input, self.cap)?;
+        let ran = execute(command, deadline, self.input, self.cap, stop)?;
         let Capped::Within(stdout) = ran.stdout else {
             return Err(RepositoryError::new(
                 ErrorKind::GitFailed,
@@ -622,7 +636,7 @@ pub(crate) fn install_config_values(
     for (key, value) in values {
         let mut command = super::base(root, false);
         command.args(["config", "--file", stage_name, "--replace-all", key, value]);
-        let output = execute(command, reads, None, Some(1024))?;
+        let output = execute(command, reads, None, Some(1024), None)?;
         if !output.status.success() {
             return Err(failed("edit the staged config with Git"));
         }
