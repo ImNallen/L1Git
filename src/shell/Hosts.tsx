@@ -1,16 +1,25 @@
 import { paletteItems } from "../actions";
+import type { AppearanceState } from "../appearance";
+import { AppearanceSettings } from "../components/AppearanceSettings";
 import { AddRepositoryDialog } from "../components/AddRepositoryDialog";
 import { CommandPalette } from "../components/CommandPalette";
 import { DiscardDialog, DiscardPartDialog } from "../components/DiscardDialog";
+import { GeneralSettings } from "../components/GeneralSettings";
+import { SettingsDialog } from "../components/SettingsDialog";
 import { StashDialog } from "../components/StashDialog";
+import type { UpdateRestart } from "../components/UpdateRestart";
+import { InstallingBlocker } from "../components/UpdatesSettings";
 import type { RecentRepository } from "../domain/recents";
 import type { RepositorySnapshot } from "../domain/repository";
 import { mac } from "../repositories";
+import type { useFetchSettings } from "../fetchSettings";
+import type { Updates } from "../updates";
 import type { WritesView } from "../useWrites";
 import type { ComposedActions } from "./actionSlices";
 import type { DiffPane } from "./useDiffPane";
 import type { Navigation } from "./useNavigation";
 import type { Palette } from "./usePalette";
+import type { SettingsScreen } from "./useSettingsScreen";
 import type { Staging } from "./useStaging";
 
 export function StashHost({
@@ -108,5 +117,48 @@ export function AddRepositoryHost({
   if (!nav.adding) return null;
   return (
     <AddRepositoryDialog onAdd={nav.addRepository} onClose={nav.closeAdd} />
+  );
+}
+
+/** Settings, then the update restart consent and the installing blocker. */
+export function SettingsHost({
+  settings,
+  appearance,
+  fetching,
+  updates,
+  restart,
+}: {
+  settings: SettingsScreen;
+  appearance: AppearanceState;
+  fetching: ReturnType<typeof useFetchSettings>;
+  updates: Updates;
+  restart: UpdateRestart;
+}) {
+  return (
+    <>
+      {settings.screen === "settings" && (
+        <SettingsDialog
+          section={settings.section}
+          onSectionChange={settings.setSection}
+          onClose={settings.leave}
+        >
+          {settings.section === "appearance" ? (
+            <AppearanceSettings appearance={appearance} />
+          ) : (
+            <GeneralSettings
+              fetching={{
+                intervalMinutes: fetching.intervalMinutes,
+                onIntervalChange: fetching.setIntervalMinutes,
+                persistenceError: fetching.persistenceError,
+              }}
+              updates={updates}
+              restart={restart}
+            />
+          )}
+        </SettingsDialog>
+      )}
+      {restart.dialog}
+      <InstallingBlocker state={updates.snapshot.state} />
+    </>
   );
 }

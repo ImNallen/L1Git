@@ -1,13 +1,9 @@
 import { useAppearance } from "./appearance";
 import { useBranchVisibility } from "./branchVisibility";
 import type { ThemeSettings } from "./themes/catalog";
-import { AppearanceSettings } from "./components/AppearanceSettings";
-import { GeneralSettings } from "./components/GeneralSettings";
-import { SettingsDialog } from "./components/SettingsDialog";
 import { useExpandedRepositories } from "./expandedRepositories";
 import { useUpdates } from "./updates";
 import { useUpdateRestart } from "./components/UpdateRestart";
-import { InstallingBlocker } from "./components/UpdatesSettings";
 import { useFetchSettings } from "./fetchSettings";
 import { useHistoryColumns } from "./historyColumns";
 import { useOverview } from "./overview";
@@ -28,6 +24,7 @@ import {
   DiscardPartHost,
   AddRepositoryHost,
   PaletteHost,
+  SettingsHost,
   StashHost,
 } from "./shell/Hosts";
 import { useNavigation } from "./shell/useNavigation";
@@ -264,29 +261,13 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
         appearance={appearance}
         writes={writes}
       />
-      {settings.screen === "settings" && (
-        <SettingsDialog
-          section={settings.section}
-          onSectionChange={settings.setSection}
-          onClose={settings.leave}
-        >
-          {settings.section === "appearance" ? (
-            <AppearanceSettings appearance={appearance} />
-          ) : (
-            <GeneralSettings
-              fetching={{
-                intervalMinutes: fetchSettings.intervalMinutes,
-                onIntervalChange: fetchSettings.setIntervalMinutes,
-                persistenceError: fetchSettings.persistenceError,
-              }}
-              updates={updates}
-              restart={updateRestart}
-            />
-          )}
-        </SettingsDialog>
-      )}
-      {updateRestart.dialog}
-      <InstallingBlocker state={updates.snapshot.state} />
+      <SettingsHost
+        settings={settings}
+        appearance={appearance}
+        fetching={fetchSettings}
+        updates={updates}
+        restart={updateRestart}
+      />
       <PaletteHost
         palette={palette}
         actions={actions}
