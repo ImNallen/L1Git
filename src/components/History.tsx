@@ -1,6 +1,7 @@
 import {
   Fragment,
   useEffect,
+  useEffectEvent,
   useImperativeHandle,
   useLayoutEffect,
   useMemo,
@@ -674,6 +675,7 @@ export function History({
     scroller.scrollTop = index * ROW_HEIGHT + ROW_HEIGHT / 2 - height / 2;
     setViewport({ top: scroller.scrollTop, height: scroller.clientHeight });
   }
+  const revealFromEffect = useEffectEvent(revealCentered);
 
   useLayoutEffect(() => {
     const scroller = scrollRef.current;
@@ -696,7 +698,7 @@ export function History({
       (last.id === selectedId && last.seq === revealSeq)
     )
       return;
-    revealCentered(rowsRef.current.findIndex((row) => row.id === selectedId));
+    revealFromEffect(rowsRef.current.findIndex((row) => row.id === selectedId));
   }, [snapshot.root, scrollTopOf, selectedId, revealSeq, hidden]);
 
   const ruleShown = useRef({ root: snapshot.root, rule });
@@ -704,7 +706,7 @@ export function History({
     const last = ruleShown.current;
     ruleShown.current = { root: snapshot.root, rule };
     if (last.root === snapshot.root && last.rule !== rule)
-      revealCentered(rows.findIndex((row) => row.id === selectedId));
+      revealFromEffect(rows.findIndex((row) => row.id === selectedId));
   }, [snapshot.root, rule, rows, selectedId]);
 
   useLayoutEffect(

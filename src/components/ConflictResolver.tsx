@@ -103,19 +103,20 @@ export function ConflictResolver({
     () => editorOptions(theme, painted),
     [theme, painted],
   );
+  const epoch = draft?.editorEpoch;
   const file = useMemo(
     () => draft && { name: path, contents: draft.text },
-    [path, draft?.editorEpoch, mode],
+    [path, epoch, mode],
   );
   const choiceOptions = useMemo(
     () => ({
       ...options,
       mergeConflictActionsType: "default" as const,
       onMergeConflictResolve: (file: { contents: string }) => {
-        if (draft) chooseResolution(key, draft.editorEpoch, file.contents);
+        if (epoch !== undefined) chooseResolution(key, epoch, file.contents);
       },
     }),
-    [options, key, draft?.editorEpoch],
+    [options, key, epoch],
   );
   if (!draft)
     return (
