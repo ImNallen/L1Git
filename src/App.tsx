@@ -60,9 +60,8 @@ import { GeneralSettings } from "./components/GeneralSettings";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { CommitInspector, InspectorFrame } from "./components/CommitInspector";
 import { revisionOf } from "./components/revision";
-import type { DiffStyle, FileDiffHandle } from "./components/FileDiffPane";
+import type { DiffStyle } from "./components/FileDiffPane";
 import { History, HistoryPlaceholder } from "./components/History";
-import type { HistoryHandle } from "./components/History";
 import { PaneDivider } from "./components/PaneDivider";
 import { RepositoryTree } from "./components/RepositoryTree";
 import { UndoButtons, WriteNoticeRow } from "./components/UndoControls";
@@ -130,6 +129,7 @@ import { useWrites } from "./useWrites";
 import { composeActions, defineSlice } from "./shell/actionSlices";
 import { focusedElement, shownElement } from "./shell/dom";
 import { InspectorToggle, SidebarToggle } from "./shell/LayoutToggles";
+import { useFocus, useFocusRecovery } from "./shell/useFocus";
 import { useLayout } from "./shell/useLayout";
 import { useSettingsScreen } from "./shell/useSettingsScreen";
 import {
@@ -165,10 +165,17 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     sidebarToggleRef,
   } = layout;
   const settings = useSettingsScreen(layout);
+  const focus = useFocus(sidebarToggleRef);
+  const {
+    historyRef,
+    fileDiffRef,
+    fallback: focusFallback,
+    focusNamedBranch,
+    refocusIfLost,
+  } = focus;
   const [adding, setAdding] = useState(false);
   const [editingMessage, setEditingMessage] = useState(false);
   const [headOf, setHeadOf] = useState<RepositoryRoot | null>(null);
-  const [lostFocusChecks, checkLostFocus] = useState(0);
   const [discarding, setDiscarding] = useState<{
     root: RepositoryRoot;
     write: Write;
@@ -201,8 +208,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   const [lastBranch, setLastBranch] = useState<
     ReadonlyMap<RepositoryRoot, FullRef>
   >(new Map());
-  const historyRef = useRef<HistoryHandle>(null);
-  const fileDiffRef = useRef<FileDiffHandle>(null);
   const gridFocus = useRef<{
     root: RepositoryRoot;
     from: Element | null;
@@ -313,7 +318,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
         mergeState.kind !== "idle"),
     write: writes.write,
     selectRange: app.selectRange,
-    lostFocus: () => checkLostFocus((count) => count + 1),
+    lostFocus: () => focus.checkLost(),
   });
   function writeFiles(
     root: RepositoryRoot,
@@ -878,29 +883,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   const openPalette = useCallback(() => {
     paletteReturn.current = focusedElement();
     setPalette({ picked: historyRef.current?.picked() ?? null });
-  }, []);
-  const focusFallback = useCallback(() => {
-    for (const focus of [
-      () => historyRef.current?.focus(),
-      () => fileDiffRef.current?.focus(),
-      () => sidebarToggleRef.current?.focus(),
-    ]) {
-      focus();
-      if (shownElement(focusedElement())) return;
-    }
-  }, [sidebarToggleRef]);
-  const focusNamedBranch = () => {
-    if (shownElement(focusedElement())) return;
-    const named = document.querySelector<HTMLElement>(
-      ".repository-tree .branch-row[aria-current='true']",
-    );
-    if (named) named.focus();
-    else focusFallback();
-  };
-  const refocusIfLost = () =>
-    requestAnimationFrame(() => {
-      if (!shownElement(focusedElement())) focusFallback();
-    });
+  }, [historyRef]);
   async function checkout(target: Start) {
     if (!snapshot) return;
     await writes.write(snapshot.root, checkoutWrite(target, snapshot.head));
@@ -962,7 +945,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
         historyRef.current?.focus();
     } else if (workspace.kind !== "error") return;
     cancelGridFocus();
-  }, [snapshot?.root, workspace.kind, sidebarToggleRef]);
+  }, [snapshot?.root, workspace.kind, sidebarToggleRef, historyRef]);
   async function addRepository(path: string, signal: AbortSignal) {
     const added = await app.addRepository(path, signal);
     if (added.kind === "opened") {
@@ -999,9 +982,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       appSelect({ kind: "commit", oid: settled.head.oid });
     setHeadOf(null);
   }, [headOf, settled, appSelect]);
-  useEffect(() => {
-    if (lostFocusChecks > 0 && !shownElement(focusedElement())) focusFallback();
-  }, [lostFocusChecks, focusFallback]);
+  useFocusRecovery(focus);
   useEffect(() => {
     if (pendingStash === null) return;
     if (app.activeRoot !== pendingStash.root) setPendingStash(null);
@@ -1485,12 +1466,12 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                       write: writeFiles,
                       commit: async (worktree, write) => {
                         const outcome = await writes.write(worktree, write);
-                        checkLostFocus((count) => count + 1);
+                        focus.checkLost();
                         return outcome;
                       },
                       confirmDiscard: askDiscard,
                       confirmStash: askStash,
-                      lostFocus: () => checkLostFocus((count) => count + 1),
+                      lostFocus: () => focus.checkLost(),
                     }}
                   />
                 ) : (
