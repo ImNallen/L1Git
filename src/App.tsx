@@ -1,8 +1,4 @@
 import { MergeControls } from "./components/MergeControls";
-import {
-  draftImpact as currentDraftImpact,
-  useDraftImpact,
-} from "./draftProtection";
 import { canMark, resolutionKey, resolutionOf } from "./resolutionDrafts";
 import {
   Suspense,
@@ -117,13 +113,14 @@ import { useActiveWorktree } from "./shell/useActiveWorktree";
 import { useFocus, useFocusRecovery } from "./shell/useFocus";
 import { useHistoryPane } from "./shell/useHistoryPane";
 import { useLayout } from "./shell/useLayout";
+import { useMergePanel, useResolutionDrafts } from "./shell/useMergePanel";
+import {
+  ResolutionDraftList,
+  RetainedResolutionHost,
+} from "./shell/MergeRegions";
 import { useWriteLoop } from "./shell/useWriteLoop";
 import { useSettingsScreen } from "./shell/useSettingsScreen";
-import {
-  FileDiffPane,
-  RetainedResolution,
-  usePrefetchLazyViews,
-} from "./shell/lazyViews";
+import { FileDiffPane, usePrefetchLazyViews } from "./shell/lazyViews";
 import { isBranch, jumpView, listedRef } from "./shell/navigation";
 import { workspaceView } from "./shell/workspaceView";
 import type { Jump, JumpTarget } from "./shell/navigation";
@@ -198,21 +195,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     cancel: AbortController;
   } | null>(null);
   const { workspace, current, fileDiff, closeFile } = app;
-  const draftImpact = useDraftImpact();
-  const [retained, setRetained] = useState<{
-    root: RepositoryRoot;
-    path: string;
-  } | null>(null);
-  useEffect(() => {
-    if (draftImpact.resolutions.length === 0) return;
-    const protect = (event: BeforeUnloadEvent) => {
-      if (currentDraftImpact().frozen) return;
-      event.preventDefault();
-      event.returnValue = "";
-    };
-    window.addEventListener("beforeunload", protect);
-    return () => window.removeEventListener("beforeunload", protect);
-  }, [draftImpact.resolutions.length]);
   const expansion = useExpandedRepositories(app.catalog);
   const historyColumns = useHistoryColumns();
   const visibility = useBranchVisibility();
@@ -251,11 +233,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       }
     : null;
   const active = useActiveWorktree(snapshot, app.selection, app.changes);
-  const { mergeState, root: activeWorktree } = active;
-  const [mergeReviewOpen, setMergeReviewOpen] = useState(false);
-  useEffect(() => {
-    setMergeReviewOpen(false);
-  }, [active.root]);
   const loop = useWriteLoop({
     app,
     snapshotRoot: snapshot?.root ?? null,
@@ -271,6 +248,20 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     opened,
     loop.writes.running !== null,
   );
+  const merge = useMergePanel({
+    snapshot,
+    active,
+    opened,
+    writes,
+    rereadChanges,
+    selecting: { select },
+    openInspector: layout.openInspector,
+  });
+  const drafts = useResolutionDrafts({
+    snapshot,
+    closeFile,
+    selectRepository: app.selectRepository,
+  });
   const parts = useParts({
     fileDiff,
     changes: app.changes,
@@ -416,18 +407,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       ),
     [snapshot],
   );
-  const mergeHead = snapshot?.worktrees.find(
-    (worktree) => worktree.root === active.root,
-  )?.head;
-  const mergeEligible =
-    mergeHead?.kind === "attached" &&
-    openRepository?.overview.branches.some(
-      (branch) =>
-        String(branch.reference) === String(mergeHead.reference) &&
-        branch.state.kind === "diverged",
-    ) === true;
-  const mergeBusy =
-    writes.running !== null || openRepository?.activity.kind !== "idle";
   const askFor = (kind: keyof ReturnType<typeof branchAsks>) => () => {
     const ask = ruledBranch && branchAsks(ruledBranch)[kind];
     if (ask) setBranchAsk(ask);
@@ -630,20 +609,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       },
     },
   });
-  const mergeActions = defineSlice({
-    context: {
-      dialogOpen: mergeReviewOpen,
-      merging: active.merging,
-      mergeAvailable:
-        mergeEligible && !mergeBusy && mergeState?.kind === "idle",
-    },
-    commands: {
-      mergeUpstream: () => {
-        if (mergeEligible && !mergeBusy && mergeState?.kind === "idle")
-          setMergeReviewOpen(true);
-      },
-    },
-  });
   const undoActions = defineSlice({
     context: {
       history: {
@@ -667,7 +632,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     diffActions,
     stagingActions,
     refWriteActions,
-    mergeActions,
+    merge.actions,
     undoActions,
   );
   const keys = useRef({ context, commands, palette: palette !== null });
@@ -930,52 +895,10 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
               </div>
             </header>
             <WriteNoticeRow writes={writes} />
-            {activeWorktree && snapshot && (
-              <MergeControls
-                key={activeWorktree}
-                root={activeWorktree}
-                read={active.merge}
-                refresh={rereadChanges}
-                eligible={mergeEligible}
-                busy={mergeBusy}
-                reviewOpen={mergeReviewOpen}
-                onReview={() => setMergeReviewOpen(true)}
-                onCloseReview={() => setMergeReviewOpen(false)}
-                run={(action) => writes.merge(activeWorktree, action)}
-                onInspect={() => {
-                  select({ kind: "worktree", root: activeWorktree });
-                  layout.openInspector();
-                }}
-              />
+            {merge.controls && (
+              <MergeControls key={merge.controls.root} {...merge.controls} />
             )}
-            {draftImpact.resolutions.length > 0 && (
-              <div
-                className="resolution-draft-list"
-                aria-label="Unsaved conflict results"
-              >
-                <span>Unsaved conflict results</span>
-                {draftImpact.resolutions.map(({ root, path }) => (
-                  <button
-                    className="button secondary"
-                    key={resolutionKey(root, path)}
-                    title={`${root}/${path}`}
-                    onClick={() => {
-                      closeFile();
-                      void (
-                        snapshot?.root === root ||
-                        snapshot?.worktrees.some(
-                          (worktree) => worktree.root === root,
-                        )
-                          ? Promise.resolve()
-                          : app.selectRepository(root)
-                      ).then(() => setRetained({ root, path }));
-                    }}
-                  >
-                    {path}
-                  </button>
-                ))}
-              </div>
-            )}
+            <ResolutionDraftList drafts={drafts} />
             <PushNotice push={sync.push} />
             {persistenceError && (
               <div className="notice error-notice" role="alert">
@@ -1207,19 +1130,12 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
           )}
         </div>
       </main>
-      {retained && (
-        <Suspense>
-          <RetainedResolution
-            {...retained}
-            refresh={app.changes.get(retained.root)}
-            theme={appearance.variant.appearance}
-            painted={Object.keys(appearance.variant.palette).length > 0}
-            writes={writes}
-            onClose={() => setRetained(null)}
-            onResolved={() => setRetained(null)}
-          />
-        </Suspense>
-      )}
+      <RetainedResolutionHost
+        drafts={drafts}
+        changes={app.changes}
+        appearance={appearance}
+        writes={writes}
+      />
       {settings.screen === "settings" && (
         <SettingsDialog
           section={settings.section}
