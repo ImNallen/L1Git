@@ -335,7 +335,7 @@ input::placeholder {
   top: 100%;
   left: 0;
   right: 0;
-  height: 8px;
+  height: 10px;
 }
 .sidebar-updater:hover .update-tooltip,
 .sidebar-updater:focus-within .update-tooltip {
