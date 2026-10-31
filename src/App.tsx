@@ -1,7 +1,6 @@
 import { MergeControls } from "./components/MergeControls";
 import { Suspense } from "react";
 import { EyeOff, FolderGit2, Info, Plus, TriangleAlert } from "lucide-react";
-import { REDO_SHORTCUT, shortcutLabel, UNDO_SHORTCUT } from "./actions";
 import { useAppearance } from "./appearance";
 import { useBranchVisibility } from "./branchVisibility";
 import type { ThemeSettings } from "./themes/catalog";
@@ -11,7 +10,7 @@ import { SettingsDialog } from "./components/SettingsDialog";
 import { CommitInspector, InspectorFrame } from "./components/CommitInspector";
 import { History, HistoryPlaceholder } from "./components/History";
 import { PaneDivider } from "./components/PaneDivider";
-import { UndoButtons, WriteNoticeRow } from "./components/UndoControls";
+import { WriteNoticeRow } from "./components/UndoControls";
 import { useExpandedRepositories } from "./expandedRepositories";
 import { useUpdates } from "./updates";
 import { useUpdateRestart } from "./components/UpdateRestart";
@@ -19,13 +18,13 @@ import { InstallingBlocker } from "./components/UpdatesSettings";
 import { useFetchSettings } from "./fetchSettings";
 import { useHistoryColumns } from "./historyColumns";
 import { repositoryWarnings, useOverview } from "./overview";
-import { mac, macNative } from "./repositories";
+import { macNative } from "./repositories";
 import { useRepositoryRefs } from "./useRepositoryRefs";
 import { useWorkspace } from "./useWorkspace";
 import { composeActions } from "./shell/actionSlices";
 import { InspectorToggle, SidebarToggle } from "./shell/LayoutToggles";
 import { openedRepository, useSyncControls } from "./shell/sync";
-import { PublishHost, PushNotice, SyncButtons } from "./shell/SyncRegions";
+import { PublishHost, PushNotice } from "./shell/SyncRegions";
 import { useActiveWorktree } from "./shell/useActiveWorktree";
 import { useFocus, useFocusRecovery } from "./shell/useFocus";
 import { useHistoryPane } from "./shell/useHistoryPane";
@@ -40,6 +39,7 @@ import {
 } from "./shell/Hosts";
 import { useNavigation } from "./shell/useNavigation";
 import { Sidebar } from "./shell/Sidebar";
+import { Toolbar } from "./shell/Toolbar";
 import { useRefWrites, useUndoSteps } from "./shell/useRefWrites";
 import {
   BranchHost,
@@ -228,31 +228,16 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       <main className="workspace">
         <div className="repository-workspace">
           <div className="repository-content">
-            <header className="toolbar" data-tauri-drag-region>
-              {!sidebarOpen && sidebarToggle}
-              <div className="breadcrumb" data-tauri-drag-region>
-                {shown ? (
-                  <span className="repository-name" title={shown.root}>
-                    {shown.name}
-                  </span>
-                ) : (
-                  <span className="muted">Workspace</span>
-                )}
-              </div>
-              <div className="toolbar-actions">
-                {snapshot && (
-                  <UndoButtons
-                    writes={writes}
-                    shortcuts={{
-                      undo: shortcutLabel(UNDO_SHORTCUT, mac),
-                      redo: shortcutLabel(REDO_SHORTCUT, mac),
-                    }}
-                  />
-                )}
-                <SyncButtons sync={sync} commands={commands} />
-                {!inspectorVisible && inspectorToggle}
-              </div>
-            </header>
+            <Toolbar
+              sidebarToggle={sidebarToggle}
+              inspectorToggle={inspectorToggle}
+              layout={layout}
+              shown={shown}
+              snapshot={snapshot}
+              writes={writes}
+              sync={sync}
+              commands={commands}
+            />
             <WriteNoticeRow writes={writes} />
             {merge.controls && (
               <MergeControls key={merge.controls.root} {...merge.controls} />
