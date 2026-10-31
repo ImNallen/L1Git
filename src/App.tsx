@@ -1,6 +1,4 @@
 import { MergeControls } from "./components/MergeControls";
-import { useMergeState } from "./useMergeState";
-import { mergeAllows } from "./domain/merge";
 import {
   draftImpact as currentDraftImpact,
   useDraftImpact,
@@ -122,6 +120,7 @@ import { composeActions, defineSlice } from "./shell/actionSlices";
 import { focusedElement, shownElement } from "./shell/dom";
 import { InspectorToggle, SidebarToggle } from "./shell/LayoutToggles";
 import { openedRepository } from "./shell/sync";
+import { useActiveWorktree } from "./shell/useActiveWorktree";
 import { useFocus, useFocusRecovery } from "./shell/useFocus";
 import { useHistoryPane } from "./shell/useHistoryPane";
 import { useLayout } from "./shell/useLayout";
@@ -264,31 +263,12 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
         changes: app.changes.get(listedWorktree.root),
       }
     : null;
-  const [mergeTarget, setMergeTarget] = useState<{
-    openedRoot: RepositoryRoot;
-    target: RepositoryRoot;
-  } | null>(null);
+  const active = useActiveWorktree(snapshot, app.selection, app.changes);
+  const { mergeState, root: activeWorktree } = active;
   const [mergeReviewOpen, setMergeReviewOpen] = useState(false);
-  const mergeRoot =
-    mergeTarget !== null &&
-    mergeTarget.openedRoot === snapshot?.root &&
-    snapshot?.worktrees.some((worktree) => worktree.root === mergeTarget.target)
-      ? mergeTarget.target
-      : (snapshot?.root ?? null);
-  const mergeChanges =
-    mergeRoot === null ? undefined : app.changes.get(mergeRoot);
-  const [mergeRead, refreshMerge] = useMergeState(mergeRoot, mergeChanges);
-  const mergeState = mergeRead.kind === "ready" ? mergeRead.value : null;
-  useEffect(() => {
-    setMergeTarget(null);
-  }, [snapshot?.root]);
-  useEffect(() => {
-    if (selected?.kind === "worktree" && snapshot?.root)
-      setMergeTarget({ openedRoot: snapshot.root, target: selected.root });
-  }, [selected, snapshot?.root]);
   useEffect(() => {
     setMergeReviewOpen(false);
-  }, [mergeRoot]);
+  }, [active.root]);
   const writes = useWrites(
     snapshot?.root ?? null,
     {
@@ -302,7 +282,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
         return app.rereadOpenRepository(repository);
       },
     },
-    mergeRoot,
+    active.root,
   );
   const parts = useParts({
     fileDiff,
@@ -310,11 +290,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     diffStyle,
     busy:
       writes.running !== null ||
-      (mergeRoot !== null &&
-        fileDiff.kind !== "closed" &&
-        fileDiff.root === mergeRoot &&
-        mergeState !== null &&
-        mergeState.kind !== "idle"),
+      active.mergingIn(fileDiff.kind !== "closed" ? fileDiff.root : null),
     write: writes.write,
     selectRange: app.selectRange,
     lostFocus: () => focus.checkLost(),
@@ -335,8 +311,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     const changes = app.changes.get(root);
     const write =
       changes?.kind === "ready" ? writeFor(kind, changes.status, paths) : null;
-    return write === null ||
-      (root === mergeRoot && !mergeAllows(mergeState, write.operation))
+    return write === null || !active.allows(root, write.operation)
       ? Promise.resolve(false)
       : writes.write(root, write);
   }
@@ -481,7 +456,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     [snapshot],
   );
   const mergeHead = snapshot?.worktrees.find(
-    (worktree) => worktree.root === mergeRoot,
+    (worktree) => worktree.root === active.root,
   )?.head;
   const mergeEligible =
     mergeHead?.kind === "attached" &&
@@ -492,7 +467,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     ) === true;
   const mergeBusy =
     writes.running !== null || openRepository?.activity.kind !== "idle";
-  const mergeActive = mergeState !== null && mergeState.kind !== "idle";
   const askFor = (kind: keyof ReturnType<typeof branchAsks>) => () => {
     const ask = ruledBranch && branchAsks(ruledBranch)[kind];
     if (ask) setBranchAsk(ask);
@@ -513,7 +487,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   const rereadChanges = () => {
     app.refreshChanges();
     writes.rereadHistory();
-    refreshMerge();
+    active.refreshMerge();
   };
   const rereadAll = () => {
     rereadChanges();
@@ -773,7 +747,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   const mergeActions = defineSlice({
     context: {
       dialogOpen: mergeReviewOpen,
-      merging: mergeActive,
+      merging: active.merging,
       mergeAvailable:
         mergeEligible && !mergeBusy && mergeState?.kind === "idle",
     },
@@ -1118,20 +1092,20 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
               </div>
             </header>
             <WriteNoticeRow writes={writes} />
-            {mergeRoot && snapshot && (
+            {activeWorktree && snapshot && (
               <MergeControls
-                key={mergeRoot}
-                root={mergeRoot}
-                read={mergeRead}
+                key={activeWorktree}
+                root={activeWorktree}
+                read={active.merge}
                 refresh={rereadChanges}
                 eligible={mergeEligible}
                 busy={mergeBusy}
                 reviewOpen={mergeReviewOpen}
                 onReview={() => setMergeReviewOpen(true)}
                 onCloseReview={() => setMergeReviewOpen(false)}
-                run={(action) => writes.merge(mergeRoot, action)}
+                run={(action) => writes.merge(activeWorktree, action)}
                 onInspect={() => {
-                  select({ kind: "worktree", root: mergeRoot });
+                  select({ kind: "worktree", root: activeWorktree });
                   layout.openInspector();
                 }}
               />
@@ -1393,10 +1367,9 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                     onRefreshChanges={rereadChanges}
                     writes={{
                       busy: writes.running !== null,
-                      merge:
-                        selectedWorktree?.worktree.root === mergeRoot
-                          ? mergeState
-                          : null,
+                      merge: active.mergeStateFor(
+                        selectedWorktree?.worktree.root,
+                      ),
                       write: writeFiles,
                       commit: async (worktree, write) => {
                         const outcome = await writes.write(worktree, write);
