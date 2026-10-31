@@ -1,7 +1,14 @@
+import { paletteItems } from "../actions";
+import { CommandPalette } from "../components/CommandPalette";
 import { DiscardDialog, DiscardPartDialog } from "../components/DiscardDialog";
 import { StashDialog } from "../components/StashDialog";
+import type { RecentRepository } from "../domain/recents";
+import type { RepositorySnapshot } from "../domain/repository";
+import { mac } from "../repositories";
 import type { WritesView } from "../useWrites";
+import type { ComposedActions } from "./actionSlices";
 import type { DiffPane } from "./useDiffPane";
+import type { Palette } from "./usePalette";
 import type { Staging } from "./useStaging";
 
 export function StashHost({
@@ -60,6 +67,33 @@ export function DiscardPartHost({ diff }: { diff: Pick<DiffPane, "parts"> }) {
       effect={parts.discarding.effect}
       onDiscard={parts.confirmDiscard}
       onClose={parts.closeDiscard}
+    />
+  );
+}
+
+export function PaletteHost({
+  palette,
+  actions,
+  entries,
+  snapshot,
+}: {
+  palette: Pick<Palette, "open" | "close" | "run">;
+  actions: ComposedActions;
+  entries: RecentRepository[];
+  snapshot: RepositorySnapshot | null;
+}) {
+  if (!palette.open) return null;
+  return (
+    <CommandPalette
+      items={paletteItems(
+        actions.context,
+        actions.commands,
+        mac,
+        entries,
+        snapshot,
+      )}
+      onClose={palette.close}
+      onRun={palette.run}
     />
   );
 }

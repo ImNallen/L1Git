@@ -1,10 +1,8 @@
 import { MergeControls } from "./components/MergeControls";
 import {
   Suspense,
-  useCallback,
   useEffect,
   useEffectEvent,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -19,18 +17,7 @@ import {
   Trash2,
   TriangleAlert,
 } from "lucide-react";
-import {
-  claimedWhilePaletteOpen,
-  matchesShortcut,
-  PALETTE_SHORTCUT,
-  paletteItems,
-  REDO_SHORTCUT,
-  shortcutAction,
-  shortcutLabel,
-  typingIn,
-  UNDO_SHORTCUT,
-} from "./actions";
-import type { PaletteItem } from "./actions";
+import { REDO_SHORTCUT, shortcutLabel, UNDO_SHORTCUT } from "./actions";
 import { useAppearance } from "./appearance";
 import { useBranchVisibility } from "./branchVisibility";
 import type { ThemeSettings } from "./themes/catalog";
@@ -41,7 +28,6 @@ import { CheckoutCommitDialog } from "./components/CheckoutCommitDialog";
 import { TagDialog } from "./components/TagDialog";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { EditMessageDialog } from "./components/EditMessageDialog";
-import { CommandPalette } from "./components/CommandPalette";
 import { GeneralSettings } from "./components/GeneralSettings";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { CommitInspector, InspectorFrame } from "./components/CommitInspector";
@@ -97,7 +83,13 @@ import { useFocus, useFocusRecovery } from "./shell/useFocus";
 import { useHistoryPane } from "./shell/useHistoryPane";
 import { useLayout } from "./shell/useLayout";
 import { useDiffPane } from "./shell/useDiffPane";
-import { DiscardHost, DiscardPartHost, StashHost } from "./shell/Hosts";
+import {
+  DiscardHost,
+  DiscardPartHost,
+  PaletteHost,
+  StashHost,
+} from "./shell/Hosts";
+import { usePalette, useShortcuts } from "./shell/usePalette";
 import { useStaging } from "./shell/useStaging";
 import { useMergePanel, useResolutionDrafts } from "./shell/useMergePanel";
 import {
@@ -143,6 +135,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     focusNamedBranch,
     refocusIfLost,
   } = focus;
+  const palette = usePalette(focus);
   const [adding, setAdding] = useState(false);
   const [editingMessage, setEditingMessage] = useState(false);
   const [headOf, setHeadOf] = useState<RepositoryRoot | null>(null);
@@ -154,8 +147,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     (RefStep & { root: RepositoryRoot }) | null
   >(null);
   const focusJumpedRow = useRef(false);
-  const [palette, setPalette] = useState<{ picked: Oid | null } | null>(null);
-  const paletteReturn = useRef<Element | null>(null);
   const [jump, setJump] = useState<Jump | null>(null);
   // The branch or tag last selected in each repository, so it stays highlighted after a round trip.
   const [lastBranch, setLastBranch] = useState<
@@ -377,10 +368,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     }));
     historyRef.current?.focus();
   }
-  const paletteActions = defineSlice({
-    context: { picked: palette?.picked ?? null, typing: false },
-    commands: {},
-  });
   const navigationActions = defineSlice({
     context: {
       adding,
@@ -467,28 +454,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       redo: () => void stepHistory("redo"),
     },
   });
-  const { context, commands } = composeActions(
-    settings.actions,
-    layout.actions,
-    paletteActions,
-    history.actions,
-    navigationActions,
-    sync.actions,
-    loop.actions,
-    diff.actions,
-    staging.actions,
-    refWriteActions,
-    merge.actions,
-    undoActions,
-  );
-  const keys = useRef({ context, commands, palette: palette !== null });
-  useLayoutEffect(() => {
-    keys.current = { context, commands, palette: palette !== null };
-  });
-  const openPalette = useCallback(() => {
-    paletteReturn.current = focusedElement();
-    setPalette({ picked: historyRef.current?.picked() ?? null });
-  }, [historyRef]);
   async function checkout(target: Start) {
     if (!snapshot) return;
     await writes.write(snapshot.root, checkoutWrite(target, snapshot.head));
@@ -524,24 +489,13 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     focusJumpedRow.current = false;
     focusJumpedBranch();
   }, [sidebarJump]);
-  const closePalette = () => {
-    flushSync(() => setPalette(null));
-    const back = paletteReturn.current;
-    if (shownElement(back)) back.focus({ preventScroll: true });
-    if (!shownElement(back) || focusedElement() !== back) focusFallback();
-  };
-  const runItem = (item: PaletteItem) => {
-    closePalette();
-    item.run();
-    refocusIfLost();
-  };
   useEffect(() => {
     const pending = gridFocus.current;
     if (pending === null) return;
     if (snapshot?.root === pending.root) {
       const focused = focusedElement();
       if (
-        palette === null &&
+        !palette.open &&
         (focused === pending.from ||
           focused === document.body ||
           focused === sidebarToggleRef.current ||
@@ -560,17 +514,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     }
     return added.kind === "failed" ? added.problem : null;
   }
-  const sidebarToggle = (
-    <SidebarToggle layout={layout} toggle={commands.toggleSidebar} />
-  );
-  const inspectorToggle = (
-    <InspectorToggle
-      layout={layout}
-      disabled={!shown}
-      toggle={commands.toggleInspector}
-    />
-  );
-
   const appSelect = app.select;
   useEffect(() => {
     if (jump === null) return;
@@ -598,37 +541,33 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       setPendingStash(null);
     }
   }, [pendingStash, settled, app.activeRoot, appSelect]);
-  useEffect(() => {
-    function keyboard(event: KeyboardEvent) {
-      const { context, commands, palette } = keys.current;
-      // A modal dialog owns Escape, even when its focused control was disabled and dropped focus.
-      const dialogOpen = document.querySelector("dialog[open]") !== null;
-      if (matchesShortcut(PALETTE_SHORTCUT, event, mac)) {
-        event.preventDefault();
-        const target =
-          event.target instanceof HTMLElement ? event.target : null;
-        if (!dialogOpen && !typingIn(target)) openPalette();
-        return;
-      }
-      if (palette) {
-        if (claimedWhilePaletteOpen(event, mac)) event.preventDefault();
-        return;
-      }
-      const [origin] = event.composedPath();
-      const typing = typingIn(origin instanceof HTMLElement ? origin : null);
-      const action = shortcutAction(
-        { ...context, dialogOpen, typing },
-        event,
-        mac,
-      );
-      if (action === null) return;
-      event.preventDefault();
-      action.run(commands);
-    }
-    window.addEventListener("keydown", keyboard);
-    return () => window.removeEventListener("keydown", keyboard);
-  }, [openPalette]);
+  const actions = composeActions(
+    settings.actions,
+    layout.actions,
+    palette.actions,
+    history.actions,
+    navigationActions,
+    sync.actions,
+    loop.actions,
+    diff.actions,
+    staging.actions,
+    refWriteActions,
+    merge.actions,
+    undoActions,
+  );
+  useShortcuts(actions, palette);
   usePrefetchLazyViews();
+  const { commands } = actions;
+  const sidebarToggle = (
+    <SidebarToggle layout={layout} toggle={commands.toggleSidebar} />
+  );
+  const inspectorToggle = (
+    <InspectorToggle
+      layout={layout}
+      disabled={!shown}
+      toggle={commands.toggleInspector}
+    />
+  );
 
   return (
     <div
@@ -992,19 +931,12 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       )}
       {updateRestart.dialog}
       <InstallingBlocker state={updates.snapshot.state} />
-      {palette && (
-        <CommandPalette
-          items={paletteItems(
-            context,
-            commands,
-            mac,
-            app.catalog.entries,
-            snapshot,
-          )}
-          onClose={closePalette}
-          onRun={runItem}
-        />
-      )}
+      <PaletteHost
+        palette={palette}
+        actions={actions}
+        entries={app.catalog.entries}
+        snapshot={snapshot}
+      />
       {editingMessage && headStatus && editableHead && (
         <EditMessageDialog
           status={headStatus}
