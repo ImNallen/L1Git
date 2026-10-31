@@ -1,5 +1,3 @@
-import { Suspense } from "react";
-import { FolderGit2, Plus, TriangleAlert } from "lucide-react";
 import { useAppearance } from "./appearance";
 import { useBranchVisibility } from "./branchVisibility";
 import type { ThemeSettings } from "./themes/catalog";
@@ -7,7 +5,6 @@ import { AppearanceSettings } from "./components/AppearanceSettings";
 import { GeneralSettings } from "./components/GeneralSettings";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { CommitInspector, InspectorFrame } from "./components/CommitInspector";
-import { History, HistoryPlaceholder } from "./components/History";
 import { PaneDivider } from "./components/PaneDivider";
 import { useExpandedRepositories } from "./expandedRepositories";
 import { useUpdates } from "./updates";
@@ -39,6 +36,7 @@ import { useNavigation } from "./shell/useNavigation";
 import { Sidebar } from "./shell/Sidebar";
 import { Toolbar } from "./shell/Toolbar";
 import { Notices } from "./shell/Notices";
+import { WorkspacePanes } from "./shell/WorkspacePanes";
 import { useRefWrites, useUndoSteps } from "./shell/useRefWrites";
 import {
   BranchHost,
@@ -53,14 +51,14 @@ import { useMergePanel, useResolutionDrafts } from "./shell/useMergePanel";
 import { RetainedResolutionHost } from "./shell/MergeRegions";
 import { useWriteLoop } from "./shell/useWriteLoop";
 import { useSettingsScreen } from "./shell/useSettingsScreen";
-import { FileDiffPane, usePrefetchLazyViews } from "./shell/lazyViews";
+import { usePrefetchLazyViews } from "./shell/lazyViews";
 import { workspaceView } from "./shell/workspaceView";
 
 export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   const appearance = useAppearance(initialTheme);
   const app = useWorkspace();
   const view = workspaceView(app);
-  const { snapshot, shown, opening, busy, fileOpen, activePath } = view;
+  const { snapshot, shown, activePath } = view;
   const fetchSettings = useFetchSettings();
   const updates = useUpdates();
   const updateRestart = useUpdateRestart(updates);
@@ -78,7 +76,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   } = layout;
   const settings = useSettingsScreen(layout);
   const focus = useFocus(sidebarToggleRef);
-  const { historyRef, fileDiffRef } = focus;
   const palette = usePalette(focus);
   const { workspace, current, fileDiff, closeFile } = app;
   const expansion = useExpandedRepositories(app.catalog);
@@ -106,7 +103,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     selection: app.selection,
     focus,
   });
-  const { model, rule, placement, shows } = history;
+  const { rule, placement } = history;
   const active = useActiveWorktree(snapshot, app.selection, app.changes);
   const loop = useWriteLoop({
     app,
@@ -137,7 +134,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   });
   useFocusRecovery(focus);
   const diff = useDiffPane({ app, writes, active, focus });
-  const { parts } = diff;
   const staging = useStaging({
     snapshot,
     selection: app.selection,
@@ -244,126 +240,19 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
               rule={rule}
               nav={nav}
             />
-            <div className="workspace-panes">
-              {model ? (
-                <>
-                  <History
-                    ref={historyRef}
-                    snapshot={model.snapshot}
-                    visibleCommits={model.visibleCommits}
-                    visibleOids={model.visibleOids}
-                    rows={model.rows}
-                    graph={model.graph}
-                    rule={model.rule}
-                    selection={app.selection}
-                    compare={app.compare}
-                    revealSeq={nav.revealSeq}
-                    onSelect={nav.selecting.select}
-                    onCompare={nav.selecting.compareWith}
-                    onEndCompare={nav.selecting.endCompare}
-                    onOpenFirstFile={app.openFirstFile}
-                    onCancelOpen={app.cancelOpenFirstFile}
-                    scrollTopOf={app.scrollTopOf}
-                    onScroll={app.rememberScroll}
-                    busy={busy}
-                    hidden={fileOpen}
-                    trunk={model.trunk}
-                    visibleColumns={historyColumns.visible}
-                    onToggleColumn={historyColumns.toggle}
-                    editableHead={refWrites.commitActions.editableHead}
-                    onEditMessage={refWrites.commitActions.onEditMessage}
-                    onNewBranch={refWrites.commitActions.onNewBranch}
-                    onCreateTag={refWrites.commitActions.onCreateTag}
-                    onCheckout={refWrites.commitActions.onCheckout}
-                  />
-                  {fileDiff.kind !== "closed" && (
-                    <Suspense>
-                      <FileDiffPane
-                        ref={fileDiffRef}
-                        state={fileDiff}
-                        diffStyle={diff.diffStyle}
-                        theme={appearance.variant.appearance}
-                        painted={
-                          Object.keys(appearance.variant.palette).length > 0
-                        }
-                        onDiffStyle={diff.setDiffStyle}
-                        onBack={closeFile}
-                        onRetry={() =>
-                          app.openFile(fileDiff.path, fileDiff.side)
-                        }
-                        onRefresh={() => {
-                          rereadChanges();
-                          app.openFile(fileDiff.path, fileDiff.side);
-                        }}
-                        selectable={shows}
-                        onSelectCommit={(oid) =>
-                          nav.selecting.select({ kind: "commit", oid })
-                        }
-                        parts={parts.view}
-                        writes={writes}
-                      />
-                    </Suspense>
-                  )}
-                </>
-              ) : opening ? (
-                <HistoryPlaceholder />
-              ) : workspace.kind === "error" ? (
-                <div className="workspace-empty">
-                  <div className="empty-icon error-icon">
-                    <TriangleAlert size={32} />
-                  </div>
-                  <h1>
-                    {workspace.error.kind === "timedOut"
-                      ? "Reading this repository took too long"
-                      : "Could not open this repository"}
-                  </h1>
-                  <p className="path-label">{workspace.path}</p>
-                  <p role="alert">{workspace.error.message}</p>
-                  <div className="empty-actions">
-                    <button
-                      className="button secondary"
-                      onClick={() => void app.selectRepository(workspace.path)}
-                    >
-                      Try again
-                    </button>
-                    <button
-                      className="button primary"
-                      onClick={commands.addRepository}
-                    >
-                      Choose another folder
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="workspace-empty starter">
-                  <div className="empty-icon">
-                    <FolderGit2 size={34} strokeWidth={1.3} />
-                  </div>
-                  <span className="eyebrow">L1 Git</span>
-                  <h1>Open your first repository</h1>
-                  <p>
-                    Browse your branches, follow the commit graph,
-                    <br />
-                    and see the story behind each change.
-                  </p>
-                  <button
-                    className="button primary"
-                    onClick={commands.addRepository}
-                  >
-                    <Plus size={16} />
-                    Add repository
-                  </button>
-                  <span className="empty-shortcut">
-                    or press <kbd>⌘ / Ctrl</kbd> <kbd>O</kbd>
-                  </span>
-                  <div className="empty-scope">
-                    <span className="status-dot" />
-                    Fetches remotes and fast-forwards only clean branches that
-                    are behind.
-                  </div>
-                </div>
-              )}
-            </div>
+            <WorkspacePanes
+              app={app}
+              view={view}
+              history={history}
+              columns={historyColumns}
+              nav={nav}
+              commitActions={refWrites.commitActions}
+              focus={focus}
+              diff={diff}
+              loop={loop}
+              appearance={appearance}
+              onAdd={commands.addRepository}
+            />
           </div>
           {inspectorVisible && (
             <>

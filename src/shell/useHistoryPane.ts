@@ -16,6 +16,7 @@ import { NO_RULE, visibleCommits } from "../domain/visibility";
 import type { VisibilityRule } from "../domain/visibility";
 import { historyRows } from "../domain/worktree";
 import type { ChangesByWorktree, HistoryRow } from "../domain/worktree";
+import type { ColumnId } from "../historyColumns";
 import { defineSlice } from "./actionSlices";
 import type { ActionSlice } from "./actionSlices";
 import type { Focus } from "./useFocus";
@@ -29,6 +30,11 @@ export type HistoryModel = {
   graph: Graph;
   rule: VisibilityRule;
   trunk: Oid[];
+};
+
+export type HistoryColumnsGroup = {
+  visible: ReadonlySet<ColumnId>;
+  toggle: (id: ColumnId) => void;
 };
 
 /** The selected commit's labels and lane, for the inspector header. */
