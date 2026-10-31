@@ -104,15 +104,12 @@ import { trunkTips } from "./domain/highlight";
 import { readyAdvances } from "./domain/overview";
 import { refLabels } from "./domain/refs";
 import type {
-  Branch,
   FullRef,
   Head,
   Oid,
-  RepositoryRefs,
   RepositoryRoot,
   Start,
   Stash,
-  Tag,
 } from "./domain/repository";
 import { pushControl, pushOutcomeText } from "./domain/push";
 import { sameSelection } from "./domain/selection";
@@ -141,36 +138,9 @@ import { useRepositoryRefs } from "./useRepositoryRefs";
 import { useParts } from "./useParts";
 import { useWorkspace } from "./useWorkspace";
 import { useWrites } from "./useWrites";
-
-/**
- * A branch jump. `pending` waits for the snapshot of `root` to load, then a
- * new `seq` reveals the branch after the history restores its scroll.
- */
-type Jump = {
-  root: RepositoryRoot;
-  reference: FullRef;
-  seq: number;
-  pending: boolean;
-};
-function focusedElement(): Element | null {
-  let focused = document.activeElement;
-  while (focused?.shadowRoot?.activeElement)
-    focused = focused.shadowRoot.activeElement;
-  return focused;
-}
-
-function shownElement(element: Element | null): element is HTMLElement {
-  return (
-    element instanceof HTMLElement &&
-    element !== document.body &&
-    element.isConnected &&
-    element.getClientRects().length > 0
-  );
-}
-
-type JumpTarget = Branch | Tag;
-
-const isBranch = (target: JumpTarget): target is Branch => "kind" in target;
+import { focusedElement, shownElement } from "./shell/dom";
+import { isBranch, listedRef } from "./shell/navigation";
+import type { Jump, JumpTarget } from "./shell/navigation";
 
 // Diffs, highlighting, and the conflict editor load after startup, since no file is open at launch.
 const diffViews = () => import("./components/FileDiffPane");
@@ -184,17 +154,6 @@ const RetainedResolution = lazy(() =>
 
 // Below this the default sidebar leaves the history too narrow for its columns.
 const NARROW_SIDEBAR = "(max-width: 939px)";
-
-function listedRef(
-  refs: Pick<RepositoryRefs, "branches" | "tags">,
-  reference: FullRef,
-): JumpTarget | null {
-  return (
-    refs.branches.find((branch) => branch.reference === reference) ??
-    refs.tags.find((tag) => tag.reference === reference) ??
-    null
-  );
-}
 
 export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   const appearance = useAppearance(initialTheme);
