@@ -111,7 +111,6 @@ import type {
   Stash,
 } from "./domain/repository";
 import { pushControl, pushOutcomeText } from "./domain/push";
-import { sameSelection } from "./domain/selection";
 import type { Compare } from "./domain/comparison";
 import type { Selection } from "./domain/selection";
 import {
@@ -143,7 +142,7 @@ import {
   RetainedResolution,
   usePrefetchLazyViews,
 } from "./shell/lazyViews";
-import { isBranch, listedRef } from "./shell/navigation";
+import { isBranch, jumpView, listedRef } from "./shell/navigation";
 import type { Jump, JumpTarget } from "./shell/navigation";
 
 // Below this the default sidebar leaves the history too narrow for its columns.
@@ -520,27 +519,22 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     () => (snapshot ? trunkTips(snapshot.branches, statuses ?? []) : []),
     [snapshot, statuses],
   );
-  const jumpedReference =
-    snapshot && !(jump?.pending && jump.root === snapshot.root)
-      ? lastBranch.get(snapshot.root)
-      : undefined;
-  const jumped =
-    snapshot && jumpedReference ? listedRef(snapshot, jumpedReference) : null;
-  const jumpedUnloaded = jumped !== null && !loaded.has(jumped.oid);
-  const hiddenJump =
-    jumped !== null &&
-    sidebarJump?.root === snapshot?.root &&
-    sidebarJump?.reference === jumped.reference &&
-    !jumpedUnloaded &&
-    !visibleOids.has(jumped.oid)
-      ? jumped
-      : null;
-  const highlighted =
-    jumped !== null &&
-    sameSelection(app.selection, { kind: "commit", oid: jumped.oid });
-  const ruledBranch =
-    jumped && isBranch(jumped) && (highlighted || hiddenJump) ? jumped : null;
-  const sidebarTag = jumped && !isBranch(jumped) ? jumped : null;
+  const {
+    jumped,
+    jumpedUnloaded,
+    hiddenJump,
+    highlighted,
+    ruledBranch,
+    sidebarTag,
+  } = jumpView({
+    snapshot,
+    jump,
+    lastBranch,
+    sidebarJump,
+    selection: app.selection,
+    loaded,
+    visibleOids,
+  });
   const checkedOut = useMemo(
     () =>
       new Map(
