@@ -25,8 +25,6 @@ import {
   FolderGit2,
   Info,
   LoaderCircle,
-  PanelLeft,
-  PanelRight,
   Settings,
   Plus,
   Trash2,
@@ -57,7 +55,6 @@ import { StashDialog } from "./components/StashDialog";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { DiscardDialog, DiscardPartDialog } from "./components/DiscardDialog";
 import { EditMessageDialog } from "./components/EditMessageDialog";
-import { COMMIT_SUMMARY_ID } from "./components/CommitBox";
 import { CommandPalette } from "./components/CommandPalette";
 import { GeneralSettings } from "./components/GeneralSettings";
 import { SettingsDialog } from "./components/SettingsDialog";
@@ -132,6 +129,8 @@ import { useWorkspace } from "./useWorkspace";
 import { useWrites } from "./useWrites";
 import { composeActions, defineSlice } from "./shell/actionSlices";
 import { focusedElement, shownElement } from "./shell/dom";
+import { InspectorToggle, SidebarToggle } from "./shell/LayoutToggles";
+import { useLayout } from "./shell/useLayout";
 import {
   FileDiffPane,
   RetainedResolution,
@@ -140,9 +139,6 @@ import {
 import { isBranch, jumpView, listedRef } from "./shell/navigation";
 import { workspaceView } from "./shell/workspaceView";
 import type { Jump, JumpTarget } from "./shell/navigation";
-
-// Below this the default sidebar leaves the history too narrow for its columns.
-const NARROW_SIDEBAR = "(max-width: 939px)";
 
 export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   const appearance = useAppearance(initialTheme);
@@ -160,6 +156,16 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     app.catalog.entries.map((entry) => entry.root),
     fetchSettings.intervalMinutes,
   );
+  const layout = useLayout(shown);
+  const {
+    sidebarOpen,
+    inspectorVisible,
+    sidebarWidth,
+    setSidebarWidth,
+    inspectorWidth,
+    setInspectorWidth,
+    sidebarToggleRef,
+  } = layout;
   const [adding, setAdding] = useState(false);
   const [editingMessage, setEditingMessage] = useState(false);
   const [headOf, setHeadOf] = useState<RepositoryRoot | null>(null);
@@ -190,22 +196,12 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   const focusJumpedRow = useRef(false);
   const [palette, setPalette] = useState<{ picked: Oid | null } | null>(null);
   const paletteReturn = useRef<Element | null>(null);
-  const [sidebarOpen, setSidebarOpen] = useState(
-    () => !window.matchMedia(NARROW_SIDEBAR).matches,
-  );
-  const [inspectorOpen, setInspectorOpen] = useState(
-    () => window.innerWidth >= 1100,
-  );
-  const [sidebarWidth, setSidebarWidth] = useState(260);
-  const [inspectorWidth, setInspectorWidth] = useState(320);
   const [diffStyle, setDiffStyle] = useState<DiffStyle>("unified");
   const [jump, setJump] = useState<Jump | null>(null);
   // The branch or tag last selected in each repository, so it stays highlighted after a round trip.
   const [lastBranch, setLastBranch] = useState<
     ReadonlyMap<RepositoryRoot, FullRef>
   >(new Map());
-  const sidebarToggleRef = useRef<HTMLButtonElement>(null);
-  const inspectorToggleRef = useRef<HTMLButtonElement>(null);
   const settingsRef = useRef<HTMLButtonElement>(null);
   const historyRef = useRef<HistoryHandle>(null);
   const fileDiffRef = useRef<FileDiffHandle>(null);
@@ -217,7 +213,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   const leaveSettings = useCallback(() => {
     flushSync(() => setScreen("repository"));
     (sidebarOpen ? settingsRef : sidebarToggleRef).current?.focus();
-  }, [sidebarOpen]);
+  }, [sidebarOpen, sidebarToggleRef]);
   const { workspace, current, fileDiff, closeFile } = app;
   const draftImpact = useDraftImpact();
   const [retained, setRetained] = useState<{
@@ -469,7 +465,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     root: RepositoryRoot;
     reference: FullRef;
   } | null>(null);
-  const inspectorVisible = Boolean(shown && inspectorOpen);
   const openRoot = shown?.root ?? null;
   const openRootState = openRoot === null ? null : overview.roots.get(openRoot);
   const openRepository =
@@ -683,17 +678,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       leaveSettings,
     },
   });
-  const layoutActions = defineSlice({
-    context: { inspectable: shown !== null },
-    commands: {
-      toggleSidebar: () => setSidebarOpen((open) => !open),
-      toggleInspector: () => setInspectorOpen((open) => !open),
-      focusCommit: () => {
-        flushSync(() => setInspectorOpen(true));
-        document.getElementById(COMMIT_SUMMARY_ID)?.focus();
-      },
-    },
-  });
   const paletteActions = defineSlice({
     context: { picked: palette?.picked ?? null, typing: false },
     commands: {},
@@ -891,7 +875,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   });
   const { context, commands } = composeActions(
     settingsActions,
-    layoutActions,
+    layout.actions,
     paletteActions,
     historyActions,
     navigationActions,
@@ -911,7 +895,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     paletteReturn.current = focusedElement();
     setPalette({ picked: historyRef.current?.picked() ?? null });
   }, []);
-  const focusFallback = () => {
+  const focusFallback = useCallback(() => {
     for (const focus of [
       () => historyRef.current?.focus(),
       () => fileDiffRef.current?.focus(),
@@ -920,7 +904,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       focus();
       if (shownElement(focusedElement())) return;
     }
-  };
+  }, [sidebarToggleRef]);
   const focusNamedBranch = () => {
     if (shownElement(focusedElement())) return;
     const named = document.querySelector<HTMLElement>(
@@ -962,7 +946,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     if (target === null) return focusFallback();
     focusJumpedRow.current = true;
     jumpToStepped(root, target);
-  }, [steppedRef, branchRefs.refs]);
+  }, [steppedRef, branchRefs.refs, focusFallback]);
   useEffect(() => {
     if (!focusJumpedRow.current) return;
     focusJumpedRow.current = false;
@@ -994,7 +978,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
         historyRef.current?.focus();
     } else if (workspace.kind !== "error") return;
     cancelGridFocus();
-  }, [snapshot?.root, workspace.kind]);
+  }, [snapshot?.root, workspace.kind, sidebarToggleRef]);
   async function addRepository(path: string, signal: AbortSignal) {
     const added = await app.addRepository(path, signal);
     if (added.kind === "opened") {
@@ -1004,35 +988,14 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     return added.kind === "failed" ? added.problem : null;
   }
   const sidebarToggle = (
-    <button
-      ref={sidebarToggleRef}
-      className={`icon-button sidebar-toggle ${sidebarOpen ? "toggled" : ""}`}
-      aria-label="Toggle sidebar"
-      title="Toggle sidebar"
-      aria-pressed={sidebarOpen}
-      onClick={() => {
-        flushSync(commands.toggleSidebar);
-        sidebarToggleRef.current?.focus();
-      }}
-    >
-      <PanelLeft size={16} />
-    </button>
+    <SidebarToggle layout={layout} toggle={commands.toggleSidebar} />
   );
   const inspectorToggle = (
-    <button
-      ref={inspectorToggleRef}
-      className={`icon-button ${inspectorVisible ? "toggled" : ""}`}
+    <InspectorToggle
+      layout={layout}
       disabled={!shown}
-      aria-label="Toggle commit inspector"
-      title="Toggle commit inspector"
-      aria-pressed={inspectorVisible}
-      onClick={() => {
-        flushSync(commands.toggleInspector);
-        inspectorToggleRef.current?.focus();
-      }}
-    >
-      <PanelRight size={16} />
-    </button>
+      toggle={commands.toggleInspector}
+    />
   );
 
   const appSelect = app.select;
@@ -1054,7 +1017,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   }, [headOf, settled, appSelect]);
   useEffect(() => {
     if (lostFocusChecks > 0 && !shownElement(focusedElement())) focusFallback();
-  }, [lostFocusChecks]);
+  }, [lostFocusChecks, focusFallback]);
   useEffect(() => {
     if (pendingStash === null) return;
     if (app.activeRoot !== pendingStash.root) setPendingStash(null);
@@ -1094,23 +1057,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     window.addEventListener("keydown", keyboard);
     return () => window.removeEventListener("keydown", keyboard);
   }, [openPalette]);
-  useEffect(() => {
-    const media = window.matchMedia("(max-width: 1099px)");
-    const narrow = () => {
-      if (media.matches) setInspectorOpen(false);
-    };
-    media.addEventListener("change", narrow);
-    return () => media.removeEventListener("change", narrow);
-  }, []);
   usePrefetchLazyViews();
-  useEffect(() => {
-    const media = window.matchMedia(NARROW_SIDEBAR);
-    const narrow = () => {
-      if (media.matches) setSidebarOpen(false);
-    };
-    media.addEventListener("change", narrow);
-    return () => media.removeEventListener("change", narrow);
-  }, []);
 
   return (
     <div
@@ -1286,7 +1233,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                 run={(action) => writes.merge(mergeRoot, action)}
                 onInspect={() => {
                   select({ kind: "worktree", root: mergeRoot });
-                  setInspectorOpen(true);
+                  layout.openInspector();
                 }}
               />
             )}
