@@ -1,5 +1,4 @@
 import { MergeControls } from "./components/MergeControls";
-import { canMark, resolutionKey, resolutionOf } from "./resolutionDrafts";
 import {
   Suspense,
   useCallback,
@@ -40,9 +39,7 @@ import { AddRepositoryDialog } from "./components/AddRepositoryDialog";
 import { BranchDialog } from "./components/BranchDialog";
 import { CheckoutCommitDialog } from "./components/CheckoutCommitDialog";
 import { TagDialog } from "./components/TagDialog";
-import { StashDialog } from "./components/StashDialog";
 import { ConfirmDialog } from "./components/ConfirmDialog";
-import { DiscardDialog } from "./components/DiscardDialog";
 import { EditMessageDialog } from "./components/EditMessageDialog";
 import { CommandPalette } from "./components/CommandPalette";
 import { GeneralSettings } from "./components/GeneralSettings";
@@ -56,7 +53,6 @@ import {
   answeredInTagDialog,
   branchAsks,
   checkoutWrite,
-  discardChoice,
   nextEntry,
   refStep,
   startAt,
@@ -64,20 +60,11 @@ import {
   stashDropWrite,
   stashPopWrite,
   worktreeForStash,
-  writeFor,
 } from "./domain/operations";
-import type {
-  BranchAsk,
-  FileWrite,
-  RefStep,
-  Step,
-  TagAsk,
-  Write,
-} from "./domain/operations";
+import type { BranchAsk, RefStep, Step, TagAsk } from "./domain/operations";
 import { swapEnds } from "./domain/comparison";
 import type {
   FullRef,
-  Head,
   Oid,
   RepositoryRoot,
   Start,
@@ -87,7 +74,6 @@ import type { Compare } from "./domain/comparison";
 import type { Selection } from "./domain/selection";
 import { branchVisibility, NO_RULE, toggleRule } from "./domain/visibility";
 import type { VisibilityRule } from "./domain/visibility";
-import { listWrites, worktreeGroups } from "./domain/worktree";
 import { useExpandedRepositories } from "./expandedRepositories";
 import { useUpdates } from "./updates";
 import { useUpdateRestart } from "./components/UpdateRestart";
@@ -111,7 +97,8 @@ import { useFocus, useFocusRecovery } from "./shell/useFocus";
 import { useHistoryPane } from "./shell/useHistoryPane";
 import { useLayout } from "./shell/useLayout";
 import { useDiffPane } from "./shell/useDiffPane";
-import { DiscardPartHost } from "./shell/Hosts";
+import { DiscardHost, DiscardPartHost, StashHost } from "./shell/Hosts";
+import { useStaging } from "./shell/useStaging";
 import { useMergePanel, useResolutionDrafts } from "./shell/useMergePanel";
 import {
   ResolutionDraftList,
@@ -159,22 +146,9 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   const [adding, setAdding] = useState(false);
   const [editingMessage, setEditingMessage] = useState(false);
   const [headOf, setHeadOf] = useState<RepositoryRoot | null>(null);
-  const [discarding, setDiscarding] = useState<{
-    root: RepositoryRoot;
-    write: Write;
-    paths: string[];
-    skipped: number;
-    returnFocus?: () => void;
-  } | null>(null);
   const [branchAsk, setBranchAsk] = useState<BranchAsk | null>(null);
   const [detaching, setDetaching] = useState<Oid | null>(null);
   const [tagAsk, setTagAsk] = useState<TagAsk | null>(null);
-  const [stashing, setStashing] = useState<{
-    root: RepositoryRoot;
-    paths: string[];
-    untracked: boolean;
-    head: Head;
-  } | null>(null);
   const [droppingStash, setDroppingStash] = useState<Stash | null>(null);
   const [steppedRef, setSteppedRef] = useState<
     (RefStep & { root: RepositoryRoot }) | null
@@ -220,16 +194,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   });
   const { model, rule, loaded, visibleOids, placement, shows } = history;
   const selected = app.selection;
-  const listedWorktree =
-    selected?.kind === "worktree"
-      ? snapshot?.worktrees.find((worktree) => worktree.root === selected.root)
-      : undefined;
-  const selectedWorktree = listedWorktree
-    ? {
-        worktree: listedWorktree,
-        changes: app.changes.get(listedWorktree.root),
-      }
-    : null;
   const active = useActiveWorktree(snapshot, app.selection, app.changes);
   const loop = useWriteLoop({
     app,
@@ -262,56 +226,16 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   });
   const diff = useDiffPane({ app, writes, active, focus });
   const { parts } = diff;
-  function writeFiles(
-    root: RepositoryRoot,
-    kind: FileWrite,
-    paths: readonly string[],
-  ) {
-    if (
-      kind === "stageFiles" &&
-      paths.some((path) => {
-        const draft = resolutionOf(resolutionKey(root, path));
-        return draft !== null && !canMark(draft);
-      })
-    )
-      return Promise.resolve(false);
-    const changes = app.changes.get(root);
-    const write =
-      changes?.kind === "ready" ? writeFor(kind, changes.status, paths) : null;
-    return write === null || !active.allows(root, write.operation)
-      ? Promise.resolve(false)
-      : writes.write(root, write);
-  }
-  function askDiscard(
-    root: RepositoryRoot,
-    paths: readonly string[],
-    returnFocus?: () => void,
-  ) {
-    const changes = app.changes.get(root);
-    if (changes?.kind !== "ready") return;
-    const choice = discardChoice(changes.status, paths);
-    const write = writeFor("discard", changes.status, choice.paths);
-    if (write !== null) setDiscarding({ root, write, ...choice, returnFocus });
-  }
-  function askStash(root: RepositoryRoot, paths: readonly string[]) {
-    const changes = app.changes.get(root);
-    if (changes?.kind !== "ready") return;
-    const named = new Set(paths);
-    const untracked =
-      paths.length > 0 &&
-      changes.status.entries.some(
-        (entry) =>
-          entry.kind === "untracked" &&
-          !entry.path.endsWith("/") &&
-          named.has(entry.path),
-      );
-    setStashing({
-      root,
-      paths: [...paths],
-      untracked,
-      head: changes.status.head,
-    });
-  }
+  const staging = useStaging({
+    snapshot,
+    selection: app.selection,
+    compare: app.compare,
+    changes: app.changes,
+    writes,
+    active,
+    focus,
+  });
+  const { selectedWorktree } = staging;
   function stashAction(action: "apply" | "pop" | "drop", stash: Stash) {
     if (!snapshot) return;
     if (action === "drop") {
@@ -338,29 +262,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   const headStatus = rootChanges?.kind === "ready" ? rootChanges.status : null;
   const editableHead =
     headStatus?.head.kind === "unborn" ? null : (headStatus?.head.oid ?? null);
-  const selectedChanges =
-    app.compare === null ? selectedWorktree?.changes : undefined;
-  const selectedLists = useMemo(
-    () =>
-      selectedChanges?.kind === "ready"
-        ? new Map(
-            worktreeGroups(selectedChanges.status.entries).map((group) => [
-              group.side,
-              group.files.map((file) => file.path),
-            ]),
-          )
-        : null,
-    [selectedChanges],
-  );
-  function writeList(side: "unstaged" | "staged") {
-    const paths = selectedLists?.get(side);
-    if (selectedWorktree && paths)
-      void writeFiles(
-        selectedWorktree.worktree.root,
-        listWrites[side].kind,
-        paths,
-      );
-  }
   const selectCommit = (oid: Oid) => select({ kind: "commit", oid });
   // A stash clicked in another repository, selected once its snapshot loads.
   const [pendingStash, setPendingStash] = useState<{
@@ -537,34 +438,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       endCompare,
     },
   });
-  const stagingActions = defineSlice({
-    context: {
-      worktree: selectedLists && {
-        unstaged: selectedLists.get("unstaged")?.length ?? 0,
-        staged: selectedLists.get("staged")?.length ?? 0,
-        conflicts: selectedLists.get("conflict")?.length ?? 0,
-        discardable:
-          selectedChanges?.kind === "ready"
-            ? discardChoice(
-                selectedChanges.status,
-                selectedLists.get("unstaged") ?? [],
-              ).paths.length
-            : 0,
-      },
-    },
-    commands: {
-      stageAll: () => writeList("unstaged"),
-      unstageAll: () => writeList("staged"),
-      discardAll: () => {
-        const paths = selectedLists?.get("unstaged");
-        if (selectedWorktree && paths)
-          askDiscard(selectedWorktree.worktree.root, paths);
-      },
-      stashChanges: () => {
-        if (selectedWorktree) askStash(selectedWorktree.worktree.root, []);
-      },
-    },
-  });
   const refWriteActions = defineSlice({
     context: {},
     commands: {
@@ -603,7 +476,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     sync.actions,
     loop.actions,
     diff.actions,
-    stagingActions,
+    staging.actions,
     refWriteActions,
     merge.actions,
     undoActions,
@@ -1079,21 +952,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                     onRetry={app.retryDetail}
                     worktree={selectedWorktree}
                     onRefreshChanges={rereadChanges}
-                    writes={{
-                      busy: writes.running !== null,
-                      merge: active.mergeStateFor(
-                        selectedWorktree?.worktree.root,
-                      ),
-                      write: writeFiles,
-                      commit: async (worktree, write) => {
-                        const outcome = await writes.write(worktree, write);
-                        focus.checkLost();
-                        return outcome;
-                      },
-                      confirmDiscard: askDiscard,
-                      confirmStash: askStash,
-                      lostFocus: () => focus.checkLost(),
-                    }}
+                    writes={staging.inspectorWrites}
                   />
                 ) : (
                   <InspectorFrame toggleButton={inspectorToggle} />
@@ -1215,19 +1074,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
           onClose={() => setDetaching(null)}
         />
       )}
-      {stashing && (
-        <StashDialog
-          paths={stashing.paths}
-          includeUntracked={stashing.untracked}
-          head={stashing.head}
-          onWrite={async (write) => {
-            const outcome = await writes.write(stashing.root, write);
-            if (outcome.kind === "failed") writes.dismiss();
-            return outcome;
-          }}
-          onClose={() => setStashing(null)}
-        />
-      )}
+      <StashHost staging={staging} writes={writes} />
       {droppingStash && snapshot && (
         <ConfirmDialog
           icon={Trash2}
@@ -1248,17 +1095,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
           </p>
         </ConfirmDialog>
       )}
-      {discarding && (
-        <DiscardDialog
-          paths={discarding.paths}
-          skipped={discarding.skipped}
-          onDiscard={() => void writes.write(discarding.root, discarding.write)}
-          onClose={() => {
-            setDiscarding(null);
-            discarding.returnFocus?.();
-          }}
-        />
-      )}
+      <DiscardHost staging={staging} writes={writes} />
       <DiscardPartHost diff={diff} />
       {adding && (
         <AddRepositoryDialog
