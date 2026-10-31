@@ -4,8 +4,6 @@ import type { ThemeSettings } from "./themes/catalog";
 import { AppearanceSettings } from "./components/AppearanceSettings";
 import { GeneralSettings } from "./components/GeneralSettings";
 import { SettingsDialog } from "./components/SettingsDialog";
-import { CommitInspector, InspectorFrame } from "./components/CommitInspector";
-import { PaneDivider } from "./components/PaneDivider";
 import { useExpandedRepositories } from "./expandedRepositories";
 import { useUpdates } from "./updates";
 import { useUpdateRestart } from "./components/UpdateRestart";
@@ -37,6 +35,7 @@ import { Sidebar } from "./shell/Sidebar";
 import { Toolbar } from "./shell/Toolbar";
 import { Notices } from "./shell/Notices";
 import { WorkspacePanes } from "./shell/WorkspacePanes";
+import { InspectorPane } from "./shell/InspectorPane";
 import { useRefWrites, useUndoSteps } from "./shell/useRefWrites";
 import {
   BranchHost,
@@ -67,17 +66,11 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     fetchSettings.intervalMinutes,
   );
   const layout = useLayout(shown);
-  const {
-    sidebarOpen,
-    inspectorVisible,
-    inspectorWidth,
-    setInspectorWidth,
-    sidebarToggleRef,
-  } = layout;
+  const { sidebarOpen, sidebarToggleRef } = layout;
   const settings = useSettingsScreen(layout);
   const focus = useFocus(sidebarToggleRef);
   const palette = usePalette(focus);
-  const { workspace, current, fileDiff, closeFile } = app;
+  const { workspace, current, closeFile } = app;
   const expansion = useExpandedRepositories(app.catalog);
   const historyColumns = useHistoryColumns();
   const visibility = useBranchVisibility();
@@ -103,7 +96,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     selection: app.selection,
     focus,
   });
-  const { rule, placement } = history;
+  const { rule } = history;
   const active = useActiveWorktree(snapshot, app.selection, app.changes);
   const loop = useWriteLoop({
     app,
@@ -143,7 +136,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     active,
     focus,
   });
-  const { selectedWorktree } = staging;
   const refWrites = useRefWrites({
     snapshot,
     selection: app.selection,
@@ -254,46 +246,16 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
               onAdd={commands.addRepository}
             />
           </div>
-          {inspectorVisible && (
-            <>
-              <PaneDivider
-                label="Resize commit inspector"
-                width={inspectorWidth}
-                min={280}
-                max={500}
-                direction={-1}
-                onResize={setInspectorWidth}
-              />
-              <div
-                className="inspector-container"
-                style={{ width: inspectorWidth }}
-              >
-                {snapshot ? (
-                  <CommitInspector
-                    state={app.detail}
-                    root={snapshot.root}
-                    selection={app.selection}
-                    compare={app.compare}
-                    comparison={app.comparison}
-                    snapshot={snapshot}
-                    refs={placement.refs}
-                    lane={placement.lane}
-                    onSelect={nav.selecting.select}
-                    onSwap={app.swapCompare}
-                    selectedFile={fileDiff.kind !== "closed" ? fileDiff : null}
-                    onSelectFile={app.openFile}
-                    toggleButton={inspectorToggle}
-                    onRetry={app.retryDetail}
-                    worktree={selectedWorktree}
-                    onRefreshChanges={rereadChanges}
-                    writes={staging.inspectorWrites}
-                  />
-                ) : (
-                  <InspectorFrame toggleButton={inspectorToggle} />
-                )}
-              </div>
-            </>
-          )}
+          <InspectorPane
+            layout={layout}
+            toggle={inspectorToggle}
+            app={app}
+            snapshot={snapshot}
+            nav={nav}
+            history={history}
+            staging={staging}
+            rereadChanges={rereadChanges}
+          />
         </div>
       </main>
       <RetainedResolutionHost
