@@ -318,7 +318,7 @@ input::placeholder {
   right: 15px;
   bottom: calc(100% + 8px);
   z-index: 10;
-  width: max-content;
+  width: 320px;
   max-width: calc(100% - 30px);
   padding: 8px 10px;
   border: 1px solid var(--border-strong);
@@ -329,8 +329,35 @@ input::placeholder {
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
+.update-tooltip::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  height: 10px;
+}
+.sidebar-updater:hover .update-tooltip,
 .sidebar-updater:focus-within .update-tooltip {
   display: block;
+}
+.update-tooltip-changes {
+  display: block;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-strong);
+}
+.update-tooltip-title {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--text);
+  font-weight: 600;
+}
+.update-tooltip-notes {
+  display: block;
+  max-height: min(240px, 40vh);
+  overflow-y: auto;
+  white-space: pre-wrap;
 }
 .status-dot {
   display: inline-block;

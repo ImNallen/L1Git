@@ -120,6 +120,75 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
+it.each(["available", "downloaded"] as const)(
+  "exposes literal release notes on focus for a %s update without live announcements",
+  async (kind) => {
+    const notes = `## What's Changed\n\n* Preserve spacing\n  <script>alert("notes")</script>\n[link](javascript:alert(1))`;
+    await state({
+      kind,
+      candidate: { ...candidate, notes },
+      message: "Retry is available",
+    });
+    await render(false);
+    sidebar().focus();
+    expect(document.activeElement).toBe(sidebar());
+    const descriptions = sidebar()
+      .getAttribute("aria-describedby")
+      ?.split(" ")
+      .map((id) => document.getElementById(id));
+    expect(descriptions).toHaveLength(2);
+    expect(descriptions?.[0]?.textContent).toContain(
+      kind === "downloaded" ? "ready to install" : "is available",
+    );
+    expect(descriptions?.[0]?.textContent).toContain("Retry is available");
+    expect(descriptions?.[1]?.textContent).toContain("What's changed");
+    expect(descriptions?.[1]?.textContent).toContain(notes);
+    const region = container.querySelector<HTMLElement>(
+      '[role="region"][aria-label="What\'s changed"]',
+    );
+    expect(region?.textContent).toBe(notes);
+    expect(region?.tabIndex).toBe(0);
+    region?.focus();
+    expect(document.activeElement).toBe(region);
+    expect(container.querySelector("script, a")).toBeNull();
+    expect(
+      container.querySelector('[role="status"]')?.textContent,
+    ).not.toContain(notes);
+    expect(region?.closest('[aria-live], [role="status"]')).toBeNull();
+  },
+);
+
+it.each(["available", "downloaded"] as const)(
+  "omits absent or blank release notes for a %s update",
+  async (kind) => {
+    await render(false);
+    for (const notes of [null, "", " \n\t "]) {
+      await state({ kind, candidate: { ...candidate, notes }, message: null });
+      expect(container.querySelector('[role="region"]')).toBeNull();
+      expect(
+        container.querySelector(".update-tooltip")?.textContent,
+      ).not.toContain("What's changed");
+      expect(sidebar().getAttribute("aria-describedby")).toBe(
+        container.querySelector('[role="status"]')?.id,
+      );
+    }
+  },
+);
+
+it("keeps release notes out of busy progress details", async () => {
+  await render(false);
+  for (const value of [
+    { kind: "downloading", candidate, received: 12, total: 100 },
+    { kind: "installing", candidate },
+  ]) {
+    await state(value);
+    expect(container.querySelector('[role="region"]')).toBeNull();
+    expect(
+      container.querySelector(".update-tooltip")?.textContent,
+    ).not.toContain(candidate.notes);
+  }
+});
+
 it("separates checking, download, progress and explicit restart and escapes release notes", async () => {
   await render();
   transport.invoke.mockResolvedValue(snapshot({ kind: "checking" }));
