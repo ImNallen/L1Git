@@ -50,14 +50,10 @@ export function InspectorPane({
           <CommitInspector
             state={app.detail}
             root={snapshot.root}
-            selection={app.selection}
-            compare={app.compare}
+            selecting={nav.selecting}
             comparison={app.comparison}
             snapshot={snapshot}
-            refs={history.placement.refs}
-            lane={history.placement.lane}
-            onSelect={nav.selecting.select}
-            onSwap={app.swapCompare}
+            placement={history.placement}
             selectedFile={fileDiff.kind !== "closed" ? fileDiff : null}
             onSelectFile={app.openFile}
             toggleButton={toggle}
