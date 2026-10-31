@@ -41,7 +41,7 @@ import {
   typingIn,
   UNDO_SHORTCUT,
 } from "./actions";
-import type { FileView, PaletteItem, Screen, SettingsSection } from "./actions";
+import type { FileView, PaletteItem } from "./actions";
 import { useAppearance } from "./appearance";
 import { useBranchVisibility } from "./branchVisibility";
 import type { ThemeSettings } from "./themes/catalog";
@@ -131,6 +131,7 @@ import { composeActions, defineSlice } from "./shell/actionSlices";
 import { focusedElement, shownElement } from "./shell/dom";
 import { InspectorToggle, SidebarToggle } from "./shell/LayoutToggles";
 import { useLayout } from "./shell/useLayout";
+import { useSettingsScreen } from "./shell/useSettingsScreen";
 import {
   FileDiffPane,
   RetainedResolution,
@@ -146,9 +147,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   const view = workspaceView(app);
   const { snapshot, settled, shown, opening, busy, fileOpen, activePath } =
     view;
-  const [screen, setScreen] = useState<Screen>("repository");
-  const [settingsSection, setSettingsSection] =
-    useState<SettingsSection>("general");
   const fetchSettings = useFetchSettings();
   const updates = useUpdates();
   const updateRestart = useUpdateRestart(updates);
@@ -166,6 +164,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     setInspectorWidth,
     sidebarToggleRef,
   } = layout;
+  const settings = useSettingsScreen(layout);
   const [adding, setAdding] = useState(false);
   const [editingMessage, setEditingMessage] = useState(false);
   const [headOf, setHeadOf] = useState<RepositoryRoot | null>(null);
@@ -202,7 +201,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   const [lastBranch, setLastBranch] = useState<
     ReadonlyMap<RepositoryRoot, FullRef>
   >(new Map());
-  const settingsRef = useRef<HTMLButtonElement>(null);
   const historyRef = useRef<HistoryHandle>(null);
   const fileDiffRef = useRef<FileDiffHandle>(null);
   const gridFocus = useRef<{
@@ -210,10 +208,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     from: Element | null;
     cancel: AbortController;
   } | null>(null);
-  const leaveSettings = useCallback(() => {
-    flushSync(() => setScreen("repository"));
-    (sidebarOpen ? settingsRef : sidebarToggleRef).current?.focus();
-  }, [sidebarOpen, sidebarToggleRef]);
   const { workspace, current, fileDiff, closeFile } = app;
   const draftImpact = useDraftImpact();
   const [retained, setRetained] = useState<{
@@ -612,7 +606,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   function showRepository(root: RepositoryRoot) {
     cancelGridFocus();
     setSidebarJump(null);
-    setScreen("repository");
+    settings.toRepository();
     expansion.setExpanded(root, true);
     if (root !== snapshot?.root) void app.selectRepository(root);
   }
@@ -668,16 +662,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     }));
     historyRef.current?.focus();
   }
-  const settingsActions = defineSlice({
-    context: { screen, section: settingsSection },
-    commands: {
-      openSettings: (section?: SettingsSection) => {
-        if (section) setSettingsSection(section);
-        setScreen("settings");
-      },
-      leaveSettings,
-    },
-  });
   const paletteActions = defineSlice({
     context: { picked: palette?.picked ?? null, typing: false },
     commands: {},
@@ -874,7 +858,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     },
   });
   const { context, commands } = composeActions(
-    settingsActions,
+    settings.actions,
     layout.actions,
     paletteActions,
     historyActions,
@@ -1121,7 +1105,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
         </div>
         <footer className="sidebar-bottom">
           <button
-            ref={settingsRef}
+            ref={settings.settingsRef}
             className="icon-button"
             aria-label="Settings"
             title="Settings"
@@ -1530,13 +1514,13 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
           />
         </Suspense>
       )}
-      {screen === "settings" && (
+      {settings.screen === "settings" && (
         <SettingsDialog
-          section={settingsSection}
-          onSectionChange={setSettingsSection}
-          onClose={leaveSettings}
+          section={settings.section}
+          onSectionChange={settings.setSection}
+          onClose={settings.leave}
         >
-          {settingsSection === "appearance" ? (
+          {settings.section === "appearance" ? (
             <AppearanceSettings appearance={appearance} />
           ) : (
             <GeneralSettings
