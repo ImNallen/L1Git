@@ -1,13 +1,11 @@
 import { MergeControls } from "./components/MergeControls";
-import { Suspense, useState } from "react";
-import { flushSync } from "react-dom";
+import { Suspense } from "react";
 import {
   EyeOff,
   FolderGit2,
   Info,
   Settings,
   Plus,
-  Trash2,
   TriangleAlert,
 } from "lucide-react";
 import { REDO_SHORTCUT, shortcutLabel, UNDO_SHORTCUT } from "./actions";
@@ -15,11 +13,6 @@ import { useAppearance } from "./appearance";
 import { useBranchVisibility } from "./branchVisibility";
 import type { ThemeSettings } from "./themes/catalog";
 import { AppearanceSettings } from "./components/AppearanceSettings";
-import { BranchDialog } from "./components/BranchDialog";
-import { CheckoutCommitDialog } from "./components/CheckoutCommitDialog";
-import { TagDialog } from "./components/TagDialog";
-import { ConfirmDialog } from "./components/ConfirmDialog";
-import { EditMessageDialog } from "./components/EditMessageDialog";
 import { GeneralSettings } from "./components/GeneralSettings";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { CommitInspector, InspectorFrame } from "./components/CommitInspector";
@@ -27,20 +20,6 @@ import { History, HistoryPlaceholder } from "./components/History";
 import { PaneDivider } from "./components/PaneDivider";
 import { RepositoryTree } from "./components/RepositoryTree";
 import { UndoButtons, WriteNoticeRow } from "./components/UndoControls";
-import {
-  answeredInTagDialog,
-  branchAsks,
-  checkoutWrite,
-  nextEntry,
-  refStep,
-  startAt,
-  stashApplyWrite,
-  stashDropWrite,
-  stashPopWrite,
-  worktreeForStash,
-} from "./domain/operations";
-import type { BranchAsk, Step, TagAsk } from "./domain/operations";
-import type { Oid, Start, Stash } from "./domain/repository";
 import { useExpandedRepositories } from "./expandedRepositories";
 import { useUpdates } from "./updates";
 import { useUpdateRestart } from "./components/UpdateRestart";
@@ -54,8 +33,7 @@ import { repositoryWarnings, useOverview } from "./overview";
 import { mac, macNative } from "./repositories";
 import { useRepositoryRefs } from "./useRepositoryRefs";
 import { useWorkspace } from "./useWorkspace";
-import { composeActions, defineSlice } from "./shell/actionSlices";
-import { focusedElement, shownElement } from "./shell/dom";
+import { composeActions } from "./shell/actionSlices";
 import { InspectorToggle, SidebarToggle } from "./shell/LayoutToggles";
 import { openedRepository, useSyncControls } from "./shell/sync";
 import { PublishHost, PushNotice, SyncButtons } from "./shell/SyncRegions";
@@ -72,6 +50,14 @@ import {
   StashHost,
 } from "./shell/Hosts";
 import { useNavigation } from "./shell/useNavigation";
+import { useRefWrites, useUndoSteps } from "./shell/useRefWrites";
+import {
+  BranchHost,
+  CheckoutCommitHost,
+  DropStashHost,
+  EditMessageHost,
+  TagHost,
+} from "./shell/RefWriteHosts";
 import { usePalette, useShortcuts } from "./shell/usePalette";
 import { useStaging } from "./shell/useStaging";
 import { useMergePanel, useResolutionDrafts } from "./shell/useMergePanel";
@@ -109,19 +95,8 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   } = layout;
   const settings = useSettingsScreen(layout);
   const focus = useFocus(sidebarToggleRef);
-  const {
-    historyRef,
-    fileDiffRef,
-    fallback: focusFallback,
-    focusNamedBranch,
-    refocusIfLost,
-  } = focus;
+  const { historyRef, fileDiffRef } = focus;
   const palette = usePalette(focus);
-  const [editingMessage, setEditingMessage] = useState(false);
-  const [branchAsk, setBranchAsk] = useState<BranchAsk | null>(null);
-  const [detaching, setDetaching] = useState<Oid | null>(null);
-  const [tagAsk, setTagAsk] = useState<TagAsk | null>(null);
-  const [droppingStash, setDroppingStash] = useState<Stash | null>(null);
   const { workspace, current, fileDiff, closeFile } = app;
   const expansion = useExpandedRepositories(app.catalog);
   const historyColumns = useHistoryColumns();
@@ -149,7 +124,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     focus,
   });
   const { model, rule, placement, shows } = history;
-  const selected = app.selection;
   const active = useActiveWorktree(snapshot, app.selection, app.changes);
   const loop = useWriteLoop({
     app,
@@ -179,8 +153,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     paletteOpen: palette.open,
   });
   useFocusRecovery(focus);
-  const { jumped, jumpedUnloaded, hiddenJump, ruledBranch, sidebarTag } =
-    nav.jump;
+  const { jumped, jumpedUnloaded, hiddenJump } = nav.jump;
   const diff = useDiffPane({ app, writes, active, focus });
   const { parts } = diff;
   const staging = useStaging({
@@ -193,6 +166,15 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     focus,
   });
   const { selectedWorktree } = staging;
+  const refWrites = useRefWrites({
+    snapshot,
+    selection: app.selection,
+    changes: app.changes,
+    writes,
+    nav,
+    staging,
+    focus,
+  });
   const merge = useMergePanel({
     snapshot,
     active,
@@ -207,86 +189,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     closeFile,
     selectRepository: app.selectRepository,
   });
-  function stashAction(action: "apply" | "pop" | "drop", stash: Stash) {
-    if (!snapshot) return;
-    if (action === "drop") {
-      setDroppingStash(stash);
-      return;
-    }
-    const target = worktreeForStash(
-      snapshot,
-      stash.message,
-      selectedWorktree
-        ? {
-            root: selectedWorktree.worktree.root,
-            head: selectedWorktree.worktree.head,
-          }
-        : null,
-    );
-    const write =
-      action === "apply"
-        ? stashApplyWrite(stash, target.head)
-        : stashPopWrite(stash, target.head);
-    void writes.write(target.root, write);
-  }
-  const rootChanges = snapshot ? app.changes.get(snapshot.root) : undefined;
-  const headStatus = rootChanges?.kind === "ready" ? rootChanges.status : null;
-  const editableHead =
-    headStatus?.head.kind === "unborn" ? null : (headStatus?.head.oid ?? null);
-  const askFor = (kind: keyof ReturnType<typeof branchAsks>) => () => {
-    const ask = ruledBranch && branchAsks(ruledBranch)[kind];
-    if (ask) setBranchAsk(ask);
-  };
-  const askTag = (oid: Oid) =>
-    setTagAsk({
-      kind: "create",
-      at: oid,
-      subject:
-        snapshot?.commits.find((commit) => commit.oid === oid)?.subject ?? "",
-    });
-  const refWriteActions = defineSlice({
-    context: {},
-    commands: {
-      checkout: () => {
-        if (ruledBranch) void checkout(startAt(ruledBranch));
-      },
-      newBranch: askFor("create"),
-      renameBranch: askFor("rename"),
-      deleteBranch: askFor("delete"),
-      createTag: () => {
-        if (selected?.kind === "commit") askTag(selected.oid);
-      },
-      deleteTag: () => {
-        if (sidebarTag) setTagAsk({ kind: "delete", tag: sidebarTag });
-      },
-    },
-  });
-  const undoActions = defineSlice({
-    context: {
-      history: {
-        undo: nextEntry(writes.history, "undo")?.label ?? null,
-        redo: nextEntry(writes.history, "redo")?.label ?? null,
-      },
-    },
-    commands: {
-      undo: () => void stepHistory("undo"),
-      redo: () => void stepHistory("redo"),
-    },
-  });
-  async function checkout(target: Start) {
-    if (!snapshot) return;
-    await writes.write(snapshot.root, checkoutWrite(target, snapshot.head));
-    refocusIfLost();
-  }
-  async function stepHistory(step: Step) {
-    const entry = nextEntry(writes.history, step);
-    nav.followRefStep(null);
-    const outcome = await writes[step]();
-    if (entry?.operation.kind === "checkout") refocusIfLost();
-    const moved = entry && refStep(entry.operation, step);
-    if (outcome.kind === "applied" && entry && moved)
-      nav.followRefStep({ root: entry.root, ...moved });
-  }
+  const undo = useUndoSteps({ writes, nav, focus });
   const actions = composeActions(
     settings.actions,
     layout.actions,
@@ -297,9 +200,9 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     loop.actions,
     diff.actions,
     staging.actions,
-    refWriteActions,
+    refWrites.actions,
     merge.actions,
-    undoActions,
+    undo.actions,
   );
   useShortcuts(actions, palette);
   usePrefetchLazyViews();
@@ -353,13 +256,11 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
             onRule={nav.sidebar.onRule}
             onRemove={nav.sidebar.onRemove}
             onAdd={nav.sidebar.onAdd}
-            writable={
-              snapshot && { root: snapshot.root, checkedOutIn: nav.checkedOut }
-            }
-            onBranchAsk={setBranchAsk}
-            onTagAsk={setTagAsk}
-            onStashAction={stashAction}
-            onCheckout={(branch) => void checkout(startAt(branch))}
+            writable={refWrites.sidebarActions.writable}
+            onBranchAsk={refWrites.sidebarActions.onBranchAsk}
+            onTagAsk={refWrites.sidebarActions.onTagAsk}
+            onStashAction={refWrites.sidebarActions.onStashAction}
+            onCheckout={refWrites.sidebarActions.onCheckout}
           />
         </div>
         <footer className="sidebar-bottom">
@@ -496,17 +397,11 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                     trunk={model.trunk}
                     visibleColumns={historyColumns.visible}
                     onToggleColumn={historyColumns.toggle}
-                    editableHead={editableHead}
-                    onEditMessage={() => setEditingMessage(true)}
-                    onNewBranch={(oid) =>
-                      setBranchAsk({
-                        kind: "create",
-                        at: { kind: "commit", oid },
-                        from: `commit ${oid.slice(0, 7)}`,
-                      })
-                    }
-                    onCreateTag={askTag}
-                    onCheckout={setDetaching}
+                    editableHead={refWrites.commitActions.editableHead}
+                    onEditMessage={refWrites.commitActions.onEditMessage}
+                    onNewBranch={refWrites.commitActions.onNewBranch}
+                    onCreateTag={refWrites.commitActions.onCreateTag}
+                    onCheckout={refWrites.commitActions.onCheckout}
                   />
                   {fileDiff.kind !== "closed" && (
                     <Suspense>
@@ -674,97 +569,34 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
         entries={app.catalog.entries}
         snapshot={snapshot}
       />
-      {editingMessage && headStatus && editableHead && (
-        <EditMessageDialog
-          status={headStatus}
-          onSave={async (worktree, write) => {
-            const outcome = await writes.write(worktree, write);
-            if (outcome.kind === "applied") nav.selectHeadAfter(worktree);
-            return outcome;
-          }}
-          onClose={() => {
-            flushSync(() => setEditingMessage(false));
-            focusFallback();
-          }}
-        />
-      )}
+      <EditMessageHost
+        refWrites={refWrites}
+        writes={writes}
+        nav={nav}
+        focus={focus}
+      />
       <PublishHost sync={sync} loop={loop} focus={focus} />
-      {branchAsk && snapshot && (
-        <BranchDialog
-          ask={branchAsk}
-          root={snapshot.root}
-          head={snapshot.head}
-          onWrite={async (write) => {
-            const outcome = await writes.write(snapshot.root, write);
-            const shownInDialog =
-              write.operation.kind === "createBranch" ||
-              write.operation.kind === "renameBranch";
-            if (outcome.kind === "failed" && shownInDialog) writes.dismiss();
-            if (!shownElement(focusedElement())) focusFallback();
-            return outcome;
-          }}
-          onNamedBranch={(branch) => nav.jumpTo(snapshot.root, branch)}
-          onClose={() => {
-            setBranchAsk(null);
-            requestAnimationFrame(focusNamedBranch);
-          }}
-        />
-      )}
-      {tagAsk && snapshot && (
-        <TagDialog
-          ask={tagAsk}
-          head={snapshot.head}
-          onWrite={async (write) => {
-            const { operation } = write;
-            const outcome = await writes.write(snapshot.root, write);
-            if (
-              outcome.kind === "failed" &&
-              operation.kind === "createTag" &&
-              answeredInTagDialog(outcome.problem)
-            )
-              writes.dismiss();
-            if (outcome.kind === "applied" && operation.kind === "deleteTag")
-              nav.followRefStep({
-                root: snapshot.root,
-                left: null,
-                gone: operation.tag.reference,
-              });
-            return outcome;
-          }}
-          onClose={() => {
-            setTagAsk(null);
-            refocusIfLost();
-          }}
-        />
-      )}
-      {detaching && (
-        <CheckoutCommitDialog
-          oid={detaching}
-          onConfirm={() => void checkout({ kind: "commit", oid: detaching })}
-          onClose={() => setDetaching(null)}
-        />
-      )}
+      <BranchHost
+        refWrites={refWrites}
+        snapshot={snapshot}
+        writes={writes}
+        nav={nav}
+        focus={focus}
+      />
+      <TagHost
+        refWrites={refWrites}
+        snapshot={snapshot}
+        writes={writes}
+        nav={nav}
+        focus={focus}
+      />
+      <CheckoutCommitHost refWrites={refWrites} />
       <StashHost staging={staging} writes={writes} />
-      {droppingStash && snapshot && (
-        <ConfirmDialog
-          icon={Trash2}
-          title={`Drop ${droppingStash.name}?`}
-          closeLabel="Close drop stash"
-          confirm="Drop stash"
-          onConfirm={() => {
-            void writes.write(
-              snapshot.root,
-              stashDropWrite(droppingStash, snapshot.head),
-            );
-            setDroppingStash(null);
-          }}
-          onClose={() => setDroppingStash(null)}
-        >
-          <p>
-            {droppingStash.message} Undo puts this entry back at stash@{"{0}"}.
-          </p>
-        </ConfirmDialog>
-      )}
+      <DropStashHost
+        refWrites={refWrites}
+        snapshot={snapshot}
+        writes={writes}
+      />
       <DiscardHost staging={staging} writes={writes} />
       <DiscardPartHost diff={diff} />
       <AddRepositoryHost nav={nav} />
