@@ -1,6 +1,5 @@
-import { MergeControls } from "./components/MergeControls";
 import { Suspense } from "react";
-import { EyeOff, FolderGit2, Info, Plus, TriangleAlert } from "lucide-react";
+import { FolderGit2, Plus, TriangleAlert } from "lucide-react";
 import { useAppearance } from "./appearance";
 import { useBranchVisibility } from "./branchVisibility";
 import type { ThemeSettings } from "./themes/catalog";
@@ -10,21 +9,20 @@ import { SettingsDialog } from "./components/SettingsDialog";
 import { CommitInspector, InspectorFrame } from "./components/CommitInspector";
 import { History, HistoryPlaceholder } from "./components/History";
 import { PaneDivider } from "./components/PaneDivider";
-import { WriteNoticeRow } from "./components/UndoControls";
 import { useExpandedRepositories } from "./expandedRepositories";
 import { useUpdates } from "./updates";
 import { useUpdateRestart } from "./components/UpdateRestart";
 import { InstallingBlocker } from "./components/UpdatesSettings";
 import { useFetchSettings } from "./fetchSettings";
 import { useHistoryColumns } from "./historyColumns";
-import { repositoryWarnings, useOverview } from "./overview";
+import { useOverview } from "./overview";
 import { macNative } from "./repositories";
 import { useRepositoryRefs } from "./useRepositoryRefs";
 import { useWorkspace } from "./useWorkspace";
 import { composeActions } from "./shell/actionSlices";
 import { InspectorToggle, SidebarToggle } from "./shell/LayoutToggles";
 import { openedRepository, useSyncControls } from "./shell/sync";
-import { PublishHost, PushNotice } from "./shell/SyncRegions";
+import { PublishHost } from "./shell/SyncRegions";
 import { useActiveWorktree } from "./shell/useActiveWorktree";
 import { useFocus, useFocusRecovery } from "./shell/useFocus";
 import { useHistoryPane } from "./shell/useHistoryPane";
@@ -40,6 +38,7 @@ import {
 import { useNavigation } from "./shell/useNavigation";
 import { Sidebar } from "./shell/Sidebar";
 import { Toolbar } from "./shell/Toolbar";
+import { Notices } from "./shell/Notices";
 import { useRefWrites, useUndoSteps } from "./shell/useRefWrites";
 import {
   BranchHost,
@@ -51,14 +50,10 @@ import {
 import { usePalette, useShortcuts } from "./shell/usePalette";
 import { useStaging } from "./shell/useStaging";
 import { useMergePanel, useResolutionDrafts } from "./shell/useMergePanel";
-import {
-  ResolutionDraftList,
-  RetainedResolutionHost,
-} from "./shell/MergeRegions";
+import { RetainedResolutionHost } from "./shell/MergeRegions";
 import { useWriteLoop } from "./shell/useWriteLoop";
 import { useSettingsScreen } from "./shell/useSettingsScreen";
 import { FileDiffPane, usePrefetchLazyViews } from "./shell/lazyViews";
-import { isBranch } from "./shell/navigation";
 import { workspaceView } from "./shell/workspaceView";
 
 export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
@@ -141,7 +136,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     paletteOpen: palette.open,
   });
   useFocusRecovery(focus);
-  const { jumped, jumpedUnloaded, hiddenJump } = nav.jump;
   const diff = useDiffPane({ app, writes, active, focus });
   const { parts } = diff;
   const staging = useStaging({
@@ -238,63 +232,18 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
               sync={sync}
               commands={commands}
             />
-            <WriteNoticeRow writes={writes} />
-            {merge.controls && (
-              <MergeControls key={merge.controls.root} {...merge.controls} />
-            )}
-            <ResolutionDraftList drafts={drafts} />
-            <PushNotice push={sync.push} />
-            {persistenceError && (
-              <div className="notice error-notice" role="alert">
-                <TriangleAlert size={14} />
-                <span>{persistenceError}</span>
-              </div>
-            )}
-            {current?.error && (
-              <div className="notice error-notice" role="alert">
-                <TriangleAlert size={14} />
-                <span>
-                  {current.error.message} The last successful view is retained.
-                </span>
-                <button onClick={() => void refreshRepository()}>
-                  Try again
-                </button>
-              </div>
-            )}
-            {openRepository &&
-              repositoryWarnings(openRepository).map((warning) => (
-                <div className="notice error-notice" role="alert" key={warning}>
-                  <TriangleAlert size={14} />
-                  <span>{warning}</span>
-                </div>
-              ))}
-            {hiddenJump && snapshot && (
-              <div className="notice info-notice" role="status">
-                <EyeOff size={14} />
-                <span>
-                  {hiddenJump.name}{" "}
-                  {rule.kind === "solo"
-                    ? "is outside the soloed branches."
-                    : "is hidden in the graph."}
-                </span>
-                <button
-                  onClick={() => nav.showInGraph(snapshot.root, hiddenJump)}
-                >
-                  {isBranch(hiddenJump)
-                    ? `Show ${hiddenJump.name}`
-                    : "Show all branches"}
-                </button>
-              </div>
-            )}
-            {jumped && jumpedUnloaded && snapshot && (
-              <div className="notice info-notice" role="status">
-                <Info size={14} />
-                <span>
-                  {jumped.name} is older than the newest{" "}
-                  {snapshot.commits.length.toLocaleString()} loaded commits.
-                </span>
-              </div>
-            )}
+            <Notices
+              snapshot={snapshot}
+              writes={writes}
+              merge={merge}
+              drafts={drafts}
+              sync={sync}
+              persistenceError={persistenceError}
+              error={current?.error}
+              onRetry={() => void refreshRepository()}
+              rule={rule}
+              nav={nav}
+            />
             <div className="workspace-panes">
               {model ? (
                 <>
