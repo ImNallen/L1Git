@@ -68,26 +68,14 @@ export function Sidebar({
           <RepositoryTree
             entries={entries}
             expanded={expansion.expanded}
-            refs={refs}
-            activePath={activePath}
-            highlighted={navigation.highlighted}
-            selectedStash={navigation.selectedStash}
-            sync={sync}
-            onSelect={navigation.onSelect}
             onToggle={(root) =>
               expansion.setExpanded(root, !expansion.expanded.has(root))
             }
-            onJump={navigation.onJump}
-            onStash={navigation.onStash}
-            ruleFor={navigation.ruleFor}
-            onRule={navigation.onRule}
-            onRemove={navigation.onRemove}
-            onAdd={navigation.onAdd}
-            writable={refActions.writable}
-            onBranchAsk={refActions.onBranchAsk}
-            onTagAsk={refActions.onTagAsk}
-            onStashAction={refActions.onStashAction}
-            onCheckout={refActions.onCheckout}
+            refs={refs}
+            activePath={activePath}
+            sync={sync}
+            navigation={navigation}
+            refActions={refActions}
           />
         </div>
         <footer className="sidebar-bottom">

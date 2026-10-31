@@ -20,13 +20,11 @@ import {
   Trash2,
 } from "lucide-react";
 import { branchAsks } from "../domain/operations";
-import type { BranchAsk, TagAsk } from "../domain/operations";
+import type { BranchAsk } from "../domain/operations";
 import type { RecentRepository } from "../domain/recents";
 import { normalizeSearch } from "../domain/search";
 import type {
   Branch,
-  FullRef,
-  Oid,
   RepositoryRefs,
   RepositoryRoot,
   Stash,
@@ -36,6 +34,8 @@ import { NO_RULE, branchVisibility, toggleRule } from "../domain/visibility";
 import type { VisibilityRule } from "../domain/visibility";
 import type { RootSync } from "../overview";
 import type { RefsState } from "../useRepositoryRefs";
+import type { SidebarNavigation } from "../shell/useNavigation";
+import type { SidebarRefActions } from "../shell/useRefWrites";
 import { ContextMenu, opensMenu } from "./ContextMenu";
 import { RepositoryBranches } from "./RepositoryBranches";
 import { SyncCounts } from "./SyncCounts";
@@ -44,52 +44,37 @@ import { useRovingRows } from "./useRovingRows";
 type Props = {
   entries: RecentRepository[];
   expanded: ReadonlySet<RepositoryRoot>;
+  onToggle: (root: RepositoryRoot) => void;
   refs: ReadonlyMap<RepositoryRoot, RefsState>;
   activePath: string | null;
-  /** The branch or tag last jumped to in the open repository. */
-  highlighted: { root: RepositoryRoot; reference: FullRef } | null;
-  selectedStash: { root: RepositoryRoot; oid: Oid } | null;
   sync: ReadonlyMap<RepositoryRoot, RootSync>;
-  onSelect: (root: RepositoryRoot) => void;
-  onToggle: (root: RepositoryRoot) => void;
-  onJump: (root: RepositoryRoot, target: Branch | Tag) => void;
-  onStash: (root: RepositoryRoot, stash: Stash) => void;
-  ruleFor: (root: RepositoryRoot) => VisibilityRule;
-  onRule: (root: RepositoryRoot, rule: VisibilityRule) => void;
-  onRemove: (root: RepositoryRoot) => void;
-  onAdd: () => void;
-  writable: {
-    root: RepositoryRoot;
-    checkedOutIn: ReadonlyMap<FullRef, string>;
-  } | null;
-  onBranchAsk: (ask: BranchAsk) => void;
-  onTagAsk: (ask: TagAsk) => void;
-  onStashAction: (action: "apply" | "pop" | "drop", stash: Stash) => void;
-  onCheckout: (branch: Branch) => void;
+  navigation: SidebarNavigation;
+  refActions: SidebarRefActions;
 };
 
 export function RepositoryTree({
   entries,
   expanded,
+  onToggle,
   refs,
   activePath,
-  highlighted,
-  selectedStash,
   sync,
-  onSelect,
-  onToggle,
-  onJump,
-  onStash,
-  ruleFor,
-  onRule,
-  onRemove,
-  onAdd,
-  writable,
-  onBranchAsk,
-  onTagAsk,
-  onStashAction,
-  onCheckout,
+  navigation,
+  refActions,
 }: Props) {
+  const {
+    highlighted,
+    selectedStash,
+    onSelect,
+    onJump,
+    onStash,
+    ruleFor,
+    onRule,
+    onRemove,
+    onAdd,
+  } = navigation;
+  const { writable, onBranchAsk, onTagAsk, onStashAction, onCheckout } =
+    refActions;
   const [query, setQuery] = useState("");
   const tree = useRef<HTMLElement>(null);
   useRovingRows(tree);
