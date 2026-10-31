@@ -261,6 +261,7 @@ export function useWorkspace() {
     if (saved.catalog.lastRoot !== null)
       void selectRepository(saved.catalog.lastRoot);
     return () => {
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- a request counter, not a DOM ref; bumping the live value drops in-flight reads
       requestId.current++;
     };
   }, [saved.catalog.lastRoot, selectRepository]);

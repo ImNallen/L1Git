@@ -106,6 +106,7 @@ export function ConflictResolver({
   const epoch = draft?.editorEpoch;
   const file = useMemo(
     () => draft && { name: path, contents: draft.text },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the editor owns the text within an epoch; only a new epoch replaces its file
     [path, epoch, mode],
   );
   const choiceOptions = useMemo(

@@ -88,8 +88,10 @@ export function PublishDialog({
       },
     );
     return () => {
+      /* eslint-disable react-hooks/exhaustive-deps -- counters, not DOM refs; bumping the live values drops in-flight replies */
       ++lifetime.current;
       ++optionsGeneration.current;
+      /* eslint-enable react-hooks/exhaustive-deps */
     };
   }, [root]);
   useEffect(() => {
