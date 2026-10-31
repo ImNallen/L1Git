@@ -88,10 +88,7 @@ import type {
   Write,
 } from "./domain/operations";
 import { swapEnds } from "./domain/comparison";
-import { buildGraph } from "./domain/graph";
-import { trunkTips } from "./domain/highlight";
 import { readyAdvances } from "./domain/overview";
-import { refLabels } from "./domain/refs";
 import type {
   FullRef,
   Head,
@@ -103,14 +100,9 @@ import type {
 import { pushControl, pushOutcomeText } from "./domain/push";
 import type { Compare } from "./domain/comparison";
 import type { Selection } from "./domain/selection";
-import {
-  branchVisibility,
-  NO_RULE,
-  toggleRule,
-  visibleCommits,
-} from "./domain/visibility";
+import { branchVisibility, NO_RULE, toggleRule } from "./domain/visibility";
 import type { VisibilityRule } from "./domain/visibility";
-import { historyRows, listWrites, worktreeGroups } from "./domain/worktree";
+import { listWrites, worktreeGroups } from "./domain/worktree";
 import { useExpandedRepositories } from "./expandedRepositories";
 import { useUpdates } from "./updates";
 import { useUpdateRestart } from "./components/UpdateRestart";
@@ -129,7 +121,9 @@ import { useWrites } from "./useWrites";
 import { composeActions, defineSlice } from "./shell/actionSlices";
 import { focusedElement, shownElement } from "./shell/dom";
 import { InspectorToggle, SidebarToggle } from "./shell/LayoutToggles";
+import { openedRepository } from "./shell/sync";
 import { useFocus, useFocusRecovery } from "./shell/useFocus";
+import { useHistoryPane } from "./shell/useHistoryPane";
 import { useLayout } from "./shell/useLayout";
 import { useSettingsScreen } from "./shell/useSettingsScreen";
 import {
@@ -244,16 +238,21 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     overviewStore,
     visibility.prune,
   );
-  const rule = snapshot ? visibility.ruleFor(snapshot.root) : NO_RULE;
-  const visible = useMemo(
-    () => (snapshot ? visibleCommits(snapshot.commits, snapshot, rule) : []),
-    [snapshot, rule],
-  );
-  const rows = useMemo(
-    () =>
-      snapshot ? historyRows(visible, snapshot.worktrees, app.changes) : [],
-    [snapshot, visible, app.changes],
-  );
+  const opened = openedRepository(overview, shown?.root ?? null);
+  const {
+    root: openRoot,
+    state: openRootState,
+    repository: openRepository,
+  } = opened;
+  const history = useHistoryPane({
+    snapshot,
+    ruleFor: visibility.ruleFor,
+    changes: app.changes,
+    statuses: openRepository?.overview.branches,
+    selection: app.selection,
+    focus,
+  });
+  const { model, rule, loaded, visibleOids, placement, shows } = history;
   const selected = app.selection;
   const listedWorktree =
     selected?.kind === "worktree"
@@ -420,40 +419,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
         paths,
       );
   }
-  const loaded = useMemo(
-    () => new Set(snapshot?.commits.map((commit) => commit.oid)),
-    [snapshot],
-  );
-  const visibleOids = useMemo(
-    () =>
-      visible === snapshot?.commits
-        ? loaded
-        : new Set(visible.map((commit) => commit.oid)),
-    [visible, snapshot, loaded],
-  );
-  const graph = useMemo(
-    () =>
-      buildGraph(
-        rows,
-        visible === snapshot?.commits
-          ? snapshot.squashes
-          : snapshot?.squashes.filter(
-              (squash) =>
-                visibleOids.has(squash.commit) && visibleOids.has(squash.tip),
-            ),
-      ),
-    [rows, visible, visibleOids, snapshot],
-  );
-  const labels = useMemo(
-    () => (snapshot ? refLabels(snapshot) : null),
-    [snapshot],
-  );
-  const selectedOid = selected?.kind === "commit" ? selected.oid : null;
-  const selectedRefs =
-    selectedOid === null ? [] : (labels?.get(selectedOid) ?? []);
-  const selectedLane =
-    selectedOid === null ? null : (graph.rows.get(selectedOid)?.lane ?? null);
-  const shows = useCallback((oid: Oid) => visibleOids.has(oid), [visibleOids]);
   const selectCommit = (oid: Oid) => select({ kind: "commit", oid });
   // A stash clicked in another repository, selected once its snapshot loads.
   const [pendingStash, setPendingStash] = useState<{
@@ -464,14 +429,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     root: RepositoryRoot;
     reference: FullRef;
   } | null>(null);
-  const openRoot = shown?.root ?? null;
-  const openRootState = openRoot === null ? null : overview.roots.get(openRoot);
-  const openRepository =
-    openRootState?.kind === "open"
-      ? (overview.repositories.find(
-          (repository) => repository.commonDir === openRootState.commonDir,
-        ) ?? null)
-      : null;
   const openPush =
     openRoot === null ? undefined : overview.pushByRoot.get(openRoot);
   const publishControl = pushControl(
@@ -498,11 +455,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   const openReady = openRepository
     ? readyAdvances(openRepository.overview).length
     : 0;
-  const statuses = openRepository?.overview.branches;
-  const trunk = useMemo(
-    () => (snapshot ? trunkTips(snapshot.branches, statuses ?? []) : []),
-    [snapshot, statuses],
-  );
   const {
     jumped,
     jumpedUnloaded,
@@ -670,24 +622,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   const paletteActions = defineSlice({
     context: { picked: palette?.picked ?? null, typing: false },
     commands: {},
-  });
-  const historyActions = defineSlice({
-    context: { searchable: snapshot !== null },
-    commands: {
-      search: () => historyRef.current?.openSearch(),
-      compareWithWorkingCopy: () => {
-        if (selected?.kind === "commit")
-          historyRef.current?.compareWithWorkingCopy(selected.oid);
-      },
-      compareWithPick: () => {
-        if (selected?.kind === "commit")
-          historyRef.current?.compareWithPick(selected.oid);
-      },
-      pick: () => {
-        if (selected?.kind === "commit") historyRef.current?.pick(selected.oid);
-      },
-      clearPick: () => historyRef.current?.pick(null),
-    },
   });
   const navigationActions = defineSlice({
     context: {
@@ -866,7 +800,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     settings.actions,
     layout.actions,
     paletteActions,
-    historyActions,
+    history.actions,
     navigationActions,
     syncActions,
     writeLoopActions,
@@ -1301,16 +1235,16 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
               </div>
             )}
             <div className="workspace-panes">
-              {snapshot ? (
+              {model ? (
                 <>
                   <History
                     ref={historyRef}
-                    snapshot={snapshot}
-                    visibleCommits={visible}
-                    visibleOids={visibleOids}
-                    rows={rows}
-                    graph={graph}
-                    rule={rule}
+                    snapshot={model.snapshot}
+                    visibleCommits={model.visibleCommits}
+                    visibleOids={model.visibleOids}
+                    rows={model.rows}
+                    graph={model.graph}
+                    rule={model.rule}
                     selection={app.selection}
                     compare={app.compare}
                     revealSeq={jump?.seq ?? 0}
@@ -1323,7 +1257,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                     onScroll={app.rememberScroll}
                     busy={busy}
                     hidden={fileOpen}
-                    trunk={trunk}
+                    trunk={model.trunk}
                     visibleColumns={historyColumns.visible}
                     onToggleColumn={historyColumns.toggle}
                     editableHead={editableHead}
@@ -1447,8 +1381,8 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                     compare={app.compare}
                     comparison={app.comparison}
                     snapshot={snapshot}
-                    refs={selectedRefs}
-                    lane={selectedLane}
+                    refs={placement.refs}
+                    lane={placement.lane}
                     onSelect={select}
                     onSwap={app.swapCompare}
                     selectedFile={fileDiff.kind !== "closed" ? fileDiff : null}
