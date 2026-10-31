@@ -89,6 +89,9 @@ jobs:
       - name: Check Windows core and bridge
         if: runner.os == 'Windows'
         run: cargo clippy --locked -p l1-git-core -p l1-git-dev-bridge --lib --bins -- -D warnings
+      - name: Test core and bridge on macOS
+        if: runner.os == 'macOS'
+        run: cargo test --locked -p l1-git-core -p l1-git-dev-bridge --no-fail-fast
       - run: cargo clippy --locked -p l1-git --all-targets -- -D warnings
       - run: cargo test --locked -p l1-git
       - run: pnpm tauri build --debug
