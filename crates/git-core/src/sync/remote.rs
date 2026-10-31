@@ -239,7 +239,7 @@ mod tests {
         );
         let locks = core.locks(&root.join(".git"));
         let gate = lock_ignoring_poison(&locks.gate);
-        let write = lock_ignoring_poison(&locks.write);
+        let write = locks.write_lock();
         let permits: Vec<_> = (0..core.limits.network_slots.get())
             .map(|_| core.slots.acquire())
             .collect();

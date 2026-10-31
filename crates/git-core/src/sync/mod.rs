@@ -1,5 +1,7 @@
 mod advance;
 mod fetch;
+mod locks;
+use locks::Locks;
 mod push;
 mod read;
 mod remote;
@@ -22,10 +24,7 @@ use std::{
     collections::HashMap,
     num::NonZeroUsize,
     path::{Path, PathBuf},
-    sync::{
-        Arc, Condvar, Mutex, MutexGuard, PoisonError, TryLockError,
-        atomic::{AtomicUsize, Ordering},
-    },
+    sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError},
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -76,23 +75,6 @@ pub struct Coordinator {
 type Repositories = Arc<Mutex<HashMap<PathBuf, Arc<Locks>>>>;
 
 #[derive(Default)]
-struct Locks {
-    gate: Mutex<Gate>,
-    write: Mutex<()>,
-    /// Threads waiting for `write`. A refresh that holds it stops for them.
-    wanted: AtomicUsize,
-}
-
-impl Locks {
-    fn write_lock(&self) -> MutexGuard<'_, ()> {
-        self.wanted.fetch_add(1, Ordering::SeqCst);
-        let write = lock_ignoring_poison(&self.write);
-        self.wanted.fetch_sub(1, Ordering::SeqCst);
-        write
-    }
-}
-
-#[derive(Default)]
 struct Refreshes {
     running: Mutex<usize>,
     finished: Condvar,
@@ -121,12 +103,8 @@ impl Writers {
         work: impl FnOnce(&dyn Fn() -> bool) -> T,
     ) -> Option<T> {
         let locks = locks_in(&self.0, common_dir);
-        let _write = match locks.write.try_lock() {
-            Ok(write) => write,
-            Err(TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
-            Err(TryLockError::WouldBlock) => return None,
-        };
-        let wanted = || locks.wanted.load(Ordering::SeqCst) > 0;
+        let _write = locks.try_write()?;
+        let wanted = || locks.wanted();
         (!wanted()).then(|| work(&wanted))
     }
 }
