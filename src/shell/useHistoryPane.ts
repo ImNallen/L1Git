@@ -29,6 +29,7 @@ export type HistoryModel = {
   rows: readonly HistoryRow[];
   graph: Graph;
   rule: VisibilityRule;
+  /** Tips of the default branch, which the highlight treats as trunk. */
   trunk: Oid[];
 };
 
