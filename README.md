@@ -72,6 +72,7 @@ cargo test --locked
 pnpm test
 pnpm build
 pnpm format:check
+pnpm lint
 cargo fmt --all --check
 cargo clippy --locked --all-targets -- -D warnings
 ```
