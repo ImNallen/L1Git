@@ -1,3 +1,4 @@
+import { settingsDestinations } from "../settingsSearch";
 import { fetchIntervals } from "../fetchSettings";
 import type { FetchInterval } from "../fetchSettings";
 
@@ -20,11 +21,11 @@ export function FetchSettings({
       <h2 id="fetching-heading" className="general-settings-title">
         Fetching
       </h2>
-      <p className="settings-description">
-        When L1 Git downloads new commits from your remotes.
-      </p>
-      <p className="settings-section-title">Schedule</p>
-      <div className="settings-row">
+      <div
+        className="settings-row"
+        id={settingsDestinations.fetch.targetId}
+        tabIndex={-1}
+      >
         <div>
           <h3 id="interval-label">Fetch automatically</h3>
           <p id="interval-description">

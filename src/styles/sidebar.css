@@ -312,9 +312,6 @@ input::placeholder {
   margin-left: auto;
   border-radius: 5px;
 }
-.sidebar-updater .icon-button:hover:not(:disabled, [aria-disabled="true"]) {
-  background: transparent;
-}
 .update-tooltip {
   display: none;
   position: absolute;

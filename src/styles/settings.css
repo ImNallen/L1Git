@@ -1,8 +1,8 @@
 .settings-dialog {
   position: fixed;
   inset: 0;
-  width: min(1040px, calc(100% - 80px));
-  height: min(760px, calc(100dvh - 80px));
+  width: min(1004px, calc(100% - 80px));
+  height: min(752px, calc(100dvh - 80px));
   max-width: none;
   max-height: none;
   margin: auto;
@@ -18,7 +18,7 @@
 }
 .settings-dialog[open] {
   display: grid;
-  grid-template-columns: 190px minmax(0, 1fr);
+  grid-template-columns: 188px minmax(0, 1fr);
 }
 .settings-dialog::backdrop {
   background: color-mix(in srgb, var(--dialog-backdrop) 45%, transparent);
@@ -34,7 +34,8 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  min-height: 42px;
+  min-height: 37px;
+  flex-shrink: 0;
   padding: 0 10px 0 16px;
   border-bottom: 1px solid var(--border);
   font-size: 12px;
@@ -46,7 +47,9 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 12px 8px;
+  padding: 8px 6px;
+  min-height: 0;
+  overflow-y: auto;
   background: var(--sidebar);
   border-right: 1px solid var(--border);
 }
@@ -55,7 +58,8 @@
   align-items: center;
   gap: 9px;
   width: 100%;
-  padding: 9px 12px;
+  padding: 6px 8px;
+  font-size: 12px;
   border-radius: 6px;
   text-align: left;
   color: var(--text-secondary);
@@ -78,7 +82,7 @@
   max-height: calc(100% - 32px);
 }
 .settings-group {
-  margin: 0 0 40px;
+  margin: 0 0 28px;
   padding: 0;
   border: 0;
   min-width: 0;
@@ -510,7 +514,8 @@
 .update-actions {
   display: flex;
   gap: 8px;
-  margin: 16px 0;
+  flex-wrap: wrap;
+  margin: 0;
 }
 
 .update-progress {
@@ -546,7 +551,8 @@
   }
   .settings-navigation {
     flex-direction: row;
-    overflow-x: auto;
+    flex-wrap: wrap;
+    overflow: visible;
     border-right: 0;
     border-bottom: 1px solid var(--border);
     padding: 8px;
@@ -563,7 +569,7 @@
     flex-wrap: wrap;
   }
   .settings-row {
-    padding: 16px;
+    padding: 12px 14px;
   }
   .settings-options {
     flex-wrap: wrap;
@@ -591,15 +597,121 @@
   }
 }
 .general-settings-group {
-  margin-top: 32px;
-}
-.general-settings-group + .general-settings-group {
-  padding-top: 32px;
-  border-top: 1px solid var(--border);
+  margin: 0 0 28px;
 }
 .general-settings-title {
   margin: 0 0 10px;
   color: var(--text-heading);
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 550;
+}
+
+.settings-row-group {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.settings-row-group > .settings-row {
+  border: 0;
+  border-radius: 0;
+}
+.settings-row-group > .settings-row + .settings-row {
+  border-top: 1px solid var(--border);
+}
+.settings-row > div:first-child {
+  flex: 1 1 250px;
+}
+.settings-row > .settings-options {
+  flex: 0 1 auto;
+}
+.settings-update-status {
+  min-width: 0;
+}
+.settings-update-version .update-actions .button {
+  min-height: 28px;
+  height: auto;
+  padding: 5px 8px;
+  font-size: 12px;
+}
+.settings-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  margin-bottom: 6px;
+  padding: 0 7px;
+  color: var(--muted);
+  border: 1px solid transparent;
+  border-radius: 5px;
+}
+.settings-search:focus-within {
+  border-color: var(--border-input);
+  background: var(--control-inset);
+}
+.settings-search input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+}
+.settings-search input::-webkit-search-cancel-button {
+  display: none;
+}
+.settings-search .icon-button {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+.settings-search kbd {
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--row-hover);
+  font: inherit;
+  font-size: 11px;
+}
+.settings-search-results {
+  margin-top: 12px;
+  font-size: 12px;
+}
+.settings-search-results > p {
+  padding: 0 8px;
+  color: var(--muted);
+}
+.settings-search-result {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 8px;
+  text-align: left;
+  border-radius: 5px;
+}
+.settings-search-result small {
+  color: var(--muted);
+  line-height: 1.4;
+}
+.settings-search-result:hover {
+  background: var(--row-hover);
+}
+.settings-search-result:focus-visible,
+.settings-page [tabindex="-1"]:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: -2px;
+}
+@media (max-width: 700px) {
+  .settings-search {
+    flex: 1 1 160px;
+    margin: 0;
+  }
+  .settings-navigation > nav {
+    display: flex;
+  }
+  .settings-search-results {
+    width: 100%;
+    max-height: 160px;
+    overflow-y: auto;
+    margin-top: 0;
+  }
 }

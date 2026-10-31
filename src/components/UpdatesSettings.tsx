@@ -2,6 +2,7 @@ import { useEffect, useId, useRef } from "react";
 import { Download, LoaderCircle, RefreshCw, RotateCw } from "lucide-react";
 import type { Updates, UpdateState } from "../updates";
 import type { UpdateRestart } from "./UpdateRestart";
+import { settingsDestinations } from "../settingsSearch";
 
 const releases = "https://github.com/ImNallen/L1Git/releases";
 const unavailable = {
@@ -64,93 +65,104 @@ export function UpdatesSettings({
       <h2 id="updates-heading" className="general-settings-title">
         Updates
       </h2>
-      <p className="settings-description">
-        Installed version {snapshot.installedVersion}. Downloads and restart
-        always need your action.
-      </p>
-      <p className="settings-section-title">Release channel</p>
-      <div className="settings-row">
-        <div>
-          <h3 id="update-channel">Update channel</h3>
-          <p id="update-channel-description">
-            Stable releases or early Nightly builds. Switching channels waits
-            for a newer version and never downgrades.
-          </p>
+      <div className="settings-row-group">
+        <div
+          className="settings-row"
+          id={settingsDestinations.channel.targetId}
+          tabIndex={-1}
+        >
+          <div>
+            <h3 id="update-channel">Update channel</h3>
+            <p id="update-channel-description">
+              Stable releases or early Nightly builds. Switching channels waits
+              for a newer version and never downgrades.
+            </p>
+          </div>
+          <div
+            className="settings-options"
+            role="radiogroup"
+            aria-labelledby="update-channel"
+            aria-describedby="update-channel-description"
+          >
+            {(["stable", "nightly"] as const).map((value) => (
+              <label key={value}>
+                <input
+                  type="radio"
+                  name="update-channel"
+                  checked={track === value}
+                  disabled={locked}
+                  onChange={() => {
+                    restart.cancel();
+                    void updates.selectTrack(value);
+                  }}
+                />
+                <span>{value === "stable" ? "Stable" : "Nightly"}</span>
+              </label>
+            ))}
+          </div>
         </div>
         <div
-          className="settings-options"
-          role="radiogroup"
-          aria-labelledby="update-channel"
-          aria-describedby="update-channel-description"
+          className="settings-row settings-update-version"
+          id={settingsDestinations.updates.targetId}
+          tabIndex={-1}
         >
-          {(["stable", "nightly"] as const).map((value) => (
-            <label key={value}>
-              <input
-                type="radio"
-                name="update-channel"
-                checked={track === value}
-                disabled={locked}
-                onChange={() => {
-                  restart.cancel();
-                  void updates.selectTrack(value);
-                }}
-              />
-              <span>{value === "stable" ? "Stable" : "Nightly"}</span>
-            </label>
-          ))}
+          <div className="settings-update-status">
+            <h3>Version {snapshot.installedVersion}</h3>
+            <p role="status" aria-live="polite">
+              {statusText(state, trackLabel)}
+            </p>
+            {state.kind === "downloading" && (
+              <div className="update-progress">
+                <progress
+                  aria-label="Update download"
+                  value={state.total === null ? undefined : state.received}
+                  max={state.total ?? undefined}
+                />
+                <span>
+                  {state.received.toLocaleString()} bytes
+                  {state.total === null
+                    ? ""
+                    : ` of ${state.total.toLocaleString()}`}
+                </span>
+              </div>
+            )}
+          </div>
+          <div className="update-actions">
+            <button
+              type="button"
+              className="button secondary"
+              disabled={locked || checking}
+              onClick={() => void updates.check()}
+            >
+              {state.kind === "checking" ? (
+                <LoaderCircle size={14} className="spin" />
+              ) : (
+                <RotateCw size={14} />
+              )}{" "}
+              {state.kind === "failed" ? "Retry check" : "Check for updates"}
+            </button>
+            {state.kind === "available" && (
+              <button
+                type="button"
+                className="button primary"
+                onClick={() => void updates.download(state.candidate.id)}
+              >
+                <Download size={14} />
+                {state.message ? "Retry download" : "Download update"}
+              </button>
+            )}
+            {state.kind === "downloaded" && (
+              <button
+                type="button"
+                className="button primary"
+                onClick={() => restart.request(state.candidate.id)}
+              >
+                <RotateCw size={14} />
+                Restart and install
+              </button>
+            )}
+          </div>
         </div>
-      </div>
-      <p className="settings-section-title">App updates</p>
-      <p role="status" aria-live="polite">
-        {statusText(state, trackLabel)}
-      </p>
-      {state.kind === "downloading" && (
-        <div className="update-progress">
-          <progress
-            aria-label="Update download"
-            value={state.total === null ? undefined : state.received}
-            max={state.total ?? undefined}
-          />
-          <span>
-            {state.received.toLocaleString()} bytes
-            {state.total === null ? "" : ` of ${state.total.toLocaleString()}`}
-          </span>
-        </div>
-      )}
-      <div className="update-actions">
-        <button
-          type="button"
-          className="button secondary"
-          disabled={locked || checking}
-          onClick={() => void updates.check()}
-        >
-          {state.kind === "checking" ? (
-            <LoaderCircle size={14} className="spin" />
-          ) : (
-            <RotateCw size={14} />
-          )}{" "}
-          {state.kind === "failed" ? "Retry check" : "Check for updates"}
-        </button>
-        {state.kind === "available" && (
-          <button
-            type="button"
-            className="button primary"
-            onClick={() => void updates.download(state.candidate.id)}
-          >
-            <Download size={14} />
-            {state.message ? "Retry download" : "Download update"}
-          </button>
-        )}
-        {state.kind === "downloaded" && (
-          <button
-            type="button"
-            className="button primary"
-            onClick={() => restart.request(state.candidate.id)}
-          >
-            <RotateCw size={14} />
-            Restart and install
-          </button>
-        )}
       </div>
       {(state.kind === "available" || state.kind === "downloaded") &&
         state.message && (
@@ -170,7 +182,8 @@ export function UpdatesSettings({
         </>
       )}
       <p className="settings-description">
-        L1 Git checks at startup and hourly.{" "}
+        L1 Git checks at startup and hourly. Downloads and restart always need
+        your action.{" "}
         <a href={releases} target="_blank" rel="noreferrer">
           Download releases manually
         </a>

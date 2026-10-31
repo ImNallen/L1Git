@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { Copy, Moon, Paintbrush, Plus, Sun, Trash2 } from "lucide-react";
 import type { AppearanceState } from "../appearance";
@@ -20,6 +20,7 @@ import {
   TOKENS,
   type Appearance,
 } from "../themes/palette";
+import { settingsDestinations } from "../settingsSearch";
 import { AddThemeDialog } from "./AddThemeDialog";
 import { CreateThemePanel } from "./CreateThemePanel";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -208,9 +209,7 @@ function ThemeCard({
 }
 
 export function AppearanceSettings({ appearance }: Props) {
-  const heading = useRef<HTMLHeadingElement>(null);
   const themesHeading = useRef<HTMLHeadingElement>(null);
-  useEffect(() => heading.current?.focus(), []);
   const { settings, variant, persistenceError, nativeError } = appearance;
   const [draft, setDraft] = useState<{ key: number; draft: ThemeDraft } | null>(
     null,
@@ -231,11 +230,14 @@ export function AppearanceSettings({ appearance }: Props) {
   return (
     <section className="settings-page" aria-labelledby="appearance-heading">
       <div className="settings-content">
-        <h1 id="appearance-heading" tabIndex={-1} ref={heading}>
+        <h1 className="visually-hidden" id="appearance-heading" tabIndex={-1}>
           Appearance
         </h1>
-        <p className="settings-description">How L1 Git looks on this device.</p>
-        <fieldset className="settings-group">
+        <fieldset
+          className="settings-group"
+          id={settingsDestinations.scheme.targetId}
+          tabIndex={-1}
+        >
           <legend className="settings-section-title">Color scheme</legend>
           <p className="settings-group-description">
             System follows your operating system setting.
@@ -258,11 +260,14 @@ export function AppearanceSettings({ appearance }: Props) {
             ))}
           </div>
         </fieldset>
-        <section className="settings-group" aria-labelledby="themes-heading">
+        <section
+          className="settings-group"
+          aria-labelledby={settingsDestinations.themes.targetId}
+        >
           <div className="settings-group-header">
             <div>
               <h2
-                id="themes-heading"
+                id={settingsDestinations.themes.targetId}
                 className="settings-section-title"
                 tabIndex={-1}
                 ref={themesHeading}
@@ -276,6 +281,7 @@ export function AppearanceSettings({ appearance }: Props) {
             <div className="settings-group-actions">
               <button
                 className="button secondary"
+                id={settingsDestinations.create.targetId}
                 onClick={(event) =>
                   edit(draftOf(variant, ""), event.currentTarget)
                 }
@@ -285,6 +291,7 @@ export function AppearanceSettings({ appearance }: Props) {
               </button>
               <button
                 className="button secondary"
+                id={settingsDestinations.add.targetId}
                 onClick={() => setAdding(true)}
               >
                 <Plus size={14} />

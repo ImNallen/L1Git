@@ -121,3 +121,30 @@ it("lists General before Appearance and navigates to General", async () => {
   await act(async () => navigation[0]?.click());
   expect(changed).toHaveBeenCalledExactlyOnceWith("general");
 });
+
+it("leaves slash typing and nested dialog focus alone", async () => {
+  const search = container.querySelector<HTMLInputElement>(
+    'input[aria-label="Search settings"]',
+  );
+  const nested = container.querySelector<HTMLDialogElement>(
+    'dialog[aria-label="Nested dialog"]',
+  );
+  if (!search || !nested) throw new Error("Missing settings controls");
+  const slash = () =>
+    new KeyboardEvent("keydown", { key: "/", bubbles: true, cancelable: true });
+  await act(async () => {
+    search.focus();
+    const typing = slash();
+    search.dispatchEvent(typing);
+    expect(typing.defaultPrevented).toBe(false);
+    nested.showModal();
+    const button = document.createElement("button");
+    button.textContent = "Nested action";
+    nested.append(button);
+    button.focus();
+    const shortcut = slash();
+    button.dispatchEvent(shortcut);
+    expect(shortcut.defaultPrevented).toBe(false);
+    expect(document.activeElement).toBe(button);
+  });
+});
