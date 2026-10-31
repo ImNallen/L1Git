@@ -541,7 +541,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     if (snapshot?.root === pending.root) {
       const focused = focusedElement();
       if (
-        !keys.current.palette &&
+        palette === null &&
         (focused === pending.from ||
           focused === document.body ||
           focused === sidebarToggleRef.current ||
@@ -550,6 +550,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
         historyRef.current?.focus();
     } else if (workspace.kind !== "error") return;
     cancelGridFocus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs when the opened repository arrives or fails; the palette only gates the focus
   }, [snapshot?.root, workspace.kind, sidebarToggleRef, historyRef]);
   async function addRepository(path: string, signal: AbortSignal) {
     const added = await app.addRepository(path, signal);
