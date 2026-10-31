@@ -43,13 +43,7 @@ import {
   typingIn,
   UNDO_SHORTCUT,
 } from "./actions";
-import type {
-  ActionContext,
-  Commands,
-  PaletteItem,
-  Screen,
-  SettingsSection,
-} from "./actions";
+import type { FileView, PaletteItem, Screen, SettingsSection } from "./actions";
 import { useAppearance } from "./appearance";
 import { useBranchVisibility } from "./branchVisibility";
 import type { ThemeSettings } from "./themes/catalog";
@@ -136,6 +130,7 @@ import { useRepositoryRefs } from "./useRepositoryRefs";
 import { useParts } from "./useParts";
 import { useWorkspace } from "./useWorkspace";
 import { useWrites } from "./useWrites";
+import { composeActions, defineSlice } from "./shell/actionSlices";
 import { focusedElement, shownElement } from "./shell/dom";
 import {
   FileDiffPane,
@@ -683,162 +678,236 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     }));
     historyRef.current?.focus();
   }
-  const commands: Commands = {
-    addRepository: () => setAdding(true),
-    openSettings: (section) => {
-      if (section) setSettingsSection(section);
-      setScreen("settings");
+  const settingsActions = defineSlice({
+    context: { screen, section: settingsSection },
+    commands: {
+      openSettings: (section?: SettingsSection) => {
+        if (section) setSettingsSection(section);
+        setScreen("settings");
+      },
+      leaveSettings,
     },
-    leaveSettings,
-    toggleSidebar: () => setSidebarOpen((open) => !open),
-    toggleInspector: () => setInspectorOpen((open) => !open),
-    fetch: () => {
-      if (openRepository) void overviewStore.fetch(openRepository.commonDir);
+  });
+  const layoutActions = defineSlice({
+    context: { inspectable: shown !== null },
+    commands: {
+      toggleSidebar: () => setSidebarOpen((open) => !open),
+      toggleInspector: () => setInspectorOpen((open) => !open),
+      focusCommit: () => {
+        flushSync(() => setInspectorOpen(true));
+        document.getElementById(COMMIT_SUMMARY_ID)?.focus();
+      },
     },
-    push: () => {
-      if (openRoot && publishControl.kind === "ready")
-        void overviewStore.push(openRoot, publishControl.intent);
-      else if (openRoot && publishControl.kind === "publish")
-        setPublishingRoot(openRoot);
+  });
+  const paletteActions = defineSlice({
+    context: { picked: palette?.picked ?? null, typing: false },
+    commands: {},
+  });
+  const historyActions = defineSlice({
+    context: { searchable: snapshot !== null },
+    commands: {
+      search: () => historyRef.current?.openSearch(),
+      compareWithWorkingCopy: () => {
+        if (selected?.kind === "commit")
+          historyRef.current?.compareWithWorkingCopy(selected.oid);
+      },
+      compareWithPick: () => {
+        if (selected?.kind === "commit")
+          historyRef.current?.compareWithPick(selected.oid);
+      },
+      pick: () => {
+        if (selected?.kind === "commit") historyRef.current?.pick(selected.oid);
+      },
+      clearPick: () => historyRef.current?.pick(null),
     },
-    mergeUpstream: () => {
-      if (mergeEligible && !mergeBusy && mergeState?.kind === "idle")
-        setMergeReviewOpen(true);
+  });
+  const navigationActions = defineSlice({
+    context: {
+      adding,
+      selection: selected,
+      compare: app.compare && { swappable: swapEnds(app.compare) !== null },
+      sidebarBranch: ruledBranch && {
+        name: ruledBranch.name,
+        visibility: branchVisibility(rule, ruledBranch.reference),
+        outOfView: hiddenJump !== null,
+        local: ruledBranch.kind === "local",
+        checkedOut: checkedOut.has(ruledBranch.reference),
+      },
+      sidebarTag: sidebarTag && { name: sidebarTag.name },
+      rule: rule.kind,
     },
-    fastForward: () => {
-      if (openRepository)
-        void overviewStore.updateAll(openRepository.commonDir);
+    commands: {
+      addRepository: () => setAdding(true),
+      openRepository: (root: RepositoryRoot) => {
+        showRepository(root);
+        if (root === snapshot?.root) return;
+        const cancel = new AbortController();
+        for (const type of ["pointerdown", "keydown"])
+          window.addEventListener(type, cancelGridFocus, {
+            capture: true,
+            signal: cancel.signal,
+          });
+        gridFocus.current = { root, from: focusedElement(), cancel };
+      },
+      jumpToRef: (reference: FullRef) => {
+        const target = snapshot && listedRef(snapshot, reference);
+        if (snapshot && target) jumpTo(snapshot.root, target);
+      },
+      showStash: (stash: Stash) => {
+        if (snapshot) showStash(snapshot.root, stash);
+      },
+      toggleHide: () => {
+        if (snapshot && hiddenJump) showInGraph(snapshot.root, hiddenJump);
+        else if (snapshot && ruledBranch)
+          setRule(
+            snapshot.root,
+            toggleRule(rule, "hide", ruledBranch.reference),
+          );
+      },
+      toggleSolo: () => {
+        if (snapshot && ruledBranch)
+          setRule(
+            snapshot.root,
+            toggleRule(rule, "solo", ruledBranch.reference),
+          );
+      },
+      showAllBranches: () => {
+        if (snapshot) setRule(snapshot.root, NO_RULE);
+      },
+      swapCompare: app.swapCompare,
+      endCompare,
     },
-    search: () => historyRef.current?.openSearch(),
-    closeFile,
-    showFile: (view) => fileDiffRef.current?.show(view),
-    compareWithWorkingCopy: () => {
-      if (selected?.kind === "commit")
-        historyRef.current?.compareWithWorkingCopy(selected.oid);
+  });
+  const syncActions = defineSlice({
+    context: {
+      push: openRoot ? publishControl : null,
+      repository: openRepository && {
+        fetching: openFetching,
+        idle: openRepository.activity.kind === "idle",
+        ready: openReady,
+      },
     },
-    compareWithPick: () => {
-      if (selected?.kind === "commit")
-        historyRef.current?.compareWithPick(selected.oid);
+    commands: {
+      fetch: () => {
+        if (openRepository) void overviewStore.fetch(openRepository.commonDir);
+      },
+      push: () => {
+        if (openRoot && publishControl.kind === "ready")
+          void overviewStore.push(openRoot, publishControl.intent);
+        else if (openRoot && publishControl.kind === "publish")
+          setPublishingRoot(openRoot);
+      },
+      fastForward: () => {
+        if (openRepository)
+          void overviewStore.updateAll(openRepository.commonDir);
+      },
     },
-    pick: () => {
-      if (selected?.kind === "commit") historyRef.current?.pick(selected.oid);
+  });
+  const writeLoopActions = defineSlice({
+    context: { writing: writes.running !== null },
+    commands: {},
+  });
+  const diffActions = defineSlice({
+    context: {
+      file:
+        fileDiff.kind === "closed"
+          ? null
+          : {
+              hasCommit: revisionOf(fileDiff) !== null,
+              lineActions: parts.lineActions,
+            },
     },
-    clearPick: () => historyRef.current?.pick(null),
-    swapCompare: app.swapCompare,
-    endCompare,
-    toggleHide: () => {
-      if (snapshot && hiddenJump) showInGraph(snapshot.root, hiddenJump);
-      else if (snapshot && ruledBranch)
-        setRule(snapshot.root, toggleRule(rule, "hide", ruledBranch.reference));
+    commands: {
+      closeFile,
+      showFile: (view: FileView) => fileDiffRef.current?.show(view),
+      writeLines: parts.writeLines,
     },
-    toggleSolo: () => {
-      if (snapshot && ruledBranch)
-        setRule(snapshot.root, toggleRule(rule, "solo", ruledBranch.reference));
+  });
+  const stagingActions = defineSlice({
+    context: {
+      worktree: selectedLists && {
+        unstaged: selectedLists.get("unstaged")?.length ?? 0,
+        staged: selectedLists.get("staged")?.length ?? 0,
+        conflicts: selectedLists.get("conflict")?.length ?? 0,
+        discardable:
+          selectedChanges?.kind === "ready"
+            ? discardChoice(
+                selectedChanges.status,
+                selectedLists.get("unstaged") ?? [],
+              ).paths.length
+            : 0,
+      },
     },
-    showAllBranches: () => {
-      if (snapshot) setRule(snapshot.root, NO_RULE);
+    commands: {
+      stageAll: () => writeList("unstaged"),
+      unstageAll: () => writeList("staged"),
+      discardAll: () => {
+        const paths = selectedLists?.get("unstaged");
+        if (selectedWorktree && paths)
+          askDiscard(selectedWorktree.worktree.root, paths);
+      },
+      stashChanges: () => {
+        if (selectedWorktree) askStash(selectedWorktree.worktree.root, []);
+      },
     },
-    checkout: () => {
-      if (ruledBranch) void checkout(startAt(ruledBranch));
+  });
+  const refWriteActions = defineSlice({
+    context: {},
+    commands: {
+      checkout: () => {
+        if (ruledBranch) void checkout(startAt(ruledBranch));
+      },
+      newBranch: askFor("create"),
+      renameBranch: askFor("rename"),
+      deleteBranch: askFor("delete"),
+      createTag: () => {
+        if (selected?.kind === "commit") askTag(selected.oid);
+      },
+      deleteTag: () => {
+        if (sidebarTag) setTagAsk({ kind: "delete", tag: sidebarTag });
+      },
     },
-    newBranch: askFor("create"),
-    renameBranch: askFor("rename"),
-    deleteBranch: askFor("delete"),
-    createTag: () => {
-      if (selected?.kind === "commit") askTag(selected.oid);
+  });
+  const mergeActions = defineSlice({
+    context: {
+      dialogOpen: mergeReviewOpen,
+      merging: mergeActive,
+      mergeAvailable:
+        mergeEligible && !mergeBusy && mergeState?.kind === "idle",
     },
-    deleteTag: () => {
-      if (sidebarTag) setTagAsk({ kind: "delete", tag: sidebarTag });
+    commands: {
+      mergeUpstream: () => {
+        if (mergeEligible && !mergeBusy && mergeState?.kind === "idle")
+          setMergeReviewOpen(true);
+      },
     },
-    openRepository: (root) => {
-      showRepository(root);
-      if (root === snapshot?.root) return;
-      const cancel = new AbortController();
-      for (const type of ["pointerdown", "keydown"])
-        window.addEventListener(type, cancelGridFocus, {
-          capture: true,
-          signal: cancel.signal,
-        });
-      gridFocus.current = { root, from: focusedElement(), cancel };
+  });
+  const undoActions = defineSlice({
+    context: {
+      history: {
+        undo: nextEntry(writes.history, "undo")?.label ?? null,
+        redo: nextEntry(writes.history, "redo")?.label ?? null,
+      },
     },
-    jumpToRef: (reference) => {
-      const target = snapshot && listedRef(snapshot, reference);
-      if (snapshot && target) jumpTo(snapshot.root, target);
+    commands: {
+      undo: () => void stepHistory("undo"),
+      redo: () => void stepHistory("redo"),
     },
-    showStash: (stash) => {
-      if (snapshot) showStash(snapshot.root, stash);
-    },
-    stageAll: () => writeList("unstaged"),
-    unstageAll: () => writeList("staged"),
-    discardAll: () => {
-      const paths = selectedLists?.get("unstaged");
-      if (selectedWorktree && paths)
-        askDiscard(selectedWorktree.worktree.root, paths);
-    },
-    stashChanges: () => {
-      if (selectedWorktree) askStash(selectedWorktree.worktree.root, []);
-    },
-    focusCommit: () => {
-      flushSync(() => setInspectorOpen(true));
-      document.getElementById(COMMIT_SUMMARY_ID)?.focus();
-    },
-    undo: () => void stepHistory("undo"),
-    redo: () => void stepHistory("redo"),
-    writeLines: parts.writeLines,
-  };
-  const context: ActionContext = {
-    screen,
-    section: settingsSection,
-    dialogOpen: mergeReviewOpen,
-    adding,
-    searchable: snapshot !== null,
-    inspectable: shown !== null,
-    push: openRoot ? publishControl : null,
-    repository: openRepository && {
-      fetching: openFetching,
-      idle: openRepository.activity.kind === "idle",
-      ready: openReady,
-    },
-    file:
-      fileDiff.kind === "closed"
-        ? null
-        : {
-            hasCommit: revisionOf(fileDiff) !== null,
-            lineActions: parts.lineActions,
-          },
-    selection: selected,
-    picked: palette?.picked ?? null,
-    compare: app.compare && { swappable: swapEnds(app.compare) !== null },
-    sidebarBranch: ruledBranch && {
-      name: ruledBranch.name,
-      visibility: branchVisibility(rule, ruledBranch.reference),
-      outOfView: hiddenJump !== null,
-      local: ruledBranch.kind === "local",
-      checkedOut: checkedOut.has(ruledBranch.reference),
-    },
-    sidebarTag: sidebarTag && { name: sidebarTag.name },
-    rule: rule.kind,
-    worktree: selectedLists && {
-      unstaged: selectedLists.get("unstaged")?.length ?? 0,
-      staged: selectedLists.get("staged")?.length ?? 0,
-      conflicts: selectedLists.get("conflict")?.length ?? 0,
-      discardable:
-        selectedChanges?.kind === "ready"
-          ? discardChoice(
-              selectedChanges.status,
-              selectedLists.get("unstaged") ?? [],
-            ).paths.length
-          : 0,
-    },
-    history: {
-      undo: nextEntry(writes.history, "undo")?.label ?? null,
-      redo: nextEntry(writes.history, "redo")?.label ?? null,
-    },
-    writing: writes.running !== null,
-    merging: mergeActive,
-    mergeAvailable: mergeEligible && !mergeBusy && mergeState?.kind === "idle",
-    typing: false,
-  };
+  });
+  const { context, commands } = composeActions(
+    settingsActions,
+    layoutActions,
+    paletteActions,
+    historyActions,
+    navigationActions,
+    syncActions,
+    writeLoopActions,
+    diffActions,
+    stagingActions,
+    refWriteActions,
+    mergeActions,
+    undoActions,
+  );
   const keys = useRef({ context, commands, palette: palette !== null });
   useLayoutEffect(() => {
     keys.current = { context, commands, palette: palette !== null };
