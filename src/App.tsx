@@ -115,7 +115,6 @@ import { mac, macNative } from "./repositories";
 import { useRepositoryRefs } from "./useRepositoryRefs";
 import { useParts } from "./useParts";
 import { useWorkspace } from "./useWorkspace";
-import { useWrites } from "./useWrites";
 import { composeActions, defineSlice } from "./shell/actionSlices";
 import { focusedElement, shownElement } from "./shell/dom";
 import { InspectorToggle, SidebarToggle } from "./shell/LayoutToggles";
@@ -124,6 +123,7 @@ import { useActiveWorktree } from "./shell/useActiveWorktree";
 import { useFocus, useFocusRecovery } from "./shell/useFocus";
 import { useHistoryPane } from "./shell/useHistoryPane";
 import { useLayout } from "./shell/useLayout";
+import { useWriteLoop } from "./shell/useWriteLoop";
 import { useSettingsScreen } from "./shell/useSettingsScreen";
 import {
   FileDiffPane,
@@ -269,21 +269,15 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   useEffect(() => {
     setMergeReviewOpen(false);
   }, [active.root]);
-  const writes = useWrites(
-    snapshot?.root ?? null,
-    {
-      worktree: app.rereadWorktree,
-      repository: app.rereadOpenRepository,
-      refs: (worktree, repository) => {
-        const state =
-          overview.roots.get(worktree) ?? overview.roots.get(repository);
-        if (state?.kind === "open")
-          void overviewStore.refreshLocal(state.commonDir);
-        return app.rereadOpenRepository(repository);
-      },
-    },
-    active.root,
-  );
+  const loop = useWriteLoop({
+    app,
+    snapshotRoot: snapshot?.root ?? null,
+    overview: { view: overview, store: overviewStore },
+    opened,
+    active,
+    reloadRefs: branchRefs.reload,
+  });
+  const { writes, rereadChanges, refreshRepository } = loop;
   const parts = useParts({
     fileDiff,
     changes: app.changes,
@@ -418,14 +412,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
           ? "Wait for this repository's current operation to finish."
           : null,
   );
-  const writeCommonDir = openRepository?.commonDir;
-  useEffect(() => {
-    if (writes.running === null || writeCommonDir === undefined) return;
-    overviewStore.invalidatePush(writeCommonDir);
-    return () => {
-      void overviewStore.refreshLocal(writeCommonDir);
-    };
-  }, [writes.running, writeCommonDir, overviewStore]);
   const openFetching = openRepository?.activity.kind === "fetching";
   const openReady = openRepository
     ? readyAdvances(openRepository.overview).length
@@ -484,52 +470,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     snapshot.stashes.some((stash) => stash.oid === selected.oid)
       ? { root: snapshot.root, oid: selected.oid }
       : null;
-  const rereadChanges = () => {
-    app.refreshChanges();
-    writes.rereadHistory();
-    active.refreshMerge();
-  };
-  const rereadAll = () => {
-    rereadChanges();
-    return app.refresh();
-  };
-  const refreshRepository = () => {
-    if (openRepository)
-      void overviewStore.refreshLocal(openRepository.commonDir);
-    return rereadAll();
-  };
-  const refreshRef = useRef(rereadAll);
-  const refreshRepositoryRef = useRef(refreshRepository);
-  const reloadRefsRef = useRef(branchRefs.reload);
-  useEffect(() => {
-    refreshRef.current = rereadAll;
-    refreshRepositoryRef.current = refreshRepository;
-    reloadRefsRef.current = branchRefs.reload;
-  });
-  // Commits and branches made outside L1 Git show up when its window regains focus.
-  useEffect(() => {
-    let last = 0;
-    const reread = () => {
-      if (document.hidden || performance.now() - last < 1000) return;
-      last = performance.now();
-      void refreshRepositoryRef.current();
-      reloadRefsRef.current();
-    };
-    window.addEventListener("focus", reread);
-    document.addEventListener("visibilitychange", reread);
-    return () => {
-      window.removeEventListener("focus", reread);
-      document.removeEventListener("visibilitychange", reread);
-    };
-  }, []);
-  useEffect(
-    () =>
-      overviewStore.onRefsChanged((roots) => {
-        if (roots.some((root) => root === app.activeRoot))
-          void refreshRef.current();
-      }),
-    [overviewStore, app.activeRoot],
-  );
   function cancelGridFocus() {
     gridFocus.current?.cancel.abort();
     gridFocus.current = null;
@@ -679,10 +619,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       },
     },
   });
-  const writeLoopActions = defineSlice({
-    context: { writing: writes.running !== null },
-    commands: {},
-  });
   const diffActions = defineSlice({
     context: {
       file:
@@ -777,7 +713,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     history.actions,
     navigationActions,
     syncActions,
-    writeLoopActions,
+    loop.actions,
     diffActions,
     stagingActions,
     refWriteActions,
@@ -1456,12 +1392,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
         <PublishDialog
           key={publishingRoot}
           root={publishingRoot}
-          onRemoteAdded={() => {
-            const state = overview.roots.get(publishingRoot);
-            if (state?.kind === "open")
-              void overviewStore.refreshLocal(state.commonDir);
-            void app.rereadOpenRepository(publishingRoot);
-          }}
+          onRemoteAdded={() => loop.remoteAdded(publishingRoot)}
           onPublish={(intent) => {
             void overviewStore.push(publishingRoot, intent);
           }}
