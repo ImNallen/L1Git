@@ -200,7 +200,13 @@ export function UpdateAffordance({
   restart: UpdateRestart;
 }) {
   const statusId = useId();
+  const notesId = useId();
   const { state, track, preferenceError } = updates.snapshot;
+  const notes =
+    state.kind === "available" || state.kind === "downloaded"
+      ? state.candidate.notes
+      : null;
+  const descriptionId = notes?.trim() ? `${statusId} ${notesId}` : statusId;
   if (state.kind === "unavailable" && state.reason === "development")
     return null;
   const progress =
@@ -283,7 +289,7 @@ export function UpdateAffordance({
         type="button"
         className="icon-button"
         aria-label={action.label}
-        aria-describedby={statusId}
+        aria-describedby={descriptionId}
         disabled={action.run === null}
         onClick={() => void action.run?.()}
       >
@@ -297,8 +303,21 @@ export function UpdateAffordance({
           aria-hidden="true"
         />
       </button>
-      <span className="update-tooltip" aria-hidden="true">
-        {detail}
+      <span className="update-tooltip">
+        <span aria-hidden="true">{detail}</span>
+        {notes?.trim() && (
+          <span id={notesId} className="update-tooltip-changes">
+            <span className="update-tooltip-title">What's changed</span>
+            <span
+              className="update-tooltip-notes"
+              role="region"
+              aria-label="What's changed"
+              tabIndex={0}
+            >
+              {notes}
+            </span>
+          </span>
+        )}
       </span>
       <span
         id={statusId}
