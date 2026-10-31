@@ -28,6 +28,7 @@ export function useMergeState(
   useEffect(() => {
     void refresh();
     return () => {
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- a sequence counter, not a DOM ref; bumping the live value drops in-flight reads
       sequence.current++;
     };
   }, [refresh, refreshSignal]);

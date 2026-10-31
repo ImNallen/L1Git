@@ -11,6 +11,7 @@ import {
   lazy,
   useCallback,
   useEffect,
+  useEffectEvent,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -344,7 +345,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     setMergeTarget(null);
   }, [snapshot?.root]);
   useEffect(() => {
-    if (selected?.kind === "worktree" && snapshot)
+    if (selected?.kind === "worktree" && snapshot?.root)
       setMergeTarget({ openedRoot: snapshot.root, target: selected.root });
   }, [selected, snapshot?.root]);
   useEffect(() => {
@@ -514,10 +515,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   const selectedLane =
     selectedOid === null ? null : (graph.rows.get(selectedOid)?.lane ?? null);
   const shows = useCallback((oid: Oid) => visibleOids.has(oid), [visibleOids]);
-  const selectCommit = useCallback(
-    (oid: Oid) => select({ kind: "commit", oid }),
-    [select],
-  );
+  const selectCommit = (oid: Oid) => select({ kind: "commit", oid });
   // A stash clicked in another repository, selected once its snapshot loads.
   const [pendingStash, setPendingStash] = useState<{
     root: RepositoryRoot;
@@ -938,6 +936,8 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     if (outcome.kind === "applied" && entry && moved)
       setSteppedRef({ root: entry.root, ...moved });
   }
+  const jumpToStepped = useEffectEvent(jumpTo);
+  const focusJumpedBranch = useEffectEvent(focusNamedBranch);
   useEffect(() => {
     if (steppedRef === null) return;
     const { root, left, gone } = steppedRef;
@@ -950,12 +950,12 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     if (shownElement(focusedElement())) return;
     if (target === null) return focusFallback();
     focusJumpedRow.current = true;
-    jumpTo(root, target);
+    jumpToStepped(root, target);
   }, [steppedRef, branchRefs.refs]);
   useEffect(() => {
     if (!focusJumpedRow.current) return;
     focusJumpedRow.current = false;
-    focusNamedBranch();
+    focusJumpedBranch();
   }, [sidebarJump]);
   const closePalette = () => {
     flushSync(() => setPalette(null));
@@ -1027,22 +1027,23 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   // A cached snapshot can predate the branch, tag, or stash clicked in the
   // sidebar, so pending selections wait for the reread to finish.
   const reread = workspace.kind === "ready" ? workspace.snapshot : null;
+  const appSelect = app.select;
   useEffect(() => {
     if (jump === null) return;
     if (app.activeRoot !== jump.root) setJump(null);
     else if (jump.pending && reread?.root === jump.root) {
       const target = listedRef(reread, jump.reference);
       if (target && visibleOids.has(target.oid))
-        app.select({ kind: "commit", oid: target.oid });
+        appSelect({ kind: "commit", oid: target.oid });
       setJump({ ...jump, pending: false, seq: jump.seq + 1 });
     }
-  }, [jump, reread, visibleOids, app.activeRoot, app.select]);
+  }, [jump, reread, visibleOids, app.activeRoot, appSelect]);
   useEffect(() => {
     if (headOf === null || reread === null) return;
     if (reread.root === headOf && reread.head.kind !== "unborn")
-      app.select({ kind: "commit", oid: reread.head.oid });
+      appSelect({ kind: "commit", oid: reread.head.oid });
     setHeadOf(null);
-  }, [headOf, reread, app.select]);
+  }, [headOf, reread, appSelect]);
   useEffect(() => {
     if (lostFocusChecks > 0 && !shownElement(focusedElement())) focusFallback();
   }, [lostFocusChecks]);
@@ -1051,10 +1052,10 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     if (app.activeRoot !== pendingStash.root) setPendingStash(null);
     else if (reread?.root === pendingStash.root) {
       if (reread.stashes.some((stash) => stash.oid === pendingStash.oid))
-        app.select({ kind: "commit", oid: pendingStash.oid });
+        appSelect({ kind: "commit", oid: pendingStash.oid });
       setPendingStash(null);
     }
-  }, [pendingStash, reread, app.activeRoot, app.select]);
+  }, [pendingStash, reread, app.activeRoot, appSelect]);
   useEffect(() => {
     function keyboard(event: KeyboardEvent) {
       const { context, commands, palette } = keys.current;

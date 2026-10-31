@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { SelectedLineRange } from "@pierre/diffs";
 import * as repositories from "./repositories";
 import { firstChangedPath } from "./domain/changedFiles";
@@ -254,6 +261,7 @@ export function useWorkspace() {
     if (saved.catalog.lastRoot !== null)
       void selectRepository(saved.catalog.lastRoot);
     return () => {
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- a request counter, not a DOM ref; bumping the live value drops in-flight reads
       requestId.current++;
     };
   }, [saved.catalog.lastRoot, selectRepository]);
@@ -543,6 +551,7 @@ export function useWorkspace() {
       setFileDiff({ kind: "closed" });
   }, [detail, fileDiff]);
 
+  const openPendingFile = useEffectEvent(openFile);
   useEffect(() => {
     if (pendingOpen === null) return;
     if (
@@ -559,7 +568,7 @@ export function useWorkspace() {
       setPendingOpen(null);
       if (found.kind === "error") return;
       const file = firstWorktreeFile(worktreeGroups(found.status.entries));
-      if (file !== null) openFile(file.path, file.side);
+      if (file !== null) openPendingFile(file.path, file.side);
       return;
     }
     if (
@@ -573,7 +582,7 @@ export function useWorkspace() {
     setPendingOpen(null);
     if (detail.kind === "error") return;
     const path = firstChangedPath(detail.detail.files);
-    if (path !== undefined) openFile(path, null);
+    if (path !== undefined) openPendingFile(path, null);
   }, [
     pendingOpen,
     detail,

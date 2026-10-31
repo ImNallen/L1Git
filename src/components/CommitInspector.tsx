@@ -5,6 +5,7 @@ import { canMark, resolutionKey, resolutionOf } from "../resolutionDrafts";
 import {
   useCallback,
   useEffect,
+  useEffectEvent,
   useLayoutEffect,
   useRef,
   useState,
@@ -769,8 +770,8 @@ function WorktreeInspector({
       (group) =>
         (side ?? group.side) === group.side && listsRow(group.files, row),
     );
-  useEffect(() => {
-    if (writes.busy) {
+  const followWrite = useEffectEvent((busy: boolean) => {
+    if (busy) {
       writing.current = true;
       const row =
         resume.current ??
@@ -798,6 +799,9 @@ function WorktreeInspector({
     if (row !== null && target !== undefined)
       setFocusAfter({ row: target, side: row.side });
     else writes.lostFocus();
+  });
+  useEffect(() => {
+    followWrite(writes.busy);
   }, [writes.busy]);
   const listsFocus = (group: WorktreeGroup) =>
     focusAfter !== null && listsRow(group.files, focusAfter.row);
