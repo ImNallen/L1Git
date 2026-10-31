@@ -31,7 +31,7 @@ import {
   typingIn,
   UNDO_SHORTCUT,
 } from "./actions";
-import type { FileView, PaletteItem } from "./actions";
+import type { PaletteItem } from "./actions";
 import { useAppearance } from "./appearance";
 import { useBranchVisibility } from "./branchVisibility";
 import type { ThemeSettings } from "./themes/catalog";
@@ -42,14 +42,12 @@ import { CheckoutCommitDialog } from "./components/CheckoutCommitDialog";
 import { TagDialog } from "./components/TagDialog";
 import { StashDialog } from "./components/StashDialog";
 import { ConfirmDialog } from "./components/ConfirmDialog";
-import { DiscardDialog, DiscardPartDialog } from "./components/DiscardDialog";
+import { DiscardDialog } from "./components/DiscardDialog";
 import { EditMessageDialog } from "./components/EditMessageDialog";
 import { CommandPalette } from "./components/CommandPalette";
 import { GeneralSettings } from "./components/GeneralSettings";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { CommitInspector, InspectorFrame } from "./components/CommitInspector";
-import { revisionOf } from "./components/revision";
-import type { DiffStyle } from "./components/FileDiffPane";
 import { History, HistoryPlaceholder } from "./components/History";
 import { PaneDivider } from "./components/PaneDivider";
 import { RepositoryTree } from "./components/RepositoryTree";
@@ -102,7 +100,6 @@ import { useHistoryColumns } from "./historyColumns";
 import { repositoryWarnings, useOverview } from "./overview";
 import { mac, macNative } from "./repositories";
 import { useRepositoryRefs } from "./useRepositoryRefs";
-import { useParts } from "./useParts";
 import { useWorkspace } from "./useWorkspace";
 import { composeActions, defineSlice } from "./shell/actionSlices";
 import { focusedElement, shownElement } from "./shell/dom";
@@ -113,6 +110,8 @@ import { useActiveWorktree } from "./shell/useActiveWorktree";
 import { useFocus, useFocusRecovery } from "./shell/useFocus";
 import { useHistoryPane } from "./shell/useHistoryPane";
 import { useLayout } from "./shell/useLayout";
+import { useDiffPane } from "./shell/useDiffPane";
+import { DiscardPartHost } from "./shell/Hosts";
 import { useMergePanel, useResolutionDrafts } from "./shell/useMergePanel";
 import {
   ResolutionDraftList,
@@ -183,7 +182,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   const focusJumpedRow = useRef(false);
   const [palette, setPalette] = useState<{ picked: Oid | null } | null>(null);
   const paletteReturn = useRef<Element | null>(null);
-  const [diffStyle, setDiffStyle] = useState<DiffStyle>("unified");
   const [jump, setJump] = useState<Jump | null>(null);
   // The branch or tag last selected in each repository, so it stays highlighted after a round trip.
   const [lastBranch, setLastBranch] = useState<
@@ -262,17 +260,8 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     closeFile,
     selectRepository: app.selectRepository,
   });
-  const parts = useParts({
-    fileDiff,
-    changes: app.changes,
-    diffStyle,
-    busy:
-      writes.running !== null ||
-      active.mergingIn(fileDiff.kind !== "closed" ? fileDiff.root : null),
-    write: writes.write,
-    selectRange: app.selectRange,
-    lostFocus: () => focus.checkLost(),
-  });
+  const diff = useDiffPane({ app, writes, active, focus });
+  const { parts } = diff;
   function writeFiles(
     root: RepositoryRoot,
     kind: FileWrite,
@@ -548,22 +537,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       endCompare,
     },
   });
-  const diffActions = defineSlice({
-    context: {
-      file:
-        fileDiff.kind === "closed"
-          ? null
-          : {
-              hasCommit: revisionOf(fileDiff) !== null,
-              lineActions: parts.lineActions,
-            },
-    },
-    commands: {
-      closeFile,
-      showFile: (view: FileView) => fileDiffRef.current?.show(view),
-      writeLines: parts.writeLines,
-    },
-  });
   const stagingActions = defineSlice({
     context: {
       worktree: selectedLists && {
@@ -629,7 +602,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     navigationActions,
     sync.actions,
     loop.actions,
-    diffActions,
+    diff.actions,
     stagingActions,
     refWriteActions,
     merge.actions,
@@ -992,12 +965,12 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                       <FileDiffPane
                         ref={fileDiffRef}
                         state={fileDiff}
-                        diffStyle={diffStyle}
+                        diffStyle={diff.diffStyle}
                         theme={appearance.variant.appearance}
                         painted={
                           Object.keys(appearance.variant.palette).length > 0
                         }
-                        onDiffStyle={setDiffStyle}
+                        onDiffStyle={diff.setDiffStyle}
                         onBack={closeFile}
                         onRetry={() =>
                           app.openFile(fileDiff.path, fileDiff.side)
@@ -1286,15 +1259,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
           }}
         />
       )}
-      {parts.discarding && (
-        <DiscardPartDialog
-          path={parts.discarding.path}
-          choice={parts.discarding.choice}
-          effect={parts.discarding.effect}
-          onDiscard={parts.confirmDiscard}
-          onClose={parts.closeDiscard}
-        />
-      )}
+      <DiscardPartHost diff={diff} />
       {adding && (
         <AddRepositoryDialog
           onAdd={addRepository}
