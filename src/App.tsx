@@ -1,39 +1,29 @@
 import { useAppearance } from "./appearance";
 import { useBranchVisibility } from "./branchVisibility";
-import type { ThemeSettings } from "./themes/catalog";
-import { useExpandedRepositories } from "./expandedRepositories";
-import { useUpdates } from "./updates";
 import { useUpdateRestart } from "./components/UpdateRestart";
+import { useExpandedRepositories } from "./expandedRepositories";
 import { useFetchSettings } from "./fetchSettings";
 import { useHistoryColumns } from "./historyColumns";
 import { useOverview } from "./overview";
 import { macNative } from "./repositories";
+import type { ThemeSettings } from "./themes/catalog";
+import { useUpdates } from "./updates";
 import { useRepositoryRefs } from "./useRepositoryRefs";
 import { useWorkspace } from "./useWorkspace";
 import { composeActions } from "./shell/actionSlices";
-import { InspectorToggle, SidebarToggle } from "./shell/LayoutToggles";
-import { openedRepository, useSyncControls } from "./shell/sync";
-import { PublishHost } from "./shell/SyncRegions";
-import { useActiveWorktree } from "./shell/useActiveWorktree";
-import { useFocus, useFocusRecovery } from "./shell/useFocus";
-import { useHistoryPane } from "./shell/useHistoryPane";
-import { useLayout } from "./shell/useLayout";
-import { useDiffPane } from "./shell/useDiffPane";
 import {
+  AddRepositoryHost,
   DiscardHost,
   DiscardPartHost,
-  AddRepositoryHost,
   PaletteHost,
   SettingsHost,
   StashHost,
 } from "./shell/Hosts";
-import { useNavigation } from "./shell/useNavigation";
-import { Sidebar } from "./shell/Sidebar";
-import { Toolbar } from "./shell/Toolbar";
-import { Notices } from "./shell/Notices";
-import { WorkspacePanes } from "./shell/WorkspacePanes";
 import { InspectorPane } from "./shell/InspectorPane";
-import { useRefWrites, useUndoSteps } from "./shell/useRefWrites";
+import { InspectorToggle, SidebarToggle } from "./shell/LayoutToggles";
+import { usePrefetchLazyViews } from "./shell/lazyViews";
+import { RetainedResolutionHost } from "./shell/MergeRegions";
+import { Notices } from "./shell/Notices";
 import {
   BranchHost,
   CheckoutCommitHost,
@@ -41,74 +31,78 @@ import {
   EditMessageHost,
   TagHost,
 } from "./shell/RefWriteHosts";
-import { usePalette, useShortcuts } from "./shell/usePalette";
-import { useStaging } from "./shell/useStaging";
+import { Sidebar } from "./shell/Sidebar";
+import { openedRepository, useSyncControls } from "./shell/sync";
+import { PublishHost } from "./shell/SyncRegions";
+import { Toolbar } from "./shell/Toolbar";
+import { useActiveWorktree } from "./shell/useActiveWorktree";
+import { useDiffPane } from "./shell/useDiffPane";
+import { useFocus, useFocusRecovery } from "./shell/useFocus";
+import { useHistoryPane } from "./shell/useHistoryPane";
+import { useLayout } from "./shell/useLayout";
 import { useMergePanel, useResolutionDrafts } from "./shell/useMergePanel";
-import { RetainedResolutionHost } from "./shell/MergeRegions";
-import { useWriteLoop } from "./shell/useWriteLoop";
+import { useNavigation } from "./shell/useNavigation";
+import { usePalette, useShortcuts } from "./shell/usePalette";
+import { useRefWrites, useUndoSteps } from "./shell/useRefWrites";
 import { useSettingsScreen } from "./shell/useSettingsScreen";
-import { usePrefetchLazyViews } from "./shell/lazyViews";
+import { useStaging } from "./shell/useStaging";
+import { useWriteLoop } from "./shell/useWriteLoop";
 import { workspaceView } from "./shell/workspaceView";
+import { WorkspacePanes } from "./shell/WorkspacePanes";
 
+/**
+ * The composition root. Every owner is a hook called here, so all state stays
+ * in this fiber and the order of these calls is the order effects run in.
+ */
 export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   const appearance = useAppearance(initialTheme);
   const app = useWorkspace();
   const view = workspaceView(app);
-  const { snapshot, shown, activePath } = view;
   const fetchSettings = useFetchSettings();
   const updates = useUpdates();
-  const updateRestart = useUpdateRestart(updates);
-  const { view: overview, store: overviewStore } = useOverview(
+  const restart = useUpdateRestart(updates);
+  const overview = useOverview(
     app.catalog.entries.map((entry) => entry.root),
     fetchSettings.intervalMinutes,
   );
-  const layout = useLayout(shown);
-  const { sidebarOpen, sidebarToggleRef } = layout;
+  const layout = useLayout(view.shown);
   const settings = useSettingsScreen(layout);
-  const focus = useFocus(sidebarToggleRef);
+  const focus = useFocus(layout.sidebarToggleRef);
   const palette = usePalette(focus);
-  const { workspace, current, closeFile } = app;
   const expansion = useExpandedRepositories(app.catalog);
-  const historyColumns = useHistoryColumns();
+  const columns = useHistoryColumns();
   const visibility = useBranchVisibility();
-  const persistenceError =
-    app.persistenceError ??
-    expansion.persistenceError ??
-    historyColumns.persistenceError ??
-    visibility.persistenceError;
-  const branchRefs = useRepositoryRefs(
+  const sidebarRefs = useRepositoryRefs(
     expansion.expanded,
-    workspace,
-    snapshot,
-    overviewStore,
+    app.workspace,
+    view.snapshot,
+    overview.store,
     visibility.prune,
   );
-  const opened = openedRepository(overview, shown?.root ?? null);
-  const openRepository = opened.repository;
+  const opened = openedRepository(overview.view, view.shown?.root ?? null);
   const history = useHistoryPane({
-    snapshot,
+    snapshot: view.snapshot,
     ruleFor: visibility.ruleFor,
     changes: app.changes,
-    statuses: openRepository?.overview.branches,
+    statuses: opened.repository?.overview.branches,
     selection: app.selection,
     focus,
   });
-  const { rule } = history;
-  const active = useActiveWorktree(snapshot, app.selection, app.changes);
+  const active = useActiveWorktree(view.snapshot, app.selection, app.changes);
   const loop = useWriteLoop({
     app,
-    snapshotRoot: snapshot?.root ?? null,
-    overview: { view: overview, store: overviewStore },
-    opened,
-    active,
-    reloadRefs: branchRefs.reload,
-  });
-  const { writes, rereadChanges, refreshRepository } = loop;
-  const sync = useSyncControls(
-    overviewStore,
+    snapshotRoot: view.snapshot?.root ?? null,
     overview,
     opened,
-    loop.writes.running !== null,
+    active,
+    reloadRefs: sidebarRefs.reload,
+  });
+  const { writes } = loop;
+  const sync = useSyncControls(
+    overview.store,
+    overview.view,
+    opened,
+    writes.running !== null,
   );
   const nav = useNavigation({
     app,
@@ -116,16 +110,17 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     history,
     visibility,
     expansion,
-    sidebarRefs: branchRefs.refs,
+    sidebarRefs: sidebarRefs.refs,
     settings,
     focus,
     layout,
     paletteOpen: palette.open,
   });
+  // After navigation: its ref-step effect must see lost focus before this restores it.
   useFocusRecovery(focus);
   const diff = useDiffPane({ app, writes, active, focus });
   const staging = useStaging({
-    snapshot,
+    snapshot: view.snapshot,
     selection: app.selection,
     compare: app.compare,
     changes: app.changes,
@@ -134,7 +129,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     focus,
   });
   const refWrites = useRefWrites({
-    snapshot,
+    snapshot: view.snapshot,
     selection: app.selection,
     changes: app.changes,
     writes,
@@ -143,17 +138,17 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     focus,
   });
   const merge = useMergePanel({
-    snapshot,
+    snapshot: view.snapshot,
     active,
     opened,
     writes,
-    rereadChanges,
+    rereadChanges: loop.rereadChanges,
     selecting: nav.selecting,
     openInspector: layout.openInspector,
   });
   const drafts = useResolutionDrafts({
-    snapshot,
-    closeFile,
+    snapshot: view.snapshot,
+    closeFile: app.closeFile,
     selectRepository: app.selectRepository,
   });
   const undo = useUndoSteps({ writes, nav, focus });
@@ -173,6 +168,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   );
   useShortcuts(actions, palette);
   usePrefetchLazyViews();
+
   const { commands } = actions;
   const sidebarToggle = (
     <SidebarToggle layout={layout} toggle={commands.toggleSidebar} />
@@ -180,14 +176,19 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   const inspectorToggle = (
     <InspectorToggle
       layout={layout}
-      disabled={!shown}
+      disabled={!view.shown}
       toggle={commands.toggleInspector}
     />
   );
+  const persistenceError =
+    app.persistenceError ??
+    expansion.persistenceError ??
+    columns.persistenceError ??
+    visibility.persistenceError;
 
   return (
     <div
-      className={`app ${macNative ? "native-mac" : ""} ${sidebarOpen ? "" : "sidebar-hidden"}`}
+      className={`app ${macNative ? "native-mac" : ""} ${layout.sidebarOpen ? "" : "sidebar-hidden"}`}
     >
       <Sidebar
         layout={layout}
@@ -196,13 +197,13 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
         commands={commands}
         entries={app.catalog.entries}
         expansion={expansion}
-        refs={branchRefs.refs}
-        activePath={activePath}
-        sync={overview.syncByRoot}
+        refs={sidebarRefs.refs}
+        activePath={view.activePath}
+        sync={overview.view.syncByRoot}
         navigation={nav.sidebar}
         refActions={refWrites.sidebarActions}
         updates={updates}
-        restart={updateRestart}
+        restart={restart}
       />
       <main className="workspace">
         <div className="repository-workspace">
@@ -211,29 +212,29 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
               sidebarToggle={sidebarToggle}
               inspectorToggle={inspectorToggle}
               layout={layout}
-              shown={shown}
-              snapshot={snapshot}
+              shown={view.shown}
+              snapshot={view.snapshot}
               writes={writes}
               sync={sync}
               commands={commands}
             />
             <Notices
-              snapshot={snapshot}
+              snapshot={view.snapshot}
               writes={writes}
               merge={merge}
               drafts={drafts}
               sync={sync}
               persistenceError={persistenceError}
-              error={current?.error}
-              onRetry={() => void refreshRepository()}
-              rule={rule}
+              error={app.current?.error}
+              onRetry={() => void loop.refreshRepository()}
+              rule={history.rule}
               nav={nav}
             />
             <WorkspacePanes
               app={app}
               view={view}
               history={history}
-              columns={historyColumns}
+              columns={columns}
               nav={nav}
               commitActions={refWrites.commitActions}
               focus={focus}
@@ -247,14 +248,15 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
             layout={layout}
             toggle={inspectorToggle}
             app={app}
-            snapshot={snapshot}
+            snapshot={view.snapshot}
             nav={nav}
             history={history}
             staging={staging}
-            rereadChanges={rereadChanges}
+            rereadChanges={loop.rereadChanges}
           />
         </div>
       </main>
+      {/* Overlays in this order, so dialogs opened in one commit stack as before. */}
       <RetainedResolutionHost
         drafts={drafts}
         changes={app.changes}
@@ -266,13 +268,13 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
         appearance={appearance}
         fetching={fetchSettings}
         updates={updates}
-        restart={updateRestart}
+        restart={restart}
       />
       <PaletteHost
         palette={palette}
         actions={actions}
         entries={app.catalog.entries}
-        snapshot={snapshot}
+        snapshot={view.snapshot}
       />
       <EditMessageHost
         refWrites={refWrites}
@@ -283,14 +285,14 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       <PublishHost sync={sync} loop={loop} focus={focus} />
       <BranchHost
         refWrites={refWrites}
-        snapshot={snapshot}
+        snapshot={view.snapshot}
         writes={writes}
         nav={nav}
         focus={focus}
       />
       <TagHost
         refWrites={refWrites}
-        snapshot={snapshot}
+        snapshot={view.snapshot}
         writes={writes}
         nav={nav}
         focus={focus}
@@ -299,7 +301,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       <StashHost staging={staging} writes={writes} />
       <DropStashHost
         refWrites={refWrites}
-        snapshot={snapshot}
+        snapshot={view.snapshot}
         writes={writes}
       />
       <DiscardHost staging={staging} writes={writes} />
