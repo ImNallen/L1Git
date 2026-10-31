@@ -8,7 +8,6 @@ import {
 import { canMark, resolutionKey, resolutionOf } from "./resolutionDrafts";
 import {
   Suspense,
-  lazy,
   useCallback,
   useEffect,
   useEffectEvent,
@@ -139,18 +138,13 @@ import { useParts } from "./useParts";
 import { useWorkspace } from "./useWorkspace";
 import { useWrites } from "./useWrites";
 import { focusedElement, shownElement } from "./shell/dom";
+import {
+  FileDiffPane,
+  RetainedResolution,
+  usePrefetchLazyViews,
+} from "./shell/lazyViews";
 import { isBranch, listedRef } from "./shell/navigation";
 import type { Jump, JumpTarget } from "./shell/navigation";
-
-// Diffs, highlighting, and the conflict editor load after startup, since no file is open at launch.
-const diffViews = () => import("./components/FileDiffPane");
-const resolutionViews = () => import("./components/ConflictResolver");
-const FileDiffPane = lazy(() =>
-  diffViews().then((m) => ({ default: m.FileDiffPane })),
-);
-const RetainedResolution = lazy(() =>
-  resolutionViews().then((m) => ({ default: m.RetainedResolution })),
-);
 
 // Below this the default sidebar leaves the history too narrow for its columns.
 const NARROW_SIDEBAR = "(max-width: 939px)";
@@ -1053,11 +1047,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     media.addEventListener("change", narrow);
     return () => media.removeEventListener("change", narrow);
   }, []);
-  useEffect(() => {
-    // Fetch them once launch has painted, so the first file opens without waiting.
-    void diffViews();
-    void resolutionViews();
-  }, []);
+  usePrefetchLazyViews();
   useEffect(() => {
     const media = window.matchMedia(NARROW_SIDEBAR);
     const narrow = () => {
