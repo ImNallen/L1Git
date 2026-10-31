@@ -11,6 +11,7 @@ mod files;
 mod index;
 mod merge;
 mod partial;
+mod refresh;
 mod refs;
 mod resolution;
 mod stash;

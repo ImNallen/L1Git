@@ -453,6 +453,45 @@ impl<'r> MergeIndexTxn<'r> {
     }
 }
 
+/// Runs only `update-index --refresh`, which changes only the stat data the
+/// index caches for each file, so it replaces the index with no record and
+/// no hook.
+pub(crate) struct RefreshTxn<'r>(Txn<'r>);
+
+impl<'r> RefreshTxn<'r> {
+    pub(super) fn begin(repo: &'r Repo, deadline: WriteDeadline) -> Result<Self, RepositoryError> {
+        Txn::begin(repo, deadline).map(Self)
+    }
+
+    /// Stops Git once `stop` turns true. Git writes the copy only when an
+    /// entry changed, and until then the copy keeps the index's size and
+    /// modification time.
+    pub(super) fn refresh(mut self, stop: &dyn Fn() -> bool) -> Result<(), RepositoryError> {
+        let ran = self
+            .0
+            .git(&[
+                "-c",
+                "core.ignoreStat=false",
+                "update-index",
+                "-q",
+                "--ignore-submodules",
+                "--refresh",
+            ])
+            .run_unless(self.0.deadline, Some(stop))?;
+        let stamp = |path: &Path| {
+            fs::metadata(path)
+                .and_then(|metadata| Ok((metadata.len(), metadata.modified()?)))
+                .ok()
+        };
+        let rewritten =
+            stamp(&self.0.copy).is_some_and(|copy| Some(copy) != stamp(&self.0.repo.index));
+        if matches!(ran.code(), Some(0 | 1)) && rewritten {
+            self.0.publish_flags(false, false)?;
+        }
+        Ok(())
+    }
+}
+
 pub(crate) struct RefTxn<'r>(Outside<'r>);
 
 impl<'r> RefTxn<'r> {

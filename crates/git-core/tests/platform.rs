@@ -1,8 +1,13 @@
 use l1_git_core::{
-    Coordinator, Expect, FilePatch, Limits, Operation, Side, Start, WorktreePatch, snapshot,
-    worktree_patch, worktree_status,
+    Coordinator, Expect, FilePatch, Limits, Operation, Side, Start, UndoHistory, WorktreePatch,
+    snapshot, worktree_patch, worktree_status,
 };
-use std::{fs, path::Path, process::Command};
+use std::{
+    fs,
+    path::Path,
+    process::Command,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
 fn git(root: &Path, args: &[&str]) -> String {
     let output = Command::new("git")
@@ -164,4 +169,96 @@ fn reads_and_writes_a_repository_with_spaces_unicode_and_crlf() {
             l1_git_core::ErrorKind::UnsupportedPath
         );
     }
+}
+
+fn seconds(time: SystemTime) -> u64 {
+    time.duration_since(UNIX_EPOCH).unwrap().as_secs()
+}
+
+/// Whether the index caches `path`'s current modification time.
+fn cached(root: &Path, path: &str) -> bool {
+    let debug = git(root, &["ls-files", "--debug", "--", path]);
+    let mtime = debug
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("mtime: "))
+        .unwrap();
+    let file = fs::metadata(root.join(path)).unwrap().modified().unwrap();
+    mtime.split(':').next().unwrap() == seconds(file).to_string()
+}
+
+#[test]
+fn a_status_read_refreshes_stale_stat_data_unless_another_process_holds_the_index_lock() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("répo");
+    fs::create_dir(&root).unwrap();
+    git(&root, &["init", "--quiet", "--initial-branch=main"]);
+    for (key, value) in [
+        ("user.name", "Ada"),
+        ("user.email", "ada@example.test"),
+        ("commit.gpgSign", "false"),
+        ("maintenance.auto", "false"),
+        ("gc.auto", "0"),
+    ] {
+        git(&root, &["config", key, value]);
+    }
+    fs::write(root.join("f.txt"), "one\n").unwrap();
+    git(&root, &["add", "f.txt"]);
+    git(&root, &["commit", "--quiet", "-m", "Initial"]);
+    let touched = SystemTime::now() - Duration::from_secs(3600);
+    fs::File::options()
+        .write(true)
+        .open(root.join("f.txt"))
+        .unwrap()
+        .set_modified(touched)
+        .unwrap();
+    let stage = git(&root, &["ls-files", "--stage", "--debug"]);
+    let path = root.to_str().unwrap();
+    let coordinator = Coordinator::new(Limits::default(), temp.path().join("undo"));
+    let lock = root.join(".git/index.lock");
+    fs::write(&lock, "another process").unwrap();
+
+    assert!(
+        coordinator
+            .worktree_status(path)
+            .unwrap()
+            .entries
+            .is_empty()
+    );
+    coordinator.wait_for_refreshes();
+    assert_eq!(fs::read_to_string(&lock).unwrap(), "another process");
+    assert!(!cached(&root, "f.txt"), "refreshed under a foreign lock");
+
+    fs::remove_file(&lock).unwrap();
+    assert!(
+        coordinator
+            .worktree_status(path)
+            .unwrap()
+            .entries
+            .is_empty()
+    );
+    coordinator.wait_for_refreshes();
+    assert!(cached(&root, "f.txt"), "stat data stayed stale");
+    let refreshed = git(&root, &["ls-files", "--stage", "--debug"]);
+    let rows = |listing: &str| -> Vec<String> {
+        listing
+            .lines()
+            .filter(|line| !line.contains("time: ") && !line.contains("ino: "))
+            .map(str::to_owned)
+            .collect()
+    };
+    assert_eq!(rows(&refreshed), rows(&stage));
+    assert_eq!(
+        coordinator.undo_history(path).unwrap(),
+        UndoHistory {
+            undo: None,
+            redo: None
+        }
+    );
+    assert!(!lock.exists());
+    let leftovers: Vec<_> = fs::read_dir(root.join(".git"))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .filter(|name| name.to_string_lossy().starts_with("l1git-"))
+        .collect();
+    assert!(leftovers.is_empty(), "{leftovers:?}");
 }

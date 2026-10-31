@@ -204,6 +204,7 @@ mod tests {
             Deadline::start(LocalRead::Snapshot, Duration::from_secs(5)),
             None,
             None,
+            None,
         )
         .unwrap();
         assert!(result.status.success());
@@ -217,6 +218,7 @@ mod tests {
         let result = execute(
             helper("hang", &marker),
             Deadline::start(LocalRead::Snapshot, Duration::from_secs(3)),
+            None,
             None,
             None,
         );

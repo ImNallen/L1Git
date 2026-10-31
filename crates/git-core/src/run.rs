@@ -10,7 +10,7 @@ use crate::{
     repository::{
         commit_detail_within, file_patch_within, line_stats_within, refs_within, snapshot_within,
     },
-    status::{worktree_patch_within, worktree_status_within},
+    status::worktree_patch_within,
     write::merged_within,
 };
 use serde::{Deserialize, Serialize};
@@ -204,10 +204,9 @@ pub fn run(coordinator: &Coordinator, request: Request) -> Result<Response, Repo
         Request::FastForward { path, advances } => {
             Response::FastForward(coordinator.fast_forward(&path, &advances)?)
         }
-        Request::WorktreeStatus { path } => Response::WorktreeStatus(worktree_status_within(
-            &path,
-            deadline(LocalRead::WorktreeStatus),
-        )?),
+        Request::WorktreeStatus { path } => {
+            Response::WorktreeStatus(coordinator.worktree_status(&path)?)
+        }
         Request::ConflictFile { path, file } => Response::ConflictFile(
             crate::write::conflict_file_within(&path, &file, deadline(LocalRead::ConflictFile))?,
         ),

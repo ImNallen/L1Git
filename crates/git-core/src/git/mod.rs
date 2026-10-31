@@ -217,13 +217,14 @@ struct Ran {
     stderr: CapturedPipe,
 }
 
-/// Spawns Git in its own process group so an expired deadline stops every
-/// process it started, such as a clean filter.
+/// Spawns Git in its own process group so an expired deadline, or `stop`
+/// turning true, stops every process it started, such as a clean filter.
 fn execute(
     mut command: Command,
     deadline: Deadline,
     input: Option<Vec<u8>>,
     cap: Option<usize>,
+    stop: Option<&dyn Fn() -> bool>,
 ) -> Result<Ran, RepositoryError> {
     command
         .stdin(if input.is_some() {
@@ -251,13 +252,18 @@ fn execute(
         let _ = sender.send(capped(&mut pipe, cap));
     });
     let stdout = loop {
-        #[cfg(windows)]
-        let wait = deadline.remaining().min(POLL);
-        #[cfg(not(windows))]
-        let wait = deadline.remaining();
+        let wait = if cfg!(windows) || stop.is_some() {
+            deadline.remaining().min(POLL)
+        } else {
+            deadline.remaining()
+        };
         match receiver.recv_timeout(wait) {
             Ok(Ok(stdout)) => break stdout,
             Ok(Err(_)) => {
+                child.stop();
+                return Err(deadline.broken());
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) if stop.is_some_and(|stop| stop()) => {
                 child.stop();
                 return Err(deadline.broken());
             }
@@ -343,7 +349,7 @@ fn whole(ran: Ran) -> Result<Exit, RepositoryError> {
 }
 
 pub(crate) fn run(path: &Path, args: &[&str], deadline: Deadline) -> Result<Exit, RepositoryError> {
-    whole(execute(command(path, args), deadline, None, None)?)
+    whole(execute(command(path, args), deadline, None, None, None)?)
 }
 
 pub(crate) fn config_flag(
@@ -432,6 +438,7 @@ pub(crate) fn read_with_input(
         deadline,
         Some(input),
         None,
+        None,
     )?)?)
 }
 
@@ -459,7 +466,7 @@ pub(crate) fn run_capped(
     cap: usize,
     deadline: Deadline,
 ) -> Result<CappedRun, RepositoryError> {
-    let ran = execute(command(path, args), deadline, None, Some(cap))?;
+    let ran = execute(command(path, args), deadline, None, Some(cap), None)?;
     Ok(CappedRun {
         code: ran.status.code(),
         stdout: ran.stdout,
@@ -1096,6 +1103,7 @@ mod tests {
             command,
             Deadline::of(LocalRead::Snapshot),
             Some(vec![b'x'; 1024 * 1024]),
+            None,
             None,
         );
         assert!(matches!(result, Err(error) if error.kind == ErrorKind::GitFailed));

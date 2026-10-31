@@ -22,7 +22,11 @@ use std::{
     collections::HashMap,
     num::NonZeroUsize,
     path::{Path, PathBuf},
-    sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError},
+    sync::{
+        Arc, Condvar, Mutex, MutexGuard, PoisonError, TryLockError,
+        atomic::{AtomicUsize, Ordering},
+    },
+    thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -57,20 +61,74 @@ impl Default for Limits {
 /// lock). Ordinary writes never take the gate, so they never wait for a fetch.
 /// Push, fast-forward, and config addition take the gate before the write lock.
 /// At most `network_slots`
-/// remote operations run at once. Local reads take no lock.
+/// remote operations run at once. Local reads take no lock. An index refresh
+/// after a status read holds the write lock only while nothing else wants it.
 pub struct Coordinator {
     limits: Limits,
     read_cap: Option<Duration>,
     write_cap: Option<Duration>,
     undo_dir: PathBuf,
-    repositories: Mutex<HashMap<PathBuf, Arc<Locks>>>,
+    repositories: Repositories,
+    refreshes: Arc<Refreshes>,
     slots: Semaphore,
 }
+
+type Repositories = Arc<Mutex<HashMap<PathBuf, Arc<Locks>>>>;
 
 #[derive(Default)]
 struct Locks {
     gate: Mutex<Gate>,
     write: Mutex<()>,
+    /// Threads waiting for `write`. A refresh that holds it stops for them.
+    wanted: AtomicUsize,
+}
+
+impl Locks {
+    fn write_lock(&self) -> MutexGuard<'_, ()> {
+        self.wanted.fetch_add(1, Ordering::SeqCst);
+        let write = lock_ignoring_poison(&self.write);
+        self.wanted.fetch_sub(1, Ordering::SeqCst);
+        write
+    }
+}
+
+#[derive(Default)]
+struct Refreshes {
+    running: Mutex<usize>,
+    finished: Condvar,
+}
+
+/// Counts a refresh until its thread ends, even by a panic.
+struct Running(Arc<Refreshes>);
+
+impl Drop for Running {
+    fn drop(&mut self) {
+        *lock_ignoring_poison(&self.0.running) -= 1;
+        self.0.finished.notify_all();
+    }
+}
+
+/// Lets a background refresh take a repository's write lock.
+pub(crate) struct Writers(Repositories);
+
+impl Writers {
+    /// Runs `work` under the write lock of `common_dir` when nothing holds or
+    /// wants that lock. `work` gets a check that turns true once a write, an
+    /// undo, or a ref move wants it, so it can stop and let go.
+    pub(crate) fn unless_busy<T>(
+        &self,
+        common_dir: &Path,
+        work: impl FnOnce(&dyn Fn() -> bool) -> T,
+    ) -> Option<T> {
+        let locks = locks_in(&self.0, common_dir);
+        let _write = match locks.write.try_lock() {
+            Ok(write) => write,
+            Err(TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+            Err(TryLockError::WouldBlock) => return None,
+        };
+        let wanted = || locks.wanted.load(Ordering::SeqCst) > 0;
+        (!wanted()).then(|| work(&wanted))
+    }
 }
 
 #[derive(Default)]
@@ -87,7 +145,8 @@ impl Coordinator {
             read_cap: None,
             write_cap: None,
             undo_dir: undo_dir.into(),
-            repositories: Mutex::default(),
+            repositories: Repositories::default(),
+            refreshes: Arc::default(),
             slots: Semaphore::new(limits.network_slots),
         }
     }
@@ -123,8 +182,31 @@ impl Coordinator {
 
     pub(crate) fn writing<T>(&self, common_dir: &Path, work: impl FnOnce() -> T) -> T {
         let locks = self.locks(common_dir);
-        let _write = lock_ignoring_poison(&locks.write);
+        let _write = locks.write_lock();
         work()
+    }
+
+    /// Runs `refresh` on its own thread, so the read that asked for it can
+    /// answer first.
+    pub(crate) fn refresh_later(&self, refresh: impl FnOnce(&Writers) + Send + 'static) {
+        *lock_ignoring_poison(&self.refreshes.running) += 1;
+        let running = Running(Arc::clone(&self.refreshes));
+        let writers = Writers(Arc::clone(&self.repositories));
+        let _ = thread::Builder::new().spawn(move || {
+            let _running = running;
+            refresh(&writers);
+        });
+    }
+
+    /// Blocks until every index refresh that a status read started has
+    /// finished. Only tests use it.
+    pub fn wait_for_refreshes(&self) {
+        let running = lock_ignoring_poison(&self.refreshes.running);
+        drop(
+            self.refreshes
+                .finished
+                .wait_while(running, |running| *running > 0),
+        );
     }
 
     pub(crate) fn gated<T>(&self, common_dir: &Path, work: impl FnOnce() -> T) -> T {
@@ -190,7 +272,7 @@ impl Coordinator {
         let outcomes = advances
             .iter()
             .map(|request| {
-                let _write = lock_ignoring_poison(&locks.write);
+                let _write = locks.write_lock();
                 self.guard_merge_refs(
                     &repository.root,
                     &[request.reference.as_str().to_owned()],
@@ -211,12 +293,16 @@ impl Coordinator {
     }
 
     fn locks(&self, common_dir: &Path) -> Arc<Locks> {
-        Arc::clone(
-            lock_ignoring_poison(&self.repositories)
-                .entry(common_dir.to_owned())
-                .or_default(),
-        )
+        locks_in(&self.repositories, common_dir)
     }
+}
+
+fn locks_in(repositories: &Repositories, common_dir: &Path) -> Arc<Locks> {
+    Arc::clone(
+        lock_ignoring_poison(repositories)
+            .entry(common_dir.to_owned())
+            .or_default(),
+    )
 }
 
 fn capped(budget: Duration, cap: Option<Duration>) -> Duration {
