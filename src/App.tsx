@@ -138,6 +138,7 @@ import {
   usePrefetchLazyViews,
 } from "./shell/lazyViews";
 import { isBranch, jumpView, listedRef } from "./shell/navigation";
+import { workspaceView } from "./shell/workspaceView";
 import type { Jump, JumpTarget } from "./shell/navigation";
 
 // Below this the default sidebar leaves the history too narrow for its columns.
@@ -146,6 +147,9 @@ const NARROW_SIDEBAR = "(max-width: 939px)";
 export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   const appearance = useAppearance(initialTheme);
   const app = useWorkspace();
+  const view = workspaceView(app);
+  const { snapshot, settled, shown, opening, busy, fileOpen, activePath } =
+    view;
   const [screen, setScreen] = useState<Screen>("repository");
   const [settingsSection, setSettingsSection] =
     useState<SettingsSection>("general");
@@ -230,13 +234,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     window.addEventListener("beforeunload", protect);
     return () => window.removeEventListener("beforeunload", protect);
   }, [draftImpact.resolutions.length]);
-  const fileOpen = fileDiff.kind !== "closed";
-  const busy = workspace.kind === "loading" || workspace.kind === "opening";
-  const snapshot = current?.snapshot ?? null;
-  const opening = workspace.kind === "opening" ? workspace : null;
-  const shown = snapshot
-    ? { root: snapshot.root, name: snapshot.name }
-    : opening && { root: opening.path, name: opening.name };
   const expansion = useExpandedRepositories(app.catalog);
   const historyColumns = useHistoryColumns();
   const visibility = useBranchVisibility();
@@ -473,8 +470,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     reference: FullRef;
   } | null>(null);
   const inspectorVisible = Boolean(shown && inspectorOpen);
-  const activePath =
-    shown?.root ?? (workspace.kind === "error" ? workspace.path : null);
   const openRoot = shown?.root ?? null;
   const openRootState = openRoot === null ? null : overview.roots.get(openRoot);
   const openRepository =
@@ -1040,38 +1035,35 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     </button>
   );
 
-  // A cached snapshot can predate the branch, tag, or stash clicked in the
-  // sidebar, so pending selections wait for the reread to finish.
-  const reread = workspace.kind === "ready" ? workspace.snapshot : null;
   const appSelect = app.select;
   useEffect(() => {
     if (jump === null) return;
     if (app.activeRoot !== jump.root) setJump(null);
-    else if (jump.pending && reread?.root === jump.root) {
-      const target = listedRef(reread, jump.reference);
+    else if (jump.pending && settled?.root === jump.root) {
+      const target = listedRef(settled, jump.reference);
       if (target && visibleOids.has(target.oid))
         appSelect({ kind: "commit", oid: target.oid });
       setJump({ ...jump, pending: false, seq: jump.seq + 1 });
     }
-  }, [jump, reread, visibleOids, app.activeRoot, appSelect]);
+  }, [jump, settled, visibleOids, app.activeRoot, appSelect]);
   useEffect(() => {
-    if (headOf === null || reread === null) return;
-    if (reread.root === headOf && reread.head.kind !== "unborn")
-      appSelect({ kind: "commit", oid: reread.head.oid });
+    if (headOf === null || settled === null) return;
+    if (settled.root === headOf && settled.head.kind !== "unborn")
+      appSelect({ kind: "commit", oid: settled.head.oid });
     setHeadOf(null);
-  }, [headOf, reread, appSelect]);
+  }, [headOf, settled, appSelect]);
   useEffect(() => {
     if (lostFocusChecks > 0 && !shownElement(focusedElement())) focusFallback();
   }, [lostFocusChecks]);
   useEffect(() => {
     if (pendingStash === null) return;
     if (app.activeRoot !== pendingStash.root) setPendingStash(null);
-    else if (reread?.root === pendingStash.root) {
-      if (reread.stashes.some((stash) => stash.oid === pendingStash.oid))
+    else if (settled?.root === pendingStash.root) {
+      if (settled.stashes.some((stash) => stash.oid === pendingStash.oid))
         appSelect({ kind: "commit", oid: pendingStash.oid });
       setPendingStash(null);
     }
-  }, [pendingStash, reread, app.activeRoot, appSelect]);
+  }, [pendingStash, settled, app.activeRoot, appSelect]);
   useEffect(() => {
     function keyboard(event: KeyboardEvent) {
       const { context, commands, palette } = keys.current;
@@ -1547,7 +1539,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
                     lane={selectedLane}
                     onSelect={select}
                     onSwap={app.swapCompare}
-                    selectedFile={fileOpen ? fileDiff : null}
+                    selectedFile={fileDiff.kind !== "closed" ? fileDiff : null}
                     onSelectFile={app.openFile}
                     toggleButton={inspectorToggle}
                     onRetry={app.retryDetail}
