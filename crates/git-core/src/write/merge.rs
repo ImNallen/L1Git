@@ -1161,7 +1161,6 @@ impl Coordinator {
                         None,
                     ));
                 }
-                // Only three-way merges publish a private index. Fast-forward lets Git own the real index.
                 let txn = if shown.plan == MergePlan::MergeCommit {
                     let txn = MergeIndexTxn::begin(repo, deadline)?;
                     ordinary_index(&index::read(txn.runner())?)?;

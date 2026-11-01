@@ -1603,7 +1603,14 @@ fn record_decoder_rejects_unknown_fields_and_mismatched_versions_without_rewriti
     let session = f.start(&f.coordinator());
     let (repo, record, _) = f.record();
     let path = directory(&repo, session.id).join("state.json");
-    for change in ["extra", "root", "id", "legacy-with-new-review", "future"] {
+    for change in [
+        "extra",
+        "root",
+        "id",
+        "legacy-with-new-review",
+        "phase",
+        "future",
+    ] {
         let mut value = serde_json::to_value(&record).unwrap();
         match change {
             "extra" => value["session"]["review"]["extra"] = true.into(),
