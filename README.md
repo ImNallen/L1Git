@@ -11,7 +11,7 @@ A desktop Git client for macOS, Linux, and Windows. Browse your repositories, re
 - Commit, amend, and edit your last commit's message.
 - Manage branches, tags, and stashes. Browse multiple repositories and linked worktrees.
 - Fetch, fast-forward branches, and push or publish the current branch.
-- Merge a diverged branch with its reviewed upstream, resolve text conflicts, and finish or abort.
+- Merge a selected local or remote branch into the current working copy after reviewing both refs and commit IDs. Fast-forward when possible, or resolve text conflicts and finish or abort a merge commit.
 - Undo and redo local edits made through the app, including commits and discarded changes.
 - Choose light or dark themes, create your own, or import themes from VS Code and Open VSX.
 

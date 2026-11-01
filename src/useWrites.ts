@@ -191,12 +191,37 @@ export function useWrites(
           outcome = { kind: "failed", problem: problemFrom(error) };
         }
         try {
-          await reread.refs(worktree, repository);
-        } finally {
-          await Promise.all([
-            readHistory(historyRoot ?? worktree),
-            reread.worktree(worktree),
-          ]);
+          try {
+            await reread.refs(worktree, repository);
+          } finally {
+            await Promise.all([
+              readHistory(historyRoot ?? worktree),
+              reread.worktree(worktree),
+            ]);
+          }
+        } catch (error) {
+          if (outcome.kind === "merged") {
+            const result = outcome.report.outcome;
+            if (
+              result.kind === "fastForwarded" ||
+              result.kind === "finished" ||
+              result.kind === "started"
+            ) {
+              const problem = `Repository refresh failed: ${problemFrom(error).message}`;
+              outcome = {
+                ...outcome,
+                report: {
+                  ...outcome.report,
+                  outcome: {
+                    ...result,
+                    problem: result.problem
+                      ? `${result.problem} ${problem}`
+                      : problem,
+                  },
+                },
+              };
+            }
+          }
         }
         return outcome;
       },

@@ -102,13 +102,9 @@ it("the merge review closes when the active worktree changes", async () => {
   app.bridge.reset();
   await app.refocusWindow();
   expect(dialogs()).toEqual([]);
-  expect(app.bridge.lines((request) => request.op === "mergeReview"))
-    .toMatchInlineSnapshot(`
-    [
-      "mergeReview /fixture/pin",
-      "mergeReview /fixture/pin",
-    ]
-  `);
+  expect(app.bridge.lines((request) => request.op === "mergeReview")).toEqual(
+    [],
+  );
 });
 
 it("stageFiles is refused while a resolution draft is unmarkable", async () => {
@@ -212,4 +208,75 @@ it("Inspect in the merge panel selects the worktree, opens the inspector, and cl
   expect(selectedRow()).toBe("Uncommitted changes in pin-feature, 1 modified");
   expect(query("complementary", "Commit inspector")).toBeTruthy();
   expect(query("status", /topic is hidden in the graph/)).toBeNull();
+});
+
+it("the branch menu pins the selected source to the active linked destination without checkout", async () => {
+  const app = await mountApp();
+  await app.click(historyRow("Uncommitted changes in pin-feature,"));
+  app.bridge.reset();
+  await app.click(get("button", /^origin/));
+  await app.contextMenu(refRow("refs/remotes/origin/main")!);
+  await app.click(get("menuitem", "Merge into current branch…"));
+  expect(dialogs()).toEqual(["Merge into current branch"]);
+  expect(document.querySelector(".merge-pair")?.textContent).toContain(
+    "refs/remotes/origin/main",
+  );
+  expect(document.querySelector(".merge-pair")?.textContent).toContain(
+    "refs/heads/feature",
+  );
+  expect([
+    ...new Map(
+      app.bridge.log
+        .filter((request) => request.op === "mergeReview")
+        .map((request) => [JSON.stringify(request), request]),
+    ).values(),
+  ]).toEqual([
+    {
+      op: "mergeReview",
+      path: PIN_FEATURE,
+      selection: { kind: "branch", reference: "refs/remotes/origin/main" },
+    },
+  ]);
+  expect(app.bridge.count("write")).toBe(0);
+  expect(app.bridge.count("merge")).toBe(0);
+  expect(selectedRow()).toBe("Uncommitted changes in pin-feature, 1 modified");
+});
+
+it("the palette merges its selected branch into the active destination", async () => {
+  const app = await mountApp();
+  await app.click(historyRow("Uncommitted changes in pin-feature,"));
+  await app.click(refRow("refs/heads/topic")!);
+  app.bridge.reset();
+  await app.runPaletteItem("Merge selected branch into current branch…");
+  expect(dialogs()).toEqual(["Merge into current branch"]);
+  expect([
+    ...new Map(
+      app.bridge.log
+        .filter((request) => request.op === "mergeReview")
+        .map((request) => [JSON.stringify(request), request]),
+    ).values(),
+  ]).toEqual([
+    {
+      op: "mergeReview",
+      path: PIN_FEATURE,
+      selection: { kind: "branch", reference: "refs/heads/topic" },
+    },
+  ]);
+  expect(app.bridge.count("write")).toBe(0);
+});
+
+it("a late merge review response cannot reopen or retarget a review after switching repositories", async () => {
+  const app = await mountApp();
+  const pending = app.bridge.hold("mergeReview", PIN);
+  await app.contextMenu(refRow("refs/heads/topic")!);
+  await app.click(get("menuitem", "Merge into current branch…"));
+  await pending.arrived;
+  expect(dialogs()).toEqual(["Merge into current branch"]);
+  await app.click(repositoryRow(OTHER));
+  expect(dialogs()).toEqual([]);
+  pending.release();
+  await app.settle();
+  expect(dialogs()).toEqual([]);
+  expect(app.bridge.count("mergeReview", OTHER)).toBe(0);
+  expect(app.bridge.count("merge")).toBe(0);
 });

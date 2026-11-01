@@ -1,7 +1,9 @@
 use super::{Capped, Deadline, Work, base, execute, text, too_old, without_prompts};
 use crate::{
     ErrorKind, RepositoryError, StaleReason, stderr,
-    write::{CommitTxn, HOOK_OFF, MergeIndexTxn, Outside, Published, RefTxn, ScratchIndex, Txn},
+    write::{
+        CommitTxn, HOOK_OFF, MergeIndexTxn, MergeTxn, Outside, Published, RefTxn, ScratchIndex, Txn,
+    },
 };
 use std::{
     ffi::OsStr,
@@ -285,6 +287,25 @@ impl<'a> Write<'a> {
             cap: None,
             as_user: true,
             lazy_fetch: false,
+        }
+    }
+
+    pub(crate) fn fast_forward(txn: &'a MergeTxn<'_>, source: &'a crate::Oid) -> Self {
+        Self {
+            dir: txn.runner().root(),
+            args: vec![
+                "merge",
+                "--ff-only",
+                "--no-autostash",
+                "--no-overwrite-ignore",
+                "--no-edit",
+                source.as_str(),
+            ],
+            env: Vec::new(),
+            input: None,
+            cap: None,
+            as_user: true,
+            lazy_fetch: true,
         }
     }
 

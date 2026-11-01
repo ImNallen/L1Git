@@ -1,7 +1,12 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { GitMerge, X } from "lucide-react";
 import * as repositories from "../repositories";
-import type { MergeAction, MergeReview, MergeState } from "../domain/merge";
+import type {
+  MergeAction,
+  MergeReview,
+  MergeState,
+  MergeSelection,
+} from "../domain/merge";
 import type { RepositoryRoot } from "../domain/repository";
 import { problemFrom } from "../domain/repository";
 import { useRead } from "../useRead";
@@ -39,7 +44,7 @@ export function MergeControls({
   refresh,
   eligible,
   busy,
-  reviewOpen,
+  review,
   onReview,
   onCloseReview,
   run,
@@ -50,7 +55,7 @@ export function MergeControls({
   refresh: () => void;
   eligible: boolean;
   busy: boolean;
-  reviewOpen: boolean;
+  review: MergeSelection | null;
   onReview: () => void;
   onCloseReview: () => void;
   run: (action: MergeAction) => Promise<MergeCommandOutcome>;
@@ -86,6 +91,19 @@ export function MergeControls({
         case "notStarted":
           setNotice({ message: outcome.problem, error: true });
           break;
+        case "upToDate":
+          setNotice({
+            message:
+              "The destination already contains the selected source. No files or refs changed.",
+            error: false,
+          });
+          break;
+        case "fastForwarded":
+          setNotice({
+            message: `Fast-forwarded to ${outcome.commit}. ${outcome.problem ?? "Push remains a separate action."}`,
+            error: outcome.problem !== null,
+          });
+          break;
         case "finished":
           setNotice({
             message:
@@ -109,12 +127,12 @@ export function MergeControls({
   const state = read.kind === "ready" ? read.value : null;
   if (
     !notice &&
-    !reviewOpen &&
+    !review &&
     (read.kind === "loading" || (state?.kind === "idle" && !eligible))
   )
     return null;
   return (
-    <section className="merge-controls" aria-label="Upstream merge">
+    <section className="merge-controls" aria-label="Branch merge">
       {state?.kind === "idle" && eligible && (
         <div className="merge-actions">
           <button
@@ -151,9 +169,11 @@ export function MergeControls({
           onInspect={onInspect}
         />
       )}
-      {reviewOpen && (
+      {review && (
         <MergeReviewDialog
+          key={JSON.stringify([root, review])}
           root={root}
+          selection={review}
           busy={busy}
           run={execute}
           onClose={onCloseReview}
@@ -213,10 +233,10 @@ function ActiveMerge({
         </summary>
         <MergePair review={session.review} />
       </details>
-      {state.upstreamMoved && (
+      {state.sourceMoved && (
         <p>
-          The upstream has moved. This merge still uses the source commit you
-          reviewed above.
+          The source branch has moved. This merge still uses the source commit
+          you reviewed above.
         </p>
       )}
       <p>
@@ -350,16 +370,20 @@ function ActiveMerge({
 
 function MergeReviewDialog({
   root,
+  selection,
   busy,
   run,
   onClose,
 }: {
   root: RepositoryRoot;
+  selection: MergeSelection;
   busy: boolean;
   run: (action: MergeAction) => Promise<MergeCommandOutcome>;
   onClose: () => void;
 }) {
-  const [review, refresh] = useRead(root, () => repositories.mergeReview(root));
+  const [review, refresh] = useRead(JSON.stringify([root, selection]), () =>
+    repositories.mergeReview(root, selection),
+  );
   const [problem, setProblem] = useState<string | null>(null);
   const { frozen } = useDraftImpact();
   const [draft] = useCommitDraft(root);
@@ -379,7 +403,12 @@ function MergeReviewDialog({
   async function start() {
     if (review.kind !== "ready" || busy || frozen || amending) return;
     const result = await run({ kind: "start", review: review.value });
-    if (result.kind === "merged" && result.report.outcome.kind === "started") {
+    if (
+      result.kind === "merged" &&
+      ["started", "fastForwarded", "upToDate"].includes(
+        result.report.outcome.kind,
+      )
+    ) {
       dialog.current?.close();
       onClose();
     } else if (result.kind === "failed") {
@@ -413,7 +442,11 @@ function MergeReviewDialog({
           <X size={17} />
         </button>
       </div>
-      <h1 id={title}>Merge upstream</h1>
+      <h1 id={title}>
+        {selection.kind === "upstream"
+          ? "Merge upstream"
+          : "Merge into current branch"}
+      </h1>
       <p>
         Merge the reviewed source into this worktree's current branch. Fetch and
         Push remain separate actions.
@@ -429,8 +462,11 @@ function MergeReviewDialog({
         </p>
       )}
       <p>
-        Start requires clean tracked files and an ordinary index. Git stops
-        before committing, including when there are no conflicts.
+        {review.kind === "ready" && review.value.plan === "upToDate"
+          ? "Up to date. The destination already contains this source. No write is needed."
+          : review.kind === "ready" && review.value.plan === "fastForward"
+            ? "Fast-forward. Move the current branch to the source commit without creating a merge commit. This cannot be undone here."
+            : "Merge commit. Start requires clean tracked files and an ordinary index. Git stops before committing so you can review and Finish or Abort."}
       </p>
       <p>
         Merge lifecycle actions cannot be undone. Abort cancels an active merge.
@@ -449,10 +485,18 @@ function MergeReviewDialog({
         <button
           type="button"
           className="button primary"
-          disabled={busy || frozen || amending || review.kind !== "ready"}
+          disabled={
+            busy ||
+            frozen ||
+            amending ||
+            review.kind !== "ready" ||
+            review.value.plan === "upToDate"
+          }
           onClick={() => void start()}
         >
-          Start merge
+          {review.kind === "ready" && review.value.plan === "fastForward"
+            ? "Fast-forward"
+            : "Start merge"}
         </button>
       </div>
     </dialog>

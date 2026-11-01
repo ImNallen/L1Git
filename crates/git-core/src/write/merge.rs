@@ -35,12 +35,35 @@ pub struct MergeTracking {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
+pub enum MergeSelection {
+    Upstream,
+    Branch { reference: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
+pub enum MergeContext {
+    Branch,
+    Upstream { tracking: MergeTracking },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MergePlan {
+    UpToDate,
+    FastForward,
+    MergeCommit,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MergeReview {
     pub root: String,
     pub destination: BranchTip,
     pub source: MergeSource,
-    pub tracking: MergeTracking,
+    pub context: MergeContext,
+    pub plan: MergePlan,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -95,7 +118,7 @@ pub enum MergeState {
         unresolved: Vec<String>,
         staged: StagedStamp,
         tree: Option<Oid>,
-        upstream_moved: bool,
+        source_moved: bool,
     },
     Attention {
         session: Option<MergeSession>,
@@ -112,6 +135,11 @@ pub enum MergeState {
     deny_unknown_fields
 )]
 pub enum MergeOutcome {
+    UpToDate,
+    FastForwarded {
+        commit: Oid,
+        problem: Option<String>,
+    },
     Started {
         problem: Option<String>,
     },
@@ -141,6 +169,7 @@ pub struct MergeReport {
 )]
 enum SessionPhase {
     Starting,
+    FastForwarding,
     Active,
     Finishing { tree: Oid },
     Aborting,
@@ -154,6 +183,112 @@ struct Record {
     identity: Identity,
     session: MergeSession,
     phase: SessionPhase,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct V1Review {
+    root: String,
+    destination: BranchTip,
+    source: MergeSource,
+    tracking: MergeTracking,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct V1Session {
+    id: EntryId,
+    review: V1Review,
+    footprint: Vec<String>,
+    suggested_message: String,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
+enum V1Outcome {
+    Started {
+        problem: Option<String>,
+    },
+    Finished {
+        commit: Oid,
+        problem: Option<String>,
+    },
+    Aborted,
+    NotStarted {
+        problem: String,
+    },
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
+enum V1Phase {
+    Starting,
+    Active,
+    Finishing { tree: Oid },
+    Aborting,
+    Closed { outcome: V1Outcome },
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct V1Record {
+    version: u32,
+    identity: Identity,
+    session: V1Session,
+    phase: V1Phase,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum StoredRecord {
+    Current(Record),
+    Legacy(V1Record),
+}
+
+fn decode_record(value: StoredRecord) -> Result<Record, RepositoryError> {
+    match value {
+        StoredRecord::Current(record) if record.version == 2 => Ok(record),
+        StoredRecord::Legacy(old) if old.version == 1 => {
+            let phase = match old.phase {
+                V1Phase::Starting => SessionPhase::Starting,
+                V1Phase::Active => SessionPhase::Active,
+                V1Phase::Finishing { tree } => SessionPhase::Finishing { tree },
+                V1Phase::Aborting => SessionPhase::Aborting,
+                V1Phase::Closed { outcome } => SessionPhase::Closed {
+                    outcome: match outcome {
+                        V1Outcome::Started { problem } => MergeOutcome::Started { problem },
+                        V1Outcome::Finished { commit, problem } => {
+                            MergeOutcome::Finished { commit, problem }
+                        }
+                        V1Outcome::Aborted => MergeOutcome::Aborted,
+                        V1Outcome::NotStarted { problem } => MergeOutcome::NotStarted { problem },
+                    },
+                },
+            };
+            Ok(Record {
+                version: 2,
+                identity: old.identity,
+                phase,
+                session: MergeSession {
+                    id: old.session.id,
+                    footprint: old.session.footprint,
+                    suggested_message: old.session.suggested_message,
+                    review: MergeReview {
+                        root: old.session.review.root,
+                        destination: old.session.review.destination,
+                        source: old.session.review.source,
+                        context: MergeContext::Upstream {
+                            tracking: old.session.review.tracking,
+                        },
+                        plan: MergePlan::MergeCommit,
+                    },
+                },
+            })
+        }
+        StoredRecord::Current(_) | StoredRecord::Legacy(_) => Err(storage(
+            "Unsupported merge session version. Preserve the session files and use a compatible L1 Git version.",
+        )),
+    }
 }
 
 fn refused(message: impl Into<String>) -> RepositoryError {
@@ -318,9 +453,18 @@ fn load_id(repo: &Repo, id: EntryId) -> Result<Record, RepositoryError> {
     if !meta.is_dir() || meta.file_type().is_symlink() {
         return Err(storage("Invalid session directory."));
     }
-    let record: Record =
-        read(&dir.join("state.json"))?.ok_or_else(|| storage("Missing session record."))?;
-    if record.version != 1
+    let record = decode_record(
+        read(&dir.join("state.json"))?.ok_or_else(|| storage("Missing session record."))?,
+    )?;
+    let phase_matches_plan = match record.phase {
+        SessionPhase::FastForwarding => record.session.review.plan == MergePlan::FastForward,
+        SessionPhase::Starting
+        | SessionPhase::Active
+        | SessionPhase::Finishing { .. }
+        | SessionPhase::Aborting => record.session.review.plan == MergePlan::MergeCommit,
+        SessionPhase::Closed { .. } => true,
+    };
+    if !phase_matches_plan
         || record.identity != Identity::of(&repo.git_dir)?
         || record.session.id != id
         || record.session.review.root != repo.root()
@@ -406,11 +550,63 @@ fn landed(
     }))
 }
 
+enum FastForwardResult {
+    Unchanged,
+    Advanced,
+}
+
+impl FastForwardResult {
+    fn outcome(self, record: &Record, problem: Option<String>) -> MergeOutcome {
+        match self {
+            Self::Advanced => MergeOutcome::FastForwarded {
+                commit: record.session.review.source.oid.clone(),
+                problem,
+            },
+            Self::Unchanged => MergeOutcome::NotStarted {
+                problem: problem.unwrap_or_else(|| "The interrupted fast-forward left the clean original destination. Review and start again.".into()),
+            },
+        }
+    }
+}
+
+fn fast_forward_outcome(
+    repo: &Repo,
+    record: &Record,
+    deadline: WriteDeadline,
+) -> Result<Option<FastForwardResult>, RepositoryError> {
+    let head = repo.head(deadline)?;
+    let target = Head::Attached {
+        reference: record.session.review.destination.reference.as_str().into(),
+        oid: record.session.review.source.oid.as_str().into(),
+    };
+    safe_index(repo, deadline)?;
+    if !sync::in_progress(&repo.root, deadline.reads())?.is_empty()
+        || marker(repo, "MERGE_AUTOSTASH")?.is_some()
+        || !status::entries(&repo.root, Untracked::No, deadline.reads())?
+            .0
+            .is_empty()
+    {
+        return Ok(None);
+    }
+    if head == target {
+        Ok(Some(FastForwardResult::Advanced))
+    } else if head == expected_head(&record.session) {
+        Ok(Some(FastForwardResult::Unchanged))
+    } else {
+        Ok(None)
+    }
+}
+
 fn reconcile(repo: &Repo, deadline: WriteDeadline) -> Result<Option<Record>, RepositoryError> {
     let Some(mut record) = load(repo)? else {
         return Ok(None);
     };
     match record.phase.clone() {
+        SessionPhase::FastForwarding => {
+            if let Some(outcome) = fast_forward_outcome(repo, &record, deadline)? {
+                record.close(repo, outcome.outcome(&record, None))?;
+            }
+        }
         SessionPhase::Starting if baseline(repo, &record, deadline)? => {
             record.close(repo, MergeOutcome::NotStarted { problem: "The interrupted merge did not change the clean starting state. Review and start again.".into() })?;
         }
@@ -469,10 +665,11 @@ fn state(
                     unresolved,
                     staged,
                     tree,
-                    upstream_moved: current.as_ref() != Some(&record.session.review.source.oid),
+                    source_moved: current.as_ref() != Some(&record.session.review.source.oid),
                 });
             }
             SessionPhase::Starting
+            | SessionPhase::FastForwarding
             | SessionPhase::Active
             | SessionPhase::Finishing { .. }
             | SessionPhase::Aborting => {
@@ -547,65 +744,119 @@ fn config(repo: &Repo, key: &str, deadline: WriteDeadline) -> Result<Vec<String>
         .collect()
 }
 
-fn review(repo: &Repo, deadline: WriteDeadline) -> Result<MergeReview, RepositoryError> {
+fn review(
+    repo: &Repo,
+    selection: &MergeSelection,
+    deadline: WriteDeadline,
+) -> Result<MergeReview, RepositoryError> {
     let Head::Attached { reference, oid } = repo.head(deadline)? else {
         return Err(refused(
-            "Merge upstream needs a checked-out local branch with an existing commit.",
+            "Merge needs a checked-out local branch with an existing commit.",
         ));
     };
     let branch = BranchRef::try_from(reference).map_err(|_| git::malformed())?;
-    let one = |values: Vec<String>| match values.as_slice() {
-        [value] => Ok(value.clone()),
-        _ => Err(refused(
-            "Configure exactly one upstream for this branch before merging.",
-        )),
+    let (source_ref, context) = match selection {
+        MergeSelection::Branch { reference } => (reference.clone(), MergeContext::Branch),
+        MergeSelection::Upstream => {
+            let one = |values: Vec<String>| match values.as_slice() {
+                [value] => Ok(value.clone()),
+                _ => Err(refused(
+                    "Configure exactly one upstream for this branch before merging.",
+                )),
+            };
+            let remote = one(config(
+                repo,
+                &format!("branch.{}.remote", branch.name()),
+                deadline,
+            )?)?;
+            let merge = one(config(
+                repo,
+                &format!("branch.{}.merge", branch.name()),
+                deadline,
+            )?)?;
+            let fetch = if remote == "." {
+                Vec::new()
+            } else {
+                config(repo, &format!("remote.{remote}.fetch"), deadline)?
+            };
+            let source_ref = git::line(&git::read(
+                &repo.root,
+                &["for-each-ref", "--format=%(upstream)", branch.as_str()],
+                deadline.reads(),
+            )?);
+            if !source_ref.starts_with("refs/") || source_ref.contains('\n') {
+                return Err(refused(
+                    "The configured upstream is missing. Fetch explicitly, then review again.",
+                ));
+            }
+            (
+                source_ref,
+                MergeContext::Upstream {
+                    tracking: MergeTracking {
+                        remote,
+                        merge,
+                        fetch,
+                    },
+                },
+            )
+        }
     };
-    let remote = one(config(
-        repo,
-        &format!("branch.{}.remote", branch.name()),
-        deadline,
-    )?)?;
-    let merge = one(config(
-        repo,
-        &format!("branch.{}.merge", branch.name()),
-        deadline,
-    )?)?;
-    let fetch = if remote == "." {
-        Vec::new()
-    } else {
-        config(repo, &format!("remote.{remote}.fetch"), deadline)?
-    };
-    let source_ref = git::line(&git::read(
-        &repo.root,
-        &["for-each-ref", "--format=%(upstream)", branch.as_str()],
-        deadline.reads(),
-    )?);
-    if !source_ref.starts_with("refs/") || source_ref.contains('\n') {
+    if !(source_ref.starts_with("refs/heads/") || source_ref.starts_with("refs/remotes/")) {
         return Err(refused(
-            "The configured upstream is missing. Fetch explicitly, then review again.",
+            "Select an existing local or remote branch using its full ref name.",
+        ));
+    }
+    let direct = git::read(
+        &repo.root,
+        &[
+            "for-each-ref",
+            "--format=%(refname)%09%(symref)%09%(objecttype)",
+            &source_ref,
+        ],
+        deadline.reads(),
+    )?;
+    let expected = format!("{source_ref}\t\tcommit");
+    if !git::text(&direct).lines().any(|line| line == expected) {
+        return Err(refused(
+            "Select an exact existing branch ref. Symbolic aliases, tags, and revision expressions cannot be merged.",
         ));
     }
     let source = commit::resolve(repo, deadline, &source_ref)?.ok_or_else(|| {
         refused("The upstream commit is missing. Fetch explicitly, then review again.")
     })?;
     let destination = Oid::try_from(oid).map_err(|_| git::malformed())?;
-    let counts = git::read(
-        &repo.root,
-        &[
-            "rev-list",
-            "--left-right",
-            "--count",
-            &format!("{}...{}", destination.as_str(), source.as_str()),
-        ],
-        deadline.reads(),
-    )?;
-    let counts = git::text(&counts);
-    let counts: Vec<_> = counts.split_whitespace().collect();
-    if counts.len() != 2 || counts.contains(&"0") {
-        return Err(refused(
-            "Merge upstream is available only when this branch and its upstream have diverged. Use Fast-forward for a branch that is only behind.",
-        ));
-    }
+    let ancestor = |left: &Oid, right: &Oid| -> Result<bool, RepositoryError> {
+        let ran = git::run(
+            &repo.root,
+            &["merge-base", "--is-ancestor", left.as_str(), right.as_str()],
+            deadline.reads(),
+        )?;
+        match ran.status.code() {
+            Some(0) => Ok(true),
+            Some(1) => Ok(false),
+            _ => Err(git::malformed()),
+        }
+    };
+    let plan = if ancestor(&source, &destination)? {
+        MergePlan::UpToDate
+    } else if ancestor(&destination, &source)? {
+        MergePlan::FastForward
+    } else {
+        let common = git::run(
+            &repo.root,
+            &["merge-base", destination.as_str(), source.as_str()],
+            deadline.reads(),
+        )?;
+        match common.status.code() {
+            Some(0) => MergePlan::MergeCommit,
+            Some(1) => {
+                return Err(refused(
+                    "The selected branch and destination have unrelated histories. No merge was started.",
+                ));
+            }
+            _ => return Err(git::malformed()),
+        }
+    };
     Ok(MergeReview {
         root: repo.root(),
         destination: BranchTip {
@@ -616,11 +867,8 @@ fn review(repo: &Repo, deadline: WriteDeadline) -> Result<MergeReview, Repositor
             reference: source_ref,
             oid: source,
         },
-        tracking: MergeTracking {
-            remote,
-            merge,
-            fetch,
-        },
+        context,
+        plan,
     })
 }
 
@@ -634,7 +882,7 @@ fn safe_index(repo: &Repo, deadline: WriteDeadline) -> Result<(), RepositoryErro
     ordinary_index(&rows)?;
     let sparse = config(repo, "core.sparseCheckout", deadline)?;
     if sparse.iter().any(|value| value != "false" && value != "0") {
-        return Err(refused("Merge upstream does not support sparse checkout."));
+        return Err(refused("Merge does not support sparse checkout."));
     }
     Ok(())
 }
@@ -647,6 +895,18 @@ fn ordinary_index(rows: &index::Rows) -> Result<(), RepositoryError> {
     {
         return Err(refused(
             "Merge needs an index without skip-worktree, assume-unchanged, or intent-to-add entries. Restore an ordinary index before starting or continuing.",
+        ));
+    }
+    Ok(())
+}
+
+fn clean_tracked(repo: &Repo, deadline: WriteDeadline) -> Result<(), RepositoryError> {
+    if !status::entries(&repo.root, Untracked::No, deadline.reads())?
+        .0
+        .is_empty()
+    {
+        return Err(refused(
+            "Merge needs a clean tracked worktree and index. Commit or stash your changes first.",
         ));
     }
     Ok(())
@@ -813,7 +1073,11 @@ impl Coordinator {
         work()
     }
 
-    pub fn review_merge(&self, path: &str) -> Result<MergeReview, RepositoryError> {
+    pub fn review_merge(
+        &self,
+        path: &str,
+        selection: &MergeSelection,
+    ) -> Result<MergeReview, RepositoryError> {
         self.merge_locked(path, LocalWrite::MergeStart, |repo, _, deadline| {
             let record = reconcile(repo, deadline)?;
             if state(repo, record.as_ref(), deadline)? != MergeState::Idle {
@@ -821,7 +1085,7 @@ impl Coordinator {
                     "Finish or resolve the current Git operation before starting a merge.",
                 ));
             }
-            review(repo, deadline)
+            review(repo, selection, deadline)
         })
     }
 
@@ -855,10 +1119,16 @@ impl Coordinator {
                     ));
                 }
                 base_store.settled_log(repo, deadline)?;
-                if review(repo, deadline)? != *shown {
+                let selection = match &shown.context {
+                    MergeContext::Branch => MergeSelection::Branch {
+                        reference: shown.source.reference.clone(),
+                    },
+                    MergeContext::Upstream { .. } => MergeSelection::Upstream,
+                };
+                if review(repo, &selection, deadline)? != *shown {
                     return Err(RepositoryError::stale(
                         StaleReason::HeadMoved,
-                        "The reviewed branch, upstream, or tracking configuration changed. Review the merge again.",
+                        "The reviewed destination, source, or tracking configuration changed. Review the merge again.",
                     ));
                 }
                 guard_refs(
@@ -867,13 +1137,7 @@ impl Coordinator {
                     deadline,
                 )?;
                 safe_index(repo, deadline)?;
-                let txn = MergeIndexTxn::begin(repo, deadline)?;
-                ordinary_index(&index::read(txn.runner())?)?;
-                if review(repo, deadline)? != *shown {
-                    return Err(refused(
-                        "The merge review changed before index ownership was acquired. Review again.",
-                    ));
-                }
+
                 if !config(
                     repo,
                     &format!("branch.{}.mergeOptions", shown.destination.reference.name()),
@@ -886,22 +1150,38 @@ impl Coordinator {
                         "Managed merges require the default merge strategy options. Run the configured merge with Git instead.",
                     ));
                 }
-                if !status::entries(&repo.root, Untracked::No, deadline.reads())?
-                    .0
-                    .is_empty()
-                {
-                    return Err(refused(
-                        "Merge upstream needs a clean tracked worktree and index. Commit or stash your changes first.",
+                clean_tracked(repo, deadline)?;
+                refuse_untracked_collisions(repo, &shown.source.oid, deadline)?;
+                if shown.plan == MergePlan::UpToDate {
+                    return Ok((
+                        MergeReport {
+                            state: MergeState::Idle,
+                            outcome: MergeOutcome::UpToDate,
+                        },
+                        None,
                     ));
                 }
-                refuse_untracked_collisions(repo, &shown.source.oid, deadline)?;
+                // Only three-way merges publish a private index. Fast-forward lets Git own the real index.
+                let txn = if shown.plan == MergePlan::MergeCommit {
+                    let txn = MergeIndexTxn::begin(repo, deadline)?;
+                    ordinary_index(&index::read(txn.runner())?)?;
+                    Some(txn)
+                } else {
+                    None
+                };
+                if review(repo, &selection, deadline)? != *shown {
+                    return Err(refused(
+                        "The reviewed source or destination changed. Review again.",
+                    ));
+                }
+                clean_tracked(repo, deadline)?;
                 for dir in [repo.git_dir.join("l1git"), base(repo)] {
                     checked_dir(&dir)?;
                 }
                 let id = EntryId::after(current.as_ref().map(|record| record.session.id));
                 checked_dir(&directory(repo, id))?;
                 let mut record = Record {
-                    version: 1,
+                    version: 2,
                     identity: Identity::of(&repo.git_dir)?,
                     session: MergeSession {
                         id,
@@ -913,7 +1193,11 @@ impl Coordinator {
                             shown.destination.reference.name()
                         ),
                     },
-                    phase: SessionPhase::Starting,
+                    phase: if shown.plan == MergePlan::FastForward {
+                        SessionPhase::FastForwarding
+                    } else {
+                        SessionPhase::Starting
+                    },
                 };
                 record.keep(
                     repo,
@@ -922,6 +1206,46 @@ impl Coordinator {
                 )?;
                 record.save(repo)?;
                 persist(&base(repo).join("current.json"), &id)?;
+                if shown.plan == MergePlan::FastForward {
+                    let txn = MergeTxn::begin(repo, deadline)?;
+                    let trace = directory(repo, id).join("fast-forward.json");
+                    let refs = trace.with_extension("refs");
+                    let result = txn
+                        .fast_forward(&shown.source.oid)
+                        .traces(&trace, &refs)
+                        .run(deadline)
+                        .and_then(|wrote| wrote.succeeded());
+                    let deadline = deadline.renewed();
+                    let observed = fast_forward_outcome(repo, &record, deadline);
+                    if let Ok(Some(observed)) = observed {
+                        let problem = result
+                            .err()
+                            .map(|error| error.message)
+                            .or_else(|| failed_hook(&trace));
+                        let outcome = observed.outcome(&record, problem);
+                        record.close(repo, outcome.clone())?;
+                        return Ok((
+                            MergeReport {
+                                state: MergeState::Idle,
+                                outcome,
+                            },
+                            None,
+                        ));
+                    }
+                    let state = state(repo, Some(&record), deadline)?;
+                    if repo.head(deadline)?
+                        == (Head::Attached {
+                            reference: shown.destination.reference.as_str().into(),
+                            oid: shown.source.oid.as_str().into(),
+                        })
+                    {
+                        return Ok((MergeReport { state, outcome: MergeOutcome::FastForwarded { commit: shown.source.oid.clone(), problem: Some("The destination advanced, but its index or worktree needs attention. Preserve the session evidence and inspect it externally.".into()) } }, None));
+                    }
+                    return Err(refused(
+                        "Fast-forward recovery needs attention. Preserve the session evidence; no reset was attempted.",
+                    ));
+                }
+                let txn = txn.ok_or_else(|| refused("Missing three-way merge index."))?;
                 let ran = txn.start(&shown.source.oid).run(deadline);
                 let deadline = deadline.renewed();
                 if owned(repo, &record, deadline)? {

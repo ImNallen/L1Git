@@ -1,8 +1,8 @@
 use crate::{
     AddRemote, AddRemoteReport, Advance, Applied, Blame, BranchMerged, BranchTip, CommitDetail,
     Comparison, ConflictFile, Coordinator, EntryId, Expect, FastForwardReport, FetchMode,
-    FilePatch, FileRevision, LineStats, MergeAction, MergeReport, MergeReview, MergeState,
-    Operation, PublishChoice, PublishOptions, PushAvailability, PushIntent, PushReport,
+    FilePatch, FileRevision, LineStats, MergeAction, MergeReport, MergeReview, MergeSelection,
+    MergeState, Operation, PublishChoice, PublishOptions, PushAvailability, PushIntent, PushReport,
     RepositoryError, RepositoryOverview, RepositoryRefs, RepositorySnapshot, Side, UndoHistory,
     WorktreePatch, WorktreeStatus,
     file_history::{blame_within, file_history_within},
@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 pub enum Request {
     MergeReview {
         path: String,
+        selection: MergeSelection,
     },
     MergeState {
         path: String,
@@ -150,7 +151,9 @@ pub enum Response {
 pub fn run(coordinator: &Coordinator, request: Request) -> Result<Response, RepositoryError> {
     let deadline = |read| coordinator.deadline(read);
     Ok(match request {
-        Request::MergeReview { path } => Response::MergeReview(coordinator.review_merge(&path)?),
+        Request::MergeReview { path, selection } => {
+            Response::MergeReview(coordinator.review_merge(&path, &selection)?)
+        }
         Request::MergeState { path } => Response::MergeState(coordinator.merge_state(&path)?),
         Request::Merge { path, action } => Response::Merge(coordinator.merge(&path, &action)?),
         Request::Snapshot { path } => {

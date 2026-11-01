@@ -9,15 +9,27 @@ import {
 } from "./repository";
 import type { Operation } from "./repository";
 
+export const mergeSelectionSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("upstream") }),
+  z.strictObject({ kind: z.literal("branch"), reference: refSchema }),
+]);
+const mergeTrackingSchema = z.strictObject({
+  remote: z.string(),
+  merge: z.string(),
+  fetch: z.array(z.string()),
+});
 export const mergeReviewSchema = z.strictObject({
   root: rootSchema,
   destination: branchTipSchema,
   source: z.strictObject({ reference: refSchema, oid: oidSchema }),
-  tracking: z.strictObject({
-    remote: z.string(),
-    merge: z.string(),
-    fetch: z.array(z.string()),
-  }),
+  context: z.discriminatedUnion("kind", [
+    z.strictObject({ kind: z.literal("branch") }),
+    z.strictObject({
+      kind: z.literal("upstream"),
+      tracking: mergeTrackingSchema,
+    }),
+  ]),
+  plan: z.enum(["upToDate", "fastForward", "mergeCommit"]),
 });
 export const mergeSessionSchema = z.strictObject({
   id: entryIdSchema,
@@ -33,7 +45,7 @@ export const mergeStateSchema = z.discriminatedUnion("kind", [
     unresolved: z.array(z.string()),
     staged: stagedStampSchema,
     tree: oidSchema.nullable(),
-    upstreamMoved: z.boolean(),
+    sourceMoved: z.boolean(),
   }),
   z.strictObject({
     kind: z.literal("attention"),
@@ -54,6 +66,12 @@ export const mergeActionSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("abort"), session: entryIdSchema }),
 ]);
 export const mergeOutcomeSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("upToDate") }),
+  z.strictObject({
+    kind: z.literal("fastForwarded"),
+    commit: oidSchema,
+    problem: z.string().nullable(),
+  }),
   z.strictObject({
     kind: z.literal("started"),
     problem: z.string().nullable(),
@@ -70,6 +88,7 @@ export const mergeReportSchema = z.strictObject({
   state: mergeStateSchema,
   outcome: mergeOutcomeSchema,
 });
+export type MergeSelection = z.infer<typeof mergeSelectionSchema>;
 export type MergeReview = z.infer<typeof mergeReviewSchema>;
 export type MergeState = z.infer<typeof mergeStateSchema>;
 export type MergeAction = z.infer<typeof mergeActionSchema>;

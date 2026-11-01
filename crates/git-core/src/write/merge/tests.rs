@@ -67,7 +67,9 @@ impl Fixture {
         git(&self.root, args)
     }
     fn start(&self, coordinator: &Coordinator) -> MergeSession {
-        let review = coordinator.review_merge(self.path()).unwrap();
+        let review = coordinator
+            .review_merge(self.path(), &MergeSelection::Upstream)
+            .unwrap();
         let report = coordinator
             .merge(self.path(), &MergeAction::Start { review })
             .unwrap();
@@ -352,7 +354,7 @@ fn zero_tree_delta_can_finish_and_upstream_movement_does_not_invalidate_it() {
     assert!(matches!(
         coordinator.merge_state(f.path()).unwrap(),
         MergeState::Active {
-            upstream_moved: true,
+            source_moved: true,
             ..
         }
     ));
@@ -372,7 +374,9 @@ fn zero_tree_delta_can_finish_and_upstream_movement_does_not_invalidate_it() {
 fn stale_reviews_dirty_start_hidden_index_and_foreign_operations_refuse() {
     let f = Fixture::new(false);
     let coordinator = f.coordinator();
-    let shown = coordinator.review_merge(f.path()).unwrap();
+    let shown = coordinator
+        .review_merge(f.path(), &MergeSelection::Upstream)
+        .unwrap();
     f.git(&["config", "branch.main.remote", "missing"]);
     assert!(
         coordinator
@@ -736,7 +740,9 @@ fn ignored_or_untracked_collision_never_overwrites_the_file() {
             fs::write(f.root.join(".git/excludes"), format!("{name}\n")).unwrap();
         }
         f.put(name, "precious collision\n");
-        let shown = coordinator.review_merge(f.path()).unwrap();
+        let shown = coordinator
+            .review_merge(f.path(), &MergeSelection::Upstream)
+            .unwrap();
         let error = coordinator
             .merge(f.path(), &MergeAction::Start { review: shown })
             .unwrap_err();
@@ -812,7 +818,9 @@ fn simultaneous_linked_worktree_sessions_have_independent_journals_and_closure()
     f.git(&["worktree", "add", "-b", "linked", path]);
     git(&linked, &["branch", "--set-upstream-to=upstream"]);
     let first = f.start(&coordinator);
-    let review = coordinator.review_merge(path).unwrap();
+    let review = coordinator
+        .review_merge(path, &MergeSelection::Upstream)
+        .unwrap();
     let second = active(
         coordinator
             .merge(path, &MergeAction::Start { review })
@@ -851,7 +859,9 @@ fn simultaneous_linked_worktree_sessions_have_independent_journals_and_closure()
 fn moved_destination_invalidates_start_review_without_writing_merge_metadata() {
     let f = Fixture::new(false);
     let coordinator = f.coordinator();
-    let review = coordinator.review_merge(f.path()).unwrap();
+    let review = coordinator
+        .review_merge(f.path(), &MergeSelection::Upstream)
+        .unwrap();
     f.git(&["commit", "--allow-empty", "-m", "moved"]);
     assert!(
         coordinator
@@ -957,7 +967,9 @@ fn forced_duplicate_checkout_cannot_start_a_second_merge_for_the_same_destinatio
     let linked = f.root.parent().unwrap().join("duplicate-merge");
     let path = linked.to_str().unwrap();
     f.git(&["worktree", "add", "--force", path, "main"]);
-    let review = coordinator.review_merge(path).unwrap();
+    let review = coordinator
+        .review_merge(path, &MergeSelection::Upstream)
+        .unwrap();
     let session = f.start(&coordinator);
 
     let error = coordinator
@@ -1017,7 +1029,9 @@ fn start_never_adopts_an_unrelated_edit_made_during_the_merge() {
         "printf 'independent external edit\\n' > other.txt\n\
          env -u GIT_INDEX_FILE git -c core.hooksPath=/dev/null add other.txt",
     );
-    let review = coordinator.review_merge(f.path()).unwrap();
+    let review = coordinator
+        .review_merge(f.path(), &MergeSelection::Upstream)
+        .unwrap();
     let _ = coordinator.merge(f.path(), &MergeAction::Start { review });
     assert_eq!(
         fs::read_to_string(f.root.join("other.txt")).unwrap(),
@@ -1075,7 +1089,9 @@ fn nondefault_merge_strategy_configuration_refuses_before_mutation() {
         let f = Fixture::new(false);
         let coordinator = f.coordinator();
         f.git(&["config", key, value]);
-        let review = coordinator.review_merge(f.path()).unwrap();
+        let review = coordinator
+            .review_merge(f.path(), &MergeSelection::Upstream)
+            .unwrap();
         let before = review.destination.oid.clone();
         let error = coordinator
             .merge(f.path(), &MergeAction::Start { review })
@@ -1133,4 +1149,483 @@ fn foreign_operation_and_corrupt_session_have_distinct_attention_reasons() {
             .is_err()
     );
     assert!(f.root.join(".git/MERGE_HEAD").exists());
+}
+
+impl Fixture {
+    fn selected(&self, reference: &str) -> MergeReview {
+        self.coordinator()
+            .review_merge(
+                self.path(),
+                &MergeSelection::Branch {
+                    reference: reference.into(),
+                },
+            )
+            .unwrap()
+    }
+    fn behind(&self) {
+        self.git(&["reset", "--hard", "upstream^"]);
+        self.git(&["branch", "--unset-upstream"]);
+    }
+    fn prepare_fast_forward(&self) -> (Repo, Record, WriteDeadline) {
+        self.behind();
+        let review = self.selected("refs/heads/upstream");
+        let deadline = self.coordinator().write_deadline(LocalWrite::MergeStart);
+        let repo = Repo::open(self.path(), deadline.reads()).unwrap();
+        for dir in [repo.git_dir.join("l1git"), base(&repo)] {
+            checked_dir(&dir).unwrap();
+        }
+        let id = EntryId::after(None);
+        checked_dir(&directory(&repo, id)).unwrap();
+        let record = Record {
+            version: 2,
+            identity: Identity::of(&repo.git_dir).unwrap(),
+            session: MergeSession {
+                id,
+                review,
+                footprint: vec![],
+                suggested_message: "Fast-forward".into(),
+            },
+            phase: SessionPhase::FastForwarding,
+        };
+        record
+            .keep(
+                &repo,
+                deadline,
+                vec![
+                    record.session.review.destination.oid.clone(),
+                    record.session.review.source.oid.clone(),
+                ],
+            )
+            .unwrap();
+        record.save(&repo).unwrap();
+        persist(&base(&repo).join("current.json"), &id).unwrap();
+        (repo, record, deadline)
+    }
+}
+
+#[test]
+fn explicit_local_and_remote_sources_without_tracking_finish_or_abort() {
+    for remote in [false, true] {
+        for conflict in [false, true] {
+            let f = Fixture::new(conflict);
+            f.git(&["branch", "--unset-upstream"]);
+            let reference = if remote {
+                "refs/remotes/origin/topic"
+            } else {
+                "refs/heads/upstream"
+            };
+            if remote {
+                f.git(&["update-ref", reference, "upstream"]);
+            }
+            let review = f.selected(reference);
+            assert_eq!(review.context, MergeContext::Branch);
+            assert_eq!(review.plan, MergePlan::MergeCommit);
+            let coordinator = f.coordinator();
+            let report = coordinator
+                .merge(f.path(), &MergeAction::Start { review })
+                .unwrap();
+            let session = active(report.state);
+            f.git(&[
+                "update-ref",
+                reference,
+                session.review.destination.oid.as_str(),
+            ]);
+            assert!(matches!(
+                coordinator.merge_state(f.path()).unwrap(),
+                MergeState::Active {
+                    source_moved: true,
+                    ..
+                }
+            ));
+            if conflict {
+                f.put("conflict.txt", "resolution\n");
+                f.stage(&coordinator, "conflict.txt");
+            }
+            let landed = f.finish(&coordinator);
+            assert!(matches!(landed.outcome, MergeOutcome::Finished { .. }));
+            assert_eq!(
+                f.git(&["rev-parse", "HEAD^2"]),
+                session.review.source.oid.as_str()
+            );
+        }
+        let f = Fixture::new(true);
+        f.git(&["branch", "--unset-upstream"]);
+        let session = active(
+            f.coordinator()
+                .merge(
+                    f.path(),
+                    &MergeAction::Start {
+                        review: f.selected("refs/heads/upstream"),
+                    },
+                )
+                .unwrap()
+                .state,
+        );
+        f.coordinator()
+            .merge(
+                f.path(),
+                &MergeAction::Abort {
+                    session: session.id,
+                },
+            )
+            .unwrap();
+        assert_eq!(f.git(&["status", "--porcelain"]), "");
+    }
+}
+
+#[test]
+fn equal_contained_and_fast_forward_are_terminal_and_move_only_destination() {
+    let f = Fixture::new(false);
+    f.behind();
+    for reference in ["refs/heads/main", "refs/heads/base"] {
+        if reference.ends_with("base") {
+            f.git(&["branch", "base", "HEAD"]);
+        }
+        let review = f.selected(reference);
+        assert_eq!(review.plan, MergePlan::UpToDate);
+        let report = f
+            .coordinator()
+            .merge(f.path(), &MergeAction::Start { review })
+            .unwrap();
+        assert_eq!(report.outcome, MergeOutcome::UpToDate);
+        assert_eq!(report.state, MergeState::Idle);
+    }
+    f.git(&["update-ref", "refs/remotes/origin/topic", "upstream"]);
+    let review = f.selected("refs/remotes/origin/topic");
+    assert_eq!(review.plan, MergePlan::FastForward);
+    let source = review.source.oid.clone();
+    let report = f
+        .coordinator()
+        .merge(f.path(), &MergeAction::Start { review })
+        .unwrap();
+    assert_eq!(report.state, MergeState::Idle);
+    assert_eq!(
+        report.outcome,
+        MergeOutcome::FastForwarded {
+            commit: source.clone(),
+            problem: None
+        }
+    );
+    assert_eq!(f.git(&["rev-parse", "HEAD"]), source.as_str());
+    assert_eq!(
+        f.git(&["rev-parse", "refs/remotes/origin/topic"]),
+        source.as_str()
+    );
+    assert_eq!(f.git(&["status", "--porcelain"]), "");
+    assert!(!f.root.join(".git/MERGE_HEAD").exists());
+    assert_eq!(f.selected("refs/heads/base").plan, MergePlan::UpToDate);
+}
+
+#[test]
+fn selection_rejects_aliases_expressions_tags_missing_and_unrelated_histories() {
+    let f = Fixture::new(false);
+    f.git(&["update-ref", "refs/remotes/origin/topic", "upstream"]);
+    f.git(&[
+        "symbolic-ref",
+        "refs/remotes/origin/HEAD",
+        "refs/remotes/origin/topic",
+    ]);
+    f.git(&["tag", "-a", "tagged", "upstream", "-m", "tagged"]);
+    f.git(&[
+        "update-ref",
+        "refs/remotes/origin/tag-object",
+        "refs/tags/tagged",
+    ]);
+    for reference in [
+        "upstream",
+        "refs/heads/upstream^",
+        "refs/heads/*",
+        "refs/heads/missing",
+        "refs/remotes/origin/HEAD",
+        "refs/tags/tagged",
+        "refs/remotes/origin/tag-object",
+    ] {
+        assert!(
+            f.coordinator()
+                .review_merge(
+                    f.path(),
+                    &MergeSelection::Branch {
+                        reference: reference.into()
+                    }
+                )
+                .is_err(),
+            "{reference}"
+        );
+    }
+    let unrelated = f.git(&[
+        "commit-tree",
+        &f.git(&["rev-parse", "upstream^{tree}"]),
+        "-m",
+        "unrelated",
+    ]);
+    f.git(&["update-ref", "refs/heads/unrelated", &unrelated]);
+    assert!(
+        f.coordinator()
+            .review_merge(
+                f.path(),
+                &MergeSelection::Branch {
+                    reference: "refs/heads/unrelated".into()
+                }
+            )
+            .unwrap_err()
+            .message
+            .contains("unrelated histories")
+    );
+}
+
+#[test]
+fn selected_review_rechecks_source_destination_context_and_plan() {
+    for change in ["source", "destination", "context", "plan"] {
+        let f = Fixture::new(false);
+        let mut review = f.selected("refs/heads/upstream");
+        match change {
+            "source" => {
+                f.git(&["update-ref", "refs/heads/upstream", "HEAD"]);
+            }
+            "destination" => {
+                f.git(&["commit", "--allow-empty", "-m", "moved"]);
+            }
+            "context" => {
+                review.context = MergeContext::Upstream {
+                    tracking: MergeTracking {
+                        remote: "wrong".into(),
+                        merge: "refs/heads/wrong".into(),
+                        fetch: vec![],
+                    },
+                };
+            }
+            "plan" => {
+                review.plan = MergePlan::FastForward;
+            }
+            _ => unreachable!(),
+        }
+        assert!(
+            f.coordinator()
+                .merge(f.path(), &MergeAction::Start { review })
+                .is_err(),
+            "{change}"
+        );
+        assert!(!f.root.join(".git/MERGE_HEAD").exists());
+    }
+}
+
+#[test]
+fn fast_forward_refuses_dirty_and_ignored_or_untracked_collisions() {
+    for obstacle in ["dirty", "staged", "untracked", "ignored", "case-alias"] {
+        let f = Fixture::new(false);
+        f.behind();
+        let review = f.selected("refs/heads/upstream");
+        let name = if obstacle == "case-alias" {
+            "INCOMING.txt"
+        } else if matches!(obstacle, "dirty" | "staged") {
+            "other.txt"
+        } else {
+            "incoming.txt"
+        };
+        if obstacle == "ignored" {
+            f.git(&["config", "core.excludesFile", ".git/excludes"]);
+            fs::write(f.root.join(".git/excludes"), "incoming.txt\n").unwrap();
+        }
+        f.put(name, "preserve\n");
+        if obstacle == "staged" {
+            f.git(&["add", name]);
+        }
+        let before = f.git(&["rev-parse", "HEAD"]);
+        assert!(
+            f.coordinator()
+                .merge(f.path(), &MergeAction::Start { review })
+                .is_err(),
+            "{obstacle}"
+        );
+        assert_eq!(f.git(&["rev-parse", "HEAD"]), before);
+        assert_eq!(fs::read_to_string(f.root.join(name)).unwrap(), "preserve\n");
+    }
+}
+
+#[test]
+fn fast_forward_restart_before_and_after_publication_and_ambiguous_state() {
+    for point in ["before", "after", "ambiguous", "different-branch", "marker"] {
+        let f = Fixture::new(false);
+        let (repo, record, _) = f.prepare_fast_forward();
+        if point != "before" {
+            f.git(&[
+                "merge",
+                "--ff-only",
+                record.session.review.source.oid.as_str(),
+            ]);
+        }
+        if point == "ambiguous" {
+            f.put("incoming.txt", "external edit\n");
+        }
+        if point == "different-branch" {
+            f.git(&["switch", "-c", "different"]);
+        }
+        if point == "marker" {
+            fs::write(
+                repo.git_dir.join("MERGE_AUTOSTASH"),
+                record.session.review.destination.oid.as_str(),
+            )
+            .unwrap();
+        }
+        let state = f.coordinator().merge_state(f.path()).unwrap();
+        let recovered = load(&repo).unwrap().unwrap();
+        if matches!(point, "before" | "after") {
+            assert_eq!(state, MergeState::Idle);
+            assert!(matches!(recovered.phase, SessionPhase::Closed { .. }));
+            let report = f
+                .coordinator()
+                .merge(
+                    f.path(),
+                    &MergeAction::Abort {
+                        session: record.session.id,
+                    },
+                )
+                .unwrap();
+            assert!(if point == "after" {
+                matches!(report.outcome, MergeOutcome::FastForwarded { .. })
+            } else {
+                matches!(report.outcome, MergeOutcome::NotStarted { .. })
+            });
+        } else {
+            assert!(matches!(state, MergeState::Attention { .. }), "{point}");
+            assert!(matches!(recovered.phase, SessionPhase::FastForwarding));
+            assert!(
+                f.coordinator()
+                    .merge(
+                        f.path(),
+                        &MergeAction::Abort {
+                            session: record.session.id
+                        }
+                    )
+                    .is_err()
+            );
+        }
+    }
+}
+
+#[test]
+fn legacy_active_session_decodes_pins_without_resolving_tracking_and_writes_v2() {
+    let f = Fixture::new(true);
+    let session = f.start(&f.coordinator());
+    let (repo, record, _) = f.record();
+    let path = directory(&repo, session.id).join("state.json");
+    let mut value = serde_json::to_value(record).unwrap();
+    value["version"] = 1.into();
+    let review = value["session"]["review"].as_object_mut().unwrap();
+    let tracking = review.remove("context").unwrap()["tracking"].clone();
+    review.remove("plan");
+    review.insert("tracking".into(), tracking);
+    fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+    f.git(&["branch", "--unset-upstream"]);
+    f.git(&[
+        "update-ref",
+        "refs/heads/upstream",
+        session.review.destination.oid.as_str(),
+    ]);
+    let state = f.coordinator().merge_state(f.path()).unwrap();
+    assert_eq!(active(state).review, session.review);
+    f.coordinator()
+        .merge(
+            f.path(),
+            &MergeAction::Abort {
+                session: session.id,
+            },
+        )
+        .unwrap();
+    let written: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    assert_eq!(written["version"], 2);
+    value["version"] = 999.into();
+    fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+    assert!(matches!(
+        f.coordinator().merge_state(f.path()).unwrap(),
+        MergeState::Attention {
+            reason: MergeAttention::RecoveryRequired,
+            ..
+        }
+    ));
+    assert_eq!(
+        fs::read(&path).unwrap(),
+        serde_json::to_vec(&value).unwrap()
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn fast_forward_reports_advancement_when_post_merge_hook_fails() {
+    let f = Fixture::new(false);
+    f.behind();
+    f.hook("post-merge", "echo failed >&2; exit 1");
+    let review = f.selected("refs/heads/upstream");
+    let target = review.source.oid.clone();
+    let report = f
+        .coordinator()
+        .merge(f.path(), &MergeAction::Start { review })
+        .unwrap();
+    assert!(matches!(
+        report.outcome,
+        MergeOutcome::FastForwarded {
+            problem: Some(_),
+            ..
+        }
+    ));
+    assert_eq!(f.git(&["rev-parse", "HEAD"]), target.as_str());
+    assert_eq!(report.state, MergeState::Idle);
+}
+
+#[cfg(unix)]
+#[test]
+fn fast_forward_timeout_after_publication_reports_confirmed_advancement() {
+    let f = Fixture::new(false);
+    f.behind();
+    f.hook("post-merge", "sleep 20");
+    let review = f.selected("refs/heads/upstream");
+    let target = review.source.oid.clone();
+    let coordinator = f
+        .coordinator()
+        .cap_writes(std::time::Duration::from_secs(3));
+    let report = coordinator
+        .merge(f.path(), &MergeAction::Start { review })
+        .unwrap();
+    assert!(matches!(
+        report.outcome,
+        MergeOutcome::FastForwarded {
+            problem: Some(_),
+            ..
+        }
+    ));
+    assert_eq!(f.git(&["rev-parse", "HEAD"]), target.as_str());
+    assert_eq!(coordinator.merge_state(f.path()).unwrap(), MergeState::Idle);
+}
+
+#[test]
+fn record_decoder_rejects_unknown_fields_and_mismatched_versions_without_rewriting() {
+    let f = Fixture::new(false);
+    let session = f.start(&f.coordinator());
+    let (repo, record, _) = f.record();
+    let path = directory(&repo, session.id).join("state.json");
+    for change in ["extra", "root", "id", "legacy-with-new-review", "future"] {
+        let mut value = serde_json::to_value(&record).unwrap();
+        match change {
+            "extra" => value["session"]["review"]["extra"] = true.into(),
+            "root" => value["session"]["review"]["root"] = "/different".into(),
+            "id" => value["session"]["id"] = EntryId::after(Some(session.id)).to_string().into(),
+            "legacy-with-new-review" => value["version"] = 1.into(),
+            "phase" => value["phase"] = serde_json::json!({"kind":"fastForwarding"}),
+            "future" => value["version"] = 3.into(),
+            _ => unreachable!(),
+        }
+        let bytes = serde_json::to_vec(&value).unwrap();
+        fs::write(&path, &bytes).unwrap();
+        assert!(
+            matches!(
+                f.coordinator().merge_state(f.path()).unwrap(),
+                MergeState::Attention {
+                    reason: MergeAttention::RecoveryRequired,
+                    ..
+                }
+            ),
+            "{change}"
+        );
+        assert_eq!(fs::read(&path).unwrap(), bytes);
+    }
 }

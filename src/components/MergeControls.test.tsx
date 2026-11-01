@@ -18,10 +18,14 @@ const review = mergeReviewSchema.parse({
   root: "/fixture/merge",
   destination: { reference: "refs/heads/main", oid: "a".repeat(40) },
   source: { reference: "refs/remotes/origin/main", oid: "b".repeat(40) },
-  tracking: {
-    remote: "origin",
-    merge: "refs/heads/main",
-    fetch: ["+refs/heads/*:refs/remotes/origin/*"],
+  plan: "mergeCommit",
+  context: {
+    kind: "upstream",
+    tracking: {
+      remote: "origin",
+      merge: "refs/heads/main",
+      fetch: ["+refs/heads/*:refs/remotes/origin/*"],
+    },
   },
 });
 const active = mergeStateSchema.parse({
@@ -35,7 +39,7 @@ const active = mergeStateSchema.parse({
   unresolved: [],
   staged: "c".repeat(40),
   tree: "d".repeat(40),
-  upstreamMoved: true,
+  sourceMoved: true,
 });
 const run = vi.fn<Parameters<typeof MergeControls>[0]["run"]>();
 const refresh = vi.fn();
@@ -48,7 +52,7 @@ const props: Parameters<typeof MergeControls>[0] = {
   refresh,
   eligible: false,
   busy: false,
-  reviewOpen: false,
+  review: null,
   onReview: () => {},
   onCloseReview: close,
   run,
@@ -89,11 +93,11 @@ it("keeps the ordinary history free of an idle or loading merge panel", async ()
       />,
     ),
   );
-  expect(host.querySelector('[aria-label="Upstream merge"]')).toBeNull();
+  expect(host.querySelector('[aria-label="Branch merge"]')).toBeNull();
   await act(async () =>
     root.render(<MergeControls {...props} read={{ kind: "loading" }} />),
   );
-  expect(host.querySelector('[aria-label="Upstream merge"]')).toBeNull();
+  expect(host.querySelector('[aria-label="Branch merge"]')).toBeNull();
 });
 it("offers a relevant merge action without the generic worktree and refresh toolbar", async () => {
   const onReview = vi.fn();
@@ -142,7 +146,7 @@ it("keeps an amend's saved message protected before Start", async () => {
     root.render(
       <MergeControls
         {...props}
-        reviewOpen
+        review={{ kind: "upstream" }}
         read={{ kind: "ready", value: { kind: "idle" } }}
       />,
     ),
@@ -156,7 +160,7 @@ it("reviews exact refs and OIDs and starts only after explicit Start", async () 
     root.render(
       <MergeControls
         {...props}
-        reviewOpen
+        review={{ kind: "upstream" }}
         read={{ kind: "ready", value: { kind: "idle" } }}
         eligible
       />,
@@ -172,7 +176,7 @@ it("reviews exact refs and OIDs and starts only after explicit Start", async () 
 it("requires a message, permits an empty-tree merge, and binds the reviewed staged result", async () => {
   await act(async () => root.render(<MergeControls {...props} />));
   expect(button("Finish merge").disabled).toBe(true);
-  expect(host.textContent).toContain("upstream has moved");
+  expect(host.textContent).toContain("source branch has moved");
   await act(async () => button("Use suggested message").click());
   expect(button("Finish merge").disabled).toBe(false);
   await act(async () => button("Finish merge").click());
@@ -243,3 +247,50 @@ it("keeps a readable failure and refreshes state after a rejected Finish", async
   );
   expect(refresh).toHaveBeenCalled();
 });
+
+it.each(["fastForward", "upToDate"] as const)(
+  "explains the %s plan and keeps terminal outcomes out of the active panel",
+  async (plan) => {
+    const shown = { ...review, context: { kind: "branch" as const }, plan };
+    vi.mocked(repositories.mergeReview).mockResolvedValue(shown);
+    run.mockResolvedValue({
+      kind: "merged",
+      report: {
+        state: { kind: "idle" },
+        outcome: {
+          kind: "fastForwarded",
+          commit: shown.source.oid,
+          problem: null,
+        },
+      },
+    });
+    await act(async () =>
+      root.render(
+        <MergeControls
+          {...props}
+          review={{ kind: "branch", reference: shown.source.reference }}
+          read={{ kind: "ready", value: { kind: "idle" } }}
+        />,
+      ),
+    );
+    expect(vi.mocked(repositories.mergeReview)).toHaveBeenCalledWith(
+      shown.root,
+      { kind: "branch", reference: shown.source.reference },
+    );
+    expect(host.textContent).toContain(shown.source.oid);
+    expect(host.textContent).toContain(shown.destination.oid);
+    expect(host.textContent).not.toContain("Finish merge");
+    expect(host.textContent).not.toContain("Abort merge…");
+    if (plan === "upToDate") {
+      expect(host.textContent).toContain("No write is needed");
+      expect(button("Start merge").disabled).toBe(true);
+      expect(run).not.toHaveBeenCalled();
+    } else {
+      expect(host.textContent).toContain("without creating a merge commit");
+      await act(async () => button("Fast-forward").click());
+      expect(run).toHaveBeenCalledWith({ kind: "start", review: shown });
+      expect(close).toHaveBeenCalled();
+      expect(host.textContent).toContain("Fast-forwarded to");
+    }
+  },
+);
