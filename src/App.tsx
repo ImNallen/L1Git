@@ -138,6 +138,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     focus,
   });
   const merge = useMergePanel({
+    selectedBranch: nav.jump.ruledBranch,
     snapshot: view.snapshot,
     active,
     opened,
@@ -201,7 +202,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
         activePath={view.activePath}
         sync={overview.view.syncByRoot}
         navigation={nav.sidebar}
-        refActions={refWrites.sidebarActions}
+        refActions={{ ...refWrites.sidebarActions, merge: merge.sidebar }}
         updates={updates}
         restart={restart}
       />

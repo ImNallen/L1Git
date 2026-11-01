@@ -7,6 +7,7 @@ import type {
   UndoHistory,
   WorktreeStatus,
 } from "../domain/repository";
+import { mergeSelectionSchema } from "../domain/merge";
 import type { MergeState } from "../domain/merge";
 import type { RepositoryOverview } from "../domain/overview";
 import type { PushAvailability } from "../domain/push";
@@ -150,7 +151,17 @@ const handlers: Record<string, Handler> = {
   overview: (request, world) => known(world.overviews, request.path),
   preparePush: (request, world) => known(world.pushes, request.path),
   commitDetail,
-  mergeReview: (request) => mergeReviewFor(request.path as RepositoryRoot),
+  mergeReview: (request) => {
+    const review = mergeReviewFor(request.path as RepositoryRoot);
+    const selection = mergeSelectionSchema.parse(request.selection);
+    return selection.kind === "upstream"
+      ? review
+      : {
+          ...review,
+          source: { ...review.source, reference: selection.reference },
+          context: { kind: "branch" },
+        };
+  },
   conflictFile: (request) =>
     editableConflict(request.path, String(request.file)),
   lineStats: () => [],

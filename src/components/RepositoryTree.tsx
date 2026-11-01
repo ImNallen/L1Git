@@ -73,7 +73,7 @@ export function RepositoryTree({
     onRemove,
     onAdd,
   } = navigation;
-  const { writable, onBranchAsk, onTagAsk, onStashAction, onCheckout } =
+  const { merge, writable, onBranchAsk, onTagAsk, onStashAction, onCheckout } =
     refActions;
   const [query, setQuery] = useState("");
   const tree = useRef<HTMLElement>(null);
@@ -276,6 +276,15 @@ export function RepositoryTree({
           () => onCheckout(branch),
           elsewhere ?? checkedOut,
         )}
+        {merge?.root === root &&
+          write(
+            GitBranchPlus,
+            "Merge into current branch…",
+            () => merge.onSelect(branch),
+            merge.disabled
+              ? "Select an attached working copy with no active operation and wait for pending work to finish."
+              : null,
+          )}
         {write(GitBranchPlus, "New branch…", asking(asks.create), elsewhere)}
         {write(PencilLine, "Rename…", asking(asks.rename), elsewhere)}
         {write(

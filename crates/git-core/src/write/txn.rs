@@ -406,7 +406,11 @@ impl<'r> MergeTxn<'r> {
         Outside::begin(repo, deadline).map(Self)
     }
 
-    pub(super) const fn runner(&self) -> &Outside<'r> {
+    pub(super) fn fast_forward<'a>(&'a self, source: &'a crate::Oid) -> Write<'a> {
+        Write::fast_forward(self, source)
+    }
+
+    pub(crate) const fn runner(&self) -> &Outside<'r> {
         &self.0
     }
 }

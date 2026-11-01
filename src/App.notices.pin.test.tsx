@@ -297,7 +297,7 @@ it("notices keep their order above the panes", async () => {
   ].map((row) => row.getAttribute("aria-label") ?? row.textContent);
   expect(rows).toMatchInlineSnapshot(`
     [
-      "Upstream merge",
+      "Branch merge",
       "Unsaved conflict results",
       "Hidden and soloed branches changed for this session. Could not save them.",
       "Reading this repository took too long. The last successful view is retained.Try again",

@@ -32,6 +32,7 @@ const repositoryScreen: ActionContext = {
   writing: false,
   merging: false,
   mergeAvailable: false,
+  selectedMergeAvailable: false,
   typing: false,
 };
 
@@ -45,6 +46,7 @@ function commands(): Commands {
     fetch: vi.fn(),
     fastForward: vi.fn(),
     mergeUpstream: vi.fn(),
+    mergeBranch: vi.fn(),
     push: vi.fn(),
     search: vi.fn(),
     closeFile: vi.fn(),

@@ -1,3 +1,4 @@
+import type { MergeSelection } from "./domain/merge";
 import {
   mergeReviewSchema,
   mergeStateSchema,
@@ -51,7 +52,7 @@ export const mac = navigator.userAgent.includes("Mac");
 export const macNative = native && mac;
 
 type RepositoryRequest =
-  | { op: "mergeReview"; path: RepositoryRoot }
+  | { op: "mergeReview"; path: RepositoryRoot; selection: MergeSelection }
   | { op: "mergeState"; path: RepositoryRoot }
   | { op: "merge"; path: RepositoryRoot; action: MergeAction }
   | { op: "snapshot"; path: string }
@@ -301,8 +302,11 @@ export async function preparePublish(
   return (await run({ op: "preparePublish", path, choice })).data;
 }
 
-export async function mergeReview(path: RepositoryRoot) {
-  return (await run({ op: "mergeReview", path })).data;
+export async function mergeReview(
+  path: RepositoryRoot,
+  selection: MergeSelection,
+) {
+  return (await run({ op: "mergeReview", path, selection })).data;
 }
 export async function mergeState(path: RepositoryRoot) {
   return (await run({ op: "mergeState", path })).data;

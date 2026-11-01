@@ -232,10 +232,14 @@ export function activeMerge(
         root,
         destination: { reference: "refs/heads/feature", oid: C5 },
         source: { reference: "refs/remotes/origin/feature", oid: C6 },
-        tracking: {
-          remote: "origin",
-          merge: "refs/heads/feature",
-          fetch: ["+refs/heads/*:refs/remotes/origin/*"],
+        plan: "mergeCommit",
+        context: {
+          kind: "upstream",
+          tracking: {
+            remote: "origin",
+            merge: "refs/heads/feature",
+            fetch: ["+refs/heads/*:refs/remotes/origin/*"],
+          },
         },
       },
       footprint,
@@ -244,7 +248,7 @@ export function activeMerge(
     unresolved: [],
     staged: STAMP,
     tree: null,
-    upstreamMoved: false,
+    sourceMoved: false,
   });
 }
 
@@ -335,10 +339,14 @@ export function mergeReviewFor(root: RepositoryRoot): MergeReview {
       oid: root === PIN_FEATURE ? C5 : C4,
     },
     source: { reference: `refs/remotes/origin/${branch}`, oid: C3 },
-    tracking: {
-      remote: "origin",
-      merge: `refs/heads/${branch}`,
-      fetch: ["+refs/heads/*:refs/remotes/origin/*"],
+    plan: "mergeCommit",
+    context: {
+      kind: "upstream",
+      tracking: {
+        remote: "origin",
+        merge: `refs/heads/${branch}`,
+        fetch: ["+refs/heads/*:refs/remotes/origin/*"],
+      },
     },
   });
 }

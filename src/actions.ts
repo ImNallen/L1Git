@@ -41,6 +41,7 @@ export type ActionContext = {
   writing: boolean;
   merging: boolean;
   mergeAvailable: boolean;
+  selectedMergeAvailable: boolean;
   typing: boolean;
 };
 
@@ -53,6 +54,7 @@ export type Commands = {
   fetch: () => void;
   fastForward: () => void;
   mergeUpstream: () => void;
+  mergeBranch: () => void;
   push: () => void;
   search: () => void;
   closeFile: () => void;
@@ -105,6 +107,7 @@ export type ActionId =
   | "redo"
   | "fetch"
   | "mergeUpstream"
+  | "mergeBranch"
   | "fastForward"
   | "push"
   | "search"
@@ -267,6 +270,16 @@ export const actions: readonly Action[] = [
       context.repository !== null &&
       !context.repository.fetching,
     run: (commands) => commands.fetch(),
+  },
+  {
+    id: "mergeBranch",
+    title: "Merge selected branch into current branch…",
+    available: (context) =>
+      onRepository(context) &&
+      context.selectedMergeAvailable &&
+      !context.writing &&
+      !context.merging,
+    run: (commands) => commands.mergeBranch(),
   },
   {
     id: "mergeUpstream",
