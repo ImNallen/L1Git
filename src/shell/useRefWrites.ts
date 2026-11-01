@@ -40,6 +40,11 @@ export type CommitActions = {
 
 /** RepositoryTree's write actions. */
 export type SidebarRefActions = {
+  merge?: {
+    root: RepositoryRoot;
+    disabled: boolean;
+    onSelect: (branch: Branch) => void;
+  };
   writable: {
     root: RepositoryRoot;
     checkedOutIn: ReadonlyMap<FullRef, string>;

@@ -1,10 +1,18 @@
-# Merge the current branch's upstream
+# Merge into the current branch
 
 ## Prepare
 
 Run `pnpm fixture:merge` and save the printed JSON. Every run creates new disposable repositories and bare remotes. `clean.path` and `conflict.path` each have a checked-out `main` diverged from `origin/main`. Each also has a `linked` worktree on a diverged tracking branch. The fixture prints the reviewed destination and source commit IDs and creates unrelated `notes.txt` and ignored `ignored.txt` files. Use a fresh undo directory for the app. Do not reuse the user's repository for fault injection.
 
 Keep raw evidence from `git -C <path> status --porcelain`, `git -C <path> ls-files --stage`, and `git -C <path> rev-parse HEAD`. Resolve the worktree Git directory with `git -C <path> rev-parse --absolute-git-dir`; linked worktrees do not keep merge markers inside their `.git` file. Record screenshots from the browser and native app for the review, active panel, conflict editor, and refusal state.
+
+## Select a source and review the plan
+
+1. In a disposable fixture, run `git branch --unset-upstream` on the destination and create `refs/heads/selected` at the printed source. Right-click **selected** and choose **Merge into current branch…**. Confirm both full refs and IDs. Opening this menu must not check out the source or switch the active worktree. Cancel without changing HEAD or the index.
+2. Select a linked worktree's uncommitted row, then select the source branch. Choose **Merge selected branch into current branch…** in the palette. Confirm the destination is still the linked worktree's branch. Repeat with `origin/main` as the source. Repositories that are not open must not offer the menu action. Busy, unattached, and active-operation destinations must disable it.
+3. On a fresh fixture, create a source at HEAD and another at HEAD's parent. Each review must explain **Up to date** and disable Start. Create a source one commit ahead, review the **Fast-forward** plan, and click **Fast-forward**. Confirm only the destination ref advances to the reviewed source, status is clean, and no Finish/Abort panel appears.
+4. Hold a review request with the network debugger and switch repositories or active worktrees. Release the request. The review must stay closed and must not request a review for the new destination. Automated App tests exercise this delayed-response journey.
+5. Try an ignored or untracked collision and a dirty tracked baseline before fast-forward. Start must refuse and preserve bytes. The real-Git tests exercise interrupted FastForwarding records immediately before and after Git publishes, ambiguous dirty/branch/marker states, and a failing post-merge hook. Ambiguity must preserve evidence and require attention. Active V1 sessions must reopen with their original pinned refs without resolving current tracking configuration, then write V2 on the next lifecycle action. Unknown versions must require attention.
 
 ## Review and finish a clean merge
 
@@ -19,7 +27,7 @@ Keep raw evidence from `git -C <path> status --porcelain`, `git -C <path> ls-fil
 1. Add `conflict.path`, review, and Start. Open `conflict.txt`. Confirm the persistent panel reports one unresolved path. Use the [existing text conflict editor](changes.md#resolve-a-stash-text-conflict) to inspect Base/Current/Incoming, use Pierre choices, then edit Result.
 2. Click **Save result**. Verify saved bytes while `git ls-files -u` still contains the three stages. Click **Mark resolved** separately. Undo once restores the stages and keeps the saved bytes. Undo again restores the original marker-bearing bytes. Redo twice restores both operations in order. Ordinary Commit and Amend remain unavailable.
 3. Restart the bridge or native app with the same undo directory. Reopen this worktree. Confirm the session's exact IDs and resolution Undo history survive. The app must not run another merge. Existing unsaved editor/message drafts follow the normal draft-protection rules; process restart does not promise to persist unsaved text.
-4. Advance `origin/main` through an explicit fetch: run `git --git-dir=<remote> update-ref refs/heads/main <original-source>^` against the fixture's bare remote, then click Fetch. This is a disposable remote rewrite used only by the fixture. Confirm the panel says the upstream moved, but still shows the original pinned source. Finish must remain available after resolving and staging. Verify the final second parent is that original source, not the fetched replacement.
+4. Advance `origin/main` through an explicit fetch: run `git --git-dir=<remote> update-ref refs/heads/main <original-source>^` against the fixture's bare remote, then click Fetch. This is a disposable remote rewrite used only by the fixture. Confirm the panel says the source branch moved, but still shows the original pinned source. Finish must remain available after resolving and staging. Verify the final second parent is that original source, not the fetched replacement.
 5. On a fresh fixture, resolve and Save, then type more unsaved Result text. Finish must be disabled. Open **Abort merge…** and cancel; all text must remain. Open again and confirm **Discard merge and abort**. Confirm it describes saved resolutions and the listed unsaved drafts. Abort restores the original HEAD and clean tracked state, clears only unchanged consented resolution drafts, retains the commit-message draft, and preserves unrelated untracked/ignored files. Resolution history is no longer replayable; earlier ordinary history is available again.
 
 ## Refusals and linked worktrees

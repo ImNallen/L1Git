@@ -267,7 +267,11 @@ it("blocks Save and Mark outside a managed merge's footprint without losing draf
         root: snapshot.root,
         destination: { reference: "refs/heads/main", oid: "a".repeat(40) },
         source: { reference: "refs/remotes/origin/main", oid: "b".repeat(40) },
-        tracking: { remote: "origin", merge: "refs/heads/main", fetch: [] },
+        plan: "mergeCommit",
+        context: {
+          kind: "upstream",
+          tracking: { remote: "origin", merge: "refs/heads/main", fetch: [] },
+        },
       },
       footprint: ["another.txt"],
       suggestedMessage: "Merge upstream",
@@ -275,7 +279,7 @@ it("blocks Save and Mark outside a managed merge's footprint without losing draf
     unresolved: [snapshot.path],
     staged: "c".repeat(40),
     tree: null,
-    upstreamMoved: false,
+    sourceMoved: false,
   });
   vi.mocked(repositories.mergeState).mockResolvedValue(state);
   await render(1);

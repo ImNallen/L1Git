@@ -3063,7 +3063,9 @@ describe("managed upstream merge", () => {
     git("commit", "-am", "destination");
     git("branch", "--set-upstream-to=source");
     const review = answer("mergeReview", mergeReviewSchema).parse(
-      await (await post({ op: "mergeReview", path })).json(),
+      await (
+        await post({ op: "mergeReview", path, selection: { kind: "upstream" } })
+      ).json(),
     ).data;
     expect(
       (
@@ -3162,6 +3164,49 @@ describe("managed upstream merge", () => {
         ok: false,
         error: { kind: "staleView" },
       });
+      git("branch", "--unset-upstream");
+      const contained = answer("mergeReview", mergeReviewSchema).parse(
+        await request("mergeReview", {
+          selection: { kind: "branch", reference: "refs/heads/source" },
+        }),
+      ).data;
+      expect(contained.context).toEqual({ kind: "branch" });
+      expect(contained.plan).toBe("upToDate");
+      const unchanged = answer("merge", mergeReportSchema).parse(
+        await request("merge", {
+          action: { kind: "start", review: contained },
+        }),
+      ).data;
+      expect(unchanged).toEqual({
+        state: { kind: "idle" },
+        outcome: { kind: "upToDate" },
+      });
+      const next = git(
+        "commit-tree",
+        git("rev-parse", "HEAD^{tree}"),
+        "-p",
+        "HEAD",
+        "-m",
+        "Next source",
+      );
+      git("update-ref", "refs/remotes/origin/next", next);
+      const forward = answer("mergeReview", mergeReviewSchema).parse(
+        await request("mergeReview", {
+          selection: { kind: "branch", reference: "refs/remotes/origin/next" },
+        }),
+      ).data;
+      expect(forward.plan).toBe("fastForward");
+      const advanced = answer("merge", mergeReportSchema).parse(
+        await request("merge", {
+          action: { kind: "start", review: forward },
+        }),
+      ).data;
+      expect(advanced).toEqual({
+        state: { kind: "idle" },
+        outcome: { kind: "fastForwarded", commit: next, problem: null },
+      });
+      expect(git("rev-parse", "HEAD")).toBe(next);
+      expect(git("status", "--porcelain")).toBe("");
     } finally {
       fresh.bridge.kill();
       await once(fresh.bridge, "exit");

@@ -236,3 +236,42 @@ it("keeps merge in the shared write task through landed-error refreshes and excl
   expect(reread.worktree).toHaveBeenCalledWith(status.root);
   expect(draftImpact().tasks).toBe(0);
 });
+
+it("retains confirmed fast-forward advancement when the graph refresh rejects", async () => {
+  const { mergeReportSchema } = await import("./domain/merge");
+  const report = mergeReportSchema.parse({
+    state: { kind: "idle" },
+    outcome: { kind: "fastForwarded", commit: "b".repeat(40), problem: null },
+  });
+  vi.mocked(repositories.merge).mockResolvedValueOnce(report);
+  reread.refs.mockRejectedValueOnce(new Error("offline during refresh"));
+  const result = vi.fn();
+  function MergeView() {
+    const writes = useWrites(status.root, reread);
+    return (
+      <button
+        onClick={() =>
+          void writes
+            .merge(status.root, { kind: "abort", session: applied.id })
+            .then(result)
+        }
+      >
+        Run
+      </button>
+    );
+  }
+  await act(async () => reactRoot.render(<MergeView />));
+  await act(async () => container.querySelector("button")?.click());
+  expect(result).toHaveBeenCalledWith({
+    kind: "merged",
+    report: {
+      ...report,
+      outcome: {
+        ...report.outcome,
+        problem: "Repository refresh failed: offline during refresh",
+      },
+    },
+  });
+  expect(reread.worktree).toHaveBeenCalledWith(status.root);
+  expect(draftImpact().tasks).toBe(0);
+});

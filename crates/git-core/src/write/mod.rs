@@ -27,8 +27,8 @@ use crate::{
 pub(crate) use branches::merged_within;
 pub use branches::{BranchTip, Start};
 pub use merge::{
-    MergeAction, MergeAttention, MergeOutcome, MergeReport, MergeReview, MergeSession, MergeSource,
-    MergeState, MergeTracking,
+    MergeAction, MergeAttention, MergeContext, MergeOutcome, MergePlan, MergeReport, MergeReview,
+    MergeSelection, MergeSession, MergeSource, MergeState, MergeTracking,
 };
 use partial::{Action, Part, Picks};
 pub use partial::{LinePick, LineSide};
