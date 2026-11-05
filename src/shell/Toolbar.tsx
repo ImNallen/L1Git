@@ -46,14 +46,14 @@ export function Toolbar({
           <span className="muted">Workspace</span>
         )}
         {headLabel && (
-          <>
+          <span className="breadcrumb-head">
             <span className="breadcrumb-slash" aria-hidden="true">
               /
             </span>
             <span className="breadcrumb-branch" title={headLabel}>
               {headLabel}
             </span>
-          </>
+          </span>
         )}
       </div>
       <div className="toolbar-actions">

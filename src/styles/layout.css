@@ -59,9 +59,9 @@
   gap: 10px;
   min-width: 0;
   flex: 1;
+  overflow: hidden;
 }
 .repository-name {
-  flex-shrink: 0;
   max-width: 180px;
   color: var(--text-icon);
   overflow: hidden;
@@ -70,6 +70,14 @@
 }
 .breadcrumb-slash {
   color: var(--text-faint);
+}
+.breadcrumb-head {
+  display: flex;
+  flex-shrink: 1000;
+  align-items: center;
+  gap: 10px;
+  min-width: 64px;
+  overflow: hidden;
 }
 .breadcrumb-branch {
   min-width: 0;
