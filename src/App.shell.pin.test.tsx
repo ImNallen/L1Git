@@ -9,9 +9,10 @@ import {
   installHarness,
   mountApp,
   query,
+  repositoryRow,
 } from "./test/appHarness";
 import type { Harness } from "./test/appHarness";
-import { C4, noUpstream, PIN, pinStatus } from "./test/fixtures";
+import { C4, noUpstream, OTHER, PIN, pinStatus } from "./test/fixtures";
 import { headSchema } from "./domain/repository";
 import { publishOptionsSchema } from "./domain/push";
 
@@ -162,6 +163,36 @@ it("the commit button names the branch the commit would land on when the snapsho
   });
   await app.click(historyRow("Uncommitted changes in pin,"));
   expect(get("button", "Commit to feature")).toBeTruthy();
+});
+
+const breadcrumb = () => document.querySelector(".toolbar .breadcrumb");
+
+it("the toolbar shows the checked-out branch after the repository name", async () => {
+  await mountApp();
+  expect(breadcrumb()?.textContent).toBe("pin/main");
+  expect(breadcrumb()?.querySelector("[title='main']")).not.toBeNull();
+});
+
+it("the toolbar shows a detached HEAD by its short commit ID", async () => {
+  await mountApp({
+    world: (world) =>
+      world.snapshots.set(PIN, {
+        ...world.snapshots.get(PIN)!,
+        head: headSchema.parse({ kind: "detached", oid: C4 }),
+      }),
+  });
+  expect(breadcrumb()?.textContent).toBe("pin/Detached at 4444444");
+});
+
+it("the toolbar shows no branch until the snapshot arrives", async () => {
+  const app = await mountApp();
+  const snapshot = app.bridge.hold("snapshot", OTHER);
+  await app.click(repositoryRow(OTHER));
+  await snapshot.arrived;
+  expect(breadcrumb()?.textContent).toBe("other");
+  snapshot.release();
+  await app.settle();
+  expect(breadcrumb()?.textContent).toBe("other/trunk");
 });
 
 async function fromHistoryMenu(app: Harness, row: string, item: string) {
