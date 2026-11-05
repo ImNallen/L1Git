@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { refLabels } from "./refs";
-import { oidSchema, snapshotSchema } from "./repository";
+import { headBranchName, refLabels } from "./refs";
+import { headSchema, oidSchema, snapshotSchema } from "./repository";
 
 const a = oidSchema.parse("a".repeat(40));
 const b = oidSchema.parse("b".repeat(40));
@@ -166,5 +166,38 @@ describe("ref labels", () => {
         worktree: null,
       },
     ]);
+  });
+});
+
+describe("headBranchName", () => {
+  const { branches } = snapshot({
+    kind: "attached",
+    reference: "refs/heads/main",
+    oid: a,
+  });
+  const head = (value: Record<string, unknown>) => headSchema.parse(value);
+
+  it("names the branch an attached HEAD points at", () => {
+    expect(
+      headBranchName(
+        head({ kind: "attached", reference: "refs/heads/feature", oid: a }),
+        branches,
+      ),
+    ).toBe("feature");
+  });
+
+  it("names an unborn branch, which no branch list holds yet", () => {
+    expect(
+      headBranchName(
+        head({ kind: "unborn", reference: "refs/heads/feat/first" }),
+        branches,
+      ),
+    ).toBe("feat/first");
+  });
+
+  it("names no branch for a detached HEAD", () => {
+    expect(
+      headBranchName(head({ kind: "detached", oid: a }), branches),
+    ).toBeNull();
   });
 });

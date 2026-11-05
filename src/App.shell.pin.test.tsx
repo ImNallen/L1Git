@@ -11,7 +11,8 @@ import {
   query,
 } from "./test/appHarness";
 import type { Harness } from "./test/appHarness";
-import { noUpstream, PIN } from "./test/fixtures";
+import { C4, noUpstream, PIN, pinStatus } from "./test/fixtures";
+import { headSchema } from "./domain/repository";
 import { publishOptionsSchema } from "./domain/push";
 
 installHarness();
@@ -112,6 +113,55 @@ it("the commit box stays out of the inspector's scrolling content, and the file 
   expect(
     inspector()?.querySelector(".inspector-content .worktree-groups"),
   ).not.toBeNull();
+});
+
+it("the commit button names the branch, and says Amend while amending", async () => {
+  const app = await mountApp();
+  await app.click(historyRow("Uncommitted changes in pin,"));
+  await app.type(get("textbox", "Summary"), "Ship it");
+  expect(get("button", "Commit to main").title).toMatch(
+    /^Commit to main \((⌘|Ctrl\+)Enter\)$/,
+  );
+  await app.click(get("checkbox", undefined, get("group", "Commit")));
+  expect(get("button", "Amend").title).toMatch(/^Amend \(/);
+  expect(query("button", "Commit to main")).toBeNull();
+  await app.click(get("checkbox", undefined, get("group", "Commit")));
+  expect(get("button", "Commit to main")).toBeTruthy();
+});
+
+it("the commit button says Commit on a detached HEAD", async () => {
+  const head = headSchema.parse({ kind: "detached", oid: C4 });
+  const app = await mountApp({
+    world: (world) => {
+      const snapshot = world.snapshots.get(PIN)!;
+      world.snapshots.set(PIN, {
+        ...snapshot,
+        head,
+        worktrees: snapshot.worktrees.map((worktree) =>
+          worktree.current ? { ...worktree, head } : worktree,
+        ),
+      });
+      world.statuses.set(PIN, { ...pinStatus(), head });
+    },
+  });
+  await app.click(historyRow("Uncommitted changes in pin,"));
+  expect(get("button", "Commit")).toBeTruthy();
+});
+
+it("the commit button names the branch the commit would land on when the snapshot lags behind", async () => {
+  const app = await mountApp({
+    world: (world) =>
+      world.statuses.set(PIN, {
+        ...pinStatus(),
+        head: headSchema.parse({
+          kind: "attached",
+          reference: "refs/heads/feature",
+          oid: C4,
+        }),
+      }),
+  });
+  await app.click(historyRow("Uncommitted changes in pin,"));
+  expect(get("button", "Commit to feature")).toBeTruthy();
 });
 
 async function fromHistoryMenu(app: Harness, row: string, item: string) {

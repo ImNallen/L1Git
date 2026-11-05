@@ -25,7 +25,13 @@ const formOwners = (markup: string) => markup.match(/<form[\s>]|\sform="/g);
 describe("a plain Enter submits nothing by itself", () => {
   it("in the commit box", () => {
     const markup = renderToStaticMarkup(
-      <CommitBox status={status} staged={1} busy={false} onCommit={never} />,
+      <CommitBox
+        branch="main"
+        status={status}
+        staged={1}
+        busy={false}
+        onCommit={never}
+      />,
     );
     expect(markup).toContain('type="checkbox"');
     expect(markup).toContain('aria-label="Summary"');

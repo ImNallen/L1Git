@@ -35,6 +35,7 @@ import type {
   RepositorySnapshot,
   Worktree,
 } from "../domain/repository";
+import { headBranchName } from "../domain/refs";
 import { clampMessage, listWrites, worktreeGroups } from "../domain/worktree";
 import type {
   ListSide,
@@ -832,12 +833,7 @@ function WorktreeInspector({
     void writes.write(worktree.root, kind, paths);
   };
   const { head } = worktree;
-  const branch =
-    head.kind === "detached"
-      ? null
-      : (snapshot.branches.find(
-          (candidate) => candidate.reference === head.reference,
-        )?.name ?? head.reference.replace(/^refs\/heads\//, ""));
+  const branch = headBranchName(head, snapshot.branches);
   return (
     <div className="worktree-inspector">
       <div className="inspector-content">
@@ -988,6 +984,7 @@ function WorktreeInspector({
         (!writes.merge || writes.merge.kind === "idle") && (
           <CommitBox
             status={changes.status}
+            branch={headBranchName(changes.status.head, snapshot.branches)}
             staged={
               groups.find((group) => group.side === "staged")?.files.length ?? 0
             }

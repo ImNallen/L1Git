@@ -81,7 +81,13 @@ it("holds an amend-loading task until the loaded message and amend-aside draft a
   });
   await act(async () =>
     reactRoot.render(
-      <CommitBox status={status} staged={0} busy={false} onCommit={commit} />,
+      <CommitBox
+        branch="main"
+        status={status}
+        staged={0}
+        busy={false}
+        onCommit={commit}
+      />,
     ),
   );
   const amend = container.querySelector<HTMLInputElement>(
@@ -110,7 +116,13 @@ it("holds commit submission through draft clearing and refuses a new submission 
   });
   await act(async () =>
     reactRoot.render(
-      <CommitBox status={status} staged={1} busy={false} onCommit={commit} />,
+      <CommitBox
+        branch="main"
+        status={status}
+        staged={1}
+        busy={false}
+        onCommit={commit}
+      />,
     ),
   );
   await act(async () => container.querySelector("button")?.click());
@@ -175,7 +187,13 @@ it("defers a stale amend restoration during freeze and applies it when the freez
   });
   await act(async () =>
     reactRoot.render(
-      <CommitBox status={status} staged={0} busy={false} onCommit={commit} />,
+      <CommitBox
+        branch="main"
+        status={status}
+        staged={0}
+        busy={false}
+        onCommit={commit}
+      />,
     ),
   );
   const moved = worktreeStatusSchema.parse({
@@ -188,7 +206,13 @@ it("defers a stale amend restoration during freeze and applies it when the freez
     if (freeze.kind !== "frozen") throw new Error("Cannot freeze");
     release = freeze.release;
     reactRoot.render(
-      <CommitBox status={moved} staged={0} busy={false} onCommit={commit} />,
+      <CommitBox
+        branch="main"
+        status={moved}
+        staged={0}
+        busy={false}
+        onCommit={commit}
+      />,
     );
   });
   expect(draftOf(status.root).draft.summary).toBe("Amending");
