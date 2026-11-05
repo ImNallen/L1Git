@@ -1,8 +1,23 @@
 import { describe, expect, it } from "vitest";
-import { relativeTime } from "./time";
+import { relativeTime, shortRelativeTime } from "./time";
 
 const now = 1_800_000_000;
 const ago = (seconds: number) => relativeTime(now - seconds, now, "en");
+
+describe("shortRelativeTime", () => {
+  it.each([
+    [20, "now"],
+    [5 * 60, "5m"],
+    [3 * 3600, "3h"],
+    [3 * 24 * 3600, "3d"],
+    [14 * 24 * 3600, "2w"],
+    [60 * 24 * 3600, "2mo"],
+    [2 * 365 * 24 * 3600, "2y"],
+    [-2 * 3600, "in 2h"],
+  ])("shows %i seconds ago as %s", (seconds, expected) => {
+    expect(shortRelativeTime(now - seconds, now)).toBe(expected);
+  });
+});
 
 describe("relativeTime", () => {
   it("names recent moments in the largest whole unit", () => {
