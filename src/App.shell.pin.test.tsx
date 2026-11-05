@@ -9,9 +9,11 @@ import {
   installHarness,
   mountApp,
   query,
+  repositoryRow,
 } from "./test/appHarness";
 import type { Harness } from "./test/appHarness";
-import { noUpstream, PIN } from "./test/fixtures";
+import { C4, noUpstream, OTHER, PIN, pinStatus } from "./test/fixtures";
+import { headSchema } from "./domain/repository";
 import { publishOptionsSchema } from "./domain/push";
 
 installHarness();
@@ -101,6 +103,96 @@ it("the toggle buttons keep focus as they move between the toolbar and the pane"
   await app.click(get("button", "Toggle commit inspector"));
   expect(document.activeElement?.closest(".inspector")).not.toBeNull();
   expect(focused()).toBe("button Toggle commit inspector");
+});
+
+it("the commit box stays out of the inspector's scrolling content, and the file lists stay in it", async () => {
+  const app = await mountApp();
+  await app.click(historyRow("Uncommitted changes in pin,"));
+  const box = get("group", "Commit");
+  expect(box.closest(".inspector")).not.toBeNull();
+  expect(box.closest(".inspector-content")).toBeNull();
+  expect(
+    inspector()?.querySelector(".inspector-content .worktree-groups"),
+  ).not.toBeNull();
+});
+
+it("the commit button names the branch, and says Amend while amending", async () => {
+  const app = await mountApp();
+  await app.click(historyRow("Uncommitted changes in pin,"));
+  await app.type(get("textbox", "Summary"), "Ship it");
+  expect(get("button", "Commit to main").title).toMatch(
+    /^Commit to main \((⌘|Ctrl\+)Enter\)$/,
+  );
+  await app.click(get("checkbox", undefined, get("group", "Commit")));
+  expect(get("button", "Amend").title).toMatch(/^Amend \(/);
+  expect(query("button", "Commit to main")).toBeNull();
+  await app.click(get("checkbox", undefined, get("group", "Commit")));
+  expect(get("button", "Commit to main")).toBeTruthy();
+});
+
+it("the commit button says Commit on a detached HEAD", async () => {
+  const head = headSchema.parse({ kind: "detached", oid: C4 });
+  const app = await mountApp({
+    world: (world) => {
+      const snapshot = world.snapshots.get(PIN)!;
+      world.snapshots.set(PIN, {
+        ...snapshot,
+        head,
+        worktrees: snapshot.worktrees.map((worktree) =>
+          worktree.current ? { ...worktree, head } : worktree,
+        ),
+      });
+      world.statuses.set(PIN, { ...pinStatus(), head });
+    },
+  });
+  await app.click(historyRow("Uncommitted changes in pin,"));
+  expect(get("button", "Commit")).toBeTruthy();
+});
+
+it("the commit button names the branch the commit would land on when the snapshot lags behind", async () => {
+  const app = await mountApp({
+    world: (world) =>
+      world.statuses.set(PIN, {
+        ...pinStatus(),
+        head: headSchema.parse({
+          kind: "attached",
+          reference: "refs/heads/feature",
+          oid: C4,
+        }),
+      }),
+  });
+  await app.click(historyRow("Uncommitted changes in pin,"));
+  expect(get("button", "Commit to feature")).toBeTruthy();
+});
+
+const breadcrumb = () => document.querySelector(".toolbar .breadcrumb");
+
+it("the toolbar shows the checked-out branch after the repository name", async () => {
+  await mountApp();
+  expect(breadcrumb()?.textContent).toBe("pin/main");
+  expect(breadcrumb()?.querySelector("[title='main']")).not.toBeNull();
+});
+
+it("the toolbar shows a detached HEAD by its short commit ID", async () => {
+  await mountApp({
+    world: (world) =>
+      world.snapshots.set(PIN, {
+        ...world.snapshots.get(PIN)!,
+        head: headSchema.parse({ kind: "detached", oid: C4 }),
+      }),
+  });
+  expect(breadcrumb()?.textContent).toBe("pin/Detached at 4444444");
+});
+
+it("the toolbar shows no branch until the snapshot arrives", async () => {
+  const app = await mountApp();
+  const snapshot = app.bridge.hold("snapshot", OTHER);
+  await app.click(repositoryRow(OTHER));
+  await snapshot.arrived;
+  expect(breadcrumb()?.textContent).toBe("other");
+  snapshot.release();
+  await app.settle();
+  expect(breadcrumb()?.textContent).toBe("other/trunk");
 });
 
 async function fromHistoryMenu(app: Harness, row: string, item: string) {

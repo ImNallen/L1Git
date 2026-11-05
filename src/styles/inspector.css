@@ -18,8 +18,15 @@
   font-size: 11px;
   color: var(--text-dim);
 }
+.worktree-inspector {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
 .inspector-content {
   flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   padding: 22px 21px 30px;
@@ -323,10 +330,15 @@
 .commit-box {
   display: flex;
   flex-direction: column;
+  flex-shrink: 0;
   gap: 6px;
-  margin-top: 18px;
-  padding-top: 14px;
+  max-height: 60%;
+  padding: 14px 21px;
+  overflow: auto;
   border-top: 1px solid var(--border);
+}
+.commit-box > * {
+  flex-shrink: 0;
 }
 .commit-summary,
 .commit-description {
@@ -351,19 +363,29 @@
 }
 .commit-actions {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  align-items: stretch;
   gap: 8px;
 }
 .commit-amend {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-shrink: 0;
   font-size: 11px;
   color: var(--text-secondary);
+  white-space: nowrap;
 }
 .commit-actions .button {
   gap: 6px;
+  min-width: 0;
+}
+.commit-actions .button svg {
+  flex: none;
+}
+.commit-action-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .commit-problem {
   margin-top: 0;

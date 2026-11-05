@@ -37,11 +37,13 @@ export const messageKeys = (submit: () => void) => (event: KeyboardEvent) => {
 
 export function CommitBox({
   status,
+  branch,
   staged,
   busy,
   onCommit,
 }: {
   status: WorktreeStatus;
+  branch: string | null;
   staged: number;
   busy: boolean;
   onCommit: (worktree: RepositoryRoot, write: Write) => Promise<Outcome>;
@@ -125,7 +127,11 @@ export function CommitBox({
   }
 
   const keys = messageKeys(() => void submit());
-  const action = amending ? "Amend" : "Commit";
+  const action = amending
+    ? "Amend"
+    : branch === null
+      ? "Commit"
+      : `Commit to ${branch}`;
   const hint =
     draft.summary.trim() === ""
       ? "Write a summary first."
@@ -185,7 +191,7 @@ export function CommitBox({
           {submitting || loading ? (
             <LoaderCircle size={14} className="spin" />
           ) : null}
-          {action}
+          <span className="commit-action-label">{action}</span>
         </button>
       </div>
       {problem &&

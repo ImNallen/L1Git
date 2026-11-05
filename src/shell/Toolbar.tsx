@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { REDO_SHORTCUT, shortcutLabel, UNDO_SHORTCUT } from "../actions";
 import { UndoButtons } from "../components/UndoControls";
+import { headBranchName } from "../domain/refs";
 import type { RepositorySnapshot } from "../domain/repository";
 import { mac } from "../repositories";
 import type { WritesView } from "../useWrites";
@@ -28,6 +29,11 @@ export function Toolbar({
   sync: SyncControls;
   commands: SyncCommands;
 }) {
+  const headLabel =
+    snapshot &&
+    (snapshot.head.kind === "detached"
+      ? `Detached at ${snapshot.head.oid.slice(0, 7)}`
+      : headBranchName(snapshot.head, snapshot.branches));
   return (
     <header className="toolbar" data-tauri-drag-region>
       {!layout.sidebarOpen && sidebarToggle}
@@ -38,6 +44,16 @@ export function Toolbar({
           </span>
         ) : (
           <span className="muted">Workspace</span>
+        )}
+        {headLabel && (
+          <span className="breadcrumb-head">
+            <span className="breadcrumb-slash" aria-hidden="true">
+              /
+            </span>
+            <span className="breadcrumb-branch" title={headLabel}>
+              {headLabel}
+            </span>
+          </span>
         )}
       </div>
       <div className="toolbar-actions">

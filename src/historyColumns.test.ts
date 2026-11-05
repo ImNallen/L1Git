@@ -9,7 +9,13 @@ import {
 import type { ColumnId } from "./historyColumns";
 
 describe("history column layout", () => {
-  it("lays out only the Changes column by default", () => {
+  it("lays out Date and Changes by default", () => {
+    const layout = columnLayout(58, restoreColumns({ getItem: () => null }), 7);
+    expect(layout.template).toBe("200px 58px minmax(160px, 1fr) 52px 160px");
+    expect(layout.minWidth).toBe(630);
+  });
+
+  it("keeps the wider message minimum when only Changes is on", () => {
     const layout = columnLayout(58, new Set<ColumnId>(["changes"]), 7);
     expect(layout.template).toBe("200px 58px minmax(260px, 1fr) 160px");
     expect(layout.minWidth).toBe(678);
@@ -22,9 +28,9 @@ describe("history column layout", () => {
       7,
     );
     expect(layout.template).toBe(
-      "200px 106px minmax(160px, 1fr) 120px 96px 56px 160px",
+      "200px 106px minmax(160px, 1fr) 120px 52px 56px 160px",
     );
-    expect(layout.minWidth).toBe(898);
+    expect(layout.minWidth).toBe(854);
     expect(layout.columns.map((column) => column.label)).toEqual([
       "Author",
       "Date",
@@ -57,12 +63,13 @@ describe("history column layout", () => {
 
 describe("stored history columns", () => {
   it.each([
-    [null, ["changes"]],
-    ["not json", ["changes"]],
-    ['{"version":2,"visible":["date"]}', ["changes"]],
-    ['{"version":1,"visible":["date","subject"]}', ["changes"]],
-    ['{"version":1,"visible":"date"}', ["changes"]],
+    [null, ["date", "changes"]],
+    ["not json", ["date", "changes"]],
+    ['{"version":2,"visible":["date"]}', ["date", "changes"]],
+    ['{"version":1,"visible":["date","subject"]}', ["date", "changes"]],
+    ['{"version":1,"visible":"date"}', ["date", "changes"]],
     ['{"version":1,"visible":[]}', []],
+    ['{"version":1,"visible":["changes"]}', ["changes"]],
     ['{"version":1,"visible":["sha","date"]}', ["sha", "date"]],
   ])("reads %j as %j", (stored, expected) => {
     expect([...restoreColumns({ getItem: () => stored })]).toEqual(expected);

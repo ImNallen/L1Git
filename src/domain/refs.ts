@@ -1,5 +1,7 @@
 import type {
+  Branch,
   FullRef,
+  Head,
   Oid,
   RepositoryRoot,
   RepositorySnapshot,
@@ -38,6 +40,17 @@ function rank(label: RefLabel): number {
 }
 
 const name = (label: RefLabel) => (label.kind === "head" ? "" : label.name);
+
+export function headBranchName(
+  head: Head,
+  branches: readonly Branch[],
+): string | null {
+  if (head.kind === "detached") return null;
+  return (
+    branches.find((branch) => branch.reference === head.reference)?.name ??
+    head.reference.replace(/^refs\/heads\//, "")
+  );
+}
 
 export function refLabels(snapshot: RepositorySnapshot): Map<Oid, RefLabel[]> {
   const labels: { oid: Oid; label: RefLabel }[] = [];

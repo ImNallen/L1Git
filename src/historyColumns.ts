@@ -5,7 +5,7 @@ export const COLUMNS_KEY = "l1git.columns.v1";
 
 export const historyColumns = [
   { id: "author", label: "Author", width: 120 },
-  { id: "date", label: "Date", width: 96 },
+  { id: "date", label: "Date", width: 52 },
   { id: "sha", label: "SHA" },
   { id: "changes", label: "Changes", width: 160 },
 ] as const;
@@ -14,7 +14,7 @@ export type ColumnId = (typeof historyColumns)[number]["id"];
 const columnId = z.custom<ColumnId>((value) =>
   historyColumns.some((column) => column.id === value),
 );
-const DEFAULT_COLUMNS: ReadonlySet<ColumnId> = new Set(["changes"]);
+const DEFAULT_COLUMNS: ReadonlySet<ColumnId> = new Set(["date", "changes"]);
 
 const columnsSchema = z.object({
   version: z.literal(1),

@@ -51,7 +51,7 @@ import { historyPlace, rowSelection, selectedRowId } from "../domain/selection";
 import { changeSummary } from "../domain/worktree";
 import type { HistoryRow, WorktreeRow } from "../domain/worktree";
 import { SHORT_OID_MIN_LENGTH, uniqueShortOids } from "../domain/shortOid";
-import { relativeTime } from "../domain/time";
+import { shortRelativeTime } from "../domain/time";
 import { branchVisibility } from "../domain/visibility";
 import type {
   Commit,
@@ -313,7 +313,7 @@ const cells: Record<
       className="date-cell"
       title={new Date(commit.timestamp * 1000).toLocaleString()}
     >
-      {relativeTime(commit.timestamp, now)}
+      {shortRelativeTime(commit.timestamp, now)}
     </TextCell>
   ),
   sha: (commit, { shortOid }) => (
