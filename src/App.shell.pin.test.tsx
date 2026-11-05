@@ -103,6 +103,17 @@ it("the toggle buttons keep focus as they move between the toolbar and the pane"
   expect(focused()).toBe("button Toggle commit inspector");
 });
 
+it("the commit box stays out of the inspector's scrolling content, and the file lists stay in it", async () => {
+  const app = await mountApp();
+  await app.click(historyRow("Uncommitted changes in pin,"));
+  const box = get("group", "Commit");
+  expect(box.closest(".inspector")).not.toBeNull();
+  expect(box.closest(".inspector-content")).toBeNull();
+  expect(
+    inspector()?.querySelector(".inspector-content .worktree-groups"),
+  ).not.toBeNull();
+});
+
 async function fromHistoryMenu(app: Harness, row: string, item: string) {
   get("button", "Settings").focus();
   await app.contextMenu(historyRow(row));

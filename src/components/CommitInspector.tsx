@@ -839,147 +839,151 @@ function WorktreeInspector({
           (candidate) => candidate.reference === head.reference,
         )?.name ?? head.reference.replace(/^refs\/heads\//, ""));
   return (
-    <div className="inspector-content">
-      <header className="worktree-group-header">
-        <h2>Uncommitted changes</h2>
-        {changes?.kind === "ready" &&
-          changes.status.entries.length > 0 &&
-          (!writes.merge || writes.merge.kind === "idle") && (
-            <button
-              className="button secondary list-action"
-              aria-disabled={writes.busy}
-              onClick={() => {
-                if (!writes.busy) writes.confirmStash(worktree.root, []);
-              }}
-            >
-              Stash…
+    <div className="worktree-inspector">
+      <div className="inspector-content">
+        <header className="worktree-group-header">
+          <h2>Uncommitted changes</h2>
+          {changes?.kind === "ready" &&
+            changes.status.entries.length > 0 &&
+            (!writes.merge || writes.merge.kind === "idle") && (
+              <button
+                className="button secondary list-action"
+                aria-disabled={writes.busy}
+                onClick={() => {
+                  if (!writes.busy) writes.confirmStash(worktree.root, []);
+                }}
+              >
+                Stash…
+              </button>
+            )}
+        </header>
+        <dl className="commit-metadata">
+          <div className="meta-row">
+            <dt className="visually-hidden">Worktree</dt>
+            <dd>
+              <span className="meta-icon" aria-hidden="true">
+                <FolderGit2 size={13} />
+              </span>
+              <span className="meta-lines">
+                <span className="meta-primary">{worktree.name}</span>
+                <span className="meta-secondary" title={worktree.root}>
+                  {worktree.root}
+                </span>
+              </span>
+            </dd>
+          </div>
+          <div className="meta-row">
+            <dt className="visually-hidden">HEAD</dt>
+            <dd>
+              <span className="meta-icon" aria-hidden="true">
+                <GitCommitHorizontal size={14} />
+              </span>
+              <span className="meta-lines">
+                <span className="meta-primary parents">
+                  {head.kind === "unborn" ? (
+                    "No commits yet"
+                  ) : (
+                    <button
+                      className="sha-chip"
+                      title={`Open HEAD ${head.oid}`}
+                      onClick={() =>
+                        onSelect({ kind: "commit", oid: head.oid })
+                      }
+                    >
+                      <code>{head.oid.slice(0, 7)}</code>
+                      <ArrowUpRight size={12} />
+                    </button>
+                  )}
+                </span>
+                <span className="meta-secondary">
+                  {branch === null ? "Detached HEAD" : `On ${branch}`}
+                </span>
+              </span>
+            </dd>
+          </div>
+        </dl>
+        {changes === undefined ? (
+          <div className="inspector-empty" role="status">
+            <LoaderCircle size={23} className="spin" />
+            <p>Reading changes…</p>
+          </div>
+        ) : changes.kind === "error" ? (
+          <div className="inspector-empty">
+            {changes.error.kind === "gitFailed" ? (
+              <pre className="problem-detail" role="alert">
+                {clampMessage(changes.error.message)}
+              </pre>
+            ) : (
+              <p role="alert">{changes.error.message}</p>
+            )}
+            <button className="button secondary" onClick={onRefresh}>
+              Refresh
             </button>
-          )}
-      </header>
-      <dl className="commit-metadata">
-        <div className="meta-row">
-          <dt className="visually-hidden">Worktree</dt>
-          <dd>
-            <span className="meta-icon" aria-hidden="true">
-              <FolderGit2 size={13} />
-            </span>
-            <span className="meta-lines">
-              <span className="meta-primary">{worktree.name}</span>
-              <span className="meta-secondary" title={worktree.root}>
-                {worktree.root}
-              </span>
-            </span>
-          </dd>
-        </div>
-        <div className="meta-row">
-          <dt className="visually-hidden">HEAD</dt>
-          <dd>
-            <span className="meta-icon" aria-hidden="true">
-              <GitCommitHorizontal size={14} />
-            </span>
-            <span className="meta-lines">
-              <span className="meta-primary parents">
-                {head.kind === "unborn" ? (
-                  "No commits yet"
-                ) : (
-                  <button
-                    className="sha-chip"
-                    title={`Open HEAD ${head.oid}`}
-                    onClick={() => onSelect({ kind: "commit", oid: head.oid })}
-                  >
-                    <code>{head.oid.slice(0, 7)}</code>
-                    <ArrowUpRight size={12} />
-                  </button>
-                )}
-              </span>
-              <span className="meta-secondary">
-                {branch === null ? "Detached HEAD" : `On ${branch}`}
-              </span>
-            </span>
-          </dd>
-        </div>
-      </dl>
-      {changes === undefined ? (
-        <div className="inspector-empty" role="status">
-          <LoaderCircle size={23} className="spin" />
-          <p>Reading changes…</p>
-        </div>
-      ) : changes.kind === "error" ? (
-        <div className="inspector-empty">
-          {changes.error.kind === "gitFailed" ? (
-            <pre className="problem-detail" role="alert">
-              {clampMessage(changes.error.message)}
-            </pre>
-          ) : (
-            <p role="alert">{changes.error.message}</p>
-          )}
-          <button className="button secondary" onClick={onRefresh}>
-            Refresh
-          </button>
-        </div>
-      ) : changes.status.entries.length === 0 ? (
-        <p className="muted">No uncommitted changes.</p>
-      ) : (
-        <div className="worktree-groups" ref={lists}>
-          {groups.map((group) => (
-            <WorktreeFiles
-              key={group.title}
-              group={group}
-              managed={
-                writes.merge !== undefined &&
-                writes.merge !== null &&
-                writes.merge.kind !== "idle"
-              }
-              resolvable={
-                new Set(
-                  group.files
-                    .filter(({ path }) => {
-                      const draft = resolutionOf(
-                        resolutionKey(worktree.root, path),
-                      );
-                      const owned = mergeAllows(writes.merge ?? null, {
-                        kind:
-                          group.side === "staged"
-                            ? "unstageFiles"
-                            : "stageFiles",
-                        entries: changes.status.entries.filter(
-                          (entry) => entry.path === path,
-                        ),
-                      });
-                      return (
-                        owned &&
-                        (group.side !== "conflict" ||
-                          draft === null ||
-                          canMark(draft))
-                      );
-                    })
-                    .map(({ path }) => path),
-                )
-              }
-              selectedFile={selectedFile}
-              onSelectFile={onSelectFile}
-              busy={writes.busy}
-              onWrite={onWrite}
-              discardable={discardable}
-              onStash={(paths) => writes.confirmStash(worktree.root, paths)}
-              onDiscard={(paths, row) =>
-                writes.confirmDiscard(
-                  worktree.root,
-                  paths,
-                  row === undefined
-                    ? undefined
-                    : () => setFocusAfter({ row, side: "unstaged" }),
-                )
-              }
-              onRowFocus={(focus) => (lastRow.current = focus)}
-              refocusPath={
-                group === focusTarget ? (focusAfter?.row ?? null) : null
-              }
-              onFocused={clearFocus}
-            />
-          ))}
-        </div>
-      )}
+          </div>
+        ) : changes.status.entries.length === 0 ? (
+          <p className="muted">No uncommitted changes.</p>
+        ) : (
+          <div className="worktree-groups" ref={lists}>
+            {groups.map((group) => (
+              <WorktreeFiles
+                key={group.title}
+                group={group}
+                managed={
+                  writes.merge !== undefined &&
+                  writes.merge !== null &&
+                  writes.merge.kind !== "idle"
+                }
+                resolvable={
+                  new Set(
+                    group.files
+                      .filter(({ path }) => {
+                        const draft = resolutionOf(
+                          resolutionKey(worktree.root, path),
+                        );
+                        const owned = mergeAllows(writes.merge ?? null, {
+                          kind:
+                            group.side === "staged"
+                              ? "unstageFiles"
+                              : "stageFiles",
+                          entries: changes.status.entries.filter(
+                            (entry) => entry.path === path,
+                          ),
+                        });
+                        return (
+                          owned &&
+                          (group.side !== "conflict" ||
+                            draft === null ||
+                            canMark(draft))
+                        );
+                      })
+                      .map(({ path }) => path),
+                  )
+                }
+                selectedFile={selectedFile}
+                onSelectFile={onSelectFile}
+                busy={writes.busy}
+                onWrite={onWrite}
+                discardable={discardable}
+                onStash={(paths) => writes.confirmStash(worktree.root, paths)}
+                onDiscard={(paths, row) =>
+                  writes.confirmDiscard(
+                    worktree.root,
+                    paths,
+                    row === undefined
+                      ? undefined
+                      : () => setFocusAfter({ row, side: "unstaged" }),
+                  )
+                }
+                onRowFocus={(focus) => (lastRow.current = focus)}
+                refocusPath={
+                  group === focusTarget ? (focusAfter?.row ?? null) : null
+                }
+                onFocused={clearFocus}
+              />
+            ))}
+          </div>
+        )}
+      </div>
       {changes?.kind === "ready" &&
         (!writes.merge || writes.merge.kind === "idle") && (
           <CommitBox
