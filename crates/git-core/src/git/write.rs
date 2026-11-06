@@ -3,7 +3,7 @@ use crate::{
     ErrorKind, RepositoryError, StaleReason, stderr,
     write::{
         CommitTxn, HOOK_OFF, MergeIndexTxn, MergeTxn, Outside, Published, RefTxn, ReplayKind,
-        ReplayTxn, ScratchIndex, Txn,
+        ReplayOf, ReplayTxn, ScratchIndex, Txn,
     },
 };
 use std::{
@@ -18,6 +18,7 @@ pub(crate) enum LocalWrite {
     MergeStart,
     MergeFinish,
     MergeAbort,
+    ReplayStart,
     ReplayFinish,
     ReplayAbort,
     SaveConflict,
@@ -72,6 +73,7 @@ impl LocalWrite {
             Self::MergeStart
             | Self::MergeFinish
             | Self::MergeAbort
+            | Self::ReplayStart
             | Self::ReplayFinish
             | Self::ReplayAbort
             | Self::Commit
@@ -96,6 +98,7 @@ impl LocalWrite {
             Self::MergeStart => "Starting the merge",
             Self::MergeFinish => "Finishing the merge",
             Self::MergeAbort => "Aborting the merge",
+            Self::ReplayStart => "Starting the cherry-pick or revert",
             Self::ReplayFinish => "Finishing the cherry-pick or revert",
             Self::ReplayAbort => "Aborting the cherry-pick or revert",
             Self::SaveConflict => "Saving the conflict result",
@@ -135,6 +138,7 @@ impl LocalWrite {
             Self::MergeStart => "l1git merge start",
             Self::MergeFinish => "l1git merge finish",
             Self::MergeAbort => "l1git merge abort",
+            Self::ReplayStart => "l1git replay start",
             Self::ReplayFinish => "l1git replay finish",
             Self::ReplayAbort => "l1git replay abort",
             Self::SaveConflict => "l1git save conflict",
@@ -175,9 +179,11 @@ impl LocalWrite {
             | Self::Undo
             | Self::Redo
             | Self::RefreshIndex => "The index is unchanged.",
-            Self::Commit | Self::Amend | Self::EditMessage | Self::ReplayFinish => {
-                "Git may have finished the commit, so check the history."
-            }
+            Self::Commit
+            | Self::Amend
+            | Self::EditMessage
+            | Self::ReplayStart
+            | Self::ReplayFinish => "Git may have finished the commit, so check the history.",
             Self::SaveConflict | Self::Discard | Self::DiscardPart => "No file changed.",
             Self::CreateBranch | Self::RenameBranch | Self::DeleteBranch => {
                 "L1 Git rereads the branch to see what changed."
@@ -237,6 +243,12 @@ pub(crate) struct Write<'a> {
 }
 
 const WRITE_STDOUT_CAP: usize = 1024 * 1024;
+/// Reads ignore replacement objects, and `as_user` drops the setting that does so. A
+/// command that applies what a read showed passes this to match it.
+const NO_REPLACE: &str = "--no-replace-objects";
+/// `git merge-tree` ignores `diff.algorithm` and a pick honours it, so the same change
+/// can land elsewhere in a file. A reviewed pick uses what the review used.
+const REVIEWED_ALGORITHM: &str = "diff.algorithm=histogram";
 
 impl<'a> Write<'a> {
     pub(crate) fn new(txn: &'a Txn<'_>, dir: &'a Path, args: &[&'a str]) -> Self {
@@ -344,10 +356,53 @@ impl<'a> Write<'a> {
             .lazy_fetch_unprompted()
     }
 
+    pub(crate) fn replay_apply(txn: &'a ReplayTxn<'_>, of: &'a ReplayOf) -> Self {
+        let args = match of.kind {
+            ReplayKind::CherryPick => {
+                vec![
+                    NO_REPLACE,
+                    "-c",
+                    REVIEWED_ALGORITHM,
+                    "cherry-pick",
+                    of.commit.as_str(),
+                ]
+            }
+            ReplayKind::Revert => vec![
+                NO_REPLACE,
+                "-c",
+                REVIEWED_ALGORITHM,
+                "revert",
+                "--no-edit",
+                of.commit.as_str(),
+            ],
+        };
+        Self {
+            dir: txn.root(),
+            args,
+            env: Vec::new(),
+            input: None,
+            cap: None,
+            as_user: true,
+            lazy_fetch: true,
+        }
+    }
+
+    pub(crate) fn replay_mark_revert(txn: &'a ReplayTxn<'_>, commit: &'a crate::Oid) -> Self {
+        Self {
+            dir: txn.root(),
+            args: vec!["update-ref", "--no-deref", "REVERT_HEAD", commit.as_str()],
+            env: Vec::new(),
+            input: None,
+            cap: Some(WRITE_STDOUT_CAP),
+            as_user: true,
+            lazy_fetch: false,
+        }
+    }
+
     pub(crate) fn replay_abort(txn: &'a ReplayTxn<'_>, kind: ReplayKind) -> Self {
         Self {
             dir: txn.root(),
-            args: vec![kind.command(), "--abort"],
+            args: vec![NO_REPLACE, kind.command(), "--abort"],
             env: Vec::new(),
             input: None,
             cap: None,
@@ -437,7 +492,14 @@ impl<'a> Write<'a> {
     pub(crate) fn move_tree(txn: &'a RefTxn<'_>, from: &'a crate::Oid, to: &'a crate::Oid) -> Self {
         Self {
             dir: txn.root(),
-            args: vec!["read-tree", "-m", "-u", from.as_str(), to.as_str()],
+            args: vec![
+                NO_REPLACE,
+                "read-tree",
+                "-m",
+                "-u",
+                from.as_str(),
+                to.as_str(),
+            ],
             env: Vec::new(),
             input: None,
             cap: None,
@@ -473,6 +535,12 @@ impl<'a> Write<'a> {
     pub(crate) fn traces(mut self, events: &'a Path, refs: &'a Path) -> Self {
         self.env.push(("GIT_TRACE2_EVENT", events.as_os_str()));
         self.env.push(("GIT_TRACE_REFS", refs.as_os_str()));
+        self
+    }
+
+    pub(crate) fn without_replacements(mut self) -> Self {
+        self.env
+            .push(("GIT_NO_REPLACE_OBJECTS", std::ffi::OsStr::new("1")));
         self
     }
 

@@ -3,8 +3,8 @@ use crate::{
     Comparison, ConflictFile, Coordinator, EntryId, Expect, FastForwardReport, FetchMode,
     FilePatch, FileRevision, Head, LineStats, MergeAction, MergeReport, MergeReview,
     MergeSelection, MergeState, Operation, PublishChoice, PublishOptions, PushAvailability,
-    PushIntent, PushReport, ReplayOf, RepositoryError, RepositoryOverview, RepositoryRefs,
-    RepositorySnapshot, Side, UndoHistory, WorktreePatch, WorktreeStatus,
+    PushIntent, PushReport, ReplayOf, ReplayReview, RepositoryError, RepositoryOverview,
+    RepositoryRefs, RepositorySnapshot, Side, UndoHistory, WorktreePatch, WorktreeStatus,
     file_history::{blame_within, file_history_within},
     git::LocalRead,
     repository::{
@@ -28,6 +28,10 @@ pub enum Request {
     Merge {
         path: String,
         action: MergeAction,
+    },
+    ReplayReview {
+        path: String,
+        of: ReplayOf,
     },
     ReplayAbort {
         path: String,
@@ -129,6 +133,7 @@ pub enum Response {
     MergeReview(MergeReview),
     MergeState(MergeState),
     Merge(MergeReport),
+    ReplayReview(ReplayReview),
     ReplayAbort(MergeState),
     Snapshot(RepositorySnapshot),
     Refs(RepositoryRefs),
@@ -162,6 +167,9 @@ pub fn run(coordinator: &Coordinator, request: Request) -> Result<Response, Repo
         }
         Request::MergeState { path } => Response::MergeState(coordinator.merge_state(&path)?),
         Request::Merge { path, action } => Response::Merge(coordinator.merge(&path, &action)?),
+        Request::ReplayReview { path, of } => {
+            Response::ReplayReview(coordinator.review_replay(&path, &of)?)
+        }
         Request::ReplayAbort { path, of, head } => {
             Response::ReplayAbort(coordinator.abort_replay(&path, &of, &head)?)
         }

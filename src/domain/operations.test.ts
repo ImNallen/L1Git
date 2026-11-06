@@ -176,6 +176,27 @@ group("describe", () => {
     expect(movesRefs(finish)).toBe(true);
   });
 
+  it("names a clean cherry-pick or revert by the commit's subject", () => {
+    const start = (kind: "cherryPick" | "revert") =>
+      ({
+        kind: "replay",
+        review: {
+          root: "/repo",
+          kind,
+          commit: "a".repeat(40),
+          subject: "Fix the thing",
+          destination: {
+            reference: "refs/heads/main",
+            oid: "b".repeat(40),
+          },
+          prediction: { kind: "clean", tree: "c".repeat(40) },
+        },
+      }) as unknown as Operation;
+    expect(describe(start("cherryPick"))).toBe("Cherry-pick “Fix the thing”");
+    expect(describe(start("revert"))).toBe("Revert “Fix the thing”");
+    expect(movesRefs(start("revert"))).toBe(true);
+  });
+
   const stage = (...paths: string[]) =>
     describe({
       kind: "stageFiles",

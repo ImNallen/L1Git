@@ -1,15 +1,16 @@
 use super::{
-    Applied, Change, CommitTxn, Direction, Expect, Operation, ReplayTxn, Repo,
+    Applied, BranchTip, Change, CommitTxn, Direction, Expect, Operation, ReplayTxn, Repo,
     branches::Writing,
     commit::{self, Target, Trace},
     merge::{self, Edit},
     refs::{self, Files, RefChange},
-    store::{self, EntryObjects, LockedStore},
-    txn::RefreshTxn,
+    store::{self, EntryObjects, LockedStore, Recorded},
+    txn::{RefreshTxn, Runner},
 };
 use crate::{
-    ErrorKind, Head, Oid, RepositoryError, StagedStamp, StaleReason, StatusEntry,
-    git::{self, WriteDeadline},
+    BranchRef, ErrorKind, Head, MoveSide, Oid, RepositoryError, Sides, StagedStamp, StaleReason,
+    StatusEntry,
+    git::{self, WriteDeadline, Wrote},
     status::{self, Untracked},
     sync::{self, InProgress},
 };
@@ -64,6 +65,15 @@ pub struct ReplayOf {
     pub commit: Oid,
 }
 
+impl ReplayReview {
+    fn of(&self) -> ReplayOf {
+        ReplayOf {
+            kind: self.kind,
+            commit: self.commit.clone(),
+        }
+    }
+}
+
 impl ReplayOf {
     /// `merge-tree`'s (base, theirs). A pick merges the commit's change onto
     /// HEAD, and a revert merges the opposite change.
@@ -88,6 +98,33 @@ impl ReplayOf {
             ReplayKind::Revert => (commit, parent),
         })
     }
+}
+
+/// What `merge-tree` says applying the commit to HEAD would do.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum ReplayPrediction {
+    Clean { tree: Oid },
+    Conflict { paths: Vec<String> },
+    Empty,
+}
+
+/// A pure function of the repository, so Start asks whether anything moved with
+/// one comparison.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReplayReview {
+    pub root: String,
+    pub kind: ReplayKind,
+    pub commit: Oid,
+    pub subject: String,
+    pub destination: BranchTip,
+    pub prediction: ReplayPrediction,
 }
 
 /// Derived on every read. L1 Git stores none of it as state.
@@ -211,6 +248,60 @@ struct Simulated {
     conflicted: BTreeSet<String>,
 }
 
+impl Simulated {
+    /// `None` when a path is not UTF-8, which L1 Git cannot name.
+    fn footprint(
+        &self,
+        repo: &Repo,
+        head: &Oid,
+        deadline: WriteDeadline,
+    ) -> Result<Option<Vec<String>>, RepositoryError> {
+        let changed = git::read(
+            &repo.root,
+            &[
+                "diff-tree",
+                "-r",
+                "--no-renames",
+                "--name-only",
+                "-z",
+                head.as_str(),
+                self.tree.as_str(),
+            ],
+            deadline.reads(),
+        )?;
+        Ok(
+            listed_paths(&changed)
+                .map(|changed| self.conflicted.union(&changed).cloned().collect()),
+        )
+    }
+
+    /// The paths the result writes that HEAD does not track. `git cherry-pick`
+    /// overwrites an ignored file at one of them, silently. A conflicted path HEAD
+    /// does not track is one of them, because the tree holds it.
+    fn added(
+        &self,
+        repo: &Repo,
+        head: &Oid,
+        deadline: WriteDeadline,
+    ) -> Result<Vec<String>, RepositoryError> {
+        merge::names(
+            repo,
+            WHO,
+            &[
+                "diff-tree",
+                "-r",
+                "--no-renames",
+                "--diff-filter=A",
+                "--name-only",
+                "-z",
+                head.as_str(),
+                self.tree.as_str(),
+            ],
+            deadline,
+        )
+    }
+}
+
 /// Touches neither the index nor the worktree. `None` when `merge-tree` cannot
 /// answer, as when a partial clone lacks a blob.
 fn simulate(
@@ -262,24 +353,10 @@ fn footprint(
     let Some(simulated) = simulate(repo, of, head, deadline)? else {
         return Ok(None);
     };
-    let changed = git::read(
-        &repo.root,
-        &[
-            "diff-tree",
-            "-r",
-            "--no-renames",
-            "--name-only",
-            "-z",
-            head.as_str(),
-            simulated.tree.as_str(),
-        ],
-        deadline.reads(),
-    )?;
-    let Some(changed) = listed_paths(&changed) else {
+    let Some(paths) = simulated.footprint(repo, head, deadline)? else {
         return Ok(None);
     };
-    let paths: BTreeSet<_> = simulated.conflicted.union(&changed).cloned().collect();
-    let paths: Vec<_> = real_names(repo, of, head, paths, deadline)?
+    let paths: Vec<_> = real_names(repo, of, head, paths.into_iter().collect(), deadline)?
         .into_iter()
         .collect();
     let _ = prepared(repo, of, head).and_then(|_| merge::persist(&memo, &paths));
@@ -356,6 +433,15 @@ fn tree_of(repo: &Repo, commit: &Oid, deadline: WriteDeadline) -> Result<Oid, Re
     Oid::try_from(git::line(&output)).map_err(|_| git::malformed())
 }
 
+fn subject(repo: &Repo, commit: &Oid, deadline: WriteDeadline) -> Result<String, RepositoryError> {
+    let shown = git::read(
+        &repo.root,
+        &["show", "-s", "--format=%s", commit.as_str()],
+        deadline.reads(),
+    )?;
+    Ok(git::line(&shown))
+}
+
 /// `None` unless `in_flight` answers and `merge-tree` can name the footprint.
 pub(super) fn progress(
     repo: &Repo,
@@ -380,11 +466,7 @@ pub(super) fn progress(
         Some(tree) => *tree == tree_of(repo, &head, deadline)?,
         None => false,
     };
-    let subject = git::line(&git::read(
-        &repo.root,
-        &["show", "-s", "--format=%s", of.commit.as_str()],
-        deadline.reads(),
-    )?);
+    let subject = subject(repo, &of.commit, deadline)?;
     let suggested_message = match fs::read(repo.git_dir.join("MERGE_MSG")) {
         Ok(message) => cut_conflicts_block(&git::text(&message), &comment_string(repo, deadline)?),
         Err(_) => String::new(),
@@ -402,6 +484,121 @@ pub(super) fn progress(
         empty,
         suggested_message,
     }))
+}
+
+/// Every refusal, in one place, so Start re-runs the identical list. Writes only
+/// `merge-tree`'s loose objects.
+pub(super) fn review(
+    repo: &Repo,
+    of: &ReplayOf,
+    deadline: WriteDeadline,
+) -> Result<ReplayReview, RepositoryError> {
+    // First, because a stopped rebase also detaches HEAD, and the rebase is the reason.
+    if let Some(running) = sync::in_progress(&repo.root, deadline.reads())?.first() {
+        return Err(merge::refused(format!(
+            "{} is in progress in this worktree. Finish or abort it first.",
+            refs::capitalized(running.name())
+        )));
+    }
+    let name = of.kind.operation().name();
+    let Head::Attached { reference, oid } = repo.head(deadline)? else {
+        return Err(merge::refused(format!(
+            "{} needs a checked-out local branch with a commit. Check one out first.",
+            refs::capitalized(name)
+        )));
+    };
+    let branch = BranchRef::try_from(reference).map_err(|_| git::malformed())?;
+    let head = Oid::try_from(oid).map_err(|_| git::malformed())?;
+    commit::refuse_non_commit(repo, deadline, &of.commit)?;
+    let short = commit::short(&of.commit);
+    if parents(repo, &of.commit, deadline)?.len() > 1 {
+        return Err(merge::refused(format!(
+            "{short} is a merge commit, and L1 Git applies only a commit with one parent. Use Git to choose a parent."
+        )));
+    }
+    let on_branch = merge::ancestor(repo, &of.commit, &head, deadline)?;
+    if on_branch && of.kind == ReplayKind::CherryPick {
+        return Err(merge::refused(format!(
+            "{short} is already on {}, so there is nothing to cherry-pick.",
+            branch.name()
+        )));
+    }
+    if !on_branch && of.kind == ReplayKind::Revert {
+        return Err(merge::refused(format!(
+            "{short} is not on {}, so there is nothing to revert.",
+            branch.name()
+        )));
+    }
+    merge::safe_index_for(repo, WHO, deadline)?;
+    if !merge::config(repo, "pull.twohead", deadline)?.is_empty() {
+        return Err(merge::refused(format!(
+            "pull.twohead changes how Git applies a commit, and this review cannot predict it. Run {name} with Git instead."
+        )));
+    }
+    let staged = staged_paths(repo, &head, deadline)?;
+    if !staged.is_empty() {
+        return Err(merge::refused(format!(
+            "These paths have staged changes: {}. Commit or unstage them first.",
+            staged.into_iter().collect::<Vec<_>>().join(", ")
+        )));
+    }
+    let unknown = || {
+        merge::refused(format!(
+            "L1 Git cannot work out what {name} would change. Run it with Git instead."
+        ))
+    };
+    let simulated = simulate(repo, of, &head, deadline)?.ok_or_else(unknown)?;
+    let prediction = if !simulated.conflicted.is_empty() {
+        ReplayPrediction::Conflict {
+            paths: real_names(repo, of, &head, simulated.conflicted.clone(), deadline)?
+                .into_iter()
+                .collect(),
+        }
+    } else if simulated.tree == tree_of(repo, &head, deadline)? {
+        ReplayPrediction::Empty
+    } else {
+        ReplayPrediction::Clean {
+            tree: simulated.tree.clone(),
+        }
+    };
+    if prediction != ReplayPrediction::Empty {
+        let footprint = simulated
+            .footprint(repo, &head, deadline)?
+            .ok_or_else(unknown)?;
+        let (entries, _) = status::entries(&repo.root, Untracked::No, deadline.reads())?;
+        let edited: Vec<_> = unstaged_paths(&entries)
+            .into_iter()
+            .filter(|path| footprint.contains(path))
+            .collect();
+        if !edited.is_empty() {
+            return Err(merge::refused(format!(
+                "These paths have unstaged edits, and {name} would change them: {}. Commit, stash, or undo the edits first.",
+                edited.join(", ")
+            )));
+        }
+        let added = simulated.added(repo, &head, deadline)?;
+        let added: Vec<_> = real_names(repo, of, &head, added.into_iter().collect(), deadline)?
+            .into_iter()
+            .collect();
+        let collisions = merge::colliding_files(repo, WHO, &added, deadline)?;
+        if !collisions.is_empty() {
+            return Err(merge::refused(format!(
+                "Preserve these untracked or ignored files first, because {name} would write to their paths: {}.",
+                collisions.join(", ")
+            )));
+        }
+    }
+    Ok(ReplayReview {
+        root: repo.root(),
+        kind: of.kind,
+        commit: of.commit.clone(),
+        subject: subject(repo, &of.commit, deadline)?,
+        destination: BranchTip {
+            reference: branch,
+            oid: head,
+        },
+        prediction,
+    })
 }
 
 /// Where the resolver's undo history lives while this replay lasts. The path comes
@@ -458,6 +655,181 @@ pub(super) fn admit(
             "{name} is in progress in this worktree. Only resolution and index edits within its affected paths are available until Finish or Abort."
         ))),
     }
+}
+
+fn nothing_to_apply(kind: ReplayKind) -> RepositoryError {
+    RepositoryError::new(
+        ErrorKind::UnchangedPath,
+        format!(
+            "This {} changes nothing, because the result matches HEAD. L1 Git made no commit.",
+            kind.command()
+        ),
+    )
+}
+
+/// Reviews again and compares the whole answer, so nothing the user saw has moved.
+pub(super) fn apply(
+    writing: &Writing<'_>,
+    expect: &Expect,
+    shown: &ReplayReview,
+) -> Result<Applied, RepositoryError> {
+    let &Writing {
+        repo,
+        store,
+        log,
+        deadline,
+        operation,
+    } = writing;
+    if let Some(applied) = already_landed(writing, expect)? {
+        return Ok(applied);
+    }
+    let head = repo.head_as_seen(expect, deadline)?;
+    let of = shown.of();
+    if review(repo, &of, deadline)? != *shown {
+        return Err(RepositoryError::stale(
+            StaleReason::HeadMoved,
+            format!(
+                "What this {} would do changed since L1 Git showed it, so nothing changed. Review it again.",
+                of.kind.command()
+            ),
+        ));
+    }
+    let tree = match &shown.prediction {
+        ReplayPrediction::Clean { tree } => Some(tree.clone()),
+        ReplayPrediction::Conflict { .. } => None,
+        ReplayPrediction::Empty => return Err(nothing_to_apply(of.kind)),
+    };
+    let (applied, _, recorded) = store.record_with(repo, log, operation, |_| {
+        Ok(ReplayChange::Pending {
+            before: head.clone(),
+            tree,
+        })
+    })?;
+    recorded.durable()?;
+    let trace = Trace::create(store, applied.id)?;
+    let txn = ReplayTxn::begin(repo, deadline)?;
+    let wrote = match txn
+        .apply(&of)
+        .traces(&trace.events, &trace.refs)
+        .run(deadline)
+    {
+        Ok(wrote) => wrote,
+        Err(error) => {
+            recorded.stay_pending();
+            return Err(error);
+        }
+    };
+    let txn = txn.renewed();
+    match wrote.code() {
+        Some(0) => {
+            let (made, race) = land(recorded, txn.runner(), &wrote, &trace, &head)?;
+            if let Some(race) = race {
+                return Err(race);
+            }
+            let landed_tree = tree_of(repo, &made, txn.runner().deadline())?;
+            match &shown.prediction {
+                ReplayPrediction::Clean { tree } if *tree == landed_tree => Ok(applied),
+                ReplayPrediction::Clean { .. }
+                | ReplayPrediction::Conflict { .. }
+                | ReplayPrediction::Empty => Err(RepositoryError::new(
+                    ErrorKind::AfterHookFailed {
+                        output: wrote.stderr().to_owned(),
+                    },
+                    format!(
+                        "Git made the commit, but its files differ from what the review showed, as a merge driver or a Git setting can cause. Check the commit. Undo removes it. The {} made {}.",
+                        of.kind.command(),
+                        commit::short(&made)
+                    ),
+                )),
+            }
+        }
+        Some(_) => Err(classify(repo, &txn, shown, &wrote, &trace).unwrap_or_else(|error| error)),
+        // A killed Git may have made the commit. The next request settles from Git's state.
+        None => {
+            recorded.stay_pending();
+            Err(commit::refused(&wrote, &trace))
+        }
+    }
+}
+
+/// Git exited without making a commit, so nothing landed and the entry drops. Git's
+/// state says what happened, never the exit code: `rerere.autoUpdate` exits 1 with
+/// nothing unresolved, and a hook or signing stop exits 128 with the result staged.
+fn classify(
+    repo: &Repo,
+    txn: &ReplayTxn<'_>,
+    shown: &ReplayReview,
+    wrote: &Wrote,
+    trace: &Trace,
+) -> Result<RepositoryError, RepositoryError> {
+    let deadline = txn.runner().deadline();
+    let (entries, _) = status::entries(&repo.root, Untracked::No, deadline.reads())?;
+    let unresolved = merge::unresolved(&entries);
+    // Another process's `index.lock` makes this `None`, which matches no tree below.
+    let staged = if unresolved.is_empty() {
+        merge::staged_tree(repo, deadline).ok()
+    } else {
+        None
+    };
+    let matches_head =
+        staged.is_some() && staged == Some(tree_of(repo, &shown.destination.oid, deadline)?);
+    let marked = sync::pseudoref_exists(&repo.root, shown.kind.marker(), deadline.reads())?;
+    if !marked {
+        let predicted = match &shown.prediction {
+            ReplayPrediction::Clean { tree } => Some(tree),
+            ReplayPrediction::Conflict { .. } | ReplayPrediction::Empty => None,
+        };
+        if shown.kind != ReplayKind::Revert {
+            return Ok(commit::refused(wrote, trace));
+        }
+        if predicted.is_some() && predicted == staged.as_ref() {
+            // Git writes REVERT_HEAD only on a conflict, so a clean revert that a hook
+            // or signing stopped has none. Writing it makes this a pick's stop.
+            if let Err(error) = txn
+                .mark_revert(&shown.commit)
+                .run(deadline)
+                .and_then(Wrote::succeeded)
+            {
+                return Ok(RepositoryError::new(
+                    ErrorKind::GitFailed,
+                    format!(
+                        "{} The result stays staged with no revert in progress, because L1 Git could not mark one. Commit it, or unstage and discard it. {}",
+                        commit::refused(wrote, trace).message,
+                        error.message
+                    ),
+                ));
+            }
+        } else if matches_head && wrote.code() == Some(1) {
+            // An empty revert leaves MERGE_MSG and no marker, and `--abort` refuses it.
+            let _ = fs::remove_file(repo.git_dir.join("MERGE_MSG"));
+            return Ok(nothing_to_apply(shown.kind));
+        } else {
+            return Ok(commit::refused(wrote, trace));
+        }
+    } else if matches_head && txn.abort(shown.kind).run(deadline)?.code() == Some(0) {
+        return Ok(nothing_to_apply(shown.kind));
+    }
+    let noun = shown.kind.command();
+    Ok(if unresolved.is_empty() {
+        RepositoryError::new(
+            ErrorKind::ReplayStopped {
+                output: wrote.stderr().to_owned(),
+            },
+            format!(
+                "{} The result is staged. Finish or abort the {noun}.",
+                commit::refused(wrote, trace).message
+            ),
+        )
+    } else {
+        RepositoryError::new(
+            ErrorKind::ReplayStopped {
+                output: String::new(),
+            },
+            format!(
+                "The {noun} stopped on a conflict, so Git made no commit. Resolve it, then finish or abort the {noun}."
+            ),
+        )
+    })
 }
 
 /// Runs on the global store, because the result joins global history.
@@ -537,7 +909,7 @@ pub(super) fn finish(
             extra.join(", ")
         )));
     }
-    let edited: Vec<_> = unstaged_paths(repo, deadline)?
+    let edited: Vec<_> = unstaged_paths(&entries)
         .into_iter()
         .filter(|path| footprint.contains(path))
         .collect();
@@ -558,6 +930,7 @@ pub(super) fn finish(
     let txn = CommitTxn::begin(repo, deadline)?;
     let wrote = match txn
         .commit(&[], message)
+        .without_replacements()
         .traces(&trace.events, &trace.refs)
         .run(deadline)
     {
@@ -574,22 +947,8 @@ pub(super) fn finish(
         recorded.stay_pending();
         return Err(commit::refused(&wrote, &trace));
     }
-    let target = Target::of(&head);
-    let update = commit::proved(repo, &wrote, &trace, &target, deadline)?;
-    let race = (update.old.as_ref() != Some(&before))
-        .then(|| commit::raced(commit::Kind::New(staged), &update, &target));
-    let change = RefChange::new(
-        target.at(update.old.as_ref())?,
-        target.at(Some(&update.new))?,
-        None,
-    )?;
-    let landed_tree = tree_of(repo, &update.new, deadline)?;
-    commit::record_commit(
-        recorded,
-        &txn,
-        &Change::Replay(ReplayChange::Landed(change)),
-    )?;
-    if landed_tree != *tree {
+    let (made, race) = land(recorded, txn.runner(), &wrote, &trace, &head)?;
+    if tree_of(repo, &made, deadline)? != *tree {
         return Err(race.unwrap_or_else(|| {
             RepositoryError::new(
                 ErrorKind::AfterHookFailed {
@@ -600,6 +959,32 @@ pub(super) fn finish(
         }));
     }
     race.map_or(Ok(applied), Err)
+}
+
+/// Proves the commit Git made on `head` and completes the entry. An answer of `raced`
+/// comes back beside the commit, because the entry stands either way: Undo moves the
+/// branch back to the commit Git replaced.
+fn land(
+    recorded: Recorded<'_>,
+    runner: &impl Runner,
+    wrote: &Wrote,
+    trace: &Trace,
+    head: &Head,
+) -> Result<(Oid, Option<RepositoryError>), RepositoryError> {
+    let target = Target::of(head);
+    let update = commit::proved(runner.repo(), wrote, trace, &target, runner.deadline())?;
+    let race = (update.old != refs::oid(head)).then(|| commit::raced_new(&update, &target));
+    let change = RefChange::new(
+        target.at(update.old.as_ref())?,
+        target.at(Some(&update.new))?,
+        None,
+    )?;
+    commit::record_commit(
+        recorded,
+        runner,
+        &Change::Replay(ReplayChange::Landed(change)),
+    )?;
+    Ok((update.new, race))
 }
 
 /// The undo log is the receipt for a repeated request. Nothing else records that a
@@ -790,16 +1175,32 @@ fn staged_paths(
     listed_paths(&output).ok_or_else(git::malformed)
 }
 
-fn unstaged_paths(
-    repo: &Repo,
-    deadline: WriteDeadline,
-) -> Result<BTreeSet<String>, RepositoryError> {
-    let output = git::read(
-        &repo.root,
-        &["diff", "--name-only", "--no-renames", "--no-ext-diff", "-z"],
-        deadline.reads(),
-    )?;
-    listed_paths(&output).ok_or_else(git::malformed)
+/// `git diff` would rewrite the index and run `post-index-change` for a file touched
+/// with no edits, even with `GIT_OPTIONAL_LOCKS=0`. `git status` does neither.
+fn unstaged_paths(entries: &[StatusEntry]) -> BTreeSet<String> {
+    entries
+        .iter()
+        .filter_map(|entry| match entry {
+            StatusEntry::Ordinary {
+                path,
+                sides: Sides::Unstaged { .. } | Sides::Both { .. },
+                ..
+            }
+            | StatusEntry::Renamed {
+                path,
+                side:
+                    MoveSide::Staged {
+                        unstaged: Some(_), ..
+                    }
+                    | MoveSide::Unstaged { .. },
+                ..
+            } => Some(path.clone()),
+            StatusEntry::Ordinary { .. }
+            | StatusEntry::Renamed { .. }
+            | StatusEntry::Unmerged { .. }
+            | StatusEntry::Untracked { .. } => None,
+        })
+        .collect()
 }
 
 fn outside(paths: BTreeSet<String>, footprint: &[String]) -> Vec<String> {

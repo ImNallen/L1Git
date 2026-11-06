@@ -33,7 +33,7 @@ pub use merge::{
 };
 use partial::{Action, Part, Picks};
 pub use partial::{LinePick, LineSide};
-pub use replay::{ReplayKind, ReplayOf, ReplayProgress};
+pub use replay::{ReplayKind, ReplayOf, ReplayPrediction, ReplayProgress, ReplayReview};
 pub(crate) use resolution::conflict_file_within;
 use serde::{Deserialize, Serialize};
 pub use stash::StashTip;
@@ -171,6 +171,11 @@ pub enum Operation {
     StashPop { stash: StashTip },
     /// Drops `stash`. Undo stores that same commit at `stash@{0}`.
     StashDrop { stash: StashTip },
+    /// Applies a reviewed commit with `git cherry-pick` or `git revert`, with the
+    /// user's hooks and signing. A clean result is a commit and an undo entry.
+    /// Anything else answers `replayStopped` with no entry, and `mergeState` then
+    /// reads `replay`.
+    Replay { review: ReplayReview },
     /// Commits the cherry-pick or revert that Git holds in progress, with the
     /// user's hooks and signing. `staged` and `tree` are what `mergeState` showed.
     FinishReplay {
@@ -528,6 +533,7 @@ impl Operation {
             Self::StashApply { .. } => LocalWrite::StashApply,
             Self::StashPop { .. } => LocalWrite::StashPop,
             Self::StashDrop { .. } => LocalWrite::StashDrop,
+            Self::Replay { .. } => LocalWrite::ReplayStart,
             Self::FinishReplay { .. } => LocalWrite::ReplayFinish,
         }
     }
@@ -624,6 +630,9 @@ impl Operation {
             Self::StashPop { stash } => stash::apply(&writing, expect, stash, true),
             Self::StashDrop { stash } => {
                 stash::drop_stash(&writing, stash).map(|applied| (applied, None))
+            }
+            Self::Replay { review } => {
+                replay::apply(&writing, expect, review).map(|applied| (applied, None))
             }
             Self::FinishReplay {
                 of,

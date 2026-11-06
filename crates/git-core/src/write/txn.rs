@@ -1,5 +1,5 @@
 use super::{
-    Applied, Change, Operation, ReplayKind, Repo,
+    Applied, Change, Operation, ReplayKind, ReplayOf, Repo,
     store::{LockedStore, Log, Recorded, Step},
 };
 use crate::{
@@ -496,9 +496,10 @@ impl<'r> RefreshTxn<'r> {
     }
 }
 
-/// `--abort` runs as the user on the real index. Git clears the marker last, so a
-/// crash leaves a state where repeating it finishes. On a private index, a crash
-/// before publishing would leave no marker with the conflict still staged.
+/// Runs what a terminal runs, as the user on the real index, so hooks and signing
+/// behave as Git's own. For `--abort`, Git clears the marker last, so a crash leaves
+/// a state where repeating it finishes. On a private index, a crash before publishing
+/// would leave no marker with the conflict still staged.
 pub(crate) struct ReplayTxn<'r>(Outside<'r>);
 
 impl<'r> ReplayTxn<'r> {
@@ -510,8 +511,29 @@ impl<'r> ReplayTxn<'r> {
         self.0.root()
     }
 
+    pub(super) const fn runner(&self) -> &Outside<'r> {
+        &self.0
+    }
+
+    pub(super) fn apply<'a>(&'a self, of: &'a ReplayOf) -> Write<'a> {
+        Write::replay_apply(self, of)
+    }
+
+    /// Writes the marker Git leaves out when a hook or signing stops a clean revert.
+    /// The only place L1 Git touches a marker.
+    pub(super) fn mark_revert<'a>(&'a self, commit: &'a Oid) -> Write<'a> {
+        Write::replay_mark_revert(self, commit)
+    }
+
     pub(super) fn abort(&self, kind: ReplayKind) -> Write<'_> {
         Write::replay_abort(self, kind)
+    }
+
+    pub(super) fn renewed(self) -> Self {
+        Self(Outside {
+            deadline: self.0.deadline.renewed(),
+            ..self.0
+        })
     }
 }
 

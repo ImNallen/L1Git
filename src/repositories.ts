@@ -31,6 +31,7 @@ import {
   filePatchSchema,
   lineStatsSchema,
   refsSchema,
+  replayReviewSchema,
   repositoryErrorSchema,
   snapshotSchema,
   undoHistorySchema,
@@ -57,6 +58,7 @@ type RepositoryRequest =
   | { op: "mergeReview"; path: RepositoryRoot; selection: MergeSelection }
   | { op: "mergeState"; path: RepositoryRoot }
   | { op: "merge"; path: RepositoryRoot; action: MergeAction }
+  | { op: "replayReview"; path: RepositoryRoot; of: ReplayOf }
   | { op: "replayAbort"; path: RepositoryRoot; of: ReplayOf; head: Head }
   | { op: "snapshot"; path: string }
   | { op: "refs"; path: RepositoryRoot }
@@ -85,6 +87,7 @@ const responseSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("mergeReview"), data: mergeReviewSchema }),
   z.object({ op: z.literal("mergeState"), data: mergeStateSchema }),
   z.object({ op: z.literal("merge"), data: mergeReportSchema }),
+  z.object({ op: z.literal("replayReview"), data: replayReviewSchema }),
   z.object({ op: z.literal("replayAbort"), data: mergeStateSchema }),
   z.object({ op: z.literal("snapshot"), data: snapshotSchema }),
   z.object({ op: z.literal("refs"), data: refsSchema }),
@@ -320,6 +323,10 @@ export async function merge(path: RepositoryRoot, action: MergeAction) {
     await run({ op: "merge", path, action: mergeActionSchema.parse(action) })
   ).data;
 }
+export async function replayReview(path: RepositoryRoot, of: ReplayOf) {
+  return (await run({ op: "replayReview", path, of })).data;
+}
+
 export async function replayAbort(
   path: RepositoryRoot,
   of: ReplayOf,

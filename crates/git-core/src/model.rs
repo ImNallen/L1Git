@@ -940,6 +940,13 @@ pub enum ErrorKind {
         /// What Git and the hook printed, up to 64 KiB.
         output: String,
     },
+    /// A cherry-pick or revert did not commit, and Git's state now holds it, so
+    /// `mergeState` reads `replay`.
+    ReplayStopped {
+        /// Empty for a plain conflict. Otherwise what Git or a hook printed, up to
+        /// 64 KiB.
+        output: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
