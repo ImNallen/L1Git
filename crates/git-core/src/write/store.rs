@@ -143,14 +143,22 @@ impl Store {
         id: EntryId,
         name: &str,
     ) -> Result<T, RepositoryError> {
-        let bytes = fs::read(self.entry_dir(id).join(name)).map_err(|error| {
-            if error.kind() == io::ErrorKind::NotFound {
-                history_changed()
-            } else {
-                unreadable(error)
-            }
-        })?;
-        serde_json::from_slice(&bytes).map_err(|_| self.damaged())
+        self.read_if_present(id, name)?.ok_or_else(history_changed)
+    }
+
+    fn read_if_present<T: serde::de::DeserializeOwned>(
+        &self,
+        id: EntryId,
+        name: &str,
+    ) -> Result<Option<T>, RepositoryError> {
+        let bytes = match fs::read(self.entry_dir(id).join(name)) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(unreadable(error)),
+        };
+        serde_json::from_slice(&bytes)
+            .map(Some)
+            .map_err(|_| self.damaged())
     }
 
     fn damaged(&self) -> RepositoryError {
@@ -242,7 +250,10 @@ impl LockedStore {
         opened: &Repo,
         deadline: WriteDeadline,
     ) -> Result<Option<Change>, RepositoryError> {
-        let (applied, change) = self.record_of(id)?;
+        let Some(change) = self.read_if_present::<Change>(id, "change.json")? else {
+            return Ok(None);
+        };
+        let applied = self.applied(id)?;
         if change.keeps_overwritten_files() {
             return Ok(Some(change));
         }
