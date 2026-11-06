@@ -2,7 +2,6 @@ use super::{
     Applied, BranchTip, Change, CommitTxn, Direction, Expect, Operation, ReplayTxn, Repo,
     branches::Writing,
     commit::{self, Target, Trace},
-    files,
     merge::{self, Edit},
     refs::{self, Files, RefChange},
     store::{self, EntryObjects, LockedStore, Recorded},
@@ -487,38 +486,6 @@ pub(super) fn progress(
     }))
 }
 
-/// A path that clashes gets a `~` label in `merge-tree` that names a full commit ID, and
-/// a real pick labels it differently, so only the part before the `~` can be matched.
-/// Git overwrites an ignored file there silently.
-fn at_renamed_paths(
-    repo: &Repo,
-    simulated: &Simulated,
-    deadline: WriteDeadline,
-) -> Result<Vec<String>, RepositoryError> {
-    let renamed: Vec<_> = simulated
-        .conflicted
-        .iter()
-        .filter_map(|path| {
-            let (base, label) = path.rsplit_once('~')?;
-            (label.len() == repo.null_oid.len()
-                && label.bytes().all(|byte| byte.is_ascii_hexdigit()))
-            .then(|| files::fold_for_any_disk(&format!("{base}~")))
-        })
-        .collect();
-    if renamed.is_empty() {
-        return Ok(Vec::new());
-    }
-    Ok(
-        merge::names(repo, WHO, &["ls-files", "--others", "-z"], deadline)?
-            .into_iter()
-            .filter(|path| {
-                let path = files::fold_for_any_disk(path);
-                renamed.iter().any(|base| path.starts_with(base.as_str()))
-            })
-            .collect(),
-    )
-}
-
 /// Every refusal, in one place, so Start re-runs the identical list. Writes only
 /// `merge-tree`'s loose objects.
 pub(super) fn review(
@@ -583,7 +550,9 @@ pub(super) fn review(
     let simulated = simulate(repo, of, &head, deadline)?.ok_or_else(unknown)?;
     let prediction = if !simulated.conflicted.is_empty() {
         ReplayPrediction::Conflict {
-            paths: simulated.conflicted.iter().cloned().collect(),
+            paths: real_names(repo, of, &head, simulated.conflicted.clone(), deadline)?
+                .into_iter()
+                .collect(),
         }
     } else if simulated.tree == tree_of(repo, &head, deadline)? {
         ReplayPrediction::Empty
@@ -608,8 +577,10 @@ pub(super) fn review(
             )));
         }
         let added = simulated.added(repo, &head, deadline)?;
-        let mut collisions = merge::colliding_files(repo, WHO, &added, deadline)?;
-        collisions.extend(at_renamed_paths(repo, &simulated, deadline)?);
+        let added: Vec<_> = real_names(repo, of, &head, added.into_iter().collect(), deadline)?
+            .into_iter()
+            .collect();
+        let collisions = merge::colliding_files(repo, WHO, &added, deadline)?;
         if !collisions.is_empty() {
             return Err(merge::refused(format!(
                 "Preserve these untracked or ignored files first, because {name} would write to their paths: {}.",

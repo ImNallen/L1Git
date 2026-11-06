@@ -3881,6 +3881,15 @@ fn review_refuses_an_ignored_file_at_the_name_git_gives_a_renamed_path() {
         let error = repo.review(&of(Pick::CherryPick, &commit)).unwrap_err();
         assert!(error.message.contains(&name), "{format}: {}", error.message);
         assert_eq!(repo.read(&name), "mine\n", "{format}");
+
+        fs::remove_file(repo.root.join(&name)).unwrap();
+        repo.put("d~", "editor backup\n");
+        let review = repo.review(&of(Pick::CherryPick, &commit)).unwrap();
+        assert_eq!(
+            review.prediction,
+            ReplayPrediction::Conflict { paths: vec![name] },
+            "{format}: the review names the path Git will write"
+        );
     }
 }
 
