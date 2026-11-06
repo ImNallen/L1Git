@@ -2,7 +2,8 @@ use super::{Capped, Deadline, Work, base, execute, text, too_old, without_prompt
 use crate::{
     ErrorKind, RepositoryError, StaleReason, stderr,
     write::{
-        CommitTxn, HOOK_OFF, MergeIndexTxn, MergeTxn, Outside, Published, RefTxn, ScratchIndex, Txn,
+        CommitTxn, HOOK_OFF, MergeIndexTxn, MergeTxn, Outside, Published, RefTxn, ReplayKind,
+        ReplayTxn, ScratchIndex, Txn,
     },
 };
 use std::{
@@ -18,6 +19,7 @@ pub(crate) enum LocalWrite {
     MergeFinish,
     MergeAbort,
     ReplayFinish,
+    ReplayAbort,
     SaveConflict,
     StageFiles,
     UnstageFiles,
@@ -69,6 +71,7 @@ impl LocalWrite {
             | Self::MergeFinish
             | Self::MergeAbort
             | Self::ReplayFinish
+            | Self::ReplayAbort
             | Self::Commit
             | Self::Amend
             | Self::EditMessage
@@ -90,6 +93,7 @@ impl LocalWrite {
             Self::MergeFinish => "Finishing the merge",
             Self::MergeAbort => "Aborting the merge",
             Self::ReplayFinish => "Finishing the cherry-pick or revert",
+            Self::ReplayAbort => "Aborting the cherry-pick or revert",
             Self::SaveConflict => "Saving the conflict result",
             Self::StageFiles => "Staging the files",
             Self::UnstageFiles => "Unstaging the files",
@@ -126,6 +130,7 @@ impl LocalWrite {
             Self::MergeFinish => "l1git merge finish",
             Self::MergeAbort => "l1git merge abort",
             Self::ReplayFinish => "l1git replay finish",
+            Self::ReplayAbort => "l1git replay abort",
             Self::SaveConflict => "l1git save conflict",
             Self::StageFiles => "l1git stage",
             Self::UnstageFiles => "l1git unstage",
@@ -154,7 +159,7 @@ impl LocalWrite {
 
     pub(super) const fn left_behind(self) -> &'static str {
         match self {
-            Self::MergeStart | Self::MergeFinish | Self::MergeAbort => {
+            Self::MergeStart | Self::MergeFinish | Self::MergeAbort | Self::ReplayAbort => {
                 "L1 Git rereads the merge state to see what changed."
             }
             Self::StageFiles
@@ -329,6 +334,18 @@ impl<'a> Write<'a> {
         Self::new(txn.runner(), txn.runner().root(), &args)
             .uncapped()
             .lazy_fetch_unprompted()
+    }
+
+    pub(crate) fn replay_abort(txn: &'a ReplayTxn<'_>, kind: ReplayKind) -> Self {
+        Self {
+            dir: txn.root(),
+            args: vec![kind.command(), "--abort"],
+            env: Vec::new(),
+            input: None,
+            cap: None,
+            as_user: true,
+            lazy_fetch: true,
+        }
     }
 
     pub(crate) fn branch(txn: &'a RefTxn<'_>, args: &[&'a str]) -> Self {

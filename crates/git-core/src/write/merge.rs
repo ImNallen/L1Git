@@ -1,5 +1,5 @@
 use super::{
-    BranchTip, Change, CommitTxn, EntryId, MergeIndexTxn, MergeTxn, Operation, Published,
+    BranchTip, Change, CommitTxn, EntryId, MergeIndexTxn, MergeTxn, Operation, Published, ReplayOf,
     ReplayProgress, Repo, commit, index, refs, replay,
     store::{EntryObjects, Identity, LockedStore, Objects},
     txn::Runner,
@@ -1123,6 +1123,22 @@ impl Coordinator {
                 }),
             },
         )
+    }
+
+    /// Ends the cherry-pick or revert Git holds in progress, and answers the state
+    /// after it. With nothing in progress this runs nothing and answers `Idle`.
+    pub fn abort_replay(
+        &self,
+        path: &str,
+        of: &ReplayOf,
+        head: &Head,
+    ) -> Result<MergeState, RepositoryError> {
+        self.merge_locked(path, LocalWrite::ReplayAbort, |repo, _, deadline| {
+            replay::abort(repo, of, head, deadline)?;
+            let deadline = deadline.renewed();
+            let record = reconcile(repo, deadline)?;
+            state(repo, record.as_ref(), deadline)
+        })
     }
 
     pub fn merge(&self, path: &str, action: &MergeAction) -> Result<MergeReport, RepositoryError> {

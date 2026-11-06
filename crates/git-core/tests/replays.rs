@@ -112,6 +112,10 @@ const FORCE_QUIT: &str = "L1GIT_REPLAY_FORCE_QUIT";
 /// Kills Git and the process that runs it, as a force quit in that hook would.
 const KILL_GIT_AND_APP: &str = "git=$PPID\napp=$(ps -o ppid= -p $git)\nkill -9 $app $git\n";
 
+/// Kills every `git` above this process and leaves the app alone. `--abort` runs
+/// `git reset`, so more than one is running.
+const KILL_GIT_ANCESTORS: &str = "at=$PPID\nwhile [ \"$at\" -gt 1 ]; do\n  name=$(ps -o comm= -p $at)\n  up=$(ps -o ppid= -p $at)\n  [ \"${name##*/}\" = git ] && kill -9 $at\n  at=$up\ndone\n";
+
 fn finish_operation(shown: &ReplayProgress, message: &str) -> Operation {
     Operation::FinishReplay {
         of: shown.of(),
@@ -321,6 +325,15 @@ impl Repo {
 
     fn finish(&self, message: &str) -> Result<Applied, RepositoryError> {
         self.finish_as_shown(&self.progress(), message)
+    }
+
+    fn abort_as_shown(&self, shown: &ReplayProgress) -> Result<MergeState, RepositoryError> {
+        self.coordinator()
+            .abort_replay(self.path(), &shown.of(), &shown.destination)
+    }
+
+    fn abort(&self) -> Result<MergeState, RepositoryError> {
+        self.abort_as_shown(&self.progress())
     }
 
     /// Runs Finish in a process of its own, for a hook that kills that process.
@@ -1581,5 +1594,456 @@ fn a_commit_after_a_force_quit_settles_by_its_parent_and_tree() {
         repo.git(&["add", "u.txt"]);
         repo.git(&["commit", "--quiet", "-m", "from a terminal"]);
         assert_eq!(repo.history().undo, None, "{format} {pick:?}: another tree");
+    }
+}
+
+#[test]
+fn abort_restores_head_and_every_file() {
+    for (format, pick) in cases() {
+        let (repo, _) = Repo::stopped(format, pick);
+        let before = repo.git(&["rev-parse", "HEAD", "HEAD^{tree}"]);
+        assert_eq!(repo.abort().unwrap(), MergeState::Idle, "{format} {pick:?}");
+        assert_eq!(repo.git(&["rev-parse", "HEAD", "HEAD^{tree}"]), before);
+        assert_eq!(repo.status(), "", "{format} {pick:?}");
+        assert_eq!(repo.read("f.txt"), "a\nOURS\nc\n");
+        assert!(!repo.has_marker(pick));
+        assert_eq!(repo.state(), MergeState::Idle);
+    }
+}
+
+#[test]
+fn abort_works_over_the_wire_after_a_resolved_conflict() {
+    for (format, pick) in cases() {
+        let (repo, _) = Repo::stopped(format, pick);
+        repo.resolve();
+        let shown = repo.progress();
+        let answer = run(
+            &repo.coordinator(),
+            Request::ReplayAbort {
+                path: repo.path().to_owned(),
+                of: shown.of(),
+                head: shown.destination,
+            },
+        )
+        .unwrap();
+        assert!(
+            matches!(answer, Response::ReplayAbort(MergeState::Idle)),
+            "{format} {pick:?}: {answer:?}"
+        );
+        assert_eq!(repo.read("f.txt"), "a\nOURS\nc\n");
+        assert_eq!(repo.status(), "");
+    }
+}
+
+#[test]
+fn abort_ends_a_modify_delete_conflict() {
+    for format in FORMATS {
+        for (repo, _) in modify_delete_stops(format) {
+            let head = repo.oid("HEAD");
+            assert_eq!(repo.abort().unwrap(), MergeState::Idle, "{format}");
+            assert_eq!(repo.oid("HEAD"), head);
+            assert_eq!(repo.status(), "", "{format}");
+        }
+    }
+}
+
+#[test]
+fn abort_puts_a_rename_back() {
+    for format in FORMATS {
+        let repo = Repo::new(format);
+        repo.put("g.txt", &numbered("g"));
+        repo.commit_all("adds g");
+        repo.git(&["switch", "--quiet", "-c", "topic"]);
+        repo.put("f.txt", "a\nTHEIRS\nc\n");
+        repo.git(&["mv", "g.txt", "g2.txt"]);
+        let commit = repo.commit_all("changes f, renames g");
+        repo.git(&["switch", "--quiet", "main"]);
+        repo.put("f.txt", "a\nOURS\nc\n");
+        repo.commit_all("ours");
+        repo.fails(&["cherry-pick", &commit]);
+        assert_eq!(repo.abort().unwrap(), MergeState::Idle, "{format}");
+        assert_eq!(repo.read("g.txt"), numbered("g"));
+        assert!(!repo.root.join("g2.txt").exists(), "{format}");
+        assert_eq!(repo.status(), "");
+    }
+}
+
+#[test]
+fn a_staged_edit_outside_the_footprint_refuses_abort_and_keeps_its_bytes() {
+    for (format, pick) in cases() {
+        let (repo, _) = Repo::stopped(format, pick);
+        repo.put("u.txt", "staged\n");
+        repo.git(&["add", "u.txt"]);
+        let staged = repo.git(&["rev-parse", ":u.txt"]);
+        let error = repo.abort().unwrap_err();
+        assert_eq!(error.kind, ErrorKind::Conflict, "{format} {pick:?}");
+        assert!(error.message.contains("u.txt"), "{}", error.message);
+        assert!(repo.has_marker(pick));
+        assert_eq!(repo.git(&["rev-parse", ":u.txt"]), staged);
+        assert_eq!(repo.read("u.txt"), "staged\n");
+        assert_eq!(repo.progress().unresolved, ["f.txt"]);
+    }
+}
+
+#[test]
+fn a_revert_with_no_commit_and_an_earlier_staged_edit_refuses_abort() {
+    for format in FORMATS {
+        let repo = Repo::new(format);
+        repo.put("f.txt", "a\nTHEIRS\nc\n");
+        let commit = repo.commit_all("theirs");
+        repo.put("f.txt", "a\nOURS\nc\n");
+        repo.commit_all("ours");
+        repo.put("u.txt", "staged\n");
+        repo.git(&["add", "u.txt"]);
+        repo.fails(&["revert", "--no-commit", &commit]);
+        let error = repo.abort().unwrap_err();
+        assert!(
+            error.message.contains("u.txt"),
+            "{format}: {}",
+            error.message
+        );
+        assert_eq!(repo.read("u.txt"), "staged\n");
+    }
+}
+
+#[test]
+fn an_unrelated_unstaged_edit_survives_abort() {
+    for (format, pick) in cases() {
+        let (repo, _) = Repo::stopped(format, pick);
+        repo.put("v.txt", "edited\n");
+        assert_eq!(repo.abort().unwrap(), MergeState::Idle, "{format} {pick:?}");
+        assert_eq!(repo.read("v.txt"), "edited\n");
+        assert_eq!(repo.status(), " M v.txt\n");
+    }
+}
+
+#[test]
+fn an_unstaged_edit_on_a_resolved_path_stops_abort_and_keeps_the_replay() {
+    for (format, pick) in cases() {
+        let (repo, _) = Repo::stopped(format, pick);
+        repo.put("f.txt", "a\nRESOLVED\nc\n");
+        repo.git(&["add", "f.txt"]);
+        repo.put("f.txt", "a\nMORE\nc\n");
+        let head = repo.oid("HEAD");
+        let error = repo.abort().unwrap_err();
+        assert_eq!(error.kind, ErrorKind::Conflict, "{format} {pick:?}");
+        assert!(error.message.contains("f.txt"), "{}", error.message);
+        assert!(repo.has_marker(pick));
+        assert_eq!(repo.oid("HEAD"), head);
+        assert_eq!(repo.read("f.txt"), "a\nMORE\nc\n");
+        repo.git(&["add", "f.txt"]);
+        assert_eq!(repo.abort().unwrap(), MergeState::Idle);
+    }
+}
+
+#[test]
+fn a_repeated_abort_answers_idle_and_runs_nothing() {
+    for (format, pick) in cases() {
+        let (repo, _) = Repo::stopped(format, pick);
+        let shown = repo.progress();
+        assert_eq!(repo.abort_as_shown(&shown).unwrap(), MergeState::Idle);
+        let runs = repo.directory.path().join("runs");
+        for hook in ["post-index-change", "reference-transaction"] {
+            repo.hook(hook, &format!("echo run >> '{}'\n", runs.display()));
+        }
+        assert_eq!(repo.abort_as_shown(&shown).unwrap(), MergeState::Idle);
+        assert!(!runs.exists(), "{format} {pick:?}: Git ran again");
+        repo.no_hooks();
+    }
+}
+
+#[test]
+fn an_abort_naming_another_commit_or_head_is_stale_and_changes_nothing() {
+    for (format, pick) in cases() {
+        let (repo, _) = Repo::stopped(format, pick);
+        let shown = repo.progress();
+        let stale = ErrorKind::StaleView {
+            reason: StaleReason::HeadMoved,
+        };
+        let other = ReplayOf {
+            kind: shown.kind,
+            commit: Oid::try_from(repo.oid("HEAD")).unwrap(),
+        };
+        let error = repo
+            .coordinator()
+            .abort_replay(repo.path(), &other, &shown.destination)
+            .unwrap_err();
+        assert_eq!(error.kind, stale, "{format} {pick:?}");
+        assert!(repo.has_marker(pick));
+        repo.move_head_with_plumbing();
+        assert_eq!(repo.abort_as_shown(&shown).unwrap_err().kind, stale);
+        assert!(repo.has_marker(pick), "{format} {pick:?}");
+    }
+}
+
+fn abort_refused(repo: &Repo, commit: &str, pick: Pick) {
+    let head = repo.oid("HEAD");
+    let error = repo
+        .coordinator()
+        .abort_replay(
+            repo.path(),
+            &ReplayOf {
+                kind: match pick {
+                    Pick::CherryPick => ReplayKind::CherryPick,
+                    Pick::Revert => ReplayKind::Revert,
+                },
+                commit: Oid::try_from(commit.to_owned()).unwrap(),
+            },
+            &worktree_status(repo.path()).unwrap().head,
+        )
+        .unwrap_err();
+    assert_eq!(error.kind, ErrorKind::Conflict, "{}", error.message);
+    assert_eq!(repo.oid("HEAD"), head);
+    assert!(repo.has_marker(pick));
+}
+
+#[test]
+fn abort_refuses_a_sequence_a_pruned_commit_and_a_footprint_it_cannot_name() {
+    for format in FORMATS {
+        let repo = Repo::new(format);
+        repo.git(&["switch", "--quiet", "-c", "topic"]);
+        repo.put("f.txt", "a\nTHEIRS\nc\n");
+        let first = repo.commit_all("first");
+        repo.put("u.txt", "theirs\n");
+        repo.commit_all("second");
+        repo.git(&["switch", "--quiet", "main"]);
+        repo.put("f.txt", "a\nOURS\nc\n");
+        repo.commit_all("ours");
+        repo.fails(&["cherry-pick", "topic~1", "topic"]);
+        abort_refused(&repo, &first, Pick::CherryPick);
+
+        let (repo, commit) = Repo::stopped(format, Pick::CherryPick);
+        repo.git(&["branch", "--quiet", "-D", "topic"]);
+        repo.git(&["reflog", "expire", "--expire=now", "--all"]);
+        repo.git(&["gc", "--quiet", "--prune=now"]);
+        abort_refused(&repo, &commit, Pick::CherryPick);
+
+        let (repo, commit) = Repo::stopped(format, Pick::CherryPick);
+        let blob = repo.oid(&format!("{commit}^:f.txt"));
+        fs::remove_file(
+            repo.root
+                .join(".git/objects")
+                .join(&blob[..2])
+                .join(&blob[2..]),
+        )
+        .unwrap();
+        repo.assert_external(format);
+        let error = repo
+            .coordinator()
+            .abort_replay(
+                repo.path(),
+                &ReplayOf {
+                    kind: ReplayKind::CherryPick,
+                    commit: Oid::try_from(commit).unwrap(),
+                },
+                &worktree_status(repo.path()).unwrap().head,
+            )
+            .unwrap_err();
+        assert_eq!(
+            error.kind,
+            ErrorKind::Conflict,
+            "{format}: {}",
+            error.message
+        );
+        assert!(repo.has_marker(Pick::CherryPick));
+    }
+}
+
+#[test]
+fn a_linked_worktree_aborts_only_its_own_replay() {
+    for (format, pick) in cases() {
+        let repo = Repo::new(format);
+        let linked = repo.linked("linked", "busy");
+        stop(&linked, pick);
+        let path = linked.to_str().unwrap();
+        let coordinator = repo.coordinator();
+        let MergeState::Replay { progress } = coordinator.merge_state(path).unwrap() else {
+            panic!("{format} {pick:?}");
+        };
+        let state = coordinator
+            .abort_replay(path, &progress.of(), &progress.destination)
+            .unwrap();
+        assert_eq!(state, MergeState::Idle, "{format} {pick:?}");
+        assert_eq!(git(&linked, &["status", "--porcelain"]), "");
+    }
+}
+
+/// A1, by a real kill: a smudge filter kills Git while `git reset --merge` is
+/// writing files during Abort.
+#[test]
+fn an_abort_killed_while_writing_files_finishes_when_repeated() {
+    for (format, pick) in cases() {
+        let (repo, _) = Repo::stopped(format, pick);
+        let head = repo.oid("HEAD");
+        let filter = repo.directory.path().join("kill-git");
+        fs::write(&filter, format!("#!/bin/sh\n{KILL_GIT_ANCESTORS}cat\n")).unwrap();
+        fs::set_permissions(&filter, fs::Permissions::from_mode(0o755)).unwrap();
+        repo.git(&["config", "filter.killed.smudge", filter.to_str().unwrap()]);
+        fs::write(
+            repo.root.join(".git/info/attributes"),
+            "f.txt filter=killed\n",
+        )
+        .unwrap();
+        let shown = repo.progress();
+
+        let error = repo.abort_as_shown(&shown).unwrap_err();
+        assert_eq!(
+            error.kind,
+            ErrorKind::GitFailed,
+            "{format} {pick:?}: {}",
+            error.message
+        );
+        assert!(repo.has_marker(pick), "{format} {pick:?}");
+        assert_eq!(repo.oid("HEAD"), head);
+        repo.git(&["config", "--unset", "filter.killed.smudge"]);
+
+        let lock = repo.root.join(".git/index.lock");
+        if lock.exists() {
+            let error = repo.abort_as_shown(&shown).unwrap_err();
+            assert_eq!(error.kind, ErrorKind::Conflict, "{}", error.message);
+            assert!(error.message.contains("index.lock"), "{}", error.message);
+            fs::remove_file(&lock).unwrap();
+        }
+        let state = repo
+            .coordinator()
+            .abort_replay(repo.path(), &shown.of(), &shown.destination)
+            .unwrap();
+        assert_eq!(state, MergeState::Idle, "{format} {pick:?}");
+        assert_eq!(repo.oid("HEAD"), head);
+        assert_eq!(repo.read("f.txt"), "a\nOURS\nc\n");
+        assert_eq!(repo.status(), "", "{format} {pick:?}");
+    }
+}
+
+/// A2, by a real kill: `post-index-change` runs with the index written and the
+/// marker still set.
+#[test]
+fn an_abort_killed_after_the_index_was_written_finishes_when_repeated() {
+    for (format, pick) in cases() {
+        let (repo, _) = Repo::stopped(format, pick);
+        let head = repo.oid("HEAD");
+        let shown = repo.progress();
+        repo.hook("post-index-change", KILL_GIT_ANCESTORS);
+        let error = repo.abort_as_shown(&shown).unwrap_err();
+        assert_eq!(
+            error.kind,
+            ErrorKind::GitFailed,
+            "{format} {pick:?}: {}",
+            error.message
+        );
+        repo.no_hooks();
+        assert!(repo.has_marker(pick), "{format} {pick:?}");
+        assert_eq!(
+            repo.status(),
+            "",
+            "the index and files are already restored"
+        );
+
+        let progress = repo.progress();
+        assert!(progress.empty, "{format} {pick:?}");
+        assert_eq!(repo.abort_as_shown(&progress).unwrap(), MergeState::Idle);
+        assert!(!repo.has_marker(pick));
+        assert_eq!(repo.oid("HEAD"), head);
+    }
+}
+
+/// A3, by a terminal abort: the marker is gone, so the next request sweeps the
+/// journal and answers idle.
+#[test]
+fn an_abort_that_ended_before_the_answer_reads_as_idle_and_sweeps() {
+    for (format, pick) in cases() {
+        let (repo, _) = Repo::stopped(format, pick);
+        repo.save("f.txt", "a\nRESOLVED\nc\n");
+        let shown = repo.progress();
+        repo.git(&[pick.command(), "--abort"]);
+        assert_eq!(repo.abort_as_shown(&shown).unwrap(), MergeState::Idle);
+        assert_eq!(repo.history().undo, None, "{format} {pick:?}");
+        assert_eq!(
+            fs::read_dir(repo.root.join(".git/l1git/replay"))
+                .unwrap()
+                .count(),
+            0,
+            "{format} {pick:?}"
+        );
+    }
+}
+
+const KILL_AT_REF_COMMIT: &str = "[ \"$1\" = committed ] || exit 0\n";
+
+/// F3, by hook kill: Git and the app die as the ref moves, with the marker still set.
+fn killed_as_the_ref_moved(format: &str, pick: Pick) -> (Repo, String) {
+    let (repo, _) = Repo::stopped(format, pick);
+    repo.resolve();
+    let before = repo.oid("HEAD");
+    repo.hook(
+        "reference-transaction",
+        &format!("{KILL_AT_REF_COMMIT}{KILL_GIT_AND_APP}"),
+    );
+    repo.force_quit_during_finish();
+    assert_eq!(
+        repo.oid("HEAD^"),
+        before,
+        "{format} {pick:?}: the ref moved"
+    );
+    assert!(
+        repo.has_marker(pick),
+        "{format} {pick:?}: the marker stayed"
+    );
+    (repo, before)
+}
+
+#[test]
+fn a_kill_as_the_ref_moves_reads_as_empty_and_abort_keeps_the_commit() {
+    for (format, pick) in cases() {
+        let (repo, _) = killed_as_the_ref_moved(format, pick);
+        let _ = fs::remove_file(repo.root.join(".git/index.lock"));
+        let progress = repo.progress();
+        assert!(progress.empty, "{format} {pick:?}");
+        let error = repo.finish_as_shown(&progress, "Again\n").unwrap_err();
+        assert_eq!(error.kind, ErrorKind::UnchangedPath, "{format} {pick:?}");
+        assert!(error.message.contains("Abort"), "{}", error.message);
+
+        let made = repo.oid("HEAD");
+        assert_eq!(repo.abort_as_shown(&progress).unwrap(), MergeState::Idle);
+        assert_eq!(
+            repo.oid("HEAD"),
+            made,
+            "{format} {pick:?}: Abort keeps the commit"
+        );
+        assert_eq!(repo.git(&["log", "-1", "--format=%s"]).trim(), "Finished");
+        assert_eq!(repo.status(), "");
+        assert!(
+            matches!(
+                repo.history().undo.map(|entry| entry.operation),
+                Some(Operation::FinishReplay { .. })
+            ),
+            "{format} {pick:?}: the pending entry settles once the marker is gone"
+        );
+    }
+}
+
+/// F4, by constructing the state from F3: no hook runs between Git clearing the
+/// marker and committing the index, so this clears the marker and writes the lock.
+#[test]
+fn a_kill_after_the_marker_went_settles_with_the_lock_still_there() {
+    for (format, pick) in cases() {
+        let (repo, _) = killed_as_the_ref_moved(format, pick);
+        repo.git(&["update-ref", "--no-deref", "-d", pick.marker()]);
+        let lock = repo.root.join(".git/index.lock");
+        fs::write(&lock, "").unwrap();
+        assert_eq!(repo.state(), MergeState::Idle, "{format} {pick:?}");
+        assert!(
+            matches!(
+                repo.history().undo.map(|entry| entry.operation),
+                Some(Operation::FinishReplay { .. })
+            ),
+            "{format} {pick:?}"
+        );
+        fs::remove_file(&lock).unwrap();
+        assert_eq!(
+            repo.status(),
+            "",
+            "{format} {pick:?}: the index equals HEAD"
+        );
     }
 }

@@ -1,5 +1,5 @@
 use super::{
-    Applied, Change, CommitTxn, Direction, Expect, Operation, Repo,
+    Applied, Change, CommitTxn, Direction, Expect, Operation, ReplayTxn, Repo,
     branches::Writing,
     commit::{self, Target, Trace},
     merge::{self, Edit},
@@ -36,6 +36,10 @@ impl ReplayKind {
             Self::CherryPick => "CHERRY_PICK_HEAD",
             Self::Revert => "REVERT_HEAD",
         }
+    }
+
+    pub(crate) const fn command(self) -> &'static str {
+        self.slug()
     }
 
     pub(super) const fn operation(self) -> InProgress {
@@ -599,6 +603,65 @@ pub(super) fn landed(
         head,
         None,
     )?)))
+}
+
+/// Refuses a staged edit outside the footprint before Git runs, because `--abort`
+/// silently drops it along with the conflict. Git owns everything after that: it
+/// restores the files and clears the marker last, so repeating a stopped abort
+/// finishes it. Nothing records the abort, so Undo cannot put a conflict back.
+pub(super) fn abort(
+    repo: &Repo,
+    of: &ReplayOf,
+    head: &Head,
+    deadline: WriteDeadline,
+) -> Result<(), RepositoryError> {
+    let running = sync::in_progress(&repo.root, deadline.reads())?;
+    let Some(operation) = running.first() else {
+        return Ok(());
+    };
+    let Some(found) = in_flight(repo, deadline)? else {
+        return Err(merge::refused(format!(
+            "{} is in progress in this worktree, and L1 Git cannot abort it. End it with Git.",
+            refs::capitalized(operation.name())
+        )));
+    };
+    if found != *of || repo.head(deadline)? != *head {
+        return Err(RepositoryError::stale(
+            StaleReason::HeadMoved,
+            "The cherry-pick or revert in progress, or its branch, changed since L1 Git showed it, so nothing changed. Refresh.",
+        ));
+    }
+    let current = refs::oid(head).ok_or_else(git::malformed)?;
+    settle_journal(repo, of, &current, deadline)?;
+    merge::safe_index_for(repo, WHO, deadline)?;
+    let footprint = known_footprint(repo, of, &current, deadline)?;
+    let extra = outside(staged_paths(repo, &current, deadline)?, &footprint);
+    if !extra.is_empty() {
+        return Err(merge::refused(format!(
+            "Abort would discard these staged changes, because {} does not change them: {}. Preserve them, then abort.",
+            of.kind.operation().name(),
+            extra.join(", ")
+        )));
+    }
+    let txn = ReplayTxn::begin(repo, deadline)?;
+    let wrote = txn.abort(of.kind).run(deadline)?;
+    let deadline = deadline.renewed();
+    if wrote.stderr().contains("not uptodate") {
+        return Err(merge::refused(format!(
+            "A file has unstaged edits, so Git did not abort. Stage the file or undo the edits, then abort. Git said: {}",
+            crate::stderr::summarize(wrote.stderr())
+        )));
+    }
+    wrote.succeeded()?;
+    if sync::pseudoref_exists(&repo.root, of.kind.marker(), deadline.reads())?
+        || repo.head(deadline)? != *head
+    {
+        return Err(RepositoryError::new(
+            ErrorKind::GitFailed,
+            "Git finished the abort, but its marker or HEAD did not end as expected. Inspect the repository with Git.",
+        ));
+    }
+    Ok(())
 }
 
 pub(super) fn step(
