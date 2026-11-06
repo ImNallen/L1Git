@@ -353,3 +353,16 @@ it("Escape and Cancel close it and write nothing", async () => {
   expect(close).toHaveBeenCalledTimes(2);
   expect(write).not.toHaveBeenCalled();
 });
+
+it("keeps the open review when the operation it started reaches the panel", async () => {
+  vi.mocked(repositories.replayReview).mockResolvedValue(
+    reviewOf("cherryPick", { kind: "conflict", paths: ["conflict.txt"] }),
+  );
+  await show();
+  expect(dialogText()).toContain("Will conflict in: conflict.txt");
+
+  await show({ state: replayState() });
+
+  expect(repositories.replayReview).toHaveBeenCalledOnce();
+  expect(dialogText()).toContain("Will conflict in: conflict.txt");
+});

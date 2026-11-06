@@ -86,67 +86,70 @@ export function ReplayPanel({
       onClose={onCloseReview}
     />
   );
-  if (!progress && !notice) return dialog;
   return (
-    <section className="merge-controls" aria-label="Cherry-pick or revert">
-      {notice && (notice.error || !progress) && (
-        <div
-          role={notice.error ? "alert" : "status"}
-          className={notice.error ? "error-message" : "muted"}
-        >
-          {notice.message}
-        </div>
-      )}
-      {progress && (
-        <ActiveReplay
-          key={`${progress.kind}:${progress.commit}`}
-          progress={progress}
-          stopped={
-            stop?.kind === progress.kind && stop.commit === progress.commit
-              ? stop.problem
-              : null
-          }
-          busy={busy}
-          write={(request) => {
-            setNotice(null);
-            setStop(null);
-            return write(root, request);
-          }}
-          abort={async () => {
-            setNotice(null);
-            setStop(null);
-            const { title } = replayNames[progress.kind];
-            let result: ReplayAbortOutcome;
-            try {
-              result = await abort(
-                root,
-                { kind: progress.kind, commit: progress.commit },
-                progress.destination,
-              );
-            } catch (error) {
-              result = { kind: "failed", problem: problemFrom(error) };
-            }
-            setNotice(
-              result.kind === "aborted"
-                ? {
-                    message: `${title} aborted. Its resolution Undo is closed, and earlier history is available again.`,
-                    error: false,
-                  }
-                : {
-                    message:
-                      result.kind === "failed"
-                        ? result.problem.message
-                        : "Wait for the current operation to finish.",
-                    error: true,
-                  },
-            );
-            return result;
-          }}
-          onInspect={onInspect}
-        />
+    <>
+      {(progress || notice) && (
+        <section className="merge-controls" aria-label="Cherry-pick or revert">
+          {notice && (notice.error || !progress) && (
+            <div
+              role={notice.error ? "alert" : "status"}
+              className={notice.error ? "error-message" : "muted"}
+            >
+              {notice.message}
+            </div>
+          )}
+          {progress && (
+            <ActiveReplay
+              key={`${progress.kind}:${progress.commit}`}
+              progress={progress}
+              stopped={
+                stop?.kind === progress.kind && stop.commit === progress.commit
+                  ? stop.problem
+                  : null
+              }
+              busy={busy}
+              write={(request) => {
+                setNotice(null);
+                setStop(null);
+                return write(root, request);
+              }}
+              abort={async () => {
+                setNotice(null);
+                setStop(null);
+                const { title } = replayNames[progress.kind];
+                let result: ReplayAbortOutcome;
+                try {
+                  result = await abort(
+                    root,
+                    { kind: progress.kind, commit: progress.commit },
+                    progress.destination,
+                  );
+                } catch (error) {
+                  result = { kind: "failed", problem: problemFrom(error) };
+                }
+                setNotice(
+                  result.kind === "aborted"
+                    ? {
+                        message: `${title} aborted. Its resolution Undo is closed, and earlier history is available again.`,
+                        error: false,
+                      }
+                    : {
+                        message:
+                          result.kind === "failed"
+                            ? result.problem.message
+                            : "Wait for the current operation to finish.",
+                        error: true,
+                      },
+                );
+                return result;
+              }}
+              onInspect={onInspect}
+            />
+          )}
+        </section>
       )}
       {dialog}
-    </section>
+    </>
   );
 }
 
