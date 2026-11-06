@@ -519,6 +519,12 @@ impl<'r> ReplayTxn<'r> {
         Write::replay_apply(self, of)
     }
 
+    /// Writes the marker Git leaves out when a hook or signing stops a clean revert.
+    /// The only place L1 Git touches a marker.
+    pub(super) fn mark_revert<'a>(&'a self, commit: &'a Oid) -> Write<'a> {
+        Write::replay_mark_revert(self, commit)
+    }
+
     pub(super) fn abort(&self, kind: ReplayKind) -> Write<'_> {
         Write::replay_abort(self, kind)
     }

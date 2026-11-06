@@ -534,7 +534,12 @@ export const repositoryErrorSchema = z.union([
     message: z.string(),
   }),
   z.object({
-    kind: z.enum(["hookFailed", "afterHookFailed", "missingIdentity"]),
+    kind: z.enum([
+      "hookFailed",
+      "afterHookFailed",
+      "missingIdentity",
+      "replayStopped",
+    ]),
     message: z.string(),
     output: z.string(),
   }),

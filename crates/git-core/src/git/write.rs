@@ -366,6 +366,18 @@ impl<'a> Write<'a> {
         }
     }
 
+    pub(crate) fn replay_mark_revert(txn: &'a ReplayTxn<'_>, commit: &'a crate::Oid) -> Self {
+        Self {
+            dir: txn.root(),
+            args: vec!["update-ref", "--no-deref", "REVERT_HEAD", commit.as_str()],
+            env: Vec::new(),
+            input: None,
+            cap: Some(WRITE_STDOUT_CAP),
+            as_user: true,
+            lazy_fetch: false,
+        }
+    }
+
     pub(crate) fn replay_abort(txn: &'a ReplayTxn<'_>, kind: ReplayKind) -> Self {
         Self {
             dir: txn.root(),

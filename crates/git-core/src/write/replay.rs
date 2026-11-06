@@ -715,16 +715,98 @@ pub(super) fn apply(
         }
     };
     let txn = txn.renewed();
-    // A killed Git may have made the commit. The next request settles from Git's state.
-    if wrote.code().is_none() {
-        recorded.stay_pending();
-        return Err(commit::refused(&wrote, &trace));
+    match wrote.code() {
+        Some(0) => {
+            let (_, race) = land(recorded, txn.runner(), &wrote, &trace, &head)?;
+            race.map_or(Ok(applied), Err)
+        }
+        Some(_) => Err(classify(repo, &txn, shown, &wrote, &trace).unwrap_or_else(|error| error)),
+        // A killed Git may have made the commit. The next request settles from Git's state.
+        None => {
+            recorded.stay_pending();
+            Err(commit::refused(&wrote, &trace))
+        }
     }
-    if wrote.code() != Some(0) {
-        return Err(commit::refused(&wrote, &trace));
+}
+
+/// Git exited without making a commit, so nothing landed and the entry drops. Git's
+/// state says what happened, never the exit code: `rerere.autoUpdate` exits 1 with
+/// nothing unresolved, and a hook or signing stop exits 128 with the result staged.
+fn classify(
+    repo: &Repo,
+    txn: &ReplayTxn<'_>,
+    shown: &ReplayReview,
+    wrote: &Wrote,
+    trace: &Trace,
+) -> Result<RepositoryError, RepositoryError> {
+    let deadline = txn.runner().deadline();
+    let (entries, _) = status::entries(&repo.root, Untracked::No, deadline.reads())?;
+    let unresolved = merge::unresolved(&entries);
+    // Another process's `index.lock` makes this `None`, which matches no tree below.
+    let staged = if unresolved.is_empty() {
+        merge::staged_tree(repo, deadline).ok()
+    } else {
+        None
+    };
+    let matches_head =
+        staged.is_some() && staged == Some(tree_of(repo, &shown.destination.oid, deadline)?);
+    let marked = sync::pseudoref_exists(&repo.root, shown.kind.marker(), deadline.reads())?;
+    if !marked {
+        let predicted = match &shown.prediction {
+            ReplayPrediction::Clean { tree } => Some(tree),
+            ReplayPrediction::Conflict { .. } | ReplayPrediction::Empty => None,
+        };
+        if shown.kind != ReplayKind::Revert {
+            return Ok(commit::refused(wrote, trace));
+        }
+        if predicted.is_some() && predicted == staged.as_ref() {
+            // Git writes REVERT_HEAD only on a conflict, so a clean revert that a hook
+            // or signing stopped has none. Writing it makes this a pick's stop.
+            if let Err(error) = txn
+                .mark_revert(&shown.commit)
+                .run(deadline)
+                .and_then(Wrote::succeeded)
+            {
+                return Ok(RepositoryError::new(
+                    ErrorKind::GitFailed,
+                    format!(
+                        "{} The result stays staged with no revert in progress, because L1 Git could not mark one. Commit it, or unstage and discard it. {}",
+                        commit::refused(wrote, trace).message,
+                        error.message
+                    ),
+                ));
+            }
+        } else if matches_head && wrote.code() == Some(1) {
+            // An empty revert leaves MERGE_MSG and no marker, and `--abort` refuses it.
+            let _ = fs::remove_file(repo.git_dir.join("MERGE_MSG"));
+            return Ok(nothing_to_apply(shown.kind));
+        } else {
+            return Ok(commit::refused(wrote, trace));
+        }
+    } else if matches_head && txn.abort(shown.kind).run(deadline)?.code() == Some(0) {
+        return Ok(nothing_to_apply(shown.kind));
     }
-    let (_, race) = land(recorded, txn.runner(), &wrote, &trace, &head)?;
-    race.map_or(Ok(applied), Err)
+    let noun = shown.kind.command();
+    Ok(if unresolved.is_empty() {
+        RepositoryError::new(
+            ErrorKind::ReplayStopped {
+                output: wrote.stderr().to_owned(),
+            },
+            format!(
+                "{} The result is staged. Finish or abort the {noun}.",
+                commit::refused(wrote, trace).message
+            ),
+        )
+    } else {
+        RepositoryError::new(
+            ErrorKind::ReplayStopped {
+                output: String::new(),
+            },
+            format!(
+                "The {noun} stopped on a conflict, so Git made no commit. Resolve it, then finish or abort the {noun}."
+            ),
+        )
+    })
 }
 
 /// Runs on the global store, because the result joins global history.
