@@ -3214,20 +3214,18 @@ describe("managed upstream merge", () => {
   }, 30_000);
 });
 
-describe("a cherry-pick started in a terminal", () => {
-  it("reads as a replay, finishes through a write, and joins the undo history", async () => {
-    const { mergeStateSchema } = await import("./domain/merge");
-    const { appliedSchema, operationSchema, undoHistorySchema } =
-      await import("./domain/repository");
-    const path = join(fixture.root, "terminal pick");
-    mkdirSync(path);
-    const env = Object.fromEntries(
+describe("a cherry-pick or revert started in a terminal", () => {
+  const env = () =>
+    Object.fromEntries(
       Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")),
     );
+  const stopped = (name: string) => {
+    const path = join(fixture.root, name);
+    mkdirSync(path);
     const git = (...args: string[]) =>
       execFileSync("git", ["-C", path, ...args], {
         encoding: "utf8",
-        env,
+        env: env(),
         stdio: ["ignore", "pipe", "pipe"],
       }).trim();
     git("init", "-b", "main");
@@ -3249,15 +3247,28 @@ describe("a cherry-pick started in a terminal", () => {
     git("switch", "main");
     writeFileSync(join(path, "file.txt"), "current\n");
     git("commit", "-am", "current");
-    expect(
-      spawnSync("git", ["-C", path, "cherry-pick", picked], { env }).status,
-    ).toBe(1);
-
-    const stopped = answer("mergeState", mergeStateSchema).parse(
+    return { path, git, picked };
+  };
+  const state = async (path: string) => {
+    const { mergeStateSchema } = await import("./domain/merge");
+    return answer("mergeState", mergeStateSchema).parse(
       await (await post({ op: "mergeState", path })).json(),
     ).data;
-    if (stopped.kind !== "replay") throw new Error(stopped.kind);
-    expect(stopped.progress).toMatchObject({
+  };
+
+  it("reads as a replay, finishes through a write, joins the undo history, and undoes and redoes with its files", async () => {
+    const { appliedSchema, operationSchema, undoHistorySchema } =
+      await import("./domain/repository");
+    const { path, git, picked } = stopped("terminal pick");
+    const current = git("rev-parse", "HEAD");
+    expect(
+      spawnSync("git", ["-C", path, "cherry-pick", picked], { env: env() })
+        .status,
+    ).toBe(1);
+
+    const conflicted = await state(path);
+    if (conflicted.kind !== "replay") throw new Error(conflicted.kind);
+    expect(conflicted.progress).toMatchObject({
       kind: "cherryPick",
       commit: picked,
       subject: "incoming",
@@ -3269,9 +3280,7 @@ describe("a cherry-pick started in a terminal", () => {
 
     writeFileSync(join(path, "file.txt"), "resolved\n");
     git("add", "file.txt");
-    const ready = answer("mergeState", mergeStateSchema).parse(
-      await (await post({ op: "mergeState", path })).json(),
-    ).data;
+    const ready = await state(path);
     if (ready.kind !== "replay" || !ready.progress.tree)
       throw new Error(ready.kind);
     const applied = answer("write", appliedSchema).parse(
@@ -3291,10 +3300,72 @@ describe("a cherry-pick started in a terminal", () => {
       ).json(),
     ).data;
     expect(git("log", "-1", "--format=%s")).toBe("Finished");
+    const finished = git("rev-parse", "HEAD");
     const history = answer("undoHistory", undoHistorySchema).parse(
       await (await post({ op: "undoHistory", path })).json(),
     ).data;
     expect(history.undo?.id).toBe(applied.id);
     expect(history.undo?.operation.kind).toBe("finishReplay");
+    expect(await state(path)).toEqual({ kind: "idle" });
+
+    answer("undo", appliedSchema).parse(
+      await (await post({ op: "undo", path, id: applied.id })).json(),
+    );
+    expect(git("rev-parse", "HEAD")).toBe(current);
+    expect(readFileSync(join(path, "file.txt"), "utf8")).toBe("current\n");
+    expect(git("status", "--porcelain")).toBe("");
+    expect(
+      await state(path),
+      "Undo removes the commit and does not reopen the conflict",
+    ).toEqual({ kind: "idle" });
+
+    answer("redo", appliedSchema).parse(
+      await (await post({ op: "redo", path, id: applied.id })).json(),
+    );
+    expect(git("rev-parse", "HEAD")).toBe(finished);
+    expect(readFileSync(join(path, "file.txt"), "utf8")).toBe("resolved\n");
   }, 30_000);
+
+  it.each([
+    ["cherryPick", ["cherry-pick"], "CHERRY_PICK_HEAD"],
+    ["revert", ["revert", "--no-edit"], "REVERT_HEAD"],
+  ] as const)(
+    "aborts a %s and answers idle, and a repeat changes nothing",
+    async (kind, start, marker) => {
+      const { path, git, picked } = stopped(`terminal abort ${kind}`);
+      if (kind === "revert") {
+        git("switch", "source");
+        writeFileSync(join(path, "file.txt"), "later\n");
+        git("commit", "-am", "later");
+      }
+      const head = git("rev-parse", "HEAD");
+      expect(
+        spawnSync("git", ["-C", path, ...start, picked], { env: env() }).status,
+      ).toBe(1);
+      const conflicted = await state(path);
+      if (conflicted.kind !== "replay") throw new Error(conflicted.kind);
+      expect(conflicted.progress.kind).toBe(kind);
+      const { mergeStateSchema } = await import("./domain/merge");
+      const request = {
+        op: "replayAbort",
+        path,
+        of: { kind, commit: picked },
+        head: conflicted.progress.destination,
+      };
+      for (const repeat of [false, true]) {
+        const answered = answer("replayAbort", mergeStateSchema).parse(
+          await (await post(request)).json(),
+        ).data;
+        expect(answered, `repeat ${repeat}`).toEqual({ kind: "idle" });
+        expect(git("rev-parse", "HEAD")).toBe(head);
+        expect(git("status", "--porcelain")).toBe("");
+        expect(
+          spawnSync("git", ["-C", path, "show-ref", "--exists", marker], {
+            env: env(),
+          }).status,
+        ).toBe(2);
+      }
+    },
+    30_000,
+  );
 });
