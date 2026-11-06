@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { expect, it } from "vitest";
+import { expect, it, onTestFinished } from "vitest";
 import { createBridge } from "./fakeBridge";
 import {
   focused,
@@ -95,6 +95,13 @@ it("queues animation frames and controls the clock", async () => {
   const before = performance.now();
   app.dom.clock.offset += 5_000;
   expect(performance.now() - before).toBeGreaterThanOrEqual(5_000);
+});
+
+it("runs queued animation frames when the app unmounts", async () => {
+  await mountApp();
+  let ran = false;
+  requestAnimationFrame(() => (ran = true));
+  onTestFinished(() => expect(ran).toBe(true));
 });
 
 it("answers through the transport and records requests it cannot answer", async () => {
