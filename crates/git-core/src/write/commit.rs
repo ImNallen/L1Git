@@ -1,7 +1,7 @@
 use super::{
     Applied, Change, CommitTxn, EntryId, Expect, Operation, Repo,
     refs::{RefChange, capitalized, oid},
-    store::{LockedStore, Log},
+    store::{LockedStore, Log, Recorded},
 };
 use crate::{
     ErrorKind, Head, Oid, RepositoryError, StagedStamp, StaleReason, StatusEntry,
@@ -41,7 +41,7 @@ pub(super) enum Target {
 }
 
 impl Target {
-    fn of(head: &Head) -> Self {
+    pub(super) fn of(head: &Head) -> Self {
         match head {
             Head::Attached { reference, .. } | Head::Unborn { reference } => {
                 Self::Branch(reference.clone())
@@ -50,7 +50,7 @@ impl Target {
         }
     }
 
-    fn at(&self, oid: Option<&Oid>) -> Result<Head, RepositoryError> {
+    pub(super) fn at(&self, oid: Option<&Oid>) -> Result<Head, RepositoryError> {
         Ok(match (self, oid) {
             (Self::Branch(reference), Some(oid)) => Head::Attached {
                 reference: reference.clone(),
@@ -97,8 +97,8 @@ impl Target {
 
 #[derive(Debug, PartialEq, Eq)]
 pub(super) struct Update {
-    old: Option<Oid>,
-    new: Oid,
+    pub(super) old: Option<Oid>,
+    pub(super) new: Oid,
 }
 
 #[expect(
@@ -186,18 +186,24 @@ pub(super) fn commit(
         target.at(Some(&update.new))?,
         replaced,
     )?;
-    recorded
-        .complete(txn.runner(), &Change::Ref(change))
-        .map_err(|error| {
-            RepositoryError::new(
-                error.kind,
-                format!(
-                    "Git made the commit, but L1 Git could not record it, so it cannot undo it. {}",
-                    error.message
-                ),
-            )
-        })?;
+    record_commit(recorded, &txn, &Change::Ref(change))?;
     race.map_or(Ok(applied), Err)
+}
+
+pub(super) fn record_commit(
+    recorded: Recorded<'_>,
+    txn: &CommitTxn<'_>,
+    change: &Change,
+) -> Result<(), RepositoryError> {
+    recorded.complete(txn.runner(), change).map_err(|error| {
+        RepositoryError::new(
+            error.kind,
+            format!(
+                "Git made the commit, but L1 Git could not record it, so it cannot undo it. {}",
+                error.message
+            ),
+        )
+    })
 }
 
 pub(super) fn proved(
@@ -306,7 +312,7 @@ pub(super) fn refuse_non_commit(
     ))
 }
 
-fn raced(kind: Kind<'_>, update: &Update, target: &Target) -> RepositoryError {
+pub(super) fn raced(kind: Kind<'_>, update: &Update, target: &Target) -> RepositoryError {
     let made = short(&update.new);
     let old = update.old.as_ref().map_or("nothing", short);
     let name = target.name();
@@ -439,8 +445,8 @@ pub(super) fn refused(wrote: &Wrote, trace: &Trace) -> RepositoryError {
 /// the folder is gone.
 pub(super) struct Trace {
     dir: PathBuf,
-    events: PathBuf,
-    refs: PathBuf,
+    pub(super) events: PathBuf,
+    pub(super) refs: PathBuf,
 }
 
 #[derive(Deserialize)]
@@ -488,7 +494,7 @@ fn stops_commit(name: &str, argv: &[String]) -> bool {
 }
 
 impl Trace {
-    fn create(store: &LockedStore, id: EntryId) -> Result<Self, RepositoryError> {
+    pub(super) fn create(store: &LockedStore, id: EntryId) -> Result<Self, RepositoryError> {
         store.remove_traces()?;
         let dir = store.new_trace_dir(id)?;
         Ok(Self {

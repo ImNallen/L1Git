@@ -886,29 +886,37 @@ fn review(
 }
 
 fn safe_index(repo: &Repo, deadline: WriteDeadline) -> Result<(), RepositoryError> {
+    safe_index_for(repo, "Merge", deadline)
+}
+
+pub(super) fn safe_index_for(
+    repo: &Repo,
+    who: &str,
+    deadline: WriteDeadline,
+) -> Result<(), RepositoryError> {
     if repo.index.with_extension("lock").exists() {
         return Err(refused(
             "Another Git process owns index.lock. Wait for it to finish.",
         ));
     }
     let (rows, _) = index::read_worktree(&repo.root, deadline.reads())?;
-    ordinary_index(&rows)?;
+    ordinary_index(&rows, who)?;
     let sparse = config(repo, "core.sparseCheckout", deadline)?;
     if sparse.iter().any(|value| value != "false" && value != "0") {
-        return Err(refused("Merge does not support sparse checkout."));
+        return Err(refused(format!("{who} does not support sparse checkout.")));
     }
     Ok(())
 }
 
-fn ordinary_index(rows: &index::Rows) -> Result<(), RepositoryError> {
+fn ordinary_index(rows: &index::Rows, who: &str) -> Result<(), RepositoryError> {
     if rows
         .values()
         .flatten()
         .any(|row| row.skip_worktree || row.assume_unchanged || row.intent_to_add)
     {
-        return Err(refused(
-            "Merge needs an index without skip-worktree, assume-unchanged, or intent-to-add entries. Restore an ordinary index before starting or continuing.",
-        ));
+        return Err(refused(format!(
+            "{who} needs an index without skip-worktree, assume-unchanged, or intent-to-add entries. Restore an ordinary index before starting or continuing."
+        )));
     }
     Ok(())
 }
@@ -1176,7 +1184,7 @@ impl Coordinator {
                 }
                 let txn = if shown.plan == MergePlan::MergeCommit {
                     let txn = MergeIndexTxn::begin(repo, deadline)?;
-                    ordinary_index(&index::read(txn.runner())?)?;
+                    ordinary_index(&index::read(txn.runner())?, "Merge")?;
                     Some(txn)
                 } else {
                     None
@@ -1433,7 +1441,7 @@ impl Coordinator {
                 }
                 MergeAction::Abort { .. } => {
                     let txn = MergeIndexTxn::begin(repo, deadline)?;
-                    ordinary_index(&index::read(txn.runner())?)?;
+                    ordinary_index(&index::read(txn.runner())?, "Merge")?;
                     within_footprint(
                         &record.session,
                         paths(&status::entries(&repo.root, Untracked::No, deadline.reads())?.0),
@@ -1527,7 +1535,7 @@ pub(super) fn admit(
         }
         match edit(operation) {
             Edit::Paths(changed) => within_footprint(&record.session, changed)?,
-            Edit::Refused => {
+            Edit::Finish | Edit::Refused => {
                 return Err(refused(
                     "A managed merge is active. Only resolution and index edits within its affected paths are available until Finish or Abort.",
                 ));
@@ -1539,6 +1547,7 @@ pub(super) fn admit(
 
 pub(super) enum Edit {
     Paths(BTreeSet<String>),
+    Finish,
     Refused,
 }
 
@@ -1552,6 +1561,7 @@ pub(super) fn edit(operation: &Operation) -> Edit {
         Operation::StageFiles { entries } | Operation::UnstageFiles { entries } => {
             Edit::Paths(paths(entries))
         }
+        Operation::FinishReplay { .. } => Edit::Finish,
         Operation::Commit { .. }
         | Operation::Amend { .. }
         | Operation::EditMessage { .. }
@@ -1588,7 +1598,9 @@ fn branch_names(
                 Head::Detached { .. } | Head::Unborn { .. } => Vec::new(),
             }
         }
-        Operation::SaveConflict { .. }
+        // Finish moves the branch its own replay holds, which `guard_refs` refuses.
+        Operation::FinishReplay { .. }
+        | Operation::SaveConflict { .. }
         | Operation::StageFiles { .. }
         | Operation::UnstageFiles { .. }
         | Operation::Discard { .. }

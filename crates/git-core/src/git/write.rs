@@ -17,6 +17,7 @@ pub(crate) enum LocalWrite {
     MergeStart,
     MergeFinish,
     MergeAbort,
+    ReplayFinish,
     SaveConflict,
     StageFiles,
     UnstageFiles,
@@ -67,6 +68,7 @@ impl LocalWrite {
             Self::MergeStart
             | Self::MergeFinish
             | Self::MergeAbort
+            | Self::ReplayFinish
             | Self::Commit
             | Self::Amend
             | Self::EditMessage
@@ -87,6 +89,7 @@ impl LocalWrite {
             Self::MergeStart => "Starting the merge",
             Self::MergeFinish => "Finishing the merge",
             Self::MergeAbort => "Aborting the merge",
+            Self::ReplayFinish => "Finishing the cherry-pick or revert",
             Self::SaveConflict => "Saving the conflict result",
             Self::StageFiles => "Staging the files",
             Self::UnstageFiles => "Unstaging the files",
@@ -122,6 +125,7 @@ impl LocalWrite {
             Self::MergeStart => "l1git merge start",
             Self::MergeFinish => "l1git merge finish",
             Self::MergeAbort => "l1git merge abort",
+            Self::ReplayFinish => "l1git replay finish",
             Self::SaveConflict => "l1git save conflict",
             Self::StageFiles => "l1git stage",
             Self::UnstageFiles => "l1git unstage",
@@ -160,7 +164,7 @@ impl LocalWrite {
             | Self::Undo
             | Self::Redo
             | Self::RefreshIndex => "The index is unchanged.",
-            Self::Commit | Self::Amend | Self::EditMessage => {
+            Self::Commit | Self::Amend | Self::EditMessage | Self::ReplayFinish => {
                 "Git may have finished the commit, so check the history."
             }
             Self::SaveConflict | Self::Discard | Self::DiscardPart => "No file changed.",

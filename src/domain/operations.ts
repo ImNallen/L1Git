@@ -479,6 +479,8 @@ export function describe(operation: Operation): string {
       return `Pop ${operation.stash.name}`;
     case "stashDrop":
       return `Drop ${operation.stash.name}`;
+    case "finishReplay":
+      return `Finish ${operation.of.kind === "revert" ? "revert" : "cherry-pick"} ${quoted(operation.message)}`;
   }
   if ("message" in operation)
     return `${commitVerbs[operation.kind]} ${quoted(operation.message)}`;

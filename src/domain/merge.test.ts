@@ -30,7 +30,30 @@ const operation = (value: unknown) => operationSchema.parse(value);
 const stageHunk = (path: string) =>
   operation({ kind: "stageHunk", path, hunk: 0, shown: "" });
 
+const finish = operation({
+  kind: "finishReplay",
+  of: { kind: "cherryPick", commit: oid("a") },
+  staged: "c".repeat(40),
+  tree: oid("d"),
+  message: "Picked",
+});
+
 describe("mergeAllows during a replay", () => {
+  it("allows Finish only during a replay", () => {
+    expect(mergeAllows(replay, finish)).toBe(true);
+    expect(
+      mergeAllows(
+        mergeStateSchema.parse({
+          kind: "attention",
+          session: null,
+          reason: "externalOperation",
+          message: "A rebase is in progress.",
+        }),
+        finish,
+      ),
+    ).toBe(false);
+  });
+
   it("allows index edits only inside the footprint", () => {
     expect(mergeAllows(replay, stageHunk("inside.txt"))).toBe(true);
     expect(mergeAllows(replay, stageHunk("outside.txt"))).toBe(false);

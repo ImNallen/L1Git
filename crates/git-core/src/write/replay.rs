@@ -1,10 +1,13 @@
 use super::{
-    Operation, Repo, commit,
+    Applied, Change, CommitTxn, Direction, Expect, Operation, Repo,
+    branches::Writing,
+    commit::{self, Target, Trace},
     merge::{self, Edit},
-    refs,
+    refs::{self, RefChange},
+    store::{self, EntryObjects, LockedStore},
 };
 use crate::{
-    Head, Oid, RepositoryError, StagedStamp,
+    ErrorKind, Head, Oid, RepositoryError, StagedStamp, StaleReason, StatusEntry,
     git::{self, WriteDeadline},
     status::{self, Untracked},
     sync::{self, InProgress},
@@ -112,6 +115,19 @@ impl ReplayProgress {
             commit: self.commit.clone(),
         }
     }
+}
+
+/// `change.json` exists from before Git runs, so a crash can never leave a pending
+/// entry with no recorded change.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "state",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub(super) enum ReplayChange {
+    Pending { before: Head, tree: Option<Oid> },
+    Landed(RefChange),
 }
 
 /// The single check for a replay L1 Git can finish. Everything else stays an
@@ -375,10 +391,282 @@ pub(super) fn admit(
                 outside.join(", ")
             )))
         }
+        Edit::Finish => Ok(()),
         Edit::Refused => Err(merge::refused(format!(
             "{name} is in progress in this worktree. Only resolution and index edits within its affected paths are available until Finish or Abort."
         ))),
     }
+}
+
+const WHO: &str = "This cherry-pick or revert";
+
+/// Commits what Git says is in progress. Runs on the global store, because the
+/// result joins global history. A pick finished after a crash keeps its entry.
+pub(super) fn finish(
+    writing: &Writing<'_>,
+    expect: &Expect,
+    of: &ReplayOf,
+    staged: &StagedStamp,
+    tree: &Oid,
+    message: &str,
+) -> Result<Applied, RepositoryError> {
+    let &Writing {
+        repo,
+        store,
+        log,
+        deadline,
+        operation,
+    } = writing;
+    if let Some(applied) = already_landed(writing, expect)? {
+        return Ok(applied);
+    }
+    let name = of.kind.operation().name();
+    match in_flight(repo, deadline)? {
+        Some(found) if found == *of => {}
+        Some(_) => {
+            return Err(RepositoryError::stale(
+                StaleReason::HeadMoved,
+                "A different cherry-pick or revert is in progress now, so nothing changed. Refresh.",
+            ));
+        }
+        None => {
+            return Err(merge::refused(
+                "No single cherry-pick or revert is in progress in this worktree, so there is nothing to finish. Refresh.",
+            ));
+        }
+    }
+    let head = repo.head_as_seen(expect, deadline)?;
+    let before = refs::oid(&head).ok_or_else(git::malformed)?;
+    settle_journal(repo, of, &before, deadline)?;
+    merge::safe_index_for(repo, WHO, deadline)?;
+    if message.trim().is_empty() {
+        return Err(RepositoryError::new(
+            ErrorKind::GitFailed,
+            "Write a commit message. Git refuses an empty one.",
+        ));
+    }
+    let (entries, stamp) = status::entries(&repo.root, Untracked::No, deadline.reads())?;
+    if let Some(path) = entries.iter().find_map(|entry| match entry {
+        StatusEntry::Unmerged { path, .. } => Some(path),
+        StatusEntry::Ordinary { .. }
+        | StatusEntry::Renamed { .. }
+        | StatusEntry::Untracked { .. } => None,
+    }) {
+        return Err(merge::refused(format!(
+            "{path} has a conflict. Mark it resolved before you finish."
+        )));
+    }
+    if stamp != *staged || merge::staged_tree(repo, deadline)? != *tree {
+        return Err(RepositoryError::stale(
+            StaleReason::StagedChanged,
+            "The staged result changed since L1 Git showed it. Review it again before you finish.",
+        ));
+    }
+    if *tree == tree_of(repo, &before, deadline)? {
+        return Err(RepositoryError::new(
+            ErrorKind::UnchangedPath,
+            format!(
+                "The staged result matches HEAD, so there is no commit to make. Abort to end {name}."
+            ),
+        ));
+    }
+    let footprint = known_footprint(repo, of, &before, deadline)?;
+    let extra = outside(staged_paths(repo, &before, deadline)?, &footprint);
+    if !extra.is_empty() {
+        return Err(merge::refused(format!(
+            "Preserve these staged changes before you finish, because {name} does not change them: {}.",
+            extra.join(", ")
+        )));
+    }
+    let edited: Vec<_> = unstaged_paths(repo, deadline)?
+        .into_iter()
+        .filter(|path| footprint.contains(path))
+        .collect();
+    if !edited.is_empty() {
+        return Err(merge::refused(format!(
+            "These paths have unstaged edits that the reviewed result leaves out: {}. Stage them or undo the edits before you finish.",
+            edited.join(", ")
+        )));
+    }
+    let (applied, _, recorded) = store.record_with(repo, log, operation, |_| {
+        Ok(ReplayChange::Pending {
+            before: head.clone(),
+            tree: Some(tree.clone()),
+        })
+    })?;
+    recorded.durable()?;
+    let trace = Trace::create(store, applied.id)?;
+    let txn = CommitTxn::begin(repo, deadline)?;
+    let wrote = match txn
+        .commit(&[], message)
+        .traces(&trace.events, &trace.refs)
+        .run(deadline)
+    {
+        Ok(wrote) => wrote,
+        Err(error) => {
+            recorded.stay_pending();
+            return Err(error);
+        }
+    };
+    let txn = txn.renewed();
+    let deadline = deadline.renewed();
+    // A killed Git may have made the commit. The next request settles from Git's state.
+    if wrote.code().is_none() {
+        recorded.stay_pending();
+        return Err(commit::refused(&wrote, &trace));
+    }
+    let target = Target::of(&head);
+    let update = commit::proved(repo, &wrote, &trace, &target, deadline)?;
+    let race = (update.old.as_ref() != Some(&before))
+        .then(|| commit::raced(commit::Kind::New(staged), &update, &target));
+    let change = RefChange::new(
+        target.at(update.old.as_ref())?,
+        target.at(Some(&update.new))?,
+        None,
+    )?;
+    let landed_tree = tree_of(repo, &update.new, deadline)?;
+    commit::record_commit(
+        recorded,
+        &txn,
+        &Change::Replay(ReplayChange::Landed(change)),
+    )?;
+    if landed_tree != *tree {
+        return Err(race.unwrap_or_else(|| {
+            RepositoryError::new(
+                ErrorKind::AfterHookFailed {
+                    output: wrote.stderr().to_owned(),
+                },
+                "Git made the commit, but a hook changed the staged files first, so it differs from the result you reviewed. Undo removes the commit.",
+            )
+        }));
+    }
+    race.map_or(Ok(applied), Err)
+}
+
+/// The undo log is the receipt for a repeated request. Nothing else records that a
+/// replay finished, and Git's marker is gone by then.
+fn already_landed(
+    writing: &Writing<'_>,
+    expect: &Expect,
+) -> Result<Option<Applied>, RepositoryError> {
+    let Some(id) = writing.log.next_undo() else {
+        return Ok(None);
+    };
+    let (applied, change) = writing.store.record_of(id)?;
+    let Change::Replay(ReplayChange::Landed(change)) = change else {
+        return Ok(None);
+    };
+    Ok((applied.operation == *writing.operation
+        && applied.root == writing.repo.root()
+        && change.moved(&expect.head, &writing.repo.head(writing.deadline)?))
+    .then_some(applied))
+}
+
+/// Settles a pending entry from Git alone. A commit whose parent, tree, or branch
+/// differ stays, with no undo entry. The marker is not consulted, because Git moves
+/// the ref before it clears the marker.
+pub(super) fn landed(
+    repo: &Repo,
+    change: &ReplayChange,
+    deadline: WriteDeadline,
+) -> Result<Option<ReplayChange>, RepositoryError> {
+    let ReplayChange::Pending { before, tree } = change else {
+        return Ok(Some(change.clone()));
+    };
+    let head = repo.head(deadline)?;
+    let (Some(parent), Some(made)) = (refs::oid(before), refs::oid(&head)) else {
+        return Ok(None);
+    };
+    if head == *before || Target::of(&head) != Target::of(before) {
+        return Ok(None);
+    }
+    let shown = git::read(
+        &repo.root,
+        &["show", "-s", "--format=%P%n%T", made.as_str()],
+        deadline.reads(),
+    )?;
+    let shown = git::text(&shown);
+    let mut lines = shown.lines();
+    if lines.next() != Some(parent.as_str())
+        || tree
+            .as_ref()
+            .is_some_and(|tree| lines.next() != Some(tree.as_str()))
+    {
+        return Ok(None);
+    }
+    Ok(Some(ReplayChange::Landed(RefChange::new(
+        before.clone(),
+        head,
+        None,
+    )?)))
+}
+
+pub(super) fn step(
+    _repo: &Repo,
+    _entry: &EntryObjects,
+    _change: &ReplayChange,
+    _direction: Direction,
+    _deadline: WriteDeadline,
+) -> Result<(), RepositoryError> {
+    Err(store::history_changed())
+}
+
+fn settle_journal(
+    repo: &Repo,
+    of: &ReplayOf,
+    head: &Oid,
+    deadline: WriteDeadline,
+) -> Result<(), RepositoryError> {
+    let journal = folder(repo, of, head).join("undo");
+    LockedStore::lock(&journal, &repo.common_dir, deadline.reads())?.settled_log(repo, deadline)?;
+    Ok(())
+}
+
+fn known_footprint(
+    repo: &Repo,
+    of: &ReplayOf,
+    head: &Oid,
+    deadline: WriteDeadline,
+) -> Result<Vec<String>, RepositoryError> {
+    footprint(repo, of, head, deadline)?.ok_or_else(|| {
+        merge::refused(format!(
+            "L1 Git cannot work out which paths {} changes. End it with Git.",
+            of.kind.operation().name()
+        ))
+    })
+}
+
+fn staged_paths(
+    repo: &Repo,
+    head: &Oid,
+    deadline: WriteDeadline,
+) -> Result<BTreeSet<String>, RepositoryError> {
+    let output = git::read(
+        &repo.root,
+        &[
+            "diff-index",
+            "--cached",
+            "--no-renames",
+            "--name-only",
+            "-z",
+            head.as_str(),
+            "--",
+        ],
+        deadline.reads(),
+    )?;
+    listed_paths(&output).ok_or_else(git::malformed)
+}
+
+fn unstaged_paths(
+    repo: &Repo,
+    deadline: WriteDeadline,
+) -> Result<BTreeSet<String>, RepositoryError> {
+    let output = git::read(
+        &repo.root,
+        &["diff", "--name-only", "--no-renames", "--no-ext-diff", "-z"],
+        deadline.reads(),
+    )?;
+    listed_paths(&output).ok_or_else(git::malformed)
 }
 
 fn outside(paths: BTreeSet<String>, footprint: &[String]) -> Vec<String> {

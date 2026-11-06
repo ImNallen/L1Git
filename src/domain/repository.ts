@@ -433,6 +433,13 @@ const otherOperationSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("stashApply"), stash: stashTipSchema }),
   z.strictObject({ kind: z.literal("stashPop"), stash: stashTipSchema }),
   z.strictObject({ kind: z.literal("stashDrop"), stash: stashTipSchema }),
+  z.strictObject({
+    kind: z.literal("finishReplay"),
+    of: replayOfSchema,
+    staged: stagedStampSchema,
+    tree: oidSchema,
+    message: z.string(),
+  }),
 ]);
 const saveConflictDescriptor = z.strictObject({
   kind: z.literal("saveConflict"),

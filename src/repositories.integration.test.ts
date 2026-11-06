@@ -3213,3 +3213,88 @@ describe("managed upstream merge", () => {
     }
   }, 30_000);
 });
+
+describe("a cherry-pick started in a terminal", () => {
+  it("reads as a replay, finishes through a write, and joins the undo history", async () => {
+    const { mergeStateSchema } = await import("./domain/merge");
+    const { appliedSchema, operationSchema, undoHistorySchema } =
+      await import("./domain/repository");
+    const path = join(fixture.root, "terminal pick");
+    mkdirSync(path);
+    const env = Object.fromEntries(
+      Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")),
+    );
+    const git = (...args: string[]) =>
+      execFileSync("git", ["-C", path, ...args], {
+        encoding: "utf8",
+        env,
+        stdio: ["ignore", "pipe", "pipe"],
+      }).trim();
+    git("init", "-b", "main");
+    for (const [key, value] of [
+      ["user.name", "Pick bridge"],
+      ["user.email", "pick@example.test"],
+      ["commit.gpgSign", "false"],
+      ["core.hooksPath", "/dev/null"],
+      ["gc.auto", "0"],
+    ] as const)
+      git("config", key, value);
+    writeFileSync(join(path, "file.txt"), "base\n");
+    git("add", ".");
+    git("commit", "-m", "base");
+    git("switch", "-c", "source");
+    writeFileSync(join(path, "file.txt"), "incoming\n");
+    git("commit", "-am", "incoming");
+    const picked = git("rev-parse", "HEAD");
+    git("switch", "main");
+    writeFileSync(join(path, "file.txt"), "current\n");
+    git("commit", "-am", "current");
+    expect(
+      spawnSync("git", ["-C", path, "cherry-pick", picked], { env }).status,
+    ).toBe(1);
+
+    const stopped = answer("mergeState", mergeStateSchema).parse(
+      await (await post({ op: "mergeState", path })).json(),
+    ).data;
+    if (stopped.kind !== "replay") throw new Error(stopped.kind);
+    expect(stopped.progress).toMatchObject({
+      kind: "cherryPick",
+      commit: picked,
+      subject: "incoming",
+      footprint: ["file.txt"],
+      unresolved: ["file.txt"],
+      tree: null,
+      suggestedMessage: "incoming\n",
+    });
+
+    writeFileSync(join(path, "file.txt"), "resolved\n");
+    git("add", "file.txt");
+    const ready = answer("mergeState", mergeStateSchema).parse(
+      await (await post({ op: "mergeState", path })).json(),
+    ).data;
+    if (ready.kind !== "replay" || !ready.progress.tree)
+      throw new Error(ready.kind);
+    const applied = answer("write", appliedSchema).parse(
+      await (
+        await post({
+          op: "write",
+          path,
+          operation: operationSchema.parse({
+            kind: "finishReplay",
+            of: { kind: "cherryPick", commit: picked },
+            staged: ready.progress.staged,
+            tree: ready.progress.tree,
+            message: "Finished\n",
+          }),
+          expect: { head: ready.progress.destination },
+        })
+      ).json(),
+    ).data;
+    expect(git("log", "-1", "--format=%s")).toBe("Finished");
+    const history = answer("undoHistory", undoHistorySchema).parse(
+      await (await post({ op: "undoHistory", path })).json(),
+    ).data;
+    expect(history.undo?.id).toBe(applied.id);
+    expect(history.undo?.operation.kind).toBe("finishReplay");
+  }, 30_000);
+});

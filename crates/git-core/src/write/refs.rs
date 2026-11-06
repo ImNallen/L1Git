@@ -33,6 +33,10 @@ impl RefChange {
         Ok(change)
     }
 
+    pub(super) fn moved(&self, before: &Head, after: &Head) -> bool {
+        self.before == *before && self.after == *after
+    }
+
     pub(super) fn objects(&self) -> Objects {
         Objects {
             tips: self.replaced.iter().cloned().collect(),

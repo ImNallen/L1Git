@@ -153,5 +153,7 @@ export function mergeAllows(
     case "stashPop":
     case "stashDrop":
       return false;
+    case "finishReplay":
+      return state.kind === "replay";
   }
 }

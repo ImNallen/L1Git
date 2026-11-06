@@ -170,6 +170,14 @@ pub enum Operation {
     StashPop { stash: StashTip },
     /// Drops `stash`. Undo stores that same commit at `stash@{0}`.
     StashDrop { stash: StashTip },
+    /// Commits the cherry-pick or revert that Git holds in progress, with the
+    /// user's hooks and signing. `staged` and `tree` are what `mergeState` showed.
+    FinishReplay {
+        of: ReplayOf,
+        staged: StagedStamp,
+        tree: Oid,
+        message: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -247,6 +255,7 @@ enum Change {
     Checkout(checkout::CheckoutChange),
     Tag(tags::TagChange),
     Stash(stash::StashChange),
+    Replay(replay::ReplayChange),
 }
 
 impl From<resolution::ResolutionChange> for Change {
@@ -285,6 +294,12 @@ impl From<stash::StashChange> for Change {
     }
 }
 
+impl From<replay::ReplayChange> for Change {
+    fn from(change: replay::ReplayChange) -> Self {
+        Self::Replay(change)
+    }
+}
+
 impl Change {
     fn objects(&self) -> Objects {
         match self {
@@ -295,7 +310,8 @@ impl Change {
             | Self::Discard(_)
             | Self::Branch(_)
             | Self::Checkout(_)
-            | Self::Tag(_) => Objects::default(),
+            | Self::Tag(_)
+            | Self::Replay(_) => Objects::default(),
         }
     }
 
@@ -357,6 +373,11 @@ impl Change {
             Self::Stash(change) => {
                 stash::step(repo, store, entry, change, step, direction, deadline)
             }
+            Self::Replay(change) => {
+                replay::step(repo, entry, change, direction, deadline)?;
+                store.save(step.log())?;
+                Ok(None)
+            }
         }
     }
 
@@ -372,7 +393,8 @@ impl Change {
                 | Self::Ref(_)
                 | Self::Discard(_)
                 | Self::Branch(_)
-                | Self::Tag(_),
+                | Self::Tag(_)
+                | Self::Replay(_),
                 _,
             ) => None,
         }
@@ -398,6 +420,7 @@ impl Change {
             Self::Stash(change) => {
                 Ok(stash::landed(repo, entry, change, deadline)?.map(Self::Stash))
             }
+            Self::Replay(change) => Ok(replay::landed(repo, change, deadline)?.map(Self::Replay)),
         }
     }
 
@@ -409,7 +432,8 @@ impl Change {
             | Self::Index(_)
             | Self::Ref(_)
             | Self::Discard(_)
-            | Self::Checkout(_) => false,
+            | Self::Checkout(_)
+            | Self::Replay(_) => false,
         }
     }
 
@@ -422,7 +446,8 @@ impl Change {
             | Self::Branch(_)
             | Self::Checkout(_)
             | Self::Tag(_)
-            | Self::Stash(_) => false,
+            | Self::Stash(_)
+            | Self::Replay(_) => false,
         }
     }
 
@@ -437,7 +462,8 @@ impl Change {
             | Self::Branch(_)
             | Self::Checkout(_)
             | Self::Tag(_)
-            | Self::Stash(_) => {}
+            | Self::Stash(_)
+            | Self::Replay(_) => {}
         }
     }
 
@@ -450,7 +476,8 @@ impl Change {
             | Self::Discard(_)
             | Self::Branch(_)
             | Self::Checkout(_)
-            | Self::Tag(_) => false,
+            | Self::Tag(_)
+            | Self::Replay(_) => false,
         }
     }
 }
@@ -499,6 +526,7 @@ impl Operation {
             Self::StashApply { .. } => LocalWrite::StashApply,
             Self::StashPop { .. } => LocalWrite::StashPop,
             Self::StashDrop { .. } => LocalWrite::StashDrop,
+            Self::FinishReplay { .. } => LocalWrite::ReplayFinish,
         }
     }
 
@@ -595,6 +623,13 @@ impl Operation {
             Self::StashDrop { stash } => {
                 stash::drop_stash(&writing, stash).map(|applied| (applied, None))
             }
+            Self::FinishReplay {
+                of,
+                staged,
+                tree,
+                message,
+            } => replay::finish(&writing, expect, of, staged, tree, message)
+                .map(|applied| (applied, None)),
         }
     }
 }
@@ -752,7 +787,9 @@ impl Coordinator {
         self.writing(&common_dir, || {
             let store = LockedStore::lock(self.undo_dir(), &common_dir, deadline.reads())?;
             let deadline = deadline.renewed();
-            if let Some(dir) = merge::journal(&repo, deadline)? {
+            if let Some(dir) = merge::journal(&repo, deadline)?
+                && write != LocalWrite::ReplayFinish
+            {
                 let session = LockedStore::lock(&dir, &common_dir, deadline.reads())?;
                 let log = session.settled_log(&repo, deadline)?;
                 work(repo, &session, log, deadline)
