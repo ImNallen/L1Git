@@ -15,7 +15,7 @@ import {
 import { createServer } from "node:net";
 import { join } from "node:path";
 import { setTimeout } from "node:timers/promises";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
   fastForwardReportSchema,
@@ -3562,6 +3562,61 @@ describe("a cherry-pick or revert", () => {
     expect(git("log", "-1", "--format=%an")).toBe("Pick bridge");
     expect(await state(path)).toEqual({ kind: "idle" });
   }, 30_000);
+
+  it.each([
+    ["cherryPick", "Cherry-pick “adds new”"],
+    ["revert", "Revert “removes new”"],
+  ] as const)(
+    "takes a %s from the app's review through to a clean Undo",
+    async (kind, label) => {
+      const repositories = await import("./repositories");
+      const { describe: describeOperation } =
+        await import("./domain/operations");
+      const { replayOfSchema, rootSchema } =
+        await import("./domain/repository");
+      const repository = applying(`client ${kind}`, kind);
+      const { git } = repository;
+      const path = rootSchema.parse(repository.path);
+      const before = git("rev-parse", "HEAD");
+      const bridge = globalThis.fetch;
+      vi.stubGlobal("fetch", (input: unknown, init?: RequestInit) =>
+        input === "/api/run"
+          ? post(JSON.parse(String(init?.body)))
+          : bridge(input as RequestInfo, init),
+      );
+      try {
+        const review = await repositories.replayReview(
+          path,
+          replayOfSchema.parse(repository.of),
+        );
+        expect(review.prediction.kind).toBe("clean");
+        const applied = await repositories.write(
+          path,
+          { kind: "replay", review },
+          {
+            head: {
+              kind: "attached",
+              reference: review.destination.reference,
+              oid: review.destination.oid,
+            },
+          },
+        );
+        expect(git("rev-parse", "HEAD^")).toBe(before);
+        const { undo } = await repositories.undoHistory(path);
+        expect(undo?.id).toBe(applied.id);
+        if (!undo) throw new Error("no undo entry");
+        expect(describeOperation(undo.operation)).toBe(label);
+
+        await repositories.undo(path, undo.id);
+        expect(git("rev-parse", "HEAD")).toBe(before);
+        expect(git("status", "--porcelain")).toBe("");
+        expect(existsSync(join(repository.path, "new.txt"))).toBe(false);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    },
+    30_000,
+  );
 
   it("refuses a review with the reason and changes nothing", async () => {
     const { path, git, picked } = stopped("start refused");
