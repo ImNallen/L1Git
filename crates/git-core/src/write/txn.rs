@@ -554,6 +554,10 @@ impl<'r> RefTxn<'r> {
         Write::stash(self, args)
     }
 
+    pub(super) fn refresh_stat(&self) -> Write<'_> {
+        Write::refresh_stat(self)
+    }
+
     pub(super) fn move_tree<'a>(&'a self, from: &'a Oid, to: &'a Oid) -> Write<'a> {
         Write::move_tree(self, from, to)
     }

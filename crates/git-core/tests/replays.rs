@@ -2171,6 +2171,33 @@ fn an_overlapping_edit_refuses_undo_with_head_unmoved() {
 }
 
 #[test]
+fn a_file_touched_with_no_edits_does_not_refuse_undo_or_redo() {
+    let touch = |repo: &Repo, path: &str| {
+        fs::File::options()
+            .write(true)
+            .open(repo.root.join(path))
+            .unwrap()
+            .set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(60))
+            .unwrap();
+    };
+    for (format, pick) in cases() {
+        let (repo, applied) = Repo::finished(format, pick);
+        let parent = repo.oid("HEAD^");
+        let made = repo.oid("HEAD");
+        touch(&repo, "f.txt");
+        assert_eq!(repo.status(), "", "{format} {pick:?}");
+        repo.undo(&applied).unwrap();
+        assert_eq!(repo.oid("HEAD"), parent, "{format} {pick:?}");
+        assert_eq!(repo.read("f.txt"), "a\nOURS\nc\n");
+
+        touch(&repo, "f.txt");
+        repo.redo(&applied).unwrap();
+        assert_eq!(repo.oid("HEAD"), made, "{format} {pick:?}");
+        assert_eq!(repo.read("f.txt"), "a\nRESOLVED\nc\n");
+    }
+}
+
+#[test]
 fn an_ignored_or_untracked_file_at_a_created_path_refuses_the_step() {
     for format in FORMATS {
         for ignored in [true, false] {

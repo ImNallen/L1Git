@@ -260,6 +260,11 @@ fn follow(
             )));
         }
     }
+    // `read-tree` trusts cached stat data, so a file touched with no edits reads as edited.
+    let refreshed = txn.refresh_stat().run(deadline)?;
+    if !matches!(refreshed.code(), Some(0 | 1)) {
+        refreshed.succeeded()?;
+    }
     let moved = txn.move_tree(from, to).run(deadline)?;
     let said = moved.stderr();
     if moved.code() != Some(0)
