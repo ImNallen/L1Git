@@ -162,6 +162,10 @@ const handlers: Record<string, Handler> = {
           context: { kind: "branch" },
         };
   },
+  replayAbort: (request, world) => {
+    world.merges.delete(request.path as RepositoryRoot);
+    return idleMerge();
+  },
   conflictFile: (request) =>
     editableConflict(request.path, String(request.file)),
   lineStats: () => [],

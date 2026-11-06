@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ComponentProps } from "react";
 import type { MergeControls } from "../components/MergeControls";
+import type { ReplayPanel } from "../components/ReplayPanel";
 import {
   draftImpact as currentDraftImpact,
   useDraftImpact,
@@ -26,6 +27,8 @@ import type { ActiveWorktree } from "./useActiveWorktree";
 export type MergePanel = {
   /** Null with no snapshot. Rendered with `key={controls.root}`, so a new worktree remounts it. */
   controls: ComponentProps<typeof MergeControls> | null;
+  /** Null with no snapshot. Keyed by `replay.root`, so a new worktree remounts it too. */
+  replay: ComponentProps<typeof ReplayPanel> | null;
   sidebar: SidebarRefActions["merge"];
   actions: ActionSlice<
     "dialogOpen" | "merging" | "mergeAvailable" | "selectedMergeAvailable",
@@ -47,7 +50,7 @@ export function useMergePanel({
   active: ActiveWorktree;
   selectedBranch: Branch | null;
   opened: OpenedRepository;
-  writes: Pick<WritesView, "running" | "merge">;
+  writes: Pick<WritesView, "running" | "merge" | "write" | "abortReplay">;
   rereadChanges: () => void;
   /** The user selects the worktree, which clears the sidebar jump. */
   selecting: UserSelection;
@@ -81,6 +84,10 @@ export function useMergePanel({
   function open(selection: MergeSelection) {
     if (root && canMerge) setReview({ root, selection });
   }
+  const inspect = () => {
+    if (root) selecting.select({ kind: "worktree", root });
+    openInspector();
+  };
   return {
     sidebar: snapshot
       ? {
@@ -102,10 +109,18 @@ export function useMergePanel({
             onReview: () => open({ kind: "upstream" }),
             onCloseReview: () => setReview(null),
             run: (action) => writes.merge(root, action),
-            onInspect: () => {
-              selecting.select({ kind: "worktree", root });
-              openInspector();
-            },
+            onInspect: inspect,
+          }
+        : null,
+    replay:
+      root && snapshot
+        ? {
+            root,
+            read: active.merge,
+            busy,
+            write: writes.write,
+            abort: writes.abortReplay,
+            onInspect: inspect,
           }
         : null,
     actions: defineSlice({

@@ -1,3 +1,4 @@
+import { replayNames } from "./domain/merge";
 import type { MergeAction, MergeReport } from "./domain/merge";
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as repositories from "./repositories";
@@ -21,8 +22,10 @@ import { problemFrom } from "./domain/repository";
 import type {
   Applied,
   EntryId,
+  Head,
   Operation,
   Problem,
+  ReplayOf,
   RepositoryRoot,
 } from "./domain/repository";
 import { oneReadPerKey } from "./oneReadPerKey";
@@ -228,6 +231,33 @@ export function useWrites(
     );
   }
 
+  function abortReplay(
+    worktree: RepositoryRoot,
+    of: ReplayOf,
+    head: Head,
+  ): Promise<ReplayAbortOutcome> {
+    return task(
+      "merge",
+      `Abort ${replayNames[of.kind].noun}`,
+      async (repository) => {
+        let outcome: Exclude<ReplayAbortOutcome, { kind: "busy" }>;
+        try {
+          await repositories.replayAbort(worktree, of, head);
+          outcome = { kind: "aborted" };
+        } catch (error) {
+          outcome = { kind: "failed", problem: problemFrom(error) };
+        }
+        if (outcome.kind === "failed" && rereadsRepository(outcome.problem))
+          reread.repository(repository);
+        await Promise.all([
+          readHistory(historyRoot ?? worktree),
+          reread.worktree(worktree),
+        ]);
+        return outcome;
+      },
+    );
+  }
+
   const current = (root === null ? undefined : byRoot.get(root)) ?? idle;
   const writes = {
     ...current,
@@ -253,6 +283,7 @@ export function useWrites(
   return {
     ...writes,
     merge,
+    abortReplay,
     write: (worktree: RepositoryRoot, { operation, expect }: Write) =>
       run({ action: "write" }, describe(operation), worktree, operation, () =>
         repositories.write(worktree, operation, expect),
@@ -267,6 +298,11 @@ export function useWrites(
 }
 
 export type WritesView = ReturnType<typeof useWrites>;
+
+export type ReplayAbortOutcome =
+  | { kind: "aborted" }
+  | { kind: "failed"; problem: Problem }
+  | { kind: "busy" };
 
 export type MergeCommandOutcome =
   | { kind: "merged"; report: MergeReport }

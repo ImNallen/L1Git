@@ -320,3 +320,10 @@ export async function merge(path: RepositoryRoot, action: MergeAction) {
     await run({ op: "merge", path, action: mergeActionSchema.parse(action) })
   ).data;
 }
+export async function replayAbort(
+  path: RepositoryRoot,
+  of: ReplayOf,
+  head: Head,
+) {
+  return (await run({ op: "replayAbort", path, of, head })).data;
+}

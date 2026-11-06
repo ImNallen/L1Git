@@ -1107,6 +1107,35 @@ fn nondefault_merge_strategy_configuration_refuses_before_mutation() {
 }
 
 #[test]
+fn undo_from_another_worktree_still_names_an_active_merge() {
+    let f = Fixture::new(true);
+    let coordinator = f.coordinator();
+    let other = f.root.parent().unwrap().join("linked");
+    f.git(&["worktree", "add", "-b", "linked", other.to_str().unwrap()]);
+    fs::write(f.root.join("earlier.txt"), "earlier\n").unwrap();
+    f.git(&["add", "earlier.txt"]);
+    let status = worktree_status(f.path()).unwrap();
+    let earlier = coordinator
+        .write(
+            f.path(),
+            &Operation::Commit {
+                message: "earlier\n".to_owned(),
+                staged: status.staged_stamp,
+            },
+            &Expect { head: status.head },
+        )
+        .unwrap();
+    f.start(&coordinator);
+    let error = coordinator
+        .undo(other.to_str().unwrap(), earlier.id)
+        .unwrap_err();
+    assert_eq!(
+        error.message,
+        "This history entry changes a worktree with an active merge. Use that worktree's resolution Undo until Finish or Abort.",
+    );
+}
+
+#[test]
 fn foreign_operation_and_corrupt_session_have_distinct_attention_reasons() {
     let f = Fixture::new(false);
     let coordinator = f.coordinator();

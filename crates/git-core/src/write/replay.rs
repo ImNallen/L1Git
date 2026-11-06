@@ -5,6 +5,7 @@ use super::{
     merge::{self, Edit},
     refs::{self, Files, RefChange},
     store::{self, EntryObjects, LockedStore},
+    txn::RefreshTxn,
 };
 use crate::{
     ErrorKind, Head, Oid, RepositoryError, StagedStamp, StaleReason, StatusEntry,
@@ -706,6 +707,9 @@ pub(super) fn abort(
             collisions.join(", ")
         )));
     }
+    // A row that resolution Undo restored has no stat data, which `--abort` reports as
+    // an unstaged edit.
+    RefreshTxn::begin(repo, deadline)?.refresh(&|| false)?;
     let txn = ReplayTxn::begin(repo, deadline)?;
     let wrote = txn.abort(of.kind).run(deadline)?;
     let deadline = deadline.renewed();

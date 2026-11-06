@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { singleCommit } from "./domain/comparison";
 import { oidSchema, problemFrom, rootSchema } from "./domain/repository";
+import type { Head } from "./domain/repository";
 
 const invoke = vi.fn();
 const fetch = vi.fn();
@@ -302,6 +303,33 @@ it.each([true, false])(
         }),
       );
     await expect(addRemote(root, remote)).rejects.toHaveProperty("issues");
+  },
+);
+
+it.each([true, false])(
+  "sends replayAbort through native=%s transport and validates its answer",
+  async (native) => {
+    const api = await load(native);
+    const of = { kind: "revert" as const, commit: oid };
+    const head = {
+      kind: "attached" as const,
+      reference: "refs/heads/main",
+      oid,
+    } as Head;
+    const answered = { op: "replayAbort", data: { kind: "idle" } };
+    if (native) invoke.mockResolvedValueOnce(answered);
+    else reply(200, { ok: true, ...answered });
+    expect(await api.replayAbort(root, of, head)).toEqual({ kind: "idle" });
+    const sent = native
+      ? (invoke.mock.calls[0]?.[1] as { request: unknown }).request
+      : (JSON.parse(
+          (fetch.mock.calls[0]?.[1] as { body: string }).body,
+        ) as unknown);
+    expect(sent).toEqual({ op: "replayAbort", path: root, of, head });
+    const invalid = { op: "replayAbort", data: { kind: "idle", force: true } };
+    if (native) invoke.mockResolvedValueOnce(invalid);
+    else reply(200, { ok: true, ...invalid });
+    await expect(api.replayAbort(root, of, head)).rejects.toThrow();
   },
 );
 
