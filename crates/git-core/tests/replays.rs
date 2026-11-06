@@ -2125,6 +2125,71 @@ fn a_conflict_git_renames_to_avoid_a_clash_can_be_finished_and_aborted() {
 }
 
 #[test]
+fn a_renamed_path_resolved_in_a_terminal_before_the_first_read_can_still_be_finished() {
+    for (format, pick) in cases() {
+        let repo = stopped_on_a_renamed_path(format, pick);
+        let unmerged = repo.git(&["diff", "--name-only", "--diff-filter=U"]);
+        let renamed = unmerged.trim().to_owned();
+        repo.git(&["add", "--", &renamed]);
+        let shown = repo.progress();
+        assert!(
+            shown.footprint.contains(&renamed),
+            "{format} {pick:?}: {shown:?}"
+        );
+        repo.finish("Finished\n").unwrap();
+        assert!(
+            repo.git(&["ls-files"]).contains(&renamed),
+            "{format} {pick:?}"
+        );
+    }
+}
+
+/// `git update-index` can make a path unmerged, so being unmerged says nothing about who
+/// made the change.
+#[test]
+fn abort_refuses_a_path_something_other_than_the_operation_made_unmerged() {
+    for (format, pick) in cases() {
+        let (repo, _) = Repo::stopped(format, pick);
+        let blob = repo.git(&["rev-parse", ":u.txt"]);
+        let null = "0".repeat(blob.trim().len());
+        let script = format!(
+            "printf '0 {null}\\tu.txt\\n100644 {}\\t2\\tu.txt\\n' | sed 's/\\t2\\t/ 2\\t/' | git update-index --index-info",
+            blob.trim()
+        );
+        let ran = Command::new("sh")
+            .args(["-c", &script])
+            .current_dir(&repo.root)
+            .output()
+            .unwrap();
+        assert!(ran.status.success(), "{ran:?}");
+        assert!(repo.status().contains("u.txt"), "{format} {pick:?}");
+
+        let error = repo.abort().unwrap_err();
+        assert_eq!(error.kind, ErrorKind::Conflict, "{format} {pick:?}");
+        assert!(error.message.contains("u.txt"), "{}", error.message);
+        assert!(!repo.progress().footprint.contains(&"u.txt".to_owned()));
+    }
+}
+
+/// The memo must not carry one operation's index into the next one on the same commit.
+#[test]
+fn a_stale_memo_does_not_widen_a_later_no_commit_revert() {
+    for (format, pick) in cases().filter(|(_, pick)| *pick == Pick::Revert) {
+        let (repo, commit) = Repo::stopped(format, pick);
+        assert!(!repo.progress().footprint.contains(&"u.txt".to_owned()));
+        repo.git(&["revert", "--abort"]);
+        repo.put("u.txt", "staged\n");
+        repo.git(&["add", "u.txt"]);
+        repo.fails(&["revert", "-n", &commit]);
+
+        let error = repo.abort().unwrap_err();
+        assert_eq!(error.kind, ErrorKind::Conflict, "{format}");
+        assert!(error.message.contains("u.txt"), "{}", error.message);
+        assert_eq!(repo.read("u.txt"), "staged\n", "{format}");
+    }
+}
+
+#[test]
 fn undo_removes_the_commit_and_its_files_and_redo_returns_the_same_oid() {
     for (format, pick) in cases() {
         let (repo, applied) = Repo::finished(format, pick);

@@ -243,11 +243,10 @@ fn simulate(
     Ok(listed_paths(&ran.stdout[end..]).map(|conflicted| Simulated { tree, conflicted }))
 }
 
-/// The conflicted paths, every path the simulated result changes, and every path
-/// unmerged when this first runs. The memo keeps the answer, so index edits cannot
-/// widen it and resolving cannot shrink it.
-/// `merge-tree` runs custom merge drivers, so each (kind, commit, HEAD) runs it
-/// once, and the memo keeps the answer. Losing the memo costs one more run.
+/// The conflicted paths and every path the simulated result changes, plus the real name
+/// of a path Git renamed. `merge-tree` runs custom merge drivers, so each (kind, commit,
+/// HEAD) runs it once, and the memo keeps the answer. The memo holds only what those
+/// three decide, so losing it costs one more run and no operation inherits another's.
 fn footprint(
     repo: &Repo,
     of: &ReplayOf,
@@ -255,37 +254,65 @@ fn footprint(
     deadline: WriteDeadline,
 ) -> Result<Option<Vec<String>>, RepositoryError> {
     let memo = folder(repo, of, head).join("footprint.json");
-    if let Ok(Some(paths)) = merge::read::<Vec<String>>(&memo) {
-        return Ok(Some(paths));
+    let simulated = if let Ok(Some(paths)) = merge::read::<Vec<String>>(&memo) {
+        paths
+    } else {
+        let Some(simulated) = simulate(repo, of, head, deadline)? else {
+            return Ok(None);
+        };
+        let changed = git::read(
+            &repo.root,
+            &[
+                "diff-tree",
+                "-r",
+                "--no-renames",
+                "--name-only",
+                "-z",
+                head.as_str(),
+                simulated.tree.as_str(),
+            ],
+            deadline.reads(),
+        )?;
+        let Some(changed) = listed_paths(&changed) else {
+            return Ok(None);
+        };
+        let paths: Vec<_> = simulated.conflicted.union(&changed).cloned().collect();
+        let _ = prepared(repo, of, head).and_then(|_| merge::persist(&memo, &paths));
+        paths
+    };
+    with_real_names(repo, simulated, deadline).map(Some)
+}
+
+/// What comes before the label when `merge-tree` renames a path to avoid a clash: it
+/// labels the path with a full commit ID, and a real pick with `HEAD` or a short ID.
+fn renamed_stem(repo: &Repo, path: &str) -> Option<String> {
+    let (stem, label) = path.rsplit_once('~')?;
+    (label.len() == repo.null_oid.len() && label.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .then(|| format!("{stem}~"))
+}
+
+/// Translates a predicted name into the one Git really used. It only ever adds a path
+/// the simulation already predicted, so a staged edit the operation did not make stays
+/// outside, which is what lets Abort refuse to drop it.
+fn with_real_names(
+    repo: &Repo,
+    simulated: Vec<String>,
+    deadline: WriteDeadline,
+) -> Result<Vec<String>, RepositoryError> {
+    let stems: Vec<_> = simulated
+        .iter()
+        .filter_map(|path| renamed_stem(repo, path))
+        .collect();
+    if stems.is_empty() {
+        return Ok(simulated);
     }
-    let Some(simulated) = simulate(repo, of, head, deadline)? else {
-        return Ok(None);
-    };
-    let changed = git::read(
-        &repo.root,
-        &[
-            "diff-tree",
-            "-r",
-            "--no-renames",
-            "--name-only",
-            "-z",
-            head.as_str(),
-            simulated.tree.as_str(),
-        ],
-        deadline.reads(),
-    )?;
-    let Some(changed) = listed_paths(&changed) else {
-        return Ok(None);
-    };
-    let mut paths: BTreeSet<_> = simulated.conflicted.union(&changed).cloned().collect();
-    // Git renames a path to avoid a clash, and it names it differently from `merge-tree`.
-    // Only Git's merge makes a path unmerged. `AUTO_MERGE` would also name a staged
-    // edit that `revert -n` merged over, which Abort must not drop.
-    let (entries, _) = status::entries(&repo.root, Untracked::No, deadline.reads())?;
-    paths.extend(merge::unresolved(&entries));
-    let paths: Vec<_> = paths.into_iter().collect();
-    let _ = prepared(repo, of, head).and_then(|_| merge::persist(&memo, &paths));
-    Ok(Some(paths))
+    let mut paths: BTreeSet<_> = simulated.into_iter().collect();
+    paths.extend(
+        merge::names(repo, WHO, &["ls-files", "-z"], deadline)?
+            .into_iter()
+            .filter(|path| stems.iter().any(|stem| path.starts_with(stem.as_str()))),
+    );
+    Ok(paths.into_iter().collect())
 }
 
 fn tree_of(repo: &Repo, commit: &Oid, deadline: WriteDeadline) -> Result<Oid, RepositoryError> {
