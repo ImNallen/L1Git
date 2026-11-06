@@ -63,7 +63,7 @@ it("Finish writes finishReplay, closes the panel, and lands in Undo with its lab
     `write ${PIN} finishReplay`,
   ]);
   expect(query("region", PANEL)).toBeNull();
-  expect(get("button", "Undo Finish cherry-pick “Picked commit”")).toBeTruthy();
+  expect(get("button", "Undo Cherry-pick “Picked commit”")).toBeTruthy();
 });
 
 it("a refused Finish shows why through the write notice and keeps the panel", async () => {

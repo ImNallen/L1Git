@@ -338,7 +338,7 @@ export const checkoutWrite = (target: Start, head: Head): Write => ({
   expect: { head },
 });
 
-const branchName = (branch: BranchTip) =>
+export const branchName = (branch: Pick<BranchTip, "reference">) =>
   branch.reference.replace(/^refs\/heads\//, "");
 
 const startName = (start: Start) =>
@@ -484,7 +484,7 @@ export function describe(operation: Operation): string {
     case "replay":
       return `${replayNames[operation.review.kind].title} ${quoted(operation.review.subject)}`;
     case "finishReplay":
-      return `Finish ${replayNames[operation.of.kind].noun} ${quoted(operation.message)}`;
+      return `${replayNames[operation.of.kind].title} ${quoted(operation.message)}`;
   }
   if ("message" in operation)
     return `${commitVerbs[operation.kind]} ${quoted(operation.message)}`;
@@ -502,6 +502,12 @@ export function describe(operation: Operation): string {
   if (resolving) return `Mark ${files} resolved`;
   return `${fileVerbs[operation.kind]} ${files}`;
 }
+
+/** What a write is called while it runs or if it fails. A refused Finish must not read as a refused start. */
+export const attemptLabel = (operation: Operation) =>
+  operation.kind === "finishReplay"
+    ? `Finish ${replayNames[operation.of.kind].noun} ${quoted(operation.message)}`
+    : describe(operation);
 
 export type Step = "undo" | "redo";
 
