@@ -1,5 +1,6 @@
 import { EyeOff, Info, TriangleAlert } from "lucide-react";
 import { MergeControls } from "../components/MergeControls";
+import { ReplayPanel } from "../components/ReplayPanel";
 import { WriteNoticeRow } from "../components/UndoControls";
 import type { Problem, RepositorySnapshot } from "../domain/repository";
 import type { VisibilityRule } from "../domain/visibility";
@@ -27,7 +28,7 @@ export function Notices({
 }: {
   snapshot: RepositorySnapshot | null;
   writes: WritesView;
-  merge: Pick<MergePanel, "controls">;
+  merge: Pick<MergePanel, "controls" | "replay">;
   drafts: ResolutionDrafts;
   sync: Pick<SyncControls, "push" | "opened">;
   persistenceError: string | null;
@@ -43,6 +44,9 @@ export function Notices({
       <WriteNoticeRow writes={writes} />
       {merge.controls && (
         <MergeControls key={merge.controls.root} {...merge.controls} />
+      )}
+      {merge.replay && (
+        <ReplayPanel key={`replay:${merge.replay.root}`} {...merge.replay} />
       )}
       <ResolutionDraftList drafts={drafts} />
       <PushNotice push={sync.push} />

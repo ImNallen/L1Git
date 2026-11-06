@@ -14,6 +14,7 @@ import type { Read } from "../useRead";
 import { useDraftImpact } from "../draftProtection";
 import { clearSubmitted, useCommitDraft } from "../commitDrafts";
 import { messageFor, splitMessage } from "../domain/commitMessage";
+import type { Draft } from "../domain/commitMessage";
 import {
   discardConsentedResolutions,
   resolutionConsent,
@@ -35,6 +36,57 @@ export function MergePair({ review }: { review: MergeReview }) {
         <code>{review.destination.oid}</code>
       </dd>
     </dl>
+  );
+}
+
+export function OperationMessage({
+  summaryLabel,
+  descriptionLabel,
+  suggested,
+  draft,
+  setDraft,
+  disabled,
+}: {
+  summaryLabel: string;
+  descriptionLabel: string;
+  suggested: string;
+  draft: Draft;
+  setDraft: (draft: Draft) => void;
+  disabled: boolean;
+}) {
+  return (
+    <>
+      <label className="merge-message">
+        {summaryLabel}
+        <input
+          aria-label={summaryLabel}
+          className="commit-summary"
+          value={draft.summary}
+          placeholder={suggested}
+          readOnly={disabled}
+          onChange={(event) =>
+            setDraft({ ...draft, summary: event.target.value })
+          }
+        />
+        <textarea
+          aria-label={descriptionLabel}
+          className="commit-description"
+          value={draft.description}
+          placeholder="Description (optional)"
+          readOnly={disabled}
+          onChange={(event) =>
+            setDraft({ ...draft, description: event.target.value })
+          }
+        />
+      </label>
+      <button
+        className="button secondary"
+        disabled={disabled}
+        onClick={() => setDraft(splitMessage(suggested))}
+      >
+        Use suggested message
+      </button>
+    </>
   );
 }
 
@@ -128,7 +180,9 @@ export function MergeControls({
   if (
     !notice &&
     !review &&
-    (read.kind === "loading" || (state?.kind === "idle" && !eligible))
+    (read.kind === "loading" ||
+      state?.kind === "replay" ||
+      (state?.kind === "idle" && !eligible))
   )
     return null;
   return (
@@ -155,7 +209,11 @@ export function MergeControls({
       {read.kind === "error" && <p role="alert">{read.error.message}</p>}
       {state?.kind === "attention" && (
         <div role="alert">
-          <strong>Merge needs attention</strong>
+          <strong>
+            {state.reason === "externalOperation"
+              ? "Git operation in progress"
+              : "Merge needs attention"}
+          </strong>
           <p>{state.message}</p>
           {state.session && <MergePair review={state.session.review} />}
         </div>
@@ -253,47 +311,14 @@ function ActiveMerge({
           <code>{state.tree}</code>
         </details>
       )}
-      <label className="merge-message">
-        Merge commit message
-        <input
-          aria-label="Merge commit message"
-          className="commit-summary"
-          value={draft.draft.summary}
-          placeholder={session.suggestedMessage}
-          readOnly={disabled}
-          onChange={(event) =>
-            setDraft({
-              draft: { ...draft.draft, summary: event.target.value },
-              amend: null,
-            })
-          }
-        />
-        <textarea
-          aria-label="Merge description"
-          className="commit-description"
-          value={draft.draft.description}
-          placeholder="Description (optional)"
-          readOnly={disabled}
-          onChange={(event) =>
-            setDraft({
-              draft: { ...draft.draft, description: event.target.value },
-              amend: null,
-            })
-          }
-        />
-      </label>
-      <button
-        className="button secondary"
+      <OperationMessage
+        summaryLabel="Merge commit message"
+        descriptionLabel="Merge description"
+        suggested={session.suggestedMessage}
+        draft={draft.draft}
+        setDraft={(next) => setDraft({ draft: next, amend: null })}
         disabled={disabled}
-        onClick={() =>
-          setDraft({
-            draft: splitMessage(session.suggestedMessage),
-            amend: null,
-          })
-        }
-      >
-        Use suggested message
-      </button>
+      />
       {dirty && (
         <p role="status">
           Unsaved conflict results must be saved before Finish. Abort asks
