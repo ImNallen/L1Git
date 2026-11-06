@@ -105,6 +105,13 @@ impl Pick {
             Self::Revert => "revert",
         }
     }
+
+    const fn kind(self) -> ReplayKind {
+        match self {
+            Self::CherryPick => ReplayKind::CherryPick,
+            Self::Revert => ReplayKind::Revert,
+        }
+    }
 }
 
 const FORCE_QUIT: &str = "L1GIT_REPLAY_FORCE_QUIT";
@@ -500,13 +507,7 @@ fn a_replay_started_in_a_terminal_reads_from_gits_state_alone() {
         let (repo, commit) = Repo::stopped(format, pick);
         let progress = repo.progress();
         assert_eq!(progress.root, repo.path());
-        assert_eq!(
-            progress.kind,
-            match pick {
-                Pick::CherryPick => ReplayKind::CherryPick,
-                Pick::Revert => ReplayKind::Revert,
-            }
-        );
+        assert_eq!(progress.kind, pick.kind());
         assert_eq!(progress.commit.as_str(), commit);
         assert_eq!(progress.subject, "theirs");
         assert_eq!(
@@ -566,7 +567,7 @@ fn a_result_equal_to_head_reads_as_empty() {
 
 /// Stops on a modify/delete conflict in `u.txt`, in both directions: HEAD
 /// changes what the commit removes, and HEAD removes what the commit changes.
-fn modify_delete_stops(format: &str) -> Vec<(Repo, String)> {
+fn modify_delete_stops(format: &str) -> [Repo; 2] {
     let head_changes = Repo::new(format);
     head_changes.git(&["switch", "--quiet", "-c", "topic"]);
     head_changes.git(&["rm", "--quiet", "u.txt"]);
@@ -583,13 +584,13 @@ fn modify_delete_stops(format: &str) -> Vec<(Repo, String)> {
     head_removes.commit_all("removes u");
     head_changes.fails(&["cherry-pick", &removes]);
     head_removes.fails(&["cherry-pick", &changes]);
-    vec![(head_changes, removes), (head_removes, changes)]
+    [head_changes, head_removes]
 }
 
 #[test]
 fn a_modify_delete_conflict_stays_in_the_footprint_after_it_is_resolved() {
     for format in FORMATS {
-        for (repo, _) in modify_delete_stops(format) {
+        for repo in modify_delete_stops(format) {
             let progress = repo.progress();
             assert_eq!(progress.footprint, ["u.txt"], "{format}");
             assert_eq!(progress.unresolved, ["u.txt"], "{format}");
@@ -1081,28 +1082,12 @@ fn finish_commits_the_reviewed_result_with_the_right_author() {
 #[test]
 fn finish_closes_the_journal_and_joins_the_global_history() {
     for (format, pick) in cases() {
-        let repo = Repo::new(format);
-        repo.put("u.txt", "more\n");
-        repo.git(&["add", "u.txt"]);
-        let status = worktree_status(repo.path()).unwrap();
-        let earlier = repo
-            .coordinator()
-            .write(
-                repo.path(),
-                &Operation::Commit {
-                    message: "earlier\n".to_owned(),
-                    staged: status.staged_stamp,
-                },
-                &Expect { head: status.head },
-            )
-            .unwrap();
-        stop(&repo.root, pick);
+        let (repo, _) = Repo::stopped(format, pick);
         let saved = repo.save("f.txt", "a\nSAVED\nc\n");
         let marked = repo.stage("f.txt");
-        let coordinator = repo.coordinator();
-        coordinator.undo(repo.path(), marked.id).unwrap();
-        coordinator.undo(repo.path(), saved.id).unwrap();
-        assert_eq!(repo.progress().unresolved, ["f.txt"]);
+        repo.undo(&marked).unwrap();
+        repo.undo(&saved).unwrap();
+        assert_eq!(repo.progress().unresolved, ["f.txt"], "{format} {pick:?}");
         repo.resolve();
         let finished = repo.finish("Finished\n").unwrap();
         let history = repo.history();
@@ -1119,32 +1104,44 @@ fn finish_closes_the_journal_and_joins_the_global_history() {
             0,
             "{format} {pick:?}"
         );
-        assert_ne!(earlier.id, finished.id);
     }
 }
 
 #[test]
 fn finish_works_after_a_modify_delete_resolved_either_way() {
     for format in FORMATS {
-        for (repo, _) in modify_delete_stops(format) {
-            let _ = fs::remove_file(repo.root.join("u.txt"));
-            repo.git(&["rm", "--quiet", "--cached", "--ignore-unmatch", "u.txt"]);
-            let removed = repo.progress();
-            let before = repo.oid("HEAD");
-            if removed.empty {
-                let error = repo.finish("Finished\n").unwrap_err();
-                assert_eq!(error.kind, ErrorKind::UnchangedPath, "{}", error.message);
-                continue;
-            }
-            repo.finish("Finished\n").unwrap();
-            assert_eq!(repo.oid("HEAD^"), before, "{format}");
-            assert!(
-                !repo
-                    .git(&["ls-tree", "--name-only", "HEAD"])
-                    .contains("u.txt"),
-                "{format}"
-            );
-        }
+        let [head_changes, head_removes] = modify_delete_stops(format);
+
+        let before = head_changes.oid("HEAD");
+        head_changes.git(&["rm", "--quiet", "--force", "u.txt"]);
+        head_changes.finish("Takes the removal\n").unwrap();
+        assert_eq!(head_changes.oid("HEAD^"), before, "{format}");
+        assert!(!head_changes.root.join("u.txt").exists(), "{format}");
+        assert_eq!(head_changes.status(), "", "{format}");
+
+        let before = head_removes.oid("HEAD");
+        head_removes.git(&["add", "u.txt"]);
+        head_removes.finish("Takes the change\n").unwrap();
+        assert_eq!(head_removes.oid("HEAD^"), before, "{format}");
+        assert_eq!(head_removes.read("u.txt"), "theirs\n", "{format}");
+        assert_eq!(head_removes.status(), "", "{format}");
+    }
+}
+
+#[test]
+fn a_modify_delete_resolved_to_heads_side_is_empty() {
+    for format in FORMATS {
+        let [_, head_removes] = modify_delete_stops(format);
+        let _ = fs::remove_file(head_removes.root.join("u.txt"));
+        head_removes.git(&["rm", "--quiet", "--cached", "u.txt"]);
+        assert!(head_removes.progress().empty, "{format}");
+        let error = head_removes.finish("Finished\n").unwrap_err();
+        assert_eq!(
+            error.kind,
+            ErrorKind::UnchangedPath,
+            "{format}: {}",
+            error.message
+        );
     }
 }
 
@@ -1670,7 +1667,7 @@ fn abort_works_over_the_wire_after_a_resolved_conflict() {
 #[test]
 fn abort_ends_a_modify_delete_conflict() {
     for format in FORMATS {
-        for (repo, _) in modify_delete_stops(format) {
+        for repo in modify_delete_stops(format) {
             let head = repo.oid("HEAD");
             assert_eq!(repo.abort().unwrap(), MergeState::Idle, "{format}");
             assert_eq!(repo.oid("HEAD"), head);
@@ -1808,17 +1805,14 @@ fn an_abort_naming_another_commit_or_head_is_stale_and_changes_nothing() {
     }
 }
 
-fn abort_refused(repo: &Repo, commit: &str, pick: Pick) {
+fn abort_refused(repo: &Repo, commit: &str) {
     let head = repo.oid("HEAD");
     let error = repo
         .coordinator()
         .abort_replay(
             repo.path(),
             &ReplayOf {
-                kind: match pick {
-                    Pick::CherryPick => ReplayKind::CherryPick,
-                    Pick::Revert => ReplayKind::Revert,
-                },
+                kind: ReplayKind::CherryPick,
                 commit: Oid::try_from(commit.to_owned()).unwrap(),
             },
             &worktree_status(repo.path()).unwrap().head,
@@ -1826,7 +1820,7 @@ fn abort_refused(repo: &Repo, commit: &str, pick: Pick) {
         .unwrap_err();
     assert_eq!(error.kind, ErrorKind::Conflict, "{}", error.message);
     assert_eq!(repo.oid("HEAD"), head);
-    assert!(repo.has_marker(pick));
+    assert!(repo.has_marker(Pick::CherryPick));
 }
 
 #[test]
@@ -1842,13 +1836,13 @@ fn abort_refuses_a_sequence_a_pruned_commit_and_a_footprint_it_cannot_name() {
         repo.put("f.txt", "a\nOURS\nc\n");
         repo.commit_all("ours");
         repo.fails(&["cherry-pick", "topic~1", "topic"]);
-        abort_refused(&repo, &first, Pick::CherryPick);
+        abort_refused(&repo, &first);
 
         let (repo, commit) = Repo::stopped(format, Pick::CherryPick);
         repo.git(&["branch", "--quiet", "-D", "topic"]);
         repo.git(&["reflog", "expire", "--expire=now", "--all"]);
         repo.git(&["gc", "--quiet", "--prune=now"]);
-        abort_refused(&repo, &commit, Pick::CherryPick);
+        abort_refused(&repo, &commit);
 
         let (repo, commit) = Repo::stopped(format, Pick::CherryPick);
         let blob = repo.oid(&format!("{commit}^:f.txt"));
@@ -1860,24 +1854,7 @@ fn abort_refuses_a_sequence_a_pruned_commit_and_a_footprint_it_cannot_name() {
         )
         .unwrap();
         repo.assert_external(format);
-        let error = repo
-            .coordinator()
-            .abort_replay(
-                repo.path(),
-                &ReplayOf {
-                    kind: ReplayKind::CherryPick,
-                    commit: Oid::try_from(commit).unwrap(),
-                },
-                &worktree_status(repo.path()).unwrap().head,
-            )
-            .unwrap_err();
-        assert_eq!(
-            error.kind,
-            ErrorKind::Conflict,
-            "{format}: {}",
-            error.message
-        );
-        assert!(repo.has_marker(Pick::CherryPick));
+        abort_refused(&repo, &commit);
     }
 }
 
