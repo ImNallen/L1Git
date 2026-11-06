@@ -1,5 +1,5 @@
 use super::{
-    Direction, RefTxn, Repo,
+    Direction, RefTxn, Repo, merge,
     store::{EntryObjects, Objects},
     txn::Runner,
 };
@@ -145,11 +145,30 @@ pub(super) fn transact(
     ))
 }
 
+/// What a ref's undo does with the files. `Stay` moves only the ref, like `git reset
+/// --soft`. `Follow` removes the commit's file changes too.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Files {
+    Stay,
+    Follow,
+}
+
 pub(super) fn restore(
     repo: &Repo,
     entry: &EntryObjects,
     change: &RefChange,
     direction: Direction,
+    deadline: WriteDeadline,
+) -> Result<(), RepositoryError> {
+    restore_with(repo, entry, change, direction, Files::Stay, deadline)
+}
+
+pub(super) fn restore_with(
+    repo: &Repo,
+    entry: &EntryObjects,
+    change: &RefChange,
+    direction: Direction,
+    files: Files,
     deadline: WriteDeadline,
 ) -> Result<(), RepositoryError> {
     let (from, to) = match direction {
@@ -158,7 +177,7 @@ pub(super) fn restore(
     };
     if let Some(operation) = sync::in_progress(&repo.root, deadline.reads())?
         .into_iter()
-        .find(|operation| operation.holds_commits())
+        .find(|operation| files == Files::Follow || operation.holds_commits())
     {
         return Err(RepositoryError::new(
             ErrorKind::Conflict,
@@ -196,7 +215,83 @@ pub(super) fn restore(
         Direction::Undo => "l1git undo",
         Direction::Redo => "l1git redo",
     };
-    transact(&txn, &[step], reflog, "branch")
+    match files {
+        Files::Stay => transact(&txn, &[step], reflog, "branch"),
+        Files::Follow => follow(repo, &txn, &step, reflog, deadline),
+    }
+}
+
+/// Moves the files first, so a refusal changes nothing, and the ref only after them.
+/// A crash between the two leaves a staged inverse, and repeating the step finishes.
+fn follow(
+    repo: &Repo,
+    txn: &RefTxn<'_>,
+    step: &Move,
+    reflog: &str,
+    deadline: WriteDeadline,
+) -> Result<(), RepositoryError> {
+    const WHO: &str = "Undo or redo";
+    let (Some(from), Some(to)) = (&step.old, &step.new) else {
+        return Err(git::malformed());
+    };
+    merge::safe_index_for(repo, WHO, deadline)?;
+    // `read-tree -u` overwrites an ignored file at a path it creates, silently.
+    let created = merge::names(
+        repo,
+        WHO,
+        &[
+            "diff-tree",
+            "-r",
+            "--no-renames",
+            "--diff-filter=A",
+            "--name-only",
+            "-z",
+            from.as_str(),
+            to.as_str(),
+        ],
+        deadline,
+    )?;
+    if !created.is_empty() {
+        let collisions = merge::colliding_files(repo, WHO, &created, deadline)?;
+        if !collisions.is_empty() {
+            return Err(merge::refused(format!(
+                "Preserve these untracked or ignored files first, because this undo or redo would create files at their paths: {}.",
+                collisions.join(", ")
+            )));
+        }
+    }
+    let moved = txn.move_tree(from, to).run(deadline)?;
+    let said = moved.stderr();
+    if moved.code() != Some(0)
+        && (said.contains("not uptodate") || said.contains("would be overwritten"))
+    {
+        return Err(RepositoryError::stale(
+            StaleReason::PathChanged,
+            format!(
+                "A file this commit changed has edits, so L1 Git cannot undo or redo it, and nothing changed. Git said: {}",
+                stderr::summarize(said)
+            ),
+        ));
+    }
+    moved.succeeded()?;
+    let Err(stopped) = transact(txn, std::slice::from_ref(step), reflog, "branch") else {
+        return Ok(());
+    };
+    let back = txn.renewed()?;
+    let result = back
+        .move_tree(to, from)
+        .run(back.runner().deadline())
+        .and_then(git::Wrote::succeeded);
+    match result {
+        Ok(_) => Err(stopped),
+        Err(also) => Err(RepositoryError::new(
+            stopped.kind,
+            format!(
+                "{} The files had already moved, and L1 Git could not put them back, so the index and files hold the other side of this commit as staged changes. {}",
+                stopped.message, also.message
+            ),
+        )),
+    }
 }
 
 pub(super) fn capitalized(text: &str) -> String {

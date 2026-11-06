@@ -988,28 +988,57 @@ fn aborted_index(
         }))
 }
 
+pub(super) fn names(
+    repo: &Repo,
+    who: &str,
+    args: &[&str],
+    deadline: WriteDeadline,
+) -> Result<Vec<String>, RepositoryError> {
+    git::read(&repo.root, args, deadline.reads())?
+        .split(|byte| *byte == 0)
+        .filter(|path| !path.is_empty())
+        .map(|path| {
+            String::from_utf8(path.to_vec())
+                .map_err(|_| refused(format!("{who} paths must be valid UTF-8.")))
+        })
+        .collect()
+}
+
 fn refuse_untracked_collisions(
     repo: &Repo,
     source: &Oid,
     deadline: WriteDeadline,
 ) -> Result<(), RepositoryError> {
-    let names = |args: &[&str]| -> Result<Vec<String>, RepositoryError> {
-        git::read(&repo.root, args, deadline.reads())?
-            .split(|byte| *byte == 0)
-            .filter(|path| !path.is_empty())
-            .map(|path| {
-                String::from_utf8(path.to_vec())
-                    .map_err(|_| refused("Merge paths must be valid UTF-8."))
-            })
-            .collect()
-    };
-    let incoming: Vec<_> = names(&["ls-tree", "-r", "-z", "--name-only", source.as_str()])?
+    let incoming = names(
+        repo,
+        "Merge",
+        &["ls-tree", "-r", "-z", "--name-only", source.as_str()],
+        deadline,
+    )?;
+    let collisions = colliding_files(repo, "Merge", &incoming, deadline)?;
+    if collisions.is_empty() {
+        Ok(())
+    } else {
+        Err(refused(format!(
+            "Preserve these untracked or ignored files before merging because they overlap the source tree: {}",
+            collisions.join(", ")
+        )))
+    }
+}
+
+pub(super) fn colliding_files(
+    repo: &Repo,
+    who: &str,
+    incoming: &[String],
+    deadline: WriteDeadline,
+) -> Result<Vec<String>, RepositoryError> {
+    let incoming: Vec<_> = incoming
         .iter()
         .map(|path| super::files::fold_for_any_disk(path))
         .collect();
     // No exclude rules: ignored files need the same protection as other untracked files.
-    let untracked = names(&["ls-files", "--others", "-z"])?;
-    let collisions: Vec<_> = untracked
+    let untracked = names(repo, who, &["ls-files", "--others", "-z"], deadline)?;
+    Ok(untracked
         .into_iter()
         .filter(|path| {
             // Conservatively include aliases on case- or normalization-insensitive disks.
@@ -1020,15 +1049,7 @@ fn refuse_untracked_collisions(
                     || path.starts_with(&format!("{target}/"))
             })
         })
-        .collect();
-    if collisions.is_empty() {
-        Ok(())
-    } else {
-        Err(refused(format!(
-            "Preserve these untracked or ignored files before merging because they overlap the source tree: {}",
-            collisions.join(", ")
-        )))
-    }
+        .collect())
 }
 
 fn paths(entries: &[StatusEntry]) -> BTreeSet<String> {

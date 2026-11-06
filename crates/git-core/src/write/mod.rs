@@ -388,14 +388,15 @@ impl Change {
             (Self::Checkout(_), Direction::Redo) => Some(LocalWrite::RedoCheckout),
             (Self::Stash(_), Direction::Undo) => Some(LocalWrite::UndoStash),
             (Self::Stash(_), Direction::Redo) => Some(LocalWrite::RedoStash),
+            (Self::Replay(_), Direction::Undo) => Some(LocalWrite::UndoReplay),
+            (Self::Replay(_), Direction::Redo) => Some(LocalWrite::RedoReplay),
             (
                 Self::Resolution(_)
                 | Self::Index(_)
                 | Self::Ref(_)
                 | Self::Discard(_)
                 | Self::Branch(_)
-                | Self::Tag(_)
-                | Self::Replay(_),
+                | Self::Tag(_),
                 _,
             ) => None,
         }

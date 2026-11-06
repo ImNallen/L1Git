@@ -3,7 +3,7 @@ use super::{
     store::{LockedStore, Log, Recorded, Step},
 };
 use crate::{
-    ErrorKind, RepositoryError,
+    ErrorKind, Oid, RepositoryError,
     git::{self, HeldIndexLock, Write, WriteDeadline},
 };
 use std::{
@@ -552,6 +552,10 @@ impl<'r> RefTxn<'r> {
 
     pub(super) fn stash<'a>(&'a self, args: &[&'a str]) -> Write<'a> {
         Write::stash(self, args)
+    }
+
+    pub(super) fn move_tree<'a>(&'a self, from: &'a Oid, to: &'a Oid) -> Write<'a> {
+        Write::move_tree(self, from, to)
     }
 }
 

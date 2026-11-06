@@ -3,7 +3,7 @@ use super::{
     branches::Writing,
     commit::{self, Target, Trace},
     merge::{self, Edit},
-    refs::{self, RefChange},
+    refs::{self, Files, RefChange},
     store::{self, EntryObjects, LockedStore},
 };
 use crate::{
@@ -23,6 +23,8 @@ use std::{
 const EMPTY_TREE_SHA1: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 const EMPTY_TREE_SHA256: &str = "6ef19b41225c5369f1c104d45d8d85efa9b057b53b14b4b9b939dd74decc5321";
 
+const WHO: &str = "This cherry-pick or revert";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ReplayKind {
@@ -39,20 +41,16 @@ impl ReplayKind {
     }
 
     pub(crate) const fn command(self) -> &'static str {
-        self.slug()
+        match self {
+            Self::CherryPick => "cherry-pick",
+            Self::Revert => "revert",
+        }
     }
 
     pub(super) const fn operation(self) -> InProgress {
         match self {
             Self::CherryPick => InProgress::CherryPick,
             Self::Revert => InProgress::Revert,
-        }
-    }
-
-    const fn slug(self) -> &'static str {
-        match self {
-            Self::CherryPick => "cherry-pick",
-            Self::Revert => "revert",
         }
     }
 }
@@ -184,7 +182,7 @@ fn base(repo: &Repo) -> PathBuf {
 fn folder(repo: &Repo, of: &ReplayOf, head: &Oid) -> PathBuf {
     base(repo).join(format!(
         "{}-{}-{}",
-        of.kind.slug(),
+        of.kind.command(),
         of.commit.as_str(),
         head.as_str()
     ))
@@ -296,8 +294,7 @@ fn tree_of(repo: &Repo, commit: &Oid, deadline: WriteDeadline) -> Result<Oid, Re
     Oid::try_from(git::line(&output)).map_err(|_| git::malformed())
 }
 
-/// `None` unless `in_flight` answers and `merge-tree` can name the footprint. A
-/// pick from a terminal and a pick from L1 Git read the same.
+/// `None` unless `in_flight` answers and `merge-tree` can name the footprint.
 pub(super) fn progress(
     repo: &Repo,
     deadline: WriteDeadline,
@@ -368,9 +365,8 @@ pub(super) fn sweep(repo: &Repo, keep: Option<&Path>) {
     }
 }
 
-/// Index edits within the footprint pass. Anything else refuses and says why. A
-/// replay whose footprint `merge-tree` cannot name reads as an external operation,
-/// so it passes as one does.
+/// A replay whose footprint `merge-tree` cannot name reads as an external
+/// operation, so it passes as one does.
 pub(super) fn admit(
     repo: &Repo,
     operation: &Operation,
@@ -402,10 +398,7 @@ pub(super) fn admit(
     }
 }
 
-const WHO: &str = "This cherry-pick or revert";
-
-/// Commits what Git says is in progress. Runs on the global store, because the
-/// result joins global history. A pick finished after a crash keeps its entry.
+/// Runs on the global store, because the result joins global history.
 pub(super) fn finish(
     writing: &Writing<'_>,
     expect: &Expect,
@@ -665,13 +658,16 @@ pub(super) fn abort(
 }
 
 pub(super) fn step(
-    _repo: &Repo,
-    _entry: &EntryObjects,
-    _change: &ReplayChange,
-    _direction: Direction,
-    _deadline: WriteDeadline,
+    repo: &Repo,
+    entry: &EntryObjects,
+    change: &ReplayChange,
+    direction: Direction,
+    deadline: WriteDeadline,
 ) -> Result<(), RepositoryError> {
-    Err(store::history_changed())
+    let ReplayChange::Landed(change) = change else {
+        return Err(store::history_changed());
+    };
+    refs::restore_with(repo, entry, change, direction, Files::Follow, deadline)
 }
 
 fn settle_journal(
@@ -772,8 +768,10 @@ fn comment_string(repo: &Repo, deadline: WriteDeadline) -> Result<String, Reposi
 /// because a commit's body can hold a real `# ...` line. Under `commit.cleanup =
 /// scissors`, Git writes its cut line and notes before the hint.
 fn cut_conflicts_block(merge_msg: &str, comment: &str) -> String {
+    fn bare(line: &str) -> &str {
+        line.trim_end_matches('\n')
+    }
     let lines: Vec<_> = merge_msg.split_inclusive('\n').collect();
-    let bare = |line: &str| line.trim_end_matches('\n').to_owned();
     let path = format!("{comment}\t");
     let heading = format!("{comment} Conflicts:");
     let mut keep = lines.len();

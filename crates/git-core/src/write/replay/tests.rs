@@ -39,6 +39,48 @@ fn cutting_changes_nothing_without_a_trailing_block() {
     }
 }
 
+#[test]
+fn a_recorded_change_keeps_its_stored_form() {
+    let oid = |digit: &str| digit.repeat(40);
+    let before = Head::Attached {
+        reference: "refs/heads/main".to_owned(),
+        oid: oid("a"),
+    };
+    let after = Head::Attached {
+        reference: "refs/heads/main".to_owned(),
+        oid: oid("b"),
+    };
+    for (change, stored) in [
+        (
+            Change::Replay(ReplayChange::Pending {
+                before: before.clone(),
+                tree: Some(Oid::try_from(oid("c")).unwrap()),
+            }),
+            serde_json::json!({
+                "domain": "replay",
+                "state": "pending",
+                "before": {"kind": "attached", "reference": "refs/heads/main", "oid": oid("a")},
+                "tree": oid("c"),
+            }),
+        ),
+        (
+            Change::Replay(ReplayChange::Landed(
+                RefChange::new(before.clone(), after, None).unwrap(),
+            )),
+            serde_json::json!({
+                "domain": "replay",
+                "state": "landed",
+                "before": {"kind": "attached", "reference": "refs/heads/main", "oid": oid("a")},
+                "after": {"kind": "attached", "reference": "refs/heads/main", "oid": oid("b")},
+                "replaced": null,
+            }),
+        ),
+    ] {
+        assert_eq!(serde_json::to_value(&change).unwrap(), stored);
+        assert_eq!(serde_json::from_value::<Change>(stored).unwrap(), change);
+    }
+}
+
 /// F1, by constructing the state: no hook runs between recording the entry and
 /// starting Git, so this records it and stops there.
 #[cfg(unix)]
@@ -57,80 +99,95 @@ mod crash {
         command.arg("-C").arg(root).args(args).output().unwrap()
     }
 
+    fn run_all(root: &Path, commands: &[&[&str]]) {
+        for args in commands {
+            let ran = git(root, args);
+            assert!(ran.status.success(), "{args:?}: {ran:?}");
+        }
+    }
+
     #[test]
     fn a_pending_entry_recorded_before_git_ran_drops_and_finish_still_works() {
-        let directory = tempfile::tempdir().unwrap();
-        let root = directory.path().canonicalize().unwrap().join("repo");
-        fs::create_dir(&root).unwrap();
-        for args in [
-            &["init", "--quiet", "--initial-branch=main"][..],
-            &["config", "user.name", "Ada"],
-            &["config", "user.email", "ada@example.test"],
-            &["config", "core.hooksPath", "/dev/null"],
-        ] {
-            assert!(git(&root, args).status.success());
-        }
-        fs::write(root.join("f.txt"), "base\n").unwrap();
-        for args in [
-            &["add", "."][..],
-            &["commit", "-qm", "base"],
-            &["switch", "-qc", "topic"],
-        ] {
-            assert!(git(&root, args).status.success());
-        }
-        fs::write(root.join("f.txt"), "theirs\n").unwrap();
-        for args in [&["commit", "-qam", "theirs"][..], &["switch", "-q", "main"]] {
-            assert!(git(&root, args).status.success());
-        }
-        fs::write(root.join("f.txt"), "ours\n").unwrap();
-        assert!(git(&root, &["commit", "-qam", "ours"]).status.success());
-        assert!(!git(&root, &["cherry-pick", "topic"]).status.success());
-        fs::write(root.join("f.txt"), "resolved\n").unwrap();
-        assert!(git(&root, &["add", "."]).status.success());
+        for format in ["files", "reftable"] {
+            let directory = tempfile::tempdir().unwrap();
+            let root = directory.path().canonicalize().unwrap().join("repo");
+            fs::create_dir(&root).unwrap();
+            let init = format!("--ref-format={format}");
+            run_all(
+                &root,
+                &[
+                    &["init", "--quiet", "--initial-branch=main", &init],
+                    &["config", "user.name", "Ada"],
+                    &["config", "user.email", "ada@example.test"],
+                    &["config", "core.hooksPath", "/dev/null"],
+                ],
+            );
+            fs::write(root.join("f.txt"), "base\n").unwrap();
+            run_all(
+                &root,
+                &[
+                    &["add", "."],
+                    &["commit", "-qm", "base"],
+                    &["switch", "-qc", "topic"],
+                ],
+            );
+            fs::write(root.join("f.txt"), "theirs\n").unwrap();
+            run_all(
+                &root,
+                &[&["commit", "-qam", "theirs"], &["switch", "-q", "main"]],
+            );
+            fs::write(root.join("f.txt"), "ours\n").unwrap();
+            run_all(&root, &[&["commit", "-qam", "ours"]]);
+            assert!(!git(&root, &["cherry-pick", "topic"]).status.success());
+            fs::write(root.join("f.txt"), "resolved\n").unwrap();
+            run_all(&root, &[&["add", "."]]);
 
-        let path = root.to_str().unwrap();
-        let coordinator = Coordinator::new(Limits::default(), directory.path().join("undo"));
-        let MergeState::Replay { progress } = coordinator.merge_state(path).unwrap() else {
-            panic!("a replay should be in flight");
-        };
-        let operation = Operation::FinishReplay {
-            of: progress.of(),
-            staged: progress.staged.clone(),
-            tree: progress.tree.clone().unwrap(),
-            message: "Finished\n".to_owned(),
-        };
-        let head = progress.destination.clone();
-        coordinator
-            .locked(path, LocalWrite::ReplayFinish, |repo, store, log, _| {
-                let (_, _, recorded) = store.record_with(&repo, &log, &operation, |_| {
-                    Ok(ReplayChange::Pending {
-                        before: head.clone(),
-                        tree: progress.tree.clone(),
-                    })
-                })?;
-                recorded.durable()?;
-                recorded.stay_pending();
-                Ok(())
-            })
-            .unwrap();
-
-        assert_eq!(
-            coordinator.merge_state(path).unwrap(),
-            MergeState::Replay {
-                progress: progress.clone()
-            }
-        );
-        assert_eq!(coordinator.undo_history(path).unwrap().undo, None);
-        let finished = coordinator
-            .write(path, &operation, &Expect { head: head.clone() })
-            .unwrap();
-        assert_eq!(
+            let path = root.to_str().unwrap();
+            let coordinator = Coordinator::new(Limits::default(), directory.path().join("undo"));
+            let MergeState::Replay { progress } = coordinator.merge_state(path).unwrap() else {
+                panic!("{format}: a replay should be in flight");
+            };
+            let operation = Operation::FinishReplay {
+                of: progress.of(),
+                staged: progress.staged.clone(),
+                tree: progress.tree.clone().unwrap(),
+                message: "Finished\n".to_owned(),
+            };
+            let head = progress.destination.clone();
             coordinator
-                .undo_history(path)
-                .unwrap()
-                .undo
-                .map(|entry| entry.id),
-            Some(finished.id)
-        );
+                .locked(path, LocalWrite::ReplayFinish, |repo, store, log, _| {
+                    let (_, _, recorded) = store.record_with(&repo, &log, &operation, |_| {
+                        Ok(ReplayChange::Pending {
+                            before: head.clone(),
+                            tree: progress.tree.clone(),
+                        })
+                    })?;
+                    recorded.durable()?;
+                    recorded.stay_pending();
+                    Ok(())
+                })
+                .unwrap();
+
+            assert_eq!(
+                coordinator.merge_state(path).unwrap(),
+                MergeState::Replay {
+                    progress: progress.clone()
+                },
+                "{format}"
+            );
+            assert_eq!(coordinator.undo_history(path).unwrap().undo, None);
+            let finished = coordinator
+                .write(path, &operation, &Expect { head: head.clone() })
+                .unwrap();
+            assert_eq!(
+                coordinator
+                    .undo_history(path)
+                    .unwrap()
+                    .undo
+                    .map(|entry| entry.id),
+                Some(finished.id),
+                "{format}"
+            );
+        }
     }
 }

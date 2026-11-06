@@ -127,7 +127,6 @@ fn finish_operation(shown: &ReplayProgress, message: &str) -> Operation {
 
 const PICKS: [Pick; 2] = [Pick::CherryPick, Pick::Revert];
 
-/// Every case runs in both ref formats, for both commands.
 fn cases() -> impl Iterator<Item = (&'static str, Pick)> {
     FORMATS
         .into_iter()
@@ -141,6 +140,10 @@ struct Repo {
 
 impl Repo {
     fn new(format: &str) -> Self {
+        Self::with_objects(format, "sha1")
+    }
+
+    fn with_objects(format: &str, objects: &str) -> Self {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().canonicalize().unwrap().join("repo");
         fs::create_dir(&root).unwrap();
@@ -151,9 +154,10 @@ impl Repo {
                 "--quiet",
                 "--initial-branch=main",
                 &format!("--ref-format={format}"),
+                &format!("--object-format={objects}"),
             ],
         );
-        assert!(init.status.success());
+        assert!(init.status.success(), "{init:?}");
         let repo = Self { directory, root };
         for (key, value) in [
             ("user.name", "Ada"),
@@ -303,7 +307,6 @@ impl Repo {
         self.git(&["config", "core.hooksPath", "/dev/null"]);
     }
 
-    /// Saves and marks `f.txt`, as the resolver does.
     fn resolve(&self) {
         self.save("f.txt", "a\nRESOLVED\nc\n");
         self.stage("f.txt");
@@ -336,6 +339,21 @@ impl Repo {
         self.abort_as_shown(&self.progress())
     }
 
+    fn undo(&self, applied: &Applied) -> Result<Applied, RepositoryError> {
+        self.coordinator().undo(self.path(), applied.id)
+    }
+
+    fn redo(&self, applied: &Applied) -> Result<Applied, RepositoryError> {
+        self.coordinator().redo(self.path(), applied.id)
+    }
+
+    fn finished(format: &str, pick: Pick) -> (Self, Applied) {
+        let (repo, _) = Self::stopped(format, pick);
+        repo.resolve();
+        let applied = repo.finish("Finished\n").unwrap();
+        (repo, applied)
+    }
+
     /// Runs Finish in a process of its own, for a hook that kills that process.
     fn force_quit_during_finish(&self) {
         let quit = Command::new(std::env::current_exe().unwrap())
@@ -350,7 +368,6 @@ impl Repo {
         self.no_hooks();
     }
 
-    /// What Git staged against HEAD, which the derived footprint must cover.
     fn staged_paths(&self) -> Vec<String> {
         let listed = self.git(&[
             "diff-index",
@@ -653,6 +670,21 @@ fn a_root_commit_replays_against_the_empty_tree() {
             "{format}"
         );
         assert_eq!(progress.footprint, repo.staged_paths(), "{format}");
+    }
+}
+
+#[test]
+fn a_root_commit_replays_in_a_sha256_repository() {
+    for format in FORMATS {
+        let repo = Repo::with_objects(format, "sha256");
+        repo.git(&["switch", "--quiet", "--orphan", "other"]);
+        repo.put("f.txt", "root\n");
+        let root = repo.commit_all("root");
+        repo.git(&["switch", "--quiet", "main"]);
+        repo.fails(&["cherry-pick", &root]);
+        let progress = repo.progress();
+        assert_eq!(progress.unresolved, ["f.txt"], "{format}");
+        assert_eq!(progress.footprint, ["f.txt"], "{format}");
     }
 }
 
@@ -2044,6 +2076,466 @@ fn a_kill_after_the_marker_went_settles_with_the_lock_still_there() {
             repo.status(),
             "",
             "{format} {pick:?}: the index equals HEAD"
+        );
+    }
+}
+
+#[test]
+fn undo_removes_the_commit_and_its_files_and_redo_returns_the_same_oid() {
+    for (format, pick) in cases() {
+        let (repo, applied) = Repo::finished(format, pick);
+        let made = repo.oid("HEAD");
+        let result = repo.git(&["rev-parse", "HEAD^{tree}"]);
+        let parent = repo.oid("HEAD^");
+
+        assert_eq!(repo.undo(&applied).unwrap().id, applied.id);
+        assert_eq!(repo.oid("HEAD"), parent, "{format} {pick:?}");
+        assert_eq!(repo.read("f.txt"), "a\nOURS\nc\n");
+        assert_eq!(repo.status(), "", "{format} {pick:?}");
+        assert_eq!(
+            repo.root.join("n.txt").exists(),
+            pick == Pick::Revert,
+            "{format} {pick:?}"
+        );
+        assert_eq!(
+            repo.state(),
+            MergeState::Idle,
+            "Undo does not reopen a conflict"
+        );
+
+        assert_eq!(repo.redo(&applied).unwrap().id, applied.id);
+        assert_eq!(repo.oid("HEAD"), made, "{format} {pick:?}");
+        assert_eq!(repo.git(&["rev-parse", "HEAD^{tree}"]), result);
+        assert_eq!(repo.read("f.txt"), "a\nRESOLVED\nc\n");
+        assert_eq!(repo.status(), "", "{format} {pick:?}");
+    }
+}
+
+#[test]
+fn a_repeated_undo_answers_the_entry_and_changes_nothing() {
+    for (format, pick) in cases() {
+        let (repo, applied) = Repo::finished(format, pick);
+        let parent = repo.oid("HEAD^");
+        repo.undo(&applied).unwrap();
+        assert_eq!(repo.undo(&applied).unwrap().id, applied.id);
+        assert_eq!(repo.oid("HEAD"), parent, "{format} {pick:?}");
+    }
+}
+
+#[test]
+fn older_history_is_still_reachable_after_a_finished_replay_is_undone() {
+    for (format, pick) in cases() {
+        let repo = Repo::new(format);
+        repo.put("u.txt", "more\n");
+        repo.git(&["add", "u.txt"]);
+        let status = worktree_status(repo.path()).unwrap();
+        let earlier = repo
+            .coordinator()
+            .write(
+                repo.path(),
+                &Operation::Commit {
+                    message: "earlier\n".to_owned(),
+                    staged: status.staged_stamp,
+                },
+                &Expect { head: status.head },
+            )
+            .unwrap();
+        stop(&repo.root, pick);
+        repo.save("f.txt", "a\nSAVED\nc\n");
+        repo.stage("f.txt");
+        let finished = repo.finish("Finished\n").unwrap();
+        repo.undo(&finished).unwrap();
+        assert_eq!(repo.undo_id(), Some(earlier.id), "{format} {pick:?}");
+    }
+}
+
+#[test]
+fn an_unrelated_edit_survives_undo_and_redo() {
+    for (format, pick) in cases() {
+        let (repo, applied) = Repo::finished(format, pick);
+        repo.put("v.txt", "edited\n");
+        repo.put("u.txt", "staged\n");
+        repo.git(&["add", "u.txt"]);
+        repo.undo(&applied).unwrap();
+        assert_eq!(repo.read("v.txt"), "edited\n", "{format} {pick:?}");
+        assert_eq!(repo.read("u.txt"), "staged\n", "{format} {pick:?}");
+        assert_eq!(repo.git(&["diff", "--cached", "--name-only"]), "u.txt\n");
+        repo.redo(&applied).unwrap();
+        assert_eq!(repo.read("v.txt"), "edited\n", "{format} {pick:?}");
+        assert_eq!(repo.status(), "M  u.txt\n M v.txt\n", "{format} {pick:?}");
+    }
+}
+
+#[test]
+fn an_overlapping_edit_refuses_undo_with_head_unmoved() {
+    let stale = ErrorKind::StaleView {
+        reason: StaleReason::PathChanged,
+    };
+    for (format, pick) in cases() {
+        let (repo, applied) = Repo::finished(format, pick);
+        let made = repo.oid("HEAD");
+        repo.put("f.txt", "a\nEDITED\nc\n");
+        let error = repo.undo(&applied).unwrap_err();
+        assert_eq!(error.kind, stale, "{format} {pick:?}: {}", error.message);
+        assert!(error.message.contains("f.txt"), "{}", error.message);
+        assert_eq!(repo.oid("HEAD"), made, "{format} {pick:?}");
+        assert_eq!(repo.read("f.txt"), "a\nEDITED\nc\n");
+
+        repo.git(&["add", "f.txt"]);
+        let error = repo.undo(&applied).unwrap_err();
+        assert_eq!(error.kind, stale, "{format} {pick:?}: {}", error.message);
+        assert_eq!(repo.oid("HEAD"), made, "{format} {pick:?}");
+        assert_eq!(repo.git(&["diff", "--cached", "--name-only"]), "f.txt\n");
+
+        repo.git(&["restore", "--staged", "--worktree", "f.txt"]);
+        repo.undo(&applied).unwrap();
+        assert_eq!(repo.oid("HEAD"), repo.oid("main"));
+    }
+}
+
+#[test]
+fn an_ignored_or_untracked_file_at_a_created_path_refuses_the_step() {
+    for format in FORMATS {
+        for ignored in [true, false] {
+            let (repo, applied) = Repo::finished(format, Pick::Revert);
+            assert!(
+                !repo.root.join("n.txt").exists(),
+                "the revert removed n.txt"
+            );
+            if ignored {
+                fs::write(repo.root.join(".git/info/exclude"), "n.txt\n").unwrap();
+            }
+            repo.put("n.txt", "mine\n");
+            let made = repo.oid("HEAD");
+            let error = refused(repo.undo(&applied));
+            assert!(error.message.contains("n.txt"), "{}", error.message);
+            assert_eq!(repo.oid("HEAD"), made, "{format} ignored {ignored}");
+            assert_eq!(repo.read("n.txt"), "mine\n");
+
+            let (repo, applied) = Repo::finished(format, Pick::CherryPick);
+            repo.undo(&applied).unwrap();
+            if ignored {
+                fs::write(repo.root.join(".git/info/exclude"), "n.txt\n").unwrap();
+            }
+            repo.put("n.txt", "mine\n");
+            let parent = repo.oid("HEAD");
+            let error = refused(repo.redo(&applied));
+            assert!(error.message.contains("n.txt"), "{}", error.message);
+            assert_eq!(repo.oid("HEAD"), parent, "{format} ignored {ignored}");
+            assert_eq!(repo.read("n.txt"), "mine\n");
+        }
+    }
+}
+
+#[test]
+fn undo_refuses_any_operation_in_progress() {
+    for (format, pick) in cases() {
+        let (repo, applied) = Repo::finished(format, pick);
+        let made = repo.oid("HEAD");
+        repo.git(&["bisect", "start"]);
+        let error = refused(repo.undo(&applied));
+        assert!(error.message.starts_with("A bisect"), "{}", error.message);
+        assert_eq!(repo.oid("HEAD"), made, "{format} {pick:?}");
+    }
+}
+
+#[test]
+fn undo_after_head_moved_is_stale() {
+    for (format, pick) in cases() {
+        let (repo, applied) = Repo::finished(format, pick);
+        let moved = repo.move_head_with_plumbing();
+        let error = repo.undo(&applied).unwrap_err();
+        assert_eq!(
+            error.kind,
+            ErrorKind::StaleView {
+                reason: StaleReason::HeadMoved
+            },
+            "{format} {pick:?}"
+        );
+        assert_eq!(repo.oid("HEAD"), moved);
+    }
+}
+
+#[test]
+fn undo_refuses_while_the_index_is_locked_or_not_ordinary() {
+    for (format, pick) in cases() {
+        let (repo, applied) = Repo::finished(format, pick);
+        let made = repo.oid("HEAD");
+        let lock = repo.root.join(".git/index.lock");
+        fs::write(&lock, "").unwrap();
+        let error = refused(repo.undo(&applied));
+        assert!(error.message.contains("index.lock"), "{}", error.message);
+        fs::remove_file(&lock).unwrap();
+        repo.git(&["update-index", "--skip-worktree", "v.txt"]);
+        let error = refused(repo.undo(&applied));
+        assert!(error.message.contains("skip-worktree"), "{}", error.message);
+        repo.git(&["update-index", "--no-skip-worktree", "v.txt"]);
+        repo.git(&["config", "core.sparseCheckout", "true"]);
+        let error = refused(repo.undo(&applied));
+        assert!(error.message.contains("sparse"), "{}", error.message);
+        repo.git(&["config", "core.sparseCheckout", "false"]);
+        assert_eq!(repo.oid("HEAD"), made, "{format} {pick:?}");
+        repo.undo(&applied).unwrap();
+    }
+}
+
+/// A crash between moving the files and moving the ref, by constructing the state:
+/// no hook runs between the two that can also stop L1 Git's own transaction.
+#[test]
+fn undo_repeated_after_the_files_moved_finishes_the_ref() {
+    for (format, pick) in cases() {
+        let (repo, applied) = Repo::finished(format, pick);
+        let (made, parent) = (repo.oid("HEAD"), repo.oid("HEAD^"));
+        repo.git(&["read-tree", "-m", "-u", &made, &parent]);
+        assert_eq!(repo.oid("HEAD"), made);
+        assert!(
+            !repo.status().is_empty(),
+            "{format} {pick:?}: a staged inverse"
+        );
+        repo.undo(&applied).unwrap();
+        assert_eq!(repo.oid("HEAD"), parent, "{format} {pick:?}");
+        assert_eq!(repo.status(), "", "{format} {pick:?}");
+    }
+}
+
+/// A crash after the ref moved and before the log saved, by constructing the state:
+/// both moves done by hand, with the log still naming the entry as next to undo.
+#[test]
+fn undo_repeated_after_the_ref_moved_only_saves_the_log() {
+    for (format, pick) in cases() {
+        let (repo, applied) = Repo::finished(format, pick);
+        let (made, parent) = (repo.oid("HEAD"), repo.oid("HEAD^"));
+        repo.git(&["read-tree", "-m", "-u", &made, &parent]);
+        repo.git(&["update-ref", "refs/heads/main", &parent, &made]);
+        repo.undo(&applied).unwrap();
+        assert_eq!(repo.history().redo.map(|entry| entry.id), Some(applied.id));
+        repo.redo(&applied).unwrap();
+        assert_eq!(repo.oid("HEAD"), made, "{format} {pick:?}");
+    }
+}
+
+/// The hook moves the branch once the files have moved, so the compare-and-swap fails.
+const MOVE_BRANCH_ONCE: &str = "[ -e .git/moved ] && exit 0\ntouch .git/moved\ngit update-ref refs/heads/main \"$(git commit-tree 'HEAD^{tree}' -p HEAD -m moved)\"\n";
+
+#[test]
+fn a_failed_ref_move_puts_the_files_back() {
+    for (format, pick) in cases() {
+        let (repo, applied) = Repo::finished(format, pick);
+        repo.hook("post-index-change", MOVE_BRANCH_ONCE);
+        let error = repo.undo(&applied).unwrap_err();
+        repo.no_hooks();
+        assert_eq!(
+            error.kind,
+            ErrorKind::StaleView {
+                reason: StaleReason::HeadMoved
+            },
+            "{format} {pick:?}: {}",
+            error.message
+        );
+        assert_eq!(repo.read("f.txt"), "a\nRESOLVED\nc\n", "{format} {pick:?}");
+        assert_eq!(repo.status(), "", "{format} {pick:?}");
+    }
+}
+
+#[test]
+fn a_failed_ref_move_that_cannot_put_the_files_back_says_both() {
+    for (format, pick) in cases() {
+        let (repo, applied) = Repo::finished(format, pick);
+        repo.hook(
+            "post-index-change",
+            &format!("{MOVE_BRANCH_ONCE}echo edited > f.txt\n"),
+        );
+        let error = repo.undo(&applied).unwrap_err();
+        repo.no_hooks();
+        assert!(
+            error.message.contains("moved since")
+                && error.message.contains("could not put them back")
+                && error.message.contains("f.txt"),
+            "{format} {pick:?}: {}",
+            error.message
+        );
+        assert_eq!(repo.read("f.txt"), "edited\n");
+    }
+}
+
+#[test]
+fn redo_brings_the_commit_back_after_it_was_pruned() {
+    for (format, pick) in cases() {
+        let (repo, applied) = Repo::finished(format, pick);
+        let made = repo.oid("HEAD");
+        repo.undo(&applied).unwrap();
+        if pick == Pick::CherryPick {
+            repo.git(&["branch", "--quiet", "-D", "topic"]);
+        }
+        repo.git(&["reflog", "expire", "--expire=now", "--all"]);
+        repo.git(&["gc", "--quiet", "--prune=now"]);
+        assert!(
+            !terminal(&repo.root, &["cat-file", "-e", &made])
+                .status
+                .success(),
+            "{format} {pick:?}: gc should prune the commit"
+        );
+        repo.redo(&applied).unwrap();
+        assert_eq!(repo.oid("HEAD"), made, "{format} {pick:?}");
+        assert_eq!(repo.read("f.txt"), "a\nRESOLVED\nc\n");
+        assert_eq!(repo.status(), "", "{format} {pick:?}");
+    }
+}
+
+#[test]
+fn undo_from_another_worktree_changes_the_worktree_that_finished() {
+    for (format, pick) in cases() {
+        let repo = Repo::new(format);
+        let linked = repo.linked("linked", "busy");
+        stop(&linked, pick);
+        let path = linked.to_str().unwrap();
+        fs::write(linked.join("f.txt"), "a\nRESOLVED\nc\n").unwrap();
+        git(&linked, &["add", "f.txt"]);
+        let coordinator = repo.coordinator();
+        let MergeState::Replay { progress } = coordinator.merge_state(path).unwrap() else {
+            panic!("{format} {pick:?}");
+        };
+        let applied = coordinator
+            .write(
+                path,
+                &finish_operation(&progress, "Finished\n"),
+                &Expect {
+                    head: progress.destination,
+                },
+            )
+            .unwrap();
+        let parent = git(&linked, &["rev-parse", "HEAD^"]);
+        coordinator.undo(repo.path(), applied.id).unwrap();
+        assert_eq!(
+            git(&linked, &["rev-parse", "HEAD"]),
+            parent,
+            "{format} {pick:?}"
+        );
+        assert_eq!(git(&linked, &["status", "--porcelain"]), "");
+    }
+}
+
+#[test]
+fn a_replay_on_a_detached_head_finishes_and_undoes() {
+    for format in FORMATS {
+        let repo = Repo::new(format);
+        repo.git(&["switch", "--quiet", "-c", "topic"]);
+        repo.put("f.txt", "a\nTHEIRS\nc\n");
+        let commit = repo.commit_all("theirs");
+        repo.git(&["switch", "--quiet", "--detach", "main"]);
+        repo.put("f.txt", "a\nOURS\nc\n");
+        repo.commit_all("ours");
+        repo.fails(&["cherry-pick", &commit]);
+        repo.resolve();
+        let before = repo.oid("HEAD");
+        let applied = repo.finish("Finished\n").unwrap();
+        let made = repo.oid("HEAD");
+        assert_eq!(repo.oid("HEAD^"), before, "{format}");
+        repo.undo(&applied).unwrap();
+        assert_eq!(repo.oid("HEAD"), before, "{format}");
+        repo.redo(&applied).unwrap();
+        assert_eq!(repo.oid("HEAD"), made, "{format}");
+    }
+}
+
+#[test]
+fn undo_works_on_an_entry_a_crash_left_pending() {
+    for (format, pick) in cases() {
+        let (repo, parent) = killed_as_the_ref_moved(format, pick);
+        let _ = fs::remove_file(repo.root.join(".git/index.lock"));
+        let progress = repo.progress();
+        repo.abort_as_shown(&progress).unwrap();
+        let entry = repo.history().undo.expect("the entry settled");
+        let made = repo.oid("HEAD");
+        repo.undo(&entry).unwrap();
+        assert_eq!(repo.oid("HEAD"), parent, "{format} {pick:?}");
+        repo.redo(&entry).unwrap();
+        assert_eq!(repo.oid("HEAD"), made, "{format} {pick:?}");
+    }
+}
+
+/// By a real kill: a smudge filter kills Git after `git read-tree` rewrote `f.txt`
+/// and before it wrote `n.txt`.
+#[test]
+fn an_undo_killed_inside_read_tree_refuses_until_its_rewritten_files_are_discarded() {
+    for format in FORMATS {
+        let (repo, applied) = Repo::finished(format, Pick::Revert);
+        let made = repo.oid("HEAD");
+        let parent = repo.oid("HEAD^");
+        let filter = repo.directory.path().join("kill-git");
+        fs::write(&filter, format!("#!/bin/sh\n{KILL_GIT_ANCESTORS}cat\n")).unwrap();
+        fs::set_permissions(&filter, fs::Permissions::from_mode(0o755)).unwrap();
+        repo.git(&["config", "filter.killed.smudge", filter.to_str().unwrap()]);
+        fs::write(
+            repo.root.join(".git/info/attributes"),
+            "n.txt filter=killed\n",
+        )
+        .unwrap();
+
+        let error = repo.undo(&applied).unwrap_err();
+        assert_eq!(
+            error.kind,
+            ErrorKind::GitFailed,
+            "{format}: {}",
+            error.message
+        );
+        assert_eq!(
+            repo.oid("HEAD"),
+            made,
+            "{format}: the ref moves only after read-tree"
+        );
+        repo.git(&["config", "--unset", "filter.killed.smudge"]);
+        let _ = fs::remove_file(repo.root.join(".git/index.lock"));
+        assert_eq!(repo.status(), " M f.txt\n", "{format}: Git's partial state");
+
+        let error = repo.undo(&applied).unwrap_err();
+        assert_eq!(
+            error.kind,
+            ErrorKind::StaleView {
+                reason: StaleReason::PathChanged
+            },
+            "{format}: {}",
+            error.message
+        );
+        repo.git(&["restore", "f.txt"]);
+        repo.undo(&applied).unwrap();
+        assert_eq!(repo.oid("HEAD"), parent, "{format}");
+        assert_eq!(repo.status(), "", "{format}");
+    }
+}
+
+#[test]
+fn undo_from_another_worktree_refuses_while_that_worktree_holds_a_replay() {
+    for (format, pick) in cases() {
+        let repo = Repo::new(format);
+        let linked = repo.linked("linked", "busy");
+        let path = linked.to_str().unwrap();
+        fs::write(linked.join("u.txt"), "more\n").unwrap();
+        git(&linked, &["add", "u.txt"]);
+        let coordinator = repo.coordinator();
+        let status = worktree_status(path).unwrap();
+        let earlier = coordinator
+            .write(
+                path,
+                &Operation::Commit {
+                    message: "earlier\n".to_owned(),
+                    staged: status.staged_stamp,
+                },
+                &Expect { head: status.head },
+            )
+            .unwrap();
+        stop(&linked, pick);
+        let head = git(&linked, &["rev-parse", "HEAD"]);
+        let error = refused(coordinator.undo(repo.path(), earlier.id));
+        assert!(
+            error.message.contains("resolution Undo"),
+            "{}",
+            error.message
+        );
+        assert_eq!(
+            git(&linked, &["rev-parse", "HEAD"]),
+            head,
+            "{format} {pick:?}"
         );
     }
 }
