@@ -259,6 +259,61 @@ it("keeps recovery read-only while preserving resolution for an external operati
   expect(button("Mark resolved").disabled).toBe(false);
 });
 
+const replay = (kind: "cherryPick" | "revert", footprint: string[]) =>
+  mergeStateSchema.parse({
+    kind: "replay",
+    progress: {
+      root: snapshot.root,
+      kind,
+      commit: "a".repeat(40),
+      subject: "Picked",
+      destination: {
+        kind: "attached",
+        reference: "refs/heads/main",
+        oid: "b".repeat(40),
+      },
+      footprint,
+      unresolved: [snapshot.path],
+      staged: "c".repeat(40),
+      tree: null,
+      empty: false,
+      suggestedMessage: "Picked\n",
+    },
+  });
+
+it.each([
+  ["cherryPick", "outside the cherry-pick's affected paths"],
+  ["revert", "outside the revert's affected paths"],
+] as const)(
+  "names a %s when a path is outside its footprint",
+  async (kind, text) => {
+    vi.mocked(repositories.mergeState).mockResolvedValue(
+      replay(kind, ["another.txt"]),
+    );
+    await render(1);
+    expect(button("Mark resolved").disabled).toBe(true);
+    expect(host.textContent).toContain(text);
+    expect(host.textContent).not.toContain("the merge's");
+  },
+);
+
+it("lets the resolver work inside a replay's footprint, and says what Incoming holds in a revert", async () => {
+  vi.mocked(repositories.mergeState).mockResolvedValue(
+    replay("cherryPick", [snapshot.path]),
+  );
+  await render(1);
+  expect(button("Mark resolved").disabled).toBe(false);
+  expect(host.textContent).not.toContain("the reverse of the commit");
+  vi.mocked(repositories.mergeState).mockResolvedValue(
+    replay("revert", [snapshot.path]),
+  );
+  await render(2);
+  expect(button("Mark resolved").disabled).toBe(false);
+  expect(host.textContent).toContain(
+    "Incoming holds the reverse of the commit",
+  );
+});
+
 it("blocks Save and Mark outside a managed merge's footprint without losing draft text", async () => {
   const state = mergeStateSchema.parse({
     kind: "active",

@@ -9,7 +9,7 @@ import { conflictTextSchema, problemFrom } from "../domain/repository";
 import type { ConflictFile, RepositoryRoot } from "../domain/repository";
 import { useDraftImpact } from "../draftProtection";
 import { useMergeState } from "../useMergeState";
-import { mergeAllows } from "../domain/merge";
+import { mergeAllows, replayNames } from "../domain/merge";
 import {
   attachEditor,
   canMark,
@@ -176,6 +176,14 @@ export function ConflictResolver({
               ))}
             </div>
           </div>
+          {mergeRead.kind === "ready" &&
+            mergeRead.value.kind === "replay" &&
+            mergeRead.value.progress.kind === "revert" && (
+              <p className="conflict-help">
+                In a revert, Incoming holds the reverse of the commit. Base is
+                that commit and Incoming is its parent.
+              </p>
+            )}
           <div className="conflict-code">
             <File
               file={{ name: path, contents: draft.snapshot[source] }}
@@ -238,12 +246,12 @@ export function ConflictResolver({
           {!allowed && (
             <p role="status">
               {mergeRead.kind === "loading"
-                ? "Checking merge state…"
+                ? "Checking for an operation in progress…"
                 : mergeRead.kind === "error"
                   ? mergeRead.error.message
                   : mergeRead.value.kind === "attention"
                     ? mergeRead.value.message
-                    : "This path is outside the merge's affected paths. Preserve it externally before continuing."}
+                    : `This path is outside the ${mergeRead.value.kind === "replay" ? replayNames[mergeRead.value.progress.kind].noun : "merge"}'s affected paths. Preserve it externally before continuing.`}
             </p>
           )}
           {(stale || problem || read.kind === "error" || !valid) && (
