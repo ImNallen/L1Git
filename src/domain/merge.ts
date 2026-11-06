@@ -9,7 +9,7 @@ import {
   rootSchema,
   stagedStampSchema,
 } from "./repository";
-import type { Operation } from "./repository";
+import type { Operation, ReplayKind } from "./repository";
 
 export const mergeSelectionSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("upstream") }),
@@ -110,6 +110,13 @@ export type MergeState = z.infer<typeof mergeStateSchema>;
 export type MergeAction = z.infer<typeof mergeActionSchema>;
 export type MergeReport = z.infer<typeof mergeReportSchema>;
 export type MergeSession = z.infer<typeof mergeSessionSchema>;
+export type ReplayProgress = z.infer<typeof replayProgressSchema>;
+
+export const replayNames: Record<ReplayKind, { noun: string; title: string }> =
+  {
+    cherryPick: { noun: "cherry-pick", title: "Cherry-pick" },
+    revert: { noun: "revert", title: "Revert" },
+  };
 
 export function mergeAllows(
   state: MergeState | null,

@@ -72,6 +72,7 @@ const writes: WritesView = {
   undo: async () => ({ kind: "busy" }),
   redo: async () => ({ kind: "busy" }),
   merge: async () => ({ kind: "busy" }),
+  abortReplay: async () => ({ kind: "busy" }),
   dismiss: () => {},
   rereadHistory: () => {},
 };

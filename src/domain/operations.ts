@@ -1,4 +1,5 @@
 import { subjectOf } from "./commitMessage";
+import { replayNames } from "./merge";
 import { shownText, splittable } from "./lineSelection";
 import type { ListSide } from "./worktree";
 import type {
@@ -480,7 +481,7 @@ export function describe(operation: Operation): string {
     case "stashDrop":
       return `Drop ${operation.stash.name}`;
     case "finishReplay":
-      return `Finish ${operation.of.kind === "revert" ? "revert" : "cherry-pick"} ${quoted(operation.message)}`;
+      return `Finish ${replayNames[operation.of.kind].noun} ${quoted(operation.message)}`;
   }
   if ("message" in operation)
     return `${commitVerbs[operation.kind]} ${quoted(operation.message)}`;

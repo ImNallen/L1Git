@@ -553,6 +553,7 @@ export type IndexObject = z.infer<typeof indexObjectSchema>;
 export type Stages = z.infer<typeof stagesSchema>;
 export type MoveSide = z.infer<typeof moveSideSchema>;
 export type Conflict = z.infer<typeof conflictSchema>;
+export type ReplayKind = z.infer<typeof replayKindSchema>;
 export type ReplayOf = z.infer<typeof replayOfSchema>;
 export type StatusEntry = z.infer<typeof statusEntrySchema>;
 export type WorktreeStatus = z.infer<typeof worktreeStatusSchema>;
