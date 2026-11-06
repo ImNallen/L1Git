@@ -437,6 +437,101 @@ fn a_commit_git_was_killed_after_making_is_not_reported_as_made() {
     assert!(repo.undo_entry().is_none());
 }
 
+#[cfg(unix)]
+const FORCE_QUIT_REPOSITORY: &str = "L1GIT_FORCE_QUIT_REPOSITORY";
+
+/// Runs only inside the process that
+/// `a_force_quit_during_a_commit_leaves_later_requests_working` starts, because
+/// its `pre-commit` hook kills this process.
+#[cfg(unix)]
+#[test]
+fn force_quit_process() {
+    let Ok(root) = std::env::var(FORCE_QUIT_REPOSITORY) else {
+        return;
+    };
+    let undo = Path::new(&root).parent().unwrap().join("undo");
+    let status = worktree_status(&root).unwrap();
+    let answer = Coordinator::new(Limits::default(), undo).write(
+        &root,
+        &Operation::Commit {
+            message: "Landed\n".to_owned(),
+            staged: status.staged_stamp,
+        },
+        &Expect { head: status.head },
+    );
+    panic!("the hook should have killed this process before {answer:?}");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_force_quit_during_a_commit_leaves_later_requests_working() {
+    use std::{
+        os::unix::process::ExitStatusExt,
+        thread,
+        time::{Duration, Instant},
+    };
+    let repo = Repo::born();
+    let finished = repo.directory.path().join("finished");
+    repo.hook("pre-commit", "kill -9 $(ps -o ppid= -p $PPID)\n");
+    repo.hook("post-commit", &format!("touch '{}'\n", finished.display()));
+    repo.staged_edit("a.txt", "two\n");
+
+    let quit = Command::new(std::env::current_exe().unwrap())
+        .args(["force_quit_process", "--exact", "--nocapture"])
+        .env(FORCE_QUIT_REPOSITORY, repo.path())
+        .status()
+        .unwrap();
+    assert_eq!(quit.signal(), Some(9), "{quit}");
+    let waiting = Instant::now();
+    while !finished.exists() {
+        assert!(
+            waiting.elapsed() < Duration::from_secs(60),
+            "Git should finish the commit on its own"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+    repo.git(&["config", "core.hooksPath", "/dev/null"]);
+    assert_eq!(repo.git(&["log", "-1", "--format=%s"]), "Landed\n");
+    let made = repo.head();
+
+    assert!(repo.undo_entry().is_none());
+    repo.staged_edit("a.txt", "three\n");
+    let later = repo.write(Kind::Commit, "Later\n").unwrap();
+    assert_eq!(repo.git(&["rev-parse", "HEAD^"]).trim(), made);
+    assert_eq!(repo.undo_entry().map(|entry| entry.id), Some(later.id));
+    repo.undo(&later);
+    assert_eq!(repo.head(), made);
+    assert!(repo.undo_entry().is_none());
+}
+
+#[test]
+fn an_undo_entry_that_lost_its_recorded_change_answers_history_changed() {
+    let repo = Repo::born();
+    repo.staged_edit("a.txt", "two\n");
+    let applied = repo.write(Kind::Commit, "Recorded\n").unwrap();
+    let made = repo.head();
+    let store = fs::read_dir(repo.directory.path().join("undo"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    fs::remove_file(
+        store
+            .join("entries")
+            .join(applied.id.to_string())
+            .join("change.json"),
+    )
+    .unwrap();
+    refused(
+        repo.coordinator().undo(repo.path(), applied.id),
+        ErrorKind::StaleView {
+            reason: StaleReason::HistoryChanged,
+        },
+    );
+    assert_eq!(repo.head(), made);
+}
+
 #[test]
 fn hooks_see_the_users_environment_not_l1_gits() {
     let repo = Repo::born();
