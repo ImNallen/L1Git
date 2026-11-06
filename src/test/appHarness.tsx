@@ -636,6 +636,9 @@ export async function mountApp(options: MountOptions = {}): Promise<Harness> {
     bridge,
     async unmount() {
       await act(async () => root.unmount());
+      // A queued frame keeps Preact's fallback timer alive, and that timer
+      // throws if it fires after the environment is gone.
+      await harness.flushFrames();
       dom.restore();
     },
   };
