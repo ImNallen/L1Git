@@ -2,6 +2,7 @@ use super::{
     Applied, BranchTip, Change, CommitTxn, Direction, Expect, Operation, ReplayTxn, Repo,
     branches::Writing,
     commit::{self, Target, Trace},
+    files,
     merge::{self, Edit},
     refs::{self, Files, RefChange},
     store::{self, EntryObjects, LockedStore, Recorded},
@@ -486,6 +487,38 @@ pub(super) fn progress(
     }))
 }
 
+/// A path that clashes gets a `~` label in `merge-tree` that names a full commit ID, and
+/// a real pick labels it differently, so only the part before the `~` can be matched.
+/// Git overwrites an ignored file there silently.
+fn at_renamed_paths(
+    repo: &Repo,
+    simulated: &Simulated,
+    deadline: WriteDeadline,
+) -> Result<Vec<String>, RepositoryError> {
+    let renamed: Vec<_> = simulated
+        .conflicted
+        .iter()
+        .filter_map(|path| {
+            let (base, label) = path.rsplit_once('~')?;
+            (label.len() == repo.null_oid.len()
+                && label.bytes().all(|byte| byte.is_ascii_hexdigit()))
+            .then(|| files::fold_for_any_disk(&format!("{base}~")))
+        })
+        .collect();
+    if renamed.is_empty() {
+        return Ok(Vec::new());
+    }
+    Ok(
+        merge::names(repo, WHO, &["ls-files", "--others", "-z"], deadline)?
+            .into_iter()
+            .filter(|path| {
+                let path = files::fold_for_any_disk(path);
+                renamed.iter().any(|base| path.starts_with(base.as_str()))
+            })
+            .collect(),
+    )
+}
+
 /// Every refusal, in one place, so Start re-runs the identical list. Writes only
 /// `merge-tree`'s loose objects.
 pub(super) fn review(
@@ -575,7 +608,8 @@ pub(super) fn review(
             )));
         }
         let added = simulated.added(repo, &head, deadline)?;
-        let collisions = merge::colliding_files(repo, WHO, &added, deadline)?;
+        let mut collisions = merge::colliding_files(repo, WHO, &added, deadline)?;
+        collisions.extend(at_renamed_paths(repo, &simulated, deadline)?);
         if !collisions.is_empty() {
             return Err(merge::refused(format!(
                 "Preserve these untracked or ignored files first, because {name} would write to their paths: {}.",
@@ -717,8 +751,26 @@ pub(super) fn apply(
     let txn = txn.renewed();
     match wrote.code() {
         Some(0) => {
-            let (_, race) = land(recorded, txn.runner(), &wrote, &trace, &head)?;
-            race.map_or(Ok(applied), Err)
+            let (made, race) = land(recorded, txn.runner(), &wrote, &trace, &head)?;
+            if let Some(race) = race {
+                return Err(race);
+            }
+            let landed_tree = tree_of(repo, &made, txn.runner().deadline())?;
+            match &shown.prediction {
+                ReplayPrediction::Clean { tree } if *tree == landed_tree => Ok(applied),
+                ReplayPrediction::Clean { .. }
+                | ReplayPrediction::Conflict { .. }
+                | ReplayPrediction::Empty => Err(RepositoryError::new(
+                    ErrorKind::AfterHookFailed {
+                        output: wrote.stderr().to_owned(),
+                    },
+                    format!(
+                        "Git made the commit, but its files differ from what the review showed, as a merge driver or a Git setting can cause. Check the commit. Undo removes it. The {} made {}.",
+                        of.kind.command(),
+                        commit::short(&made)
+                    ),
+                )),
+            }
         }
         Some(_) => Err(classify(repo, &txn, shown, &wrote, &trace).unwrap_or_else(|error| error)),
         // A killed Git may have made the commit. The next request settles from Git's state.
@@ -907,6 +959,7 @@ pub(super) fn finish(
     let txn = CommitTxn::begin(repo, deadline)?;
     let wrote = match txn
         .commit(&[], message)
+        .without_replacements()
         .traces(&trace.events, &trace.refs)
         .run(deadline)
     {

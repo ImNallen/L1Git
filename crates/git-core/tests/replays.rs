@@ -3782,6 +3782,142 @@ fn a_destination_that_moved_after_the_review_is_stale() {
     }
 }
 
+/// A pick and `git merge-tree` place the change differently under `diff.algorithm=myers`.
+fn with_a_diff_algorithm_that_moves_the_change(format: &str) -> (Repo, ReplayOf) {
+    let repo = Repo::new(format);
+    repo.put("c.txt", "c\nb\nc\nb\nb\n");
+    repo.commit_all("base");
+    repo.git(&["switch", "--quiet", "-c", "topic"]);
+    repo.put("c.txt", "b\nc\nb\nc\nb\n");
+    let commit = repo.commit_all("moves b");
+    repo.git(&["switch", "--quiet", "main"]);
+    repo.put("c.txt", "c\nb\nx\nc\nb\nb\n");
+    repo.commit_all("adds x");
+    repo.git(&["config", "diff.algorithm", "myers"]);
+    (repo, of(Pick::CherryPick, &commit))
+}
+
+#[test]
+fn a_diff_algorithm_setting_does_not_change_what_a_clean_review_applies() {
+    for format in ["files", "reftable"] {
+        let (repo, of) = with_a_diff_algorithm_that_moves_the_change(format);
+        let review = repo.review(&of).unwrap();
+        let ReplayPrediction::Clean { tree } = &review.prediction else {
+            panic!("{format}: {:?}", review.prediction);
+        };
+        let predicted = tree.as_str().to_owned();
+        repo.start(&review).unwrap();
+        assert_eq!(
+            repo.git(&["rev-parse", "HEAD^{tree}"]).trim(),
+            predicted,
+            "{format}"
+        );
+    }
+}
+
+#[test]
+fn a_result_that_differs_from_the_review_lands_with_undo_and_says_so() {
+    for format in ["files", "reftable"] {
+        let repo = Repo::new(format);
+        let driver = repo.directory.path().join("driver.sh");
+        let count = repo.directory.path().join("count");
+        fs::write(
+            &driver,
+            format!(
+                "#!/bin/sh\necho run >> '{0}'\n[ \"$(wc -l < '{0}')\" -le 2 ] && echo reviewed > \"$1\" || echo different > \"$1\"\nexit 0\n",
+                count.display()
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&driver, fs::Permissions::from_mode(0o755)).unwrap();
+        repo.git(&[
+            "config",
+            "merge.counts.driver",
+            &format!("{} %A", driver.display()),
+        ]);
+        repo.put(".gitattributes", "c.txt merge=counts\n");
+        repo.put("c.txt", "base\n");
+        repo.commit_all("base");
+        repo.git(&["switch", "--quiet", "-c", "topic"]);
+        repo.put("c.txt", "theirs\n");
+        let commit = repo.commit_all("theirs");
+        repo.git(&["switch", "--quiet", "main"]);
+        repo.put("c.txt", "ours\n");
+        repo.commit_all("ours");
+        let parent = repo.oid("HEAD");
+
+        let review = repo.review(&of(Pick::CherryPick, &commit)).unwrap();
+        assert!(
+            matches!(review.prediction, ReplayPrediction::Clean { .. }),
+            "{format}"
+        );
+        let error = repo.start(&review).unwrap_err();
+        assert!(
+            matches!(error.kind, ErrorKind::AfterHookFailed { .. }),
+            "{format}: {error:?}"
+        );
+        assert!(error.message.contains("differ"), "{}", error.message);
+        assert_ne!(repo.oid("HEAD"), parent, "{format}: the commit landed");
+        assert!(repo.history().undo.is_some(), "{format}: Undo removes it");
+    }
+}
+
+#[test]
+fn review_refuses_an_ignored_file_at_the_name_git_gives_a_renamed_path() {
+    for format in ["files", "reftable"] {
+        let repo = Repo::new(format);
+        repo.git(&["switch", "--quiet", "-c", "topic"]);
+        repo.put("d", "file\n");
+        let commit = repo.commit_all("pick me");
+        repo.git(&["switch", "--quiet", "main"]);
+        fs::create_dir(repo.root.join("d")).unwrap();
+        repo.put("d/x", "x\n");
+        repo.commit_all("d is a folder");
+        fs::write(repo.root.join(".git/info/exclude"), "d~*\n").unwrap();
+        let short = repo.git(&["rev-parse", "--short", &commit]);
+        let name = format!("d~{} (pick me)", short.trim());
+        repo.put(&name, "mine\n");
+
+        let error = repo.review(&of(Pick::CherryPick, &commit)).unwrap_err();
+        assert!(error.message.contains(&name), "{format}: {}", error.message);
+        assert_eq!(repo.read(&name), "mine\n", "{format}");
+    }
+}
+
+#[test]
+fn finish_keeps_the_author_the_review_showed_when_a_replacement_object_exists() {
+    for format in ["files", "reftable"] {
+        let repo = Repo::new(format);
+        repo.git(&["switch", "--quiet", "-c", "topic"]);
+        repo.put("f.txt", "a\nTHEIRS\nc\n");
+        let commit = repo.commit_all("theirs");
+        repo.git(&["switch", "--quiet", "main"]);
+        repo.put("f.txt", "a\nOURS\nc\n");
+        repo.commit_all("ours");
+        let replacement = repo.git(&[
+            "-c",
+            "user.name=Replacer",
+            "commit-tree",
+            "-p",
+            &format!("{commit}^"),
+            "-m",
+            "replacement",
+            &format!("{commit}^{{tree}}"),
+        ]);
+        repo.git(&["replace", &commit, replacement.trim()]);
+
+        let review = repo.review(&of(Pick::CherryPick, &commit)).unwrap();
+        repo.start(&review).unwrap_err();
+        repo.resolve();
+        repo.finish("Finished\n").unwrap();
+        assert_eq!(
+            repo.git(&["log", "-1", "--format=%an"]),
+            "Ada\n",
+            "{format}"
+        );
+    }
+}
+
 #[test]
 fn a_replacement_object_does_not_change_what_a_clean_review_applies() {
     for (format, pick) in cases() {

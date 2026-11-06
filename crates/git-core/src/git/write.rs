@@ -246,6 +246,9 @@ const WRITE_STDOUT_CAP: usize = 1024 * 1024;
 /// Reads ignore replacement objects, and `as_user` drops the setting that does so. A
 /// command that applies what a read showed passes this to match it.
 const NO_REPLACE: &str = "--no-replace-objects";
+/// `git merge-tree` ignores `diff.algorithm` and a pick honours it, so the same change
+/// can land elsewhere in a file. A reviewed pick uses what the review used.
+const REVIEWED_ALGORITHM: &str = "diff.algorithm=histogram";
 
 impl<'a> Write<'a> {
     pub(crate) fn new(txn: &'a Txn<'_>, dir: &'a Path, args: &[&'a str]) -> Self {
@@ -355,8 +358,23 @@ impl<'a> Write<'a> {
 
     pub(crate) fn replay_apply(txn: &'a ReplayTxn<'_>, of: &'a ReplayOf) -> Self {
         let args = match of.kind {
-            ReplayKind::CherryPick => vec![NO_REPLACE, "cherry-pick", of.commit.as_str()],
-            ReplayKind::Revert => vec![NO_REPLACE, "revert", "--no-edit", of.commit.as_str()],
+            ReplayKind::CherryPick => {
+                vec![
+                    NO_REPLACE,
+                    "-c",
+                    REVIEWED_ALGORITHM,
+                    "cherry-pick",
+                    of.commit.as_str(),
+                ]
+            }
+            ReplayKind::Revert => vec![
+                NO_REPLACE,
+                "-c",
+                REVIEWED_ALGORITHM,
+                "revert",
+                "--no-edit",
+                of.commit.as_str(),
+            ],
         };
         Self {
             dir: txn.root(),
@@ -517,6 +535,12 @@ impl<'a> Write<'a> {
     pub(crate) fn traces(mut self, events: &'a Path, refs: &'a Path) -> Self {
         self.env.push(("GIT_TRACE2_EVENT", events.as_os_str()));
         self.env.push(("GIT_TRACE_REFS", refs.as_os_str()));
+        self
+    }
+
+    pub(crate) fn without_replacements(mut self) -> Self {
+        self.env
+            .push(("GIT_NO_REPLACE_OBJECTS", std::ffi::OsStr::new("1")));
         self
     }
 
