@@ -144,7 +144,8 @@ export const movesRefs = (operation: Operation) =>
   isBranchOperation(operation) ||
   isTagOperation(operation) ||
   isStashOperation(operation) ||
-  operation.kind === "checkout";
+  operation.kind === "checkout" ||
+  operation.kind === "replay";
 
 export type BranchAsk =
   | { kind: "create"; at: Start; from: string }
@@ -480,6 +481,8 @@ export function describe(operation: Operation): string {
       return `Pop ${operation.stash.name}`;
     case "stashDrop":
       return `Drop ${operation.stash.name}`;
+    case "replay":
+      return `${replayNames[operation.review.kind].title} ${quoted(operation.review.subject)}`;
     case "finishReplay":
       return `Finish ${replayNames[operation.of.kind].noun} ${quoted(operation.message)}`;
   }

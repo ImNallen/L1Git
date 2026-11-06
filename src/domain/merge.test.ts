@@ -38,7 +38,26 @@ const finish = operation({
   message: "Picked",
 });
 
+const start = operation({
+  kind: "replay",
+  review: {
+    root: "/repo",
+    kind: "cherryPick",
+    commit: oid("a"),
+    subject: "Picked",
+    destination: { reference: "refs/heads/main", oid: oid("b") },
+    prediction: { kind: "clean", tree: oid("d") },
+  },
+});
+
 describe("mergeAllows during a replay", () => {
+  it("allows a new replay only while the worktree is idle", () => {
+    expect(mergeAllows(mergeStateSchema.parse({ kind: "idle" }), start)).toBe(
+      true,
+    );
+    expect(mergeAllows(replay, start)).toBe(false);
+  });
+
   it("allows Finish only during a replay", () => {
     expect(mergeAllows(replay, finish)).toBe(true);
     expect(

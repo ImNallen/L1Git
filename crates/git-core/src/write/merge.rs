@@ -1666,6 +1666,7 @@ pub(super) fn edit(operation: &Operation) -> Edit {
         Operation::Commit { .. }
         | Operation::Amend { .. }
         | Operation::EditMessage { .. }
+        | Operation::Replay { .. }
         | Operation::Discard { .. }
         | Operation::DiscardHunk { .. }
         | Operation::DiscardLines { .. }
@@ -1693,12 +1694,13 @@ fn branch_names(
         }
         Operation::DeleteBranch { branch } => vec![branch.reference.as_str().into()],
         Operation::CreateBranch { name, .. } => vec![format!("refs/heads/{name}")],
-        Operation::Commit { .. } | Operation::Amend { .. } | Operation::EditMessage { .. } => {
-            match repo.head(deadline)? {
-                Head::Attached { reference, .. } => vec![reference],
-                Head::Detached { .. } | Head::Unborn { .. } => Vec::new(),
-            }
-        }
+        Operation::Commit { .. }
+        | Operation::Amend { .. }
+        | Operation::EditMessage { .. }
+        | Operation::Replay { .. } => match repo.head(deadline)? {
+            Head::Attached { reference, .. } => vec![reference],
+            Head::Detached { .. } | Head::Unborn { .. } => Vec::new(),
+        },
         // Finish moves the branch its own replay holds, which `guard_refs` refuses.
         Operation::FinishReplay { .. }
         | Operation::SaveConflict { .. }

@@ -3,7 +3,7 @@ use crate::{
     ErrorKind, RepositoryError, StaleReason, stderr,
     write::{
         CommitTxn, HOOK_OFF, MergeIndexTxn, MergeTxn, Outside, Published, RefTxn, ReplayKind,
-        ReplayTxn, ScratchIndex, Txn,
+        ReplayOf, ReplayTxn, ScratchIndex, Txn,
     },
 };
 use std::{
@@ -348,6 +348,22 @@ impl<'a> Write<'a> {
         Self::new(txn.runner(), txn.runner().root(), &args)
             .uncapped()
             .lazy_fetch_unprompted()
+    }
+
+    pub(crate) fn replay_apply(txn: &'a ReplayTxn<'_>, of: &'a ReplayOf) -> Self {
+        let args = match of.kind {
+            ReplayKind::CherryPick => vec!["cherry-pick", of.commit.as_str()],
+            ReplayKind::Revert => vec!["revert", "--no-edit", of.commit.as_str()],
+        };
+        Self {
+            dir: txn.root(),
+            args,
+            env: Vec::new(),
+            input: None,
+            cap: None,
+            as_user: true,
+            lazy_fetch: true,
+        }
     }
 
     pub(crate) fn replay_abort(txn: &'a ReplayTxn<'_>, kind: ReplayKind) -> Self {

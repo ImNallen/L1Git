@@ -4,13 +4,13 @@ use super::{
     commit::{self, Target, Trace},
     merge::{self, Edit},
     refs::{self, Files, RefChange},
-    store::{self, EntryObjects, LockedStore},
-    txn::RefreshTxn,
+    store::{self, EntryObjects, LockedStore, Recorded},
+    txn::{RefreshTxn, Runner},
 };
 use crate::{
     BranchRef, ErrorKind, Head, MoveSide, Oid, RepositoryError, Sides, StagedStamp, StaleReason,
     StatusEntry,
-    git::{self, WriteDeadline},
+    git::{self, WriteDeadline, Wrote},
     status::{self, Untracked},
     sync::{self, InProgress},
 };
@@ -63,6 +63,15 @@ impl ReplayKind {
 pub struct ReplayOf {
     pub kind: ReplayKind,
     pub commit: Oid,
+}
+
+impl ReplayReview {
+    fn of(&self) -> ReplayOf {
+        ReplayOf {
+            kind: self.kind,
+            commit: self.commit.clone(),
+        }
+    }
 }
 
 impl ReplayOf {
@@ -643,6 +652,81 @@ pub(super) fn admit(
     }
 }
 
+fn nothing_to_apply(kind: ReplayKind) -> RepositoryError {
+    RepositoryError::new(
+        ErrorKind::UnchangedPath,
+        format!(
+            "This {} changes nothing, because the result matches HEAD. L1 Git made no commit.",
+            kind.command()
+        ),
+    )
+}
+
+/// Reviews again and compares the whole answer, so nothing the user saw has moved.
+pub(super) fn apply(
+    writing: &Writing<'_>,
+    expect: &Expect,
+    shown: &ReplayReview,
+) -> Result<Applied, RepositoryError> {
+    let &Writing {
+        repo,
+        store,
+        log,
+        deadline,
+        operation,
+    } = writing;
+    if let Some(applied) = already_landed(writing, expect)? {
+        return Ok(applied);
+    }
+    let head = repo.head_as_seen(expect, deadline)?;
+    let of = shown.of();
+    if review(repo, &of, deadline)? != *shown {
+        return Err(RepositoryError::stale(
+            StaleReason::HeadMoved,
+            format!(
+                "What this {} would do changed since L1 Git showed it, so nothing changed. Review it again.",
+                of.kind.command()
+            ),
+        ));
+    }
+    let tree = match &shown.prediction {
+        ReplayPrediction::Clean { tree } => Some(tree.clone()),
+        ReplayPrediction::Conflict { .. } => None,
+        ReplayPrediction::Empty => return Err(nothing_to_apply(of.kind)),
+    };
+    let (applied, _, recorded) = store.record_with(repo, log, operation, |_| {
+        Ok(ReplayChange::Pending {
+            before: head.clone(),
+            tree,
+        })
+    })?;
+    recorded.durable()?;
+    let trace = Trace::create(store, applied.id)?;
+    let txn = ReplayTxn::begin(repo, deadline)?;
+    let wrote = match txn
+        .apply(&of)
+        .traces(&trace.events, &trace.refs)
+        .run(deadline)
+    {
+        Ok(wrote) => wrote,
+        Err(error) => {
+            recorded.stay_pending();
+            return Err(error);
+        }
+    };
+    let txn = txn.renewed();
+    // A killed Git may have made the commit. The next request settles from Git's state.
+    if wrote.code().is_none() {
+        recorded.stay_pending();
+        return Err(commit::refused(&wrote, &trace));
+    }
+    if wrote.code() != Some(0) {
+        return Err(commit::refused(&wrote, &trace));
+    }
+    let (_, race) = land(recorded, txn.runner(), &wrote, &trace, &head)?;
+    race.map_or(Ok(applied), Err)
+}
+
 /// Runs on the global store, because the result joins global history.
 pub(super) fn finish(
     writing: &Writing<'_>,
@@ -757,22 +841,8 @@ pub(super) fn finish(
         recorded.stay_pending();
         return Err(commit::refused(&wrote, &trace));
     }
-    let target = Target::of(&head);
-    let update = commit::proved(repo, &wrote, &trace, &target, deadline)?;
-    let race = (update.old.as_ref() != Some(&before))
-        .then(|| commit::raced(commit::Kind::New(staged), &update, &target));
-    let change = RefChange::new(
-        target.at(update.old.as_ref())?,
-        target.at(Some(&update.new))?,
-        None,
-    )?;
-    let landed_tree = tree_of(repo, &update.new, deadline)?;
-    commit::record_commit(
-        recorded,
-        &txn,
-        &Change::Replay(ReplayChange::Landed(change)),
-    )?;
-    if landed_tree != *tree {
+    let (made, race) = land(recorded, txn.runner(), &wrote, &trace, &head)?;
+    if tree_of(repo, &made, deadline)? != *tree {
         return Err(race.unwrap_or_else(|| {
             RepositoryError::new(
                 ErrorKind::AfterHookFailed {
@@ -783,6 +853,32 @@ pub(super) fn finish(
         }));
     }
     race.map_or(Ok(applied), Err)
+}
+
+/// Proves the commit Git made on `head` and completes the entry. An answer of `raced`
+/// comes back beside the commit, because the entry stands either way: Undo moves the
+/// branch back to the commit Git replaced.
+fn land(
+    recorded: Recorded<'_>,
+    runner: &impl Runner,
+    wrote: &Wrote,
+    trace: &Trace,
+    head: &Head,
+) -> Result<(Oid, Option<RepositoryError>), RepositoryError> {
+    let target = Target::of(head);
+    let update = commit::proved(runner.repo(), wrote, trace, &target, runner.deadline())?;
+    let race = (update.old != refs::oid(head)).then(|| commit::raced_new(&update, &target));
+    let change = RefChange::new(
+        target.at(update.old.as_ref())?,
+        target.at(Some(&update.new))?,
+        None,
+    )?;
+    commit::record_commit(
+        recorded,
+        runner,
+        &Change::Replay(ReplayChange::Landed(change)),
+    )?;
+    Ok((update.new, race))
 }
 
 /// The undo log is the receipt for a repeated request. Nothing else records that a

@@ -446,6 +446,7 @@ const otherOperationSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("stashApply"), stash: stashTipSchema }),
   z.strictObject({ kind: z.literal("stashPop"), stash: stashTipSchema }),
   z.strictObject({ kind: z.literal("stashDrop"), stash: stashTipSchema }),
+  z.strictObject({ kind: z.literal("replay"), review: replayReviewSchema }),
   z.strictObject({
     kind: z.literal("finishReplay"),
     of: replayOfSchema,

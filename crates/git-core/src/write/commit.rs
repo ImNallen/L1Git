@@ -2,6 +2,7 @@ use super::{
     Applied, Change, CommitTxn, EntryId, Expect, Operation, Repo,
     refs::{RefChange, capitalized, oid},
     store::{LockedStore, Log, Recorded},
+    txn::Runner,
 };
 use crate::{
     ErrorKind, Head, Oid, RepositoryError, StagedStamp, StaleReason, StatusEntry,
@@ -186,16 +187,16 @@ pub(super) fn commit(
         target.at(Some(&update.new))?,
         replaced,
     )?;
-    record_commit(recorded, &txn, &Change::Ref(change))?;
+    record_commit(recorded, txn.runner(), &Change::Ref(change))?;
     race.map_or(Ok(applied), Err)
 }
 
 pub(super) fn record_commit(
     recorded: Recorded<'_>,
-    txn: &CommitTxn<'_>,
+    runner: &impl Runner,
     change: &Change,
 ) -> Result<(), RepositoryError> {
-    recorded.complete(txn.runner(), change).map_err(|error| {
+    recorded.complete(runner, change).map_err(|error| {
         RepositoryError::new(
             error.kind,
             format!(
@@ -312,20 +313,30 @@ pub(super) fn refuse_non_commit(
     ))
 }
 
-pub(super) fn raced(kind: Kind<'_>, update: &Update, target: &Target) -> RepositoryError {
+pub(super) fn raced_new(update: &Update, target: &Target) -> RepositoryError {
     let made = short(&update.new);
     let old = update.old.as_ref().map_or("nothing", short);
     let name = target.name();
     RepositoryError::new(
         ErrorKind::Raced,
-        match kind {
-            Kind::New(_) => format!(
-                "Another process moved HEAD while Git committed, so the commit {made} landed on {name} after {old} instead of after what L1 Git showed. Undo moves {name} back to {old}."
-            ),
-            Kind::Amend(_) | Kind::EditMessage => format!(
-                "Another process moved HEAD while Git amended, so the amend {made} replaced {old} on {name}, not the commit L1 Git showed. Undo puts {old} back."
-            ),
-        },
+        format!(
+            "Another process moved HEAD while Git committed, so the commit {made} landed on {name} after {old} instead of after what L1 Git showed. Undo moves {name} back to {old}."
+        ),
+    )
+}
+
+fn raced(kind: Kind<'_>, update: &Update, target: &Target) -> RepositoryError {
+    if matches!(kind, Kind::New(_)) {
+        return raced_new(update, target);
+    }
+    let made = short(&update.new);
+    let old = update.old.as_ref().map_or("nothing", short);
+    let name = target.name();
+    RepositoryError::new(
+        ErrorKind::Raced,
+        format!(
+            "Another process moved HEAD while Git amended, so the amend {made} replaced {old} on {name}, not the commit L1 Git showed. Undo puts {old} back."
+        ),
     )
 }
 

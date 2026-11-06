@@ -159,6 +159,7 @@ export function mergeAllows(
     case "stashApply":
     case "stashPop":
     case "stashDrop":
+    case "replay":
       return false;
     case "finishReplay":
       return state.kind === "replay";
