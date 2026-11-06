@@ -707,6 +707,93 @@ fn a_sequence_of_commits_stays_external() {
     }
 }
 
+fn external_message(repo: &Repo) -> String {
+    match repo.state() {
+        MergeState::Attention {
+            session: None,
+            reason: MergeAttention::ExternalOperation,
+            message,
+        } => message,
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn a_sequence_names_the_commands_that_end_it() {
+    for format in FORMATS {
+        let repo = Repo::new(format);
+        repo.git(&["switch", "--quiet", "-c", "topic"]);
+        repo.put("f.txt", "a\nTHEIRS\nc\n");
+        repo.commit_all("first");
+        repo.put("u.txt", "theirs\n");
+        repo.commit_all("second");
+        repo.git(&["switch", "--quiet", "main"]);
+        repo.put("f.txt", "a\nOURS\nc\n");
+        repo.commit_all("ours");
+        repo.fails(&["cherry-pick", "topic~1", "topic"]);
+        assert_eq!(
+            external_message(&repo),
+            "A cherry-pick of several commits is in progress. Continue it with git cherry-pick --continue or end it with git cherry-pick --abort, then refresh.",
+            "{format}",
+        );
+        repo.git(&["cherry-pick", "--abort"]);
+
+        repo.git(&["switch", "--quiet", "topic"]);
+        repo.put("f.txt", "a\nLATER\nc\n");
+        repo.commit_all("later");
+        repo.fails(&["revert", "--no-edit", "HEAD~1", "HEAD~2"]);
+        assert_eq!(
+            external_message(&repo),
+            "A revert of several commits is in progress. Continue it with git revert --continue or end it with git revert --abort, then refresh.",
+            "{format}",
+        );
+    }
+}
+
+#[test]
+fn an_external_operation_is_named() {
+    for format in FORMATS {
+        let repo = Repo::new(format);
+        repo.git(&["switch", "--quiet", "-c", "topic"]);
+        repo.put("f.txt", "a\nTHEIRS\nc\n");
+        repo.commit_all("theirs");
+        repo.git(&["switch", "--quiet", "main"]);
+        repo.put("f.txt", "a\nOURS\nc\n");
+        repo.commit_all("ours");
+
+        repo.git(&["bisect", "start"]);
+        assert_eq!(
+            external_message(&repo),
+            "A bisect is in progress. Finish or abort it with Git, then refresh.",
+            "{format}",
+        );
+        repo.fails(&["cherry-pick", "topic"]);
+        assert_eq!(
+            external_message(&repo),
+            "A cherry-pick and a bisect are in progress. Finish or abort them with Git, then refresh.",
+            "{format}",
+        );
+        repo.git(&["cherry-pick", "--abort"]);
+        repo.git(&["bisect", "reset"]);
+
+        repo.fails(&["merge", "--no-edit", "topic"]);
+        assert_eq!(
+            external_message(&repo),
+            "A merge is in progress. Finish or abort it with Git, then refresh.",
+            "{format}",
+        );
+        repo.git(&["merge", "--abort"]);
+
+        repo.git(&["switch", "--quiet", "topic"]);
+        repo.fails(&["rebase", "main"]);
+        assert_eq!(
+            external_message(&repo),
+            "A rebase is in progress. Finish or abort it with Git, then refresh.",
+            "{format}",
+        );
+    }
+}
+
 #[test]
 fn a_mainline_pick_of_a_merge_commit_stays_external() {
     for format in FORMATS {
@@ -2832,10 +2919,15 @@ fn undo_from_another_worktree_refuses_while_that_worktree_holds_a_replay() {
         stop(&linked, pick);
         let head = git(&linked, &["rev-parse", "HEAD"]);
         let error = refused(coordinator.undo(repo.path(), earlier.id));
-        assert!(
-            error.message.contains("resolution Undo"),
-            "{}",
-            error.message
+        let holder = match pick {
+            Pick::CherryPick => "a cherry-pick",
+            Pick::Revert => "a revert",
+        };
+        assert_eq!(
+            error.message,
+            format!(
+                "This history entry changes a worktree with {holder} in progress. Use that worktree's resolution Undo until Finish or Abort."
+            ),
         );
         assert_eq!(
             git(&linked, &["rev-parse", "HEAD"]),

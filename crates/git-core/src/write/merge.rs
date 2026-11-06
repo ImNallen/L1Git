@@ -9,7 +9,7 @@ use crate::{
     StatusEntry,
     git::{self, LocalWrite, WriteDeadline},
     status::{self, Untracked},
-    sync,
+    sync::{self, InProgress},
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -690,11 +690,46 @@ fn state(
     if let Some(progress) = replay::progress(repo, deadline)? {
         return Ok(MergeState::Replay { progress });
     }
-    if !sync::in_progress(&repo.root, deadline.reads())?.is_empty() {
-        Ok(MergeState::Attention { session: None, reason: MergeAttention::ExternalOperation, message: "A Git operation started outside this merge session is in progress. Finish or abort it with Git, then refresh.".into() })
-    } else {
+    let operations = sync::in_progress(&repo.root, deadline.reads())?;
+    if operations.is_empty() {
         Ok(MergeState::Idle)
+    } else {
+        Ok(MergeState::Attention {
+            session: None,
+            reason: MergeAttention::ExternalOperation,
+            message: external_operation_message(&operations),
+        })
     }
+}
+
+fn external_operation_message(operations: &[InProgress]) -> String {
+    let command = if !operations.contains(&InProgress::Sequence) {
+        None
+    } else if operations.contains(&InProgress::CherryPick) {
+        Some("cherry-pick")
+    } else if operations.contains(&InProgress::Revert) {
+        Some("revert")
+    } else {
+        None
+    };
+    if let Some(command) = command {
+        return format!(
+            "A {command} of several commits is in progress. Continue it with git {command} --continue or end it with git {command} --abort, then refresh."
+        );
+    }
+    let names: Vec<_> = operations
+        .iter()
+        .map(|operation| operation.name())
+        .collect();
+    let (verb, them) = if names.len() == 1 {
+        ("is", "it")
+    } else {
+        ("are", "them")
+    };
+    format!(
+        "{} {verb} in progress. Finish or abort {them} with Git, then refresh.",
+        refs::capitalized(&names.join(" and ")),
+    )
 }
 
 fn failed_hook(path: &Path) -> Option<String> {
@@ -1734,9 +1769,13 @@ pub(super) fn admit_step(
     }
     let target = opened.worktree(&applied.root, deadline.reads())?;
     if target.root != opened.root && journal(&target, deadline)?.is_some() {
-        return Err(refused(
-            "This history entry changes a worktree with an active merge. Use that worktree's resolution Undo until Finish or Abort.",
-        ));
+        let holder = match replay::in_flight(&target, deadline)? {
+            Some(of) => format!("{} in progress", of.kind.operation().name()),
+            None => "an active merge".to_owned(),
+        };
+        return Err(refused(format!(
+            "This history entry changes a worktree with {holder}. Use that worktree's resolution Undo until Finish or Abort.",
+        )));
     }
     admit(&target, &applied.operation, deadline)?;
     Ok(())
