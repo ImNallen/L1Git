@@ -12,6 +12,7 @@ import type { MouseEvent, ReactNode, Ref } from "react";
 import { createPortal, flushSync } from "react-dom";
 import {
   Check,
+  Cherry,
   CircleCheck,
   Cloud,
   FolderGit2,
@@ -21,12 +22,14 @@ import {
   GitCompareArrows,
   PencilLine,
   Pin,
+  RotateCcw,
   Tag,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { initials } from "../domain/author";
 import { mac } from "../repositories";
 import { compareRows, comparedRowId } from "../domain/comparison";
+import { replayEntry } from "../domain/merge";
 import type { Compare } from "../domain/comparison";
 import { diffstatBlocks } from "../domain/diffstat";
 import type { GraphRow, RowId } from "../domain/graph";
@@ -67,6 +70,7 @@ import type {
   HistoryModel,
 } from "../shell/useHistoryPane";
 import type { CommitActions } from "../shell/useRefWrites";
+import type { CommitReplay } from "../shell/useMergePanel";
 import { useLineStats } from "../useLineStats";
 import { ContextMenu } from "./ContextMenu";
 import { HistorySearch } from "./HistorySearch";
@@ -446,6 +450,7 @@ type Props = {
   revealSeq: number;
   columns: HistoryColumnsGroup;
   commitActions: CommitActions;
+  commitReplay: CommitReplay;
   onOpenFirstFile: () => void;
   onCancelOpen: () => void;
   /** Where the history of `root` was scrolled when it was last shown. */
@@ -462,6 +467,7 @@ export function History({
   revealSeq,
   columns,
   commitActions,
+  commitReplay,
   onOpenFirstFile,
   onCancelOpen,
   scrollTopOf,
@@ -1206,6 +1212,33 @@ export function History({
                 <Tag size={14} />
                 <span>Create tag…</span>
               </button>
+              {(
+                [
+                  ["cherryPick", Cherry],
+                  ["revert", RotateCcw],
+                ] as const
+              ).map(([kind, Icon]) => (
+                <button
+                  key={kind}
+                  role="menuitem"
+                  aria-disabled={commitReplay.disabled}
+                  onClick={() => {
+                    if (commitReplay.disabled) return;
+                    closeMenu();
+                    tableRef.current?.focus({ preventScroll: true });
+                    commitReplay.onReview({ kind, commit: menuCommit });
+                  }}
+                >
+                  <Icon size={14} />
+                  <span>{replayEntry(kind, commitReplay.branch)}</span>
+                  {commitReplay.disabled && (
+                    <small className="menu-reason">
+                      Wait for pending work, and finish any operation in this
+                      worktree.
+                    </small>
+                  )}
+                </button>
+              ))}
               {menuCommit === editableHead && (
                 <button
                   role="menuitem"

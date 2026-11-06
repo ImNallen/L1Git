@@ -1,6 +1,13 @@
 import type { PushControl } from "./domain/push";
 import { normalizeSearch } from "./domain/search";
-import type { FullRef, Oid, RepositoryRoot, Stash } from "./domain/repository";
+import { replayEntry } from "./domain/merge";
+import type {
+  FullRef,
+  Oid,
+  ReplayKind,
+  RepositoryRoot,
+  Stash,
+} from "./domain/repository";
 import type { Selection } from "./domain/selection";
 import type { PartAction } from "./domain/operations";
 import type { BranchVisibility, VisibilityRule } from "./domain/visibility";
@@ -42,6 +49,8 @@ export type ActionContext = {
   merging: boolean;
   mergeAvailable: boolean;
   selectedMergeAvailable: boolean;
+  /** Null unless the active worktree could start one. `branch` is null when it is on no branch. */
+  replay: { branch: string | null } | null;
   typing: boolean;
 };
 
@@ -55,6 +64,7 @@ export type Commands = {
   fastForward: () => void;
   mergeUpstream: () => void;
   mergeBranch: () => void;
+  replay: (kind: ReplayKind) => void;
   push: () => void;
   search: () => void;
   closeFile: () => void;
@@ -131,6 +141,8 @@ export type ActionId =
   | "deleteBranch"
   | "createTag"
   | "deleteTag"
+  | "cherryPick"
+  | "revert"
   | "addRepository"
   | "toggleSidebar"
   | "toggleInspector"
@@ -155,6 +167,10 @@ const fileOpen = (context: ActionContext) =>
   onRepository(context) && context.file !== null;
 const withRevision = (context: ActionContext) =>
   onRepository(context) && context.file?.hasCommit === true;
+const replayable = (context: ActionContext) =>
+  onRepository(context) &&
+  context.replay !== null &&
+  context.selection?.kind === "commit";
 const linesAllow = (action: PartAction) => (context: ActionContext) =>
   onRepository(context) &&
   !context.writing &&
@@ -479,6 +495,19 @@ export const actions: readonly Action[] = [
       !context.merging &&
       context.sidebarTag !== null,
     run: (commands) => commands.deleteTag(),
+  },
+  {
+    id: "cherryPick",
+    title: (context) =>
+      replayEntry("cherryPick", context.replay?.branch ?? null),
+    available: replayable,
+    run: (commands) => commands.replay("cherryPick"),
+  },
+  {
+    id: "revert",
+    title: (context) => replayEntry("revert", context.replay?.branch ?? null),
+    available: replayable,
+    run: (commands) => commands.replay("revert"),
   },
   {
     id: "addRepository",

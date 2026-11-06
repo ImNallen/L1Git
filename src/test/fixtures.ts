@@ -8,6 +8,7 @@ import {
   appliedSchema,
   conflictFileSchema,
   oidSchema,
+  replayReviewSchema,
   snapshotSchema,
   undoHistorySchema,
   worktreeStatusSchema,
@@ -16,6 +17,9 @@ import type {
   Applied,
   ConflictFile,
   Oid,
+  ReplayOf,
+  ReplayPrediction,
+  ReplayReview,
   RepositoryRoot,
   RepositorySnapshot,
   UndoHistory,
@@ -375,6 +379,23 @@ export function mergeReviewFor(root: RepositoryRoot): MergeReview {
         fetch: ["+refs/heads/*:refs/remotes/origin/*"],
       },
     },
+  });
+}
+
+export function replayReviewFor(
+  root: RepositoryRoot,
+  of: ReplayOf,
+  prediction: ReplayPrediction = { kind: "clean", tree: C3 },
+): ReplayReview {
+  return replayReviewSchema.parse({
+    root,
+    ...of,
+    subject: "Picked subject",
+    destination:
+      root === PIN_FEATURE
+        ? { reference: "refs/heads/feature", oid: C5 }
+        : { reference: "refs/heads/main", oid: C4 },
+    prediction,
   });
 }
 

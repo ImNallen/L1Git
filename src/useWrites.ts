@@ -5,6 +5,7 @@ import * as repositories from "./repositories";
 import { beginDraftTask } from "./draftProtection";
 import { restoreUndone } from "./commitDrafts";
 import {
+  attemptLabel,
   describe,
   movesRefs,
   nextEntry,
@@ -134,7 +135,7 @@ export function useWrites(
         changed === worktree ? null : reread.worktree(changed),
       ]);
       const notice: WriteNotice | null =
-        outcome.kind === "failed"
+        outcome.kind === "failed" && outcome.problem.kind !== "replayStopped"
           ? job.action === "write"
             ? {
                 kind: "failed",
@@ -285,8 +286,12 @@ export function useWrites(
     merge,
     abortReplay,
     write: (worktree: RepositoryRoot, { operation, expect }: Write) =>
-      run({ action: "write" }, describe(operation), worktree, operation, () =>
-        repositories.write(worktree, operation, expect),
+      run(
+        { action: "write" },
+        attemptLabel(operation),
+        worktree,
+        operation,
+        () => repositories.write(worktree, operation, expect),
       ),
     undo: () => step("undo"),
     redo: () => step("redo"),

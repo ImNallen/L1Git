@@ -139,6 +139,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   });
   const merge = useMergePanel({
     selectedBranch: nav.jump.ruledBranch,
+    selection: app.selection,
     snapshot: view.snapshot,
     active,
     opened,
@@ -238,6 +239,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
               columns={columns}
               nav={nav}
               commitActions={refWrites.commitActions}
+              commitReplay={merge.commitReplay}
               focus={focus}
               diff={diff}
               loop={loop}

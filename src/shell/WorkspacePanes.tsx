@@ -6,6 +6,7 @@ import { FileDiffPane } from "./lazyViews";
 import type { DiffPane } from "./useDiffPane";
 import type { Focus } from "./useFocus";
 import type { HistoryColumnsGroup, HistoryPane } from "./useHistoryPane";
+import type { CommitReplay } from "./useMergePanel";
 import type { Navigation } from "./useNavigation";
 import type { CommitActions } from "./useRefWrites";
 import type { WriteLoop } from "./useWriteLoop";
@@ -18,6 +19,7 @@ export function WorkspacePanes({
   columns,
   nav,
   commitActions,
+  commitReplay,
   focus,
   diff,
   loop,
@@ -30,6 +32,7 @@ export function WorkspacePanes({
   columns: HistoryColumnsGroup;
   nav: Pick<Navigation, "selecting" | "revealSeq">;
   commitActions: CommitActions;
+  commitReplay: CommitReplay;
   focus: Pick<Focus, "historyRef" | "fileDiffRef">;
   diff: DiffPane;
   loop: Pick<WriteLoop, "writes" | "rereadChanges">;
@@ -49,6 +52,7 @@ export function WorkspacePanes({
             revealSeq={nav.revealSeq}
             columns={columns}
             commitActions={commitActions}
+            commitReplay={commitReplay}
             onOpenFirstFile={app.openFirstFile}
             onCancelOpen={app.cancelOpenFirstFile}
             scrollTopOf={app.scrollTopOf}

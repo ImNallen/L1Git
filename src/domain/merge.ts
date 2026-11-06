@@ -118,6 +118,14 @@ export const replayNames: Record<ReplayKind, { noun: string; title: string }> =
     revert: { noun: "revert", title: "Revert" },
   };
 
+/** The menu and palette entry. `branch` is null when the active worktree is on no branch. */
+export const replayEntry = (kind: ReplayKind, branch: string | null) =>
+  kind === "cherryPick"
+    ? `Cherry-pick onto ${branch ?? "current branch"}…`
+    : branch === null
+      ? "Revert…"
+      : `Revert on ${branch}…`;
+
 export function mergeAllows(
   state: MergeState | null,
   operation: Operation,

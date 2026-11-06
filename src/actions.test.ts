@@ -33,6 +33,7 @@ const repositoryScreen: ActionContext = {
   merging: false,
   mergeAvailable: false,
   selectedMergeAvailable: false,
+  replay: null,
   typing: false,
 };
 
@@ -47,6 +48,7 @@ function commands(): Commands {
     fastForward: vi.fn(),
     mergeUpstream: vi.fn(),
     mergeBranch: vi.fn(),
+    replay: vi.fn(),
     push: vi.fn(),
     search: vi.fn(),
     closeFile: vi.fn(),
@@ -344,6 +346,59 @@ describe("command palette", () => {
     expect(checkouts(sidebar(false, false))).toEqual(["Check out topic"]);
     expect(checkouts(sidebar(false, false, true))).toEqual([]);
     expect(checkouts({ ...repositoryScreen })).toEqual([]);
+  });
+
+  it("offers Cherry-pick and Revert for a selected commit, naming the branch", () => {
+    const commit = { kind: "commit" as const, oid: "a".repeat(40) as Oid };
+    const replays = (context: Partial<ActionContext>) =>
+      titles({ ...repositoryScreen, ...context }, "").filter((title) =>
+        /Cherry-pick|Revert/.test(title),
+      );
+    expect(replays({ selection: commit, replay: { branch: "main" } })).toEqual([
+      "Cherry-pick onto main…",
+      "Revert on main…",
+    ]);
+    expect(replays({ selection: commit, replay: { branch: null } })).toEqual([
+      "Cherry-pick onto current branch…",
+      "Revert…",
+    ]);
+    expect(
+      replays({ selection: commit, replay: null }),
+      "the worktree is not idle",
+    ).toEqual([]);
+    expect(
+      replays({ selection: null, replay: { branch: "main" } }),
+      "no commit is selected",
+    ).toEqual([]);
+    expect(
+      replays({
+        selection: {
+          kind: "worktree",
+          root: "/work/l1-demo" as RepositoryRoot,
+        },
+        replay: { branch: "main" },
+      }),
+    ).toEqual([]);
+    expect(
+      replays({
+        screen: "settings",
+        selection: commit,
+        replay: { branch: "main" },
+      }),
+    ).toEqual([]);
+  });
+
+  it("runs the matching replay command", () => {
+    const run = commands();
+    const context = {
+      ...repositoryScreen,
+      selection: { kind: "commit" as const, oid: "a".repeat(40) as Oid },
+      replay: { branch: "main" },
+    };
+    paletteItems(context, run, false, [], null)
+      .find((item) => item.title === "Revert on main…")
+      ?.run();
+    expect(run.replay).toHaveBeenCalledExactlyOnceWith("revert");
   });
 
   it("offers Create tag for a selected commit and Delete tag for the sidebar tag", () => {
