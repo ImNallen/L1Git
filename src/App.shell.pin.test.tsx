@@ -165,15 +165,22 @@ it("the commit button names the branch the commit would land on when the snapsho
   expect(get("button", "Commit to feature")).toBeTruthy();
 });
 
-const breadcrumb = () => document.querySelector(".toolbar .breadcrumb");
-
-it("the toolbar shows the checked-out branch after the repository name", async () => {
+it("shows the repository and commit count above history", async () => {
   await mountApp();
-  expect(breadcrumb()?.textContent).toBe("pin/main");
-  expect(breadcrumb()?.querySelector("[title='main']")).not.toBeNull();
+  expect(document.querySelector(".history-heading strong")?.textContent).toBe(
+    "pin",
+  );
+  expect(document.querySelector(".history-heading")?.textContent).toContain(
+    "commits",
+  );
+  expect(
+    document.querySelector(
+      ".toolbar input[aria-label='Search loaded history']",
+    ),
+  ).not.toBeNull();
 });
 
-it("the toolbar shows a detached HEAD by its short commit ID", async () => {
+it("keeps repository identity while detached", async () => {
   await mountApp({
     world: (world) =>
       world.snapshots.set(PIN, {
@@ -181,18 +188,18 @@ it("the toolbar shows a detached HEAD by its short commit ID", async () => {
         head: headSchema.parse({ kind: "detached", oid: C4 }),
       }),
   });
-  expect(breadcrumb()?.textContent).toBe("pin/Detached at 4444444");
+  expect(document.querySelector(".history-heading strong")?.textContent).toBe(
+    "pin",
+  );
 });
 
-it("the toolbar shows no branch until the snapshot arrives", async () => {
+it("updates the history heading when switching repositories", async () => {
   const app = await mountApp();
-  const snapshot = app.bridge.hold("snapshot", OTHER);
   await app.click(repositoryRow(OTHER));
-  await snapshot.arrived;
-  expect(breadcrumb()?.textContent).toBe("other");
-  snapshot.release();
   await app.settle();
-  expect(breadcrumb()?.textContent).toBe("other/trunk");
+  expect(document.querySelector(".history-heading strong")?.textContent).toBe(
+    "other",
+  );
 });
 
 async function fromHistoryMenu(app: Harness, row: string, item: string) {

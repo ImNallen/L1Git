@@ -37,6 +37,11 @@ export function useRovingRows(container: RefObject<HTMLElement | null>) {
           ? row.parentElement?.querySelector<HTMLElement>(".repository-toggle")
           : null;
 
+    const repositoryOf = (row: HTMLElement) =>
+      row
+        .closest("[data-repository-root]")
+        ?.getAttribute("data-repository-root");
+
     function onFocusIn(event: FocusEvent) {
       const target = event.target;
       if (!(target instanceof HTMLElement) || !target.matches(ROW)) return;
@@ -69,15 +74,24 @@ export function useRovingRows(container: RefObject<HTMLElement | null>) {
           break;
         case "ArrowRight":
           if (expanded === "false") toggle?.click();
-          else if (expanded === "true") next = all[at + 1];
+          else if (expanded === "true")
+            next = target.classList.contains("repository-open")
+              ? all.find(
+                  (row) =>
+                    !row.classList.contains("repository-open") &&
+                    repositoryOf(row) === repositoryOf(target),
+                )
+              : all[at + 1];
           else return;
           break;
         case "ArrowLeft":
           if (expanded === "true") toggle?.click();
           else
-            next = target
-              .closest(".repository-group")
-              ?.querySelector<HTMLElement>(".repository-open");
+            next = rows().find(
+              (row) =>
+                row.classList.contains("repository-open") &&
+                repositoryOf(row) === repositoryOf(target),
+            );
           break;
         default:
           return;

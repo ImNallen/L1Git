@@ -146,12 +146,12 @@ const builtInLanes = BUILT_IN_FAMILIES.flatMap((f) => f.variants).map(
 
 it("starts each theme's lanes from L1's lane nearest its accent and keeps L1's order", () => {
   expect(LANES.map((lane) => variantPalette("grove-dark")[lane])).toEqual([
-    "#32d6c1",
-    "#fdc128",
-    "#ff7488",
-    "#c387ff",
-    "#a5e837",
-    "#4e83f9",
+    "#2bd3be",
+    "#fabe23",
+    "#fa7084",
+    "#bf83fb",
+    "#a2e533",
+    "#497df3",
   ]);
   expect(
     Object.fromEntries(builtInLanes.map(([id, , lanes]) => [id, lanes[0]])),
@@ -159,15 +159,15 @@ it("starts each theme's lanes from L1's lane nearest its accent and keeps L1's o
     "l1-light": "#1b4ed8",
     "l1-dark": "#4a7ef4",
     "grove-light": "#0d756d",
-    "grove-dark": "#32d6c1",
+    "grove-dark": "#2bd3be",
     "ocean-light": "#1a4cd6",
-    "ocean-dark": "#4e83f9",
+    "ocean-dark": "#497df3",
     "ember-light": "#b35207",
-    "ember-dark": "#ff7488",
+    "ember-dark": "#fa7084",
     "iris-light": "#9231e8",
-    "iris-dark": "#c286ff",
+    "iris-dark": "#be82fa",
     "rose-light": "#df1946",
-    "rose-dark": "#fe7488",
+    "rose-dark": "#fa7084",
   });
 });
 
@@ -206,7 +206,7 @@ it.each(derived.map((v) => [v.id, v.palette] as const))(
 );
 
 it("puts dark initials on a dark theme's lanes and keeps white on a light theme's", () => {
-  expect(variantPalette("grove-dark").onLane).toBe("#101c16");
+  expect(variantPalette("grove-dark").onLane).toBe("#0c1310");
   expect(variantPalette("grove-light").onLane).toBe("#ffffff");
 });
 
@@ -248,9 +248,9 @@ it.each(derived.map((v) => [v.id, v.palette] as const))(
 it("tints status washes and shadows with the theme's background", () => {
   const grove = variantPalette("grove-dark");
   expect([grove.success, grove.successBg, grove.shadowPane]).toEqual([
-    "#38d69b",
-    "#173126",
-    "#01010177",
+    "#64bc9b",
+    "#182822",
+    "#00000077",
   ]);
   const ember = variantPalette("ember-light");
   expect([ember.errorBg, ember.accentMuted, ember.shadowPane]).toEqual([
@@ -268,8 +268,8 @@ it("washes the background toward the status colour a theme brings", () => {
   });
   expect([p.success, p.successBg, p.successBgHover]).toEqual([
     "#50fa7b",
-    "#344c45",
-    "#3a5f4c",
+    "#324642",
+    "#395b4b",
   ]);
 });
 
@@ -279,13 +279,13 @@ it("tints error washes toward the red a theme brings", () => {
     accent: "#bd93f9",
     deleted: "#ff5555",
   });
-  expect(p.errorBorder).toBe("#5c3940");
+  expect(p.errorBorder).toBe("#53373f");
 });
 
 it("starts lanes from L1's blue when the accent is grey", () => {
   for (const accent of ["#808080", "#7f8081"]) {
     const p = derivePalette("dark", "#0a0a0a", accent);
-    expect([p.graphLane1, p.graphLane3]).toEqual(["#4a7ef4", "#fbbf24"]);
+    expect([p.graphLane1, p.graphLane3]).toEqual(["#4578ee", "#f8bc1f"]);
   }
 });
 
@@ -307,7 +307,7 @@ it("colours keywords with the accent and turns the rest of the code with it", ()
     grove.syntaxKeyword,
     grove.syntaxString,
     grove.syntaxComment,
-  ]).toEqual(["#72daa7", "#fbb76d", "#939795"]);
+  ]).toEqual(["#72daa7", "#fbb76d", "#959997"]);
   expect([
     ember.syntaxKeyword,
     ember.syntaxString,

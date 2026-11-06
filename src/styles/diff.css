@@ -334,3 +334,19 @@
 .resolution-dialog > .conflict-toolbar {
   justify-content: space-between;
 }
+
+.file-diff-toolbar {
+  height: 56px;
+  flex-shrink: 0;
+  padding-inline: 20px;
+}
+.file-diff-toolbar > .button.secondary {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  padding-inline: 0;
+}
+.diff-style {
+  background: transparent;
+  border-color: transparent;
+}

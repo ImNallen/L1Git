@@ -15,6 +15,10 @@ const NARROW_SIDEBAR = "(max-width: 939px)";
  * shared and owned here rather than by the toggle.
  */
 export type Layout = {
+  searchSlot: HTMLDivElement | null;
+  setSearchSlot: (element: HTMLDivElement | null) => void;
+  toolbarMenu: DOMRect | null;
+  setToolbarMenu: (rect: DOMRect | null) => void;
   sidebarOpen: boolean;
   inspectorVisible: boolean;
   sidebarWidth: number;
@@ -31,14 +35,16 @@ export type Layout = {
 };
 
 export function useLayout(shown: WorkspaceView["shown"]): Layout {
+  const [searchSlot, setSearchSlot] = useState<HTMLDivElement | null>(null);
+  const [toolbarMenu, setToolbarMenu] = useState<DOMRect | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(
     () => !window.matchMedia(NARROW_SIDEBAR).matches,
   );
   const [inspectorOpen, setInspectorOpen] = useState(
     () => window.innerWidth >= 1100,
   );
-  const [sidebarWidth, setSidebarWidth] = useState(260);
-  const [inspectorWidth, setInspectorWidth] = useState(320);
+  const [sidebarWidth, setSidebarWidth] = useState(280);
+  const [inspectorWidth, setInspectorWidth] = useState(360);
   const sidebarToggleRef = useRef<HTMLButtonElement>(null);
   const inspectorToggleRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -58,6 +64,10 @@ export function useLayout(shown: WorkspaceView["shown"]): Layout {
     return () => media.removeEventListener("change", narrow);
   }, []);
   return {
+    searchSlot,
+    setSearchSlot,
+    toolbarMenu,
+    setToolbarMenu,
     sidebarOpen,
     inspectorVisible: Boolean(shown && inspectorOpen),
     sidebarWidth,

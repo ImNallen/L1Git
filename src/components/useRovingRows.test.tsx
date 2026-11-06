@@ -13,7 +13,7 @@ function Tree({ searching = false }: { searching?: boolean }) {
   useRovingRows(nav);
   return (
     <nav ref={nav}>
-      <div className="repository-group">
+      <div className="repository-group" data-repository-root="demo">
         <div className="repository-row">
           <button
             className="repository-toggle"
@@ -105,4 +105,22 @@ it("steps over folders that search disables", () => {
   expect(document.activeElement?.textContent).toBe("main");
   press("ArrowUp");
   expect(document.activeElement?.textContent).toBe("Local");
+});
+
+it("Right reaches refs below other repositories and Left returns to their owner", () => {
+  const host = render();
+  const group = host.querySelector(".repository-group")!;
+  const other = document.createElement("button");
+  other.className = "repository-open";
+  other.textContent = "other";
+  const otherGroup = document.createElement("div");
+  otherGroup.dataset.repositoryRoot = "other";
+  otherGroup.append(other);
+  group.querySelector(".repository-row")!.after(otherGroup);
+  act(() => button(host, "demo").focus());
+  press("ArrowRight");
+  expect(document.activeElement?.textContent).toBe("Local");
+  act(() => button(host, "main").focus());
+  press("ArrowLeft");
+  expect(document.activeElement?.textContent).toBe("demo");
 });

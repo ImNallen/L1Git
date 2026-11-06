@@ -9,16 +9,18 @@ import {
 import type { ColumnId } from "./historyColumns";
 
 describe("history column layout", () => {
-  it("lays out Date and Changes by default", () => {
+  it("shows every metadata column for new preferences", () => {
     const layout = columnLayout(58, restoreColumns({ getItem: () => null }), 7);
-    expect(layout.template).toBe("200px 58px minmax(160px, 1fr) 52px 160px");
-    expect(layout.minWidth).toBe(630);
+    expect(layout.template).toBe(
+      "58px minmax(160px, 1fr) 140px 60px 56px 160px",
+    );
+    expect(layout.minWidth).toBe(634);
   });
 
   it("keeps the wider message minimum when only Changes is on", () => {
     const layout = columnLayout(58, new Set<ColumnId>(["changes"]), 7);
-    expect(layout.template).toBe("200px 58px minmax(260px, 1fr) 160px");
-    expect(layout.minWidth).toBe(678);
+    expect(layout.template).toBe("58px minmax(260px, 1fr) 160px");
+    expect(layout.minWidth).toBe(478);
   });
 
   it("lays out every column in table order whatever order they were checked", () => {
@@ -28,46 +30,49 @@ describe("history column layout", () => {
       7,
     );
     expect(layout.template).toBe(
-      "200px 106px minmax(160px, 1fr) 120px 52px 56px 160px",
+      "106px minmax(160px, 1fr) 140px 60px 56px 160px",
     );
-    expect(layout.minWidth).toBe(854);
+    expect(layout.minWidth).toBe(682);
     expect(layout.columns.map((column) => column.label)).toEqual([
       "Author",
-      "Date",
-      "SHA",
+      "Age",
+      "Commit ID",
       "Changes",
     ]);
   });
 
   it.each([
-    [8, "62px", 480],
-    [10, "75px", 493],
+    [8, "62px", 280],
+    [10, "75px", 293],
   ])("widens SHA to fit a %i-character prefix", (length, width, minWidth) => {
     const layout = columnLayout(58, new Set<ColumnId>(["sha"]), length);
-    expect(layout.template).toBe(`200px 58px minmax(160px, 1fr) ${width}`);
+    expect(layout.template).toBe(`58px minmax(160px, 1fr) ${width}`);
     expect(layout.minWidth).toBe(minWidth);
   });
 
   it("narrows the message minimum once a column besides Changes is on", () => {
     const layout = columnLayout(82, new Set<ColumnId>(["author"]), 7);
-    expect(layout.template).toBe("200px 82px minmax(160px, 1fr) 120px");
-    expect(layout.minWidth).toBe(562);
+    expect(layout.template).toBe("82px minmax(160px, 1fr) 140px");
+    expect(layout.minWidth).toBe(382);
   });
 
   it("keeps only the fixed columns when every optional column is off", () => {
     expect(columnLayout(48, new Set(), 7).template).toBe(
-      "200px 48px minmax(260px, 1fr)",
+      "48px minmax(260px, 1fr)",
     );
   });
 });
 
 describe("stored history columns", () => {
   it.each([
-    [null, ["date", "changes"]],
-    ["not json", ["date", "changes"]],
-    ['{"version":2,"visible":["date"]}', ["date", "changes"]],
-    ['{"version":1,"visible":["date","subject"]}', ["date", "changes"]],
-    ['{"version":1,"visible":"date"}', ["date", "changes"]],
+    [null, ["author", "date", "sha", "changes"]],
+    ["not json", ["author", "date", "sha", "changes"]],
+    ['{"version":2,"visible":["date"]}', ["author", "date", "sha", "changes"]],
+    [
+      '{"version":1,"visible":["date","subject"]}',
+      ["author", "date", "sha", "changes"],
+    ],
+    ['{"version":1,"visible":"date"}', ["author", "date", "sha", "changes"]],
     ['{"version":1,"visible":[]}', []],
     ['{"version":1,"visible":["changes"]}', ["changes"]],
     ['{"version":1,"visible":["sha","date"]}', ["sha", "date"]],

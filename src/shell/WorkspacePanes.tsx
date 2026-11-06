@@ -13,6 +13,7 @@ import type { WriteLoop } from "./useWriteLoop";
 import type { WorkspaceApi, WorkspaceView } from "./workspaceView";
 
 export function WorkspacePanes({
+  searchSlot,
   app,
   view,
   history,
@@ -26,6 +27,7 @@ export function WorkspacePanes({
   appearance,
   onAdd,
 }: {
+  searchSlot: HTMLElement | null;
   app: WorkspaceApi;
   view: Pick<WorkspaceView, "opening" | "busy" | "fileOpen">;
   history: Pick<HistoryPane, "model" | "shows">;
@@ -46,6 +48,8 @@ export function WorkspacePanes({
       {model ? (
         <>
           <History
+            searchSlot={searchSlot}
+            onShowHistory={app.closeFile}
             ref={focus.historyRef}
             model={model}
             selecting={nav.selecting}

@@ -6,17 +6,18 @@
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: var(--canvas);
+  background: var(--panel);
 }
 .inspector-heading {
-  height: 58px;
-  min-height: 58px;
+  height: 56px;
+  min-height: 56px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0 20px;
-  font-size: 11px;
-  color: var(--text-dim);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-heading);
 }
 .worktree-inspector {
   flex: 1;
@@ -398,4 +399,71 @@
 .commit-problem svg {
   flex: none;
   margin-top: 3px;
+}
+
+.inspector-heading {
+  border-bottom: 1px solid var(--border);
+}
+.inspector-content {
+  padding-top: 20px;
+}
+.inspector-content > .sha-chip {
+  align-self: flex-start;
+  margin-bottom: 18px;
+}
+.inspector-content > .sha-chip svg {
+  opacity: 1;
+}
+.inspector-refs {
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 20px;
+}
+.inspector-refs .ref-badge {
+  height: 28px;
+  color: var(--text-body) !important;
+  background: var(--row-hover);
+  padding-inline: 8px;
+}
+.changed-files-heading {
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  padding-top: 16px;
+  height: 48px;
+}
+.changed-files-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  flex-shrink: 0;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+.changed-files-filter input {
+  border: 0;
+  background: transparent;
+  font-size: 11px;
+  width: 100%;
+  min-width: 0;
+}
+.changed-file-tree {
+  --trees-bg-override: var(--panel);
+}
+
+.commit-metadata .meta-row:has(dt:not(.visually-hidden)) {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+}
+.commit-metadata dt:not(.visually-hidden) {
+  color: var(--muted);
+}
+.commit-metadata .meta-row:has(dt:not(.visually-hidden)) .meta-icon {
+  display: none;
+}
+.commit-metadata .meta-row:has(dt:not(.visually-hidden)) dd {
+  justify-content: flex-end;
+  text-align: right;
 }

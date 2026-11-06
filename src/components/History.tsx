@@ -26,7 +26,6 @@ import {
   Tag,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { initials } from "../domain/author";
 import { mac } from "../repositories";
 import { compareRows, comparedRowId } from "../domain/comparison";
 import { replayEntry } from "../domain/merge";
@@ -172,11 +171,11 @@ function RowRing({
 function WorktreeNode({ lane, ring }: { lane: number; ring: Ring }) {
   return (
     <g className="graph-node">
-      <RowRing lane={lane} radius={8} ring={ring} />
+      <RowRing lane={lane} radius={5} ring={ring} />
       <circle
         cx={x(lane)}
         cy={18}
-        r={8}
+        r={5}
         fill="var(--canvas)"
         stroke={color(lane)}
         strokeWidth={2}
@@ -196,7 +195,7 @@ function CommitNode({
   ring: Ring;
 }) {
   const merge = commit.parents.length > 1;
-  const radius = merge ? 5 : 10;
+  const radius = merge ? 4 : 3;
   return (
     <g className="graph-node">
       <title>{`${commit.author} <${commit.email}>`}</title>
@@ -211,20 +210,7 @@ function CommitNode({
           strokeWidth={2}
         />
       ) : (
-        <>
-          <circle cx={x(lane)} cy={18} r={radius} fill={color(lane)} />
-          <text
-            x={x(lane)}
-            y={18}
-            textAnchor="middle"
-            dominantBaseline="central"
-            fill="var(--on-lane)"
-            fontSize={8.5}
-            fontWeight={600}
-          >
-            {initials(commit.author)}
-          </text>
-        </>
+        <circle cx={x(lane)} cy={18} r={radius} fill={color(lane)} />
       )}
     </g>
   );
@@ -377,7 +363,7 @@ export function RefBadge({
   return (
     <span
       className={`ref-badge ${label.kind}${lane === null ? " off-graph" : ""}`}
-      style={lane === null ? undefined : { background: color(lane) }}
+      style={lane === null ? undefined : { color: color(lane) }}
       title={title}
     >
       <Icon size={11} />
@@ -408,7 +394,7 @@ function MoreRefs({ labels, lane }: { labels: RefLabel[]; lane: number }) {
     <>
       <span
         className="ref-badge more-refs"
-        style={{ background: color(lane) }}
+        style={{ color: color(lane) }}
         aria-label={`${labels.length} more: ${labels.map(labelName).join(", ")}`}
         onMouseEnter={open}
         onMouseLeave={() => setAnchor(null)}
@@ -458,6 +444,8 @@ type Props = {
   onScroll: (root: RepositoryRoot, scrollTop: number) => void;
   busy: boolean;
   hidden: boolean;
+  onShowHistory: () => void;
+  searchSlot: HTMLElement | null;
 };
 
 export function History({
@@ -474,6 +462,8 @@ export function History({
   onScroll,
   busy,
   hidden,
+  onShowHistory,
+  searchSlot,
 }: Props) {
   const {
     snapshot,
@@ -710,7 +700,10 @@ export function History({
     function refocusWhenDiffCloses() {
       const shown = wasHidden.current && !hidden;
       wasHidden.current = hidden;
-      if (shown && !document.activeElement?.closest(".sidebar, dialog"))
+      if (
+        shown &&
+        !document.activeElement?.closest(".sidebar, dialog, .history-search")
+      )
         tableRef.current?.focus({ preventScroll: true });
     },
     [hidden],
@@ -739,6 +732,7 @@ export function History({
       const selectedRow = rows.findIndex((row) => row.id === selectedId);
       const selectedShown = selectedRow >= 0 && rowShown(selectedRow);
       flushSync(() => {
+        onShowHistory();
         closeMenu();
         setSearch((open) => open ?? { root: snapshot.root, query: "" });
       });
@@ -760,10 +754,11 @@ export function History({
 
   function closeSearch() {
     setSearch(null);
-    tableRef.current?.focus({ preventScroll: true });
+    if (!hidden) tableRef.current?.focus({ preventScroll: true });
   }
 
   function step(by: 1 | -1) {
+    flushSync(onShowHistory);
     const oid = stepMatch(snapshot.commits, matches, selectedOid, by);
     if (oid === null) return;
     revealCentered(rows.findIndex((row) => row.id === oid));
@@ -844,7 +839,7 @@ export function History({
     [visible, visibleColumns],
   );
   const lineStats = useLineStats(snapshot.root, visibleCommits);
-  const graphWidth = Math.max(48, graph.lanes * 24 + 10);
+  const graphWidth = Math.max(80, graph.lanes * 24 + 10);
   const layout = columnLayout(graphWidth, visibleColumns, shaLength);
   function revealColumn(id: ColumnId | null) {
     const index = layout.columns.findIndex((column) => column.id === id);
@@ -877,22 +872,31 @@ export function History({
       aria-busy={busy}
       hidden={hidden}
     >
-      {search && (
-        <HistorySearch
-          inputRef={searchInput}
-          query={query}
-          count={matchCount(query, matches, selectedOid)}
-          canStep={searching}
-          onQuery={(next) => setSearch({ root: snapshot.root, query: next })}
-          onStep={step}
-          onClose={closeSearch}
-        />
-      )}
+      {searchSlot &&
+        createPortal(
+          <HistorySearch
+            inputRef={searchInput}
+            query={query}
+            count={matchCount(query, matches, selectedOid)}
+            canStep={searching}
+            onQuery={(next) => {
+              flushSync(onShowHistory);
+              setSearch({ root: snapshot.root, query: next });
+            }}
+            onStep={step}
+            onClose={closeSearch}
+          />,
+          searchSlot,
+        )}
+      <div className="history-heading">
+        <strong>{snapshot.name}</strong>
+        <span>{commits.length.toLocaleString()} commits</span>
+      </div>
       <div className="history-scroll" ref={scrollRef}>
         <table
           ref={tableRef}
           className={`history-table${highlight || searching ? " highlighting" : ""}`}
-          style={{ minWidth: layout.minWidth }}
+          style={{ minWidth: layout.minWidth + 48 }}
           role="grid"
           tabIndex={0}
           aria-label="Commits"
@@ -916,13 +920,10 @@ export function History({
               aria-rowindex={1}
             >
               <th role="columnheader" scope="col">
-                Branch / Tag
-              </th>
-              <th role="columnheader" scope="col">
                 Graph
               </th>
               <th role="columnheader" scope="col">
-                Commit message
+                Commit
               </th>
               {layout.columns.map((column) => (
                 <th
@@ -991,22 +992,7 @@ export function History({
               if (entry.kind === "worktree")
                 return (
                   <tr key={entry.id} {...rowProps}>
-                    <td role="gridcell" className="ref-cell">
-                      {note && <span className="visually-hidden">{note}</span>}
-                      <span className="ref-badges">
-                        <span
-                          className="ref-badge worktree"
-                          style={{ background: color(row?.lane ?? 0) }}
-                          title={entry.worktree.root}
-                        >
-                          <FolderGit2 size={11} />
-                          <span className="ref-name">
-                            {entry.worktree.name}
-                          </span>
-                        </span>
-                      </span>
-                    </td>
-                    <td role="gridcell">
+                    <td role="gridcell" className="graph-column">
                       {row && (
                         <GraphCell
                           row={row}
@@ -1019,7 +1005,21 @@ export function History({
                         </GraphCell>
                       )}
                     </td>
-                    <td role="gridcell">
+                    <td role="gridcell" className="message-cell">
+                      {note && <span className="visually-hidden">{note}</span>}
+                      <span className="ref-badges">
+                        <span
+                          className="ref-badge worktree"
+                          style={{ color: color(row?.lane ?? 0) }}
+                          title={entry.worktree.root}
+                        >
+                          <FolderGit2 size={11} />
+                          <span className="ref-name">
+                            {entry.worktree.name}
+                          </span>
+                        </span>
+                      </span>
+
                       <WorktreeDescription row={entry} />
                     </td>
                     {layout.columns.map((column) => (
@@ -1037,22 +1037,7 @@ export function History({
               const [label, ...more] = labels.get(commit.oid) ?? [];
               return (
                 <tr key={commit.oid} {...rowProps}>
-                  <td role="gridcell" className="ref-cell">
-                    {note && <span className="visually-hidden">{note}</span>}
-                    {label && (
-                      <span
-                        className="ref-badges"
-                        onMouseEnter={() => hover(commit.oid)}
-                        onMouseLeave={unhover}
-                      >
-                        <RefBadge label={label} lane={row?.lane ?? 0} />
-                        {more.length > 0 && (
-                          <MoreRefs labels={more} lane={row?.lane ?? 0} />
-                        )}
-                      </span>
-                    )}
-                  </td>
-                  <td role="gridcell">
+                  <td role="gridcell" className="graph-column">
                     {row && (
                       <GraphCell
                         row={row}
@@ -1068,7 +1053,21 @@ export function History({
                       </GraphCell>
                     )}
                   </td>
-                  <td role="gridcell">
+                  <td role="gridcell" className="message-cell">
+                    {note && <span className="visually-hidden">{note}</span>}
+                    {label && (
+                      <span
+                        className="ref-badges"
+                        onMouseEnter={() => hover(commit.oid)}
+                        onMouseLeave={unhover}
+                      >
+                        <RefBadge label={label} lane={row?.lane ?? 0} />
+                        {more.length > 0 && (
+                          <MoreRefs labels={more} lane={row?.lane ?? 0} />
+                        )}
+                      </span>
+                    )}
+
                     <button
                       className="commit-cell"
                       tabIndex={-1}

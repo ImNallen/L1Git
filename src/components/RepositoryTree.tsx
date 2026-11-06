@@ -358,6 +358,17 @@ export function RepositoryTree({
 
   return (
     <>
+      <div className="repositories-heading">
+        <strong>Repositories</strong>{" "}
+        <button
+          className="icon-button"
+          onClick={onAdd}
+          title="Add repository"
+          aria-label="Add repository"
+        >
+          <Plus size={18} />
+        </button>
+      </div>
       <div className="sidebar-search">
         <label className="sidebar-search-field">
           <Search size={15} aria-hidden="true" />
@@ -368,14 +379,6 @@ export function RepositoryTree({
             onChange={(event) => setQuery(event.target.value)}
           />
         </label>
-        <button
-          className="icon-button"
-          onClick={onAdd}
-          title="Add repository"
-          aria-label="Add repository"
-        >
-          <Plus size={18} />
-        </button>
       </div>
       <nav
         ref={tree}
@@ -388,7 +391,11 @@ export function RepositoryTree({
           const toggleLabel = `${open ? "Collapse" : "Expand"} ${entry.name}`;
           const head = sync.get(entry.root)?.head;
           return (
-            <div className="repository-group" key={entry.root}>
+            <div
+              className="repository-group"
+              data-repository-root={entry.root}
+              key={entry.root}
+            >
               <div
                 className={`repository-row ${active ? "active" : ""}`}
                 onContextMenu={(event) => repositoryMenu(event, entry)}
@@ -418,16 +425,30 @@ export function RepositoryTree({
                     onToggle(entry.root);
                   }}
                 >
+                  <FolderGit2 size={16} aria-hidden="true" />
                   <span>{entry.name}</span>
                 </button>
                 {head && (
                   <SyncCounts divergence={head.divergence} branch={head.name} />
                 )}
               </div>
-              {open && branches(entry)}
+              {open && !active && branches(entry)}
             </div>
           );
         })}
+        {entriesShown
+          .filter(
+            (entry) => entry.root === activePath && expanded.has(entry.root),
+          )
+          .map((entry) => (
+            <div
+              className="active-repository-refs"
+              data-repository-root={entry.root}
+              key={entry.root}
+            >
+              {branches(entry)}
+            </div>
+          ))}
         {entries.length === 0 && (
           <div className="sidebar-empty">
             <FolderGit2 size={24} />

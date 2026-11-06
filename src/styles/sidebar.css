@@ -6,9 +6,9 @@
   min-width: 0;
 }
 .brand {
-  height: 58px;
-  min-height: 58px;
-  padding: 0 20px;
+  height: 0;
+  min-height: 0;
+  padding: 0;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -405,4 +405,81 @@ input::placeholder {
 .repository-row:has(> :focus-visible) {
   outline: var(--focus-ring);
   outline-offset: var(--focus-ring-offset);
+}
+
+.brand {
+  position: relative;
+  z-index: 1;
+}
+.brand > .icon-button {
+  position: absolute;
+  top: 14px;
+  right: 48px;
+}
+.repositories-heading {
+  height: 56px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+}
+.repositories-heading strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+.sidebar-search {
+  height: 48px;
+  flex-shrink: 0;
+  margin: 0;
+  padding: 5px 16px 13px;
+}
+.repository-tree {
+  padding-inline: 16px;
+}
+.repository-row {
+  height: 34px;
+  border-radius: 5px;
+}
+.repository-row.active {
+  background: var(--nav-selected-bg);
+  box-shadow: inset 2px 0 var(--blue);
+}
+.repository-row.active .repository-open {
+  color: var(--nav-selected-text);
+}
+.repository-open,
+.repository-toggle {
+  height: 34px;
+}
+.active-repository-refs {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+  margin-top: 12px;
+}
+.active-repository-refs .tree-section {
+  padding-left: 8px;
+}
+.active-repository-refs .branch-row {
+  --indent: calc(18px + var(--depth, 0) * 22px);
+}
+.active-repository-refs .branch-row > span:first-of-type {
+  font-family: inherit;
+  font-size: 12px;
+}
+.sidebar-bottom {
+  min-height: 44px;
+  padding: 0 12px;
+}
+
+.repository-open {
+  gap: 8px;
+}
+.repository-open > svg {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+
+.native-mac .repositories-heading {
+  padding-left: 100px;
 }

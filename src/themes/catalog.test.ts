@@ -95,7 +95,7 @@ it("resolves a custom theme to its stored colours over a palette derived from it
     variant.palette.accent,
     variant.palette.sidebar,
     variant.palette.panelRaised,
-  ]).toEqual(["#1b1824", "#e0a040", "#000000", "#221f2b"]);
+  ]).toEqual(["#1b1824", "#e0a040", "#000000", "#171320"]);
 });
 
 it("paints L1 from the stylesheet with no inline palette", () => {

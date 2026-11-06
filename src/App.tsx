@@ -211,6 +211,8 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
         <div className="repository-workspace">
           <div className="repository-content">
             <Toolbar
+              actions={actions}
+              searchSlot={layout.setSearchSlot}
               sidebarToggle={sidebarToggle}
               inspectorToggle={inspectorToggle}
               layout={layout}
@@ -233,6 +235,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
               nav={nav}
             />
             <WorkspacePanes
+              searchSlot={layout.searchSlot}
               app={app}
               view={view}
               history={history}

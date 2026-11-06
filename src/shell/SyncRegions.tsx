@@ -1,9 +1,4 @@
-import {
-  CloudDownload,
-  CloudUpload,
-  FastForward,
-  LoaderCircle,
-} from "lucide-react";
+import { LoaderCircle } from "lucide-react";
 import { PublishDialog } from "../components/PublishDialog";
 import { pushOutcomeText } from "../domain/push";
 import type { PushState } from "../overview";
@@ -32,9 +27,24 @@ export function SyncButtons({
           {fetching ? (
             <LoaderCircle size={14} className="spin" />
           ) : (
-            <CloudDownload size={14} />
+            <span className="workspace-action-icon fetch" aria-hidden="true" />
           )}
           <span>Fetch</span>
+        </button>
+      )}
+      {repository && (
+        <button
+          className="button secondary"
+          disabled={repository.activity.kind !== "idle" || ready === 0}
+          onClick={commands.fastForward}
+          title={`Fast-forward ${ready === 1 ? "1 branch that is" : `${ready} branches that are`} behind and clean. Never merges or rebases.`}
+        >
+          {repository.activity.kind === "updating" ? (
+            <LoaderCircle size={14} className="spin" />
+          ) : (
+            <span className="workspace-action-icon pull" aria-hidden="true" />
+          )}
+          <span>Fast-forward ({ready})</span>
         </button>
       )}
       {root && (
@@ -47,28 +57,13 @@ export function SyncButtons({
           {repository?.activity.kind === "pushing" ? (
             <LoaderCircle size={14} className="spin" />
           ) : (
-            <CloudUpload size={14} />
+            <span className="workspace-action-icon push" aria-hidden="true" />
           )}
           <span>
             {repository?.activity.kind === "pushing"
               ? "Pushing…"
               : publishControl.label}
           </span>
-        </button>
-      )}
-      {repository && ready > 0 && (
-        <button
-          className="button secondary"
-          disabled={repository.activity.kind !== "idle"}
-          onClick={commands.fastForward}
-          title={`Fast-forward ${ready === 1 ? "1 branch that is" : `${ready} branches that are`} behind and clean. Never merges or rebases.`}
-        >
-          {repository.activity.kind === "updating" ? (
-            <LoaderCircle size={14} className="spin" />
-          ) : (
-            <FastForward size={14} />
-          )}
-          <span>Fast-forward ({ready})</span>
         </button>
       )}
     </>
@@ -89,7 +84,7 @@ export function PushNotice({ push }: { push: PushState | undefined }) {
           : "alert"
       }
     >
-      <CloudUpload size={14} />
+      <span className="workspace-action-icon push" aria-hidden="true" />
       <span>
         {pushOutcomeText(notice.outcome, notice.intent)} {notice.refreshProblem}
       </span>

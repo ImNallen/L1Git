@@ -106,7 +106,7 @@ export function InspectorFrame({
   return (
     <aside className="inspector" aria-label="Commit inspector">
       <div className="inspector-heading">
-        {heading ?? <span />}
+        {heading ?? <span>Commit details</span>}
         {toggleButton}
       </div>
       {children}
@@ -355,10 +355,9 @@ export function CommitInspector({
       ? (target?.commit.parents.slice(0, 1) ?? [])
       : (target?.commit.parents ?? []);
   return (
-    <InspectorFrame
-      toggleButton={toggleButton}
-      heading={
-        target && (
+    <InspectorFrame toggleButton={toggleButton}>
+      {detail && target ? (
+        <div className="inspector-content">
           <button
             className={`sha-chip ${copy}`}
             onClick={() => void copySha(target.commit.oid)}
@@ -368,11 +367,6 @@ export function CommitInspector({
             <code>{target.commit.oid.slice(0, 7)}</code>
             {copy === "copied" ? <Check size={12} /> : <Copy size={12} />}
           </button>
-        )
-      }
-    >
-      {detail && target ? (
-        <div className="inspector-content">
           <span className="visually-hidden" role="status">
             {copy === "copied" ? "Commit SHA copied" : ""}
           </span>
@@ -413,7 +407,7 @@ export function CommitInspector({
               </dd>
             </div>
             <div className="meta-row">
-              <dt className="visually-hidden">Date</dt>
+              <dt>Committed</dt>
               <dd>
                 <span className="meta-icon" aria-hidden="true">
                   <Clock size={13} />
@@ -444,9 +438,7 @@ export function CommitInspector({
               </dd>
             </div>
             <div className="meta-row">
-              <dt className="visually-hidden">
-                {parents.length === 1 ? "Parent" : "Parents"}
-              </dt>
+              <dt>{parents.length === 1 ? "Parent" : "Parents"}</dt>
               <dd>
                 <span className="meta-icon" aria-hidden="true">
                   <GitCommitHorizontal size={14} />
@@ -567,7 +559,7 @@ function ChangedFiles({
       >
         <span className="changed-files-title">
           {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-          Changes
+          Changed files
           <span className="count">{files.length}</span>
         </span>
         <span className="change-summary">

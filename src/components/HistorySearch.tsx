@@ -24,7 +24,7 @@ export function HistorySearch({
       <input
         ref={inputRef}
         aria-label="Search loaded history"
-        placeholder="Search subjects, authors, emails, and SHAs"
+        placeholder="Search commits"
         spellCheck={false}
         value={query}
         onChange={(event) => onQuery(event.target.value)}
@@ -32,42 +32,48 @@ export function HistorySearch({
           if (event.nativeEvent.isComposing) return;
           if (event.key === "Enter") {
             event.preventDefault();
+            event.stopPropagation();
             onStep(event.shiftKey ? -1 : 1);
           } else if (event.key === "Escape") {
             event.preventDefault();
+            event.stopPropagation();
             onClose();
           }
         }}
       />
-      <span className="history-search-count" role="status">
-        {count}
-      </span>
-      <button
-        className="icon-button"
-        aria-label="Previous match"
-        title="Previous match (Shift+Enter)"
-        disabled={!canStep}
-        onClick={() => onStep(-1)}
-      >
-        <ChevronUp size={15} />
-      </button>
-      <button
-        className="icon-button"
-        aria-label="Next match"
-        title="Next match (Enter)"
-        disabled={!canStep}
-        onClick={() => onStep(1)}
-      >
-        <ChevronDown size={15} />
-      </button>
-      <button
-        className="icon-button"
-        aria-label="Close history search"
-        title="Close (Escape)"
-        onClick={onClose}
-      >
-        <X size={15} />
-      </button>
+      {query && (
+        <>
+          <span className="history-search-count" role="status">
+            {count}
+          </span>
+          <button
+            className="icon-button"
+            aria-label="Previous match"
+            title="Previous match (Shift+Enter)"
+            disabled={!canStep}
+            onClick={() => onStep(-1)}
+          >
+            <ChevronUp size={15} />
+          </button>
+          <button
+            className="icon-button"
+            aria-label="Next match"
+            title="Next match (Enter)"
+            disabled={!canStep}
+            onClick={() => onStep(1)}
+          >
+            <ChevronDown size={15} />
+          </button>
+          <button
+            className="icon-button"
+            aria-label="Close history search"
+            title="Close (Escape)"
+            onClick={onClose}
+          >
+            <X size={15} />
+          </button>
+        </>
+      )}
     </div>
   );
 }

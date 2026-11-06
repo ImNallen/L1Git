@@ -57,12 +57,6 @@ export function Sidebar({
       >
         <div className="brand" data-tauri-drag-region>
           {layout.sidebarOpen && toggle}
-          <span data-tauri-drag-region>
-            L1{" "}
-            <span className="muted" data-tauri-drag-region>
-              Git
-            </span>
-          </span>
         </div>
         <div className="repository-navigation">
           <RepositoryTree

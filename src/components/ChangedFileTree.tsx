@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Search } from "lucide-react";
 import { FILE_TREE_DENSITY_PRESETS } from "@pierre/trees";
 import type { GitStatus } from "@pierre/trees";
 import { FileTree, useFileTree } from "@pierre/trees/react";
@@ -63,6 +64,7 @@ export function ChangedFileTree({
   useEffect(() => {
     onSelectFileRef.current = onSelectFile;
   });
+  const [query, setQuery] = useState("");
   const syncing = useRef(false);
   const [preparedInput] = useState(() => changedFileTreeInput(files));
   const [initialSelectedPaths] = useState(() =>
@@ -178,7 +180,24 @@ export function ChangedFileTree({
       }
     />
   );
-  if (maxRows === undefined) return tree;
+  if (maxRows === undefined)
+    return (
+      <>
+        <label className="changed-files-filter">
+          <Search size={14} />
+          <input
+            aria-label="Filter changed files"
+            placeholder="Filter changed files"
+            value={query}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              model.setSearch(event.target.value || null);
+            }}
+          />
+        </label>
+        {tree}
+      </>
+    );
   return (
     <div
       className="fitted-file-tree"
