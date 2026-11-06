@@ -31,5 +31,6 @@ pub use sync::{
 pub use write::{
     Applied, BranchTip, EntryId, Expect, LinePick, LineSide, MergeAction, MergeAttention,
     MergeContext, MergeOutcome, MergePlan, MergeReport, MergeReview, MergeSelection, MergeSession,
-    MergeSource, MergeState, MergeTracking, Operation, Start, StashTip, TagTip, UndoHistory,
+    MergeSource, MergeState, MergeTracking, Operation, ReplayKind, ReplayOf, Start, StashTip,
+    TagTip, UndoHistory,
 };

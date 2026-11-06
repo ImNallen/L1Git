@@ -1,6 +1,6 @@
 use super::{
     BranchTip, Change, CommitTxn, EntryId, MergeIndexTxn, MergeTxn, Operation, Published, Repo,
-    commit, index,
+    commit, index, refs, replay,
     store::{EntryObjects, Identity, LockedStore, Objects},
     txn::Runner,
 };
@@ -1637,6 +1637,15 @@ pub(super) fn guard_refs(
                     "{} is the destination of an unfinished merge in {}. Finish or abort it before changing that branch.",
                     record.session.review.destination.reference.as_str(),
                     path
+                )));
+            }
+            if let Some(of) = replay::in_flight(&target, deadline)?
+                && let Head::Attached { reference, .. } = target.head(deadline)?
+                && names.contains(&reference)
+            {
+                return Err(refused(format!(
+                    "{} in {path} has {reference} as its destination. Finish or abort it before changing that branch.",
+                    refs::capitalized(of.kind.operation().name()),
                 )));
             }
         }

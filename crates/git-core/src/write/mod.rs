@@ -13,6 +13,7 @@ mod merge;
 mod partial;
 mod refresh;
 mod refs;
+mod replay;
 mod resolution;
 mod stash;
 mod store;
@@ -32,6 +33,7 @@ pub use merge::{
 };
 use partial::{Action, Part, Picks};
 pub use partial::{LinePick, LineSide};
+pub use replay::{ReplayKind, ReplayOf};
 pub(crate) use resolution::conflict_file_within;
 use serde::{Deserialize, Serialize};
 pub use stash::StashTip;
