@@ -881,3 +881,32 @@ fn discards_and_undoes_where_the_git_dir_is_on_another_file_system() {
     assert_eq!(separate.disk(), before);
     drop(repo);
 }
+
+#[test]
+fn a_pending_discard_that_lost_its_recorded_change_keeps_its_saved_files() {
+    let repo = Repo::new(&[("a.txt", "one\n")]);
+    repo.put("a.txt", "only copy\n");
+    let applied = repo.discard(&["a.txt"]).unwrap();
+    let store = fs::read_dir(repo.directory.path().join("undo"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let log_path = store.join("log.json");
+    let mut log: serde_json::Value = serde_json::from_slice(&fs::read(&log_path).unwrap()).unwrap();
+    let id = log["entries"].as_array_mut().unwrap().pop().unwrap();
+    log["pending"] = id;
+    fs::write(&log_path, serde_json::to_vec(&log).unwrap()).unwrap();
+    let entry = store.join("entries").join(applied.id.to_string());
+    fs::remove_file(entry.join("change.json")).unwrap();
+
+    let error = repo.coordinator().undo_history(repo.path()).unwrap_err();
+    assert_eq!(
+        error.kind,
+        ErrorKind::StaleView {
+            reason: StaleReason::HistoryChanged
+        }
+    );
+    assert!(entry.exists(), "the saved files stay for recovery");
+}

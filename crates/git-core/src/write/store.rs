@@ -250,10 +250,20 @@ impl LockedStore {
         opened: &Repo,
         deadline: WriteDeadline,
     ) -> Result<Option<Change>, RepositoryError> {
-        let Some(change) = self.read_if_present::<Change>(id, "change.json")? else {
-            return Ok(None);
-        };
         let applied = self.applied(id)?;
+        let Some(change) = self.read_if_present::<Change>(id, "change.json")? else {
+            // Only a commit is pending before its change exists, so a crash can leave
+            // it without one. Any other entry lost it to damage, and it may hold the
+            // only copy of what the write replaced.
+            return if matches!(
+                applied.operation,
+                Operation::Commit { .. } | Operation::Amend { .. } | Operation::EditMessage { .. }
+            ) {
+                Ok(None)
+            } else {
+                Err(history_changed())
+            };
+        };
         if change.keeps_overwritten_files() {
             return Ok(Some(change));
         }
