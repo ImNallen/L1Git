@@ -235,15 +235,23 @@ pub(super) fn proved(
 
 /// Git prints `[<branch> <abbreviated oid>] <subject>` once it has moved the
 /// branch and run `post-commit`. The branch there is HEAD's when Git prints,
-/// which another process may have switched, so only the OID is read.
+/// which another process may have switched, so only the OID is read. A
+/// cherry-pick that needs a content merge prints `Auto-merging <path>` first,
+/// after anything a merge driver printed.
 fn printed(stdout: &[u8]) -> Option<String> {
-    let line = git::text(stdout.split(|byte| *byte == b'\n').next()?);
-    line.split(' ').find_map(|token| {
-        token
-            .strip_suffix(']')
-            .filter(|hex| hex.len() >= 4 && hex.bytes().all(|byte| byte.is_ascii_hexdigit()))
-            .map(str::to_owned)
-    })
+    stdout
+        .split(|byte| *byte == b'\n')
+        .filter(|line| line.starts_with(b"["))
+        .find_map(|line| {
+            git::text(line).split(' ').find_map(|token| {
+                token
+                    .strip_suffix(']')
+                    .filter(|hex| {
+                        hex.len() >= 4 && hex.bytes().all(|byte| byte.is_ascii_hexdigit())
+                    })
+                    .map(str::to_owned)
+            })
+        })
 }
 
 fn only_object_starting_with(
@@ -538,6 +546,47 @@ impl Drop for Trace {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_the_oid_git_printed_after_any_lines_before_it() {
+        assert_eq!(
+            printed(
+                b"Auto-merging f.txt\n[main 5cb3a7c] adds clean\n Date: Fri Nov 6 11:05:25 2026 +0100\n 1 file changed, 1 insertion(+), 1 deletion(-)\n"
+            )
+            .as_deref(),
+            Some("5cb3a7c")
+        );
+    }
+
+    #[test]
+    fn reads_the_oid_after_a_merge_driver_printed_a_bracketed_line() {
+        assert_eq!(
+            printed(
+                b"[driver] merging .merge_file_3ZIuby\nAuto-merging g.txt\n[main 0eea2a5] clean change\n"
+            )
+            .as_deref(),
+            Some("0eea2a5")
+        );
+    }
+
+    #[test]
+    fn reads_the_oid_from_each_form_of_git_commit_output() {
+        for (stdout, oid) in [
+            ("[main 5cb3a7c] subject\n 1 file changed\n", "5cb3a7c"),
+            ("[main (root-commit) 5cb3a7c] subject\n", "5cb3a7c"),
+            ("[detached HEAD 5cb3a7c] subject\n", "5cb3a7c"),
+            ("[abcdef 5cb3a7c] ends with abcd]\n", "5cb3a7c"),
+        ] {
+            assert_eq!(printed(stdout.as_bytes()).as_deref(), Some(oid), "{stdout}");
+        }
+    }
+
+    #[test]
+    fn reads_no_oid_when_git_printed_no_summary_line() {
+        for stdout in ["", "Auto-merging f.txt\n", "made 5cb3a7c] subject\n"] {
+            assert_eq!(printed(stdout.as_bytes()), None, "{stdout}");
+        }
+    }
 
     #[test]
     fn counts_reference_transaction_only_while_preparing() {
