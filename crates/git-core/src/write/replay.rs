@@ -243,8 +243,9 @@ fn simulate(
     Ok(listed_paths(&ran.stdout[end..]).map(|conflicted| Simulated { tree, conflicted }))
 }
 
-/// The conflicted paths and every path the simulated result changes. These come
-/// from trees, so index edits cannot widen them and resolving cannot shrink them.
+/// The conflicted paths, every path the simulated result changes, and every path
+/// unmerged when this first runs. The memo keeps the answer, so index edits cannot
+/// widen it and resolving cannot shrink it.
 /// `merge-tree` runs custom merge drivers, so each (kind, commit, HEAD) runs it
 /// once, and the memo keeps the answer. Losing the memo costs one more run.
 fn footprint(
@@ -276,7 +277,13 @@ fn footprint(
     let Some(changed) = listed_paths(&changed) else {
         return Ok(None);
     };
-    let paths: Vec<_> = simulated.conflicted.union(&changed).cloned().collect();
+    let mut paths: BTreeSet<_> = simulated.conflicted.union(&changed).cloned().collect();
+    // Git renames a path to avoid a clash, and it names it differently from `merge-tree`.
+    // Only Git's merge makes a path unmerged. `AUTO_MERGE` would also name a staged
+    // edit that `revert -n` merged over, which Abort must not drop.
+    let (entries, _) = status::entries(&repo.root, Untracked::No, deadline.reads())?;
+    paths.extend(merge::unresolved(&entries));
+    let paths: Vec<_> = paths.into_iter().collect();
     let _ = prepared(repo, of, head).and_then(|_| merge::persist(&memo, &paths));
     Ok(Some(paths))
 }

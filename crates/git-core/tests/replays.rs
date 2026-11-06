@@ -2057,6 +2057,73 @@ fn a_kill_after_the_marker_went_settles_with_the_lock_still_there() {
     }
 }
 
+/// `foo` is a file on one side and a folder on the other, so Git files the file under
+/// a new name. A real pick and `git merge-tree` label that name differently.
+fn stopped_on_a_renamed_path(format: &str, pick: Pick) -> Repo {
+    let repo = Repo::new(format);
+    repo.put("foo", "file\n");
+    repo.commit_all("foo is a file");
+    let start: &[&str] = match pick {
+        Pick::CherryPick => &["cherry-pick"],
+        Pick::Revert => &["revert", "--no-edit"],
+    };
+    let commit = match pick {
+        Pick::CherryPick => {
+            repo.git(&["switch", "--quiet", "-c", "topic", "HEAD^"]);
+            fs::create_dir(repo.root.join("foo")).unwrap();
+            repo.put("foo/x", "x\n");
+            let commit = repo.commit_all("foo is a folder");
+            repo.git(&["switch", "--quiet", "main"]);
+            commit
+        }
+        Pick::Revert => {
+            fs::remove_file(repo.root.join("foo")).unwrap();
+            let removed = repo.commit_all("foo goes");
+            fs::create_dir(repo.root.join("foo")).unwrap();
+            repo.put("foo/x", "x\n");
+            repo.commit_all("foo is a folder");
+            removed
+        }
+    };
+    repo.fails(&[start, &[commit.as_str()]].concat());
+    repo
+}
+
+#[test]
+fn a_conflict_git_renames_to_avoid_a_clash_can_be_finished_and_aborted() {
+    for (format, pick) in cases() {
+        let repo = stopped_on_a_renamed_path(format, pick);
+        let shown = repo.progress();
+        assert_eq!(shown.unresolved.len(), 1, "{format} {pick:?}: {shown:?}");
+        let renamed = shown.unresolved[0].clone();
+        assert!(renamed.starts_with("foo~"), "{format} {pick:?}: {renamed}");
+        assert!(
+            shown.footprint.contains(&renamed),
+            "{format} {pick:?}: {:?} lacks {renamed}",
+            shown.footprint
+        );
+
+        assert_eq!(repo.abort().unwrap(), MergeState::Idle, "{format} {pick:?}");
+
+        let repo = stopped_on_a_renamed_path(format, pick);
+        let renamed = repo.progress().unresolved[0].clone();
+        repo.stage(&renamed);
+        let shown = repo.progress();
+        assert!(shown.unresolved.is_empty(), "{format} {pick:?}: {shown:?}");
+        assert!(
+            shown.footprint.contains(&renamed),
+            "{format} {pick:?}: resolving does not shrink it"
+        );
+        let applied = repo.finish("Finished\n").unwrap();
+        assert!(
+            repo.git(&["ls-files"]).contains(&renamed),
+            "{format} {pick:?}"
+        );
+        repo.undo(&applied).unwrap();
+        assert_eq!(repo.status(), "", "{format} {pick:?}");
+    }
+}
+
 #[test]
 fn undo_removes_the_commit_and_its_files_and_redo_returns_the_same_oid() {
     for (format, pick) in cases() {
