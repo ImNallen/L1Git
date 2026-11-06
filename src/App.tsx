@@ -238,6 +238,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
               columns={columns}
               nav={nav}
               commitActions={refWrites.commitActions}
+              commitReplay={merge.commitReplay}
               focus={focus}
               diff={diff}
               loop={loop}

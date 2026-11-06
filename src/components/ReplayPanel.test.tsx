@@ -60,6 +60,9 @@ const panel = (
     busy={busy}
     write={write}
     abort={abort}
+    dismiss={vi.fn()}
+    review={null}
+    onCloseReview={vi.fn()}
     onInspect={inspect}
   />
 );

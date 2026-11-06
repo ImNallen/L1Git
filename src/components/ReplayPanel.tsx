@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { GitCommitHorizontal } from "lucide-react";
+import { useEffect, useId, useRef, useState } from "react";
+import { GitCommitHorizontal, X } from "lucide-react";
 import { clearSubmitted, useCommitDraft } from "../commitDrafts";
 import { messageFor } from "../domain/commitMessage";
 import { replayNames } from "../domain/merge";
@@ -9,14 +9,17 @@ import type {
   Head,
   Problem,
   ReplayOf,
+  ReplayReview,
   RepositoryRoot,
 } from "../domain/repository";
 import type { Write } from "../domain/operations";
 import { useDraftImpact } from "../draftProtection";
+import * as repositories from "../repositories";
 import {
   discardConsentedResolutions,
   resolutionConsent,
 } from "../resolutionDrafts";
+import { useRead } from "../useRead";
 import type { Read } from "../useRead";
 import type { Outcome, ReplayAbortOutcome } from "../useWrites";
 import { commitOutput } from "./CommitBox";
@@ -25,12 +28,19 @@ import { OperationMessage } from "./MergeControls";
 
 type Notice = { message: string; error: boolean };
 
+type StoppedProblem = { message: string; output: string };
+/** Git stopped a start for a reason the panel's own state does not explain. */
+type Stop = ReplayOf & { problem: StoppedProblem };
+
 export function ReplayPanel({
   root,
   read,
   busy,
   write,
   abort,
+  dismiss,
+  review,
+  onCloseReview,
   onInspect,
 }: {
   root: RepositoryRoot;
@@ -42,14 +52,41 @@ export function ReplayPanel({
     of: ReplayOf,
     head: Head,
   ) => Promise<ReplayAbortOutcome>;
+  /** Clears the write notice for a failure the review dialog answers itself. */
+  dismiss: () => void;
+  review: ReplayOf | null;
+  onCloseReview: () => void;
   onInspect: () => void;
 }) {
   const [notice, setNotice] = useState<Notice | null>(null);
+  const [stop, setStop] = useState<Stop | null>(null);
   const progress =
     read.kind === "ready" && read.value.kind === "replay"
       ? read.value.progress
       : null;
-  if (!progress && !notice) return null;
+  const dialog = review && (
+    <ReplayReviewDialog
+      key={JSON.stringify([root, review])}
+      root={root}
+      of={review}
+      busy={busy}
+      write={(request) => {
+        setNotice(null);
+        setStop(null);
+        return write(root, request);
+      }}
+      dismiss={dismiss}
+      onStopped={(shown, problem) =>
+        setStop(
+          problem.output === "" && shown.prediction.kind === "conflict"
+            ? null
+            : { kind: shown.kind, commit: shown.commit, problem },
+        )
+      }
+      onClose={onCloseReview}
+    />
+  );
+  if (!progress && !notice) return dialog;
   return (
     <section className="merge-controls" aria-label="Cherry-pick or revert">
       {notice && (notice.error || !progress) && (
@@ -64,13 +101,20 @@ export function ReplayPanel({
         <ActiveReplay
           key={`${progress.kind}:${progress.commit}`}
           progress={progress}
+          stopped={
+            stop?.kind === progress.kind && stop.commit === progress.commit
+              ? stop.problem
+              : null
+          }
           busy={busy}
           write={(request) => {
             setNotice(null);
+            setStop(null);
             return write(root, request);
           }}
           abort={async () => {
             setNotice(null);
+            setStop(null);
             const { title } = replayNames[progress.kind];
             let result: ReplayAbortOutcome;
             try {
@@ -101,18 +145,21 @@ export function ReplayPanel({
           onInspect={onInspect}
         />
       )}
+      {dialog}
     </section>
   );
 }
 
 function ActiveReplay({
   progress,
+  stopped,
   busy,
   write,
   abort,
   onInspect,
 }: {
   progress: ReplayProgress;
+  stopped: StoppedProblem | null;
   busy: boolean;
   write: (write: Write) => Promise<Outcome>;
   abort: () => Promise<ReplayAbortOutcome>;
@@ -187,8 +234,18 @@ function ActiveReplay({
           ? `The staged result matches HEAD, so there is nothing to commit. Abort ends the ${noun} and keeps every commit.`
           : unresolved.length
             ? `${unresolved.length} unresolved path${unresolved.length === 1 ? "" : "s"}. Resolve and mark each path.`
-            : "All conflicts are resolved. Review the staged result before finishing."}
+            : stopped
+              ? "Review the staged result before finishing."
+              : "All conflicts are resolved. Review the staged result before finishing."}
       </p>
+      {stopped && (
+        <div className="error-message commit-problem" role="alert">
+          <p>{stopped.message}</p>
+          {stopped.output && (
+            <pre className="problem-detail">{stopped.output}</pre>
+          )}
+        </div>
+      )}
       <button className="button secondary" onClick={onInspect}>
         Review staged result and conflicts
       </button>
@@ -285,4 +342,169 @@ function ActiveReplay({
       )}
     </>
   );
+}
+
+function ReplayReviewDialog({
+  root,
+  of,
+  busy,
+  write,
+  dismiss,
+  onStopped,
+  onClose,
+}: {
+  root: RepositoryRoot;
+  of: ReplayOf;
+  busy: boolean;
+  write: (write: Write) => Promise<Outcome>;
+  dismiss: () => void;
+  onStopped: (shown: ReplayReview, problem: StoppedProblem) => void;
+  onClose: () => void;
+}) {
+  const [review, refresh] = useRead(JSON.stringify([root, of]), () =>
+    repositories.replayReview(root, of),
+  );
+  const [refusal, setRefusal] = useState<{
+    message: string;
+    problem: Problem | null;
+  } | null>(null);
+  const { frozen } = useDraftImpact();
+  const dialog = useRef<HTMLDialogElement>(null);
+  const cancel = useRef<HTMLButtonElement>(null);
+  const title = useId();
+  const { noun, title: action } = replayNames[of.kind];
+  const shown = review.kind === "ready" ? review.value : null;
+  useEffect(() => {
+    dialog.current?.showModal();
+    cancel.current?.focus();
+  }, []);
+  function leave() {
+    dialog.current?.close();
+    onClose();
+  }
+  function close() {
+    if (!busy) leave();
+  }
+  async function confirm() {
+    if (!shown || busy || frozen) return;
+    setRefusal(null);
+    const outcome = await write({
+      operation: { kind: "replay", review: shown },
+      expect: {
+        head: {
+          kind: "attached",
+          reference: shown.destination.reference,
+          oid: shown.destination.oid,
+        },
+      },
+    });
+    if (outcome.kind === "busy") {
+      setRefusal({
+        message: "Wait for the current operation to finish.",
+        problem: null,
+      });
+    } else if (outcome.kind === "applied") {
+      leave();
+    } else if (outcome.problem.kind === "replayStopped") {
+      onStopped(shown, outcome.problem);
+      leave();
+    } else if (
+      outcome.problem.kind === "raced" ||
+      outcome.problem.kind === "afterHookFailed"
+    ) {
+      leave();
+    } else {
+      dismiss();
+      setRefusal({
+        message:
+          outcome.problem.kind === "staleView"
+            ? `What this ${noun} would do changed since L1 Git showed it, so nothing changed. Review it again.`
+            : outcome.problem.message,
+        problem: outcome.problem,
+      });
+      refresh();
+    }
+  }
+  return (
+    <dialog
+      ref={dialog}
+      className="add-dialog merge-dialog"
+      aria-labelledby={title}
+      onCancel={(event) => {
+        event.preventDefault();
+        close();
+      }}
+    >
+      <div className="dialog-title">
+        <GitCommitHorizontal size={20} />
+        <button
+          type="button"
+          className="icon-button"
+          aria-label={`Close ${noun} review`}
+          disabled={busy}
+          onClick={close}
+        >
+          <X size={17} />
+        </button>
+      </div>
+      <h1 id={title}>{action} this commit</h1>
+      {review.kind === "loading" && <p>Reading the commit and its branch…</p>}
+      {review.kind === "error" && <p role="alert">{review.error.message}</p>}
+      {refusal &&
+        refusal.message !==
+          (review.kind === "error" && review.error.message) && (
+          <p role="alert">{refusal.message}</p>
+        )}
+      {refusal?.problem && commitOutput(refusal.problem)}
+      {shown && (
+        <>
+          <dl className="merge-pair">
+            <dt>Commit</dt>
+            <dd>
+              {shown.subject}
+              <code>{shown.commit}</code>
+            </dd>
+            <dt>Destination</dt>
+            <dd>
+              {shown.destination.reference}
+              <code>{shown.destination.oid}</code>
+            </dd>
+          </dl>
+          <p>{predicted(shown)}</p>
+        </>
+      )}
+      <div className="dialog-actions">
+        <button
+          ref={cancel}
+          type="button"
+          className="button secondary"
+          disabled={busy}
+          onClick={close}
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          className="button primary"
+          disabled={
+            busy || frozen || !shown || shown.prediction.kind === "empty"
+          }
+          onClick={() => void confirm()}
+        >
+          {action}
+        </button>
+      </div>
+    </dialog>
+  );
+}
+
+function predicted({ prediction }: ReplayReview): string {
+  switch (prediction.kind) {
+    case "clean":
+      return "Applies cleanly. L1 Git will commit it straight away, and Undo removes it.";
+    case "conflict":
+      return `Will conflict in: ${prediction.paths.join(", ")}. You resolve it in the app, then finish or abort.`;
+    case "empty":
+      return "These changes are already there, so there is nothing to apply.";
+  }
 }

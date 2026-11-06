@@ -1,4 +1,4 @@
-import { detailSchema } from "../domain/repository";
+import { detailSchema, replayOfSchema } from "../domain/repository";
 import type {
   Applied,
   Problem,
@@ -31,6 +31,7 @@ import {
   pinSnapshot,
   pinStatus,
   readyPush,
+  replayReviewFor,
 } from "./fixtures";
 
 export type BridgeRequest = { op: string; path: string } & Record<
@@ -162,6 +163,11 @@ const handlers: Record<string, Handler> = {
           context: { kind: "branch" },
         };
   },
+  replayReview: (request) =>
+    replayReviewFor(
+      request.path as RepositoryRoot,
+      replayOfSchema.parse(request.of),
+    ),
   replayAbort: (request, world) => {
     world.merges.delete(request.path as RepositoryRoot);
     return idleMerge();
