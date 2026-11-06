@@ -1507,54 +1507,72 @@ pub(super) fn admit(
                 "The merge needs recovery before more changes are safe.",
             ));
         }
-        let changed = match operation {
-            Operation::SaveConflict { path, .. }
-            | Operation::StageHunk { path, .. }
-            | Operation::UnstageHunk { path, .. }
-            | Operation::StageLines { path, .. }
-            | Operation::UnstageLines { path, .. } => BTreeSet::from([path.clone()]),
-            Operation::StageFiles { entries } | Operation::UnstageFiles { entries } => {
-                paths(entries)
-            }
-            Operation::Commit { .. }
-            | Operation::Amend { .. }
-            | Operation::EditMessage { .. }
-            | Operation::Discard { .. }
-            | Operation::DiscardHunk { .. }
-            | Operation::DiscardLines { .. }
-            | Operation::CreateBranch { .. }
-            | Operation::RenameBranch { .. }
-            | Operation::DeleteBranch { .. }
-            | Operation::Checkout { .. }
-            | Operation::CreateTag { .. }
-            | Operation::DeleteTag { .. }
-            | Operation::StashPush { .. }
-            | Operation::StashApply { .. }
-            | Operation::StashPop { .. }
-            | Operation::StashDrop { .. } => {
+        match edit(operation) {
+            Edit::Paths(changed) => within_footprint(&record.session, changed)?,
+            Edit::Refused => {
                 return Err(refused(
                     "A managed merge is active. Only resolution and index edits within its affected paths are available until Finish or Abort.",
                 ));
             }
-        };
-        within_footprint(&record.session, changed)?;
+        }
     }
     Ok(())
 }
 
-fn branch_names(operation: &Operation) -> Vec<String> {
+enum Edit {
+    Paths(BTreeSet<String>),
+    Refused,
+}
+
+fn edit(operation: &Operation) -> Edit {
     match operation {
+        Operation::SaveConflict { path, .. }
+        | Operation::StageHunk { path, .. }
+        | Operation::UnstageHunk { path, .. }
+        | Operation::StageLines { path, .. }
+        | Operation::UnstageLines { path, .. } => Edit::Paths(BTreeSet::from([path.clone()])),
+        Operation::StageFiles { entries } | Operation::UnstageFiles { entries } => {
+            Edit::Paths(paths(entries))
+        }
+        Operation::Commit { .. }
+        | Operation::Amend { .. }
+        | Operation::EditMessage { .. }
+        | Operation::Discard { .. }
+        | Operation::DiscardHunk { .. }
+        | Operation::DiscardLines { .. }
+        | Operation::CreateBranch { .. }
+        | Operation::RenameBranch { .. }
+        | Operation::DeleteBranch { .. }
+        | Operation::Checkout { .. }
+        | Operation::CreateTag { .. }
+        | Operation::DeleteTag { .. }
+        | Operation::StashPush { .. }
+        | Operation::StashApply { .. }
+        | Operation::StashPop { .. }
+        | Operation::StashDrop { .. } => Edit::Refused,
+    }
+}
+
+fn branch_names(
+    repo: &Repo,
+    operation: &Operation,
+    deadline: WriteDeadline,
+) -> Result<Vec<String>, RepositoryError> {
+    Ok(match operation {
         Operation::RenameBranch { branch, to } => {
             vec![branch.reference.as_str().into(), format!("refs/heads/{to}")]
         }
         Operation::DeleteBranch { branch } => vec![branch.reference.as_str().into()],
         Operation::CreateBranch { name, .. } => vec![format!("refs/heads/{name}")],
+        Operation::Commit { .. } | Operation::Amend { .. } | Operation::EditMessage { .. } => {
+            match repo.head(deadline)? {
+                Head::Attached { reference, .. } => vec![reference],
+                Head::Detached { .. } | Head::Unborn { .. } => Vec::new(),
+            }
+        }
         Operation::SaveConflict { .. }
         | Operation::StageFiles { .. }
         | Operation::UnstageFiles { .. }
-        | Operation::Commit { .. }
-        | Operation::Amend { .. }
-        | Operation::EditMessage { .. }
         | Operation::Discard { .. }
         | Operation::StageHunk { .. }
         | Operation::UnstageHunk { .. }
@@ -1569,7 +1587,7 @@ fn branch_names(operation: &Operation) -> Vec<String> {
         | Operation::StashApply { .. }
         | Operation::StashPop { .. }
         | Operation::StashDrop { .. } => Vec::new(),
-    }
+    })
 }
 
 fn guard_branches(
@@ -1577,14 +1595,7 @@ fn guard_branches(
     operation: &Operation,
     deadline: WriteDeadline,
 ) -> Result<(), RepositoryError> {
-    let mut names = branch_names(operation);
-    if matches!(
-        operation,
-        Operation::Commit { .. } | Operation::Amend { .. } | Operation::EditMessage { .. }
-    ) && let Head::Attached { reference, .. } = repo.head(deadline)?
-    {
-        names.push(reference);
-    }
+    let names = branch_names(repo, operation, deadline)?;
     if names.is_empty() {
         return Ok(());
     }
