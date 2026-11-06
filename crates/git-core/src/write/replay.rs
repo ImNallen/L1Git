@@ -326,7 +326,15 @@ fn real_names(
             };
             let tracked = git::read(
                 &repo.root,
-                &["ls-tree", "--name-only", "-z", head.as_str(), "--", &name],
+                &[
+                    "--literal-pathspecs",
+                    "ls-tree",
+                    "--name-only",
+                    "-z",
+                    head.as_str(),
+                    "--",
+                    &name,
+                ],
                 deadline.reads(),
             )?;
             Ok(if tracked.is_empty() { name } else { path })

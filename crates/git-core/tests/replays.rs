@@ -2298,6 +2298,31 @@ fn abort_refuses_a_staged_edit_on_a_tracked_file_named_like_a_renamed_path() {
 }
 
 #[test]
+fn a_clash_on_a_name_that_looks_like_pathspec_magic_still_reads_and_aborts() {
+    for format in ["files", "reftable"] {
+        for name in [":!foo", ":(foo", ":"] {
+            let repo = Repo::new(format);
+            repo.git(&["switch", "--quiet", "-c", "topic"]);
+            fs::create_dir(repo.root.join(name)).unwrap();
+            repo.put(&format!("{name}/x"), "x\n");
+            let commit = repo.commit_all("a folder");
+            repo.git(&["switch", "--quiet", "main"]);
+            repo.put(name, "file\n");
+            repo.commit_all("a file");
+            repo.fails(&["cherry-pick", &commit]);
+
+            let shown = repo.progress();
+            assert_eq!(shown.unresolved.len(), 1, "{format} {name}: {shown:?}");
+            assert!(
+                shown.footprint.contains(&shown.unresolved[0]),
+                "{format} {name}"
+            );
+            assert_eq!(repo.abort().unwrap(), MergeState::Idle, "{format} {name}");
+        }
+    }
+}
+
+#[test]
 fn undo_removes_the_commit_and_its_files_and_redo_returns_the_same_oid() {
     for (format, pick) in cases() {
         let (repo, applied) = Repo::finished(format, pick);
