@@ -1,5 +1,5 @@
 import { mergeReviewSchema, mergeStateSchema } from "../domain/merge";
-import type { MergeReview, MergeState } from "../domain/merge";
+import type { MergeReview, MergeState, ReplayProgress } from "../domain/merge";
 import { overviewSchema } from "../domain/overview";
 import type { RepositoryOverview } from "../domain/overview";
 import { pushAvailabilitySchema } from "../domain/push";
@@ -329,6 +329,33 @@ export const readyPush = (): PushAvailability =>
 
 export const noUpstream = (): PushAvailability =>
   pushAvailabilitySchema.parse({ kind: "unavailable", reason: "noUpstream" });
+
+export function replayInProgress(
+  root: RepositoryRoot,
+  footprint: string[],
+  progress: Partial<Omit<ReplayProgress, "root" | "footprint">> = {},
+): MergeState {
+  return mergeStateSchema.parse({
+    kind: "replay",
+    progress: {
+      root,
+      kind: "cherryPick",
+      commit: C6,
+      subject: "Picked commit",
+      destination:
+        root === PIN_FEATURE
+          ? { kind: "attached", reference: "refs/heads/feature", oid: C5 }
+          : { kind: "attached", reference: "refs/heads/main", oid: C4 },
+      footprint,
+      unresolved: [],
+      staged: STAMP,
+      tree: C3,
+      empty: false,
+      suggestedMessage: "Picked commit\n",
+      ...progress,
+    },
+  });
+}
 
 export function mergeReviewFor(root: RepositoryRoot): MergeReview {
   const branch = root === PIN_FEATURE ? "feature" : "main";
