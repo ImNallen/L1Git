@@ -45,10 +45,22 @@ struct Repo {
 
 impl Repo {
     fn unborn() -> Self {
+        Self::unborn_as("files")
+    }
+
+    fn unborn_as(ref_format: &str) -> Self {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().canonicalize().unwrap().join("repo");
         fs::create_dir(&root).unwrap();
-        git(&root, &["init", "--quiet", "--initial-branch=main"]);
+        git(
+            &root,
+            &[
+                "init",
+                "--quiet",
+                "--initial-branch=main",
+                &format!("--ref-format={ref_format}"),
+            ],
+        );
         for (key, value) in [
             ("user.name", "Ada"),
             ("user.email", "ada@example.test"),
@@ -61,7 +73,11 @@ impl Repo {
     }
 
     fn born() -> Self {
-        let repo = Self::unborn();
+        Self::born_as("files")
+    }
+
+    fn born_as(ref_format: &str) -> Self {
+        let repo = Self::unborn_as(ref_format);
         repo.put("a.txt", "one\n");
         repo.git(&["add", "a.txt"]);
         repo.git(&["commit", "--quiet", "-m", "initial"]);
@@ -343,6 +359,111 @@ fn refuses_during_a_merge_or_with_an_unmerged_path() {
     fs::write(repo.root.join(".git/BISECT_LOG"), "").unwrap();
     repo.write(Kind::Commit, "During a bisect\n")
         .expect("a bisect does not block a commit");
+}
+
+/// Stops a real `git cherry-pick` or `git revert` on a conflict, with the
+/// conflict resolved and staged, so nothing but the operation itself can make
+/// L1 Git refuse.
+fn resolved_and_unfinished(ref_format: &str, start: &[&str]) -> (Repo, Applied) {
+    let repo = Repo::born_as(ref_format);
+    repo.git(&["switch", "--quiet", "-c", "topic"]);
+    repo.staged_edit("a.txt", "theirs\n");
+    repo.git(&["commit", "--quiet", "-m", "theirs"]);
+    repo.git(&["switch", "--quiet", "main"]);
+    repo.staged_edit("a.txt", "ours\n");
+    repo.git(&["commit", "--quiet", "-m", "ours"]);
+    repo.staged_edit("a.txt", "later\n");
+    let later = repo.write(Kind::Commit, "later").unwrap();
+    assert!(git_fails(&repo.root, start), "{start:?} should conflict");
+    assert!(repo.status().starts_with("UU a.txt"), "{}", repo.status());
+    repo.staged_edit("a.txt", "resolved\n");
+    (repo, later)
+}
+
+const REPLAYS: [(&[&str], &str, &str); 2] = [
+    (
+        &["cherry-pick", "topic"],
+        "A cherry-pick",
+        "CHERRY_PICK_HEAD",
+    ),
+    (&["revert", "HEAD~1"], "A revert", "REVERT_HEAD"),
+];
+
+#[test]
+fn a_commit_refuses_during_a_cherry_pick_or_revert_in_either_ref_format() {
+    for ref_format in ["files", "reftable"] {
+        for (start, name, marker) in REPLAYS {
+            let (repo, _) = resolved_and_unfinished(ref_format, start);
+            let head = repo.head();
+            let error = refused(repo.write(Kind::Commit, "finish"), ErrorKind::Conflict);
+            assert!(
+                error.message.starts_with(name),
+                "{ref_format}: {}",
+                error.message
+            );
+            assert_eq!(repo.head(), head, "{ref_format} {name}");
+            repo.git(&["show-ref", "--exists", marker]);
+        }
+    }
+}
+
+#[test]
+fn undo_refuses_during_a_cherry_pick_or_revert_in_either_ref_format() {
+    for ref_format in ["files", "reftable"] {
+        for (start, name, marker) in REPLAYS {
+            let (repo, later) = resolved_and_unfinished(ref_format, start);
+            let head = repo.head();
+            let error = refused(
+                repo.coordinator().undo(repo.path(), later.id),
+                ErrorKind::Conflict,
+            );
+            assert!(
+                error.message.starts_with(name),
+                "{ref_format}: {}",
+                error.message
+            );
+            assert_eq!(repo.head(), head, "{ref_format} {name}");
+            repo.git(&["show-ref", "--exists", marker]);
+        }
+    }
+}
+
+#[test]
+fn a_reftable_worktree_answers_only_for_its_own_cherry_pick() {
+    let (repo, _) = resolved_and_unfinished("reftable", &["cherry-pick", "topic"]);
+    let linked = repo.directory.path().join("linked");
+    repo.git(&[
+        "worktree",
+        "add",
+        "--quiet",
+        "-b",
+        "other",
+        linked.to_str().unwrap(),
+        "topic",
+    ]);
+    fs::write(linked.join("a.txt"), "other\n").unwrap();
+    git(&linked, &["add", "a.txt"]);
+    let linked = linked.to_str().unwrap();
+    let status = worktree_status(linked).unwrap();
+    repo.coordinator()
+        .write(
+            linked,
+            &Operation::Commit {
+                message: "other".to_owned(),
+                staged: status.staged_stamp,
+            },
+            &Expect { head: status.head },
+        )
+        .unwrap();
+}
+
+#[test]
+fn a_branch_or_tag_named_like_a_reftable_marker_is_not_an_unfinished_operation() {
+    let repo = Repo::born_as("reftable");
+    repo.git(&["branch", "CHERRY_PICK_HEAD"]);
+    repo.git(&["tag", "REVERT_HEAD"]);
+    repo.staged_edit("a.txt", "two\n");
+    repo.write(Kind::Commit, "two").unwrap();
 }
 
 #[test]
