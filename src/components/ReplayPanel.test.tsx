@@ -299,6 +299,25 @@ it.each([
   },
 );
 
+it("shows what a refusing hook printed, as the Commit box does, until the next Finish", async () => {
+  write.mockResolvedValueOnce({
+    kind: "failed",
+    problem: {
+      kind: "hookFailed",
+      message: "The hook stopped the commit.",
+      output: "lint failed in conflict.txt",
+    },
+  });
+  await render(state());
+  await act(async () => button("Use suggested message").click());
+  await act(async () => button("Finish cherry-pick").click());
+  expect(host.querySelector(".problem-detail")?.textContent).toBe(
+    "lint failed in conflict.txt",
+  );
+  await act(async () => button("Finish cherry-pick").click());
+  expect(host.querySelector(".problem-detail")).toBeNull();
+});
+
 it("makes the user turn off a saved Amend before writing a message", async () => {
   const loaded = loadMessage("Previous commit\n");
   setDraft(worktree, {

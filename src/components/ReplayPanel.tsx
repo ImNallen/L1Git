@@ -5,7 +5,12 @@ import { messageFor } from "../domain/commitMessage";
 import { replayNames } from "../domain/merge";
 import type { MergeState, ReplayProgress } from "../domain/merge";
 import { problemFrom } from "../domain/repository";
-import type { Head, ReplayOf, RepositoryRoot } from "../domain/repository";
+import type {
+  Head,
+  Problem,
+  ReplayOf,
+  RepositoryRoot,
+} from "../domain/repository";
 import type { Write } from "../domain/operations";
 import { useDraftImpact } from "../draftProtection";
 import {
@@ -14,6 +19,7 @@ import {
 } from "../resolutionDrafts";
 import type { Read } from "../useRead";
 import type { Outcome, ReplayAbortOutcome } from "../useWrites";
+import { commitOutput } from "./CommitBox";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { OperationMessage } from "./MergeControls";
 
@@ -121,6 +127,7 @@ function ActiveReplay({
   const [aborting, setAborting] = useState<ReturnType<
     typeof resolutionConsent
   > | null>(null);
+  const [refusal, setRefusal] = useState<Problem | null>(null);
   const message = messageFor(draft.draft, null);
   const dirty = impact.resolutions.some((draft) => draft.root === root);
   const disabled = busy || impact.frozen;
@@ -133,6 +140,7 @@ function ActiveReplay({
     message.trim() !== "";
   async function finish() {
     if (!ready || tree === null) return;
+    setRefusal(null);
     const outcome = await write({
       operation: {
         kind: "finishReplay",
@@ -150,6 +158,12 @@ function ActiveReplay({
           outcome.problem.kind === "afterHookFailed"))
     )
       clearSubmitted(root, draft);
+    else if (
+      outcome.kind === "failed" &&
+      (outcome.problem.kind === "hookFailed" ||
+        outcome.problem.kind === "missingIdentity")
+    )
+      setRefusal(outcome.problem);
   }
   return (
     <>
@@ -229,6 +243,7 @@ function ActiveReplay({
           Abort {noun}…
         </button>
       </div>
+      {refusal && commitOutput(refusal)}
       <p className="muted">
         {!empty &&
           "Finish can be undone like a commit. Undo removes the commit and its file changes, and it does not reopen the conflict. "}

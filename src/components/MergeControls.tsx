@@ -62,7 +62,7 @@ export function OperationMessage({
           aria-label={summaryLabel}
           className="commit-summary"
           value={draft.summary}
-          placeholder={suggested}
+          placeholder={splitMessage(suggested).summary}
           readOnly={disabled}
           onChange={(event) =>
             setDraft({ ...draft, summary: event.target.value })
