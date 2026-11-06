@@ -1,4 +1,8 @@
-use super::{Repo, commit, merge, refs};
+use super::{
+    Operation, Repo, commit,
+    merge::{self, Edit},
+    refs,
+};
 use crate::{
     Head, Oid, RepositoryError, StagedStamp,
     git::{self, WriteDeadline},
@@ -6,7 +10,11 @@ use crate::{
     sync::{self, InProgress},
 };
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeSet, fs, path::PathBuf};
+use std::{
+    collections::BTreeSet,
+    fs,
+    path::{Path, PathBuf},
+};
 
 /// The empty tree stands in for a root commit's missing parent.
 const EMPTY_TREE_SHA1: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
@@ -315,6 +323,69 @@ pub(super) fn progress(
         empty,
         suggested_message,
     }))
+}
+
+/// Where the resolver's undo history lives while this replay lasts. The path comes
+/// from Git's state, and nothing reads the folder to learn what is in progress, so
+/// deleting it costs only resolution Undo. Runs under the store lock.
+pub(super) fn journal(repo: &Repo, progress: &ReplayProgress) -> Result<PathBuf, RepositoryError> {
+    let head = refs::oid(&progress.destination).ok_or_else(git::malformed)?;
+    let folder = prepared(repo, &progress.of(), &head)?;
+    sweep(repo, Some(&folder));
+    Ok(folder.join("undo"))
+}
+
+/// Removes every journal and memo but `keep`, which a finished or restarted replay
+/// left behind. Runs under the store lock.
+pub(super) fn sweep(repo: &Repo, keep: Option<&Path>) {
+    let Ok(folders) = fs::read_dir(base(repo)) else {
+        return;
+    };
+    for folder in folders.flatten() {
+        if keep != Some(folder.path().as_path()) {
+            let _ = fs::remove_dir_all(folder.path());
+        }
+    }
+}
+
+/// Index edits within the footprint pass. Anything else refuses and says why. A
+/// replay whose footprint `merge-tree` cannot name reads as an external operation,
+/// so it passes as one does.
+pub(super) fn admit(
+    repo: &Repo,
+    operation: &Operation,
+    deadline: WriteDeadline,
+) -> Result<(), RepositoryError> {
+    let Some(of) = in_flight(repo, deadline)? else {
+        return Ok(());
+    };
+    let head = refs::oid(&repo.head(deadline)?).ok_or_else(git::malformed)?;
+    let Some(footprint) = footprint(repo, &of, &head, deadline)? else {
+        return Ok(());
+    };
+    let name = refs::capitalized(of.kind.operation().name());
+    match merge::edit(operation) {
+        Edit::Paths(changed) => {
+            let outside = outside(changed, &footprint);
+            if outside.is_empty() {
+                return Ok(());
+            }
+            Err(merge::refused(format!(
+                "{name} is in progress in this worktree, and it does not change these paths: {}. Finish or abort it before you change them.",
+                outside.join(", ")
+            )))
+        }
+        Edit::Refused => Err(merge::refused(format!(
+            "{name} is in progress in this worktree. Only resolution and index edits within its affected paths are available until Finish or Abort."
+        ))),
+    }
+}
+
+fn outside(paths: BTreeSet<String>, footprint: &[String]) -> Vec<String> {
+    paths
+        .into_iter()
+        .filter(|path| !footprint.contains(path))
+        .collect()
 }
 
 /// What Git started each `Conflicts:` line with. `auto` only changes what `git

@@ -295,7 +295,7 @@ fn decode_record(value: StoredRecord) -> Result<Record, RepositoryError> {
     }
 }
 
-fn refused(message: impl Into<String>) -> RepositoryError {
+pub(super) fn refused(message: impl Into<String>) -> RepositoryError {
     RepositoryError::new(ErrorKind::Conflict, message)
 }
 
@@ -1501,9 +1501,12 @@ pub(super) fn journal(
             message,
             ..
         } => Err(refused(message)),
-        MergeState::Attention { session: None, .. }
-        | MergeState::Idle
-        | MergeState::Replay { .. } => Ok(None),
+        MergeState::Replay { progress } => replay::journal(repo, &progress).map(Some),
+        MergeState::Idle => {
+            replay::sweep(repo, None);
+            Ok(None)
+        }
+        MergeState::Attention { session: None, .. } => Ok(None),
     }
 }
 
@@ -1531,15 +1534,15 @@ pub(super) fn admit(
             }
         }
     }
-    Ok(())
+    replay::admit(repo, operation, deadline)
 }
 
-enum Edit {
+pub(super) enum Edit {
     Paths(BTreeSet<String>),
     Refused,
 }
 
-fn edit(operation: &Operation) -> Edit {
+pub(super) fn edit(operation: &Operation) -> Edit {
     match operation {
         Operation::SaveConflict { path, .. }
         | Operation::StageHunk { path, .. }

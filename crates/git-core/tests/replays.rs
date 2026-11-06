@@ -1,8 +1,9 @@
 #![cfg(unix)]
 
 use l1_git_core::{
-    Applied, BranchTip, Coordinator, ErrorKind, Expect, Head, Limits, MergeAttention, MergeState,
-    Operation, ReplayKind, ReplayProgress, RepositoryError, worktree_status,
+    Applied, BranchTip, ConflictFile, ConflictSnapshot, Coordinator, EntryId, ErrorKind, Expect,
+    Head, Limits, MergeAttention, MergeState, Operation, ReplayKind, ReplayProgress,
+    RepositoryError, Request, Response, UndoHistory, run, worktree_status,
 };
 use std::{
     fs,
@@ -177,6 +178,71 @@ impl Repo {
             } => {}
             other => panic!("{why}: {other:?}"),
         }
+    }
+
+    fn history(&self) -> UndoHistory {
+        self.coordinator().undo_history(self.path()).unwrap()
+    }
+
+    fn undo_id(&self) -> Option<EntryId> {
+        self.history().undo.map(|entry| entry.id)
+    }
+
+    /// Only plumbing moves a branch under a marker. Porcelain refuses or clears it.
+    fn move_head_with_plumbing(&self) -> String {
+        let moved = self.git(&["commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "moved"]);
+        self.git(&["update-ref", "refs/heads/main", moved.trim()]);
+        moved.trim().to_owned()
+    }
+
+    fn snapshot(&self, file: &str) -> ConflictSnapshot {
+        let answer = run(
+            &self.coordinator(),
+            Request::ConflictFile {
+                path: self.path().to_owned(),
+                file: file.to_owned(),
+            },
+        )
+        .unwrap();
+        let Response::ConflictFile(ConflictFile::Editable { snapshot }) = answer else {
+            panic!("{file} should be editable: {answer:?}");
+        };
+        *snapshot
+    }
+
+    fn save(&self, file: &str, text: &str) -> Applied {
+        let seen = self.snapshot(file);
+        self.coordinator()
+            .write(
+                self.path(),
+                &Operation::SaveConflict {
+                    path: seen.path,
+                    version: seen.version,
+                    text: Some(text.to_owned()),
+                },
+                &Expect { head: seen.head },
+            )
+            .unwrap()
+    }
+
+    fn stage(&self, file: &str) -> Applied {
+        let status = worktree_status(self.path()).unwrap();
+        let entries = status
+            .entries
+            .into_iter()
+            .filter(|entry| serde_json::to_value(entry).unwrap()["path"] == file)
+            .collect();
+        self.coordinator()
+            .write(
+                self.path(),
+                &Operation::StageFiles { entries },
+                &Expect { head: status.head },
+            )
+            .unwrap()
+    }
+
+    fn read(&self, file: &str) -> String {
+        fs::read_to_string(self.root.join(file)).unwrap()
     }
 
     /// What Git staged against HEAD, which the derived footprint must cover.
@@ -689,5 +755,138 @@ fn a_second_read_does_not_run_a_merge_driver_again_and_the_memo_can_be_deleted()
             after_git + 3,
             "{format}: a damaged memo recomputes"
         );
+    }
+}
+
+#[test]
+fn the_resolver_undoes_through_a_journal_derived_from_gits_state() {
+    for (format, pick) in cases() {
+        let (repo, _) = Repo::stopped(format, pick);
+        let conflicted = repo.read("f.txt");
+        let saved = repo.save("f.txt", "a\nRESOLVED\nc\n");
+        assert_eq!(repo.undo_id(), Some(saved.id), "{format} {pick:?}");
+        let marked = repo.stage("f.txt");
+        assert_eq!(repo.undo_id(), Some(marked.id), "{format} {pick:?}");
+        assert!(repo.progress().unresolved.is_empty());
+
+        let coordinator = repo.coordinator();
+        coordinator.undo(repo.path(), marked.id).unwrap();
+        assert_eq!(repo.progress().unresolved, ["f.txt"], "{format} {pick:?}");
+        coordinator.undo(repo.path(), saved.id).unwrap();
+        assert_eq!(repo.read("f.txt"), conflicted, "{format} {pick:?}");
+        assert_eq!(repo.history().undo, None);
+        coordinator.redo(repo.path(), saved.id).unwrap();
+        assert_eq!(repo.read("f.txt"), "a\nRESOLVED\nc\n");
+        coordinator.redo(repo.path(), marked.id).unwrap();
+        assert!(repo.progress().unresolved.is_empty(), "{format} {pick:?}");
+    }
+}
+
+#[test]
+fn deleting_the_journal_folder_loses_only_resolution_undo() {
+    for (format, pick) in cases() {
+        let (repo, commit) = Repo::stopped(format, pick);
+        repo.save("f.txt", "a\nRESOLVED\nc\n");
+        fs::remove_dir_all(repo.root.join(".git/l1git/replay")).unwrap();
+        assert_eq!(repo.history().undo, None, "{format} {pick:?}");
+        assert_eq!(repo.progress().commit.as_str(), commit);
+        assert_eq!(repo.read("f.txt"), "a\nRESOLVED\nc\n");
+    }
+}
+
+#[test]
+fn a_journal_goes_away_once_git_says_the_replay_is_over() {
+    for (format, pick) in cases() {
+        let (repo, _) = Repo::stopped(format, pick);
+        repo.save("f.txt", "a\nRESOLVED\nc\n");
+        let folders = repo.root.join(".git/l1git/replay");
+        assert_eq!(fs::read_dir(&folders).unwrap().count(), 1);
+        match pick {
+            Pick::CherryPick => repo.git(&["cherry-pick", "--abort"]),
+            Pick::Revert => repo.git(&["revert", "--abort"]),
+        };
+        assert_eq!(repo.history().undo, None, "{format} {pick:?}");
+        assert_eq!(
+            fs::read_dir(&folders).unwrap().count(),
+            0,
+            "{format} {pick:?}"
+        );
+    }
+}
+
+#[test]
+fn a_new_replay_sweeps_the_journal_of_the_one_before_it() {
+    for (format, pick) in cases() {
+        let (repo, _) = Repo::stopped(format, pick);
+        repo.save("f.txt", "a\nRESOLVED\nc\n");
+        let folders = repo.root.join(".git/l1git/replay");
+        let first = fs::read_dir(&folders)
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        repo.move_head_with_plumbing();
+        assert_eq!(
+            repo.history().undo,
+            None,
+            "{format} {pick:?}: a new HEAD is a new journal"
+        );
+        assert!(!first.exists(), "{format} {pick:?}");
+        assert_eq!(
+            fs::read_dir(&folders).unwrap().count(),
+            1,
+            "{format} {pick:?}"
+        );
+    }
+}
+
+#[test]
+fn only_index_edits_inside_the_footprint_pass_during_a_replay() {
+    for (format, pick) in cases() {
+        let (repo, _) = Repo::stopped(format, pick);
+        repo.put("u.txt", "edited\n");
+        let status = worktree_status(repo.path()).unwrap();
+        let entries: Vec<_> = status
+            .entries
+            .iter()
+            .filter(|entry| serde_json::to_value(entry).unwrap()["path"] == "u.txt")
+            .cloned()
+            .collect();
+        let expect = Expect {
+            head: status.head.clone(),
+        };
+        let coordinator = repo.coordinator();
+        let error = refused(coordinator.write(
+            repo.path(),
+            &Operation::StageFiles {
+                entries: entries.clone(),
+            },
+            &expect,
+        ));
+        assert!(
+            error.message.contains("u.txt"),
+            "{format} {pick:?}: {}",
+            error.message
+        );
+        for operation in [
+            Operation::Discard { entries },
+            Operation::Commit {
+                message: "no".to_owned(),
+                staged: status.staged_stamp.clone(),
+            },
+            Operation::Amend {
+                message: "no".to_owned(),
+                staged: status.staged_stamp.clone(),
+            },
+            Operation::StashPush {
+                message: String::new(),
+                untracked: false,
+                paths: Vec::new(),
+            },
+        ] {
+            refused(coordinator.write(repo.path(), &operation, &expect));
+        }
+        assert_eq!(repo.read("u.txt"), "edited\n");
     }
 }
