@@ -2,7 +2,8 @@ use super::{Capped, Deadline, Work, base, execute, text, too_old, without_prompt
 use crate::{
     ErrorKind, RepositoryError, StaleReason, stderr,
     write::{
-        CommitTxn, HOOK_OFF, MergeIndexTxn, MergeTxn, Outside, Published, RefTxn, ScratchIndex, Txn,
+        CommitTxn, HOOK_OFF, MergeIndexTxn, MergeTxn, Outside, Published, RefTxn, ReplayKind,
+        ReplayTxn, ScratchIndex, Txn,
     },
 };
 use std::{
@@ -17,6 +18,8 @@ pub(crate) enum LocalWrite {
     MergeStart,
     MergeFinish,
     MergeAbort,
+    ReplayFinish,
+    ReplayAbort,
     SaveConflict,
     StageFiles,
     UnstageFiles,
@@ -43,6 +46,8 @@ pub(crate) enum LocalWrite {
     RedoCheckout,
     UndoStash,
     RedoStash,
+    UndoReplay,
+    RedoReplay,
     RefreshIndex,
 }
 
@@ -67,6 +72,8 @@ impl LocalWrite {
             Self::MergeStart
             | Self::MergeFinish
             | Self::MergeAbort
+            | Self::ReplayFinish
+            | Self::ReplayAbort
             | Self::Commit
             | Self::Amend
             | Self::EditMessage
@@ -78,7 +85,9 @@ impl LocalWrite {
             | Self::StashPop
             | Self::StashDrop
             | Self::UndoStash
-            | Self::RedoStash => 600,
+            | Self::RedoStash
+            | Self::UndoReplay
+            | Self::RedoReplay => 600,
         })
     }
 
@@ -87,6 +96,8 @@ impl LocalWrite {
             Self::MergeStart => "Starting the merge",
             Self::MergeFinish => "Finishing the merge",
             Self::MergeAbort => "Aborting the merge",
+            Self::ReplayFinish => "Finishing the cherry-pick or revert",
+            Self::ReplayAbort => "Aborting the cherry-pick or revert",
             Self::SaveConflict => "Saving the conflict result",
             Self::StageFiles => "Staging the files",
             Self::UnstageFiles => "Unstaging the files",
@@ -113,6 +124,8 @@ impl LocalWrite {
             Self::RedoCheckout => "Redoing the checkout",
             Self::UndoStash => "Undoing the stash change",
             Self::RedoStash => "Redoing the stash change",
+            Self::UndoReplay => "Undoing the cherry-pick or revert",
+            Self::RedoReplay => "Redoing the cherry-pick or revert",
             Self::RefreshIndex => "Refreshing the index",
         }
     }
@@ -122,6 +135,8 @@ impl LocalWrite {
             Self::MergeStart => "l1git merge start",
             Self::MergeFinish => "l1git merge finish",
             Self::MergeAbort => "l1git merge abort",
+            Self::ReplayFinish => "l1git replay finish",
+            Self::ReplayAbort => "l1git replay abort",
             Self::SaveConflict => "l1git save conflict",
             Self::StageFiles => "l1git stage",
             Self::UnstageFiles => "l1git unstage",
@@ -142,15 +157,15 @@ impl LocalWrite {
             Self::StashApply => "l1git stash apply",
             Self::StashPop => "l1git stash pop",
             Self::StashDrop => "l1git stash drop",
-            Self::Undo | Self::UndoCheckout | Self::UndoStash => "l1git undo",
-            Self::Redo | Self::RedoCheckout | Self::RedoStash => "l1git redo",
+            Self::Undo | Self::UndoCheckout | Self::UndoStash | Self::UndoReplay => "l1git undo",
+            Self::Redo | Self::RedoCheckout | Self::RedoStash | Self::RedoReplay => "l1git redo",
             Self::RefreshIndex => "l1git refresh",
         }
     }
 
     pub(super) const fn left_behind(self) -> &'static str {
         match self {
-            Self::MergeStart | Self::MergeFinish | Self::MergeAbort => {
+            Self::MergeStart | Self::MergeFinish | Self::MergeAbort | Self::ReplayAbort => {
                 "L1 Git rereads the merge state to see what changed."
             }
             Self::StageFiles
@@ -160,7 +175,7 @@ impl LocalWrite {
             | Self::Undo
             | Self::Redo
             | Self::RefreshIndex => "The index is unchanged.",
-            Self::Commit | Self::Amend | Self::EditMessage => {
+            Self::Commit | Self::Amend | Self::EditMessage | Self::ReplayFinish => {
                 "Git may have finished the commit, so check the history."
             }
             Self::SaveConflict | Self::Discard | Self::DiscardPart => "No file changed.",
@@ -168,9 +183,11 @@ impl LocalWrite {
                 "L1 Git rereads the branch to see what changed."
             }
             Self::CreateTag | Self::DeleteTag => "L1 Git rereads the tag to see what changed.",
-            Self::Checkout | Self::UndoCheckout | Self::RedoCheckout => {
-                "L1 Git rereads HEAD to see whether Git moved it."
-            }
+            Self::Checkout
+            | Self::UndoCheckout
+            | Self::RedoCheckout
+            | Self::UndoReplay
+            | Self::RedoReplay => "L1 Git rereads HEAD to see whether Git moved it.",
             Self::StashPush
             | Self::StashApply
             | Self::StashPop
@@ -327,6 +344,18 @@ impl<'a> Write<'a> {
             .lazy_fetch_unprompted()
     }
 
+    pub(crate) fn replay_abort(txn: &'a ReplayTxn<'_>, kind: ReplayKind) -> Self {
+        Self {
+            dir: txn.root(),
+            args: vec![kind.command(), "--abort"],
+            env: Vec::new(),
+            input: None,
+            cap: None,
+            as_user: true,
+            lazy_fetch: true,
+        }
+    }
+
     pub(crate) fn branch(txn: &'a RefTxn<'_>, args: &[&'a str]) -> Self {
         let mut all = vec!["branch"];
         all.extend(args);
@@ -402,6 +431,18 @@ impl<'a> Write<'a> {
             cap: Some(WRITE_STDOUT_CAP),
             as_user: true,
             lazy_fetch: false,
+        }
+    }
+
+    pub(crate) fn move_tree(txn: &'a RefTxn<'_>, from: &'a crate::Oid, to: &'a crate::Oid) -> Self {
+        Self {
+            dir: txn.root(),
+            args: vec!["read-tree", "-m", "-u", from.as_str(), to.as_str()],
+            env: Vec::new(),
+            input: None,
+            cap: None,
+            as_user: true,
+            lazy_fetch: true,
         }
     }
 

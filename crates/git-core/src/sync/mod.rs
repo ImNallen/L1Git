@@ -13,7 +13,7 @@ pub use push::{
 pub use remote::{AddRemote, AddRemoteRefresh, AddRemoteReport};
 
 pub(crate) use advance::is_at;
-pub(crate) use read::in_progress;
+pub(crate) use read::{InProgress, in_progress, pseudoref_exists};
 
 use crate::{
     Advance, AdvanceOutcome, FastForwardReport, FetchMode, FetchSummary, RepositoryError,

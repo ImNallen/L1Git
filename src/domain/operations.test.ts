@@ -158,6 +158,24 @@ group("writeFor", () => {
 });
 
 group("describe", () => {
+  it("names a finished cherry-pick or revert by its message", () => {
+    const finish = {
+      kind: "finishReplay",
+      of: { kind: "cherryPick", commit: "a".repeat(40) },
+      staged: "b".repeat(40),
+      tree: "c".repeat(40),
+      message: "Picked it\n\nbody",
+    } as unknown as Operation;
+    expect(describe(finish)).toBe("Finish cherry-pick “Picked it”");
+    expect(
+      describe({
+        ...finish,
+        of: { kind: "revert", commit: "a".repeat(40) },
+      } as unknown as Operation),
+    ).toBe("Finish revert “Picked it”");
+    expect(movesRefs(finish)).toBe(true);
+  });
+
   const stage = (...paths: string[]) =>
     describe({
       kind: "stageFiles",

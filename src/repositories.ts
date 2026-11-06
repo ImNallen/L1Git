@@ -41,8 +41,10 @@ import type {
   BranchTip,
   EntryId,
   Expect,
+  Head,
   Oid,
   Operation,
+  ReplayOf,
   RepositoryRoot,
   Side,
 } from "./domain/repository";
@@ -55,6 +57,7 @@ type RepositoryRequest =
   | { op: "mergeReview"; path: RepositoryRoot; selection: MergeSelection }
   | { op: "mergeState"; path: RepositoryRoot }
   | { op: "merge"; path: RepositoryRoot; action: MergeAction }
+  | { op: "replayAbort"; path: RepositoryRoot; of: ReplayOf; head: Head }
   | { op: "snapshot"; path: string }
   | { op: "refs"; path: RepositoryRoot }
   | { op: "commitDetail"; path: string; comparison: Comparison }
@@ -82,6 +85,7 @@ const responseSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("mergeReview"), data: mergeReviewSchema }),
   z.object({ op: z.literal("mergeState"), data: mergeStateSchema }),
   z.object({ op: z.literal("merge"), data: mergeReportSchema }),
+  z.object({ op: z.literal("replayAbort"), data: mergeStateSchema }),
   z.object({ op: z.literal("snapshot"), data: snapshotSchema }),
   z.object({ op: z.literal("refs"), data: refsSchema }),
   z.object({ op: z.literal("commitDetail"), data: detailSchema }),

@@ -407,11 +407,44 @@ fn a_commit_refuses_during_a_cherry_pick_or_revert_in_either_ref_format() {
     }
 }
 
+/// Undo reads the pick's derived journal, as it reads an active merge's, so an
+/// entry from the global history is not in it.
 #[test]
 fn undo_refuses_during_a_cherry_pick_or_revert_in_either_ref_format() {
     for ref_format in ["files", "reftable"] {
         for (start, name, marker) in REPLAYS {
             let (repo, later) = resolved_and_unfinished(ref_format, start);
+            let head = repo.head();
+            refused(
+                repo.coordinator().undo(repo.path(), later.id),
+                ErrorKind::StaleView {
+                    reason: StaleReason::HistoryChanged,
+                },
+            );
+            assert_eq!(repo.head(), head, "{ref_format} {name}");
+            repo.git(&["show-ref", "--exists", marker]);
+        }
+    }
+}
+
+#[test]
+fn undo_refuses_during_a_sequence_of_commits_in_either_ref_format() {
+    const SEQUENCES: [(&[&str], &str, &str); 2] = [
+        (
+            &["cherry-pick", "topic", "topic~1"],
+            "A cherry-pick",
+            "CHERRY_PICK_HEAD",
+        ),
+        (
+            &["revert", "--no-edit", "HEAD~1", "HEAD"],
+            "A revert",
+            "REVERT_HEAD",
+        ),
+    ];
+    for ref_format in ["files", "reftable"] {
+        for (start, name, marker) in SEQUENCES {
+            let (repo, later) = resolved_and_unfinished(ref_format, start);
+            assert!(repo.root.join(".git/sequencer").exists(), "{start:?}");
             let head = repo.head();
             let error = refused(
                 repo.coordinator().undo(repo.path(), later.id),

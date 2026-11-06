@@ -360,6 +360,11 @@ export const linePickSchema = z.strictObject({
   side: lineSideSchema,
   line: z.number().int().positive(),
 });
+export const replayKindSchema = z.enum(["cherryPick", "revert"]);
+export const replayOfSchema = z.strictObject({
+  kind: replayKindSchema,
+  commit: oidSchema,
+});
 const hunkPart = {
   path: z.string(),
   hunk: z.number().int().nonnegative(),
@@ -428,6 +433,13 @@ const otherOperationSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("stashApply"), stash: stashTipSchema }),
   z.strictObject({ kind: z.literal("stashPop"), stash: stashTipSchema }),
   z.strictObject({ kind: z.literal("stashDrop"), stash: stashTipSchema }),
+  z.strictObject({
+    kind: z.literal("finishReplay"),
+    of: replayOfSchema,
+    staged: stagedStampSchema,
+    tree: oidSchema,
+    message: z.string(),
+  }),
 ]);
 const saveConflictDescriptor = z.strictObject({
   kind: z.literal("saveConflict"),
@@ -541,6 +553,7 @@ export type IndexObject = z.infer<typeof indexObjectSchema>;
 export type Stages = z.infer<typeof stagesSchema>;
 export type MoveSide = z.infer<typeof moveSideSchema>;
 export type Conflict = z.infer<typeof conflictSchema>;
+export type ReplayOf = z.infer<typeof replayOfSchema>;
 export type StatusEntry = z.infer<typeof statusEntrySchema>;
 export type WorktreeStatus = z.infer<typeof worktreeStatusSchema>;
 export type StagedStamp = z.infer<typeof stagedStampSchema>;

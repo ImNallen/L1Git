@@ -88,7 +88,11 @@ pub(crate) fn in_progress(
 
 /// `rev-parse --verify` would also accept a branch or tag with this name, and
 /// it answers the same for a missing ref and an unreadable ref store.
-fn pseudoref_exists(worktree: &Path, name: &str, reads: Deadline) -> Result<bool, RepositoryError> {
+pub(crate) fn pseudoref_exists(
+    worktree: &Path,
+    name: &str,
+    reads: Deadline,
+) -> Result<bool, RepositoryError> {
     let output = git::run(worktree, &["show-ref", "--exists", name], reads)?;
     match output.status.code() {
         Some(0) => Ok(true),

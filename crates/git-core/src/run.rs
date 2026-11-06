@@ -1,10 +1,10 @@
 use crate::{
     AddRemote, AddRemoteReport, Advance, Applied, Blame, BranchMerged, BranchTip, CommitDetail,
     Comparison, ConflictFile, Coordinator, EntryId, Expect, FastForwardReport, FetchMode,
-    FilePatch, FileRevision, LineStats, MergeAction, MergeReport, MergeReview, MergeSelection,
-    MergeState, Operation, PublishChoice, PublishOptions, PushAvailability, PushIntent, PushReport,
-    RepositoryError, RepositoryOverview, RepositoryRefs, RepositorySnapshot, Side, UndoHistory,
-    WorktreePatch, WorktreeStatus,
+    FilePatch, FileRevision, Head, LineStats, MergeAction, MergeReport, MergeReview,
+    MergeSelection, MergeState, Operation, PublishChoice, PublishOptions, PushAvailability,
+    PushIntent, PushReport, ReplayOf, RepositoryError, RepositoryOverview, RepositoryRefs,
+    RepositorySnapshot, Side, UndoHistory, WorktreePatch, WorktreeStatus,
     file_history::{blame_within, file_history_within},
     git::LocalRead,
     repository::{
@@ -28,6 +28,11 @@ pub enum Request {
     Merge {
         path: String,
         action: MergeAction,
+    },
+    ReplayAbort {
+        path: String,
+        of: ReplayOf,
+        head: Head,
     },
     Snapshot {
         path: String,
@@ -124,6 +129,7 @@ pub enum Response {
     MergeReview(MergeReview),
     MergeState(MergeState),
     Merge(MergeReport),
+    ReplayAbort(MergeState),
     Snapshot(RepositorySnapshot),
     Refs(RepositoryRefs),
     CommitDetail(CommitDetail),
@@ -156,6 +162,9 @@ pub fn run(coordinator: &Coordinator, request: Request) -> Result<Response, Repo
         }
         Request::MergeState { path } => Response::MergeState(coordinator.merge_state(&path)?),
         Request::Merge { path, action } => Response::Merge(coordinator.merge(&path, &action)?),
+        Request::ReplayAbort { path, of, head } => {
+            Response::ReplayAbort(coordinator.abort_replay(&path, &of, &head)?)
+        }
         Request::Snapshot { path } => {
             Response::Snapshot(snapshot_within(&path, deadline(LocalRead::Snapshot))?)
         }

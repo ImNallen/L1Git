@@ -1,9 +1,9 @@
 use super::{
-    Applied, Change, Operation, Repo,
+    Applied, Change, Operation, ReplayKind, Repo,
     store::{LockedStore, Log, Recorded, Step},
 };
 use crate::{
-    ErrorKind, RepositoryError,
+    ErrorKind, Oid, RepositoryError,
     git::{self, HeldIndexLock, Write, WriteDeadline},
 };
 use std::{
@@ -496,6 +496,25 @@ impl<'r> RefreshTxn<'r> {
     }
 }
 
+/// `--abort` runs as the user on the real index. Git clears the marker last, so a
+/// crash leaves a state where repeating it finishes. On a private index, a crash
+/// before publishing would leave no marker with the conflict still staged.
+pub(crate) struct ReplayTxn<'r>(Outside<'r>);
+
+impl<'r> ReplayTxn<'r> {
+    pub(super) fn begin(repo: &'r Repo, deadline: WriteDeadline) -> Result<Self, RepositoryError> {
+        Outside::begin(repo, deadline).map(Self)
+    }
+
+    pub(crate) fn root(&self) -> &Path {
+        self.0.root()
+    }
+
+    pub(super) fn abort(&self, kind: ReplayKind) -> Write<'_> {
+        Write::replay_abort(self, kind)
+    }
+}
+
 pub(crate) struct RefTxn<'r>(Outside<'r>);
 
 impl<'r> RefTxn<'r> {
@@ -533,6 +552,10 @@ impl<'r> RefTxn<'r> {
 
     pub(super) fn stash<'a>(&'a self, args: &[&'a str]) -> Write<'a> {
         Write::stash(self, args)
+    }
+
+    pub(super) fn move_tree<'a>(&'a self, from: &'a Oid, to: &'a Oid) -> Write<'a> {
+        Write::move_tree(self, from, to)
     }
 }
 

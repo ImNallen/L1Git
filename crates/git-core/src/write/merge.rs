@@ -1,6 +1,6 @@
 use super::{
-    BranchTip, Change, CommitTxn, EntryId, MergeIndexTxn, MergeTxn, Operation, Published, Repo,
-    commit, index,
+    BranchTip, Change, CommitTxn, EntryId, MergeIndexTxn, MergeTxn, Operation, Published, ReplayOf,
+    ReplayProgress, Repo, commit, index, refs, replay,
     store::{EntryObjects, Identity, LockedStore, Objects},
     txn::Runner,
 };
@@ -124,6 +124,10 @@ pub enum MergeState {
         session: Option<MergeSession>,
         reason: MergeAttention,
         message: String,
+    },
+    /// One cherry-pick or revert that Git holds in progress, wherever it started.
+    Replay {
+        progress: ReplayProgress,
     },
 }
 
@@ -291,7 +295,7 @@ fn decode_record(value: StoredRecord) -> Result<Record, RepositoryError> {
     }
 }
 
-fn refused(message: impl Into<String>) -> RepositoryError {
+pub(super) fn refused(message: impl Into<String>) -> RepositoryError {
     RepositoryError::new(ErrorKind::Conflict, message)
 }
 
@@ -311,7 +315,7 @@ fn directory(repo: &Repo, id: EntryId) -> PathBuf {
     base(repo).join(id.to_string())
 }
 
-fn checked_dir(path: &Path) -> Result<(), RepositoryError> {
+pub(super) fn checked_dir(path: &Path) -> Result<(), RepositoryError> {
     match fs::symlink_metadata(path) {
         Ok(meta) if meta.is_dir() && !meta.file_type().is_symlink() => Ok(()),
         Ok(_) => Err(storage(format!(
@@ -341,7 +345,7 @@ fn sync_dir(path: &Path) -> Result<(), RepositoryError> {
     Ok(())
 }
 
-fn persist<T: Serialize>(path: &Path, value: &T) -> Result<(), RepositoryError> {
+pub(super) fn persist<T: Serialize>(path: &Path, value: &T) -> Result<(), RepositoryError> {
     let temporary = path.with_extension(format!("{}.tmp", EntryId::after(None)));
     let mut options = fs::OpenOptions::new();
     options.write(true).create_new(true);
@@ -361,7 +365,9 @@ fn persist<T: Serialize>(path: &Path, value: &T) -> Result<(), RepositoryError> 
     )
 }
 
-fn read<T: serde::de::DeserializeOwned>(path: &Path) -> Result<Option<T>, RepositoryError> {
+pub(super) fn read<T: serde::de::DeserializeOwned>(
+    path: &Path,
+) -> Result<Option<T>, RepositoryError> {
     match fs::symlink_metadata(path) {
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Ok(meta) if meta.is_file() && !meta.file_type().is_symlink() => {}
@@ -632,6 +638,19 @@ fn reconcile(repo: &Repo, deadline: WriteDeadline) -> Result<Option<Record>, Rep
     Ok(Some(record))
 }
 
+pub(super) fn unresolved(entries: &[StatusEntry]) -> Vec<String> {
+    entries
+        .iter()
+        .filter_map(|entry| {
+            if let StatusEntry::Unmerged { path, .. } = entry {
+                Some(path.clone())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
 fn state(
     repo: &Repo,
     record: Option<&Record>,
@@ -643,16 +662,7 @@ fn state(
             SessionPhase::Active if owned(repo, record, deadline)? => {
                 let (entries, staged) =
                     status::entries(&repo.root, Untracked::No, deadline.reads())?;
-                let unresolved: Vec<_> = entries
-                    .iter()
-                    .filter_map(|entry| {
-                        if let StatusEntry::Unmerged { path, .. } = entry {
-                            Some(path.clone())
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
+                let unresolved = unresolved(&entries);
                 let tree = if unresolved.is_empty() {
                     Some(staged_tree(repo, deadline)?)
                 } else {
@@ -676,6 +686,9 @@ fn state(
                 return Ok(MergeState::Attention { session: Some(record.session.clone()), reason: MergeAttention::RecoveryRequired, message: "Merge recovery needs attention. Git's state does not prove a safe continuation or the merge-owned paths. Preserve the session files and resolve the operation externally; L1 Git will not reset or guess.".into() });
             }
         }
+    }
+    if let Some(progress) = replay::progress(repo, deadline)? {
+        return Ok(MergeState::Replay { progress });
     }
     if !sync::in_progress(&repo.root, deadline.reads())?.is_empty() {
         Ok(MergeState::Attention { session: None, reason: MergeAttention::ExternalOperation, message: "A Git operation started outside this merge session is in progress. Finish or abort it with Git, then refresh.".into() })
@@ -718,7 +731,7 @@ fn failed_hook(path: &Path) -> Option<String> {
     None
 }
 
-fn staged_tree(repo: &Repo, deadline: WriteDeadline) -> Result<Oid, RepositoryError> {
+pub(super) fn staged_tree(repo: &Repo, deadline: WriteDeadline) -> Result<Oid, RepositoryError> {
     let txn = MergeTxn::begin(repo, deadline)?;
     let bytes = txn
         .runner()
@@ -873,29 +886,37 @@ fn review(
 }
 
 fn safe_index(repo: &Repo, deadline: WriteDeadline) -> Result<(), RepositoryError> {
+    safe_index_for(repo, "Merge", deadline)
+}
+
+pub(super) fn safe_index_for(
+    repo: &Repo,
+    who: &str,
+    deadline: WriteDeadline,
+) -> Result<(), RepositoryError> {
     if repo.index.with_extension("lock").exists() {
         return Err(refused(
             "Another Git process owns index.lock. Wait for it to finish.",
         ));
     }
     let (rows, _) = index::read_worktree(&repo.root, deadline.reads())?;
-    ordinary_index(&rows)?;
+    ordinary_index(&rows, who)?;
     let sparse = config(repo, "core.sparseCheckout", deadline)?;
     if sparse.iter().any(|value| value != "false" && value != "0") {
-        return Err(refused("Merge does not support sparse checkout."));
+        return Err(refused(format!("{who} does not support sparse checkout.")));
     }
     Ok(())
 }
 
-fn ordinary_index(rows: &index::Rows) -> Result<(), RepositoryError> {
+fn ordinary_index(rows: &index::Rows, who: &str) -> Result<(), RepositoryError> {
     if rows
         .values()
         .flatten()
         .any(|row| row.skip_worktree || row.assume_unchanged || row.intent_to_add)
     {
-        return Err(refused(
-            "Merge needs an index without skip-worktree, assume-unchanged, or intent-to-add entries. Restore an ordinary index before starting or continuing.",
-        ));
+        return Err(refused(format!(
+            "{who} needs an index without skip-worktree, assume-unchanged, or intent-to-add entries. Restore an ordinary index before starting or continuing."
+        )));
     }
     Ok(())
 }
@@ -967,28 +988,57 @@ fn aborted_index(
         }))
 }
 
+pub(super) fn names(
+    repo: &Repo,
+    who: &str,
+    args: &[&str],
+    deadline: WriteDeadline,
+) -> Result<Vec<String>, RepositoryError> {
+    git::read(&repo.root, args, deadline.reads())?
+        .split(|byte| *byte == 0)
+        .filter(|path| !path.is_empty())
+        .map(|path| {
+            String::from_utf8(path.to_vec())
+                .map_err(|_| refused(format!("{who} paths must be valid UTF-8.")))
+        })
+        .collect()
+}
+
 fn refuse_untracked_collisions(
     repo: &Repo,
     source: &Oid,
     deadline: WriteDeadline,
 ) -> Result<(), RepositoryError> {
-    let names = |args: &[&str]| -> Result<Vec<String>, RepositoryError> {
-        git::read(&repo.root, args, deadline.reads())?
-            .split(|byte| *byte == 0)
-            .filter(|path| !path.is_empty())
-            .map(|path| {
-                String::from_utf8(path.to_vec())
-                    .map_err(|_| refused("Merge paths must be valid UTF-8."))
-            })
-            .collect()
-    };
-    let incoming: Vec<_> = names(&["ls-tree", "-r", "-z", "--name-only", source.as_str()])?
+    let incoming = names(
+        repo,
+        "Merge",
+        &["ls-tree", "-r", "-z", "--name-only", source.as_str()],
+        deadline,
+    )?;
+    let collisions = colliding_files(repo, "Merge", &incoming, deadline)?;
+    if collisions.is_empty() {
+        Ok(())
+    } else {
+        Err(refused(format!(
+            "Preserve these untracked or ignored files before merging because they overlap the source tree: {}",
+            collisions.join(", ")
+        )))
+    }
+}
+
+pub(super) fn colliding_files(
+    repo: &Repo,
+    who: &str,
+    incoming: &[String],
+    deadline: WriteDeadline,
+) -> Result<Vec<String>, RepositoryError> {
+    let incoming: Vec<_> = incoming
         .iter()
         .map(|path| super::files::fold_for_any_disk(path))
         .collect();
     // No exclude rules: ignored files need the same protection as other untracked files.
-    let untracked = names(&["ls-files", "--others", "-z"])?;
-    let collisions: Vec<_> = untracked
+    let untracked = names(repo, who, &["ls-files", "--others", "-z"], deadline)?;
+    Ok(untracked
         .into_iter()
         .filter(|path| {
             // Conservatively include aliases on case- or normalization-insensitive disks.
@@ -999,15 +1049,7 @@ fn refuse_untracked_collisions(
                     || path.starts_with(&format!("{target}/"))
             })
         })
-        .collect();
-    if collisions.is_empty() {
-        Ok(())
-    } else {
-        Err(refused(format!(
-            "Preserve these untracked or ignored files before merging because they overlap the source tree: {}",
-            collisions.join(", ")
-        )))
-    }
+        .collect())
 }
 
 fn paths(entries: &[StatusEntry]) -> BTreeSet<String> {
@@ -1104,6 +1146,22 @@ impl Coordinator {
         )
     }
 
+    /// Ends the cherry-pick or revert Git holds in progress, and answers the state
+    /// after it. With nothing in progress this runs nothing and answers `Idle`.
+    pub fn abort_replay(
+        &self,
+        path: &str,
+        of: &ReplayOf,
+        head: &Head,
+    ) -> Result<MergeState, RepositoryError> {
+        self.merge_locked(path, LocalWrite::ReplayAbort, |repo, _, deadline| {
+            replay::abort(repo, of, head, deadline)?;
+            let deadline = deadline.renewed();
+            let record = reconcile(repo, deadline)?;
+            state(repo, record.as_ref(), deadline)
+        })
+    }
+
     pub fn merge(&self, path: &str, action: &MergeAction) -> Result<MergeReport, RepositoryError> {
         let write = match action {
             MergeAction::Start { .. } => LocalWrite::MergeStart,
@@ -1163,7 +1221,7 @@ impl Coordinator {
                 }
                 let txn = if shown.plan == MergePlan::MergeCommit {
                     let txn = MergeIndexTxn::begin(repo, deadline)?;
-                    ordinary_index(&index::read(txn.runner())?)?;
+                    ordinary_index(&index::read(txn.runner())?, "Merge")?;
                     Some(txn)
                 } else {
                     None
@@ -1420,7 +1478,7 @@ impl Coordinator {
                 }
                 MergeAction::Abort { .. } => {
                     let txn = MergeIndexTxn::begin(repo, deadline)?;
-                    ordinary_index(&index::read(txn.runner())?)?;
+                    ordinary_index(&index::read(txn.runner())?, "Merge")?;
                     within_footprint(
                         &record.session,
                         paths(&status::entries(&repo.root, Untracked::No, deadline.reads())?.0),
@@ -1488,7 +1546,12 @@ pub(super) fn journal(
             message,
             ..
         } => Err(refused(message)),
-        MergeState::Attention { session: None, .. } | MergeState::Idle => Ok(None),
+        MergeState::Replay { progress } => replay::journal(repo, &progress).map(Some),
+        MergeState::Idle => {
+            replay::sweep(repo, None);
+            Ok(None)
+        }
+        MergeState::Attention { session: None, .. } => Ok(None),
     }
 }
 
@@ -1509,22 +1572,23 @@ pub(super) fn admit(
         }
         match edit(operation) {
             Edit::Paths(changed) => within_footprint(&record.session, changed)?,
-            Edit::Refused => {
+            Edit::Finish | Edit::Refused => {
                 return Err(refused(
                     "A managed merge is active. Only resolution and index edits within its affected paths are available until Finish or Abort.",
                 ));
             }
         }
     }
-    Ok(())
+    replay::admit(repo, operation, deadline)
 }
 
-enum Edit {
+pub(super) enum Edit {
     Paths(BTreeSet<String>),
+    Finish,
     Refused,
 }
 
-fn edit(operation: &Operation) -> Edit {
+pub(super) fn edit(operation: &Operation) -> Edit {
     match operation {
         Operation::SaveConflict { path, .. }
         | Operation::StageHunk { path, .. }
@@ -1534,6 +1598,7 @@ fn edit(operation: &Operation) -> Edit {
         Operation::StageFiles { entries } | Operation::UnstageFiles { entries } => {
             Edit::Paths(paths(entries))
         }
+        Operation::FinishReplay { .. } => Edit::Finish,
         Operation::Commit { .. }
         | Operation::Amend { .. }
         | Operation::EditMessage { .. }
@@ -1570,7 +1635,9 @@ fn branch_names(
                 Head::Detached { .. } | Head::Unborn { .. } => Vec::new(),
             }
         }
-        Operation::SaveConflict { .. }
+        // Finish moves the branch its own replay holds, which `guard_refs` refuses.
+        Operation::FinishReplay { .. }
+        | Operation::SaveConflict { .. }
         | Operation::StageFiles { .. }
         | Operation::UnstageFiles { .. }
         | Operation::Discard { .. }
@@ -1637,6 +1704,15 @@ pub(super) fn guard_refs(
                     "{} is the destination of an unfinished merge in {}. Finish or abort it before changing that branch.",
                     record.session.review.destination.reference.as_str(),
                     path
+                )));
+            }
+            if let Some(of) = replay::in_flight(&target, deadline)?
+                && let Head::Attached { reference, .. } = target.head(deadline)?
+                && names.contains(&reference)
+            {
+                return Err(refused(format!(
+                    "{} in {path} has {reference} as its destination. Finish or abort it before changing that branch.",
+                    refs::capitalized(of.kind.operation().name()),
                 )));
             }
         }
