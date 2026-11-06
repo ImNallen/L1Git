@@ -35,7 +35,7 @@ impl Kind<'_> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum Target {
+pub(super) enum Target {
     Branch(String),
     Detached,
 }
@@ -96,7 +96,7 @@ impl Target {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-struct Update {
+pub(super) struct Update {
     old: Option<Oid>,
     new: Oid,
 }
@@ -174,30 +174,8 @@ pub(super) fn commit(
         .run(deadline)?;
     let txn = txn.renewed();
     let deadline = deadline.renewed();
-    if wrote.code() != Some(0) {
-        return Err(refused(&wrote, &trace));
-    }
-    let printed = printed(wrote.stdout()).ok_or_else(|| {
-        RepositoryError::new(
-            ErrorKind::GitFailed,
-            "Git finished, but L1 Git could not read which commit it made, so it has no undo entry for it. Check the history.",
-        )
-    })?;
     let target = Target::of(&head);
-    let update = only_object_starting_with(repo, deadline, &printed)?
-        .and_then(|made| trace.first_update_to(&target, &made));
-    let Some(update) = update else {
-        return Err(elsewhere(&printed, &target));
-    };
-    if target.current(repo, deadline)?.as_ref() != Some(&update.new) {
-        return Err(elsewhere(short(&update.new), &target));
-    }
-    if update.old.as_ref() == Some(&update.new) {
-        return Err(RepositoryError::new(
-            ErrorKind::UnchangedPath,
-            "Nothing changed. Git made the same commit as HEAD, because the message, the files, and the second it ran are the same.",
-        ));
-    }
+    let update = proved(repo, &wrote, &trace, &target, deadline)?;
     let race = (update.old != before).then(|| raced(kind, &update, &target));
     let replaced = match kind {
         Kind::New(_) => None,
@@ -220,6 +198,39 @@ pub(super) fn commit(
             )
         })?;
     race.map_or(Ok(applied), Err)
+}
+
+pub(super) fn proved(
+    repo: &Repo,
+    wrote: &Wrote,
+    trace: &Trace,
+    target: &Target,
+    deadline: WriteDeadline,
+) -> Result<Update, RepositoryError> {
+    if wrote.code() != Some(0) {
+        return Err(refused(wrote, trace));
+    }
+    let printed = printed(wrote.stdout()).ok_or_else(|| {
+        RepositoryError::new(
+            ErrorKind::GitFailed,
+            "Git finished, but L1 Git could not read which commit it made, so it has no undo entry for it. Check the history.",
+        )
+    })?;
+    let update = only_object_starting_with(repo, deadline, &printed)?
+        .and_then(|made| trace.first_update_to(target, &made));
+    let Some(update) = update else {
+        return Err(elsewhere(&printed, target));
+    };
+    if target.current(repo, deadline)?.as_ref() != Some(&update.new) {
+        return Err(elsewhere(short(&update.new), target));
+    }
+    if update.old.as_ref() == Some(&update.new) {
+        return Err(RepositoryError::new(
+            ErrorKind::UnchangedPath,
+            "Nothing changed. Git made the same commit as HEAD, because the message, the files, and the second it ran are the same.",
+        ));
+    }
+    Ok(update)
 }
 
 /// Git prints `[<branch> <abbreviated oid>] <subject>` once it has moved the
@@ -358,7 +369,7 @@ pub(super) fn missing_identity(
     })
 }
 
-fn refused(wrote: &Wrote, trace: &Trace) -> RepositoryError {
+pub(super) fn refused(wrote: &Wrote, trace: &Trace) -> RepositoryError {
     let said = wrote.stderr();
     let printed = format!("{said}\n{}", git::text(wrote.stdout()));
     if let Some(hook) = trace.failed_hook() {
@@ -418,7 +429,7 @@ fn refused(wrote: &Wrote, trace: &Trace) -> RepositoryError {
 
 /// A Git process that a hook left running cannot recreate these traces once
 /// the folder is gone.
-struct Trace {
+pub(super) struct Trace {
     dir: PathBuf,
     events: PathBuf,
     refs: PathBuf,
