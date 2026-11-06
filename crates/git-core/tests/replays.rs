@@ -2266,6 +2266,37 @@ fn removing_a_renamed_path_keeps_it_in_the_footprint_and_undo_can_bring_it_back(
     }
 }
 
+/// Git takes `foo~HEAD_0` when HEAD already tracks `foo~HEAD`, so the operation never
+/// touches that file, and an edit staged on it is the user's own.
+#[test]
+fn abort_refuses_a_staged_edit_on_a_tracked_file_named_like_a_renamed_path() {
+    for format in ["files", "reftable"] {
+        let repo = Repo::new(format);
+        repo.git(&["switch", "--quiet", "-c", "topic"]);
+        fs::create_dir(repo.root.join("foo")).unwrap();
+        repo.put("foo/x", "x\n");
+        let commit = repo.commit_all("foo is a folder");
+        repo.git(&["switch", "--quiet", "main"]);
+        repo.put("foo", "file\n");
+        repo.put("foo~HEAD", "mine\n");
+        repo.commit_all("foo is a file");
+        repo.fails(&["cherry-pick", &commit]);
+        assert_eq!(repo.progress().unresolved, ["foo~HEAD_0"], "{format}");
+        assert!(
+            !repo.progress().footprint.contains(&"foo~HEAD".to_owned()),
+            "{format}"
+        );
+
+        repo.put("foo~HEAD", "edited\n");
+        repo.git(&["add", "--", "foo~HEAD"]);
+        repo.git(&["rm", "--quiet", "--cached", "-f", "--", "foo~HEAD_0"]);
+        let error = repo.abort().unwrap_err();
+        assert_eq!(error.kind, ErrorKind::Conflict, "{format}");
+        assert!(error.message.contains("foo~HEAD"), "{}", error.message);
+        assert_eq!(repo.read("foo~HEAD"), "edited\n", "{format}");
+    }
+}
+
 #[test]
 fn undo_removes_the_commit_and_its_files_and_redo_returns_the_same_oid() {
     for (format, pick) in cases() {

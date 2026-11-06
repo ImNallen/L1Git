@@ -286,9 +286,9 @@ fn footprint(
 }
 
 /// A path Git renames to avoid a clash is `<path>~<label>`. `merge-tree` labels it with
-/// the commit ID it was given, and a real pick or revert with what this builds. If that
-/// name is already taken, Git adds a suffix that this misses, so Finish and Abort
-/// refuse and name the path, and the terminal can still end the operation.
+/// the commit ID it was given, and a real pick or revert with what this builds. If HEAD
+/// already tracks that name, Git adds a suffix, so that file is the user's own and stays
+/// out. Finish and Abort then refuse and name the path, and the terminal can end it.
 fn real_names(
     repo: &Repo,
     of: &ReplayOf,
@@ -316,14 +316,22 @@ fn real_names(
         ReplayKind::CherryPick => format!("{short} ({subject})"),
         ReplayKind::Revert => format!("parent of {short} ({subject})"),
     };
-    Ok(paths
+    paths
         .into_iter()
-        .map(|path| match path.rsplit_once('~') {
-            Some((stem, side)) if side == head.as_str() => format!("{stem}~HEAD"),
-            Some((stem, side)) if side == theirs => format!("{stem}~{label}"),
-            Some(_) | None => path,
+        .map(|path| {
+            let name = match path.rsplit_once('~') {
+                Some((stem, side)) if side == head.as_str() => format!("{stem}~HEAD"),
+                Some((stem, side)) if side == theirs => format!("{stem}~{label}"),
+                Some(_) | None => return Ok(path),
+            };
+            let tracked = git::read(
+                &repo.root,
+                &["ls-tree", "--name-only", "-z", head.as_str(), "--", &name],
+                deadline.reads(),
+            )?;
+            Ok(if tracked.is_empty() { name } else { path })
         })
-        .collect())
+        .collect()
 }
 
 fn tree_of(repo: &Repo, commit: &Oid, deadline: WriteDeadline) -> Result<Oid, RepositoryError> {
