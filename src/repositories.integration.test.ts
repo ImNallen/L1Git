@@ -3,6 +3,7 @@ import type { ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -3214,7 +3215,7 @@ describe("managed upstream merge", () => {
   }, 30_000);
 });
 
-describe("a cherry-pick or revert started in a terminal", () => {
+describe("a cherry-pick or revert", () => {
   const env = () =>
     Object.fromEntries(
       Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")),
@@ -3256,7 +3257,7 @@ describe("a cherry-pick or revert started in a terminal", () => {
     ).data;
   };
 
-  it("reads as a replay, finishes through a write, joins the undo history, and undoes and redoes with its files", async () => {
+  it("started in a terminal reads as a replay, finishes through a write, joins the undo history, and undoes and redoes with its files", async () => {
     const { appliedSchema, operationSchema, undoHistorySchema } =
       await import("./domain/repository");
     const { path, git, picked } = stopped("terminal pick");
@@ -3330,7 +3331,7 @@ describe("a cherry-pick or revert started in a terminal", () => {
     ["cherryPick", ["cherry-pick"], "CHERRY_PICK_HEAD"],
     ["revert", ["revert", "--no-edit"], "REVERT_HEAD"],
   ] as const)(
-    "aborts a %s and answers idle, and a repeat changes nothing",
+    "started in a terminal aborts a %s and answers idle, and a repeat changes nothing",
     async (kind, start, marker) => {
       const { path, git, picked } = stopped(`terminal abort ${kind}`);
       if (kind === "revert") {
@@ -3368,4 +3369,213 @@ describe("a cherry-pick or revert started in a terminal", () => {
     },
     30_000,
   );
+
+  const applying = (name: string, kind: "cherryPick" | "revert") => {
+    const repository = stopped(name);
+    const { path, git } = repository;
+    const commit = (message: string) => {
+      git("add", "-A");
+      git("commit", "-m", message);
+      return git("rev-parse", "HEAD");
+    };
+    if (kind === "cherryPick") {
+      git("switch", "source");
+      writeFileSync(join(path, "new.txt"), "new\n");
+      const added = commit("adds new");
+      git("switch", "main");
+      return { ...repository, of: { kind, commit: added } };
+    }
+    writeFileSync(join(path, "new.txt"), "new\n");
+    commit("adds new");
+    rmSync(join(path, "new.txt"));
+    const removed = commit("removes new");
+    writeFileSync(join(path, "later.txt"), "later\n");
+    commit("later");
+    return { ...repository, of: { kind, commit: removed } };
+  };
+  const reviewed = async (path: string, of: object) => {
+    const { replayReviewSchema } = await import("./domain/repository");
+    return answer("replayReview", replayReviewSchema).parse(
+      await (await post({ op: "replayReview", path, of })).json(),
+    ).data;
+  };
+  const write = async (
+    path: string,
+    review: Awaited<ReturnType<typeof reviewed>>,
+  ) => {
+    const { operationSchema } = await import("./domain/repository");
+    const { destination } = review;
+    return post({
+      op: "write",
+      path,
+      operation: operationSchema.parse({ kind: "replay", review }),
+      expect: {
+        head: {
+          kind: "attached",
+          reference: destination.reference,
+          oid: destination.oid,
+        },
+      },
+    });
+  };
+  const failure = async (response: Response) =>
+    z
+      .object({ ok: z.literal(false), error: repositoryErrorSchema })
+      .parse(await response.json()).error;
+
+  it.each([
+    ["cherryPick", "Cherry-pick “adds new”"],
+    ["revert", "Revert “removes new”"],
+  ] as const)(
+    "applies a reviewed %s, labels it, and undoes and redoes it with its files",
+    async (kind, label) => {
+      const { appliedSchema, undoHistorySchema } =
+        await import("./domain/repository");
+      const { describe: describeOperation } =
+        await import("./domain/operations");
+      const { path, git, of } = applying(`apply ${kind}`, kind);
+      const before = git("rev-parse", "HEAD");
+
+      const review = await reviewed(path, of);
+      expect(review.prediction.kind).toBe("clean");
+      expect(review.destination).toEqual({
+        reference: "refs/heads/main",
+        oid: before,
+      });
+      expect(git("rev-parse", "HEAD")).toBe(before);
+      expect(git("status", "--porcelain")).toBe("");
+
+      const applied = answer("write", appliedSchema).parse(
+        await (await write(path, review)).json(),
+      ).data;
+      expect(git("rev-parse", "HEAD^")).toBe(before);
+      const made = git("rev-parse", "HEAD");
+      expect(readFileSync(join(path, "new.txt"), "utf8")).toBe("new\n");
+      expect(await state(path)).toEqual({ kind: "idle" });
+
+      const history = answer("undoHistory", undoHistorySchema).parse(
+        await (await post({ op: "undoHistory", path })).json(),
+      ).data;
+      expect(history.undo?.id).toBe(applied.id);
+      if (!history.undo) throw new Error("no undo entry");
+      expect(describeOperation(history.undo.operation)).toBe(label);
+
+      const again = answer("write", appliedSchema).parse(
+        await (await write(path, review)).json(),
+      ).data;
+      expect(again.id, "a repeat answers the same entry").toBe(applied.id);
+      expect(git("rev-parse", "HEAD")).toBe(made);
+
+      answer("undo", appliedSchema).parse(
+        await (await post({ op: "undo", path, id: applied.id })).json(),
+      );
+      expect(git("rev-parse", "HEAD")).toBe(before);
+      expect(existsSync(join(path, "new.txt"))).toBe(false);
+      answer("redo", appliedSchema).parse(
+        await (await post({ op: "redo", path, id: applied.id })).json(),
+      );
+      expect(git("rev-parse", "HEAD")).toBe(made);
+      expect(readFileSync(join(path, "new.txt"), "utf8")).toBe("new\n");
+    },
+    30_000,
+  );
+
+  it("answers replayStopped on a conflict, and the panel's state and Abort take over", async () => {
+    const { path, git, picked } = stopped("start conflict");
+    const before = git("rev-parse", "HEAD");
+    const of = { kind: "cherryPick", commit: picked };
+
+    const review = await reviewed(path, of);
+    expect(review.prediction).toEqual({
+      kind: "conflict",
+      paths: ["file.txt"],
+    });
+
+    const stop = await failure(await write(path, review));
+    expect(stop.kind).toBe("replayStopped");
+    expect("output" in stop && stop.output).toBe("");
+    expect(git("rev-parse", "HEAD")).toBe(before);
+
+    const held = await state(path);
+    if (held.kind !== "replay") throw new Error(held.kind);
+    expect(held.progress.unresolved).toEqual(["file.txt"]);
+
+    const { mergeStateSchema } = await import("./domain/merge");
+    expect(
+      answer("replayAbort", mergeStateSchema).parse(
+        await (
+          await post({
+            op: "replayAbort",
+            path,
+            of,
+            head: held.progress.destination,
+          })
+        ).json(),
+      ).data,
+    ).toEqual({ kind: "idle" });
+    expect(git("rev-parse", "HEAD")).toBe(before);
+    expect(git("status", "--porcelain")).toBe("");
+  }, 30_000);
+
+  it("answers replayStopped with the hook's output, and Finish keeps the pick's author", async () => {
+    const { appliedSchema, operationSchema } =
+      await import("./domain/repository");
+    const { path, git, of } = applying("start stopped by a hook", "cherryPick");
+    const before = git("rev-parse", "HEAD");
+    const review = await reviewed(path, of);
+    git("config", "user.name", "Someone else");
+    git("config", "core.hooksPath", ".git/hooks");
+    mkdirSync(join(path, ".git/hooks"), { recursive: true });
+    writeFileSync(
+      join(path, ".git/hooks/prepare-commit-msg"),
+      "#!/bin/sh\necho 'no message for you' >&2\nexit 1\n",
+      { mode: 0o755 },
+    );
+
+    const stop = await failure(await write(path, review));
+    expect(stop.kind).toBe("replayStopped");
+    expect("output" in stop && stop.output).toContain("no message for you");
+    expect(git("rev-parse", "HEAD")).toBe(before);
+
+    git("config", "core.hooksPath", "/dev/null");
+    const held = await state(path);
+    if (held.kind !== "replay" || !held.progress.tree)
+      throw new Error(held.kind);
+    expect(held.progress.unresolved).toEqual([]);
+    answer("write", appliedSchema).parse(
+      await (
+        await post({
+          op: "write",
+          path,
+          operation: operationSchema.parse({
+            kind: "finishReplay",
+            of,
+            staged: held.progress.staged,
+            tree: held.progress.tree,
+            message: held.progress.suggestedMessage,
+          }),
+          expect: { head: held.progress.destination },
+        })
+      ).json(),
+    );
+    expect(git("rev-parse", "HEAD^")).toBe(before);
+    expect(git("log", "-1", "--format=%an")).toBe("Pick bridge");
+    expect(await state(path)).toEqual({ kind: "idle" });
+  }, 30_000);
+
+  it("refuses a review with the reason and changes nothing", async () => {
+    const { path, git, picked } = stopped("start refused");
+    const before = git("rev-parse", "HEAD");
+    const refused = await failure(
+      await post({
+        op: "replayReview",
+        path,
+        of: { kind: "revert", commit: picked },
+      }),
+    );
+    expect(refused.kind).toBe("conflict");
+    expect(refused.message).toContain("is not on main");
+    expect(git("rev-parse", "HEAD")).toBe(before);
+    expect(git("status", "--porcelain")).toBe("");
+  }, 30_000);
 });
