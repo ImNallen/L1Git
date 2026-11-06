@@ -18,6 +18,7 @@ pub(crate) enum LocalWrite {
     MergeStart,
     MergeFinish,
     MergeAbort,
+    ReplayStart,
     ReplayFinish,
     ReplayAbort,
     SaveConflict,
@@ -72,6 +73,7 @@ impl LocalWrite {
             Self::MergeStart
             | Self::MergeFinish
             | Self::MergeAbort
+            | Self::ReplayStart
             | Self::ReplayFinish
             | Self::ReplayAbort
             | Self::Commit
@@ -96,6 +98,7 @@ impl LocalWrite {
             Self::MergeStart => "Starting the merge",
             Self::MergeFinish => "Finishing the merge",
             Self::MergeAbort => "Aborting the merge",
+            Self::ReplayStart => "Starting the cherry-pick or revert",
             Self::ReplayFinish => "Finishing the cherry-pick or revert",
             Self::ReplayAbort => "Aborting the cherry-pick or revert",
             Self::SaveConflict => "Saving the conflict result",
@@ -135,6 +138,7 @@ impl LocalWrite {
             Self::MergeStart => "l1git merge start",
             Self::MergeFinish => "l1git merge finish",
             Self::MergeAbort => "l1git merge abort",
+            Self::ReplayStart => "l1git replay start",
             Self::ReplayFinish => "l1git replay finish",
             Self::ReplayAbort => "l1git replay abort",
             Self::SaveConflict => "l1git save conflict",
@@ -175,9 +179,11 @@ impl LocalWrite {
             | Self::Undo
             | Self::Redo
             | Self::RefreshIndex => "The index is unchanged.",
-            Self::Commit | Self::Amend | Self::EditMessage | Self::ReplayFinish => {
-                "Git may have finished the commit, so check the history."
-            }
+            Self::Commit
+            | Self::Amend
+            | Self::EditMessage
+            | Self::ReplayStart
+            | Self::ReplayFinish => "Git may have finished the commit, so check the history.",
             Self::SaveConflict | Self::Discard | Self::DiscardPart => "No file changed.",
             Self::CreateBranch | Self::RenameBranch | Self::DeleteBranch => {
                 "L1 Git rereads the branch to see what changed."

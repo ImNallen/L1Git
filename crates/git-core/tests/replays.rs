@@ -3,10 +3,11 @@
 use l1_git_core::{
     Applied, BranchTip, ConflictFile, ConflictSnapshot, Coordinator, EntryId, ErrorKind, Expect,
     Head, Limits, MergeAction, MergeAttention, MergeSelection, MergeState, Oid, Operation,
-    ReplayKind, ReplayOf, ReplayProgress, RepositoryError, Request, Response, StaleReason,
-    UndoHistory, run, worktree_status,
+    ReplayKind, ReplayOf, ReplayPrediction, ReplayProgress, ReplayReview, RepositoryError, Request,
+    Response, StaleReason, UndoHistory, run, worktree_status,
 };
 use std::{
+    collections::BTreeMap,
     fs,
     os::unix::{fs::PermissionsExt, process::ExitStatusExt},
     path::{Path, PathBuf},
@@ -46,6 +47,22 @@ fn git(path: &Path, args: &[&str]) -> String {
 /// `f.txt`. The replayed commit also adds or removes `n.txt`, which applies
 /// cleanly. Returns the replayed commit.
 fn stop(root: &Path, pick: Pick) -> String {
+    let commit = conflicting(root, pick);
+    let start: &[&str] = match pick {
+        Pick::CherryPick => &["cherry-pick"],
+        Pick::Revert => &["revert", "--no-edit"],
+    };
+    let stopped = terminal(root, &[start, &[commit.as_str()]].concat());
+    assert!(!stopped.status.success(), "{start:?} should stop");
+    assert!(
+        git(root, &["status", "--porcelain"]).contains("UU f.txt"),
+        "the replay should stop on f.txt"
+    );
+    commit
+}
+
+/// A commit that conflicts in `f.txt` when `pick` applies it to HEAD.
+fn conflicting(root: &Path, pick: Pick) -> String {
     let commit_theirs = || {
         fs::write(root.join("f.txt"), "a\nTHEIRS\nc\n").unwrap();
         fs::write(root.join("n.txt"), "n\n").unwrap();
@@ -57,11 +74,7 @@ fn stop(root: &Path, pick: Pick) -> String {
         fs::write(root.join("f.txt"), "a\nOURS\nc\n").unwrap();
         git(root, &["commit", "--quiet", "-am", "ours"]);
     };
-    let start: &[&str] = match pick {
-        Pick::CherryPick => &["cherry-pick"],
-        Pick::Revert => &["revert", "--no-edit"],
-    };
-    let commit = match pick {
+    match pick {
         Pick::CherryPick => {
             let branch = git(root, &["symbolic-ref", "--short", "HEAD"]);
             git(root, &["switch", "--quiet", "-c", "topic"]);
@@ -75,14 +88,7 @@ fn stop(root: &Path, pick: Pick) -> String {
             commit_ours();
             commit
         }
-    };
-    let stopped = terminal(root, &[start, &[commit.as_str()]].concat());
-    assert!(!stopped.status.success(), "{start:?} should stop");
-    assert!(
-        git(root, &["status", "--porcelain"]).contains("UU f.txt"),
-        "the replay should stop on f.txt"
-    );
-    commit
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2949,5 +2955,515 @@ fn undo_from_another_worktree_refuses_while_that_worktree_holds_a_replay() {
             head,
             "{format} {pick:?}"
         );
+    }
+}
+
+fn of(pick: Pick, commit: &str) -> ReplayOf {
+    ReplayOf {
+        kind: pick.kind(),
+        commit: Oid::try_from(commit.to_owned()).unwrap(),
+    }
+}
+
+fn touch(root: &Path, path: &str) {
+    fs::File::options()
+        .write(true)
+        .open(root.join(path))
+        .unwrap()
+        .set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(60))
+        .unwrap();
+}
+
+/// What a refusal must leave alone.
+#[derive(Debug, PartialEq, Eq)]
+struct Frozen {
+    branch: Vec<u8>,
+    head: Vec<u8>,
+    status: String,
+    files: BTreeMap<PathBuf, Vec<u8>>,
+    merge_msg: bool,
+}
+
+fn files_under(dir: &Path, files: &mut BTreeMap<PathBuf, Vec<u8>>) {
+    for entry in fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.file_name().is_some_and(|name| name == ".git") {
+            continue;
+        }
+        if path.is_dir() {
+            files_under(&path, files);
+        } else {
+            files.insert(path.clone(), fs::read(&path).unwrap());
+        }
+    }
+}
+
+impl Repo {
+    fn frozen(&self) -> Frozen {
+        let mut files = BTreeMap::new();
+        files_under(&self.root, &mut files);
+        Frozen {
+            branch: terminal(&self.root, &["symbolic-ref", "-q", "HEAD"]).stdout,
+            head: terminal(&self.root, &["rev-parse", "-q", "--verify", "HEAD"]).stdout,
+            status: self.git(&["--no-optional-locks", "status", "--porcelain", "--ignored"]),
+            files,
+            merge_msg: self.root.join(".git/MERGE_MSG").exists(),
+        }
+    }
+
+    fn review(&self, of: &ReplayOf) -> Result<ReplayReview, RepositoryError> {
+        self.coordinator().review_replay(self.path(), of)
+    }
+
+    /// A commit `pick` can apply, which `change` makes: on `topic` for a pick, and
+    /// below HEAD for a revert. HEAD moved on from it either way.
+    fn commit_to_apply(&self, pick: Pick, change: impl FnOnce(&Self), message: &str) -> String {
+        if pick == Pick::CherryPick {
+            self.git(&["switch", "--quiet", "-c", "topic"]);
+        }
+        change(self);
+        let commit = self.commit_all(message);
+        if pick == Pick::CherryPick {
+            self.git(&["switch", "--quiet", "main"]);
+        }
+        self.put("u.txt", "ahead\n");
+        self.commit_all("ahead");
+        commit
+    }
+
+    fn adding(&self, pick: Pick, path: &str) -> String {
+        if let Some(parent) = Path::new(path).parent() {
+            fs::create_dir_all(self.root.join(parent)).unwrap();
+        }
+        match pick {
+            Pick::CherryPick => {
+                self.commit_to_apply(pick, |repo| repo.put(path, "new\n"), "adds a file")
+            }
+            Pick::Revert => {
+                self.put(path, "new\n");
+                self.commit_all("has a file");
+                self.commit_to_apply(
+                    pick,
+                    |repo| fs::remove_file(repo.root.join(path)).unwrap(),
+                    "removes a file",
+                )
+            }
+        }
+    }
+
+    fn clean(format: &str, pick: Pick) -> (Self, ReplayOf) {
+        let repo = Self::new(format);
+        let commit = repo.adding(pick, "n.txt");
+        (repo, of(pick, &commit))
+    }
+
+    fn editing(format: &str, pick: Pick) -> (Self, ReplayOf) {
+        let repo = Self::new(format);
+        let commit =
+            repo.commit_to_apply(pick, |repo| repo.put("f.txt", "a\nEDITED\nc\n"), "edits f");
+        (repo, of(pick, &commit))
+    }
+
+    /// HEAD already holds what applying the commit would leave.
+    fn empty(format: &str, pick: Pick) -> (Self, ReplayOf) {
+        let repo = Self::new(format);
+        let commit = match pick {
+            Pick::CherryPick => {
+                repo.git(&["switch", "--quiet", "-c", "topic"]);
+                repo.put("n.txt", "n\n");
+                let commit = repo.commit_all("adds n");
+                repo.git(&["switch", "--quiet", "main"]);
+                repo.put("n.txt", "n\n");
+                repo.commit_all("adds n here too");
+                commit
+            }
+            Pick::Revert => {
+                repo.put("n.txt", "n\n");
+                let commit = repo.commit_all("adds n");
+                fs::remove_file(repo.root.join("n.txt")).unwrap();
+                repo.commit_all("removes n by hand");
+                commit
+            }
+        };
+        (repo, of(pick, &commit))
+    }
+}
+
+fn refuses(repo: &Repo, of: &ReplayOf, says: &str) {
+    let before = repo.frozen();
+    let error = repo.review(of).expect_err(says);
+    assert_eq!(error.kind, ErrorKind::Conflict, "{says}: {}", error.message);
+    assert!(error.message.contains(says), "{says}: {}", error.message);
+    assert_eq!(repo.frozen(), before, "{says}: a refusal changes nothing");
+}
+
+#[test]
+fn a_review_names_the_commit_its_destination_and_what_git_would_do() {
+    for (format, pick) in cases() {
+        let (repo, of) = Repo::clean(format, pick);
+        let answer = run(
+            &repo.coordinator(),
+            Request::ReplayReview {
+                path: repo.path().to_owned(),
+                of: of.clone(),
+            },
+        )
+        .unwrap();
+        let Response::ReplayReview(review) = answer else {
+            panic!("{answer:?}");
+        };
+        let ReplayPrediction::Clean { tree } = &review.prediction else {
+            panic!("{format} {pick:?}: {review:?}");
+        };
+        let subject = match pick {
+            Pick::CherryPick => "adds a file",
+            Pick::Revert => "removes a file",
+        };
+        assert_eq!(
+            serde_json::to_value(&review).unwrap(),
+            serde_json::json!({
+                "root": repo.path(),
+                "kind": serde_json::to_value(pick.kind()).unwrap(),
+                "commit": of.commit.as_str(),
+                "subject": subject,
+                "destination": {"reference": "refs/heads/main", "oid": repo.oid("HEAD")},
+                "prediction": {"kind": "clean", "tree": tree.as_str()},
+            }),
+            "{format} {pick:?}"
+        );
+        assert_eq!(repo.review(&of).unwrap(), review, "{format} {pick:?}");
+    }
+}
+
+#[test]
+fn a_review_writes_nothing_but_loose_objects() {
+    for (format, pick) in cases() {
+        let (repo, of) = Repo::editing(format, pick);
+        touch(&repo.root, "f.txt");
+        repo.hook("post-index-change", "echo fired >> .git/index-changes\n");
+        let before = repo.frozen();
+        let index = fs::read(repo.root.join(".git/index")).unwrap();
+
+        repo.review(&of).unwrap();
+
+        assert_eq!(repo.frozen(), before, "{format} {pick:?}");
+        assert_eq!(
+            fs::read(repo.root.join(".git/index")).unwrap(),
+            index,
+            "{format} {pick:?}: a touched file does not refresh the index"
+        );
+        assert!(
+            !repo.root.join(".git/index-changes").exists(),
+            "{format} {pick:?}: no index write runs the hook"
+        );
+        assert!(
+            !repo.root.join(".git/l1git").exists(),
+            "{format} {pick:?}: a review keeps no memo"
+        );
+    }
+}
+
+#[test]
+fn a_review_refuses_what_version_one_does_not_do() {
+    type Setup = fn(&Repo);
+    let setups: [(&str, Setup); 10] = [
+        ("checked-out local branch", |repo| {
+            repo.git(&["switch", "--quiet", "--detach"]);
+        }),
+        ("checked-out local branch", |repo| {
+            repo.git(&["switch", "--quiet", "--orphan", "fresh"]);
+        }),
+        ("A bisect is in progress", |repo| {
+            repo.git(&["bisect", "start"]);
+        }),
+        ("staged changes: v.txt", |repo| {
+            repo.put("v.txt", "staged\n");
+            repo.git(&["add", "v.txt"]);
+        }),
+        ("index.lock", |repo| {
+            repo.put(".git/index.lock", "");
+        }),
+        ("skip-worktree", |repo| {
+            repo.git(&["update-index", "--skip-worktree", "v.txt"]);
+        }),
+        ("assume-unchanged", |repo| {
+            repo.git(&["update-index", "--assume-unchanged", "v.txt"]);
+        }),
+        ("intent-to-add", |repo| {
+            repo.put("later.txt", "later\n");
+            repo.git(&["add", "-N", "later.txt"]);
+        }),
+        ("sparse checkout", |repo| {
+            repo.git(&["config", "core.sparseCheckout", "true"]);
+        }),
+        ("pull.twohead", |repo| {
+            repo.git(&["config", "pull.twohead", "ours"]);
+        }),
+    ];
+    for (format, pick) in cases() {
+        for (says, setup) in setups {
+            let (repo, of) = Repo::clean(format, pick);
+            repo.review(&of).unwrap();
+            setup(&repo);
+            refuses(&repo, &of, says);
+        }
+    }
+}
+
+#[test]
+fn a_review_refuses_an_operation_in_progress() {
+    let elsewhere = |repo: &Repo| {
+        repo.git(&["switch", "--quiet", "-c", "elsewhere"]);
+        repo.put("w.txt", "w\n");
+        let commit = repo.commit_all("elsewhere");
+        repo.git(&["switch", "--quiet", "main"]);
+        of(Pick::CherryPick, &commit)
+    };
+    for format in FORMATS {
+        for pick in PICKS {
+            let repo = Repo::new(format);
+            let of = elsewhere(&repo);
+            stop(&repo.root, pick);
+            refuses(&repo, &of, "is in progress");
+        }
+
+        let repo = Repo::new(format);
+        let of = elsewhere(&repo);
+        conflicting(&repo.root, Pick::CherryPick);
+        repo.fails(&["merge", "--no-edit", "topic"]);
+        refuses(&repo, &of, "A merge is in progress");
+
+        let repo = Repo::new(format);
+        let of = elsewhere(&repo);
+        conflicting(&repo.root, Pick::CherryPick);
+        repo.git(&["switch", "--quiet", "topic"]);
+        repo.fails(&["rebase", "main"]);
+        refuses(&repo, &of, "A rebase is in progress");
+    }
+}
+
+#[test]
+fn a_review_refuses_an_active_merge_session() {
+    for format in FORMATS {
+        let repo = Repo::new(format);
+        let commit = repo.adding(Pick::CherryPick, "n.txt");
+        repo.git(&["switch", "--quiet", "-c", "source", "HEAD^"]);
+        repo.put("u.txt", "source\n");
+        repo.commit_all("source");
+        repo.git(&["switch", "--quiet", "main"]);
+        let coordinator = repo.coordinator();
+        let review = coordinator
+            .review_merge(
+                repo.path(),
+                &MergeSelection::Branch {
+                    reference: "refs/heads/source".to_owned(),
+                },
+            )
+            .unwrap();
+        coordinator
+            .merge(repo.path(), &MergeAction::Start { review })
+            .unwrap();
+        refuses(
+            &repo,
+            &of(Pick::CherryPick, &commit),
+            "Finish or resolve the current merge",
+        );
+    }
+}
+
+#[test]
+fn a_review_refuses_an_unmerged_path_no_operation_holds() {
+    for (format, pick) in cases() {
+        let (repo, of) = Repo::clean(format, pick);
+        repo.put("v.txt", "stashed\n");
+        repo.git(&["stash", "push", "--quiet"]);
+        repo.put("v.txt", "committed\n");
+        repo.commit_all("v");
+        repo.fails(&["stash", "pop"]);
+        refuses(&repo, &of, "staged changes: v.txt");
+    }
+}
+
+#[test]
+fn a_review_refuses_what_is_not_a_commit() {
+    for (format, pick) in cases() {
+        let (repo, _) = Repo::clean(format, pick);
+        repo.git(&["tag", "-a", "-m", "annotated", "v1"]);
+        for oid in [
+            repo.oid("HEAD:f.txt"),
+            repo.oid("HEAD^{tree}"),
+            repo.oid("v1"),
+            "1".repeat(40),
+        ] {
+            let before = repo.frozen();
+            let error = repo.review(&of(pick, &oid)).unwrap_err();
+            assert_eq!(error.kind, ErrorKind::InvalidOid, "{}", error.message);
+            assert_eq!(repo.frozen(), before, "{format} {pick:?}");
+        }
+    }
+}
+
+#[test]
+fn a_review_refuses_a_merge_commit() {
+    for (format, pick) in cases() {
+        let repo = Repo::new(format);
+        repo.git(&["switch", "--quiet", "-c", "side"]);
+        repo.put("u.txt", "side\n");
+        repo.commit_all("side");
+        repo.git(&["switch", "--quiet", "main"]);
+        repo.put("v.txt", "main\n");
+        repo.commit_all("main");
+        repo.git(&["merge", "--quiet", "--no-ff", "--no-edit", "side"]);
+        let merged = repo.oid("HEAD");
+        if pick == Pick::CherryPick {
+            repo.git(&["branch", "kept"]);
+            repo.git(&["reset", "--quiet", "--hard", "HEAD^"]);
+        }
+        refuses(&repo, &of(pick, &merged), "is a merge commit");
+    }
+}
+
+#[test]
+fn a_review_refuses_a_pick_already_on_the_branch_and_a_revert_not_on_it() {
+    for format in FORMATS {
+        let repo = Repo::new(format);
+        let below = repo.oid("HEAD");
+        repo.put("u.txt", "more\n");
+        repo.commit_all("more");
+        refuses(&repo, &of(Pick::CherryPick, &below), "already on main");
+        refuses(
+            &repo,
+            &of(Pick::CherryPick, &repo.oid("HEAD")),
+            "already on main",
+        );
+        repo.git(&["switch", "--quiet", "-c", "topic"]);
+        repo.put("n.txt", "n\n");
+        let elsewhere = repo.commit_all("elsewhere");
+        repo.git(&["switch", "--quiet", "main"]);
+        refuses(&repo, &of(Pick::Revert, &elsewhere), "is not on main");
+    }
+}
+
+#[test]
+fn a_review_refuses_an_unstaged_edit_it_would_change_and_passes_any_other() {
+    for (format, pick) in cases() {
+        let (repo, of) = Repo::editing(format, pick);
+        repo.put("v.txt", "unrelated\n");
+        assert!(
+            matches!(
+                repo.review(&of).unwrap().prediction,
+                ReplayPrediction::Clean { .. }
+            ),
+            "{format} {pick:?}"
+        );
+        repo.put("f.txt", "a\nUNSTAGED\nc\n");
+        refuses(&repo, &of, "unstaged edits, and");
+        let error = repo.review(&of).unwrap_err();
+        assert!(error.message.contains("f.txt"), "{}", error.message);
+        assert!(!error.message.contains("v.txt"), "{}", error.message);
+
+        fs::remove_file(repo.root.join("f.txt")).unwrap();
+        refuses(&repo, &of, "unstaged edits, and");
+
+        repo.git(&["restore", "f.txt"]);
+        touch(&repo.root, "f.txt");
+        repo.review(&of).expect("a touched file has no edits");
+    }
+}
+
+#[test]
+fn a_review_refuses_an_untracked_or_ignored_file_at_a_path_the_result_adds() {
+    let excluded = |repo: &Repo, pattern: &str| {
+        repo.put(".git/info/exclude", &format!("{pattern}\n"));
+    };
+    for (format, pick) in cases() {
+        let (repo, of) = Repo::clean(format, pick);
+        repo.put("n.txt", "mine\n");
+        refuses(&repo, &of, "files first");
+        excluded(&repo, "n.txt");
+        refuses(&repo, &of, "n.txt");
+        assert_eq!(repo.read("n.txt"), "mine\n", "{format} {pick:?}");
+
+        let (repo, of) = Repo::clean(format, pick);
+        fs::create_dir(repo.root.join("n.txt")).unwrap();
+        repo.put("n.txt/inside", "mine\n");
+        excluded(&repo, "n.txt/");
+        refuses(&repo, &of, "n.txt/inside");
+
+        let repo = Repo::new(format);
+        let commit = repo.adding(pick, "d/n.txt");
+        fs::remove_dir(repo.root.join("d")).unwrap_or(());
+        repo.put("d", "mine\n");
+        excluded(&repo, "d");
+        refuses(
+            &repo,
+            &self::of(pick, &commit),
+            "untracked or ignored files",
+        );
+    }
+}
+
+#[test]
+fn a_review_refuses_an_ignored_file_at_a_conflicted_path_head_does_not_track() {
+    for format in FORMATS {
+        let repo = Repo::new(format);
+        repo.git(&["switch", "--quiet", "-c", "topic"]);
+        repo.put("v.txt", "theirs\n");
+        let commit = repo.commit_all("edits v");
+        repo.git(&["switch", "--quiet", "main"]);
+        repo.git(&["rm", "--quiet", "v.txt"]);
+        repo.git(&["commit", "--quiet", "-m", "removes v"]);
+        let of = of(Pick::CherryPick, &commit);
+        assert_eq!(
+            repo.review(&of).unwrap().prediction,
+            ReplayPrediction::Conflict {
+                paths: vec!["v.txt".to_owned()]
+            },
+            "{format}"
+        );
+        repo.put(".git/info/exclude", "v.txt\n");
+        repo.put("v.txt", "mine\n");
+        refuses(&repo, &of, "v.txt");
+        assert_eq!(repo.read("v.txt"), "mine\n", "{format}");
+    }
+}
+
+#[test]
+fn a_review_refuses_a_commit_merge_tree_cannot_read() {
+    for format in FORMATS {
+        let repo = Repo::new(format);
+        repo.git(&["switch", "--quiet", "-c", "topic"]);
+        repo.put("f.txt", "a\nTHEIRS\nc\n");
+        let commit = repo.commit_all("theirs");
+        repo.git(&["switch", "--quiet", "main"]);
+        repo.put("f.txt", "a\nOURS\nc\n");
+        repo.commit_all("ours");
+        let blob = repo.oid(&format!("{commit}^:f.txt"));
+        fs::remove_file(
+            repo.root
+                .join(".git/objects")
+                .join(&blob[..2])
+                .join(&blob[2..]),
+        )
+        .unwrap();
+        refuses(
+            &repo,
+            &of(Pick::CherryPick, &commit),
+            "cannot work out what a cherry-pick would change",
+        );
+    }
+}
+
+#[test]
+fn a_review_says_when_the_result_would_be_empty() {
+    for (format, pick) in cases() {
+        let (repo, of) = Repo::empty(format, pick);
+        let before = repo.frozen();
+        assert_eq!(
+            repo.review(&of).unwrap().prediction,
+            ReplayPrediction::Empty,
+            "{format} {pick:?}"
+        );
+        assert_eq!(repo.frozen(), before, "{format} {pick:?}");
     }
 }

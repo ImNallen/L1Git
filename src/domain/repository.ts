@@ -365,6 +365,19 @@ export const replayOfSchema = z.strictObject({
   kind: replayKindSchema,
   commit: oidSchema,
 });
+export const replayPredictionSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("clean"), tree: oidSchema }),
+  z.strictObject({ kind: z.literal("conflict"), paths: z.array(z.string()) }),
+  z.strictObject({ kind: z.literal("empty") }),
+]);
+export const replayReviewSchema = z.strictObject({
+  root: rootSchema,
+  kind: replayKindSchema,
+  commit: oidSchema,
+  subject: z.string(),
+  destination: branchTipSchema,
+  prediction: replayPredictionSchema,
+});
 const hunkPart = {
   path: z.string(),
   hunk: z.number().int().nonnegative(),
@@ -555,6 +568,7 @@ export type MoveSide = z.infer<typeof moveSideSchema>;
 export type Conflict = z.infer<typeof conflictSchema>;
 export type ReplayKind = z.infer<typeof replayKindSchema>;
 export type ReplayOf = z.infer<typeof replayOfSchema>;
+export type ReplayReview = z.infer<typeof replayReviewSchema>;
 export type StatusEntry = z.infer<typeof statusEntrySchema>;
 export type WorktreeStatus = z.infer<typeof worktreeStatusSchema>;
 export type StagedStamp = z.infer<typeof stagedStampSchema>;

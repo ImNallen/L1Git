@@ -1,6 +1,6 @@
 use super::{
     BranchTip, Change, CommitTxn, EntryId, MergeIndexTxn, MergeTxn, Operation, Published, ReplayOf,
-    ReplayProgress, Repo, commit, index, refs, replay,
+    ReplayProgress, ReplayReview, Repo, commit, index, refs, replay,
     store::{EntryObjects, Identity, LockedStore, Objects},
     txn::Runner,
 };
@@ -776,7 +776,11 @@ pub(super) fn staged_tree(repo: &Repo, deadline: WriteDeadline) -> Result<Oid, R
     Oid::try_from(git::line(&bytes)).map_err(|_| git::malformed())
 }
 
-fn config(repo: &Repo, key: &str, deadline: WriteDeadline) -> Result<Vec<String>, RepositoryError> {
+pub(super) fn config(
+    repo: &Repo,
+    key: &str,
+    deadline: WriteDeadline,
+) -> Result<Vec<String>, RepositoryError> {
     let ran = git::run(
         &repo.root,
         &["config", "--null", "--get-all", key],
@@ -873,21 +877,9 @@ fn review(
         refused("The upstream commit is missing. Fetch explicitly, then review again.")
     })?;
     let destination = Oid::try_from(oid).map_err(|_| git::malformed())?;
-    let ancestor = |left: &Oid, right: &Oid| -> Result<bool, RepositoryError> {
-        let ran = git::run(
-            &repo.root,
-            &["merge-base", "--is-ancestor", left.as_str(), right.as_str()],
-            deadline.reads(),
-        )?;
-        match ran.status.code() {
-            Some(0) => Ok(true),
-            Some(1) => Ok(false),
-            _ => Err(git::malformed()),
-        }
-    };
-    let plan = if ancestor(&source, &destination)? {
+    let plan = if ancestor(repo, &source, &destination, deadline)? {
         MergePlan::UpToDate
-    } else if ancestor(&destination, &source)? {
+    } else if ancestor(repo, &destination, &source, deadline)? {
         MergePlan::FastForward
     } else {
         let common = git::run(
@@ -918,6 +910,24 @@ fn review(
         context,
         plan,
     })
+}
+
+pub(super) fn ancestor(
+    repo: &Repo,
+    left: &Oid,
+    right: &Oid,
+    deadline: WriteDeadline,
+) -> Result<bool, RepositoryError> {
+    let ran = git::run(
+        &repo.root,
+        &["merge-base", "--is-ancestor", left.as_str(), right.as_str()],
+        deadline.reads(),
+    )?;
+    match ran.status.code() {
+        Some(0) => Ok(true),
+        Some(1) => Ok(false),
+        _ => Err(git::malformed()),
+    }
 }
 
 fn safe_index(repo: &Repo, deadline: WriteDeadline) -> Result<(), RepositoryError> {
@@ -1179,6 +1189,25 @@ impl Coordinator {
                 }),
             },
         )
+    }
+
+    /// Says what applying `of` to the checked-out branch would do, or why L1 Git
+    /// refuses it. Changes nothing but `merge-tree`'s loose objects.
+    pub fn review_replay(
+        &self,
+        path: &str,
+        of: &ReplayOf,
+    ) -> Result<ReplayReview, RepositoryError> {
+        self.merge_locked(path, LocalWrite::ReplayStart, |repo, _, deadline| {
+            if let Some(record) = reconcile(repo, deadline)?
+                && !matches!(record.phase, SessionPhase::Closed { .. })
+            {
+                return Err(refused(
+                    "Finish or resolve the current merge before you start a cherry-pick or revert.",
+                ));
+            }
+            replay::review(repo, of, deadline)
+        })
     }
 
     /// Ends the cherry-pick or revert Git holds in progress, and answers the state
