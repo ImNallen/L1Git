@@ -1,0 +1,47 @@
+import { describe, expect, it } from "vitest";
+import { mergeAllows, mergeStateSchema } from "./merge";
+import { operationSchema } from "./repository";
+
+const oid = (digit: string) => digit.repeat(40);
+
+const replay = mergeStateSchema.parse({
+  kind: "replay",
+  progress: {
+    root: "/repo",
+    kind: "cherryPick",
+    commit: oid("a"),
+    subject: "Picked",
+    destination: {
+      kind: "attached",
+      reference: "refs/heads/main",
+      oid: oid("b"),
+    },
+    footprint: ["inside.txt"],
+    unresolved: ["inside.txt"],
+    staged: "c".repeat(40),
+    tree: null,
+    empty: false,
+    suggestedMessage: "Picked\n",
+  },
+});
+
+const operation = (value: unknown) => operationSchema.parse(value);
+
+const stageHunk = (path: string) =>
+  operation({ kind: "stageHunk", path, hunk: 0, shown: "" });
+
+describe("mergeAllows during a replay", () => {
+  it("allows index edits only inside the footprint", () => {
+    expect(mergeAllows(replay, stageHunk("inside.txt"))).toBe(true);
+    expect(mergeAllows(replay, stageHunk("outside.txt"))).toBe(false);
+  });
+
+  it("refuses a plain commit", () => {
+    expect(
+      mergeAllows(
+        replay,
+        operation({ kind: "commit", message: "m", staged: "c".repeat(40) }),
+      ),
+    ).toBe(false);
+  });
+});

@@ -1,6 +1,6 @@
 use super::{
-    BranchTip, Change, CommitTxn, EntryId, MergeIndexTxn, MergeTxn, Operation, Published, Repo,
-    commit, index, refs, replay,
+    BranchTip, Change, CommitTxn, EntryId, MergeIndexTxn, MergeTxn, Operation, Published,
+    ReplayProgress, Repo, commit, index, refs, replay,
     store::{EntryObjects, Identity, LockedStore, Objects},
     txn::Runner,
 };
@@ -124,6 +124,10 @@ pub enum MergeState {
         session: Option<MergeSession>,
         reason: MergeAttention,
         message: String,
+    },
+    /// One cherry-pick or revert that Git holds in progress, wherever it started.
+    Replay {
+        progress: ReplayProgress,
     },
 }
 
@@ -311,7 +315,7 @@ fn directory(repo: &Repo, id: EntryId) -> PathBuf {
     base(repo).join(id.to_string())
 }
 
-fn checked_dir(path: &Path) -> Result<(), RepositoryError> {
+pub(super) fn checked_dir(path: &Path) -> Result<(), RepositoryError> {
     match fs::symlink_metadata(path) {
         Ok(meta) if meta.is_dir() && !meta.file_type().is_symlink() => Ok(()),
         Ok(_) => Err(storage(format!(
@@ -341,7 +345,7 @@ fn sync_dir(path: &Path) -> Result<(), RepositoryError> {
     Ok(())
 }
 
-fn persist<T: Serialize>(path: &Path, value: &T) -> Result<(), RepositoryError> {
+pub(super) fn persist<T: Serialize>(path: &Path, value: &T) -> Result<(), RepositoryError> {
     let temporary = path.with_extension(format!("{}.tmp", EntryId::after(None)));
     let mut options = fs::OpenOptions::new();
     options.write(true).create_new(true);
@@ -361,7 +365,9 @@ fn persist<T: Serialize>(path: &Path, value: &T) -> Result<(), RepositoryError> 
     )
 }
 
-fn read<T: serde::de::DeserializeOwned>(path: &Path) -> Result<Option<T>, RepositoryError> {
+pub(super) fn read<T: serde::de::DeserializeOwned>(
+    path: &Path,
+) -> Result<Option<T>, RepositoryError> {
     match fs::symlink_metadata(path) {
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Ok(meta) if meta.is_file() && !meta.file_type().is_symlink() => {}
@@ -632,6 +638,19 @@ fn reconcile(repo: &Repo, deadline: WriteDeadline) -> Result<Option<Record>, Rep
     Ok(Some(record))
 }
 
+pub(super) fn unresolved(entries: &[StatusEntry]) -> Vec<String> {
+    entries
+        .iter()
+        .filter_map(|entry| {
+            if let StatusEntry::Unmerged { path, .. } = entry {
+                Some(path.clone())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
 fn state(
     repo: &Repo,
     record: Option<&Record>,
@@ -643,16 +662,7 @@ fn state(
             SessionPhase::Active if owned(repo, record, deadline)? => {
                 let (entries, staged) =
                     status::entries(&repo.root, Untracked::No, deadline.reads())?;
-                let unresolved: Vec<_> = entries
-                    .iter()
-                    .filter_map(|entry| {
-                        if let StatusEntry::Unmerged { path, .. } = entry {
-                            Some(path.clone())
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
+                let unresolved = unresolved(&entries);
                 let tree = if unresolved.is_empty() {
                     Some(staged_tree(repo, deadline)?)
                 } else {
@@ -676,6 +686,9 @@ fn state(
                 return Ok(MergeState::Attention { session: Some(record.session.clone()), reason: MergeAttention::RecoveryRequired, message: "Merge recovery needs attention. Git's state does not prove a safe continuation or the merge-owned paths. Preserve the session files and resolve the operation externally; L1 Git will not reset or guess.".into() });
             }
         }
+    }
+    if let Some(progress) = replay::progress(repo, deadline)? {
+        return Ok(MergeState::Replay { progress });
     }
     if !sync::in_progress(&repo.root, deadline.reads())?.is_empty() {
         Ok(MergeState::Attention { session: None, reason: MergeAttention::ExternalOperation, message: "A Git operation started outside this merge session is in progress. Finish or abort it with Git, then refresh.".into() })
@@ -718,7 +731,7 @@ fn failed_hook(path: &Path) -> Option<String> {
     None
 }
 
-fn staged_tree(repo: &Repo, deadline: WriteDeadline) -> Result<Oid, RepositoryError> {
+pub(super) fn staged_tree(repo: &Repo, deadline: WriteDeadline) -> Result<Oid, RepositoryError> {
     let txn = MergeTxn::begin(repo, deadline)?;
     let bytes = txn
         .runner()
@@ -1488,7 +1501,9 @@ pub(super) fn journal(
             message,
             ..
         } => Err(refused(message)),
-        MergeState::Attention { session: None, .. } | MergeState::Idle => Ok(None),
+        MergeState::Attention { session: None, .. }
+        | MergeState::Idle
+        | MergeState::Replay { .. } => Ok(None),
     }
 }
 

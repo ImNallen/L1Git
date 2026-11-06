@@ -33,7 +33,7 @@ pub use merge::{
 };
 use partial::{Action, Part, Picks};
 pub use partial::{LinePick, LineSide};
-pub use replay::{ReplayKind, ReplayOf};
+pub use replay::{ReplayKind, ReplayOf, ReplayProgress};
 pub(crate) use resolution::conflict_file_within;
 use serde::{Deserialize, Serialize};
 pub use stash::StashTip;

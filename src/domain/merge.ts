@@ -2,8 +2,10 @@ import { z } from "zod";
 import {
   branchTipSchema,
   entryIdSchema,
+  headSchema,
   oidSchema,
   refSchema,
+  replayKindSchema,
   rootSchema,
   stagedStampSchema,
 } from "./repository";
@@ -37,6 +39,19 @@ export const mergeSessionSchema = z.strictObject({
   footprint: z.array(z.string()),
   suggestedMessage: z.string(),
 });
+export const replayProgressSchema = z.strictObject({
+  root: rootSchema,
+  kind: replayKindSchema,
+  commit: oidSchema,
+  subject: z.string(),
+  destination: headSchema,
+  footprint: z.array(z.string()),
+  unresolved: z.array(z.string()),
+  staged: stagedStampSchema,
+  tree: oidSchema.nullable(),
+  empty: z.boolean(),
+  suggestedMessage: z.string(),
+});
 export const mergeStateSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("idle") }),
   z.strictObject({
@@ -53,6 +68,7 @@ export const mergeStateSchema = z.discriminatedUnion("kind", [
     reason: z.enum(["externalOperation", "recoveryRequired"]),
     message: z.string(),
   }),
+  z.strictObject({ kind: z.literal("replay"), progress: replayProgressSchema }),
 ]);
 export const mergeActionSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("start"), review: mergeReviewSchema }),
@@ -103,7 +119,9 @@ export function mergeAllows(
   const owned = (path: string) =>
     state.kind === "active"
       ? state.session.footprint.includes(path)
-      : state.reason === "externalOperation";
+      : state.kind === "replay"
+        ? state.progress.footprint.includes(path)
+        : state.reason === "externalOperation";
   switch (operation.kind) {
     case "saveConflict":
     case "stageHunk":

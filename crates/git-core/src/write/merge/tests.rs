@@ -149,7 +149,9 @@ fn git(path: &Path, args: &[&str]) -> String {
 fn active(state: MergeState) -> MergeSession {
     match state {
         MergeState::Active { session, .. } => session,
-        state @ (MergeState::Idle | MergeState::Attention { .. }) => panic!("{state:?}"),
+        state @ (MergeState::Idle | MergeState::Attention { .. } | MergeState::Replay { .. }) => {
+            panic!("{state:?}")
+        }
     }
 }
 
@@ -1108,11 +1110,7 @@ fn nondefault_merge_strategy_configuration_refuses_before_mutation() {
 fn foreign_operation_and_corrupt_session_have_distinct_attention_reasons() {
     let f = Fixture::new(false);
     let coordinator = f.coordinator();
-    fs::write(
-        f.root.join(".git/CHERRY_PICK_HEAD"),
-        f.git(&["rev-parse", "upstream"]),
-    )
-    .unwrap();
+    fs::create_dir(f.root.join(".git/rebase-merge")).unwrap();
     assert!(matches!(
         coordinator.merge_state(f.path()).unwrap(),
         MergeState::Attention {
@@ -1121,7 +1119,7 @@ fn foreign_operation_and_corrupt_session_have_distinct_attention_reasons() {
             ..
         }
     ));
-    fs::remove_file(f.root.join(".git/CHERRY_PICK_HEAD")).unwrap();
+    fs::remove_dir(f.root.join(".git/rebase-merge")).unwrap();
     f.start(&coordinator);
     let (repo, record, _) = f.record();
     fs::write(

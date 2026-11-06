@@ -360,6 +360,11 @@ export const linePickSchema = z.strictObject({
   side: lineSideSchema,
   line: z.number().int().positive(),
 });
+export const replayKindSchema = z.enum(["cherryPick", "revert"]);
+export const replayOfSchema = z.strictObject({
+  kind: replayKindSchema,
+  commit: oidSchema,
+});
 const hunkPart = {
   path: z.string(),
   hunk: z.number().int().nonnegative(),
