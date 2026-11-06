@@ -14,7 +14,8 @@ use std::{
 const MAINLINE: [&str; 5] = ["main", "master", "develop", "development", "trunk"];
 const FALLBACK_DEFAULT: [&str; 2] = ["main", "master"];
 /// What Git leaves in a worktree's git dir while a merge, rebase, am,
-/// cherry-pick, revert, or bisect is unfinished.
+/// cherry-pick, revert, or bisect is unfinished. A reftable repository keeps
+/// CHERRY_PICK_HEAD and REVERT_HEAD in its ref store instead of as files.
 const OPERATION_STATE: [(&str, InProgress); 7] = [
     ("MERGE_HEAD", InProgress::Merge),
     ("CHERRY_PICK_HEAD", InProgress::CherryPick),
@@ -54,24 +55,46 @@ impl InProgress {
     pub(crate) const fn holds_commits(self) -> bool {
         !matches!(self, Self::Bisect)
     }
+
+    const fn is_pseudoref_in_reftable(self) -> bool {
+        matches!(self, Self::CherryPick | Self::Revert)
+    }
 }
 
 pub(crate) fn in_progress(
     worktree: &Path,
     reads: Deadline,
 ) -> Result<Vec<InProgress>, RepositoryError> {
-    let mut args = vec!["rev-parse", "--path-format=absolute"];
+    let mut args = vec!["rev-parse", "--show-ref-format", "--path-format=absolute"];
     for (path, _) in OPERATION_STATE {
         args.extend(["--git-path", path]);
     }
-    let paths = git::read(worktree, &args, reads)?;
-    let paths = git::text(&paths);
-    Ok(paths
-        .lines()
-        .zip(OPERATION_STATE)
-        .filter(|(path, _)| Path::new(path).exists())
-        .map(|(_, (_, operation))| operation)
-        .collect())
+    let output = git::read(worktree, &args, reads)?;
+    let output = git::text(&output);
+    let mut lines = output.lines();
+    let reftable = lines.next() == Some("reftable");
+    let mut found = Vec::new();
+    for (path, (name, operation)) in lines.zip(OPERATION_STATE) {
+        if Path::new(path).exists()
+            || (reftable
+                && operation.is_pseudoref_in_reftable()
+                && pseudoref_exists(worktree, name, reads)?)
+        {
+            found.push(operation);
+        }
+    }
+    Ok(found)
+}
+
+/// `rev-parse --verify` would also accept a branch or tag with this name, and
+/// it answers the same for a missing ref and an unreadable ref store.
+fn pseudoref_exists(worktree: &Path, name: &str, reads: Deadline) -> Result<bool, RepositoryError> {
+    let output = git::run(worktree, &["show-ref", "--exists", name], reads)?;
+    match output.status.code() {
+        Some(0) => Ok(true),
+        Some(2) => Ok(false),
+        _ => Err(git::read_failed()),
+    }
 }
 
 pub(super) struct Repository {
