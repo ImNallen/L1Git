@@ -636,6 +636,15 @@ pub(super) fn abort(
             extra.join(", ")
         )));
     }
+    // `--abort` restores a path the replay deleted over whatever now sits there.
+    let collisions = merge::colliding_files(repo, WHO, &footprint, deadline)?;
+    if !collisions.is_empty() {
+        return Err(merge::refused(format!(
+            "Abort would overwrite these untracked or ignored files, because {} changes their paths: {}. Preserve them, then abort.",
+            of.kind.operation().name(),
+            collisions.join(", ")
+        )));
+    }
     let txn = ReplayTxn::begin(repo, deadline)?;
     let wrote = txn.abort(of.kind).run(deadline)?;
     let deadline = deadline.renewed();

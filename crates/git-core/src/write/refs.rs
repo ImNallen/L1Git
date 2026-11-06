@@ -1,7 +1,7 @@
 use super::{
     Direction, RefTxn, Repo, merge,
     store::{EntryObjects, Objects},
-    txn::Runner,
+    txn::{RefreshTxn, Runner},
 };
 use crate::{
     ErrorKind, Head, Oid, RepositoryError, StaleReason,
@@ -261,10 +261,7 @@ fn follow(
         }
     }
     // `read-tree` trusts cached stat data, so a file touched with no edits reads as edited.
-    let refreshed = txn.refresh_stat().run(deadline)?;
-    if !matches!(refreshed.code(), Some(0 | 1)) {
-        refreshed.succeeded()?;
-    }
+    RefreshTxn::begin(repo, deadline)?.refresh(&|| false)?;
     let moved = txn.move_tree(from, to).run(deadline)?;
     let said = moved.stderr();
     if moved.code() != Some(0)

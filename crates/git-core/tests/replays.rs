@@ -2171,6 +2171,35 @@ fn an_overlapping_edit_refuses_undo_with_head_unmoved() {
 }
 
 #[test]
+fn abort_refuses_to_overwrite_a_file_at_a_path_the_replay_deleted() {
+    for (format, pick) in cases().filter(|(_, pick)| *pick == Pick::Revert) {
+        for ignored in [true, false] {
+            let (repo, _) = Repo::stopped(format, pick);
+            assert!(!repo.root.join("n.txt").exists(), "{format}");
+            if ignored {
+                repo.git(&["config", "core.excludesFile", ".git/ignored"]);
+                fs::write(repo.root.join(".git/ignored"), "n.txt\n").unwrap();
+            }
+            repo.put("n.txt", "mine\n");
+
+            let error = repo.abort().unwrap_err();
+            assert_eq!(
+                error.kind,
+                ErrorKind::Conflict,
+                "{format} ignored {ignored}"
+            );
+            assert!(error.message.contains("n.txt"), "{}", error.message);
+            assert_eq!(repo.read("n.txt"), "mine\n", "{format} ignored {ignored}");
+            assert!(matches!(repo.state(), MergeState::Replay { .. }));
+
+            fs::remove_file(repo.root.join("n.txt")).unwrap();
+            assert_eq!(repo.abort().unwrap(), MergeState::Idle);
+            assert!(repo.root.join("n.txt").exists(), "Abort restored it");
+        }
+    }
+}
+
+#[test]
 fn a_file_touched_with_no_edits_does_not_refuse_undo_or_redo() {
     let touch = |repo: &Repo, path: &str| {
         fs::File::options()
@@ -2186,9 +2215,16 @@ fn a_file_touched_with_no_edits_does_not_refuse_undo_or_redo() {
         let made = repo.oid("HEAD");
         touch(&repo, "f.txt");
         assert_eq!(repo.status(), "", "{format} {pick:?}");
+        repo.hook("post-index-change", "echo fired >> .git/index-changes\n");
         repo.undo(&applied).unwrap();
+        repo.no_hooks();
         assert_eq!(repo.oid("HEAD"), parent, "{format} {pick:?}");
         assert_eq!(repo.read("f.txt"), "a\nOURS\nc\n");
+        assert_eq!(
+            fs::read_to_string(repo.root.join(".git/index-changes")).unwrap(),
+            "fired\n",
+            "{format} {pick:?}: refreshing stat data runs no hook"
+        );
 
         touch(&repo, "f.txt");
         repo.redo(&applied).unwrap();

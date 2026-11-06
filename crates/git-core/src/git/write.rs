@@ -434,25 +434,6 @@ impl<'a> Write<'a> {
         }
     }
 
-    pub(crate) fn refresh_stat(txn: &'a RefTxn<'_>) -> Self {
-        Self {
-            dir: txn.root(),
-            args: vec![
-                "-c",
-                "core.ignoreStat=false",
-                "update-index",
-                "-q",
-                "--ignore-submodules",
-                "--refresh",
-            ],
-            env: Vec::new(),
-            input: None,
-            cap: None,
-            as_user: true,
-            lazy_fetch: false,
-        }
-    }
-
     pub(crate) fn move_tree(txn: &'a RefTxn<'_>, from: &'a crate::Oid, to: &'a crate::Oid) -> Self {
         Self {
             dir: txn.root(),
