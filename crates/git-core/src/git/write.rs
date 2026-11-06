@@ -243,6 +243,9 @@ pub(crate) struct Write<'a> {
 }
 
 const WRITE_STDOUT_CAP: usize = 1024 * 1024;
+/// Reads ignore replacement objects, and `as_user` drops the setting that does so. A
+/// command that applies what a read showed passes this to match it.
+const NO_REPLACE: &str = "--no-replace-objects";
 
 impl<'a> Write<'a> {
     pub(crate) fn new(txn: &'a Txn<'_>, dir: &'a Path, args: &[&'a str]) -> Self {
@@ -352,8 +355,8 @@ impl<'a> Write<'a> {
 
     pub(crate) fn replay_apply(txn: &'a ReplayTxn<'_>, of: &'a ReplayOf) -> Self {
         let args = match of.kind {
-            ReplayKind::CherryPick => vec!["cherry-pick", of.commit.as_str()],
-            ReplayKind::Revert => vec!["revert", "--no-edit", of.commit.as_str()],
+            ReplayKind::CherryPick => vec![NO_REPLACE, "cherry-pick", of.commit.as_str()],
+            ReplayKind::Revert => vec![NO_REPLACE, "revert", "--no-edit", of.commit.as_str()],
         };
         Self {
             dir: txn.root(),
@@ -381,7 +384,7 @@ impl<'a> Write<'a> {
     pub(crate) fn replay_abort(txn: &'a ReplayTxn<'_>, kind: ReplayKind) -> Self {
         Self {
             dir: txn.root(),
-            args: vec![kind.command(), "--abort"],
+            args: vec![NO_REPLACE, kind.command(), "--abort"],
             env: Vec::new(),
             input: None,
             cap: None,
@@ -471,7 +474,14 @@ impl<'a> Write<'a> {
     pub(crate) fn move_tree(txn: &'a RefTxn<'_>, from: &'a crate::Oid, to: &'a crate::Oid) -> Self {
         Self {
             dir: txn.root(),
-            args: vec!["read-tree", "-m", "-u", from.as_str(), to.as_str()],
+            args: vec![
+                NO_REPLACE,
+                "read-tree",
+                "-m",
+                "-u",
+                from.as_str(),
+                to.as_str(),
+            ],
             env: Vec::new(),
             input: None,
             cap: None,

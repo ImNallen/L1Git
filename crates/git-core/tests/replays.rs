@@ -3783,6 +3783,42 @@ fn a_destination_that_moved_after_the_review_is_stale() {
 }
 
 #[test]
+fn a_replacement_object_does_not_change_what_a_clean_review_applies() {
+    for (format, pick) in cases() {
+        let (repo, of) = Repo::clean(format, pick);
+        let commit = of.commit.as_str().to_owned();
+        let parent = repo.git(&["rev-parse", &format!("{commit}^")]);
+        let tree = repo.git(&["rev-parse", &format!("{commit}^{{tree}}")]);
+        let replacement = repo.git(&[
+            "commit-tree",
+            "-p",
+            parent.trim(),
+            "-m",
+            "replacement",
+            repo.git(&["rev-parse", &format!("{}^{{tree}}", parent.trim())])
+                .trim(),
+        ]);
+        assert_ne!(
+            tree,
+            repo.git(&["rev-parse", &format!("{}^{{tree}}", replacement.trim())])
+        );
+        repo.git(&["replace", &commit, replacement.trim()]);
+
+        let review = repo.review(&of).unwrap();
+        let ReplayPrediction::Clean { tree: predicted } = &review.prediction else {
+            panic!("{format} {pick:?}: {:?}", review.prediction);
+        };
+        let predicted = predicted.as_str().to_owned();
+        repo.start(&review).unwrap();
+        assert_eq!(
+            repo.git(&["rev-parse", "HEAD^{tree}"]).trim(),
+            predicted,
+            "{format} {pick:?}: the commit holds what the review showed"
+        );
+    }
+}
+
+#[test]
 fn a_fresh_review_with_an_older_head_is_stale() {
     for (format, pick) in cases() {
         let (repo, of) = Repo::clean(format, pick);
