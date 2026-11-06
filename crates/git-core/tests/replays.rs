@@ -2409,6 +2409,21 @@ fn a_clash_on_a_name_that_looks_like_pathspec_magic_still_reads_and_aborts() {
     }
 }
 
+/// Undoing and redoing Mark resolved restores an index row with no stat data, and
+/// `--abort` would report that as an unstaged edit.
+#[test]
+fn abort_works_after_mark_resolved_is_undone_and_redone() {
+    for (format, pick) in cases() {
+        let (repo, _) = Repo::stopped(format, pick);
+        let saved = repo.save("f.txt", "a\nSAVED\nc\n");
+        let marked = repo.stage("f.txt");
+        repo.undo(&marked).unwrap();
+        repo.redo(&marked).unwrap();
+        assert!(saved.id < marked.id, "{format} {pick:?}");
+        assert_eq!(repo.abort().unwrap(), MergeState::Idle, "{format} {pick:?}");
+    }
+}
+
 #[test]
 fn undo_removes_the_commit_and_its_files_and_redo_returns_the_same_oid() {
     for (format, pick) in cases() {
