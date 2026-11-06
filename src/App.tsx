@@ -139,6 +139,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   });
   const merge = useMergePanel({
     selectedBranch: nav.jump.ruledBranch,
+    selection: app.selection,
     snapshot: view.snapshot,
     active,
     opened,

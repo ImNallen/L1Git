@@ -523,3 +523,37 @@ it("a linked worktree's selection is the destination, not the repository root", 
   expect(writes(app)).toEqual([`write ${PIN_FEATURE} replay`]);
   expect(get("button", "Undo Cherry-pick “Picked subject”")).toBeTruthy();
 });
+
+it("the palette offers both for the selected commit and opens the same review", async () => {
+  const app = await mountApp();
+  await app.click(historyRow("Release,"));
+  app.bridge.reset();
+  await app.runPaletteItem("Cherry-pick onto main…");
+  expect(dialogs()).toEqual([REVIEW]);
+  expect(reviews(app)).toEqual([`cherryPick 3 in ${PIN}`]);
+  await app.click(get("button", "Cancel"));
+  await app.runPaletteItem("Revert on main…");
+  expect(dialogs()).toEqual(["Revert this commit"]);
+});
+
+it("the palette drops both entries while the worktree is not idle or no commit is selected", async () => {
+  const app = await mountApp();
+  const offered = async () => {
+    await app.press("p", { ctrlKey: true });
+    const titles = paletteTitles().filter((title) =>
+      /^(Cherry-pick|Revert)/.test(title),
+    );
+    await app.press("Escape");
+    return titles;
+  };
+  expect(await offered()).toEqual([
+    "Cherry-pick onto main…",
+    "Revert on main…",
+  ]);
+  await app.click(historyRow("Uncommitted changes in pin,"));
+  expect(await offered()).toEqual([]);
+  await app.click(historyRow("Release,"));
+  app.bridge.world.merges.set(PIN, replayInProgress(PIN, ["notes.txt"]));
+  await app.refocusWindow();
+  expect(await offered()).toEqual([]);
+});

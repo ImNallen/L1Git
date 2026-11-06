@@ -11,10 +11,12 @@ import { branchName } from "../domain/operations";
 import type { SidebarRefActions } from "./useRefWrites";
 import type {
   Branch,
+  ReplayKind,
   ReplayOf,
   RepositoryRoot,
   RepositorySnapshot,
 } from "../domain/repository";
+import type { Selection } from "../domain/selection";
 import type { WritesView } from "../useWrites";
 import { defineSlice } from "./actionSlices";
 import type { ActionSlice } from "./actionSlices";
@@ -43,8 +45,12 @@ export type MergePanel = {
   sidebar: SidebarRefActions["merge"];
   commitReplay: CommitReplay;
   actions: ActionSlice<
-    "dialogOpen" | "merging" | "mergeAvailable" | "selectedMergeAvailable",
-    "mergeUpstream" | "mergeBranch"
+    | "dialogOpen"
+    | "merging"
+    | "mergeAvailable"
+    | "selectedMergeAvailable"
+    | "replay",
+    "mergeUpstream" | "mergeBranch" | "replay"
   >;
 };
 
@@ -52,6 +58,7 @@ export function useMergePanel({
   snapshot,
   active,
   selectedBranch,
+  selection,
   opened,
   writes,
   rereadChanges,
@@ -61,6 +68,7 @@ export function useMergePanel({
   snapshot: RepositorySnapshot | null;
   active: ActiveWorktree;
   selectedBranch: Branch | null;
+  selection: Selection | null;
   opened: OpenedRepository;
   writes: Pick<
     WritesView,
@@ -162,6 +170,7 @@ export function useMergePanel({
         merging: active.merging,
         mergeAvailable: available,
         selectedMergeAvailable,
+        replay: idle ? { branch: replayBranch } : null,
       },
       commands: {
         mergeBranch: () => {
@@ -170,6 +179,10 @@ export function useMergePanel({
         },
         mergeUpstream: () => {
           if (available) open({ kind: "upstream" });
+        },
+        replay: (kind: ReplayKind) => {
+          if (selection?.kind === "commit")
+            openReplay({ kind, commit: selection.oid });
         },
       },
     }),
