@@ -86,7 +86,7 @@ fn a_recorded_change_keeps_its_stored_form() {
 #[cfg(unix)]
 mod crash {
     use super::*;
-    use crate::{Coordinator, Limits, MergeState, git::LocalWrite};
+    use crate::{Coordinator, EntryId, Limits, MergeState, git::LocalWrite};
     use std::process::Command;
 
     fn git(root: &Path, args: &[&str]) -> std::process::Output {
@@ -186,6 +186,216 @@ mod crash {
                     .undo
                     .map(|entry| entry.id),
                 Some(finished.id),
+                "{format}"
+            );
+        }
+    }
+
+    /// A repository with a commit on `topic` that adds `n.txt` cleanly. When `conflict`,
+    /// the commit also changes a line of `f.txt` that `main` changes too.
+    fn picking(format: &str, conflict: bool) -> (tempfile::TempDir, std::path::PathBuf, Oid) {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().canonicalize().unwrap().join("repo");
+        fs::create_dir(&root).unwrap();
+        let init = format!("--ref-format={format}");
+        run_all(
+            &root,
+            &[
+                &["init", "--quiet", "--initial-branch=main", &init],
+                &["config", "user.name", "Ada"],
+                &["config", "user.email", "ada@example.test"],
+                &["config", "core.hooksPath", "/dev/null"],
+            ],
+        );
+        fs::write(root.join("f.txt"), "base\n").unwrap();
+        run_all(
+            &root,
+            &[
+                &["add", "."],
+                &["commit", "-qm", "base"],
+                &["switch", "-qc", "topic"],
+            ],
+        );
+        fs::write(root.join("n.txt"), "n\n").unwrap();
+        if conflict {
+            fs::write(root.join("f.txt"), "theirs\n").unwrap();
+        }
+        run_all(
+            &root,
+            &[
+                &["add", "."],
+                &["commit", "-qm", "adds n"],
+                &["switch", "-q", "main"],
+            ],
+        );
+        let commit = git(&root, &["rev-parse", "topic"]).stdout;
+        let commit = Oid::try_from(String::from_utf8(commit).unwrap().trim().to_owned()).unwrap();
+        fs::write(root.join("f.txt"), "ours\n").unwrap();
+        run_all(&root, &[&["commit", "-qam", "ours"]]);
+        (directory, root, commit)
+    }
+
+    fn reviewed(coordinator: &Coordinator, path: &str, commit: &Oid) -> (Operation, Head) {
+        let review = coordinator
+            .review_replay(
+                path,
+                &ReplayOf {
+                    kind: ReplayKind::CherryPick,
+                    commit: commit.clone(),
+                },
+            )
+            .unwrap();
+        let head = Head::Attached {
+            reference: review.destination.reference.as_str().to_owned(),
+            oid: review.destination.oid.as_str().to_owned(),
+        };
+        (Operation::Replay { review }, head)
+    }
+
+    fn leave_pending(
+        coordinator: &Coordinator,
+        path: &str,
+        operation: &Operation,
+        change: ReplayChange,
+    ) -> EntryId {
+        coordinator
+            .locked(path, LocalWrite::ReplayStart, |repo, store, log, _| {
+                let (applied, _, recorded) =
+                    store.record_with(&repo, &log, operation, |_| Ok(change))?;
+                recorded.durable()?;
+                recorded.stay_pending();
+                Ok(applied.id)
+            })
+            .unwrap()
+    }
+
+    /// S1, by constructing the state: no hook runs between recording the entry and
+    /// starting Git, so this records it and stops there.
+    #[test]
+    fn a_start_recorded_before_git_ran_drops_and_the_start_still_works() {
+        for format in ["files", "reftable"] {
+            let (directory, root, commit) = picking(format, false);
+            let path = root.to_str().unwrap();
+            let coordinator = Coordinator::new(Limits::default(), directory.path().join("undo"));
+            let (operation, head) = reviewed(&coordinator, path, &commit);
+            leave_pending(
+                &coordinator,
+                path,
+                &operation,
+                ReplayChange::Pending {
+                    before: head.clone(),
+                    tree: None,
+                },
+            );
+
+            assert_eq!(
+                coordinator.undo_history(path).unwrap().undo,
+                None,
+                "{format}"
+            );
+            assert!(!root.join("n.txt").exists(), "{format}");
+
+            let applied = coordinator
+                .write(path, &operation, &Expect { head })
+                .unwrap();
+            assert_eq!(
+                coordinator
+                    .undo_history(path)
+                    .unwrap()
+                    .undo
+                    .map(|entry| entry.id),
+                Some(applied.id),
+                "{format}"
+            );
+        }
+    }
+
+    /// S4 on a conflict, by constructing the state: Git exits as soon as it writes the
+    /// marker, and no hook runs between the two, so a terminal runs the pick after the
+    /// entry is recorded. The entry waits, because the resolver's journal answers, and
+    /// it drops once the marker goes.
+    #[test]
+    fn a_start_recorded_beside_a_conflict_drops_once_the_marker_goes() {
+        for format in ["files", "reftable"] {
+            let (directory, root, commit) = picking(format, true);
+            let path = root.to_str().unwrap();
+            let coordinator = Coordinator::new(Limits::default(), directory.path().join("undo"));
+            let (operation, head) = reviewed(&coordinator, path, &commit);
+            leave_pending(
+                &coordinator,
+                path,
+                &operation,
+                ReplayChange::Pending {
+                    before: head.clone(),
+                    tree: None,
+                },
+            );
+            assert!(
+                !git(&root, &["cherry-pick", commit.as_str()])
+                    .status
+                    .success()
+            );
+
+            let MergeState::Replay { progress } = coordinator.merge_state(path).unwrap() else {
+                panic!("{format}: a replay should be in flight");
+            };
+            assert_eq!(
+                coordinator.undo_history(path).unwrap().undo,
+                None,
+                "{format}"
+            );
+            coordinator
+                .abort_replay(path, &progress.of(), &progress.destination)
+                .unwrap();
+            assert_eq!(
+                coordinator.undo_history(path).unwrap().undo,
+                None,
+                "{format}"
+            );
+            assert_eq!(
+                String::from_utf8(git(&root, &["rev-parse", "HEAD"]).stdout)
+                    .unwrap()
+                    .trim(),
+                refs::oid(&head).unwrap().as_str(),
+                "{format}"
+            );
+        }
+    }
+
+    /// S7, by constructing the state: L1 Git writes `Landed` and then saves the log, and
+    /// no hook runs between the two.
+    #[test]
+    fn a_landed_change_the_log_did_not_save_keeps_its_undo_entry() {
+        for format in ["files", "reftable"] {
+            let (directory, root, commit) = picking(format, false);
+            let path = root.to_str().unwrap();
+            let coordinator = Coordinator::new(Limits::default(), directory.path().join("undo"));
+            let (operation, head) = reviewed(&coordinator, path, &commit);
+            run_all(&root, &[&["cherry-pick", commit.as_str()]]);
+            let after = Head::Attached {
+                reference: "refs/heads/main".to_owned(),
+                oid: String::from_utf8(git(&root, &["rev-parse", "HEAD"]).stdout)
+                    .unwrap()
+                    .trim()
+                    .to_owned(),
+            };
+            let id = leave_pending(
+                &coordinator,
+                path,
+                &operation,
+                ReplayChange::Landed(RefChange::new(head.clone(), after, None).unwrap()),
+            );
+
+            let history = coordinator.undo_history(path).unwrap();
+            assert_eq!(history.undo.map(|entry| entry.id), Some(id), "{format}");
+
+            coordinator.undo(path, id).unwrap();
+            assert!(!root.join("n.txt").exists(), "{format}");
+            assert_eq!(
+                String::from_utf8(git(&root, &["rev-parse", "HEAD"]).stdout)
+                    .unwrap()
+                    .trim(),
+                refs::oid(&head).unwrap().as_str(),
                 "{format}"
             );
         }

@@ -124,6 +124,7 @@ impl Pick {
 }
 
 const FORCE_QUIT: &str = "L1GIT_REPLAY_FORCE_QUIT";
+const FORCE_QUIT_START: &str = "L1GIT_REPLAY_FORCE_QUIT_START";
 
 /// Kills Git and the process that runs it, as a force quit in that hook would.
 const KILL_GIT_AND_APP: &str = "git=$PPID\napp=$(ps -o ppid= -p $git)\nkill -9 $app $git\n";
@@ -1139,6 +1140,32 @@ fn force_quit_process() {
         &finish_operation(&progress, "Finished\n"),
         &Expect {
             head: progress.destination,
+        },
+    );
+    panic!("the hook should have killed this process before {answer:?}");
+}
+
+/// Runs only inside the process `force_quit_during_start` starts, because a hook
+/// kills it.
+#[test]
+fn force_quit_start_process() {
+    let Ok(request) = std::env::var(FORCE_QUIT_START) else {
+        return;
+    };
+    let mut lines = request.splitn(3, '\n');
+    let (root, undo, review) = (
+        lines.next().unwrap(),
+        lines.next().unwrap(),
+        lines.next().unwrap(),
+    );
+    let review: ReplayReview = serde_json::from_str(review).unwrap();
+    let answer = Coordinator::new(Limits::default(), undo).write(
+        root,
+        &Operation::Replay {
+            review: review.clone(),
+        },
+        &Expect {
+            head: head_of(&review),
         },
     );
     panic!("the hook should have killed this process before {answer:?}");
@@ -4703,5 +4730,291 @@ fn a_linked_worktree_holds_its_own_stop() {
             "",
             "{format} {pick:?}"
         );
+    }
+}
+
+impl Repo {
+    /// Runs Start in a process of its own, for a hook that kills that process.
+    fn force_quit_during_start(&self, review: &ReplayReview) {
+        let quit = Command::new(std::env::current_exe().unwrap())
+            .args(["force_quit_start_process", "--exact", "--nocapture"])
+            .env(
+                FORCE_QUIT_START,
+                format!(
+                    "{}\n{}\n{}",
+                    self.path(),
+                    self.undo_dir().display(),
+                    serde_json::to_string(review).unwrap()
+                ),
+            )
+            .output()
+            .unwrap();
+        assert_eq!(quit.status.signal(), Some(9), "{quit:?}");
+        self.no_hooks();
+    }
+
+    fn landed_undo(&self) -> Applied {
+        let entry = self.history().undo.expect("the commit landed");
+        assert!(
+            matches!(entry.operation, Operation::Replay { .. }),
+            "{entry:?}"
+        );
+        entry
+    }
+}
+
+/// Kills only as the branch moves, past the AUTO_MERGE and marker transactions.
+const KILL_AS_THE_BRANCH_MOVES: &str =
+    "[ \"$1\" = committed ] || { cat > /dev/null; exit 0; }\ngrep -q refs/heads/main || exit 0\n";
+
+/// S2, by a real kill: a smudge filter kills Git after it rewrote `f.txt` and before
+/// it wrote `n.txt`. Git still holds `index.lock`, and the app answers.
+#[test]
+fn a_start_killed_while_git_writes_files_drops_its_entry_and_keeps_gits_partial_state() {
+    for (format, pick) in cases() {
+        let repo = Repo::new(format);
+        if pick == Pick::Revert {
+            repo.put("n.txt", "n\n");
+            repo.commit_all("has n");
+        }
+        let commit = repo.commit_to_apply(
+            pick,
+            |repo| {
+                repo.put("f.txt", "a\nEDITED\nc\n");
+                match pick {
+                    Pick::CherryPick => repo.put("n.txt", "n\n"),
+                    Pick::Revert => fs::remove_file(repo.root.join("n.txt")).unwrap(),
+                }
+            },
+            "edits f and changes n",
+        );
+        let before = repo.oid("HEAD");
+        let shown = repo.read("f.txt");
+        let of = of(pick, &commit);
+        let review = repo.review(&of).unwrap();
+        let filter = repo.directory.path().join("kill-git");
+        fs::write(&filter, format!("#!/bin/sh\n{KILL_GIT_ANCESTORS}cat\n")).unwrap();
+        fs::set_permissions(&filter, fs::Permissions::from_mode(0o755)).unwrap();
+        repo.git(&["config", "filter.killed.smudge", filter.to_str().unwrap()]);
+        repo.put(".git/info/attributes", "n.txt filter=killed\n");
+
+        let error = repo.start(&review).unwrap_err();
+
+        assert_eq!(error.kind, ErrorKind::GitFailed, "{format} {pick:?}");
+        repo.git(&["config", "--unset", "filter.killed.smudge"]);
+        assert_eq!(repo.oid("HEAD"), before, "{format} {pick:?}");
+        let lock = repo.root.join(".git/index.lock");
+        assert!(lock.exists(), "{format} {pick:?}: Git held the lock");
+        assert_ne!(
+            repo.read("f.txt"),
+            shown,
+            "{format} {pick:?}: partial state"
+        );
+        assert_eq!(repo.history().undo, None, "{format} {pick:?}");
+        refuses(&repo, &of, "index.lock");
+
+        fs::remove_file(&lock).unwrap();
+        refuses(&repo, &of, "unstaged edits, and");
+        repo.git(&["restore", "f.txt"]);
+        let applied = repo.start(&repo.review(&of).unwrap()).unwrap();
+        assert_eq!(repo.oid("HEAD^"), before, "{format} {pick:?}");
+        assert_eq!(repo.undo_id(), Some(applied.id), "{format} {pick:?}");
+    }
+}
+
+/// S3, by hook kill: Git publishes the merged index before it writes the marker, so
+/// `post-index-change` runs with no marker. This window has no in-app Abort.
+#[test]
+fn a_force_quit_before_the_marker_leaves_ordinary_staged_changes() {
+    for (format, pick) in cases() {
+        let (repo, of) = Repo::clean(format, pick);
+        let before = repo.oid("HEAD");
+        repo.put("v.txt", "unrelated\n");
+        let review = repo.review(&of).unwrap();
+        repo.hook(
+            "post-index-change",
+            &format!("git diff --cached --quiet HEAD && exit 0\n{KILL_GIT_AND_APP}"),
+        );
+
+        repo.force_quit_during_start(&review);
+
+        assert!(!repo.has_marker(pick), "{format} {pick:?}");
+        assert_eq!(repo.oid("HEAD"), before, "{format} {pick:?}");
+        assert_eq!(repo.state(), MergeState::Idle, "{format} {pick:?}");
+        assert_eq!(repo.status(), "A  n.txt\n M v.txt\n", "{format} {pick:?}");
+        assert_eq!(repo.history().undo, None, "{format} {pick:?}");
+        refuses(&repo, &of, "staged changes: n.txt");
+        assert_eq!(repo.read("v.txt"), "unrelated\n", "{format} {pick:?}");
+
+        repo.git(&["rm", "--quiet", "--force", "n.txt"]);
+        let applied = repo.start(&repo.review(&of).unwrap()).unwrap();
+        assert_eq!(repo.undo_id(), Some(applied.id), "{format} {pick:?}");
+    }
+}
+
+/// S4 for a pick, by hook kill: Git wrote the marker and has not committed. A clean
+/// revert has no marker at this point, so the same kill leaves it in S3.
+#[test]
+fn a_force_quit_before_the_commit_shows_a_pick_as_in_progress_and_a_revert_as_staged() {
+    for format in FORMATS {
+        let (repo, of_pick) = Repo::clean(format, Pick::CherryPick);
+        let before = repo.oid("HEAD");
+        let review = repo.review(&of_pick).unwrap();
+        repo.hook("prepare-commit-msg", KILL_GIT_AND_APP);
+        repo.force_quit_during_start(&review);
+
+        assert!(repo.has_marker(Pick::CherryPick), "{format}");
+        assert_eq!(repo.oid("HEAD"), before, "{format}");
+        let progress = repo.progress();
+        assert_eq!(progress.of(), of_pick, "{format}");
+        assert_eq!(progress.unresolved, Vec::<String>::new(), "{format}");
+        assert_eq!(repo.history().undo, None, "{format}");
+        let finished = repo.finish_as_shown(&progress, "Finished\n").unwrap();
+        assert_eq!(repo.oid("HEAD^"), before, "{format}");
+        assert_eq!(repo.undo_id(), Some(finished.id), "{format}");
+        assert!(
+            matches!(
+                repo.history().undo.map(|entry| entry.operation),
+                Some(Operation::FinishReplay { .. })
+            ),
+            "{format}: the entry Start left dropped"
+        );
+
+        let (repo, of_pick) = Repo::clean(format, Pick::CherryPick);
+        let review = repo.review(&of_pick).unwrap();
+        let shown = repo.frozen();
+        repo.hook("prepare-commit-msg", KILL_GIT_AND_APP);
+        repo.force_quit_during_start(&review);
+        repo.abort().unwrap();
+        assert_eq!(repo.frozen(), shown, "{format}");
+        assert_eq!(
+            repo.history().undo,
+            None,
+            "{format}: dropped once the marker went"
+        );
+
+        let (repo, of_revert) = Repo::clean(format, Pick::Revert);
+        let before = repo.oid("HEAD");
+        let review = repo.review(&of_revert).unwrap();
+        repo.hook("prepare-commit-msg", KILL_GIT_AND_APP);
+        repo.force_quit_during_start(&review);
+        assert!(!repo.has_marker(Pick::Revert), "{format}");
+        assert_eq!(repo.oid("HEAD"), before, "{format}");
+        assert_eq!(repo.state(), MergeState::Idle, "{format}");
+        assert_eq!(repo.status(), "A  n.txt\n", "{format}");
+        assert_eq!(repo.history().undo, None, "{format}");
+    }
+}
+
+/// S5, by hook kill: Git moves the branch before it clears the marker, and it runs
+/// `post-commit` before it clears the marker too, so a kill in either leaves a pick
+/// here. Abort keeps the commit, and the entry settles once the marker goes.
+#[test]
+fn a_pick_killed_with_the_branch_moved_reads_as_empty_and_abort_keeps_the_commit() {
+    for format in FORMATS {
+        for (hook, body) in [
+            ("reference-transaction", KILL_AS_THE_BRANCH_MOVES),
+            ("post-commit", ""),
+        ] {
+            let label = format!("{format} {hook}");
+            let (repo, of) = Repo::clean(format, Pick::CherryPick);
+            let before = repo.oid("HEAD");
+            let review = repo.review(&of).unwrap();
+            repo.hook(hook, &format!("{body}{KILL_GIT_AND_APP}"));
+
+            repo.force_quit_during_start(&review);
+
+            assert_eq!(repo.oid("HEAD^"), before, "{label}: the ref moved");
+            assert!(
+                repo.has_marker(Pick::CherryPick),
+                "{label}: the marker stayed"
+            );
+            let progress = repo.progress();
+            assert!(progress.empty, "{label}");
+            let error = repo.finish_as_shown(&progress, "Again\n").unwrap_err();
+            assert_eq!(error.kind, ErrorKind::UnchangedPath, "{label}");
+
+            let made = repo.oid("HEAD");
+            assert_eq!(repo.abort_as_shown(&progress).unwrap(), MergeState::Idle);
+            assert_eq!(repo.oid("HEAD"), made, "{label}: Abort keeps the commit");
+            assert_eq!(repo.status(), "", "{label}");
+            let entry = repo.landed_undo();
+            repo.undo(&entry).unwrap();
+            assert_eq!(repo.oid("HEAD"), before, "{label}");
+            assert!(!repo.root.join("n.txt").exists(), "{label}");
+            repo.redo(&entry).unwrap();
+            assert_eq!(repo.oid("HEAD"), made, "{label}");
+        }
+    }
+}
+
+/// S6. By hook kill for a revert, which has no marker to clear. By constructing the
+/// state from S5 for a pick, because no hook runs after Git clears its marker.
+#[test]
+fn a_commit_made_with_no_marker_left_settles_to_an_undo_entry() {
+    for (format, pick) in cases() {
+        let (repo, of) = Repo::clean(format, pick);
+        let before = repo.oid("HEAD");
+        let review = repo.review(&of).unwrap();
+        repo.hook("post-commit", KILL_GIT_AND_APP);
+        repo.force_quit_during_start(&review);
+        if pick == Pick::CherryPick {
+            repo.git(&["update-ref", "--no-deref", "-d", pick.marker()]);
+        }
+
+        assert!(!repo.has_marker(pick), "{format} {pick:?}");
+        assert_eq!(repo.oid("HEAD^"), before, "{format} {pick:?}");
+        assert_eq!(repo.state(), MergeState::Idle, "{format} {pick:?}");
+        let made = repo.oid("HEAD");
+        let entry = repo.landed_undo();
+        assert_eq!(
+            entry.operation,
+            Operation::Replay { review },
+            "{format} {pick:?}"
+        );
+        repo.undo(&entry).unwrap();
+        assert_eq!(repo.oid("HEAD"), before, "{format} {pick:?}");
+        repo.redo(&entry).unwrap();
+        assert_eq!(repo.oid("HEAD"), made, "{format} {pick:?}");
+    }
+}
+
+/// With only Git killed, the app is alive to answer, and it cannot yet tell whether
+/// the commit landed, so the entry stays pending for the next request.
+#[test]
+fn a_git_killed_after_the_commit_keeps_its_entry_for_the_next_request() {
+    for (format, pick) in cases() {
+        let (repo, of) = Repo::clean(format, pick);
+        let before = repo.oid("HEAD");
+        let review = repo.review(&of).unwrap();
+        repo.hook("post-commit", "kill -9 $PPID\n");
+
+        let error = repo.start(&review).unwrap_err();
+
+        assert_eq!(error.kind, ErrorKind::GitFailed, "{}", error.message);
+        repo.no_hooks();
+        assert_eq!(repo.oid("HEAD^"), before, "{format} {pick:?}");
+        if pick == Pick::CherryPick {
+            repo.abort().unwrap();
+        }
+        repo.landed_undo();
+    }
+}
+
+/// The proof reads the commit's parent and tree, so another tree drops the entry and
+/// the commit stays.
+#[test]
+fn a_commit_with_another_tree_after_a_force_quit_gets_no_undo_entry() {
+    for format in FORMATS {
+        let (repo, of) = Repo::clean(format, Pick::Revert);
+        let before = repo.oid("HEAD");
+        let review = repo.review(&of).unwrap();
+        repo.hook("prepare-commit-msg", KILL_GIT_AND_APP);
+        repo.force_quit_during_start(&review);
+        repo.put("u.txt", "another\n");
+        repo.git(&["add", "u.txt"]);
+        repo.git(&["commit", "--quiet", "-m", "from a terminal"]);
+        assert_eq!(repo.oid("HEAD^"), before, "{format}");
+        assert_eq!(repo.history().undo, None, "{format}");
     }
 }
