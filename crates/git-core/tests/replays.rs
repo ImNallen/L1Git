@@ -2078,7 +2078,7 @@ fn stopped_on_a_renamed_path(format: &str, pick: Pick) -> Repo {
         }
         Pick::Revert => {
             fs::remove_file(repo.root.join("foo")).unwrap();
-            let removed = repo.commit_all("foo goes");
+            let removed = repo.commit_all("foo/x goes\n\nwith a body");
             fs::create_dir(repo.root.join("foo")).unwrap();
             repo.put("foo/x", "x\n");
             repo.commit_all("foo is a folder");
@@ -2186,6 +2186,83 @@ fn a_stale_memo_does_not_widen_a_later_no_commit_revert() {
         assert_eq!(error.kind, ErrorKind::Conflict, "{format}");
         assert!(error.message.contains("u.txt"), "{}", error.message);
         assert_eq!(repo.read("u.txt"), "staged\n", "{format}");
+    }
+}
+
+/// The commit's side of the clash, so Git labels the path with the commit, not `HEAD`.
+fn stopped_on_a_path_labelled_with_the_commit(format: &str, subject: &str) -> Repo {
+    let repo = Repo::new(format);
+    repo.git(&["switch", "--quiet", "-c", "topic"]);
+    repo.put("foo", "file\n");
+    let commit = repo.commit_all(subject);
+    repo.git(&["switch", "--quiet", "main"]);
+    fs::create_dir(repo.root.join("foo")).unwrap();
+    repo.put("foo/x", "x\n");
+    repo.commit_all("foo is a folder");
+    repo.fails(&["cherry-pick", &commit]);
+    repo
+}
+
+#[test]
+fn the_footprint_names_a_commit_labelled_path_whatever_the_subject_holds() {
+    for format in ["files", "reftable"] {
+        for subject in [
+            "pick me",
+            "fix a/b and c/d",
+            "say \"hi\" (now)",
+            "first\nsecond",
+        ] {
+            let repo = stopped_on_a_path_labelled_with_the_commit(format, subject);
+            let shown = repo.progress();
+            assert_eq!(shown.unresolved.len(), 1, "{format} {subject}: {shown:?}");
+            assert!(
+                shown.footprint.contains(&shown.unresolved[0]),
+                "{format} {subject}: {:?} lacks {}",
+                shown.footprint,
+                shown.unresolved[0]
+            );
+            assert_eq!(
+                repo.abort().unwrap(),
+                MergeState::Idle,
+                "{format} {subject}"
+            );
+        }
+    }
+}
+
+#[test]
+fn abort_refuses_a_staged_editor_backup_beside_a_renamed_path() {
+    for (format, pick) in cases() {
+        for backup in ["foo~", "foo~1"] {
+            let repo = stopped_on_a_renamed_path(format, pick);
+            repo.put(backup, "backup\n");
+            repo.git(&["add", "--", backup]);
+
+            let error = repo.abort().unwrap_err();
+            assert_eq!(
+                error.kind,
+                ErrorKind::Conflict,
+                "{format} {pick:?} {backup}"
+            );
+            assert!(error.message.contains(backup), "{}", error.message);
+            assert_eq!(repo.read(backup), "backup\n", "{format} {pick:?} {backup}");
+        }
+    }
+}
+
+#[test]
+fn removing_a_renamed_path_keeps_it_in_the_footprint_and_undo_can_bring_it_back() {
+    for (format, pick) in cases() {
+        let repo = stopped_on_a_renamed_path(format, pick);
+        let renamed = repo.progress().unresolved[0].clone();
+        fs::remove_file(repo.root.join(&renamed)).unwrap();
+        let resolved = repo.stage(&renamed);
+        assert!(
+            repo.progress().footprint.contains(&renamed),
+            "{format} {pick:?}: resolving does not shrink it"
+        );
+        repo.undo(&resolved).unwrap();
+        assert_eq!(repo.progress().unresolved, [renamed], "{format} {pick:?}");
     }
 }
 

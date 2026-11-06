@@ -243,10 +243,11 @@ fn simulate(
     Ok(listed_paths(&ran.stdout[end..]).map(|conflicted| Simulated { tree, conflicted }))
 }
 
-/// The conflicted paths and every path the simulated result changes, plus the real name
-/// of a path Git renamed. `merge-tree` runs custom merge drivers, so each (kind, commit,
-/// HEAD) runs it once, and the memo keeps the answer. The memo holds only what those
-/// three decide, so losing it costs one more run and no operation inherits another's.
+/// The conflicted paths and every path the simulated result changes, under the names
+/// Git really gives them. Nothing here reads the index, so a staged edit the operation
+/// did not make stays outside, which is what lets Abort refuse to drop it. `merge-tree`
+/// runs custom merge drivers, so each (kind, commit, HEAD) runs it once, and the memo
+/// keeps the answer. Losing the memo costs one more run.
 fn footprint(
     repo: &Repo,
     of: &ReplayOf,
@@ -254,65 +255,75 @@ fn footprint(
     deadline: WriteDeadline,
 ) -> Result<Option<Vec<String>>, RepositoryError> {
     let memo = folder(repo, of, head).join("footprint.json");
-    let simulated = if let Ok(Some(paths)) = merge::read::<Vec<String>>(&memo) {
-        paths
-    } else {
-        let Some(simulated) = simulate(repo, of, head, deadline)? else {
-            return Ok(None);
-        };
-        let changed = git::read(
-            &repo.root,
-            &[
-                "diff-tree",
-                "-r",
-                "--no-renames",
-                "--name-only",
-                "-z",
-                head.as_str(),
-                simulated.tree.as_str(),
-            ],
-            deadline.reads(),
-        )?;
-        let Some(changed) = listed_paths(&changed) else {
-            return Ok(None);
-        };
-        let paths: Vec<_> = simulated.conflicted.union(&changed).cloned().collect();
-        let _ = prepared(repo, of, head).and_then(|_| merge::persist(&memo, &paths));
-        paths
-    };
-    with_real_names(repo, simulated, deadline).map(Some)
-}
-
-/// What comes before the label when `merge-tree` renames a path to avoid a clash: it
-/// labels the path with a full commit ID, and a real pick with `HEAD` or a short ID.
-fn renamed_stem(repo: &Repo, path: &str) -> Option<String> {
-    let (stem, label) = path.rsplit_once('~')?;
-    (label.len() == repo.null_oid.len() && label.bytes().all(|byte| byte.is_ascii_hexdigit()))
-        .then(|| format!("{stem}~"))
-}
-
-/// Translates a predicted name into the one Git really used. It only ever adds a path
-/// the simulation already predicted, so a staged edit the operation did not make stays
-/// outside, which is what lets Abort refuse to drop it.
-fn with_real_names(
-    repo: &Repo,
-    simulated: Vec<String>,
-    deadline: WriteDeadline,
-) -> Result<Vec<String>, RepositoryError> {
-    let stems: Vec<_> = simulated
-        .iter()
-        .filter_map(|path| renamed_stem(repo, path))
-        .collect();
-    if stems.is_empty() {
-        return Ok(simulated);
+    if let Ok(Some(paths)) = merge::read::<Vec<String>>(&memo) {
+        return Ok(Some(paths));
     }
-    let mut paths: BTreeSet<_> = simulated.into_iter().collect();
-    paths.extend(
-        merge::names(repo, WHO, &["ls-files", "-z"], deadline)?
-            .into_iter()
-            .filter(|path| stems.iter().any(|stem| path.starts_with(stem.as_str()))),
-    );
-    Ok(paths.into_iter().collect())
+    let Some(simulated) = simulate(repo, of, head, deadline)? else {
+        return Ok(None);
+    };
+    let changed = git::read(
+        &repo.root,
+        &[
+            "diff-tree",
+            "-r",
+            "--no-renames",
+            "--name-only",
+            "-z",
+            head.as_str(),
+            simulated.tree.as_str(),
+        ],
+        deadline.reads(),
+    )?;
+    let Some(changed) = listed_paths(&changed) else {
+        return Ok(None);
+    };
+    let paths: BTreeSet<_> = simulated.conflicted.union(&changed).cloned().collect();
+    let paths: Vec<_> = real_names(repo, of, head, paths, deadline)?
+        .into_iter()
+        .collect();
+    let _ = prepared(repo, of, head).and_then(|_| merge::persist(&memo, &paths));
+    Ok(Some(paths))
+}
+
+/// A path Git renames to avoid a clash is `<path>~<label>`. `merge-tree` labels it with
+/// the commit ID it was given, and a real pick or revert with what this builds. If that
+/// name is already taken, Git adds a suffix that this misses, so Finish and Abort
+/// refuse and name the path, and the terminal can still end the operation.
+fn real_names(
+    repo: &Repo,
+    of: &ReplayOf,
+    head: &Oid,
+    paths: BTreeSet<String>,
+    deadline: WriteDeadline,
+) -> Result<BTreeSet<String>, RepositoryError> {
+    if !paths.iter().any(|path| path.contains('~')) {
+        return Ok(paths);
+    }
+    let (_, theirs) = of.sides(repo, deadline)?;
+    let short = git::line(&git::read(
+        &repo.root,
+        &["rev-parse", "--short", of.commit.as_str()],
+        deadline.reads(),
+    )?);
+    let message = git::read(
+        &repo.root,
+        &["show", "-s", "--format=%B", of.commit.as_str()],
+        deadline.reads(),
+    )?;
+    let message = git::text(&message);
+    let subject = message.lines().next().unwrap_or_default().replace('/', "_");
+    let label = match of.kind {
+        ReplayKind::CherryPick => format!("{short} ({subject})"),
+        ReplayKind::Revert => format!("parent of {short} ({subject})"),
+    };
+    Ok(paths
+        .into_iter()
+        .map(|path| match path.rsplit_once('~') {
+            Some((stem, side)) if side == head.as_str() => format!("{stem}~HEAD"),
+            Some((stem, side)) if side == theirs => format!("{stem}~{label}"),
+            Some(_) | None => path,
+        })
+        .collect())
 }
 
 fn tree_of(repo: &Repo, commit: &Oid, deadline: WriteDeadline) -> Result<Oid, RepositoryError> {
