@@ -16,11 +16,11 @@ export function InspectorRegression() {
       <aside ref={ref}>
         <MotionBoundary {...motion} />
         <div className="commit-information">
-          <h2>{commit}</h2>
           <div
             className="commit-message-section"
             style={{ height: expanded || commit === "B" ? 200 : 40 }}
           >
+            <h2>{commit}</h2>
             Message
           </div>
           <div className="commit-metadata">Metadata</div>
@@ -46,6 +46,7 @@ export async function verifyInspectorMotion() {
   flushSync(() => expandButton.click());
   const expandedBefore = y();
   next();
+  await Promise.resolve();
   const expandedAfter = y();
   flushSync(() => expandButton.click());
   next();
@@ -54,6 +55,7 @@ export async function verifyInspectorMotion() {
   await new Promise((resolve) => setTimeout(resolve, 100));
   const reversalBefore = y();
   next();
+  await Promise.resolve();
   const reversalAfter = y();
   if (
     Math.abs(expandedBefore - expandedAfter) > 1 ||

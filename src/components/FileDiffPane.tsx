@@ -170,7 +170,7 @@ export function FileDiffPane({
                 : state.side !== null
                   ? "Working copy"
                   : state.comparison.target.kind === "commit"
-                    ? `Selected revision ${state.comparison.target.oid.slice(0, 7)}`
+                    ? "Selected commit"
                     : "Working copy"
               : state.side !== null
                 ? state.side === "staged"

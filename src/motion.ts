@@ -35,7 +35,10 @@ export function animate(
 }
 
 /** Only mounted elements participate; layout and scroll metrics stay with their renderer. */
-export function captureLayout(elements: MotionElements) {
+export function captureLayout(
+  elements: MotionElements,
+  { animateWidth = true }: { animateWidth?: boolean } = {},
+) {
   const before = new Map<string, Pose>();
   for (const [key, element] of elements) {
     const style = getComputedStyle(element);
@@ -62,7 +65,7 @@ export function captureLayout(elements: MotionElements) {
       if (
         x ||
         y ||
-        old.rect.width !== rect.width ||
+        (animateWidth && old.rect.width !== rect.width) ||
         old.background !== style.backgroundColor ||
         old.opacity !== style.opacity
       )
@@ -71,13 +74,13 @@ export function captureLayout(elements: MotionElements) {
           [
             {
               translate: `${x}px ${y}px`,
-              width: old.width,
+              ...(animateWidth ? { width: old.width } : {}),
               opacity: old.opacity,
               backgroundColor: old.background,
             },
             {
               translate: "0px 0px",
-              width: style.width,
+              ...(animateWidth ? { width: style.width } : {}),
               opacity: 1,
               backgroundColor: style.backgroundColor,
             },

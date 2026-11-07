@@ -43,34 +43,64 @@ export function ContextMenu({
     onCloseRef.current = onClose;
   });
   useLayoutEffect(() => {
-    exitingMenu?.dispose();
+    const outgoing = exitingMenu;
+    const reversal =
+      motion &&
+      outgoing?.layer.isConnected &&
+      outgoing.paint.getAttribute("aria-label") === label
+        ? {
+            height: outgoing.paint.getBoundingClientRect().height,
+            opacity:
+              Number(getComputedStyle(outgoing.layer).opacity) *
+              Number(getComputedStyle(outgoing.paint).opacity),
+            items: [...outgoing.paint.querySelectorAll("button")].map((item) =>
+              item.getBoundingClientRect(),
+            ),
+          }
+        : null;
+    if (reversal) outgoing?.dispose();
     exitingMenu = null;
     const menu = ref.current;
     if (!menu) return;
-    setPosition({
+    const clamped = {
       top: Math.max(4, Math.min(y, window.innerHeight - menu.offsetHeight - 4)),
       left: Math.max(4, Math.min(x, window.innerWidth - menu.offsetWidth - 4)),
-    });
+    };
+    menu.style.top = `${clamped.top}px`;
+    menu.style.left = `${clamped.left}px`;
+    setPosition(clamped);
     menu.querySelector<HTMLElement>(ITEMS)?.focus();
     if (motion) {
       const height = menu.getBoundingClientRect().height;
       animate(
         menu,
         [
-          { height: "100px", opacity: 0 },
+          {
+            height: `${reversal?.height ?? 100}px`,
+            opacity: reversal?.opacity ?? 0,
+          },
           { height: `${height}px`, opacity: 1 },
         ],
         160,
       );
-      for (const item of menu.querySelectorAll<HTMLElement>(ITEMS))
+      for (const [index, item] of [
+        ...menu.querySelectorAll<HTMLElement>(ITEMS),
+      ].entries()) {
+        const previous = reversal?.items[index];
+        const rect = item.getBoundingClientRect();
         animate(
           item,
           [
-            { translate: `${-item.offsetLeft}px ${-item.offsetTop}px` },
+            {
+              translate: previous
+                ? `${previous.x - rect.x}px ${previous.y - rect.y}px`
+                : `${-item.offsetLeft}px ${-item.offsetTop}px`,
+            },
             { translate: "0px 0px" },
           ],
           160,
         );
+      }
     }
     return () => {
       if (motion) {
@@ -108,9 +138,12 @@ export function ContextMenu({
         ]),
       );
     };
-  }, [x, y, motion]);
+  }, [x, y, motion, label]);
   useEffect(() => {
-    const close = () => onCloseRef.current({ returnFocus: true });
+    const close = () => {
+      exitDuration.current = 160;
+      onCloseRef.current({ returnFocus: true });
+    };
     const scrolled = (event: Event) => {
       if (
         !(event.target instanceof Node) ||
@@ -165,8 +198,15 @@ export function ContextMenu({
           onCloseRef.current({ returnFocus: true });
         }, 200);
       }}
-      onClickCapture={() => {
-        exitDuration.current = 100;
+      onClickCapture={(event) => {
+        const item =
+          event.target instanceof Element ? event.target.closest(ITEMS) : null;
+        if (
+          item &&
+          item.getAttribute("aria-disabled") !== "true" &&
+          !item.hasAttribute("disabled")
+        )
+          exitDuration.current = 100;
       }}
       onContextMenu={(event) => event.preventDefault()}
       onKeyDown={(event) => {

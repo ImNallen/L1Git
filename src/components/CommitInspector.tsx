@@ -210,6 +210,7 @@ export function CommitInspector({
     motionRoot,
     root,
     inspectedCommit?.oid ?? null,
+    selection?.kind === "commit" ? selection.oid : null,
   );
   const current = (key: { root: RepositoryRoot; comparison: Comparison }) =>
     key.root === root &&

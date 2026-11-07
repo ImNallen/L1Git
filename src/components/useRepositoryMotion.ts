@@ -2,6 +2,7 @@ import { useRef } from "react";
 import type { RefObject } from "react";
 import { animate, cancelMotion } from "../motion";
 import { captureExit } from "../motionExit";
+import type { MotionSnapshot } from "./MotionBoundary";
 
 export function useRepositoryMotion(
   container: RefObject<HTMLElement | null>,
@@ -15,13 +16,22 @@ export function useRepositoryMotion(
       : container.current;
   return {
     identity: root,
-    capture: (previous: string | null) => {
+    capture: (previous: string | null, active: MotionSnapshot | null) => {
       const first = previous === null && !visited.current;
       if (previous !== null || root !== null) visited.current = true;
       if (first) return null;
       const old = element();
       if (!old) return null;
       const exit = captureExit(old, "repository");
+      const prior = exit ? active?.takeExit?.() : null;
+      if (exit && prior) {
+        const rect = prior.getBoundingClientRect();
+        prior.style.position = "absolute";
+        prior.style.left = `${rect.left - Number.parseFloat(exit.layer.style.left)}px`;
+        prior.style.top = `${rect.top - Number.parseFloat(exit.layer.style.top)}px`;
+        exit.layer.append(prior);
+      }
+      let transferred = false;
       let focusRing: HTMLDivElement | null = null;
       const clearFocus = () => {
         focusRing?.remove();
@@ -31,6 +41,11 @@ export function useRepositoryMotion(
         window.removeEventListener("resize", clearFocus);
       };
       return {
+        takeExit: () => {
+          if (!exit?.layer.isConnected) return null;
+          transferred = true;
+          return exit.layer;
+        },
         play: () => {
           exit?.play(170);
           const next = element();
@@ -63,7 +78,7 @@ export function useRepositoryMotion(
         },
         dispose: () => {
           clearFocus();
-          exit?.dispose();
+          if (!transferred) exit?.dispose();
           const next = element();
           if (next) cancelMotion(new Map([["repository", next]]));
         },

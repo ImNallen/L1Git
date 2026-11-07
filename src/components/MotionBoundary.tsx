@@ -1,36 +1,52 @@
 import { Component } from "react";
 import type { ReactNode } from "react";
 
-export type MotionSnapshot = { play: () => void; dispose: () => void };
+export type MotionSnapshot = {
+  play: () => void;
+  dispose: () => void;
+  takeExit?: () => HTMLElement | null;
+};
 
 type Props = {
   identity: string | null;
-  capture: (previous: string | null) => MotionSnapshot | null;
+  ready?: boolean;
+  afterLayout?: boolean;
+  capture: (
+    previous: string | null,
+    active: MotionSnapshot | null,
+  ) => MotionSnapshot | null;
   children?: ReactNode;
 };
 
 /** React runs this before DOM mutations, including on interrupted animations. */
 export class MotionBoundary extends Component<Props> {
   private active: MotionSnapshot | null = null;
+  private pending = false;
 
   getSnapshotBeforeUpdate(previous: Props) {
     if (previous.identity === this.props.identity) return null;
-    const snapshot = this.props.capture(previous.identity);
-    this.active?.dispose();
+    const snapshot = this.props.capture(previous.identity, this.active);
+    if (snapshot !== this.active) this.active?.dispose();
     this.active = snapshot;
+    this.pending = snapshot !== null;
     return snapshot;
   }
 
-  componentDidUpdate(
-    _previous: Props,
-    _state: unknown,
-    snapshot: MotionSnapshot | null,
-  ) {
-    snapshot?.play();
+  componentDidUpdate() {
+    if (this.pending && this.props.ready !== false) {
+      this.pending = false;
+      const active = this.active;
+      const play = () => {
+        if (this.active === active) active?.play();
+      };
+      if (this.props.afterLayout) queueMicrotask(play);
+      else play();
+    }
   }
 
   componentWillUnmount() {
     this.active?.dispose();
+    this.active = null;
   }
 
   render() {

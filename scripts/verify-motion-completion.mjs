@@ -23,6 +23,10 @@ const inspector = evaluate(async () =>
   (await import("/scripts/inspector-motion.tsx")).verifyInspectorMotion(),
 );
 save("inspector-regression", inspector);
+const production = evaluate(async () =>
+  (await import("/scripts/production-motion.tsx")).verifyProductionMotion(),
+);
+save("production-regressions", production);
 browser("open", url);
 browser("set", "viewport", "1440", "900");
 browser("wait", "file-tree-container");
@@ -257,7 +261,13 @@ if (second) {
       buttons[1].click();
       await new Promise((resolve) => setTimeout(resolve, 25));
       buttons[0].click();
-      await new Promise((resolve) => setTimeout(resolve, 900));
+      const started = performance.now();
+      while (
+        !document.querySelector(".commit-information h2") &&
+        performance.now() - started < 10000
+      )
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+      await new Promise((resolve) => setTimeout(resolve, 220));
       return {
         selected: document.querySelector(
           ".repository-row.active .repository-open",
