@@ -19,6 +19,7 @@
     "vite.config.ts",
     "scripts/tree-geometry-browser.tsx",
     "scripts/inspector-motion.tsx",
-    "scripts/inspector-motion-entry.tsx"
+    "scripts/inspector-motion-entry.tsx",
+    "scripts/table-motion-entry.ts"
   ]
 }

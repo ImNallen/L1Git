@@ -73,6 +73,8 @@ import type { CommitReplay } from "../shell/useMergePanel";
 import { useLineStats } from "../useLineStats";
 import { ContextMenu } from "./ContextMenu";
 import { HistorySearch } from "./HistorySearch";
+import { MotionBoundary } from "./MotionBoundary";
+import { useHistoryMotion } from "./historyMotion";
 
 export const ROW_HEIGHT = Math.round((838 / 22) * 64) / 64;
 const ROW_CENTER = ROW_HEIGHT / 2;
@@ -116,6 +118,7 @@ function GraphCell({
       {row.continuations.map((edge, index) => (
         <path
           key={`continue-${edge.from}`}
+          data-graph-key={`continue:${edge.oid}`}
           className={dim(lit?.continuations[index])}
           d={curve(edge.from, edge.to, 0, ROW_HEIGHT)}
           stroke={color(edge.from)}
@@ -123,6 +126,7 @@ function GraphCell({
       ))}
       {row.incoming && (
         <path
+          data-graph-key="incoming"
           className={dim(lit?.incoming)}
           d={`M ${x(row.lane)} 0 V ${ROW_CENTER}`}
           stroke={color(row.lane)}
@@ -131,6 +135,7 @@ function GraphCell({
       {row.parents.map((edge, index) => (
         <path
           key={edge.oid}
+          data-graph-key={`parent:${edge.oid}`}
           className={dim(lit?.parents[index])}
           d={curve(edge.from, edge.to, ROW_CENTER, ROW_HEIGHT)}
           stroke={color(edge.to)}
@@ -158,6 +163,8 @@ function RowRing({
   if (ring === null) return null;
   return (
     <circle
+      data-graph-key="ring"
+      className="graph-selection-ring"
       cx={x(lane)}
       cy={ROW_CENTER}
       r={radius + 4}
@@ -174,6 +181,7 @@ function WorktreeNode({ lane, ring }: { lane: number; ring: Ring }) {
     <g className="graph-node">
       <RowRing lane={lane} radius={5} ring={ring} />
       <circle
+        data-graph-key="node"
         cx={x(lane)}
         cy={ROW_CENTER}
         r={5}
@@ -203,6 +211,7 @@ function CommitNode({
       <RowRing lane={lane} radius={radius} ring={ring} />
       {merge ? (
         <circle
+          data-graph-key="node"
           cx={x(lane)}
           cy={ROW_CENTER}
           r={radius}
@@ -212,6 +221,7 @@ function CommitNode({
         />
       ) : (
         <circle
+          data-graph-key="node"
           cx={x(lane)}
           cy={ROW_CENTER}
           r={radius}
@@ -302,7 +312,10 @@ const cells: Record<
   (commit: Commit, context: CellContext) => ReactNode
 > = {
   author: (commit) => (
-    <TextCell title={`${commit.author} <${commit.email}>`}>
+    <TextCell
+      className="author-cell"
+      title={`${commit.author} <${commit.email}>`}
+    >
       {commit.author}
     </TextCell>
   ),
@@ -858,6 +871,19 @@ export function History({
   const lineStats = useLineStats(snapshot.root, visibleCommits);
   const graphWidth = Math.max(80, graph.lanes * 24 + 24);
   const layout = columnLayout(graphWidth, visibleColumns, shaLength);
+  const selectionPaint = useRef<HTMLDivElement>(null);
+  const rowMotion = useHistoryMotion(
+    {
+      root: snapshot.root,
+      rows,
+      graph,
+      selected: selectedId,
+      template: layout.template,
+      hidden,
+    },
+    scrollRef,
+    selectionPaint,
+  );
   function revealColumn(id: ColumnId | null) {
     const index = layout.columns.findIndex((column) => column.id === id);
     const headerCells = headRef.current?.rows[0]?.cells;
@@ -906,6 +932,13 @@ export function History({
           searchSlot,
         )}
       <div className="history-scroll" ref={scrollRef}>
+        <MotionBoundary {...rowMotion} />
+        <div
+          ref={selectionPaint}
+          className="history-selection"
+          aria-hidden="true"
+          hidden
+        />
         <table
           ref={tableRef}
           className={`history-table${highlight || searching ? " highlighting" : ""}`}
@@ -981,6 +1014,7 @@ export function History({
                 : highlight?.commits.has(entry.id);
               const rowProps = {
                 id: rowId(entry.id),
+                "data-motion-row": entry.id,
                 role: "row",
                 className:
                   [
@@ -1045,7 +1079,9 @@ export function History({
                         key={column.id}
                         role="gridcell"
                         className={
-                          column.id === "changes" ? "changes-cell" : "text-cell"
+                          column.id === "changes"
+                            ? "changes-cell"
+                            : `text-cell ${column.id}-cell`
                         }
                       />
                     ))}

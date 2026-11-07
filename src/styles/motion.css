@@ -76,9 +76,6 @@
 .context-menu {
   overflow: hidden;
 }
-.file-diff {
-  animation: motion-appear 240ms ease-out;
-}
 @keyframes motion-appear {
   from {
     opacity: 0;
@@ -206,4 +203,36 @@
 }
 .history-table tr:hover:not(.selected) {
   transition-duration: 120ms;
+}
+.history-scroll {
+  position: relative;
+}
+.history-selection {
+  position: absolute;
+  z-index: 0;
+  pointer-events: none;
+  background: var(--row-selected);
+  box-shadow: inset 2px 0 var(--blue);
+}
+.history-table {
+  position: relative;
+  z-index: 1;
+}
+.history-scroll[data-selection-painted] .history-table tr.selected {
+  background: transparent;
+  box-shadow: none;
+}
+.history-table tbody tr:hover:not(.selected) {
+  background: var(--row-hover);
+}
+.history-table tbody tr:hover td {
+  background: transparent;
+}
+.graph-selection-ring {
+  animation: motion-appear 220ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .graph-selection-ring {
+    animation: none;
+  }
 }

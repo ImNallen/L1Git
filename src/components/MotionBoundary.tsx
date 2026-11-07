@@ -7,23 +7,25 @@ export type MotionSnapshot = {
   takeExit?: () => HTMLElement | null;
 };
 
-type Props = {
-  identity: string | null;
+type Props<Identity> = {
+  identity: Identity;
   ready?: boolean;
   afterLayout?: boolean;
   capture: (
-    previous: string | null,
+    previous: Identity,
     active: MotionSnapshot | null,
   ) => MotionSnapshot | null;
   children?: ReactNode;
 };
 
 /** React runs this before DOM mutations, including on interrupted animations. */
-export class MotionBoundary extends Component<Props> {
+export class MotionBoundary<Identity = string | null> extends Component<
+  Props<Identity>
+> {
   private active: MotionSnapshot | null = null;
   private pending = false;
 
-  getSnapshotBeforeUpdate(previous: Props) {
+  getSnapshotBeforeUpdate(previous: Props<Identity>) {
     if (previous.identity === this.props.identity) return null;
     const snapshot = this.props.capture(previous.identity, this.active);
     if (snapshot !== this.active) this.active?.dispose();

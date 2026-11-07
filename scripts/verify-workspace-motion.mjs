@@ -158,7 +158,9 @@ const opening = evaluate(async () => {
     .click();
   await new Promise((resolve) => {
     function frame() {
-      const history = document.querySelector(".history");
+      const history =
+        document.querySelector('[data-motion-exit="workspace-pane"]')
+          ?.firstElementChild ?? document.querySelector(".history");
       const diff = document.querySelector(".file-diff");
       samples.push({
         t: performance.now() - start,

@@ -138,23 +138,29 @@ export function captureExit(element: HTMLElement, kind: string) {
     window.removeEventListener("resize", dispose);
     media.removeEventListener("change", dispose);
   };
+  const show = () => {
+    if (!motionAllowed()) return dispose();
+    if (layer.isConnected) return;
+    document.body.append(layer);
+    for (const offset of offsets) {
+      offset.copy.scrollLeft = offset.left;
+      offset.copy.scrollTop = offset.top;
+    }
+    window.addEventListener("scroll", scrolled, true);
+    window.addEventListener("resize", dispose);
+    media.addEventListener("change", dispose);
+  };
   return {
     layer,
     paint,
     dispose,
+    show,
     play(duration: number) {
       if (!motionAllowed()) return dispose();
-      document.body.append(layer);
-      for (const offset of offsets) {
-        offset.copy.scrollLeft = offset.left;
-        offset.copy.scrollTop = offset.top;
-      }
+      show();
       animation = animate(layer, [{ opacity: 1 }, { opacity: 0 }], duration);
       timer = window.setTimeout(dispose, duration + 50);
       animation?.finished.then(dispose, dispose);
-      window.addEventListener("scroll", scrolled, true);
-      window.addEventListener("resize", dispose);
-      media.addEventListener("change", dispose);
     },
   };
 }
