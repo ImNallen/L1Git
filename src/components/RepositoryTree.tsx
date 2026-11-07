@@ -1,3 +1,4 @@
+import { MotionBoundary } from "./MotionBoundary";
 import { useRepositoryMotion } from "./useRepositoryMotion";
 import { WorkspaceIcon } from "./WorkspaceIcon";
 import { useRef, useState } from "react";
@@ -87,7 +88,11 @@ export function RepositoryTree({
   };
   const tree = useRef<HTMLElement>(null);
   useRovingRows(tree);
-  useRepositoryMotion(tree, activePath, ".active-repository-refs");
+  const motion = useRepositoryMotion(
+    tree,
+    activePath,
+    ".active-repository-refs",
+  );
   const [menu, setMenu] = useState<{
     target:
       | { kind: "repository"; entry: RecentRepository }
@@ -410,6 +415,7 @@ export function RepositoryTree({
         className="repository-tree"
         aria-label="Repositories and branches"
       >
+        <MotionBoundary {...motion} />
         {entriesShown.map((entry) => {
           const active = entry.root === activePath;
           const head = sync.get(entry.root)?.head;

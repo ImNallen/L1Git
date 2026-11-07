@@ -1,3 +1,4 @@
+import { MotionBoundary } from "./MotionBoundary";
 import { useRef, useLayoutEffect } from "react";
 import type { ReactNode } from "react";
 import { animate, motionAllowed } from "../motion";
@@ -13,7 +14,7 @@ export function WorkspaceMotion({
   children: ReactNode;
 }) {
   const pane = useRef<HTMLDivElement>(null);
-  useRepositoryMotion(pane, root);
+  const motion = useRepositoryMotion(pane, root);
   useLayoutEffect(() => {
     const history = pane.current?.querySelector<HTMLElement>(".history");
     if (!fileOpen || !history || !motionAllowed()) return;
@@ -47,6 +48,7 @@ export function WorkspaceMotion({
   }, [fileOpen]);
   return (
     <div ref={pane} className="workspace-panes">
+      <MotionBoundary {...motion} />
       {children}
     </div>
   );

@@ -17,6 +17,7 @@ const changing = (samples, property) =>
   new Set(samples.map((x) => x[property])).size > 3;
 browser("set", "viewport", "1920", "960");
 browser("set", "media", "dark");
+browser("wait", "400");
 if (evaluate(() => !!document.querySelector(".file-diff")))
   browser("press", "Escape");
 for (const [selector, control] of [
@@ -161,6 +162,9 @@ const opening = evaluate(async () => {
       const diff = document.querySelector(".file-diff");
       samples.push({
         t: performance.now() - start,
+        displayed:
+          history.getBoundingClientRect().width > 0 &&
+          Number(getComputedStyle(history).opacity) > 0,
         historyY: history.querySelector("tbody").getBoundingClientRect().y,
         headingsY: history.querySelector("thead").getBoundingClientRect().y,
         historyOpacity: getComputedStyle(history).opacity,
@@ -175,12 +179,15 @@ const opening = evaluate(async () => {
 });
 save("open-diff", opening);
 assert(
-  changing(opening, "historyY"),
+  changing(
+    opening.filter((x) => x.displayed),
+    "historyY",
+  ),
   "Outgoing history moves while diff enters",
 );
 assert(
   !changing(
-    opening.filter((x) => Number(x.historyOpacity) > 0),
+    opening.filter((x) => x.displayed),
     "headingsY",
   ),
   "History column headings stay in place while rows leave",
@@ -301,5 +308,6 @@ assert(
   "Reduced motion must skip layout animations",
 );
 browser("set", "media", "dark");
+browser("wait", "400");
 browser("press", "Escape");
 console.log(`Motion checks passed. Evidence in ${evidence}`);

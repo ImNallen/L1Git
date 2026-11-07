@@ -63,7 +63,8 @@ export function captureLayout(elements: MotionElements) {
         x ||
         y ||
         old.rect.width !== rect.width ||
-        old.background !== style.backgroundColor
+        old.background !== style.backgroundColor ||
+        old.opacity !== style.opacity
       )
         animate(
           element,

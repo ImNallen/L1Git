@@ -1,3 +1,4 @@
+import { captureExit } from "../motionExit";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type {
   KeyboardEvent as ReactKeyboardEvent,
@@ -6,6 +7,8 @@ import type {
 } from "react";
 import { animate, cancelMotion } from "../motion";
 import { createPortal } from "react-dom";
+
+let exitingMenu: ReturnType<typeof captureExit> = null;
 
 const ITEMS = "[role=menuitem], [role=menuitemcheckbox]";
 
@@ -31,12 +34,17 @@ export function ContextMenu({
   children: ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const exitDuration = useRef(160);
+  const leaveTimer = useRef(0);
+  useEffect(() => () => window.clearTimeout(leaveTimer.current), []);
   const [position, setPosition] = useState({ top: y, left: x });
   const onCloseRef = useRef(onClose);
   useEffect(() => {
     onCloseRef.current = onClose;
   });
   useLayoutEffect(() => {
+    exitingMenu?.dispose();
+    exitingMenu = null;
     const menu = ref.current;
     if (!menu) return;
     setPosition({
@@ -64,7 +72,33 @@ export function ContextMenu({
           160,
         );
     }
-    return () =>
+    return () => {
+      if (motion) {
+        exitingMenu = captureExit(menu, "menu");
+        exitingMenu?.play(exitDuration.current);
+        if (exitingMenu) {
+          exitingMenu.layer.style.height = `${Math.max(100, menu.getBoundingClientRect().height)}px`;
+          animate(
+            exitingMenu.paint,
+            [
+              { height: `${menu.getBoundingClientRect().height}px` },
+              { height: "100px" },
+            ],
+            exitDuration.current,
+          );
+          for (const item of exitingMenu.paint.querySelectorAll<HTMLElement>(
+            "button",
+          ))
+            animate(
+              item,
+              [
+                { translate: getComputedStyle(item).translate },
+                { translate: `${-item.offsetLeft}px ${-item.offsetTop}px` },
+              ],
+              exitDuration.current,
+            );
+        }
+      }
       cancelMotion(
         new Map([
           ["menu", menu],
@@ -73,6 +107,7 @@ export function ContextMenu({
           ),
         ]),
       );
+    };
   }, [x, y, motion]);
   useEffect(() => {
     const close = () => onCloseRef.current({ returnFocus: true });
@@ -121,6 +156,18 @@ export function ContextMenu({
       data-file-tree-context-menu-root="true"
       aria-label={label}
       style={position}
+      onMouseEnter={() => window.clearTimeout(leaveTimer.current)}
+      onMouseLeave={() => {
+        if (!motion) return;
+        window.clearTimeout(leaveTimer.current);
+        leaveTimer.current = window.setTimeout(() => {
+          exitDuration.current = 120;
+          onCloseRef.current({ returnFocus: true });
+        }, 200);
+      }}
+      onClickCapture={() => {
+        exitDuration.current = 100;
+      }}
       onContextMenu={(event) => event.preventDefault()}
       onKeyDown={(event) => {
         const items = [

@@ -1,3 +1,5 @@
+import { useRepositoryMotion } from "./useRepositoryMotion";
+import { MotionBoundary } from "./MotionBoundary";
 import { Collapse } from "./Collapse";
 import { useInspectorMotion } from "./useInspectorMotion";
 import { WorkspaceIcon } from "./WorkspaceIcon";
@@ -203,7 +205,12 @@ export function CommitInspector({
   );
   const lineStats = useLineStats(root, inspected);
   const motionRoot = useRef<HTMLElement>(null);
-  useInspectorMotion(motionRoot, root, inspectedCommit?.oid ?? null);
+  const repositoryMotion = useRepositoryMotion(motionRoot, root);
+  const motion = useInspectorMotion(
+    motionRoot,
+    root,
+    inspectedCommit?.oid ?? null,
+  );
   const current = (key: { root: RepositoryRoot; comparison: Comparison }) =>
     key.root === root &&
     comparison !== null &&
@@ -223,6 +230,8 @@ export function CommitInspector({
   if (selection?.kind === "worktree" && compare === null)
     return (
       <InspectorFrame ref={motionRoot} toggleButton={toggleButton}>
+        <MotionBoundary {...repositoryMotion} />
+        <MotionBoundary {...motion} />
         {worktree ? (
           <WorktreeInspector
             worktree={worktree.worktree}
@@ -292,6 +301,8 @@ export function CommitInspector({
           </span>
         }
       >
+        <MotionBoundary {...repositoryMotion} />
+        <MotionBoundary {...motion} />
         {detail ? (
           <div className="inspector-content">
             <h2>
@@ -371,6 +382,8 @@ export function CommitInspector({
       : (target?.commit.parents ?? []);
   return (
     <InspectorFrame ref={motionRoot} toggleButton={toggleButton}>
+      <MotionBoundary {...repositoryMotion} />
+      <MotionBoundary {...motion} />
       {detail && target ? (
         <div className="inspector-content commit-details">
           <div className="commit-information">

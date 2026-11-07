@@ -35,3 +35,7 @@
   min-width: 0;
   overflow: visible;
 }
+
+:host([data-layout-motion]) [data-content] {
+  translate: var(--motion-scroll, 0px) 0;
+}
