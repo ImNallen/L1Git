@@ -2,10 +2,10 @@ import { resolveTheme } from "@pierre/diffs";
 import { expect, it } from "vitest";
 import { diffTheme } from "./diffTheme";
 
-it("keeps Pierre's own themes for L1, which paints no palette", () => {
+it("uses restrained syntax for the default L1 appearance", () => {
   expect([diffTheme("light", false), diffTheme("dark", false)]).toEqual([
-    "pierre-light",
-    "pierre-dark",
+    "l1-muted-light",
+    "l1-muted-dark",
   ]);
 });
 

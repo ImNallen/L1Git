@@ -1,74 +1,134 @@
-import type { ReactNode } from "react";
-import { REDO_SHORTCUT, shortcutLabel, UNDO_SHORTCUT } from "../actions";
-import { UndoButtons } from "../components/UndoControls";
-import { headBranchName } from "../domain/refs";
+import type { ReactNode, Ref } from "react";
+import { actions as actionRegistry, titleOf } from "../actions";
+import type { ActionId } from "../actions";
+import type { ComposedActions } from "./actionSlices";
+import { ContextMenu } from "../components/ContextMenu";
 import type { RepositorySnapshot } from "../domain/repository";
-import { mac } from "../repositories";
-import type { WritesView } from "../useWrites";
-import type { SyncCommands, SyncControls } from "./sync";
-import { SyncButtons } from "./SyncRegions";
-import type { Layout } from "./useLayout";
+import type { Layout, ToolbarMenuKind } from "./useLayout";
 import type { WorkspaceView } from "./workspaceView";
 
+const menus: { kind: ToolbarMenuKind; label: string; actions: ActionId[] }[] = [
+  { kind: "fetch", label: "Fetch", actions: ["fetch"] },
+  { kind: "pull", label: "Pull", actions: ["fastForward"] },
+  { kind: "push", label: "Push", actions: ["push"] },
+  {
+    kind: "branch",
+    label: "Branch",
+    actions: [
+      "newBranch",
+      "checkout",
+      "mergeBranch",
+      "mergeUpstream",
+      "createTag",
+    ],
+  },
+  { kind: "stash", label: "Stash", actions: ["stashChanges"] },
+  {
+    kind: "more",
+    label: "More",
+    actions: [
+      "undo",
+      "redo",
+      "fileHistory",
+      "blame",
+      "toggleSidebar",
+      "openSettings",
+    ],
+  },
+];
+
 export function Toolbar({
+  actions,
+  searchSlot,
   sidebarToggle,
   inspectorToggle,
   layout,
   shown,
   snapshot,
-  writes,
-  sync,
-  commands,
 }: {
+  actions: ComposedActions;
+  searchSlot: Ref<HTMLDivElement>;
   sidebarToggle: ReactNode;
   inspectorToggle: ReactNode;
-  layout: Pick<Layout, "sidebarOpen" | "inspectorVisible">;
+  layout: Pick<
+    Layout,
+    "sidebarOpen" | "inspectorVisible" | "toolbarMenu" | "setToolbarMenu"
+  >;
   shown: WorkspaceView["shown"];
   snapshot: RepositorySnapshot | null;
-  writes: WritesView;
-  sync: SyncControls;
-  commands: SyncCommands;
 }) {
-  const headLabel =
-    snapshot &&
-    (snapshot.head.kind === "detached"
-      ? `Detached at ${snapshot.head.oid.slice(0, 7)}`
-      : headBranchName(snapshot.head, snapshot.branches));
+  const { toolbarMenu: menu, setToolbarMenu: setMenu } = layout;
+  const anchor = menu?.anchor.getBoundingClientRect();
+  const close = (returnFocus: boolean) => {
+    setMenu(null);
+    if (returnFocus) menu?.anchor.focus();
+  };
   return (
-    <header className="toolbar" data-tauri-drag-region>
+    <header
+      aria-label={
+        shown ? `${shown.name} repository actions` : "Workspace actions"
+      }
+      className="toolbar"
+      data-tauri-drag-region
+    >
       {!layout.sidebarOpen && sidebarToggle}
-      <div className="breadcrumb" data-tauri-drag-region>
-        {shown ? (
-          <span className="repository-name" title={shown.root}>
-            {shown.name}
-          </span>
-        ) : (
-          <span className="muted">Workspace</span>
-        )}
-        {headLabel && (
-          <span className="breadcrumb-head">
-            <span className="breadcrumb-slash" aria-hidden="true">
-              /
-            </span>
-            <span className="breadcrumb-branch" title={headLabel}>
-              {headLabel}
-            </span>
-          </span>
-        )}
-      </div>
       <div className="toolbar-actions">
-        {snapshot && (
-          <UndoButtons
-            writes={writes}
-            shortcuts={{
-              undo: shortcutLabel(UNDO_SHORTCUT, mac),
-              redo: shortcutLabel(REDO_SHORTCUT, mac),
-            }}
-          />
-        )}
-        <SyncButtons sync={sync} commands={commands} />
+        {snapshot &&
+          menus.map(({ kind, label }) => (
+            <div className="toolbar-action-group" key={kind}>
+              {kind === "branch" && <span className="toolbar-separator" />}
+              <button
+                className={`button toolbar-action ${kind}`}
+                aria-haspopup="menu"
+                aria-expanded={menu?.kind === kind}
+                onClick={(event) =>
+                  setMenu({ kind, anchor: event.currentTarget })
+                }
+              >
+                <span
+                  className={`workspace-action-icon ${kind}`}
+                  aria-hidden="true"
+                />
+                <span>{label}</span>
+                <span className="workspace-disclosure" aria-hidden="true" />
+              </button>
+            </div>
+          ))}
         {!layout.inspectorVisible && inspectorToggle}
       </div>
+      <div className="toolbar-search-slot" ref={searchSlot} />
+      {menu && anchor && (
+        <ContextMenu
+          motion
+          x={anchor.left}
+          y={anchor.bottom}
+          label={`${menus.find((each) => each.kind === menu.kind)?.label} actions`}
+          onClose={({ returnFocus }) => close(returnFocus)}
+        >
+          {menus
+            .find((each) => each.kind === menu.kind)
+            ?.actions.map((id) =>
+              actionRegistry.find((action) => action.id === id),
+            )
+            .map(
+              (action) =>
+                action && (
+                  <button
+                    key={action.id}
+                    role="menuitem"
+                    aria-disabled={!action.available(actions.context)}
+                    onClick={() => {
+                      if (!action.available(actions.context)) return;
+                      close(true);
+                      action.run(actions.commands);
+                    }}
+                  >
+                    {titleOf(action, actions.context)}
+                  </button>
+                ),
+            )}
+        </ContextMenu>
+      )}
     </header>
   );
 }

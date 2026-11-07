@@ -34,6 +34,10 @@ export function useFocus(
       () => historyRef.current?.focus(),
       () => fileDiffRef.current?.focus(),
       () => sidebarToggleRef.current?.focus(),
+      () =>
+        document
+          .querySelector<HTMLElement>(".repository-open[aria-current='true']")
+          ?.focus(),
     ]) {
       focus();
       if (shownElement(focusedElement())) return;

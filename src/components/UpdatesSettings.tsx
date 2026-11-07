@@ -3,6 +3,7 @@ import { Download, LoaderCircle, RefreshCw, RotateCw } from "lucide-react";
 import type { Updates, UpdateState } from "../updates";
 import type { UpdateRestart } from "./UpdateRestart";
 import { settingsDestinations } from "../settingsSearch";
+import { WorkspaceIcon } from "./WorkspaceIcon";
 
 const releases = "https://github.com/ImNallen/L1Git/releases";
 const unavailable = {
@@ -293,15 +294,18 @@ export function UpdateAffordance({
         disabled={action.run === null}
         onClick={() => void action.run?.()}
       >
-        <Icon
-          size={16}
-          className={
-            state.kind === "checking" || Icon === LoaderCircle
-              ? "spin"
-              : undefined
-          }
-          aria-hidden="true"
-        />
+        {Icon === RefreshCw ? (
+          <WorkspaceIcon
+            name="Update"
+            className={state.kind === "checking" ? "spin" : ""}
+          />
+        ) : (
+          <Icon
+            size={16}
+            className={Icon === LoaderCircle ? "spin" : undefined}
+            aria-hidden="true"
+          />
+        )}
       </button>
       <span className="update-tooltip">
         <span aria-hidden="true">{detail}</span>

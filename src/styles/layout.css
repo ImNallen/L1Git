@@ -1,6 +1,5 @@
 .pane-divider {
   flex: 0 0 1px;
-  width: 1px;
   background: var(--border);
   position: relative;
   z-index: 3;
@@ -10,13 +9,6 @@
 .pane-divider::before {
   content: "";
   position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 5px;
-  height: 26px;
-  border-radius: 999px;
-  background: var(--border-strong);
-  transform: translate(-50%, -50%);
   pointer-events: none;
 }
 .pane-divider::after {
@@ -45,8 +37,8 @@
   position: relative;
 }
 .toolbar {
-  height: 58px;
-  min-height: 58px;
+  height: 56px;
+  min-height: 56px;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -89,7 +81,6 @@
 .toolbar-actions {
   display: flex;
   align-items: center;
-  gap: 7px;
   flex-shrink: 0;
 }
 .button {
@@ -294,7 +285,7 @@ kbd {
     padding-left: 9px;
   }
   /* Hidden visually, not from the accessibility tree, so the button keeps its visible name. */
-  .toolbar-actions .button span {
+  .toolbar-actions .button span:not(.workspace-action-icon) {
     position: absolute;
     width: 1px;
     height: 1px;
@@ -481,4 +472,164 @@ kbd {
 }
 .merge-dialog {
   width: min(620px, 90vw);
+}
+
+.toolbar-search-slot {
+  width: 300px;
+  min-width: 120px;
+  margin-left: auto;
+}
+.toolbar-actions {
+  gap: 6px;
+  min-width: 0;
+}
+.toolbar-actions .button.secondary {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+.toolbar-actions .button {
+  padding-inline: 10px;
+  color: var(--text-body);
+}
+.toolbar-separator {
+  margin-inline: 8px;
+}
+@media (max-width: 1200px) {
+  .toolbar-actions .button {
+    padding-inline: 6px;
+  }
+  .toolbar {
+    gap: 6px;
+  }
+  .toolbar-search-slot {
+    width: 220px;
+  }
+}
+
+.workspace-action-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  background: currentColor;
+  mask: center / contain no-repeat;
+}
+.workspace-action-icon.branch {
+  mask-image: url("/assets/workspace/BranchIcon.svg");
+}
+.workspace-action-icon.stash {
+  mask-image: url("/assets/workspace/StashIcon.svg");
+}
+.workspace-action-icon.more {
+  mask-image: url("/assets/workspace/MoreIcon.svg");
+}
+.workspace-action-icon.fetch {
+  mask-image: url("/assets/workspace/FetchIcon.svg");
+}
+.workspace-action-icon.pull {
+  mask-image: url("/assets/workspace/PullIcon.svg");
+}
+.workspace-action-icon.push {
+  mask-image: url("/assets/workspace/PushIcon.svg");
+}
+
+.repository-content {
+  container-type: inline-size;
+}
+.toolbar-search-slot {
+  flex: 0 1 300px;
+}
+@container (max-width: 1000px) {
+  .toolbar-actions .button span:not(.workspace-action-icon) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .toolbar-actions .button {
+    width: 30px;
+    padding: 0;
+  }
+  .toolbar-separator {
+    margin-inline: 3px;
+  }
+}
+
+.pane-divider {
+  flex-basis: 0;
+  width: 0;
+}
+.pane-divider::before {
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 1px;
+  height: auto;
+  border-radius: 0;
+  background: var(--border);
+  transform: none;
+}
+.toolbar {
+  padding-inline: 24px;
+}
+.toolbar-action-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.toolbar-actions .toolbar-action {
+  padding: 0;
+  flex-shrink: 0;
+  color: var(--workspace-toolbar-text, var(--text-body));
+}
+.toolbar-action.fetch {
+  width: 94px;
+}
+.toolbar-action.pull {
+  width: 84px;
+}
+.toolbar-action.push {
+  width: 88px;
+}
+.toolbar-action.branch {
+  width: 102px;
+}
+.toolbar-action.stash {
+  width: 94px;
+}
+.toolbar-action.more {
+  width: 82px;
+}
+.toolbar-action:hover,
+.toolbar-action[aria-expanded="true"] {
+  background: var(--control-hover);
+}
+.workspace-disclosure {
+  width: 10px;
+  height: 10px;
+  background: currentColor;
+  mask: url("/assets/workspace/Disclosure.svg") center / contain no-repeat;
+}
+.toolbar-separator {
+  width: 17px;
+  height: 24px;
+  margin: 0;
+  background: linear-gradient(var(--separator), var(--separator)) center / 1px
+    18px no-repeat;
+}
+@container (max-width: 1000px) {
+  .toolbar-actions .toolbar-action {
+    width: 30px;
+  }
+  .toolbar {
+    padding-inline: 12px;
+  }
+}
+.workspace-icon {
+  display: inline-block;
+  flex-shrink: 0;
+  background: currentColor;
+  mask: var(--icon) center / contain no-repeat;
 }

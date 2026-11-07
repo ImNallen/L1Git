@@ -4,29 +4,28 @@ import { z } from "zod";
 export const COLUMNS_KEY = "l1git.columns.v1";
 
 export const historyColumns = [
-  { id: "author", label: "Author", width: 120 },
-  { id: "date", label: "Date", width: 52 },
-  { id: "sha", label: "SHA" },
-  { id: "changes", label: "Changes", width: 160 },
+  { id: "author", label: "Author", width: 140 },
+  { id: "date", label: "Age", width: 60 },
+  { id: "sha", label: "Commit ID" },
+  { id: "changes", label: "Changes", width: 202 },
 ] as const;
 export type ColumnId = (typeof historyColumns)[number]["id"];
 
 const columnId = z.custom<ColumnId>((value) =>
   historyColumns.some((column) => column.id === value),
 );
-const DEFAULT_COLUMNS: ReadonlySet<ColumnId> = new Set(["date", "changes"]);
+const DEFAULT_COLUMNS: ReadonlySet<ColumnId> = new Set(
+  historyColumns.map((column) => column.id),
+);
 
 const columnsSchema = z.object({
   version: z.literal(1),
   visible: z.array(columnId),
 });
 
-const REF_WIDTH = 200;
 const MESSAGE_MIN_WIDTH = 260;
 const CROWDED_MESSAGE_MIN_WIDTH = 160;
-// JetBrains Mono advances 0.6em per character, and .sha-cell sets it at 11px with 8px of right padding.
-// Chromium can lay the text out 1/64px wider at some zoom levels, so the column keeps 1px spare.
-const SHA_CHAR_WIDTH = 6.6;
+const SHA_CHAR_WIDTH = 7.2;
 const SHA_PADDING = 8 + 1;
 
 export function columnLayout(
@@ -40,20 +39,19 @@ export function columnLayout(
     : MESSAGE_MIN_WIDTH;
   const widths = columns.map((column) =>
     column.id === "sha"
-      ? Math.ceil(shaLength * SHA_CHAR_WIDTH) + SHA_PADDING
+      ? Math.max(100, Math.ceil(shaLength * SHA_CHAR_WIDTH) + SHA_PADDING)
       : column.width,
   );
   return {
     columns,
     template: [
-      `${REF_WIDTH}px`,
       `${graphWidth}px`,
       `minmax(${message}px, 1fr)`,
       ...widths.map((width) => `${width}px`),
     ].join(" "),
     minWidth: widths.reduce(
       (total, width) => total + width,
-      REF_WIDTH + graphWidth + message,
+      graphWidth + message,
     ),
   };
 }

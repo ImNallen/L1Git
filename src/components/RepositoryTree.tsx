@@ -1,3 +1,6 @@
+import { MotionBoundary } from "./MotionBoundary";
+import { useRepositoryMotion } from "./useRepositoryMotion";
+import { WorkspaceIcon } from "./WorkspaceIcon";
 import { useRef, useState } from "react";
 import type {
   KeyboardEvent as ReactKeyboardEvent,
@@ -5,8 +8,6 @@ import type {
 } from "react";
 import {
   ArchiveRestore,
-  ChevronDown,
-  ChevronRight,
   CircleCheck,
   CornerDownLeft,
   Eye,
@@ -16,8 +17,8 @@ import {
   GitBranchPlus,
   PencilLine,
   Plus,
-  Search,
   Trash2,
+  X,
 } from "lucide-react";
 import { branchAsks } from "../domain/operations";
 import type { BranchAsk } from "../domain/operations";
@@ -76,8 +77,22 @@ export function RepositoryTree({
   const { merge, writable, onBranchAsk, onTagAsk, onStashAction, onCheckout } =
     refActions;
   const [query, setQuery] = useState("");
+  const closeSearch = () => {
+    setQuery("");
+    const nav = tree.current;
+    (
+      nav?.querySelector<HTMLElement>(
+        ".repository-row.active .repository-open",
+      ) ?? nav?.querySelector<HTMLElement>(".repository-open")
+    )?.focus();
+  };
   const tree = useRef<HTMLElement>(null);
   useRovingRows(tree);
+  const motion = useRepositoryMotion(
+    tree,
+    activePath,
+    ".active-repository-refs",
+  );
   const [menu, setMenu] = useState<{
     target:
       | { kind: "repository"; entry: RecentRepository }
@@ -118,6 +133,9 @@ export function RepositoryTree({
       (refs !== null && refMatches(refs))
     );
   });
+  const expandedEntries = entriesShown.filter(
+    (entry) => entry.root === activePath,
+  );
 
   function openMenu(
     event: ReactMouseEvent<HTMLElement> | ReactKeyboardEvent<HTMLElement>,
@@ -358,37 +376,55 @@ export function RepositoryTree({
 
   return (
     <>
-      <div className="sidebar-search">
-        <label className="sidebar-search-field">
-          <Search size={15} aria-hidden="true" />
-          <input
-            aria-label="Filter repositories and refs"
-            placeholder="Search"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-          />
-        </label>
+      <div className="repositories-heading">
         <button
           className="icon-button"
           onClick={onAdd}
           title="Add repository"
           aria-label="Add repository"
         >
-          <Plus size={18} />
+          <WorkspaceIcon name="Plus" size={16} />
         </button>
+      </div>
+      <div className="sidebar-search">
+        <div className="sidebar-search-field" role="search">
+          <WorkspaceIcon name="Search" size={14} />
+          <input
+            aria-label="Filter repositories and refs"
+            placeholder="Search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.stopPropagation();
+                closeSearch();
+              }
+            }}
+          />
+          <button
+            className="icon-button search-close"
+            aria-label="Close repository search"
+            onClick={closeSearch}
+          >
+            <X size={14} />
+          </button>
+        </div>
       </div>
       <nav
         ref={tree}
         className="repository-tree"
         aria-label="Repositories and branches"
       >
+        <MotionBoundary {...motion} />
         {entriesShown.map((entry) => {
           const active = entry.root === activePath;
-          const open = expanded.has(entry.root);
-          const toggleLabel = `${open ? "Collapse" : "Expand"} ${entry.name}`;
           const head = sync.get(entry.root)?.head;
           return (
-            <div className="repository-group" key={entry.root}>
+            <div
+              className="repository-group"
+              data-repository-root={entry.root}
+              key={entry.root}
+            >
               <div
                 className={`repository-row ${active ? "active" : ""}`}
                 onContextMenu={(event) => repositoryMenu(event, entry)}
@@ -397,37 +433,43 @@ export function RepositoryTree({
                 }}
               >
                 <button
-                  className="repository-toggle"
-                  aria-expanded={open}
-                  aria-label={toggleLabel}
-                  title={toggleLabel}
-                  onClick={() => onToggle(entry.root)}
-                >
-                  {open ? (
-                    <ChevronDown size={13} />
-                  ) : (
-                    <ChevronRight size={13} />
-                  )}
-                </button>
-                <button
                   className="repository-open"
                   title={entry.root}
                   aria-current={active ? "true" : undefined}
                   onClick={() => {
                     onSelect(entry.root);
-                    onToggle(entry.root);
+                    if (!expanded.has(entry.root)) onToggle(entry.root);
                   }}
                 >
+                  <WorkspaceIcon name="Repository" />
                   <span>{entry.name}</span>
+                  {active && (
+                    <WorkspaceIcon
+                      name="SelectedRepository"
+                      className="repository-check"
+                      size={14}
+                    />
+                  )}
                 </button>
                 {head && (
                   <SyncCounts divergence={head.divergence} branch={head.name} />
                 )}
               </div>
-              {open && branches(entry)}
             </div>
           );
         })}
+        {expandedEntries.map((entry) => (
+          <div
+            className="active-repository-refs"
+            data-repository-root={entry.root}
+            key={entry.root}
+          >
+            {expandedEntries.length > 1 && (
+              <div className="repository-refs-heading">{entry.name}</div>
+            )}
+            {branches(entry)}
+          </div>
+        ))}
         {entries.length === 0 && (
           <div className="sidebar-empty">
             <FolderGit2 size={24} />

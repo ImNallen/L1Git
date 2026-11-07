@@ -169,3 +169,34 @@ it("Ctrl+P from a text field inside a shadow root opens the palette (pins curren
   await app.press("p", { ctrlKey: true, target: shadowInput });
   expect(dialogs()).toEqual(["Command palette"]);
 });
+
+it("typing toolbar search from a diff returns to History and Escape clears it", async () => {
+  const app = await mountApp();
+  await openFirstFile(app);
+  const search = get("textbox", "Search loaded history");
+  expect(search.closest(".toolbar")).not.toBeNull();
+  search.focus();
+  await app.type(search, "Release");
+  expect(query("button", "Back to history")).toBeNull();
+  expect(focused()).toBe("textbox Search loaded history");
+  expect(
+    document.querySelector(".history-search-count")?.textContent,
+  ).toContain("match");
+  await app.press("Enter", { target: search });
+  await app.press("Escape", { target: search });
+  expect(focused()).toBe("grid Commits");
+  expect(
+    get("textbox", "Search loaded history").getAttribute("value") ?? "",
+  ).toBe("");
+});
+
+it("Escape in toolbar search while reading a diff leaves focus on the visible input", async () => {
+  const app = await mountApp();
+  await app.type(get("textbox", "Search loaded history"), "Release");
+  await openFirstFile(app);
+  const search = get("textbox", "Search loaded history");
+  search.focus();
+  await app.press("Escape", { target: search });
+  expect(query("button", "Back to history")).not.toBeNull();
+  expect(focused()).toBe("textbox Search loaded history");
+});

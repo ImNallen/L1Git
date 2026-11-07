@@ -1,3 +1,4 @@
+import { toolbarItem } from "./test/appHarness";
 // @vitest-environment happy-dom
 import { expect, it, vi } from "vitest";
 import {
@@ -51,12 +52,12 @@ function answerPush(app: Harness, outcome: unknown) {
 it("the push notice is role=status on success and role=alert on failure", async () => {
   const app = await mountApp();
   answerPush(app, { kind: "pushed" });
-  await app.click(get("button", "Push to origin/main"));
+  await app.click(await toolbarItem(app, "Push", "Push to origin/main"));
   expect(get("status", /origin\/main/).textContent).toMatchInlineSnapshot(
     `"Pushed main to origin/main. "`,
   );
   answerPush(app, { kind: "rejected", message: "The remote said no." });
-  await app.click(get("button", "Push to origin/main"));
+  await app.click(await toolbarItem(app, "Push", "Push to origin/main"));
   expect(query("status", /origin\/main/)).toBeNull();
   expect(alerts()).toMatchInlineSnapshot(`
     [
@@ -88,12 +89,12 @@ it("the first persistence error among the four sources is shown", async () => {
       "History columns changed for this session. Could not save them.",
     ]);
     failing.add(EXPANDED_KEY);
-    await app.click(get("button", "Expand other"));
+    await app.click(repositoryRow(OTHER));
     expect(alerts()).toEqual([
       "Expanded repositories changed for this session. Could not save them.",
     ]);
     failing.add(RECENTS_KEY);
-    await app.click(repositoryRow(OTHER));
+    await app.click(repositoryRow(PIN));
     expect(alerts()).toEqual([
       "The repository list could not be saved. Allow local storage to restore repositories after restart.",
     ]);
@@ -214,6 +215,7 @@ it("the hidden-jump notice says when a ref is outside the soloed branches, and o
   expect(get("status", /soloed/).textContent).toBe(
     "topic is outside the soloed branches.Show topic",
   );
+  await app.click(get("button", "Tags2"));
   await app.click(refRow("refs/tags/t6")!);
   const notice = get("status", /soloed/);
   expect(notice.textContent).toBe(
@@ -262,8 +264,8 @@ it("the unsaved conflict results list opens RetainedResolution, switching reposi
   expect(dialogs()).toEqual(["Unsaved resolution for there.txt"]);
   expect(selectedRow()).toBe("Other tip, Pin Author, 8888888");
   expect(
-    get("button", "Expand other"),
-    "it opens the repository without expanding it in the sidebar",
+    repositoryRow(OTHER),
+    "it selects the repository in the sidebar",
   ).toBeTruthy();
 });
 

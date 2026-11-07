@@ -1,0 +1,793 @@
+diff --git a/dist/model/FileTreeController.d.ts b/dist/model/FileTreeController.d.ts
+index e7e4f0d7695697c6df034b9b67b4a7ee12ca3068..a59d5ab458e68345b4c499a3fe369abddd461113 100644
+--- a/dist/model/FileTreeController.d.ts
++++ b/dist/model/FileTreeController.d.ts
+@@ -1,3 +1,4 @@
++import { RowGeometry } from "./rowGeometry.js";
+ import { FileTreeBatchOperation, FileTreeControllerOptions, FileTreeDragAndDropConfig, FileTreeDropTarget, FileTreeItemHandle, FileTreeMoveOptions, FileTreeMutationEventForType, FileTreeMutationEventType, FileTreeMutationHandle, FileTreeRemoveOptions, FileTreeResetOptions, FileTreeResetPreparedOptions, FileTreeScrollToPathOptions, FileTreeSearchSessionHandle, FileTreeVisibleRow } from "./publicTypes.js";
+ import { FileTreeControllerListener, FileTreeScrollRequest, FileTreeStickyRowCandidate } from "./internalTypes.js";
+ 
+@@ -43,8 +44,9 @@ declare class FileTreeController implements FileTreeMutationHandle, FileTreeSear
+   getSelectedPaths(): readonly string[];
+   getSelectionVersion(): number;
+   getVisibleCount(): number;
++  getRowGeometry(itemHeight: number, fileItemHeight?: number): RowGeometry;
+   getVisibleRows(start: number, end: number): readonly FileTreeVisibleRow[];
+-  getStickyRowCandidates(scrollTop: number, itemHeight: number): readonly FileTreeStickyRowCandidate[] | null;
++  getStickyRowCandidates(scrollTop: number, itemHeight: number, rowGeometry?: RowGeometry): readonly FileTreeStickyRowCandidate[] | null;
+   /**
+    * Returns the item handle for the given path.
+    *
+diff --git a/dist/model/FileTreeController.js b/dist/model/FileTreeController.js
+index efa8b6a2fd70e0d1f1dec1d90ee87268c72f56c4..c596f9c5d938149318ced168e33527924b3b546f 100644
+--- a/dist/model/FileTreeController.js
++++ b/dist/model/FileTreeController.js
+@@ -1,3 +1,4 @@
++import { createRowGeometry } from "./rowGeometry.js";
+ import { PathStore } from "../path-store/src/store.js";
+ import "../path-store/src/index.js";
+ import { renameFileTreePaths } from "../utils/renameFileTreePaths.js";
+@@ -80,6 +81,7 @@ var FileTreeController = class FileTreeController {
+ 			writable: true
+ 		});
+ 	}
++	#rowGeometry = null;
+ 	#baseOptions;
+ 	#listeners = /* @__PURE__ */ new Set();
+ 	#mutationListeners = /* @__PURE__ */ new Map();
+@@ -258,6 +260,14 @@ var FileTreeController = class FileTreeController {
+ 	getVisibleCount() {
+ 		return this.#visibleCount;
+ 	}
++	getRowGeometry(itemHeight, fileItemHeight = itemHeight) {
++		const cached = this.#rowGeometry;
++		if (cached != null && cached.itemHeight === itemHeight && cached.fileItemHeight === fileItemHeight) return cached.geometry;
++		const directoryIndices = itemHeight === fileItemHeight ? [] : this.#getAllKnownDirectoryPaths().map((path) => this.#getExactCurrentVisibleIndexByPath(path)).filter((index) => index >= 0).sort((a, b) => a - b);
++		const geometry = createRowGeometry(this.#visibleCount, itemHeight, fileItemHeight, directoryIndices);
++		this.#rowGeometry = { itemHeight, fileItemHeight, geometry };
++		return geometry;
++	}
+ 	getVisibleRows(start, end) {
+ 		if (end < start || this.#visibleCount === 0) return [];
+ 		const boundedStart = Math.max(0, start);
+@@ -318,13 +328,13 @@ var FileTreeController = class FileTreeController {
+ 			});
+ 		});
+ 	}
+-	getStickyRowCandidates(scrollTop, itemHeight) {
++	getStickyRowCandidates(scrollTop, itemHeight, rowGeometry = this.getRowGeometry(itemHeight)) {
+ 		if (this.#searchVisibleIndices != null) return null;
+ 		if (this.#visibleCount === 0 || scrollTop <= 0 || itemHeight <= 0) return [];
+ 		const stickyRows = [];
+ 		for (let slotDepth = 0; slotDepth < this.#visibleCount; slotDepth += 1) {
+ 			const slotTop = scrollTop + slotDepth * itemHeight;
+-			const thresholdIndex = Math.min(this.#visibleCount - 1, Math.floor(slotTop / itemHeight));
++			const thresholdIndex = Math.min(this.#visibleCount - 1, rowGeometry.firstIntersecting(slotTop));
+ 			const candidateContext = this.#getStickyCandidateContextAt(thresholdIndex, slotDepth) ?? (thresholdIndex > 0 ? this.#getStickyCandidateContextAt(thresholdIndex - 1, slotDepth) : void 0);
+ 			if (candidateContext == null) break;
+ 			stickyRows.push({
+@@ -1084,7 +1094,7 @@ var FileTreeController = class FileTreeController {
+ 			this.#setFocusedIndex(nextIndex);
+ 		}
+ 	}
+-	#rebuildVisibleProjection(focusedPathCandidate, full = true) {
++	#rebuildVisibleProjection(focusedPathCandidate, full = true, invalidateGeometry = true) {
+ 		const rawVisibleCount = this.#store.getVisibleCount();
+ 		this.#storeVisibleCount = rawVisibleCount;
+ 		const projection = createVisibleProjection(this.#store.getVisibleTreeProjectionData(full ? void 0 : Math.min(rawVisibleCount, INITIAL_PROJECTION_ROW_LIMIT)), focusedPathCandidate, full ? (path) => this.#store.getVisibleIndex(path) : void 0);
+@@ -1096,6 +1106,7 @@ var FileTreeController = class FileTreeController {
+ 		this.#projectionPosInSetByIndex = projection.posInSetByIndex;
+ 		this.#projectionSetSizeByIndex = projection.setSizeByIndex;
+ 		this.#syncSearchVisibilityState();
++		if (invalidateGeometry) this.#rowGeometry = null;
+ 		this.#focusedIndex = focusedPathCandidate == null ? this.#getCurrentVisiblePaths().length > 0 ? 0 : -1 : this.#resolveFocusedIndex(focusedPathCandidate);
+ 		this.#focusedPath = this.#focusedIndex < 0 ? null : this.#resolveVisiblePathAtIndex(this.#focusedIndex);
+ 	}
+@@ -1123,7 +1134,7 @@ var FileTreeController = class FileTreeController {
+ 	}
+ 	#ensureFullProjection() {
+ 		if (this.#hasFullProjection) return;
+-		this.#rebuildVisibleProjection(this.#focusedPath, true);
++		this.#rebuildVisibleProjection(this.#focusedPath, true, false);
+ 	}
+ 	#applyMutationState(event) {
+ 		const nextRenamingPath = remapPathThroughMutation(this.#renamingPath, event);
+diff --git a/dist/model/layout.d.ts b/dist/model/layout.d.ts
+index b4469d29dd3655f1f376fbeeb529c53696899e06..dee9458ea93ce700478dc7e0db314e543f38f72a 100644
+--- a/dist/model/layout.d.ts
++++ b/dist/model/layout.d.ts
+@@ -1,3 +1,4 @@
++import { RowGeometry } from "./rowGeometry.js";
+ //#region src/model/layout.d.ts
+ type FileTreeLayoutRow = {
+   ancestorPaths: readonly string[];
+@@ -7,6 +8,7 @@ type FileTreeLayoutRow = {
+ };
+ type FileTreeLayoutMetrics = {
+   itemHeight: number;
++  rowGeometry?: RowGeometry;
+   overscan: number;
+   scrollTop: number;
+   viewportHeight: number;
+@@ -54,7 +56,7 @@ type FileTreeLayoutSnapshot<Row extends FileTreeLayoutRow = FileTreeLayoutRow> =
+     startIndex: number;
+   };
+ };
+-declare function computeStickyRows<Row extends FileTreeLayoutRow>(rows: readonly Row[], scrollTop: number, itemHeight: number): readonly FileTreeLayoutStickyRow<Row>[];
++declare function computeStickyRows<Row extends FileTreeLayoutRow>(rows: readonly Row[], scrollTop: number, itemHeight: number, rowGeometry?: RowGeometry): readonly FileTreeLayoutStickyRow<Row>[];
+ declare function computeFileTreeLayout<Row extends FileTreeLayoutRow>(rows: readonly Row[], metrics: FileTreeLayoutMetrics): FileTreeLayoutSnapshot<Row>;
+ //#endregion
+ export { EMPTY_FILE_TREE_LAYOUT_RANGE, FileTreeLayoutMetrics, FileTreeLayoutRange, FileTreeLayoutRow, FileTreeLayoutSnapshot, FileTreeLayoutStickyRow, computeFileTreeLayout, computeStickyRows };
+diff --git a/dist/model/layout.js b/dist/model/layout.js
+index 38d9ce2ab6c742cc2a9afd3d48046689d043392a..994bfec0fa37feccb1e6f59f47ccea3480d9f9e4 100644
+--- a/dist/model/layout.js
++++ b/dist/model/layout.js
+@@ -1,3 +1,4 @@
++import { createRowGeometry } from "./rowGeometry.js";
+ //#region src/model/layout.ts
+ const EMPTY_FILE_TREE_LAYOUT_RANGE = {
+ 	endIndex: -1,
+@@ -15,21 +16,6 @@ function createRange(startIndex, endIndex) {
+ function isEmptyRange(range) {
+ 	return range.startIndex < 0 || range.endIndex < range.startIndex;
+ }
+-function getRangeHeight(range, itemHeight) {
+-	return isEmptyRange(range) ? 0 : (range.endIndex - range.startIndex + 1) * itemHeight;
+-}
+-function getFirstIntersectingIndex(offset, itemCount, itemHeight) {
+-	if (itemCount <= 0) return -1;
+-	const totalHeight = itemCount * itemHeight;
+-	if (offset <= 0) return 0;
+-	if (offset >= totalHeight) return itemCount;
+-	return Math.floor(offset / itemHeight);
+-}
+-function getLastIntersectingIndex(bottomOffset, itemCount, itemHeight) {
+-	if (itemCount <= 0 || bottomOffset <= 0) return -1;
+-	if (bottomOffset >= itemCount * itemHeight) return itemCount - 1;
+-	return Math.ceil(bottomOffset / itemHeight) - 1;
+-}
+ function getExpandedDirectoryIndicesByDepth(rows) {
+ 	const indicesByDepth = /* @__PURE__ */ new Map();
+ 	rows.forEach((row, index) => {
+@@ -84,7 +70,7 @@ function computeExpandedSubtreeEndIndices(rows) {
+ 	for (const path of openDirectoryPaths) endIndexByPath.set(path, lastIndex);
+ 	return endIndexByPath;
+ }
+-function computeStickyRows(rows, scrollTop, itemHeight) {
++function computeStickyRows(rows, scrollTop, itemHeight, rowGeometry = createRowGeometry(rows.length, itemHeight)) {
+ 	if (rows.length === 0 || scrollTop <= 0) return [];
+ 	const subtreeEndIndexByPath = computeExpandedSubtreeEndIndices(rows);
+ 	const expandedDirectoryIndicesByDepth = getExpandedDirectoryIndicesByDepth(rows);
+@@ -93,7 +79,7 @@ function computeStickyRows(rows, scrollTop, itemHeight) {
+ 		const candidateIndices = expandedDirectoryIndicesByDepth.get(slotDepth);
+ 		if (candidateIndices == null || candidateIndices.length === 0) break;
+ 		const slotTop = scrollTop + slotDepth * itemHeight;
+-		let candidateOffset = findLastIndexAtOrBefore(candidateIndices, Math.min(rows.length - 1, Math.floor(slotTop / itemHeight)));
++		let candidateOffset = findLastIndexAtOrBefore(candidateIndices, Math.min(rows.length - 1, rowGeometry.firstIntersecting(slotTop)));
+ 		let candidate = null;
+ 		while (candidateOffset >= 0) {
+ 			const rowIndex = candidateIndices[candidateOffset];
+@@ -114,7 +100,7 @@ function computeStickyRows(rows, scrollTop, itemHeight) {
+ 			row,
+ 			top: defaultTop
+ 		};
+-		const nextBoundaryTop = nextBoundaryIndex * itemHeight - scrollTop;
++		const nextBoundaryTop = rowGeometry.top(nextBoundaryIndex) - scrollTop;
+ 		return {
+ 			row,
+ 			top: Math.min(defaultTop, nextBoundaryTop - itemHeight)
+@@ -123,25 +109,26 @@ function computeStickyRows(rows, scrollTop, itemHeight) {
+ }
+ function computeFileTreeLayout(rows, metrics) {
+ 	const totalRowCount = metrics.totalRowCount ?? rows.length;
+-	const totalHeight = totalRowCount * metrics.itemHeight;
++	const rowGeometry = metrics.rowGeometry ?? createRowGeometry(totalRowCount, metrics.itemHeight);
++	const totalHeight = rowGeometry.top(totalRowCount);
+ 	const viewportHeight = Math.max(0, metrics.viewportHeight);
+ 	const overscan = Math.max(0, Math.floor(metrics.overscan));
+ 	const maxScrollTop = Math.max(0, totalHeight - viewportHeight);
+ 	const scrollTop = clamp(metrics.scrollTop, 0, maxScrollTop);
+-	const stickyRows = metrics.stickyRows ?? computeStickyRows(rows, scrollTop, metrics.itemHeight);
++	const stickyRows = metrics.stickyRows ?? computeStickyRows(rows, scrollTop, metrics.itemHeight, rowGeometry);
+ 	const stickyHeight = stickyRows.reduce((maximumBottom, entry) => Math.max(maximumBottom, entry.top + metrics.itemHeight), 0);
+ 	const paneTop = Math.min(totalHeight, scrollTop + stickyHeight);
+ 	const paneHeight = Math.max(0, viewportHeight - stickyHeight);
+ 	const contentHeight = Math.max(0, totalHeight - paneTop);
+-	const firstVisiblePhysicalIndex = getFirstIntersectingIndex(scrollTop, totalRowCount, metrics.itemHeight);
+-	const firstProjectedIndex = getFirstIntersectingIndex(paneTop, totalRowCount, metrics.itemHeight);
++	const firstVisiblePhysicalIndex = rowGeometry.firstIntersecting(scrollTop);
++	const firstProjectedIndex = rowGeometry.firstIntersecting(paneTop);
+ 	const firstOccludedIndex = stickyHeight <= 0 || firstVisiblePhysicalIndex < 0 || firstVisiblePhysicalIndex >= totalRowCount ? -1 : firstVisiblePhysicalIndex;
+ 	const lastOccludedIndex = firstOccludedIndex === -1 ? -1 : Math.min(totalRowCount - 1, firstProjectedIndex - 1);
+ 	const occludedCount = firstOccludedIndex === -1 || lastOccludedIndex < firstOccludedIndex ? 0 : lastOccludedIndex - firstOccludedIndex + 1;
+-	const visible = paneHeight <= 0 || firstProjectedIndex >= totalRowCount ? EMPTY_FILE_TREE_LAYOUT_RANGE : createRange(firstProjectedIndex, getLastIntersectingIndex(paneTop + paneHeight, totalRowCount, metrics.itemHeight));
++	const visible = paneHeight <= 0 || firstProjectedIndex >= totalRowCount ? EMPTY_FILE_TREE_LAYOUT_RANGE : createRange(firstProjectedIndex, rowGeometry.lastIntersecting(paneTop + paneHeight));
+ 	const minimumWindowStart = lastOccludedIndex + 1;
+ 	const windowRange = isEmptyRange(visible) ? EMPTY_FILE_TREE_LAYOUT_RANGE : createRange(Math.max(minimumWindowStart, visible.startIndex - overscan), Math.min(totalRowCount - 1, visible.endIndex + overscan));
+-	const windowHeight = getRangeHeight(windowRange, metrics.itemHeight);
++	const windowHeight = isEmptyRange(windowRange) ? 0 : rowGeometry.top(windowRange.endIndex + 1) - rowGeometry.top(windowRange.startIndex);
+ 	return {
+ 		occlusion: {
+ 			firstOccludedIndex,
+@@ -170,7 +157,7 @@ function computeFileTreeLayout(rows, metrics) {
+ 		window: {
+ 			endIndex: windowRange.endIndex,
+ 			height: windowHeight,
+-			offsetTop: isEmptyRange(windowRange) ? 0 : windowRange.startIndex * metrics.itemHeight,
++			offsetTop: isEmptyRange(windowRange) ? 0 : rowGeometry.top(windowRange.startIndex),
+ 			startIndex: windowRange.startIndex
+ 		}
+ 	};
+diff --git a/dist/model/publicTypes.d.ts b/dist/model/publicTypes.d.ts
+index 7c851604626d34fcb838cd0381abfccfcc7728cf..e458b5ad86ca10e7a5668d4e613a3fb7bcbb0a8e 100644
+--- a/dist/model/publicTypes.d.ts
++++ b/dist/model/publicTypes.d.ts
+@@ -109,6 +109,8 @@ type FileTreeItemHandle = FileTreeDirectoryHandle | FileTreeFileHandle;
+ interface FileTreeRenderOptions {
+   initialVisibleRowCount?: number;
+   itemHeight?: number;
++  /** File row height in pixels. Defaults to itemHeight. */
++  fileItemHeight?: number;
+   overscan?: number;
+   stickyFolders?: boolean;
+ }
+diff --git a/dist/model/rowGeometry.d.ts b/dist/model/rowGeometry.d.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..bb49e01d452b645ddf606ec52cce90902a50ee95
+--- /dev/null
++++ b/dist/model/rowGeometry.d.ts
+@@ -0,0 +1,8 @@
++interface RowGeometry {
++  top(index: number): number;
++  height(index: number): number;
++  firstIntersecting(offset: number): number;
++  lastIntersecting(bottom: number): number;
++}
++declare function createRowGeometry(count: number, itemHeight: number, fileItemHeight?: number, directoryIndices?: readonly number[]): RowGeometry;
++export { RowGeometry, createRowGeometry };
+diff --git a/dist/model/rowGeometry.js b/dist/model/rowGeometry.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..6c29718363888f9c64a697387f26e912ddfa8649
+--- /dev/null
++++ b/dist/model/rowGeometry.js
+@@ -0,0 +1,47 @@
++function lowerBound(values, target) {
++	let low = 0;
++	let high = values.length;
++	while (low < high) {
++		const mid = Math.floor((low + high) / 2);
++		if (values[mid] < target) low = mid + 1;
++		else high = mid;
++	}
++	return low;
++}
++function createRowGeometry(count, itemHeight, fileItemHeight = itemHeight, directoryIndices = []) {
++	const uniform = itemHeight === fileItemHeight;
++	const top = uniform ? (index) => index * itemHeight : (index) => index * fileItemHeight + (itemHeight - fileItemHeight) * lowerBound(directoryIndices, index);
++	const totalHeight = top(count);
++	return {
++		top,
++		height: uniform ? () => itemHeight : (index) => directoryIndices[lowerBound(directoryIndices, index)] === index ? itemHeight : fileItemHeight,
++		firstIntersecting(offset) {
++			if (count === 0) return -1;
++			if (offset <= 0) return 0;
++			if (offset >= totalHeight) return count;
++			if (uniform) return Math.floor(offset / itemHeight);
++			let low = 0;
++			let high = count;
++			while (low < high) {
++				const mid = Math.floor((low + high) / 2);
++				if (top(mid + 1) <= offset) low = mid + 1;
++				else high = mid;
++			}
++			return low;
++		},
++		lastIntersecting(bottom) {
++			if (count === 0 || bottom <= 0) return -1;
++			if (bottom >= totalHeight) return count - 1;
++			if (uniform) return Math.ceil(bottom / itemHeight) - 1;
++			let low = 0;
++			let high = count;
++			while (low < high) {
++				const mid = Math.floor((low + high) / 2);
++				if (top(mid) < bottom) low = mid + 1;
++				else high = mid;
++			}
++			return low - 1;
++		}
++	};
++}
++export { createRowGeometry };
+diff --git a/dist/render/FileTree.js b/dist/render/FileTree.js
+index 305714319d9d988bfc025ecaaca662562a3a0ff7..90ccee52efdf2cc50a817230a9e91f35a227261e 100644
+--- a/dist/render/FileTree.js
++++ b/dist/render/FileTree.js
+@@ -2,7 +2,6 @@ import { getBuiltInSpriteSheet, isColoredBuiltInIconSet } from "../builtInIcons.
+ import { FILE_TREE_STYLE_ATTRIBUTE, FILE_TREE_UNSAFE_CSS_ATTRIBUTE, HEADER_SLOT_NAME } from "../constants.js";
+ import { normalizeFileTreeIcons } from "../iconConfig.js";
+ import { resolveFileTreeDensity } from "../model/density.js";
+-import { FILE_TREE_DEFAULT_ITEM_HEIGHT } from "../model/virtualization.js";
+ import style_default from "../style.js";
+ import { escapeStyleTextForHtml, wrapCoreCSS, wrapUnsafeCSS } from "../utils/cssWrappers.js";
+ import { prepareFileTreeShadowRoot } from "../components/web-components.js";
+@@ -26,8 +25,8 @@ function createServerId(explicitId) {
+ 	serverInstanceId += 1;
+ 	return `pst_srv_${serverInstanceId}`;
+ }
+-function resolveInitialViewportHeight({ initialVisibleRowCount, itemHeight }) {
+-	return initialVisibleRowCount == null ? 420 : Math.max(0, initialVisibleRowCount) * (itemHeight ?? FILE_TREE_DEFAULT_ITEM_HEIGHT);
++function resolveInitialViewportHeight({ controller, initialVisibleRowCount, itemHeight, fileItemHeight }) {
++	return initialVisibleRowCount == null ? 420 : controller.getRowGeometry(itemHeight, fileItemHeight).top(Math.max(0, initialVisibleRowCount));
+ }
+ function parseSpriteSheet(spriteSheet) {
+ 	if (typeof document === "undefined") return;
+@@ -83,7 +82,7 @@ var FileTree = class {
+ 	#wroteHostItemHeight = false;
+ 	#wroteHostDensityFactor = false;
+ 	constructor(options) {
+-		const { composition, density, fileTreeSearchMode, gitStatus, id, initialSearchQuery, icons, itemHeight, onSearchChange, onSelectionChange, overscan, renderRowDecoration, renaming, search, searchBlurBehavior, searchFakeFocus, stickyFolders, unsafeCSS, initialVisibleRowCount, ...controllerOptions } = options;
++		const { composition, density, fileTreeSearchMode, gitStatus, id, initialSearchQuery, icons, itemHeight, fileItemHeight, onSearchChange, onSelectionChange, overscan, renderRowDecoration, renaming, search, searchBlurBehavior, searchFakeFocus, stickyFolders, unsafeCSS, initialVisibleRowCount, ...controllerOptions } = options;
+ 		this.#composition = composition;
+ 		this.#id = createClientId(id);
+ 		this.#gitStatusState = resolveFileTreeGitStatusState(gitStatus);
+@@ -98,6 +97,7 @@ var FileTree = class {
+ 		this.#density = resolveFileTreeDensity(density, itemHeight);
+ 		this.#viewOptions = {
+ 			itemHeight: this.#density.itemHeight,
++			fileItemHeight,
+ 			overscan,
+ 			stickyFolders,
+ 			initialVisibleRowCount
+@@ -292,10 +292,13 @@ var FileTree = class {
+ 	#getInitialViewOptions() {
+ 		return {
+ 			initialViewportHeight: resolveInitialViewportHeight({
++				controller: this.#controller,
+ 				initialVisibleRowCount: this.#viewOptions.initialVisibleRowCount,
+-				itemHeight: this.#viewOptions.itemHeight
++				itemHeight: this.#viewOptions.itemHeight,
++				fileItemHeight: this.#viewOptions.fileItemHeight
+ 			}),
+ 			itemHeight: this.#viewOptions.itemHeight,
++			fileItemHeight: this.#viewOptions.fileItemHeight,
+ 			overscan: this.#viewOptions.overscan,
+ 			stickyFolders: this.#viewOptions.stickyFolders
+ 		};
+@@ -447,7 +450,7 @@ var FileTree = class {
+ 	}
+ };
+ function preloadFileTree(options) {
+-	const { composition, density, fileTreeSearchMode, gitStatus, id, initialSearchQuery, icons, itemHeight, onSearchChange: _onSearchChange, onSelectionChange: _onSelectionChange, overscan, renderRowDecoration, renaming, search, searchBlurBehavior, searchFakeFocus, stickyFolders, unsafeCSS, initialVisibleRowCount, ...controllerOptions } = options;
++	const { composition, density, fileTreeSearchMode, gitStatus, id, initialSearchQuery, icons, itemHeight, fileItemHeight, onSearchChange: _onSearchChange, onSelectionChange: _onSelectionChange, overscan, renderRowDecoration, renaming, search, searchBlurBehavior, searchFakeFocus, stickyFolders, unsafeCSS, initialVisibleRowCount, ...controllerOptions } = options;
+ 	const resolvedDensity = resolveFileTreeDensity(density, itemHeight);
+ 	const resolvedItemHeight = resolvedDensity.itemHeight;
+ 	const resolvedId = createServerId(id);
+@@ -459,8 +462,10 @@ function preloadFileTree(options) {
+ 	});
+ 	const gitStatusState = resolveFileTreeGitStatusState(gitStatus);
+ 	const initialViewportHeight = resolveInitialViewportHeight({
++		controller,
+ 		initialVisibleRowCount,
+-		itemHeight: resolvedItemHeight
++		itemHeight: resolvedItemHeight,
++		fileItemHeight
+ 	});
+ 	const normalizedIcons = normalizeFileTreeIcons(icons);
+ 	const customSpriteSheet = normalizedIcons.spriteSheet?.trim() ?? "";
+@@ -476,6 +481,7 @@ function preloadFileTree(options) {
+ 		icons,
+ 		instanceId: resolvedId,
+ 		itemHeight: resolvedItemHeight,
++		fileItemHeight,
+ 		overscan,
+ 		renamingEnabled: renaming != null && renaming !== false,
+ 		renderRowDecoration,
+diff --git a/dist/render/FileTreeView.js b/dist/render/FileTreeView.js
+index 7d3b818c43a7621ab9170da32b180232ed3c9472..d39cc048ad4232eaad051cdd56f4089896ae907c 100644
+--- a/dist/render/FileTreeView.js
++++ b/dist/render/FileTreeView.js
+@@ -41,7 +41,7 @@ function getFileTreeRowAriaLabel(row) {
+ 	if (flattenedSegments == null || flattenedSegments.length === 0) return row.name;
+ 	return flattenedSegments.map((segment) => segment.name).join(" / ");
+ }
+-function computeStickyRowsFromCandidates(candidates, scrollTop, itemHeight, totalRowCount) {
++function computeStickyRowsFromCandidates(candidates, scrollTop, itemHeight, totalRowCount, rowGeometry) {
+ 	return candidates.map((candidate, slotDepth) => {
+ 		const defaultTop = slotDepth * itemHeight;
+ 		const nextBoundaryIndex = candidate.subtreeEndIndex + 1;
+@@ -49,27 +49,29 @@ function computeStickyRowsFromCandidates(candidates, scrollTop, itemHeight, tota
+ 			row: candidate.row,
+ 			top: defaultTop
+ 		};
+-		const nextBoundaryTop = nextBoundaryIndex * itemHeight - scrollTop;
++		const nextBoundaryTop = rowGeometry.top(nextBoundaryIndex) - scrollTop;
+ 		return {
+ 			row: candidate.row,
+ 			top: Math.min(defaultTop, nextBoundaryTop - itemHeight)
+ 		};
+ 	}).filter((entry) => entry.top + itemHeight > 0);
+ }
+-function computeFileTreeViewLayoutState({ controller, itemHeight, overscan, scrollTop, stickyFolders, viewportHeight }) {
++function computeFileTreeViewLayoutState({ controller, itemHeight, fileItemHeight, overscan, scrollTop, stickyFolders, viewportHeight }) {
+ 	const visibleCount = controller.getVisibleCount();
+-	const stickyCandidates = stickyFolders && visibleCount > 0 ? controller.getStickyRowCandidates(scrollTop, itemHeight) : [];
++	const rowGeometry = controller.getRowGeometry(itemHeight, fileItemHeight);
++	const stickyCandidates = stickyFolders && visibleCount > 0 ? controller.getStickyRowCandidates(scrollTop, itemHeight, rowGeometry) : [];
+ 	const visibleRows = stickyCandidates == null && stickyFolders && visibleCount > 0 ? controller.getVisibleRows(0, visibleCount - 1) : [];
+ 	const snapshot = computeFileTreeLayout(visibleRows, {
++		rowGeometry,
+ 		itemHeight,
+ 		overscan,
+ 		scrollTop,
+-		stickyRows: stickyCandidates == null ? void 0 : computeStickyRowsFromCandidates(stickyCandidates, scrollTop, itemHeight, visibleCount),
++		stickyRows: stickyCandidates == null ? void 0 : computeStickyRowsFromCandidates(stickyCandidates, scrollTop, itemHeight, visibleCount, rowGeometry),
+ 		totalRowCount: visibleCount,
+ 		viewportHeight
+ 	});
+-	const previewStickyCandidates = stickyFolders && scrollTop <= 0 && visibleCount > 0 ? controller.getStickyRowCandidates(1, itemHeight) : [];
+-	const overlayRows = previewStickyCandidates != null && scrollTop <= 0 ? computeStickyRowsFromCandidates(previewStickyCandidates, 1, itemHeight, visibleCount) : stickyFolders && scrollTop <= 0 && visibleRows.length > 0 ? computeStickyRows(visibleRows, 1, itemHeight) : snapshot.sticky.rows;
++	const previewStickyCandidates = stickyFolders && scrollTop <= 0 && visibleCount > 0 ? controller.getStickyRowCandidates(1, itemHeight, rowGeometry) : [];
++	const overlayRows = previewStickyCandidates != null && scrollTop <= 0 ? computeStickyRowsFromCandidates(previewStickyCandidates, 1, itemHeight, visibleCount, rowGeometry) : stickyFolders && scrollTop <= 0 && visibleRows.length > 0 ? computeStickyRows(visibleRows, 1, itemHeight, rowGeometry) : snapshot.sticky.rows;
+ 	return {
+ 		overlayHeight: overlayRows.reduce((maxBottom, entry) => Math.max(maxBottom, entry.top + itemHeight), 0),
+ 		overlayRows,
+@@ -401,7 +403,7 @@ function renderFileTreeRowContent(row, resolveIcon, { actionLaneEnabled = false,
+ 	] });
+ }
+ function renderStyledRow(frame, row, key, options = {}) {
+-	const { controller, renameView, visualFocusPath, contextHoverPath, draggedPathSet, dragTarget, dragAndDropEnabled, shouldSuppressContextMenu, handleRowDragStart, handleRowDragEnd, handleRowTouchStart, instanceId, itemHeight, gitStatusByPath, ignoredGitDirectories, ignoredInheritanceCache, directoriesWithGitChanges, gitLaneActive, contextMenuEnabled, contextMenuTriggerMode, contextMenuButtonTriggerEnabled, contextMenuButtonVisibility, contextMenuRightClickEnabled, registerRenameInput, registerButton, resolveIcon, renderDecorationForRow, openContextMenuForRow, onRowClick, onKeyDown } = frame;
++	const { controller, renameView, visualFocusPath, contextHoverPath, draggedPathSet, dragTarget, dragAndDropEnabled, shouldSuppressContextMenu, handleRowDragStart, handleRowDragEnd, handleRowTouchStart, instanceId, itemHeight, fileItemHeight, gitStatusByPath, ignoredGitDirectories, ignoredInheritanceCache, directoriesWithGitChanges, gitLaneActive, contextMenuEnabled, contextMenuTriggerMode, contextMenuButtonTriggerEnabled, contextMenuButtonVisibility, contextMenuRightClickEnabled, registerRenameInput, registerButton, resolveIcon, renderDecorationForRow, openContextMenuForRow, onRowClick, onKeyDown } = frame;
+ 	const targetPath = getFileTreeRowPath(row);
+ 	const { isParked = false, mode = "flow", style } = options;
+ 	const isSticky = mode === "sticky";
+@@ -449,7 +451,7 @@ function renderStyledRow(frame, row, key, options = {}) {
+ 				gitLaneActive
+ 			},
+ 			isParked,
+-			itemHeight,
++			itemHeight: row.kind === "file" ? fileItemHeight : itemHeight,
+ 			mode,
+ 			row,
+ 			state: {
+@@ -517,7 +519,7 @@ function renderRangeChildren(frame, range, hiddenRowPaths) {
+ 	if (range.end < range.start) return [];
+ 	return frame.controller.getVisibleRows(range.start, range.end).filter((row) => !hiddenRowPaths.has(getFileTreeRowPath(row))).map((row, slotIndex) => renderStyledRow(frame, row, range.start + slotIndex));
+ }
+-function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDirectories, directoriesWithGitChanges, icons, instanceId, itemHeight = FILE_TREE_DEFAULT_ITEM_HEIGHT, overscan = 10, renamingEnabled = false, renderRowDecoration, searchBlurBehavior = "close", searchEnabled = false, searchFakeFocus = false, slotHost, stickyFolders = false, initialViewportHeight = 420 }) {
++function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDirectories, directoriesWithGitChanges, icons, instanceId, itemHeight = FILE_TREE_DEFAULT_ITEM_HEIGHT, fileItemHeight = itemHeight, overscan = 10, renamingEnabled = false, renderRowDecoration, searchBlurBehavior = "close", searchEnabled = false, searchFakeFocus = false, slotHost, stickyFolders = false, initialViewportHeight = 420 }) {
+ 	"use no memo";
+ 	const contextMenuAnchorRef = useRef(null);
+ 	const contextMenuTriggerRef = useRef(null);
+@@ -603,9 +605,11 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
+ 		searchInputUserInteractedRef.current = true;
+ 		setFakeSearchFocusActive((previous) => previous ? false : previous);
+ 	}, []);
++	const getRowGeometry = useCallback(() => controller.getRowGeometry(itemHeight, fileItemHeight), [controller, itemHeight, fileItemHeight]);
+ 	const [layoutState, setLayoutState] = useState(() => computeFileTreeViewLayoutState({
+ 		controller,
+ 		itemHeight,
++		fileItemHeight,
+ 		overscan,
+ 		scrollTop: 0,
+ 		stickyFolders,
+@@ -738,7 +742,7 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
+ 		if (controller.isSearchOpen()) {
+ 			const scrollElement = scrollRef.current;
+ 			const viewportHeight = readMeasuredViewportHeight(scrollElement, resolvedViewportHeight);
+-			restoreTreeFocusViewportOffsetRef.current = focusedIndex < 0 || scrollElement == null ? null : Math.max(0, Math.min(focusedIndex * itemHeight - scrollElement.scrollTop, Math.max(0, viewportHeight - itemHeight)));
++			restoreTreeFocusViewportOffsetRef.current = focusedIndex < 0 || scrollElement == null ? null : Math.max(0, Math.min(getRowGeometry().top(focusedIndex) - scrollElement.scrollTop, Math.max(0, viewportHeight - getRowGeometry().height(focusedIndex))));
+ 			restoreTreeFocusAfterSearchCloseRef.current = true;
+ 		}
+ 		if (controller.startRenaming(path) === false) return;
+@@ -747,7 +751,9 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
+ 	}, [
+ 		controller,
+ 		focusedIndex,
++		getRowGeometry,
+ 		itemHeight,
++		fileItemHeight,
+ 		renamingEnabled,
+ 		resolvedViewportHeight
+ 	]);
+@@ -760,23 +766,26 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
+ 		const focusedRow = controller.getVisibleRows(visibleIndex, visibleIndex)[0] ?? null;
+ 		if (focusedRow == null) return false;
+ 		const liveViewportHeight = readMeasuredViewportHeight(scrollElement, resolvedViewportHeight);
+-		const liveTotalHeight = controller.getVisibleCount() * itemHeight;
++		const liveTotalHeight = getRowGeometry().top(controller.getVisibleCount());
+ 		const targetViewportOffset = targetOffset === "sticky-parents" ? focusedRow.ancestorPaths.length * itemHeight : computeFileTreeViewLayoutState({
+ 			controller,
+ 			itemHeight,
++			fileItemHeight,
+ 			overscan,
+ 			scrollTop: scrollElement.scrollTop,
+ 			stickyFolders,
+ 			viewportHeight: liveViewportHeight
+ 		}).snapshot.sticky.height;
+ 		domFocusOwnerRef.current = true;
+-		scrollFocusedRowToViewportOffset(scrollElement, visibleIndex, itemHeight, liveViewportHeight, liveTotalHeight, targetViewportOffset);
++		scrollFocusedRowToViewportOffset(scrollElement, visibleIndex, getRowGeometry(), liveViewportHeight, liveTotalHeight, targetViewportOffset);
+ 		updateViewportRef.current();
+ 		pendingStickyFocusPathRef.current = restoreTreeFocus ? path : null;
+ 		return true;
+ 	}, [
+ 		controller,
++		getRowGeometry,
+ 		itemHeight,
++		fileItemHeight,
+ 		overscan,
+ 		resolvedViewportHeight,
+ 		stickyFolders
+@@ -1071,7 +1080,7 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
+ 				if (currentFocusedPath != null) controller.selectOnlyPath(currentFocusedPath);
+ 				const scrollElement = scrollRef.current;
+ 				const viewportHeight = readMeasuredViewportHeight(scrollElement, resolvedViewportHeight);
+-				restoreTreeFocusViewportOffsetRef.current = focusedIndex < 0 || scrollElement == null ? null : Math.max(0, Math.min(focusedIndex * itemHeight - scrollElement.scrollTop, Math.max(0, viewportHeight - itemHeight)));
++				restoreTreeFocusViewportOffsetRef.current = focusedIndex < 0 || scrollElement == null ? null : Math.max(0, Math.min(getRowGeometry().top(focusedIndex) - scrollElement.scrollTop, Math.max(0, viewportHeight - getRowGeometry().height(focusedIndex))));
+ 				restoreTreeFocusAfterSearchCloseRef.current = true;
+ 				controller.closeSearch();
+ 			} else if (event.key === "ArrowDown") controller.focusNextSearchMatch();
+@@ -1272,11 +1281,12 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
+ 		const update = () => {
+ 			const nextItemCount = controller.getVisibleCount();
+ 			const nextViewportHeight = getCachedViewportHeight(measuredViewportHeightRef.current, initialViewportHeight);
+-			const maxScrollTop = Math.max(0, nextItemCount * itemHeight - nextViewportHeight);
++			const maxScrollTop = Math.max(0, getRowGeometry().top(nextItemCount) - nextViewportHeight);
+ 			if (scrollElement.scrollTop > maxScrollTop) scrollElement.scrollTop = maxScrollTop;
+ 			setLayoutState(computeFileTreeViewLayoutState({
+ 				controller,
+ 				itemHeight,
++				fileItemHeight,
+ 				overscan,
+ 				scrollTop: Math.min(scrollElement.scrollTop, maxScrollTop),
+ 				stickyFolders,
+@@ -1289,7 +1299,7 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
+ 			if (initialFocusedIndex >= 0) {
+ 				const initialViewportHeightPx = getCachedViewportHeight(measuredViewportHeightRef.current, initialViewportHeight);
+ 				const initialFocusedRow = controller.getVisibleRows(initialFocusedIndex, initialFocusedIndex)[0] ?? null;
+-				scrollFocusedRowIntoView(scrollElement, initialFocusedIndex, itemHeight, initialViewportHeightPx, stickyFolders && initialFocusedRow != null ? Math.max(0, Math.min(initialFocusedRow.ancestorPaths.length * itemHeight, Math.max(0, initialViewportHeightPx - itemHeight))) : 0);
++				scrollFocusedRowIntoView(scrollElement, initialFocusedIndex, getRowGeometry(), initialViewportHeightPx, stickyFolders && initialFocusedRow != null ? Math.max(0, Math.min(initialFocusedRow.ancestorPaths.length * itemHeight, Math.max(0, initialViewportHeightPx - getRowGeometry().height(initialFocusedIndex)))) : 0);
+ 			}
+ 		}
+ 		updateViewportRef.current = update;
+@@ -1389,7 +1399,9 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
+ 	}, [
+ 		controller,
+ 		initialViewportHeight,
++		getRowGeometry,
+ 		itemHeight,
++		fileItemHeight,
+ 		overscan,
+ 		stickyFolders
+ 	]);
+@@ -1501,18 +1513,18 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
+ 			const scrollRequestIndex = scrollRequest.visibleIndex;
+ 			const scrollRequestRow = controller.getVisibleRows(scrollRequestIndex, scrollRequestIndex)[0] ?? null;
+ 			if (scrollRequestRow != null) {
+-				const scrollRequestTopInset = stickyFolders ? Math.max(0, Math.min(scrollRequestRow.ancestorPaths.length * itemHeight, Math.max(0, resolvedViewportHeight - itemHeight))) : stickyOverlayHeight;
++				const scrollRequestTopInset = stickyFolders ? Math.max(0, Math.min(scrollRequestRow.ancestorPaths.length * itemHeight, Math.max(0, resolvedViewportHeight - getRowGeometry().height(scrollRequestIndex)))) : stickyOverlayHeight;
+ 				shouldSuppressDomFocusForScrollRequest = true;
+-				shouldUpdateViewportForScrollRequest = scrollFocusedRowToOffset(scrollElement, scrollRequestIndex, itemHeight, resolvedViewportHeight, totalScrollableHeight, scrollRequest.offset, scrollRequestTopInset);
++				shouldUpdateViewportForScrollRequest = scrollFocusedRowToOffset(scrollElement, scrollRequestIndex, getRowGeometry(), resolvedViewportHeight, totalScrollableHeight, scrollRequest.offset, scrollRequestTopInset);
+ 			}
+ 			controller.clearScrollRequest(scrollRequest.id);
+ 		}
+-		const shouldRestoreFocusedRowViewportOffset = !shouldSuppressDomFocusForScrollRequest && shouldRestoreTreeFocusAfterSearchClose && scrollFocusedRowToViewportOffset(scrollElement, focusedIndex, itemHeight, resolvedViewportHeight, totalScrollableHeight, preservedViewportOffset);
+-		const shouldRestoreStickyFocusedRowViewportOffset = !shouldSuppressDomFocusForScrollRequest && pendingStickyFocusPath != null && pendingStickyFocusPath === focusedPath && scrollFocusedRowToViewportOffset(scrollElement, focusedIndex, itemHeight, resolvedViewportHeight, totalScrollableHeight, stickyOverlayHeight);
+-		const shouldRestoreStickyKeyboardViewportOffset = !shouldSuppressDomFocusForScrollRequest && pendingStickyKeyboardViewportOffset != null && pendingStickyKeyboardViewportOffset.path === focusedPath && scrollFocusedRowToViewportOffset(scrollElement, focusedIndex, itemHeight, resolvedViewportHeight, totalScrollableHeight, pendingStickyKeyboardViewportOffset.viewportOffset);
++		const shouldRestoreFocusedRowViewportOffset = !shouldSuppressDomFocusForScrollRequest && shouldRestoreTreeFocusAfterSearchClose && scrollFocusedRowToViewportOffset(scrollElement, focusedIndex, getRowGeometry(), resolvedViewportHeight, totalScrollableHeight, preservedViewportOffset);
++		const shouldRestoreStickyFocusedRowViewportOffset = !shouldSuppressDomFocusForScrollRequest && pendingStickyFocusPath != null && pendingStickyFocusPath === focusedPath && scrollFocusedRowToViewportOffset(scrollElement, focusedIndex, getRowGeometry(), resolvedViewportHeight, totalScrollableHeight, stickyOverlayHeight);
++		const shouldRestoreStickyKeyboardViewportOffset = !shouldSuppressDomFocusForScrollRequest && pendingStickyKeyboardViewportOffset != null && pendingStickyKeyboardViewportOffset.path === focusedPath && scrollFocusedRowToViewportOffset(scrollElement, focusedIndex, getRowGeometry(), resolvedViewportHeight, totalScrollableHeight, pendingStickyKeyboardViewportOffset.viewportOffset);
+ 		const shouldRestoreStickyKeyboardScrollTop = !shouldSuppressDomFocusForScrollRequest && pendingStickyKeyboardScrollTop != null && pendingStickyKeyboardScrollTop.path === focusedPath && scrollElement.scrollTop !== pendingStickyKeyboardScrollTop.scrollTop;
+ 		if (shouldRestoreStickyKeyboardScrollTop) scrollElement.scrollTop = pendingStickyKeyboardScrollTop.scrollTop;
+-		if (shouldRestoreStickyKeyboardScrollTop || shouldUpdateViewportForScrollRequest || shouldRestoreStickyFocusedRowViewportOffset || shouldRestoreStickyKeyboardViewportOffset || shouldRestoreFocusedRowViewportOffset || shouldOwnDomFocus && focusedPathChanged && pendingStickyFocusPath !== focusedPath && !shouldPreserveStickyKeyboardFocusViewport && scrollFocusedRowIntoView(scrollElement, focusedIndex, itemHeight, resolvedViewportHeight, stickyOverlayHeight)) updateViewportRef.current();
++		if (shouldRestoreStickyKeyboardScrollTop || shouldUpdateViewportForScrollRequest || shouldRestoreStickyFocusedRowViewportOffset || shouldRestoreStickyKeyboardViewportOffset || shouldRestoreFocusedRowViewportOffset || shouldOwnDomFocus && focusedPathChanged && pendingStickyFocusPath !== focusedPath && !shouldPreserveStickyKeyboardFocusViewport && scrollFocusedRowIntoView(scrollElement, focusedIndex, getRowGeometry(), resolvedViewportHeight, stickyOverlayHeight)) updateViewportRef.current();
+ 		if (shouldSuppressDomFocusForScrollRequest) {
+ 			previousFocusedPathRef.current = focusedPath;
+ 			return;
+@@ -1531,7 +1543,7 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
+ 		}
+ 		if (focusedButton == null) {
+ 			if (shouldRestoreTreeFocusAfterSearchClose && focusedIndex >= 0) {
+-				scrollFocusedRowToViewportOffset(scrollElement, focusedIndex, itemHeight, resolvedViewportHeight, totalScrollableHeight, preservedViewportOffset);
++				scrollFocusedRowToViewportOffset(scrollElement, focusedIndex, getRowGeometry(), resolvedViewportHeight, totalScrollableHeight, preservedViewportOffset);
+ 				updateViewportRef.current();
+ 			}
+ 			previousFocusedPathRef.current = focusedPath;
+@@ -1552,7 +1564,9 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
+ 		focusedIndex,
+ 		focusedPath,
+ 		focusedRowIsMounted,
++		getRowGeometry,
+ 		itemHeight,
++		fileItemHeight,
+ 		isRenaming,
+ 		isSearchOpen,
+ 		range,
+@@ -1646,11 +1660,11 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
+ 	const windowStickyBottomInset = Math.min(0, resolvedViewportHeight - windowHeight - stickyOverlayHeight);
+ 	const shouldRenderParkedFocusedRow = activeItemPath === focusedPath || restoreTreeFocusAfterSearchCloseRef.current;
+ 	const parkedFocusedRow = focusedPath != null && shouldRenderParkedFocusedRow && !focusedRowIsMounted && focusedIndex >= 0 ? visibleRows[focusedIndex] ?? controller.getVisibleRows(focusedIndex, focusedIndex)[0] ?? null : null;
+-	const parkedFocusedRowOffset = parkedFocusedRow == null ? null : getParkedFocusedRowOffset(focusedIndex, itemHeight, range, windowHeight);
++	const parkedFocusedRowOffset = parkedFocusedRow == null ? null : getParkedFocusedRowOffset(focusedIndex, getRowGeometry(), range, windowHeight);
+ 	const draggedRowSnapshot = dragRowSnapshotRef.current;
+ 	const draggedRowIsMounted = draggedPrimaryPath != null && draggedRowSnapshot != null && draggedRowSnapshot.path === draggedPrimaryPath && draggedRowSnapshot.index >= range.start && draggedRowSnapshot.index <= range.end;
+ 	const parkedDraggedRow = draggedPrimaryPath != null && draggedRowSnapshot != null && draggedRowSnapshot.path === draggedPrimaryPath && !draggedRowIsMounted && draggedRowSnapshot.path !== parkedFocusedRow?.path ? draggedRowSnapshot : null;
+-	const parkedDraggedRowOffset = parkedDraggedRow == null ? null : getParkedFocusedRowOffset(parkedDraggedRow.index, itemHeight, range, windowHeight);
++	const parkedDraggedRowOffset = parkedDraggedRow == null ? null : getParkedFocusedRowOffset(parkedDraggedRow.index, getRowGeometry(), range, windowHeight);
+ 	const guideStyleText = getFileTreeGuideStyleText((focusedIndex >= 0 ? visibleRows[focusedIndex] ?? controller.getVisibleRows(focusedIndex, focusedIndex)[0] ?? null : null)?.ancestorPaths.at(-1) ?? null);
+ 	const activeDescendantId = isSearchOpen && focusedPath != null ? getFileTreeFocusedRowDomId(instanceId, focusedPath, !focusedRowIsMounted) : void 0;
+ 	const visualFocusPath = contextMenuState?.path ?? (isSearchOpen ? focusedPath : activeItemPath);
+@@ -1752,6 +1766,7 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
+ 		ignoredInheritanceCache,
+ 		instanceId,
+ 		itemHeight,
++		fileItemHeight,
+ 		onKeyDown: handleTreeKeyDown,
+ 		onRowClick: handleRowClick,
+ 		openContextMenuForRow,
+diff --git a/dist/render/focusHelpers.d.ts b/dist/render/focusHelpers.d.ts
+index 61a552a03f5401851aee6eda1face892e01b5889..addeb0fd0dc0cbdb7202a5537480000acf1c1927 100644
+--- a/dist/render/focusHelpers.d.ts
++++ b/dist/render/focusHelpers.d.ts
+@@ -1,3 +1,4 @@
++import { RowGeometry } from "../model/rowGeometry.js";
+ import { FileTreeScrollOffset } from "../model/publicTypes.js";
+ 
+ //#region src/render/focusHelpers.d.ts
+@@ -6,10 +7,10 @@ declare function getActiveTreeElement(rootElement: HTMLElement): HTMLElement | n
+ declare function readMeasuredViewportHeight(scrollElement: HTMLElement | null, fallbackViewportHeight: number): number;
+ declare function getCachedViewportHeight(cachedViewportHeight: number | null, fallbackViewportHeight: number): number;
+ declare function getResizeObserverViewportHeight(entry: ResizeObserverEntry): number | null;
+-declare function scrollFocusedRowIntoView(scrollElement: HTMLElement, focusedIndex: number, itemHeight: number, viewportHeight: number, topInset?: number): boolean;
+-declare function scrollFocusedRowToOffset(scrollElement: HTMLElement, focusedIndex: number, itemHeight: number, viewportHeight: number, totalHeight: number, offset: FileTreeScrollOffset, topInset?: number): boolean;
+-declare function scrollFocusedRowToViewportOffset(scrollElement: HTMLElement, focusedIndex: number, itemHeight: number, viewportHeight: number, totalHeight: number, targetViewportOffset: number): boolean;
+-declare function getParkedFocusedRowOffset(focusedIndex: number, itemHeight: number, range: {
++declare function scrollFocusedRowIntoView(scrollElement: HTMLElement, focusedIndex: number, rowGeometry: RowGeometry, viewportHeight: number, topInset?: number): boolean;
++declare function scrollFocusedRowToOffset(scrollElement: HTMLElement, focusedIndex: number, rowGeometry: RowGeometry, viewportHeight: number, totalHeight: number, offset: FileTreeScrollOffset, topInset?: number): boolean;
++declare function scrollFocusedRowToViewportOffset(scrollElement: HTMLElement, focusedIndex: number, rowGeometry: RowGeometry, viewportHeight: number, totalHeight: number, targetViewportOffset: number): boolean;
++declare function getParkedFocusedRowOffset(focusedIndex: number, rowGeometry: RowGeometry, range: {
+   start: number;
+   end: number;
+ }, windowHeight: number): number | null;
+diff --git a/dist/render/focusHelpers.js b/dist/render/focusHelpers.js
+index 285d149dab1ac745f2cc1bba2057abaf61709b5f..0e25f370052b233ef6751e71e73dc74878fecb78 100644
+--- a/dist/render/focusHelpers.js
++++ b/dist/render/focusHelpers.js
+@@ -32,11 +32,11 @@ function getResizeObserverViewportHeight(entry) {
+ 	if (firstBorderBoxSize != null && Number.isFinite(firstBorderBoxSize.blockSize) && firstBorderBoxSize.blockSize > 0) return firstBorderBoxSize.blockSize;
+ 	return entry.contentRect.height > 0 ? entry.contentRect.height : null;
+ }
+-function scrollFocusedRowIntoView(scrollElement, focusedIndex, itemHeight, viewportHeight, topInset = 0) {
++function scrollFocusedRowIntoView(scrollElement, focusedIndex, rowGeometry, viewportHeight, topInset = 0) {
+ 	const nextScrollTop = computeFocusedRowScrollIntoView({
+ 		currentScrollTop: scrollElement.scrollTop,
+ 		focusedIndex,
+-		itemHeight,
++		rowGeometry,
+ 		topInset,
+ 		viewportHeight
+ 	});
+@@ -44,11 +44,11 @@ function scrollFocusedRowIntoView(scrollElement, focusedIndex, itemHeight, viewp
+ 	scrollElement.scrollTop = nextScrollTop;
+ 	return true;
+ }
+-function scrollFocusedRowToOffset(scrollElement, focusedIndex, itemHeight, viewportHeight, totalHeight, offset, topInset = 0) {
++function scrollFocusedRowToOffset(scrollElement, focusedIndex, rowGeometry, viewportHeight, totalHeight, offset, topInset = 0) {
+ 	const nextScrollTop = computeFocusedRowScrollTopForOffset({
+ 		currentScrollTop: scrollElement.scrollTop,
+ 		focusedIndex,
+-		itemHeight,
++		rowGeometry,
+ 		offset,
+ 		topInset,
+ 		totalHeight,
+@@ -58,11 +58,11 @@ function scrollFocusedRowToOffset(scrollElement, focusedIndex, itemHeight, viewp
+ 	scrollElement.scrollTop = nextScrollTop;
+ 	return true;
+ }
+-function scrollFocusedRowToViewportOffset(scrollElement, focusedIndex, itemHeight, viewportHeight, totalHeight, targetViewportOffset) {
++function scrollFocusedRowToViewportOffset(scrollElement, focusedIndex, rowGeometry, viewportHeight, totalHeight, targetViewportOffset) {
+ 	const nextScrollTop = computeViewportOffsetScrollTop({
+ 		currentScrollTop: scrollElement.scrollTop,
+ 		focusedIndex,
+-		itemHeight,
++		rowGeometry,
+ 		targetViewportOffset,
+ 		totalHeight,
+ 		viewportHeight
+@@ -71,9 +71,9 @@ function scrollFocusedRowToViewportOffset(scrollElement, focusedIndex, itemHeigh
+ 	scrollElement.scrollTop = nextScrollTop;
+ 	return true;
+ }
+-function getParkedFocusedRowOffset(focusedIndex, itemHeight, range, windowHeight) {
++function getParkedFocusedRowOffset(focusedIndex, rowGeometry, range, windowHeight) {
+ 	if (range.end < range.start) return null;
+-	if (focusedIndex < range.start) return -itemHeight;
++	if (focusedIndex < range.start) return -rowGeometry.height(focusedIndex);
+ 	if (focusedIndex > range.end) return windowHeight;
+ 	return null;
+ }
+diff --git a/dist/render/rowAttributes.js b/dist/render/rowAttributes.js
+index 59fe57850ff0e9420f0db11442c9bdc2d3986a04..e7fd9c28b9b6b3567ad6ceb8d37b0da5b894304f 100644
+--- a/dist/render/rowAttributes.js
++++ b/dist/render/rowAttributes.js
+@@ -34,6 +34,7 @@ function computeFileTreeRowElementAttributes(input) {
+ 		role: !isSticky ? "treeitem" : void 0,
+ 		style: {
+ 			minHeight: `${itemHeight}px`,
++			"--trees-row-height": `${itemHeight}px`,
+ 			...extraStyle
+ 		},
+ 		tabIndex: !isSticky && row.isFocused ? 0 : -1,
+diff --git a/dist/render/scrollTarget.d.ts b/dist/render/scrollTarget.d.ts
+index faf21c51d7264258c2dc2cbd8c88654b083644f0..9cf744abf14ed9ce87fce43833e0d5b6e2127eee 100644
+--- a/dist/render/scrollTarget.d.ts
++++ b/dist/render/scrollTarget.d.ts
+@@ -1,9 +1,10 @@
++import { RowGeometry } from "../model/rowGeometry.js";
+ import { FileTreeScrollOffset } from "../model/publicTypes.js";
+ 
+ //#region src/render/scrollTarget.d.ts
+ type FileTreeScrollTargetInput = {
+   focusedIndex: number;
+-  itemHeight: number;
++  rowGeometry: RowGeometry;
+   viewportHeight: number;
+ };
+ type FileTreeMinimalScrollIntoViewInput = FileTreeScrollTargetInput & {
+diff --git a/dist/render/scrollTarget.js b/dist/render/scrollTarget.js
+index d17899911f1d5c493be043ced933c4d981380fb0..b00b0befa03d71b86b1dc87a929c94352fc19a9a 100644
+--- a/dist/render/scrollTarget.js
++++ b/dist/render/scrollTarget.js
+@@ -1,10 +1,10 @@
+ //#region src/render/scrollTarget.ts
+ function computeFocusedRowScrollIntoView(input) {
+-	const { currentScrollTop, focusedIndex, itemHeight, topInset = 0, viewportHeight } = input;
++	const { currentScrollTop, focusedIndex, rowGeometry, topInset = 0, viewportHeight } = input;
+ 	if (focusedIndex < 0) return null;
+ 	const effectiveInset = Math.max(0, topInset);
+-	const itemTop = focusedIndex * itemHeight;
+-	const itemBottom = itemTop + itemHeight;
++	const itemTop = rowGeometry.top(focusedIndex);
++	const itemBottom = itemTop + rowGeometry.height(focusedIndex);
+ 	if (itemTop < currentScrollTop + effectiveInset) {
+ 		const nextScrollTop = Math.max(0, itemTop - effectiveInset);
+ 		return nextScrollTop === currentScrollTop ? null : nextScrollTop;
+@@ -16,29 +16,29 @@ function computeFocusedRowScrollIntoView(input) {
+ 	return null;
+ }
+ function computeFocusedRowScrollTopForOffset(input) {
+-	const { currentScrollTop, focusedIndex, itemHeight, offset, topInset = 0, totalHeight, viewportHeight } = input;
++	const { currentScrollTop, focusedIndex, rowGeometry, offset, topInset = 0, totalHeight, viewportHeight } = input;
+ 	if (offset === "nearest") return computeFocusedRowScrollIntoView({
+ 		currentScrollTop,
+ 		focusedIndex,
+-		itemHeight,
++		rowGeometry,
+ 		topInset,
+ 		viewportHeight
+ 	});
+ 	if (focusedIndex < 0) return null;
+ 	const effectiveInset = Math.max(0, topInset);
+-	const itemTop = focusedIndex * itemHeight;
++	const itemTop = rowGeometry.top(focusedIndex);
+ 	const visibleHeight = Math.max(0, viewportHeight - effectiveInset);
+-	const targetViewportOffset = offset === "center" ? effectiveInset + Math.max(0, (visibleHeight - itemHeight) / 2) : effectiveInset;
++	const targetViewportOffset = offset === "center" ? effectiveInset + Math.max(0, (visibleHeight - rowGeometry.height(focusedIndex)) / 2) : effectiveInset;
+ 	const maxScrollTop = Math.max(0, totalHeight - viewportHeight);
+ 	const nextScrollTop = Math.max(0, Math.min(itemTop - targetViewportOffset, maxScrollTop));
+ 	return nextScrollTop === currentScrollTop ? null : nextScrollTop;
+ }
+ function computeViewportOffsetScrollTop(input) {
+-	const { currentScrollTop, focusedIndex, itemHeight, targetViewportOffset, totalHeight, viewportHeight } = input;
++	const { currentScrollTop, focusedIndex, rowGeometry, targetViewportOffset, totalHeight, viewportHeight } = input;
+ 	if (focusedIndex < 0) return null;
+ 	const effectiveOffset = Math.max(0, targetViewportOffset);
+-	const itemTop = focusedIndex * itemHeight;
+-	const itemBottom = itemTop + itemHeight;
++	const itemTop = rowGeometry.top(focusedIndex);
++	const itemBottom = itemTop + rowGeometry.height(focusedIndex);
+ 	const currentViewportTop = currentScrollTop + effectiveOffset;
+ 	const currentViewportBottom = currentScrollTop + viewportHeight;
+ 	if (itemTop >= currentViewportTop && itemBottom <= currentViewportBottom) return null;

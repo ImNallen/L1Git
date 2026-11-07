@@ -1,4 +1,5 @@
 import { FolderGit2, Plus, TriangleAlert } from "lucide-react";
+import { WorkspaceMotion } from "../components/WorkspaceMotion";
 import { Suspense } from "react";
 import type { AppearanceState } from "../appearance";
 import { History, HistoryPlaceholder } from "../components/History";
@@ -13,6 +14,7 @@ import type { WriteLoop } from "./useWriteLoop";
 import type { WorkspaceApi, WorkspaceView } from "./workspaceView";
 
 export function WorkspacePanes({
+  searchSlot,
   app,
   view,
   history,
@@ -26,6 +28,7 @@ export function WorkspacePanes({
   appearance,
   onAdd,
 }: {
+  searchSlot: HTMLElement | null;
   app: WorkspaceApi;
   view: Pick<WorkspaceView, "opening" | "busy" | "fileOpen">;
   history: Pick<HistoryPane, "model" | "shows">;
@@ -42,10 +45,15 @@ export function WorkspacePanes({
   const { fileDiff, workspace } = app;
   const { model } = history;
   return (
-    <div className="workspace-panes">
+    <WorkspaceMotion
+      root={model?.snapshot.root ?? null}
+      fileOpen={view.fileOpen}
+    >
       {model ? (
         <>
           <History
+            searchSlot={searchSlot}
+            onShowHistory={app.closeFile}
             ref={focus.historyRef}
             model={model}
             selecting={nav.selecting}
@@ -137,6 +145,6 @@ export function WorkspacePanes({
           </div>
         </div>
       )}
-    </div>
+    </WorkspaceMotion>
   );
 }

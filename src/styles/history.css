@@ -64,18 +64,17 @@
 }
 .history-table th {
   text-align: left;
-  font-weight: 450;
+  font-weight: 500;
   font-size: 11px;
-  color: var(--muted);
-  height: 29px;
+  color: var(--workspace-history-heading, var(--muted));
+  height: 32px;
   display: flex;
   align-items: center;
-  border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 0;
   min-width: 0;
 }
 .history-table th:first-child {
-  padding-left: 14px;
+  padding-left: 0;
 }
 .history-table td {
   height: 36px;
@@ -86,11 +85,11 @@
   padding-right: 8px;
   overflow: hidden;
 }
-.history-table td:nth-child(2) {
+.history-table td.graph-column {
   padding: 0;
   overflow: visible;
 }
-.history-table td:nth-child(3) {
+.history-table td.message-cell {
   padding: 0 10px 0 0;
 }
 .history-table th.changes-header,
@@ -99,10 +98,7 @@
   padding-right: 14px;
 }
 .changes-cell {
-  gap: 6px;
   font-family: var(--mono);
-  font-size: 11px;
-  font-weight: 500;
   white-space: nowrap;
 }
 .text-cell span {
@@ -110,28 +106,24 @@
   text-overflow: ellipsis;
   overflow: hidden;
 }
-.history-table td.date-cell,
 .history-table td.sha-cell {
   color: var(--muted);
 }
 .sha-cell {
   padding: 0 8px 0 0;
   font-family: var(--mono);
-  font-size: 11px;
 }
 .diffstat {
   display: flex;
   gap: 2px;
-  margin-left: 2px;
 }
 .diffstat span {
-  width: 8px;
-  height: 8px;
-  border-radius: 2px;
-  background: var(--border-strong);
+  height: 3px;
+  border-radius: 1px;
+  background: var(--workspace-diffstat-neutral, var(--border-strong));
 }
 .diffstat .added {
-  background: var(--success);
+  background: var(--workspace-diffstat-added, var(--success));
 }
 .diffstat .deleted {
   background: var(--deleted);
@@ -141,9 +133,6 @@
 }
 .history-table tr:hover td {
   background: var(--row-hover);
-}
-.history-table tr.selected td {
-  background: var(--row-selected);
 }
 .history-table:focus-visible:has(tr.selected) {
   outline: none;
@@ -168,9 +157,7 @@
   color: var(--text);
   flex: 1;
   min-width: 40px;
-}
-.history-table td.ref-cell {
-  padding: 0 4px 0 14px;
+  font-size: 13px;
 }
 .ref-badges {
   display: flex;
@@ -178,7 +165,7 @@
   gap: 4px;
   min-width: 0;
 }
-.ref-cell > *,
+.message-cell > .ref-badges,
 .commit-cell,
 .text-cell > *,
 .changes-cell > *,
@@ -190,7 +177,7 @@
   tbody
   tr:not(.lit)
   :is(
-    .ref-cell > *,
+    .message-cell > .ref-badges,
     .commit-cell,
     .text-cell > *,
     .changes-cell > *,
@@ -203,7 +190,8 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  color: var(--ref-on-lane);
+  color: var(--blue);
+  background: color-mix(in srgb, currentColor 12%, transparent);
   border-radius: 4px;
   padding: 3px 6px;
   font-size: 11px;
@@ -251,7 +239,7 @@
   flex-shrink: 0;
 }
 .graph-cell path {
-  stroke-width: 1.8px;
+  stroke-width: 2px;
   fill: none;
 }
 .graph-node text {
@@ -309,4 +297,106 @@
   flex-shrink: 0;
   margin-right: 6px;
   color: var(--muted);
+}
+
+.history-table tr {
+  padding-inline: 24px;
+}
+.history-table td.message-cell {
+  gap: 10px;
+}
+.message-cell .ref-badges {
+  flex-shrink: 0;
+  max-width: 45%;
+}
+.message-cell .commit-cell {
+  flex: 1;
+}
+.history-table tr.selected {
+  box-shadow: inset 2px 0 var(--blue);
+  background: var(--row-selected);
+}
+.history-table tr.selected td {
+  background: transparent;
+}
+.history-table tr.selected .commit-subject {
+  font-weight: 500;
+}
+.history-table tr:not(.selected) .commit-subject {
+  color: var(--workspace-history-text, var(--text));
+}
+.toolbar-search-slot .history-search {
+  border: 0;
+  background: transparent;
+  border-radius: 6px;
+  padding-inline: 9px;
+  height: 30px;
+}
+.toolbar-search-slot .history-search:hover,
+.toolbar-search-slot .history-search:focus-within {
+  background: var(--control-hover);
+}
+.history-search input {
+  width: 100%;
+}
+.history-search .icon-button {
+  width: 22px;
+  height: 24px;
+}
+.history-table th {
+  white-space: nowrap;
+}
+
+.history-table td,
+.commit-cell {
+  height: var(--history-row-height);
+}
+.history-table td.changes-cell,
+.history-table th.changes-header {
+  justify-content: flex-start;
+  padding-right: 0;
+}
+.changes-cell {
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 400;
+}
+.changes-cell > .added {
+  width: 55px;
+  flex-shrink: 0;
+  text-align: right;
+}
+.changes-cell > .deleted {
+  width: 40px;
+  flex-shrink: 0;
+  text-align: right;
+}
+.change-stat.deleted.zero {
+  color: var(--text-dim);
+}
+.diffstat {
+  margin-left: 0;
+  opacity: 0.5;
+}
+.diffstat span {
+  width: 7px;
+}
+.sha-cell {
+  font-size: 12px;
+}
+.history .ref-badge {
+  height: 24px;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: color-mix(in srgb, var(--badge-lane) 67%, var(--text)) !important;
+  background: color-mix(in srgb, var(--badge-lane) 12%, transparent);
+}
+.history .ref-badge svg,
+.history .ref-worktree {
+  display: none;
+}
+.history .more-refs {
+  background: none;
+  padding-inline: 2px;
 }

@@ -1,0 +1,50 @@
+[data-code] {
+  scrollbar-gutter: auto;
+}
+[data-diff-type="split"][data-overflow="scroll"] [data-deletions] {
+  border-right: 0;
+}
+[data-diff-type="split"][data-overflow="scroll"] [data-additions] {
+  border-left: 1px solid var(--border);
+}
+[data-column-number] {
+  padding: 0 16px 0 20px;
+  text-align: left;
+  border-inline: 0;
+  font-size: 11px;
+}
+[data-line-number-content] {
+  min-width: 28px;
+}
+[data-indicators="classic"] [data-line] {
+  padding-inline-start: calc(16px + 1ch);
+}
+[data-indicators="classic"] [data-line-type="context"][data-line] {
+  padding-inline-start: 16px;
+}
+[data-separator="metadata"] {
+  font-family: var(--diffs-font-family);
+  font-size: 11px;
+}
+[data-separator="metadata"] [data-separator-wrapper] {
+  inset-inline-start: 0;
+  padding-inline: 24px;
+  color: var(--hunk-text, var(--muted));
+}
+[data-line-type="change-addition"] {
+  --diffs-computed-diff-line-bg: var(--diffs-bg-addition);
+}
+[data-line-type="change-deletion"] {
+  --diffs-computed-diff-line-bg: var(--diffs-bg-deletion);
+}
+/* Let live lines cross columns during layout changes without cloning code. */
+:host([data-layout-motion]) [data-code] {
+  grid-template-columns: var(--motion-columns);
+  contain: layout style;
+  min-width: 0;
+  overflow: visible;
+}
+
+:host([data-layout-motion]) [data-content] {
+  translate: var(--motion-scroll, 0px) 0;
+}

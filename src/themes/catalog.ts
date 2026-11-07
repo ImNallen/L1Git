@@ -80,7 +80,7 @@ export const L1_VARIANTS: Record<Appearance, ThemeVariant> = {
     id: "l1-dark",
     name: "L1 Dark",
     appearance: "dark",
-    swatch: { background: "#0a0a0a", accent: "#346bf1" },
+    swatch: { background: "#101216", accent: "#346bf1" },
     palette: {},
   },
 };

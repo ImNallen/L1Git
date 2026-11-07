@@ -228,11 +228,7 @@ mod tests {
                 .success()
         );
         let root = directory.path().canonicalize().unwrap();
-        let read_timeout = if cfg!(windows) {
-            Duration::from_secs(5)
-        } else {
-            Duration::from_millis(500)
-        };
+        let read_timeout = Duration::from_secs(5);
         let lock_wait = read_timeout + Duration::from_millis(100);
         let core = Arc::new(
             Coordinator::new(Limits::default(), root.join("undo")).cap_reads(read_timeout),

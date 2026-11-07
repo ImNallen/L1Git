@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { FILE_TREE_DENSITY_PRESETS } from "@pierre/trees";
+import { WorkspaceIcon } from "./WorkspaceIcon";
 import type { GitStatus } from "@pierre/trees";
-import { FileTree, useFileTree } from "@pierre/trees/react";
+import { FileTree, useFileTree, useFileTreeSearch } from "@pierre/trees/react";
+import treeStyles from "../styles/changedFileTree.css?inline";
 import focusStyles from "../styles/focus.css?inline";
 import {
   changedFileTreeInput,
@@ -12,6 +13,7 @@ import {
   treePath,
 } from "../domain/changedFiles";
 import type { ChangeStatus } from "../domain/repository";
+import { useTreeMotion } from "./useTreeMotion";
 import { ContextMenu } from "./ContextMenu";
 
 export const changeStatuses = {
@@ -47,7 +49,22 @@ type Props = {
   onRowFocus?: (row: string) => void;
 };
 
-const ITEM_HEIGHT = FILE_TREE_DENSITY_PRESETS.compact.itemHeight;
+const DIRECTORY_HEIGHT = 32;
+const FILE_HEIGHT = 34;
+
+function fittedTreeHeight(
+  model: ReturnType<typeof useFileTree>["model"],
+  maxRows: number | undefined,
+) {
+  if (maxRows === undefined) return 0;
+  return model
+    .getVisibleRows(0, Math.min(model.getVisibleCount(), maxRows) - 1)
+    .reduce(
+      (height, row) =>
+        height + (row.kind === "directory" ? DIRECTORY_HEIGHT : FILE_HEIGHT),
+      8,
+    );
+}
 
 export function ChangedFileTree({
   files,
@@ -79,8 +96,18 @@ export function ChangedFileTree({
     })),
     initialExpansion,
     flattenEmptyDirectories,
-    density: "compact",
-    unsafeCSS: focusStyles,
+    density: "default",
+    itemHeight: DIRECTORY_HEIGHT,
+    fileItemHeight: FILE_HEIGHT,
+    icons: { set: "minimal", colored: false },
+    renderRowDecoration: ({ item }) =>
+      item.kind === "directory"
+        ? { text: String(pathsUnder(files, item).length) }
+        : null,
+    fileTreeSearchMode: "hide-non-matches",
+    searchBlurBehavior: "retain",
+    unsafeCSS: `${focusStyles}
+${treeStyles}`,
     composition:
       actions.length > 0
         ? {
@@ -98,6 +125,8 @@ export function ChangedFileTree({
         onSelectFileRef.current(path);
     },
   });
+  const prepareMotion = useTreeMotion();
+  const search = useFileTreeSearch(model);
   useEffect(() => {
     const shown = selectedPath === null ? null : treePath(selectedPath);
     syncing.current = true;
@@ -107,12 +136,12 @@ export function ChangedFileTree({
       model.getItem(shown)?.select();
     syncing.current = false;
   }, [model, selectedPath]);
-  const [rows, setRows] = useState(() => model.getVisibleCount());
+  const [height, setHeight] = useState(() => fittedTreeHeight(model, maxRows));
   useEffect(() => {
     if (maxRows === undefined) return;
-    const count = () => setRows(model.getVisibleCount());
-    count();
-    return model.subscribe(count);
+    const resize = () => setHeight(fittedTreeHeight(model, maxRows));
+    resize();
+    return model.subscribe(resize);
   }, [model, maxRows]);
   useEffect(() => {
     if (refocusPath === null) return;
@@ -134,6 +163,8 @@ export function ChangedFileTree({
   const tree = (
     <FileTree
       model={model}
+      onClickCapture={prepareMotion}
+      onKeyDownCapture={prepareMotion}
       className="changed-file-tree"
       onFocus={(event) => {
         const [row] = event.nativeEvent.composedPath();
@@ -178,12 +209,28 @@ export function ChangedFileTree({
       }
     />
   );
-  if (maxRows === undefined) return tree;
+  if (maxRows === undefined)
+    return (
+      <>
+        <label className="changed-files-filter">
+          <WorkspaceIcon name="Search" />
+          <input
+            aria-label="Filter changed files"
+            placeholder="Filter changed files…"
+            value={search.value}
+            onChange={(event) => {
+              search.setValue(event.target.value || null);
+            }}
+          />
+        </label>
+        {search.value && search.matchingPaths.length === 0 && (
+          <p className="tree-hint">No changed files match.</p>
+        )}
+        {tree}
+      </>
+    );
   return (
-    <div
-      className="fitted-file-tree"
-      style={{ height: Math.min(rows, maxRows) * ITEM_HEIGHT + 8 }}
-    >
+    <div className="fitted-file-tree" style={{ height }}>
       {tree}
     </div>
   );

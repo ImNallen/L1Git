@@ -1,4 +1,5 @@
-import { PanelLeft, PanelRight } from "lucide-react";
+import { WorkspaceIcon } from "../components/WorkspaceIcon";
+import { PanelLeft } from "lucide-react";
 import { flushSync } from "react-dom";
 import type { Layout } from "./useLayout";
 
@@ -18,7 +19,12 @@ export function SidebarToggle({
       aria-pressed={layout.sidebarOpen}
       onClick={() => {
         flushSync(toggle);
-        layout.sidebarToggleRef.current?.focus();
+        (
+          layout.sidebarToggleRef.current ??
+          document.querySelector<HTMLElement>(
+            ".repository-open[aria-current='true']",
+          )
+        )?.focus();
       }}
     >
       <PanelLeft size={16} />
@@ -48,7 +54,7 @@ export function InspectorToggle({
         layout.inspectorToggleRef.current?.focus();
       }}
     >
-      <PanelRight size={16} />
+      <WorkspaceIcon name="Panel" />
     </button>
   );
 }

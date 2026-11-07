@@ -253,6 +253,7 @@ export function useNavigation({
         (focused === pending.from ||
           focused === document.body ||
           focused === sidebarToggleRef.current ||
+          focused?.matches(".repository-open[aria-current='true']") ||
           focused?.closest(".history-table"))
       )
         historyRef.current?.focus();

@@ -1,4 +1,11 @@
-import { useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
+import { prepareDiffMotion } from "./diffMotion";
 import { ConflictResolver } from "./ConflictResolver";
 import type { WritesView } from "../useWrites";
 import type { Ref } from "react";
@@ -25,8 +32,6 @@ export type FileDiffHandle = {
 const VIEWS: { view: View; label: string }[] = [
   { view: "unified", label: "Unified" },
   { view: "split", label: "Split" },
-  { view: "history", label: "History" },
-  { view: "blame", label: "Blame" },
 ];
 
 type Props = {
@@ -61,6 +66,9 @@ export function FileDiffPane({
   parts,
   writes,
 }: Props) {
+  const pane = useRef<HTMLElement>(null);
+  const stopMotion = useRef<(() => void) | null>(null);
+  useEffect(() => () => stopMotion.current?.(), []);
   const backRef = useRef<HTMLButtonElement>(null);
   const [mode, setMode] = useState<"diff" | "history" | "blame">("diff");
   const revision = revisionOf(state);
@@ -78,6 +86,13 @@ export function FileDiffPane({
     if (next === "history" || next === "blame") setMode(next);
     else {
       setMode("diff");
+      if (next !== diffStyle && pane.current) {
+        stopMotion.current = prepareDiffMotion(
+          pane.current,
+          next,
+          stopMotion.current,
+        );
+      }
       onDiffStyle(next);
     }
   };
@@ -87,7 +102,11 @@ export function FileDiffPane({
   }));
   const look = { diffStyle, theme, painted };
   return (
-    <section className="file-diff" aria-label={`Changes to ${state.path}`}>
+    <section
+      ref={pane}
+      className="file-diff"
+      aria-label={`Changes to ${state.path}`}
+    >
       <header className="file-diff-toolbar">
         <button
           ref={backRef}
@@ -105,7 +124,12 @@ export function FileDiffPane({
           <span className="file-diff-side">{sideLabels[state.side]}</span>
         )}
         {state.side !== "conflict" && (
-          <div className="diff-style" role="group" aria-label="File view">
+          <div
+            className="diff-style"
+            data-view={view}
+            role="group"
+            aria-label="File view"
+          >
             {VIEWS.map(({ view: each, label }) => {
               const needsCommit =
                 revision === null && (each === "history" || each === "blame");
@@ -128,6 +152,38 @@ export function FileDiffPane({
           </div>
         )}
       </header>
+      {view !== "history" && view !== "blame" && state.side !== "conflict" && (
+        <div className="file-comparison" data-split={view === "split"}>
+          <span className="comparison-base" aria-hidden={view !== "split"}>
+            {state.side === "staged"
+              ? "HEAD"
+              : state.side !== null
+                ? "Index"
+                : state.comparison.base.kind === "commit"
+                  ? state.comparison.base.oid.slice(0, 7)
+                  : "Parent revision"}
+          </span>
+          <span className="comparison-target">
+            {view === "split"
+              ? state.side === "staged"
+                ? "Index"
+                : state.side !== null
+                  ? "Working copy"
+                  : state.comparison.target.kind === "commit"
+                    ? "Selected commit"
+                    : "Working copy"
+              : state.side !== null
+                ? state.side === "staged"
+                  ? "Staged changes against HEAD"
+                  : "Working copy changes against the index"
+                : state.comparison.base.kind === "commit"
+                  ? `Changes against ${state.comparison.base.oid.slice(0, 7)}`
+                  : state.comparison.target.kind === "commit"
+                    ? "Changes against parent revision"
+                    : "Working copy changes against HEAD"}
+          </span>
+        </div>
+      )}
       {state.side === "conflict" ? (
         <ConflictResolver
           key={`${state.selection.root}:${state.path}`}

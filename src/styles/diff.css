@@ -8,8 +8,7 @@
   --diffs-font-size: 12px;
   --diffs-header-font-family: "Inter Variable", Inter, sans-serif;
 }
-/* Under a painted theme the diff sits where L1's does: on the canvas in dark, on raised panels in light. */
-:root[data-palette] .file-diff diffs-container {
+.file-diff diffs-container {
   --diffs-bg: var(--canvas);
   --diffs-fg: var(--text-strong);
   /* Pierre seeds these from the theme's terminal.ansiGreen and friends, which a CSS-variable theme leaves as near-transparent placeholders. */
@@ -19,21 +18,18 @@
   background-color: var(--diffs-bg);
   color: var(--diffs-fg);
 }
-:root[data-palette][data-theme="light"] .file-diff diffs-container {
+:root[data-theme="light"] .file-diff diffs-container {
   --diffs-bg: var(--panel-raised);
 }
 .file-diff-toolbar {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 10px 14px;
   border-bottom: 1px solid var(--border);
 }
 .file-diff-path {
   flex: 1;
   min-width: 0;
-  font-family: var(--mono);
-  font-size: 11px;
   color: var(--text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -44,7 +40,6 @@
   padding: 2px;
   border: 1px solid var(--border-control);
   border-radius: 6px;
-  background: var(--control);
 }
 .diff-style button {
   height: 26px;
@@ -333,4 +328,95 @@
 }
 .resolution-dialog > .conflict-toolbar {
   justify-content: space-between;
+}
+
+.file-diff-toolbar {
+  flex-shrink: 0;
+  padding-inline: 20px;
+}
+.file-diff-toolbar > .button.secondary {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  padding-inline: 0;
+  color: var(--workspace-toolbar-text, var(--text-secondary));
+}
+.diff-style {
+  background: transparent;
+  border-color: transparent;
+}
+
+.file-diff {
+  --diffs-line-height: 28px;
+}
+.file-diff-toolbar {
+  height: 48px;
+  min-height: 48px;
+  padding: 0 24px;
+}
+.file-diff-path {
+  font-size: 12px;
+}
+.file-diff diffs-container {
+  --diffs-bg-addition-override: color-mix(
+    in srgb,
+    var(--success) 9%,
+    var(--canvas)
+  );
+  --diffs-bg-deletion-override: color-mix(
+    in srgb,
+    var(--deleted) 9%,
+    var(--canvas)
+  );
+  --diffs-bg-separator-override: color-mix(
+    in srgb,
+    var(--text) 4%,
+    var(--canvas)
+  );
+  --diffs-fg-number-override: var(--text-dim);
+}
+.file-diff .diff-style {
+  border: 0;
+  background: transparent;
+  gap: 16px;
+  padding: 0;
+}
+.file-diff .diff-style button {
+  width: 72px;
+  height: 28px;
+  border-radius: 5px;
+  font-size: 12px;
+  color: var(--workspace-toolbar-text, var(--text-icon));
+}
+.file-diff .diff-style button[aria-pressed="true"] {
+  background: var(--workspace-diff-selected, var(--row-hover));
+  color: var(--workspace-toolbar-text, var(--text-body));
+}
+.file-diff-path {
+  font-family: var(--mono);
+  margin-left: 16px;
+  color: var(--workspace-diff-path, var(--text-secondary));
+}
+.file-comparison {
+  padding: 0 24px;
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  color: var(--workspace-diff-comparison, var(--text-dim));
+  font-size: 11px;
+  border-bottom: 1px solid var(--border);
+}
+.file-diff {
+  --diffs-gap-block: 0px;
+}
+
+:root[data-theme="dark"]:not([data-palette]) .file-diff diffs-container {
+  --hunk-text: #8d9bb0;
+  --diffs-bg-separator-override: #181a1e;
+  --diffs-bg-addition-override: #172724;
+  --diffs-bg-deletion-override: #2b1c20;
+  --diffs-fg-number-override: #6f7f78;
+  --diffs-fg-number-addition-override: #6f7f78;
+  --diffs-fg-number-deletion-override: #6f7f78;
+  --diffs-addition-color-override: #80bb9a;
 }

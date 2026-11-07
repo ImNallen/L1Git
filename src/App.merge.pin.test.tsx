@@ -1,3 +1,4 @@
+import { toolbarItem } from "./test/appHarness";
 // @vitest-environment happy-dom
 import { expect, it } from "vitest";
 import {
@@ -49,25 +50,28 @@ const targetReads = (app: Awaited<ReturnType<typeof mountApp>>) =>
 
 it("a selected linked worktree becomes the merge and undo target, a commit selection keeps it, a repository switch resets it", async () => {
   const app = await mountApp({ world: featureHistory });
-  expect(get("button", PIN_UNDO)).toBeTruthy();
+  expect(await toolbarItem(app, "More", PIN_UNDO)).toBeTruthy();
   app.bridge.reset();
   await app.click(historyRow("Uncommitted changes in pin-feature,"));
   expect(targetReads(app)).toEqual([
     "mergeState /fixture/pin-feature",
     "undoHistory /fixture/pin-feature",
   ]);
-  expect(get("button", FEATURE_UNDO)).toBeTruthy();
+  expect(await toolbarItem(app, "More", FEATURE_UNDO)).toBeTruthy();
 
   await app.click(historyRow("Release,"));
   expect(
-    get("button", FEATURE_UNDO),
+    await toolbarItem(app, "More", FEATURE_UNDO),
     "a commit selection keeps it",
   ).toBeTruthy();
 
   await app.click(repositoryRow(OTHER));
   await app.click(repositoryRow(PIN));
   expect(selectedRow()).toBe("Release, Pin Author, 3333333");
-  expect(get("button", PIN_UNDO), "a repository switch resets it").toBeTruthy();
+  expect(
+    await toolbarItem(app, "More", PIN_UNDO),
+    "a repository switch resets it",
+  ).toBeTruthy();
 });
 
 it("returning with the worktree selection restored makes it the target again", async () => {
@@ -78,7 +82,7 @@ it("returning with the worktree selection restored makes it the target again", a
   await app.click(repositoryRow(PIN));
   expect(selectedRow()).toBe("Uncommitted changes in pin-feature, 1 modified");
   expect(
-    get("button", FEATURE_UNDO),
+    await toolbarItem(app, "More", FEATURE_UNDO),
     "the reset on the switch runs before the restored selection sets the target",
   ).toBeTruthy();
 });

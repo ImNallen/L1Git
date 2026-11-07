@@ -389,15 +389,15 @@ export function refRow(
   name: string,
   root: RepositoryRoot = PIN,
 ): HTMLElement | null {
-  const group = [
-    ...document.querySelectorAll(".repository-tree .repository-group"),
-  ].find((candidate) =>
-    candidate.querySelector(`.repository-open[title="${root}"]`),
-  );
   return (
-    [...(group?.querySelectorAll<HTMLElement>(".branch-row") ?? [])].find(
+    [
+      ...document.querySelectorAll<HTMLElement>(".repository-tree .branch-row"),
+    ].find(
       (row) =>
         !hiddenByLayout(row) &&
+        row
+          .closest("[data-repository-root]")
+          ?.getAttribute("data-repository-root") === root &&
         (row.getAttribute("title") ?? "").startsWith(`${name} ·`),
     ) ?? null
   );
@@ -643,4 +643,9 @@ export async function mountApp(options: MountOptions = {}): Promise<Harness> {
     },
   };
   return harness;
+}
+
+export async function toolbarItem(app: Harness, menu: string, label: string) {
+  await app.click(get("button", menu));
+  return get("menuitem", label);
 }

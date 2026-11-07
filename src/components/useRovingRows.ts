@@ -1,9 +1,7 @@
 import { useEffect, type RefObject } from "react";
 
-// The repository chevrons and hover-only visibility toggles stay out: arrows stand in for the first, the context menu for the second.
-// Search disables folder toggles, which cannot take focus, so they drop out too.
-const ROW = "button:not(.repository-toggle, .branch-visibility, :disabled)";
-const SKIPPED = ".repository-toggle, .branch-visibility";
+const ROW = "button:not(.branch-visibility, :disabled)";
+const SKIPPED = ".branch-visibility";
 
 /**
  * Makes the sidebar one Tab stop. Up and Down step through its rows, Home and
@@ -15,7 +13,10 @@ export function useRovingRows(container: RefObject<HTMLElement | null>) {
     const root = container.current;
     if (!root) return;
     let current: HTMLElement | null = null;
-    const rows = () => [...root.querySelectorAll<HTMLElement>(ROW)];
+    const rows = () =>
+      [...root.querySelectorAll<HTMLElement>(ROW)].filter(
+        (row) => !row.closest("[inert]"),
+      );
 
     function sync() {
       const all = rows();
@@ -29,13 +30,13 @@ export function useRovingRows(container: RefObject<HTMLElement | null>) {
         skipped.tabIndex = -1;
     }
 
-    // The toggle that expands a row: the row itself, or a repository's chevron.
     const toggleOf = (row: HTMLElement) =>
-      row.hasAttribute("aria-expanded")
-        ? row
-        : row.classList.contains("repository-open")
-          ? row.parentElement?.querySelector<HTMLElement>(".repository-toggle")
-          : null;
+      row.hasAttribute("aria-expanded") ? row : null;
+
+    const repositoryOf = (row: HTMLElement) =>
+      row
+        .closest("[data-repository-root]")
+        ?.getAttribute("data-repository-root");
 
     function onFocusIn(event: FocusEvent) {
       const target = event.target;
@@ -68,16 +69,25 @@ export function useRovingRows(container: RefObject<HTMLElement | null>) {
           next = all.at(-1);
           break;
         case "ArrowRight":
-          if (expanded === "false") toggle?.click();
+          if (target.classList.contains("repository-open")) {
+            target.click();
+            next = all.find(
+              (row) =>
+                !row.classList.contains("repository-open") &&
+                repositoryOf(row) === repositoryOf(target),
+            );
+          } else if (expanded === "false") toggle?.click();
           else if (expanded === "true") next = all[at + 1];
           else return;
           break;
         case "ArrowLeft":
           if (expanded === "true") toggle?.click();
           else
-            next = target
-              .closest(".repository-group")
-              ?.querySelector<HTMLElement>(".repository-open");
+            next = rows().find(
+              (row) =>
+                row.classList.contains("repository-open") &&
+                repositoryOf(row) === repositoryOf(target),
+            );
           break;
         default:
           return;
@@ -91,7 +101,7 @@ export function useRovingRows(container: RefObject<HTMLElement | null>) {
     observer.observe(root, {
       childList: true,
       subtree: true,
-      attributeFilter: ["disabled"],
+      attributeFilter: ["disabled", "inert"],
     });
     root.addEventListener("focusin", onFocusIn);
     root.addEventListener("keydown", onKeyDown);

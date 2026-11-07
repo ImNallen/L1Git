@@ -1,3 +1,5 @@
+import { repositoryRow } from "./test/appHarness";
+import { toolbarItem } from "./test/appHarness";
 // @vitest-environment happy-dom
 import { expect, it } from "vitest";
 import {
@@ -6,10 +8,12 @@ import {
   installHarness,
   mountApp,
   query,
+  type Harness,
 } from "./test/appHarness";
 import {
   noUpstream,
   OTHER_COMMON_DIR,
+  OTHER,
   PIN,
   PIN_COMMON_DIR,
 } from "./test/fixtures";
@@ -21,12 +25,16 @@ const TODAY_SNAPSHOT_READS_AFTER_FOCUS = 2;
 const TODAY_SNAPSHOT_READS_AFTER_FILE_WRITE = 1;
 const TODAY_SNAPSHOT_READS_AFTER_REF_WRITE = 3;
 
+const refreshRequests = (app: Harness) =>
+  app.bridge.lines().filter((line) => !line.startsWith("lineStats "));
+
 it("window focus rereads overview, snapshot, statuses, undo history, merge state, and sidebar refs", async () => {
   const app = await mountApp();
-  await app.click(get("button", "Expand other"));
+  await app.click(repositoryRow(OTHER));
+  await app.click(repositoryRow(PIN));
   app.bridge.reset();
   await app.refocusWindow();
-  expect(app.bridge.lines()).toMatchInlineSnapshot(`
+  expect(refreshRequests(app)).toMatchInlineSnapshot(`
     [
       "overview /fixture/pin local",
       "undoHistory /fixture/pin",
@@ -54,13 +62,13 @@ it("a second focus within 1 s and a focus while the document is hidden do nothin
   await app.refocusWindow();
   app.bridge.reset();
   await app.refocusWindow();
-  expect(app.bridge.lines(), "throttled for 1 s").toEqual([]);
+  expect(refreshRequests(app), "throttled for 1 s").toEqual([]);
   app.dom.clock.offset += 1_000;
   app.dom.setHidden(true);
   await app.act(() => {
     document.dispatchEvent(new Event("visibilitychange"));
   });
-  expect(app.bridge.lines(), "skipped while hidden").toEqual([]);
+  expect(refreshRequests(app), "skipped while hidden").toEqual([]);
   app.dom.setHidden(false);
   await app.act(() => {
     document.dispatchEvent(new Event("visibilitychange"));
@@ -76,7 +84,7 @@ it("refs-changed for the active root rereads all; for another root it does nothi
   await app.act(() =>
     app.modules.overview.overviewStore().refreshLocal(PIN_COMMON_DIR),
   );
-  expect(app.bridge.lines()).toMatchInlineSnapshot(`
+  expect(refreshRequests(app)).toMatchInlineSnapshot(`
     [
       "overview /fixture/pin local",
       "undoHistory /fixture/pin",
@@ -91,7 +99,7 @@ it("refs-changed for the active root rereads all; for another root it does nothi
   await app.act(() =>
     app.modules.overview.overviewStore().refreshLocal(OTHER_COMMON_DIR),
   );
-  expect(app.bridge.lines()).toMatchInlineSnapshot(`
+  expect(refreshRequests(app)).toMatchInlineSnapshot(`
     [
       "overview /fixture/other local",
       "preparePush /fixture/other",
@@ -105,7 +113,7 @@ it("staging a file ends in write, history and status, refreshLocal, then the ful
   await app.click(historyRow("Uncommitted changes in pin,"));
   app.bridge.reset();
   await app.click(get("button", "Stage all"));
-  expect(app.bridge.lines()).toMatchInlineSnapshot(`
+  expect(refreshRequests(app)).toMatchInlineSnapshot(`
     [
       "write /fixture/pin stageFiles",
       "undoHistory /fixture/pin",
@@ -131,7 +139,7 @@ it("creating a branch requests the snapshot three times (pins current behavior)"
   await app.type(get("textbox", "Branch name"), "release-fix");
   app.bridge.reset();
   await app.click(get("button", "Create branch"));
-  expect(app.bridge.lines()).toMatchInlineSnapshot(`
+  expect(refreshRequests(app)).toMatchInlineSnapshot(`
     [
       "write /fixture/pin createBranch",
       "overview /fixture/pin local",
@@ -169,7 +177,7 @@ it("Try again on a read error runs refreshRepository", async () => {
   restore();
   app.bridge.reset();
   await app.click(get("button", "Try again"));
-  expect(app.bridge.lines()).toMatchInlineSnapshot(`
+  expect(refreshRequests(app)).toMatchInlineSnapshot(`
     [
       "overview /fixture/pin local",
       "undoHistory /fixture/pin",
@@ -203,7 +211,7 @@ it("adding a remote in Publish refreshes the overview and rereads the repository
     name: (request.remote as { name: string }).name,
     refresh: { kind: "refreshed", options },
   }));
-  await app.click(get("button", "Publish branch…"));
+  await app.click(await toolbarItem(app, "Push", "Publish branch…"));
   await app.click(get("button", "Add remote…"));
   await app.type(get("textbox", "Remote name"), "upstream");
   await app.type(
@@ -212,7 +220,7 @@ it("adding a remote in Publish refreshes the overview and rereads the repository
   );
   app.bridge.reset();
   await app.click(get("button", "Add remote"));
-  expect(app.bridge.lines()).toMatchInlineSnapshot(`
+  expect(refreshRequests(app)).toMatchInlineSnapshot(`
     [
       "addRemote /fixture/pin",
       "overview /fixture/pin local",
@@ -233,14 +241,14 @@ it("while a write runs, Push waits for it and push preparation is redone afterwa
   const write = app.bridge.hold("write", PIN);
   await app.click(get("button", "Stage all"));
   await write.arrived;
-  const push = get("button", "Push");
-  expect(push.getAttribute("title")).toBe(
-    "Wait for the current local write to finish.",
-  );
-  expect((push as HTMLButtonElement).disabled).toBe(true);
+  const push = await toolbarItem(app, "Push", "Push");
+  expect(push.getAttribute("aria-disabled")).toBe("true");
+  await app.click(push);
+  expect(app.bridge.count("push")).toBe(0);
+  await app.press("Escape");
   app.bridge.reset();
   write.release();
   await app.settle();
-  expect(get("button", "Push to origin/main")).toBeTruthy();
+  expect(await toolbarItem(app, "Push", "Push to origin/main")).toBeTruthy();
   expect(app.bridge.count("preparePush", PIN)).toBeGreaterThan(0);
 });

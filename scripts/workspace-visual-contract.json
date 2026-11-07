@@ -1,0 +1,71 @@
+{
+  "viewport": [1920, 960],
+  "geometry": {
+    ".sidebar": { "x": 0, "width": 280 },
+    ".repository-content": { "x": 280, "width": 1280 },
+    ".inspector-container": { "x": 1560, "width": 360 },
+    ".toolbar": { "height": 56 },
+    ".toolbar-search-slot": { "width": 300 },
+    ".history-table thead": { "y": 56, "height": 32 },
+    ".history-table tbody tr[aria-rowindex]": {
+      "width": 1280,
+      "height": 38.090909
+    },
+    ".toolbar-action.fetch": { "x": 304, "width": 94, "height": 32 },
+    ".toolbar-action.pull": { "x": 404, "width": 84 },
+    ".toolbar-action.push": { "x": 494, "width": 88 },
+    ".toolbar-action.branch": { "x": 611, "width": 102 },
+    ".toolbar-action.stash": { "x": 719, "width": 94 },
+    ".toolbar-action.more": { "x": 819, "width": 82 },
+    ".inspector-heading": { "height": 56 },
+    ".changed-files-filter": { "width": 328, "height": 30 },
+    ".changed-files-filter .workspace-icon": { "width": 16, "height": 16 },
+    ".inspector-heading .workspace-icon": {
+      "x": 1884,
+      "width": 16,
+      "height": 16
+    }
+  },
+  "styles": {
+    ".sidebar": { "backgroundColor": "rgb(12, 14, 17)" },
+    ".inspector": { "backgroundColor": "rgb(16, 18, 22)" },
+    ".commit-subject": { "fontSize": "13px" },
+    ".sha-cell": {
+      "fontSize": "12px",
+      "fontFamily": "\"IBM Plex Mono\", monospace"
+    },
+    ".commit-information h2": { "fontSize": "17px", "lineHeight": "24px" },
+    ".repository-row.active": { "boxShadow": "none" },
+    ".toolbar-action.fetch": { "color": "rgb(189, 189, 189)" },
+    ".history-table tr:not(.selected) .commit-subject": {
+      "color": "rgb(227, 232, 239)"
+    },
+    ".commit-information > .sha-chip": { "color": "rgb(184, 184, 184)" },
+    ".commit-information .meta-primary": { "color": "rgb(216, 216, 216)" },
+    ".commit-information .meta-secondary": { "color": "rgb(129, 129, 129)" },
+    ".inspector-refs .ref-badge": {
+      "color": "rgb(182, 182, 182)",
+      "backgroundColor": "rgba(255, 255, 255, 0.04)"
+    },
+    ".changed-files-filter": {
+      "backgroundColor": "rgba(255, 255, 255, 0.03)",
+      "borderTopColor": "rgba(255, 255, 255, 0.07)"
+    },
+    ".history-table th": { "fontWeight": "500", "color": "rgb(152, 163, 178)" },
+    ".history-table tr.selected .commit-subject": { "fontWeight": "500" },
+    ".diffstat .added": { "backgroundColor": "rgb(81, 203, 160)" },
+    ".repository-check": { "maskImage": "none" },
+    ".inspector-heading .workspace-icon": { "maskImage": "none" }
+  },
+  "absent": [
+    ".repository-toggle",
+    ".history-heading",
+    ".repositories-heading strong",
+    ".sidebar .sidebar-toggle"
+  ],
+  "rowGeometry": "838/22px, quantized to a browser layout unit; SVG and virtualization share the same constant. The title above history is intentionally absent.",
+  "responsive": [
+    [1440, 900],
+    [780, 900]
+  ]
+}
