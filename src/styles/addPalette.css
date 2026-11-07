@@ -4,7 +4,17 @@
     var(--primary-bg) 18%,
     var(--row-selected)
   );
+  --add-palette-primary-text: var(--text-input);
   --add-palette-field: color-mix(in srgb, var(--text-input) 3%, var(--panel));
+  --add-palette-field-border: var(--border-control);
+  --add-palette-selected: var(--row-selected);
+  --add-palette-disabled: var(--control-hover);
+  --add-palette-disabled-text: var(--text-dim);
+  --add-palette-key: var(--control-hover);
+  --add-palette-repository: var(--success-muted);
+  --add-palette-focus: color-mix(in srgb, var(--focus) 60%, var(--text-strong));
+  --focus-ring: 1.5px solid var(--add-palette-focus);
+  --focus-ring-offset: -1.5px;
   width: 520px;
   max-width: calc(100vw - 40px);
   max-height: calc(100dvh - 40px);
@@ -60,9 +70,8 @@
   margin-right: 8px;
 }
 .add-palette-step-header input:focus {
-  background: var(--add-palette-field);
-  border-color: var(--focus);
-  box-shadow: 0 0 0 1px var(--focus);
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }
 .add-palette-step-header.local input {
   margin-right: 27px;
@@ -91,7 +100,7 @@
   padding: 0 7px 0 9px;
   background: var(--add-palette-primary);
   border-radius: 6px;
-  color: var(--text-input);
+  color: var(--add-palette-primary-text);
   font-size: 12px;
   font-weight: 500;
 }
@@ -102,11 +111,12 @@
   background: color-mix(in srgb, var(--primary-bg) 44%, var(--panel-raised));
 }
 .add-palette-primary:disabled {
-  background: var(--control-hover);
-  color: var(--text-dim);
+  background: var(--add-palette-disabled);
+  color: var(--add-palette-disabled-text);
+  opacity: 1;
 }
 .add-palette-primary kbd {
-  background: color-mix(in srgb, var(--panel-raised) 45%, transparent);
+  background: var(--add-palette-key);
   border-color: transparent;
   color: inherit;
 }
@@ -136,7 +146,7 @@
   cursor: default;
 }
 .add-palette-options li[aria-selected="true"] {
-  background: var(--row-selected);
+  background: var(--add-palette-selected);
   color: var(--text);
 }
 .add-palette-source {
@@ -193,7 +203,7 @@
   font-size: 10.5px;
 }
 .add-palette-directory-kind.repository {
-  color: var(--success-muted);
+  color: var(--add-palette-repository);
 }
 label.add-palette-label {
   margin-top: 3px;
@@ -206,13 +216,13 @@ label.add-palette-label {
   margin: 7px 4px 23px;
   padding: 0 11px;
   background: var(--add-palette-field);
-  border: 1px solid var(--border-control);
+  border: 1px solid var(--add-palette-field-border);
   border-radius: 6px;
   color: var(--muted);
 }
 .add-palette-location:focus-within {
-  border-color: var(--focus);
-  box-shadow: 0 0 0 1px var(--focus);
+  outline: var(--focus-ring);
+  outline-offset: -1px;
 }
 .add-palette-location input {
   flex: 1;
@@ -274,6 +284,6 @@ label.add-palette-label {
   line-height: 1;
 }
 .add-palette-hint kbd {
-  background: var(--control-hover);
+  background: var(--add-palette-key);
   border-color: transparent;
 }
