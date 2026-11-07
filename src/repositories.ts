@@ -7,7 +7,6 @@ import {
 } from "./domain/merge";
 import type { MergeAction } from "./domain/merge";
 import { invoke, isTauri } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-dialog";
 import { z } from "zod";
 import {
   directoryListingSchema,
@@ -307,16 +306,6 @@ export async function cloneRepository(
   } finally {
     signal.removeEventListener("abort", cancel);
   }
-}
-
-export async function chooseDirectory(): Promise<string | null> {
-  if (!native) return null;
-  const result = await open({
-    title: "Add a Git repository",
-    directory: true,
-    multiple: false,
-  });
-  return typeof result === "string" ? result : null;
 }
 
 export async function preparePush(path: RepositoryRoot) {
