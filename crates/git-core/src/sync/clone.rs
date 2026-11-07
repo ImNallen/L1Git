@@ -92,6 +92,10 @@ fn before_clone(target: &Path) -> Result<Before, RepositoryError> {
     }
 }
 
+fn cancelled() -> RepositoryError {
+    RepositoryError::new(ErrorKind::GitFailed, "The clone was cancelled.")
+}
+
 fn remove_partial(target: &Path, before: &Before) -> io::Result<()> {
     let removed = match before {
         Before::Missing => fs::remove_dir_all(target),
@@ -123,7 +127,9 @@ impl Coordinator {
     ) -> Result<NewRepository, RepositoryError> {
         validate_endpoint(url)?;
         let running = self.clones.begin(target)?;
-        let _slot = self.slots.acquire();
+        let Some(_slot) = self.slots.acquire_unless(&running.stop) else {
+            return Err(cancelled());
+        };
         let before = before_clone(target)?;
         let (nearest, path) = runnable(target)?;
         let deadline = self.limits.clone_deadline;
@@ -154,10 +160,10 @@ impl Coordinator {
                     deadline.as_secs()
                 ),
             )),
-            Stoppable::Stopped => Err(stopped(
-                ErrorKind::GitFailed,
-                "The clone was cancelled.".to_owned(),
-            )),
+            Stoppable::Stopped => {
+                let error = cancelled();
+                Err(stopped(error.kind, error.message))
+            }
         }
     }
 
@@ -165,6 +171,73 @@ impl Coordinator {
     pub fn cancel_clone(&self, target: &Path) {
         if let Some(stop) = lock_ignoring_poison(&self.clones.0).get(&resolved_target(target)) {
             stop.store(true, Ordering::SeqCst);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::{Limits, Semaphore};
+    use super::*;
+    use std::{
+        num::NonZeroUsize,
+        sync::mpsc,
+        thread,
+        time::{Duration, Instant},
+    };
+
+    const PATIENCE: Duration = Duration::from_secs(5);
+
+    #[test]
+    fn cancelling_a_clone_that_waits_for_a_slot_frees_its_location() {
+        let directory = tempfile::tempdir().unwrap();
+        let base = directory.path().canonicalize().unwrap();
+        let core = Arc::new(Coordinator::new(Limits::default(), base.join("undo")));
+        let held: Vec<_> = (0..core.limits.network_slots.get())
+            .map(|_| core.slots.acquire())
+            .collect();
+        let target = base.join("waiting");
+        let (sent, finished) = mpsc::channel();
+        let (worker, to) = (Arc::clone(&core), target.clone());
+        thread::spawn(move || {
+            sent.send(worker.clone_repository("https://example.test/app.git", &to))
+                .unwrap();
+        });
+        let started = Instant::now();
+        while lock_ignoring_poison(&core.clones.0).is_empty() {
+            assert!(started.elapsed() < PATIENCE, "the clone never registered");
+            thread::sleep(Duration::from_millis(1));
+        }
+
+        core.cancel_clone(&target);
+
+        let error = finished.recv_timeout(PATIENCE).unwrap().unwrap_err();
+        assert!(error.message.contains("cancelled"), "{}", error.message);
+        assert!(!target.exists(), "Git never ran");
+        assert!(lock_ignoring_poison(&core.clones.0).is_empty());
+        drop(held);
+    }
+
+    #[test]
+    fn a_cancelled_wait_passes_a_released_slot_to_the_next_waiter() {
+        for _ in 0..20 {
+            let slots = Arc::new(Semaphore::new(NonZeroUsize::MIN));
+            let stop = Arc::new(AtomicBool::new(false));
+            let held = slots.acquire();
+            let (cancelling, flag) = (Arc::clone(&slots), Arc::clone(&stop));
+            thread::spawn(move || assert!(cancelling.acquire_unless(&flag).is_none()));
+            thread::sleep(Duration::from_millis(5));
+            let (acquired, next) = mpsc::channel();
+            let waiting = Arc::clone(&slots);
+            thread::spawn(move || {
+                let _slot = waiting.acquire();
+                acquired.send(()).unwrap();
+            });
+            thread::sleep(Duration::from_millis(5));
+            stop.store(true, Ordering::SeqCst);
+            drop(held);
+            next.recv_timeout(PATIENCE)
+                .expect("the next waiter never woke");
         }
     }
 }

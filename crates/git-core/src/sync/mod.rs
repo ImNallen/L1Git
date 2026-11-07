@@ -28,7 +28,10 @@ use std::{
     collections::HashMap,
     num::NonZeroUsize,
     path::{Path, PathBuf},
-    sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError},
+    sync::{
+        Arc, Condvar, Mutex, MutexGuard, PoisonError,
+        atomic::{AtomicBool, Ordering},
+    },
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -300,6 +303,8 @@ fn lock_ignoring_poison<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+const STOP_POLL: Duration = Duration::from_millis(20);
+
 struct Semaphore {
     free: Mutex<usize>,
     released: Condvar,
@@ -322,6 +327,30 @@ impl Semaphore {
             .unwrap_or_else(PoisonError::into_inner);
         *free -= 1;
         Permit(self)
+    }
+
+    /// Waits for a slot until `stop` turns true. Setting `stop` wakes nothing,
+    /// so the wait polls it.
+    fn acquire_unless(&self, stop: &AtomicBool) -> Option<Permit<'_>> {
+        let mut free = lock_ignoring_poison(&self.free);
+        loop {
+            if stop.load(Ordering::SeqCst) {
+                // This wait may hold the wake-up of a slot that it will not take.
+                if *free > 0 {
+                    self.released.notify_one();
+                }
+                return None;
+            }
+            if *free > 0 {
+                *free -= 1;
+                return Some(Permit(self));
+            }
+            free = self
+                .released
+                .wait_timeout(free, STOP_POLL)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
+        }
     }
 }
 
