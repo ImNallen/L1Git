@@ -13,6 +13,7 @@ import {
   treePath,
 } from "../domain/changedFiles";
 import type { ChangeStatus } from "../domain/repository";
+import { useTreeMotion } from "./useTreeMotion";
 import { ContextMenu } from "./ContextMenu";
 
 export const changeStatuses = {
@@ -124,6 +125,7 @@ ${treeStyles}`,
         onSelectFileRef.current(path);
     },
   });
+  const prepareMotion = useTreeMotion();
   const search = useFileTreeSearch(model);
   useEffect(() => {
     const shown = selectedPath === null ? null : treePath(selectedPath);
@@ -161,6 +163,8 @@ ${treeStyles}`,
   const tree = (
     <FileTree
       model={model}
+      onClickCapture={prepareMotion}
+      onKeyDownCapture={prepareMotion}
       className="changed-file-tree"
       onFocus={(event) => {
         const [row] = event.nativeEvent.composedPath();

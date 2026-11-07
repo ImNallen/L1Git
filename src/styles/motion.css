@@ -1,0 +1,209 @@
+.motion-collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  visibility: hidden;
+  transition:
+    grid-template-rows 220ms ease-out,
+    visibility 220ms;
+}
+.motion-collapse[data-open="true"] {
+  grid-template-rows: 1fr;
+  visibility: visible;
+}
+.motion-collapse > div {
+  min-height: 0;
+  overflow: hidden;
+}
+.motion-chevron {
+  transform: rotate(0deg);
+  transition: transform 220ms ease-out;
+}
+[aria-expanded="true"] .motion-chevron {
+  transform: rotate(90deg);
+}
+@media (prefers-reduced-motion: reduce) {
+  .motion-collapse,
+  .motion-chevron {
+    transition: none;
+  }
+}
+.toolbar-action,
+.tree-section,
+.branch-row,
+.repository-open,
+.context-menu [role^="menuitem"] {
+  transition:
+    background-color 120ms ease-out,
+    color 120ms ease-out,
+    border-color 160ms ease-out;
+}
+.toolbar-action[aria-expanded="true"] {
+  transition-duration: 160ms;
+}
+.history-table tr,
+.history-table td {
+  transition: background-color 220ms ease-out;
+}
+.graph-node circle {
+  transition:
+    r 220ms ease-out,
+    stroke 220ms ease-out,
+    fill 220ms ease-out;
+}
+.history-search,
+.sidebar-search-field {
+  transition: background-color 100ms ease-out;
+}
+.history-search .search-close {
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 100ms ease-out,
+    visibility 100ms;
+}
+.history-search:focus-within .search-close,
+.history-search:has(input:not(:placeholder-shown)) .search-close {
+  opacity: 1;
+  visibility: visible;
+}
+.toolbar-search-slot .history-search:focus-within,
+.sidebar-search-field:focus-within {
+  background: var(--control-hover);
+}
+.file-diff .diff-style button {
+  transition: background-color 200ms ease-out;
+}
+.context-menu {
+  overflow: hidden;
+}
+.file-diff {
+  animation: motion-appear 240ms ease-out;
+}
+@keyframes motion-appear {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .toolbar-action,
+  .tree-section,
+  .branch-row,
+  .repository-open,
+  .context-menu [role^="menuitem"],
+  .history-table tr,
+  .history-table td,
+  .graph-node circle,
+  .history-search,
+  .sidebar-search-field,
+  .history-search .search-close,
+  .file-diff .diff-style button {
+    transition: none;
+  }
+  .file-diff {
+    animation: none;
+  }
+}
+.changed-files-collapse {
+  flex: 0;
+  transition:
+    grid-template-rows 220ms ease-out,
+    flex-grow 220ms ease-out,
+    visibility 220ms;
+}
+.changed-files-collapse[data-open="true"] {
+  flex: 1;
+}
+.changed-files-collapse > div {
+  display: flex;
+  flex-direction: column;
+}
+@media (prefers-reduced-motion: reduce) {
+  .changed-files-collapse {
+    transition: none;
+  }
+}
+.workspace-panes {
+  position: relative;
+}
+.file-diff {
+  position: relative;
+}
+:root:not([data-palette])[data-theme="dark"] .toolbar-action:hover {
+  background: #292929;
+  color: #f2f2f2;
+}
+:root:not([data-palette])[data-theme="dark"]
+  .toolbar-action[aria-expanded="true"] {
+  background: #343434;
+  color: #f2f2f2;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 12%);
+}
+.file-comparison {
+  display: grid;
+  grid-template-columns: 0fr 1fr;
+  padding: 0;
+  transition: grid-template-columns 200ms ease-out;
+}
+.file-comparison[data-split="true"] {
+  grid-template-columns: 1fr 1fr;
+}
+.comparison-base {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  opacity: 0;
+}
+.comparison-target {
+  padding-inline: 24px;
+}
+.file-comparison[data-split="true"] .comparison-base {
+  padding-inline-start: 24px;
+  opacity: 1;
+  animation: motion-appear 200ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .file-comparison {
+    transition: none;
+  }
+  .file-comparison[data-split="true"] .comparison-base {
+    animation: none;
+  }
+}
+.sidebar-search-field .search-close {
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 100ms ease-out,
+    visibility 100ms;
+}
+.sidebar-search-field:focus-within .search-close,
+.sidebar-search-field:has(input:not(:placeholder-shown)) .search-close {
+  opacity: 1;
+  visibility: visible;
+}
+:root:not([data-palette])[data-theme="dark"] .sidebar-search-field:hover,
+:root:not([data-palette])[data-theme="dark"] .history-search:hover {
+  background: rgb(255 255 255 / 7%);
+}
+:root:not([data-palette])[data-theme="dark"] .sidebar-search-field:focus-within,
+:root:not([data-palette])[data-theme="dark"] .history-search:focus-within {
+  background: rgb(255 255 255 / 4.5%);
+}
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-search-field .search-close {
+    transition: none;
+  }
+}
+
+:root:not([data-palette])[data-theme="dark"] .tree-section:hover {
+  background: rgb(255 255 255 / 5.5%);
+}
+.history-table tr:hover:not(.selected) {
+  transition-duration: 120ms;
+}

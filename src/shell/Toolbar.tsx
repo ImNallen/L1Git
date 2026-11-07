@@ -99,6 +99,7 @@ export function Toolbar({
       <div className="toolbar-search-slot" ref={searchSlot} />
       {menu && anchor && (
         <ContextMenu
+          motion
           x={anchor.left}
           y={anchor.bottom}
           label={`${menus.find((each) => each.kind === menu.kind)?.label} actions`}

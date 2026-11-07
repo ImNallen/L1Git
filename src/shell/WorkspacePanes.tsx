@@ -1,4 +1,5 @@
 import { FolderGit2, Plus, TriangleAlert } from "lucide-react";
+import { WorkspaceMotion } from "../components/WorkspaceMotion";
 import { Suspense } from "react";
 import type { AppearanceState } from "../appearance";
 import { History, HistoryPlaceholder } from "../components/History";
@@ -44,7 +45,10 @@ export function WorkspacePanes({
   const { fileDiff, workspace } = app;
   const { model } = history;
   return (
-    <div className="workspace-panes">
+    <WorkspaceMotion
+      root={model?.snapshot.root ?? null}
+      fileOpen={view.fileOpen}
+    >
       {model ? (
         <>
           <History
@@ -141,6 +145,6 @@ export function WorkspacePanes({
           </div>
         </div>
       )}
-    </div>
+    </WorkspaceMotion>
   );
 }

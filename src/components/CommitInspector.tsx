@@ -1,3 +1,5 @@
+import { Collapse } from "./Collapse";
+import { useInspectorMotion } from "./useInspectorMotion";
 import { WorkspaceIcon } from "./WorkspaceIcon";
 import type { MergeState } from "../domain/merge";
 import { mergeAllows } from "../domain/merge";
@@ -12,7 +14,7 @@ import {
   useRef,
   useState,
 } from "react";
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 import {
   ArrowLeftRight,
   ArrowRight,
@@ -95,16 +97,18 @@ export type WorktreeWrites = {
 };
 
 export function InspectorFrame({
+  ref,
   heading,
   toggleButton,
   children,
 }: {
+  ref?: Ref<HTMLElement>;
   heading?: ReactNode;
   toggleButton: ReactNode;
   children?: ReactNode;
 }) {
   return (
-    <aside className="inspector" aria-label="Commit inspector">
+    <aside ref={ref} className="inspector" aria-label="Commit inspector">
       <div className="inspector-heading">
         {heading ?? <span>Commit details</span>}
         {toggleButton}
@@ -198,6 +202,8 @@ export function CommitInspector({
     [inspectedCommit],
   );
   const lineStats = useLineStats(root, inspected);
+  const motionRoot = useRef<HTMLElement>(null);
+  useInspectorMotion(motionRoot, root, inspectedCommit?.oid ?? null);
   const current = (key: { root: RepositoryRoot; comparison: Comparison }) =>
     key.root === root &&
     comparison !== null &&
@@ -216,7 +222,7 @@ export function CommitInspector({
 
   if (selection?.kind === "worktree" && compare === null)
     return (
-      <InspectorFrame toggleButton={toggleButton}>
+      <InspectorFrame ref={motionRoot} toggleButton={toggleButton}>
         {worktree ? (
           <WorktreeInspector
             worktree={worktree.worktree}
@@ -262,6 +268,7 @@ export function CommitInspector({
   if (compare !== null)
     return (
       <InspectorFrame
+        ref={motionRoot}
         toggleButton={toggleButton}
         heading={
           <span className="compare-ends">
@@ -363,7 +370,7 @@ export function CommitInspector({
       ? (target?.commit.parents.slice(0, 1) ?? [])
       : (target?.commit.parents ?? []);
   return (
-    <InspectorFrame toggleButton={toggleButton}>
+    <InspectorFrame ref={motionRoot} toggleButton={toggleButton}>
       {detail && target ? (
         <div className="inspector-content commit-details">
           <div className="commit-information">
@@ -602,7 +609,7 @@ function ChangedFiles({
           )}
         </span>
       </button>
-      {open && (
+      <Collapse open={open} className="changed-files-collapse">
         <div id="changed-files" className="changed-files">
           {files.length > 0 ? (
             <ChangedFileTree
@@ -618,7 +625,7 @@ function ChangedFiles({
             <p className="muted">{empty}</p>
           )}
         </div>
-      )}
+      </Collapse>
     </section>
   );
 }

@@ -6,6 +6,7 @@ import "@fontsource/ibm-plex-mono/500.css";
 import { initializeAppearance } from "./appearance";
 import { App } from "./App";
 import "./theme.css";
+import "./styles/motion.css";
 
 const initialTheme = initializeAppearance();
 const root = document.getElementById("root");

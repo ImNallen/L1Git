@@ -4,6 +4,7 @@ import type {
   ReactNode,
   RefObject,
 } from "react";
+import { animate, cancelMotion } from "../motion";
 import { createPortal } from "react-dom";
 
 const ITEMS = "[role=menuitem], [role=menuitemcheckbox]";
@@ -15,11 +16,13 @@ export function opensMenu(event: ReactKeyboardEvent): boolean {
 export function ContextMenu({
   x,
   y,
+  motion = false,
   label,
   ignoreScrollIn,
   onClose,
   children,
 }: {
+  motion?: boolean;
   x: number;
   y: number;
   label: string;
@@ -41,7 +44,36 @@ export function ContextMenu({
       left: Math.max(4, Math.min(x, window.innerWidth - menu.offsetWidth - 4)),
     });
     menu.querySelector<HTMLElement>(ITEMS)?.focus();
-  }, [x, y]);
+    if (motion) {
+      const height = menu.getBoundingClientRect().height;
+      animate(
+        menu,
+        [
+          { height: "100px", opacity: 0 },
+          { height: `${height}px`, opacity: 1 },
+        ],
+        160,
+      );
+      for (const item of menu.querySelectorAll<HTMLElement>(ITEMS))
+        animate(
+          item,
+          [
+            { translate: `${-item.offsetLeft}px ${-item.offsetTop}px` },
+            { translate: "0px 0px" },
+          ],
+          160,
+        );
+    }
+    return () =>
+      cancelMotion(
+        new Map([
+          ["menu", menu],
+          ...[...menu.querySelectorAll<HTMLElement>(ITEMS)].map(
+            (item, index): [string, HTMLElement] => [String(index), item],
+          ),
+        ]),
+      );
+  }, [x, y, motion]);
   useEffect(() => {
     const close = () => onCloseRef.current({ returnFocus: true });
     const scrolled = (event: Event) => {

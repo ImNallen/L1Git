@@ -1,3 +1,4 @@
+import { useRepositoryMotion } from "./useRepositoryMotion";
 import { WorkspaceIcon } from "./WorkspaceIcon";
 import { useRef, useState } from "react";
 import type {
@@ -16,6 +17,7 @@ import {
   PencilLine,
   Plus,
   Trash2,
+  X,
 } from "lucide-react";
 import { branchAsks } from "../domain/operations";
 import type { BranchAsk } from "../domain/operations";
@@ -74,8 +76,18 @@ export function RepositoryTree({
   const { merge, writable, onBranchAsk, onTagAsk, onStashAction, onCheckout } =
     refActions;
   const [query, setQuery] = useState("");
+  const closeSearch = () => {
+    setQuery("");
+    const nav = tree.current;
+    (
+      nav?.querySelector<HTMLElement>(
+        ".repository-row.active .repository-open",
+      ) ?? nav?.querySelector<HTMLElement>(".repository-open")
+    )?.focus();
+  };
   const tree = useRef<HTMLElement>(null);
   useRovingRows(tree);
+  useRepositoryMotion(tree, activePath, ".active-repository-refs");
   const [menu, setMenu] = useState<{
     target:
       | { kind: "repository"; entry: RecentRepository }
@@ -370,15 +382,28 @@ export function RepositoryTree({
         </button>
       </div>
       <div className="sidebar-search">
-        <label className="sidebar-search-field">
+        <div className="sidebar-search-field" role="search">
           <WorkspaceIcon name="Search" size={14} />
           <input
             aria-label="Filter repositories and refs"
             placeholder="Search"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.stopPropagation();
+                closeSearch();
+              }
+            }}
           />
-        </label>
+          <button
+            className="icon-button search-close"
+            aria-label="Close repository search"
+            onClick={closeSearch}
+          >
+            <X size={14} />
+          </button>
+        </div>
       </div>
       <nav
         ref={tree}

@@ -64,16 +64,16 @@ export function HistorySearch({
           >
             <ChevronDown size={15} />
           </button>
-          <button
-            className="icon-button"
-            aria-label="Close history search"
-            title="Close (Escape)"
-            onClick={onClose}
-          >
-            <X size={15} />
-          </button>
         </>
       )}
+      <button
+        className="icon-button search-close"
+        aria-label="Close history search"
+        title="Close (Escape)"
+        onClick={onClose}
+      >
+        <X size={15} />
+      </button>
     </div>
   );
 }

@@ -40,3 +40,17 @@
   color: var(--workspace-file-count, var(--trees-fg-muted));
   font-size: 10px;
 }
+[data-type="item"] {
+  transition:
+    background-color 120ms ease-out,
+    color 120ms ease-out;
+}
+[data-item-type="folder"] > [data-item-section="icon"] > svg {
+  transition: transform 220ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-type="item"],
+  [data-item-type="folder"] > [data-item-section="icon"] > svg {
+    transition: none;
+  }
+}

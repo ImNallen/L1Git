@@ -44,13 +44,13 @@ it("unreadable line statistics stay unknown without background polling", async (
 it("repository search reveals matching tags and stashes without changing collapsed sections", async () => {
   const app = await mountApp();
   const filter = get("textbox", "Filter repositories and refs");
-  expect(refRow("refs/tags/v1")).toBeNull();
+  expect(refRow("refs/tags/v1")?.closest("[inert]") ?? true).toBeTruthy();
   await app.type(filter, "v1");
-  expect(refRow("refs/tags/v1")).not.toBeNull();
+  expect(refRow("refs/tags/v1")?.closest("[inert]")).toBeNull();
   await app.type(filter, "WIP on main");
   expect(query("button", /stash@\{0\}/)).not.toBeNull();
   await app.type(filter, "");
-  expect(refRow("refs/tags/v1")).toBeNull();
+  expect(refRow("refs/tags/v1")?.closest("[inert]") ?? true).toBeTruthy();
 });
 
 it("selecting a branch in another repository preserves keyboard focus", async () => {

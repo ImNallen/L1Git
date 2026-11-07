@@ -13,7 +13,10 @@ export function useRovingRows(container: RefObject<HTMLElement | null>) {
     const root = container.current;
     if (!root) return;
     let current: HTMLElement | null = null;
-    const rows = () => [...root.querySelectorAll<HTMLElement>(ROW)];
+    const rows = () =>
+      [...root.querySelectorAll<HTMLElement>(ROW)].filter(
+        (row) => !row.closest("[inert]"),
+      );
 
     function sync() {
       const all = rows();
@@ -98,7 +101,7 @@ export function useRovingRows(container: RefObject<HTMLElement | null>) {
     observer.observe(root, {
       childList: true,
       subtree: true,
-      attributeFilter: ["disabled"],
+      attributeFilter: ["disabled", "inert"],
     });
     root.addEventListener("focusin", onFocusIn);
     root.addEventListener("keydown", onKeyDown);

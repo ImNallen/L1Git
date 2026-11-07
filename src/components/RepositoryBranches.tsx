@@ -1,3 +1,4 @@
+import { Collapse } from "./Collapse";
 import { WorkspaceIcon } from "./WorkspaceIcon";
 import { Fragment, useRef } from "react";
 import type {
@@ -5,14 +6,7 @@ import type {
   ReactNode,
   MouseEvent as ReactMouseEvent,
 } from "react";
-import {
-  ChevronDown,
-  ChevronRight,
-  Eye,
-  EyeOff,
-  Focus,
-  Package,
-} from "lucide-react";
+import { ChevronRight, Eye, EyeOff, Focus, Package } from "lucide-react";
 import { branchTree } from "../domain/branchTree";
 import type { BranchTree } from "../domain/branchTree";
 import type {
@@ -149,19 +143,17 @@ export function RepositoryBranches({
     return (
       <>
         <button className="tree-section" aria-expanded={open} onClick={toggle}>
-          {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+          <ChevronRight className="motion-chevron" size={13} />
           {icon}
           <span>{label}</span>
           <span className="count">{total}</span>
         </button>
-        {open && (
-          <div>
-            {rows}
-            {rows.length === 0 && (
-              <p className="tree-hint">No matching {label.toLowerCase()}</p>
-            )}
-          </div>
-        )}
+        <Collapse open={open}>
+          {rows}
+          {rows.length === 0 && (
+            <p className="tree-hint">No matching {label.toLowerCase()}</p>
+          )}
+        </Collapse>
       </>
     );
   }
@@ -234,7 +226,7 @@ export function RepositoryBranches({
                 title={folder.path}
                 onClick={() => onOverride(key, !open)}
               >
-                {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                <ChevronRight className="motion-chevron" size={13} />
                 <WorkspaceIcon
                   name={kind === "remote" && depth === 0 ? "Cloud" : "Folder"}
                 />
@@ -245,7 +237,7 @@ export function RepositoryBranches({
                     (branch) => branch.kind === kind && holds(branch.name),
                   )}
               </button>
-              {open && tree(folder, depth + 1)}
+              <Collapse open={open}>{tree(folder, depth + 1)}</Collapse>
             </Fragment>
           );
         })}
@@ -352,59 +344,47 @@ export function RepositoryBranches({
         aria-expanded={localSection.open}
         onClick={localSection.toggle}
       >
-        {localSection.open ? (
-          <ChevronDown size={13} />
-        ) : (
-          <ChevronRight size={13} />
-        )}
+        <ChevronRight className="motion-chevron" size={13} />
         <WorkspaceIcon name="Branch" />
         <span>Local</span>
         <span className="count">{local.length}</span>
         {!localSection.open && ruleCue((branch) => branch.kind === "local")}
       </button>
-      {localSection.open && (
-        <div>
-          {branchList("local", localShown)}
-          {head.kind === "unborn" && (
-            <div className="branch-row unborn">
-              <WorkspaceIcon name="Branch" />
-              <span className="branch-label">
-                {head.reference.replace(/^refs\/heads\//, "")}
-              </span>
-              <small>unborn</small>
-            </div>
-          )}
-          {local.length > 0 && localShown.length === 0 && (
-            <p className="tree-hint">No matching local branches</p>
-          )}
-        </div>
-      )}
+      <Collapse open={localSection.open}>
+        {branchList("local", localShown)}
+        {head.kind === "unborn" && (
+          <div className="branch-row unborn">
+            <WorkspaceIcon name="Branch" />
+            <span className="branch-label">
+              {head.reference.replace(/^refs\/heads\//, "")}
+            </span>
+            <small>unborn</small>
+          </div>
+        )}
+        {local.length > 0 && localShown.length === 0 && (
+          <p className="tree-hint">No matching local branches</p>
+        )}
+      </Collapse>
       <button
         className="tree-section"
         aria-expanded={remoteSection.open}
         onClick={remoteSection.toggle}
       >
-        {remoteSection.open ? (
-          <ChevronDown size={13} />
-        ) : (
-          <ChevronRight size={13} />
-        )}
+        <ChevronRight className="motion-chevron" size={13} />
         <WorkspaceIcon name="Cloud" />
         <span>Remote</span>
         <span className="count">{remote.length}</span>
         {!remoteSection.open && ruleCue((branch) => branch.kind === "remote")}
       </button>
-      {remoteSection.open && (
-        <div>
-          {branchList("remote", remoteShown)}
-          {remote.length === 0 && (
-            <p className="tree-hint">No remote branches found locally</p>
-          )}
-          {remote.length > 0 && remoteShown.length === 0 && (
-            <p className="tree-hint">No matching remote branches</p>
-          )}
-        </div>
-      )}
+      <Collapse open={remoteSection.open}>
+        {branchList("remote", remoteShown)}
+        {remote.length === 0 && (
+          <p className="tree-hint">No remote branches found locally</p>
+        )}
+        {remote.length > 0 && remoteShown.length === 0 && (
+          <p className="tree-hint">No matching remote branches</p>
+        )}
+      </Collapse>
       {refSection(
         "tag",
         "Tags",
