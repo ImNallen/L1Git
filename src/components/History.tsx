@@ -934,6 +934,7 @@ export function History({
           />,
           searchSlot,
         )}
+      <h2 className="history-heading">{snapshot.name} commits</h2>
       <div className="history-scroll" ref={scrollRef}>
         <MotionBoundary {...rowMotion} />
         <div

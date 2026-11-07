@@ -6,7 +6,7 @@
   flex-direction: column;
   --diffs-font-family: var(--mono);
   --diffs-font-size: 12px;
-  --diffs-header-font-family: "Inter Variable", Inter, sans-serif;
+  --diffs-header-font-family: "InterVariable", Inter, sans-serif;
 }
 .file-diff diffs-container {
   --diffs-bg: var(--canvas);
@@ -171,7 +171,7 @@
     var(--diffs-fg, var(--text-strong)) 5%,
     var(--diffs-bg, var(--panel-raised))
   );
-  font-family: "Inter Variable", Inter, sans-serif;
+  font-family: "InterVariable", Inter, sans-serif;
   font-size: 11px;
   text-align: left;
   color: var(--text-dim);
@@ -232,7 +232,7 @@
     var(--diffs-fg, var(--text-strong)) 5%,
     var(--diffs-bg, var(--panel-raised))
   );
-  font-family: "Inter Variable", Inter, sans-serif;
+  font-family: "InterVariable", Inter, sans-serif;
   font-size: 11px;
 }
 .hunk-bar-label {
@@ -353,6 +353,19 @@
   height: 48px;
   min-height: 48px;
   padding: 0 24px;
+  gap: 16px;
+  border-bottom: 0;
+}
+.repository-content:has(.file-diff) > .toolbar {
+  margin-bottom: 0;
+}
+.file-diff-toolbar > .button.secondary {
+  width: 122px;
+  height: 30px;
+  flex-shrink: 0;
+  justify-content: flex-start;
+  font-weight: 400;
+  white-space: pre;
 }
 .file-diff-path {
   font-size: 12px;
@@ -394,7 +407,7 @@
 }
 .file-diff-path {
   font-family: var(--mono);
-  margin-left: 16px;
+  margin-left: 0;
   color: var(--workspace-diff-path, var(--text-secondary));
 }
 .file-comparison {

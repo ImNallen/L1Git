@@ -145,6 +145,28 @@ export function SettingsHost({
           section={settings.section}
           onSectionChange={settings.setSection}
           onClose={settings.leave}
+          restore={
+            settings.section === "general"
+              ? {
+                  disabled:
+                    fetching.intervalMinutes === 15 &&
+                    (updates.snapshot.track === "stable" ||
+                      updates.snapshot.state.kind === "unavailable" ||
+                      updates.snapshot.state.kind === "installing"),
+                  run: () => {
+                    fetching.setIntervalMinutes(15);
+                    if (
+                      updates.snapshot.track !== "stable" &&
+                      updates.snapshot.state.kind !== "unavailable" &&
+                      updates.snapshot.state.kind !== "installing"
+                    ) {
+                      restart.cancel();
+                      void updates.selectTrack("stable");
+                    }
+                  },
+                }
+              : undefined
+          }
         >
           {settings.section === "appearance" ? (
             <AppearanceSettings appearance={appearance} />

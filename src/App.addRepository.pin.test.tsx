@@ -61,7 +61,7 @@ it("lists the sources in order, and a query filters by title", async () => {
   const app = await mountApp();
   await openPalette(app);
   expect(focused()).toBe("combobox Search sources");
-  expect(options()).toEqual(["New repository *", "Git URL", "Local folder"]);
+  expect(options()).toEqual(["Local folder *", "Git URL", "New repository"]);
   expect(hints()).toEqual(["↑ ↓Navigate", "↵Select", "EscClose"]);
 
   await app.type(get("combobox", "Search sources"), "g");
@@ -81,9 +81,9 @@ it("Up, Down, and Enter open a source from the search field", async () => {
   await openPalette(app);
   await app.press("ArrowDown");
   await app.press("ArrowDown");
-  expect(options()).toEqual(["New repository", "Git URL", "Local folder *"]);
+  expect(options()).toEqual(["Local folder", "Git URL", "New repository *"]);
   await app.press("ArrowDown");
-  expect(options()[0]).toBe("New repository *");
+  expect(options()[0]).toBe("Local folder *");
   await app.press("ArrowUp");
   await app.press("ArrowUp");
   expect(options()[1]).toBe("Git URL *");
@@ -152,34 +152,34 @@ it("Local folder lists the base and adds the highlighted repository", async () =
     "No Git repository",
   );
   app.bridge.reset();
-  await app.click(submit("Add"));
+  await app.click(submit("Open"));
   expect(dialogs()).toEqual([]);
   expect(app.bridge.count("snapshot", DOCS)).toBeGreaterThan(0);
   expect(app.bridge.count("createRepository")).toBe(0);
 });
 
-it("a non-Git row disables Add and its footer hint", async () => {
+it("a non-Git row disables Open and its footer hint", async () => {
   const app = await mountApp({ world: opensDocs });
   await openSource(app, /^Local folder/);
-  expect(hints()).toContain("↵Add");
+  expect(hints()).toContain("↵Open");
   await app.press("ArrowDown");
   expect(options()).toEqual(["docs-site", "screenshots *"]);
-  expect(submit("Add").disabled).toBe(true);
-  expect(hints()).toContain("↵Add [disabled]");
+  expect(submit("Open").disabled).toBe(true);
+  expect(hints()).toContain("↵Open [disabled]");
   await app.press("ArrowDown", { target: get("button", "Back") });
   expect(options(), "the arrows work wherever focus is").toEqual([
     "docs-site *",
     "screenshots",
   ]);
-  expect(submit("Add").disabled).toBe(false);
+  expect(submit("Open").disabled).toBe(false);
 });
 
 it("highlighting a non-Git row from Add moves focus to the path, so keys keep working", async () => {
   const app = await mountApp({ world: opensDocs });
   await openSource(app, /^Local folder/);
-  submit("Add").focus();
+  submit("Open").focus();
   await app.press("ArrowDown");
-  expect(submit("Add").disabled).toBe(true);
+  expect(submit("Open").disabled).toBe(true);
   expect(focused()).toBe("combobox Path");
   await app.press("ArrowUp");
   expect(options()[0]).toBe("docs-site *");
@@ -243,7 +243,7 @@ it("Back returns to the sources with focus in the search", async () => {
   await openSource(app, /^Git URL/);
   await app.click(get("button", "Back"));
   expect(focused()).toBe("combobox Search sources");
-  expect(options()[0]).toBe("New repository *");
+  expect(options()[0]).toBe("Local folder *");
   expect(dialogs()).toEqual(["Add repository"]);
 });
 
@@ -364,7 +364,7 @@ it("Tab wraps past a disabled Add in the Local step", async () => {
   const app = await mountApp();
   await openSource(app, /^Local folder/);
   await app.press("ArrowDown");
-  expect(submit("Add").disabled).toBe(true);
+  expect(submit("Open").disabled).toBe(true);
   await app.press("Tab");
   expect(focused()).toBe("button Back");
 });
@@ -396,10 +396,10 @@ it("a repository that fails to open keeps its error in the step", async () => {
     entries: [folder(OTHER, true)],
   }));
   await app.type(get("combobox", "Path"), "/fixture");
-  await app.click(submit("Add"));
+  await app.click(submit("Open"));
   expect(get("alert").textContent).toContain("/fixture/other");
   expect(dialogs()).toEqual(["Add repository"]);
-  expect(submit("Add").disabled).toBe(false);
+  expect(submit("Open").disabled).toBe(false);
 });
 
 it("while busy, inputs and Back are disabled and the button says so", async () => {
@@ -472,11 +472,11 @@ it("Add waits for the listing of the path it would add from", async () => {
   await app.type(get("combobox", "Path"), "/slow");
   await held.arrived;
   expect(options()[0], "the old rows stay on screen").toBe("docs-site *");
-  expect(submit("Add").disabled).toBe(true);
+  expect(submit("Open").disabled).toBe(true);
   held.release();
   await app.settle();
   expect(options()).toEqual(["x *"]);
-  expect(submit("Add").disabled).toBe(false);
+  expect(submit("Open").disabled).toBe(false);
 });
 
 it("a double-click and ArrowRight wait for the listing of the typed path", async () => {
@@ -513,7 +513,7 @@ it("a listing the core refuses shows its message", async () => {
   });
   await app.type(get("combobox", "Path"), "relative");
   expect(get("alert").textContent).toContain("absolute path");
-  expect(submit("Add").disabled).toBe(true);
+  expect(submit("Open").disabled).toBe(true);
 });
 
 it("an empty directory says so", async () => {

@@ -87,7 +87,7 @@ async function click(label: string) {
   await act(async () => found.click());
 }
 
-it("groups Fetching and Updates under one focused General page", async () => {
+it("groups Fetching and About under one focused General page", async () => {
   expect(container.querySelectorAll(".settings-page")).toHaveLength(1);
   expect(container.querySelectorAll(".settings-content")).toHaveLength(1);
   expect(container.querySelectorAll("h1")).toHaveLength(1);
@@ -95,7 +95,7 @@ it("groups Fetching and Updates under one focused General page", async () => {
   expect(document.activeElement).toBe(heading());
   expect(
     [...container.querySelectorAll("h2")].map((item) => item.textContent),
-  ).toEqual(["Fetching", "Updates"]);
+  ).toEqual(["Fetching", "About"]);
   expect(container.querySelector('[role="alert"]')?.textContent).toBe(
     "Could not save fetch interval",
   );

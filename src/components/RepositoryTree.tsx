@@ -2,6 +2,7 @@ import { MotionBoundary } from "./MotionBoundary";
 import { useRepositoryMotion } from "./useRepositoryMotion";
 import { WorkspaceIcon } from "./WorkspaceIcon";
 import { useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import type {
   KeyboardEvent as ReactKeyboardEvent,
   MouseEvent as ReactMouseEvent,
@@ -78,7 +79,7 @@ export function RepositoryTree({
     refActions;
   const [query, setQuery] = useState("");
   const closeSearch = () => {
-    setQuery("");
+    flushSync(() => setQuery(""));
     const nav = tree.current;
     (
       nav?.querySelector<HTMLElement>(

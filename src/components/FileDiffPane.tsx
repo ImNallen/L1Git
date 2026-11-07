@@ -9,7 +9,7 @@ import { prepareDiffMotion } from "./diffMotion";
 import { ConflictResolver } from "./ConflictResolver";
 import type { WritesView } from "../useWrites";
 import type { Ref } from "react";
-import { ArrowLeft, FileX2, LoaderCircle, TriangleAlert } from "lucide-react";
+import { FileX2, LoaderCircle, TriangleAlert } from "lucide-react";
 import type { Appearance } from "../themes/palette";
 import type { Oid, SubmoduleState } from "../domain/repository";
 import { clampMessage, conflictLabels } from "../domain/worktree";
@@ -111,11 +111,11 @@ export function FileDiffPane({
         <button
           ref={backRef}
           className="button secondary"
+          aria-label="Back to history"
           onClick={onBack}
           title="Back to history (Esc)"
         >
-          <ArrowLeft size={14} />
-          <span>Back to history</span>
+          <span>{"←  Back to history"}</span>
         </button>
         <span className="file-diff-path" title={state.path}>
           {state.path}

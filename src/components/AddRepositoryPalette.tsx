@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { FormEvent, KeyboardEvent, ReactNode, RefObject } from "react";
 import { flushSync } from "react-dom";
-import { ArrowLeft, ChevronRight, Link, LoaderCircle } from "lucide-react";
+import { LoaderCircle } from "lucide-react";
 import {
   baseFromHome,
   DEFAULT_BASE,
@@ -25,12 +25,12 @@ import type {
 import { problemFrom } from "../domain/repository";
 import type { Problem } from "../domain/repository";
 import { latestReader } from "../latestReader";
+import { WorkspaceIcon } from "./WorkspaceIcon";
 import {
   cloneRepository,
   createRepository,
   listDirectories,
 } from "../repositories";
-import { WorkspaceIcon } from "./WorkspaceIcon";
 
 type Props = {
   onAdd: (path: string, signal: AbortSignal) => Promise<Problem | null>;
@@ -40,9 +40,9 @@ type Props = {
 };
 
 const SOURCE_ICONS: Record<SourceKind, ReactNode> = {
-  new: <WorkspaceIcon name="Plus" size={14} />,
-  url: <Link size={14} />,
-  local: <WorkspaceIcon name="Folder" size={14} />,
+  new: <WorkspaceIcon name="AddNew" />,
+  url: <WorkspaceIcon name="AddLink" />,
+  local: <WorkspaceIcon name="AddFolder" />,
 };
 
 /** A modal's Tab order runs through the page's end, where no key reaches the palette. */
@@ -148,7 +148,7 @@ function SourcesStep({
   return (
     <>
       <div className="add-palette-header add-palette-search">
-        <WorkspaceIcon name="Search" size={14} />
+        <WorkspaceIcon name="AddSearch" />
         <input
           autoFocus
           role="combobox"
@@ -158,7 +158,7 @@ function SourcesStep({
           aria-activedescendant={
             current >= 0 ? `add-palette-source-${current}` : undefined
           }
-          placeholder="Search sources"
+          placeholder="Search sources…"
           spellCheck={false}
           autoComplete="off"
           value={query}
@@ -214,7 +214,7 @@ function SourcesStep({
                     {source.detail}
                   </span>
                 </span>
-                <ChevronRight size={14} />
+                <WorkspaceIcon name="AddChevron" />
               </li>
             ))}
           </ul>
@@ -398,7 +398,7 @@ function SubStep({
           disabled={busy}
           onClick={onBack}
         >
-          <ArrowLeft size={15} />
+          <WorkspaceIcon name="AddBack" />
         </button>
         <input
           ref={header}
@@ -477,7 +477,9 @@ function SubStep({
                         });
                     }}
                   >
-                    <WorkspaceIcon name="Folder" size={14} />
+                    <WorkspaceIcon
+                      name={index === current ? "AddFolder" : "AddDirectory"}
+                    />
                     <span className="add-palette-directory-name">
                       {entry.name}
                     </span>
@@ -515,7 +517,7 @@ function SubStep({
               {text.section}
             </label>
             <div className="add-palette-location">
-              <WorkspaceIcon name="Folder" size={14} />
+              <WorkspaceIcon name="AddDirectory" />
               <input
                 id="add-palette-location"
                 className="mono"
@@ -553,7 +555,7 @@ function Hints({ hints }: { hints: ReturnType<typeof shownHints> }) {
             disabled ? "add-palette-hint disabled" : "add-palette-hint"
           }
         >
-          <kbd>{keys}</kbd>
+          <kbd data-keys={keys}>{keys}</kbd>
           {label}
         </span>
       ))}

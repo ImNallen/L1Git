@@ -1,16 +1,17 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { Settings, Palette, Search, X } from "lucide-react";
+import { X } from "lucide-react";
+import { WorkspaceIcon } from "./WorkspaceIcon";
 import type { SettingsSection } from "../actions";
 import { searchSettings } from "../settingsSearch";
 
 const settingsSections = [
-  { section: "general", label: "General", Icon: Settings },
-  { section: "appearance", label: "Appearance", Icon: Palette },
+  { section: "general", label: "General", icon: "SettingsGeneral" },
+  { section: "appearance", label: "Appearance", icon: "SettingsPalette" },
 ] as const satisfies readonly {
   section: SettingsSection;
   label: string;
-  Icon: typeof Palette;
+  icon: string;
 }[];
 
 type Props = {
@@ -18,6 +19,7 @@ type Props = {
   onSectionChange: (section: SettingsSection) => void;
   onClose: () => void;
   children: ReactNode;
+  restore?: { disabled: boolean; run: () => void };
 };
 
 export function SettingsDialog({
@@ -25,6 +27,7 @@ export function SettingsDialog({
   onSectionChange,
   onClose,
   children,
+  restore,
 }: Props) {
   const dialog = useRef<HTMLDialogElement>(null);
   const search = useRef<HTMLInputElement>(null);
@@ -88,7 +91,7 @@ export function SettingsDialog({
     >
       <aside className="settings-navigation">
         <div className="settings-search">
-          <Search size={14} aria-hidden="true" />
+          <WorkspaceIcon name="SettingsSearch" />
           <input
             ref={search}
             type="search"
@@ -126,12 +129,10 @@ export function SettingsDialog({
             >
               <X size={12} />
             </button>
-          ) : (
-            <kbd aria-hidden="true">/</kbd>
-          )}
+          ) : null}
         </div>
         <nav aria-label="Settings sections">
-          {settingsSections.map(({ section: value, label, Icon }) => (
+          {settingsSections.map(({ section: value, label, icon }) => (
             <button
               key={value}
               className="settings-nav-item"
@@ -142,7 +143,7 @@ export function SettingsDialog({
                 onSectionChange(value);
               }}
             >
-              <Icon size={16} />
+              <WorkspaceIcon name={icon} />
               {label}
             </button>
           ))}
@@ -215,13 +216,24 @@ export function SettingsDialog({
               }
             </span>
           </nav>
+          {restore && (
+            <button
+              type="button"
+              className="icon-button settings-restore"
+              aria-label="Restore defaults"
+              disabled={restore.disabled}
+              onClick={restore.run}
+            >
+              <WorkspaceIcon name="SettingsReset" />
+            </button>
+          )}
           <button
             className="icon-button"
             aria-label="Close settings"
             title="Close settings"
             onClick={close}
           >
-            <X size={16} />
+            <WorkspaceIcon name="SettingsClose" />
           </button>
         </header>
         {children}

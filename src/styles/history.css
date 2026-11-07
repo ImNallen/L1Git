@@ -332,6 +332,14 @@
   padding-inline: 9px;
   height: 30px;
 }
+.toolbar-search-slot .history-search input {
+  line-height: 16px;
+  padding: 0;
+}
+.toolbar-search-slot .history-search input::placeholder {
+  color: var(--workspace-search-placeholder, var(--text-dim));
+  opacity: 1;
+}
 .toolbar-search-slot .history-search:hover,
 .toolbar-search-slot .history-search:focus-within {
   background: var(--control-hover);
@@ -399,4 +407,16 @@
 .history .more-refs {
   background: none;
   padding-inline: 2px;
+}
+
+.history-heading {
+  display: flex;
+  align-items: center;
+  flex: 0 0 32px;
+  margin: 0;
+  padding: 0 24px;
+  color: var(--workspace-history-title, var(--text-heading));
+  font-size: 15px;
+  line-height: 21px;
+  font-weight: 600;
 }

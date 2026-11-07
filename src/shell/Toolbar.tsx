@@ -100,8 +100,9 @@ export function Toolbar({
       {menu && anchor && (
         <ContextMenu
           motion
+          className="toolbar-menu"
           x={anchor.left}
-          y={anchor.bottom}
+          y={anchor.bottom + 6}
           label={`${menus.find((each) => each.kind === menu.kind)?.label} actions`}
           onClose={({ returnFocus }) => close(returnFocus)}
         >
@@ -116,6 +117,7 @@ export function Toolbar({
                   <button
                     key={action.id}
                     role="menuitem"
+                    title={titleOf(action, actions.context)}
                     aria-disabled={!action.available(actions.context)}
                     onClick={() => {
                       if (!action.available(actions.context)) return;
@@ -123,7 +125,9 @@ export function Toolbar({
                       action.run(actions.commands);
                     }}
                   >
-                    {titleOf(action, actions.context)}
+                    <span className="toolbar-menu-label">
+                      {titleOf(action, actions.context)}
+                    </span>
                   </button>
                 ),
             )}

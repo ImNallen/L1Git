@@ -11,14 +11,14 @@ type SettingsDestination = {
 export const settingsDestinations = {
   fetch: {
     section: "general",
-    label: "Fetch automatically",
+    label: "Background fetch",
     description: "Choose the automatic fetch interval.",
     keywords: "remotes schedule minutes off launch",
     targetId: "settings-fetch",
   },
   channel: {
     section: "general",
-    label: "Update channel",
+    label: "Release channel",
     description: "Choose Stable or Nightly releases.",
     keywords: "track beta release",
     targetId: "settings-update-channel",

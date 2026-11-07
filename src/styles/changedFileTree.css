@@ -1,5 +1,20 @@
 [data-type="item"] {
   column-gap: 8px;
+  padding-right: 10px;
+}
+[data-file-tree-virtualized-scroll="true"] {
+  scrollbar-gutter: auto;
+  scrollbar-width: thin;
+}
+[data-item-section="spacing"]:not(:empty) {
+  padding-left: 8px;
+}
+[data-item-git-status] > [data-item-section="git"] {
+  width: auto;
+  min-width: 8px;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 14px;
 }
 [data-item-git-status] > [data-item-section="content"],
 [data-item-git-status] > [data-item-section="icon"] {
@@ -15,12 +30,29 @@
   width: 16px;
   height: 16px;
   background: var(--workspace-folder-icon, var(--trees-fg-muted));
-  mask: url("/assets/workspace/Folder.svg") center / contain no-repeat;
+  mask: url("/assets/inspector/Folder.svg") center / contain no-repeat;
 }
 [data-item-type="folder"] > [data-item-section="icon"] {
   display: flex;
   gap: 8px;
   width: 40px;
+}
+[data-item-type="folder"] > [data-item-section="icon"]::before {
+  content: "";
+  display: block;
+  width: 16px;
+  height: 16px;
+  flex: none;
+  background: var(--workspace-file-icon, var(--trees-fg-muted));
+  mask: url("/assets/inspector/Disclosure.svg") center / contain no-repeat;
+  transition: transform 220ms ease-out;
+}
+[aria-expanded="false"][data-item-type="folder"]
+  > [data-item-section="icon"]::before {
+  transform: rotate(-90deg);
+}
+[data-item-type="folder"] > [data-item-section="icon"] > svg {
+  display: none;
 }
 [data-item-type="file"] > [data-item-section="icon"] > svg {
   display: none;
@@ -45,12 +77,9 @@
     background-color 120ms ease-out,
     color 120ms ease-out;
 }
-[data-item-type="folder"] > [data-item-section="icon"] > svg {
-  transition: transform 220ms ease-out;
-}
 @media (prefers-reduced-motion: reduce) {
   [data-type="item"],
-  [data-item-type="folder"] > [data-item-section="icon"] > svg {
+  [data-item-type="folder"] > [data-item-section="icon"]::before {
     transition: none;
   }
 }
