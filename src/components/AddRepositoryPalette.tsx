@@ -293,8 +293,8 @@ function SubStep({
   const current = found >= 0 ? found : entries.length > 0 ? 0 : -1;
   const highlighted = entries[current];
   // A listing for an older path may still show, but it is not what Add would add.
-  const addable =
-    listing?.path === typedPath ? highlighted?.repository === true : false;
+  const fresh = listing?.path === typedPath;
+  const addable = fresh && highlighted?.repository === true;
   const canSubmit =
     !busy && (step.kind === "local" ? addable : namesTarget(step, base));
   const text = STEP_TEXT[step.kind];
@@ -368,7 +368,7 @@ function SubStep({
         input !== null &&
         input.selectionStart === input.value.length &&
         input.selectionEnd === input.value.length;
-      if (atEnd && highlighted) {
+      if (atEnd && fresh && highlighted) {
         event.preventDefault();
         edit({ ...step, path: descendInto(step.path, highlighted) });
       }
@@ -468,7 +468,7 @@ function SubStep({
                     onMouseDown={(event) => event.preventDefault()}
                     onClick={() => setActivePath(entry.path)}
                     onDoubleClick={() => {
-                      if (busy) return;
+                      if (busy || !fresh) return;
                       if (entry.repository) void open(async () => entry.path);
                       else
                         edit({

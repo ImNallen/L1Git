@@ -36,6 +36,13 @@ const hints = () =>
 const location = (name: string) => get("textbox", name) as HTMLInputElement;
 const submit = (name: string) => get("button", name) as HTMLButtonElement;
 
+const doubleClick = (app: Harness, title: RegExp) =>
+  app.act(() => {
+    get("option", title).dispatchEvent(
+      new MouseEvent("dblclick", { bubbles: true }),
+    );
+  });
+
 async function openPalette(app: Harness) {
   await app.click(plus());
   return palette();
@@ -179,12 +186,6 @@ it("highlighting a non-Git row from Add moves focus to the path, so keys keep wo
 });
 
 it("a double-click adds a repository and enters any other folder", async () => {
-  const doubleClick = (app: Harness, title: RegExp) =>
-    app.act(() => {
-      get("option", title).dispatchEvent(
-        new MouseEvent("dblclick", { bubbles: true }),
-      );
-    });
   const app = await mountApp({
     world: (world) => {
       opensDocs(world);
@@ -476,6 +477,31 @@ it("Add waits for the listing of the path it would add from", async () => {
   await app.settle();
   expect(options()).toEqual(["x *"]);
   expect(submit("Add").disabled).toBe(false);
+});
+
+it("a double-click and ArrowRight wait for the listing of the typed path", async () => {
+  const app = await mountApp({
+    world: (world) => {
+      opensDocs(world);
+      world.directories.set("/slow", [folder("/slow/x", true)]);
+    },
+  });
+  await openSource(app, /^Local folder/);
+  const held = app.bridge.hold("listDirectories", "/slow");
+  await app.type(get("combobox", "Path"), "/slow");
+  await held.arrived;
+  expect(options()[0], "the old rows stay on screen").toBe("docs-site *");
+
+  await doubleClick(app, /^docs-site/);
+  await doubleClick(app, /^screenshots/);
+  await app.press("ArrowRight", { target: get("combobox", "Path") });
+
+  expect(app.bridge.count("snapshot", DOCS)).toBe(0);
+  expect(dialogs()).toEqual(["Add repository"]);
+  expect((get("combobox", "Path") as HTMLInputElement).value).toBe("/slow");
+  held.release();
+  await app.settle();
+  expect(options()).toEqual(["x *"]);
 });
 
 it("a listing the core refuses shows its message", async () => {
