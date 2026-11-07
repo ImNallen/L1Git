@@ -1,7 +1,7 @@
 import { animate, motionAllowed } from "./motion";
 
 const paintProperties =
-  `display position box-sizing width height min-width min-height max-width max-height margin padding border border-radius background color opacity font white-space text-align text-decoration line-height letter-spacing vertical-align overflow overflow-x overflow-y flex flex-direction flex-wrap align-items justify-content gap grid-template-columns grid-template-rows grid-column grid-row align-self justify-self inset z-index transform translate transform-origin clip-path fill stroke stroke-width visibility box-shadow outline list-style contain mask-image mask-size mask-position mask-repeat content text-overflow tab-size word-break border-collapse table-layout stroke-linecap stroke-linejoin`.split(
+  `display position box-sizing width height min-width min-height max-width max-height margin padding border border-radius background color opacity font white-space text-align text-decoration line-height letter-spacing vertical-align overflow overflow-x overflow-y flex flex-direction flex-wrap align-items justify-content gap grid-template-columns grid-template-rows grid-column grid-row align-self justify-self inset z-index transform translate transform-origin transform-box clip-path fill stroke stroke-width stroke-dasharray stroke-dashoffset visibility box-shadow outline list-style contain mask-image mask-size mask-position mask-repeat content text-overflow tab-size word-break border-collapse table-layout stroke-linecap stroke-linejoin`.split(
     " ",
   );
 

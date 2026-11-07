@@ -119,6 +119,7 @@ function GraphCell({
         <path
           key={`continue-${edge.from}`}
           data-graph-key={`continue:${edge.oid}`}
+          data-graph-lane={edge.from}
           className={dim(lit?.continuations[index])}
           d={curve(edge.from, edge.to, 0, ROW_HEIGHT)}
           stroke={color(edge.from)}
@@ -127,6 +128,7 @@ function GraphCell({
       {row.incoming && (
         <path
           data-graph-key="incoming"
+          data-graph-lane={row.lane}
           className={dim(lit?.incoming)}
           d={`M ${x(row.lane)} 0 V ${ROW_CENTER}`}
           stroke={color(row.lane)}
@@ -136,6 +138,7 @@ function GraphCell({
         <path
           key={edge.oid}
           data-graph-key={`parent:${edge.oid}`}
+          data-graph-lane={edge.to}
           className={dim(lit?.parents[index])}
           d={curve(edge.from, edge.to, ROW_CENTER, ROW_HEIGHT)}
           stroke={color(edge.to)}

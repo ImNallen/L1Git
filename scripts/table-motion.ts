@@ -1,6 +1,6 @@
 import { flushSync } from "react-dom";
 
-function requireElement<T extends Element>(
+export function requireElement<T extends Element>(
   selector: string,
   root: ParentNode = document,
 ) {
@@ -8,9 +8,10 @@ function requireElement<T extends Element>(
   if (!element) throw new Error(`Missing ${selector}`);
   return element;
 }
-const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-const act = (action: () => void) => flushSync(action);
-async function until(test: () => boolean) {
+export const wait = (ms: number) =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+export const act = (action: () => void) => flushSync(action);
+export async function until(test: () => boolean) {
   const start = performance.now();
   while (!test()) {
     if (performance.now() - start > 10000)
@@ -18,15 +19,15 @@ async function until(test: () => boolean) {
     await new Promise((resolve) => requestAnimationFrame(resolve));
   }
 }
-const check = (condition: boolean, message: string) => {
+export const check = (condition: boolean, message: string) => {
   if (!condition) throw new Error(message);
 };
-const rows = () => [
+export const rows = () => [
   ...document.querySelectorAll<HTMLElement>(".history-table [data-motion-row]"),
 ];
 const paint = () => requireElement<HTMLElement>(".history-selection");
-const scroller = () => requireElement<HTMLElement>(".history-scroll");
-function context() {
+export const scroller = () => requireElement<HTMLElement>(".history-scroll");
+export function context() {
   const branch = requireElement<HTMLButtonElement>(
     '.branch-row[title^="refs/heads/main "]',
   );
@@ -40,7 +41,7 @@ function context() {
     ),
   );
 }
-function command(name: string) {
+export function command(name: string) {
   const button = [
     ...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
   ].find((button) => button.textContent?.trim() === name);
@@ -75,7 +76,7 @@ const exitOpacity = () => {
         )
     : 0;
 };
-async function openCode() {
+export async function openCode() {
   await until(
     () =>
       !!document
@@ -84,10 +85,15 @@ async function openCode() {
   );
   const root = requireElement<HTMLElement>("file-tree-container").shadowRoot;
   if (!root) throw new Error("Missing actual Pierre tree");
-  act(() => requireElement<HTMLElement>('[role="treeitem"]', root).click());
+  act(() =>
+    requireElement<HTMLElement>(
+      '[role="treeitem"]:not([aria-expanded])',
+      root,
+    ).click(),
+  );
   await until(() => !!document.querySelector(".file-diff"));
 }
-function back() {
+export function back() {
   act(() =>
     requireElement<HTMLButtonElement>(".file-diff-toolbar button").click(),
   );

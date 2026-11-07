@@ -6,20 +6,26 @@ type Pose = {
   opacity: string;
   background: string;
 };
-const running = new WeakMap<HTMLElement, Animation>();
+const running = new WeakMap<Element, Animation>();
 
 export const motionAllowed = () =>
   typeof window.matchMedia === "function" &&
   !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 export function animate(
-  element: HTMLElement,
+  element: HTMLElement | SVGElement,
   frames: Keyframe[],
   duration: number,
+  { delay = 0, easing = "ease-out" }: { delay?: number; easing?: string } = {},
 ) {
   running.get(element)?.cancel();
   if (!motionAllowed() || typeof element.animate !== "function") return;
-  const animation = element.animate(frames, { duration, easing: "ease-out" });
+  const animation = element.animate(frames, {
+    duration,
+    delay,
+    easing,
+    fill: "backwards",
+  });
   running.set(element, animation);
   const preference = window.matchMedia("(prefers-reduced-motion: reduce)");
   const stop = () => {
