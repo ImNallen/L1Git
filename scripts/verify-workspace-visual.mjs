@@ -177,12 +177,28 @@ browser(
 const diff = evaluate(() => {
   const host = document.querySelector("diffs-container");
   const line = host.shadowRoot.querySelector("[data-line]");
+  const addedText = host.shadowRoot.querySelector(
+    '[data-line-type="change-addition"][data-line] span[style]',
+  );
+  const [unified, split] = document.querySelectorAll(".diff-style button");
+  const unifiedRect = unified.getBoundingClientRect();
+  const splitRect = split.getBoundingClientRect();
   return {
     lineHeight: getComputedStyle(line).lineHeight,
     controls: [...document.querySelectorAll(".diff-style button")].map(
       (button) => button.textContent,
     ),
     font: getComputedStyle(line).fontFamily,
+    addedText: addedText ? getComputedStyle(addedText).color : null,
+    unified: {
+      x: unifiedRect.x,
+      width: unifiedRect.width,
+      height: unifiedRect.height,
+      gap: splitRect.x - unifiedRect.right,
+      radius: getComputedStyle(unified).borderRadius,
+      background: getComputedStyle(unified).backgroundColor,
+      color: getComputedStyle(unified).color,
+    },
   };
 });
 report.diff = diff;
@@ -190,6 +206,21 @@ if (diff.lineHeight !== "28px")
   report.failures.push(`Diff line height ${diff.lineHeight}`);
 if (diff.controls.join(",") !== "Unified,Split")
   report.failures.push(`Unexpected diff controls ${diff.controls}`);
+if (diff.addedText !== "rgb(197, 228, 210)")
+  report.failures.push(`Added diff text ${diff.addedText}`);
+for (const [key, expected] of Object.entries({
+  x: 1376,
+  width: 72,
+  height: 28,
+  gap: 16,
+  radius: "5px",
+  background: "rgba(255, 255, 255, 0.08)",
+  color: "rgb(189, 189, 189)",
+}))
+  if (diff.unified[key] !== expected)
+    report.failures.push(
+      `Diff Unified ${key}: ${diff.unified[key]} != ${expected}`,
+    );
 browser("wait", "400");
 browser("screenshot", join(evidence, "diff-1920.png"));
 for (const [width, height] of contract.responsive) {

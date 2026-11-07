@@ -64,9 +64,9 @@
 }
 .history-table th {
   text-align: left;
-  font-weight: 450;
+  font-weight: 500;
   font-size: 11px;
-  color: var(--muted);
+  color: var(--workspace-history-heading, var(--muted));
   height: 32px;
   display: flex;
   align-items: center;
@@ -120,10 +120,10 @@
 .diffstat span {
   height: 3px;
   border-radius: 1px;
-  background: var(--border-strong);
+  background: var(--workspace-diffstat-neutral, var(--border-strong));
 }
 .diffstat .added {
-  background: var(--success);
+  background: var(--workspace-diffstat-added, var(--success));
 }
 .diffstat .deleted {
   background: var(--deleted);
@@ -318,6 +318,9 @@
 }
 .history-table tr.selected td {
   background: transparent;
+}
+.history-table tr.selected .commit-subject {
+  font-weight: 500;
 }
 .history-table tr:not(.selected) .commit-subject {
   color: var(--workspace-history-text, var(--text));

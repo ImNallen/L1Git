@@ -14,7 +14,7 @@
   display: block;
   width: 16px;
   height: 16px;
-  background: var(--trees-fg-muted);
+  background: var(--workspace-folder-icon, var(--trees-fg-muted));
   mask: url("/assets/workspace/Folder.svg") center / contain no-repeat;
 }
 [data-item-type="folder"] > [data-item-section="icon"] {
@@ -30,7 +30,7 @@
   display: block;
   width: 16px;
   height: 16px;
-  background: var(--trees-fg-muted);
+  background: var(--workspace-file-icon, var(--trees-fg-muted));
   mask: url("/assets/workspace/File.svg") center / contain no-repeat;
 }
 [data-item-type="folder"] > [data-item-section="git"] {

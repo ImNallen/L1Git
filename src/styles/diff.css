@@ -339,6 +339,7 @@
   background: transparent;
   box-shadow: none;
   padding-inline: 0;
+  color: var(--workspace-toolbar-text, var(--text-secondary));
 }
 .diff-style {
   background: transparent;
@@ -377,28 +378,31 @@
 .file-diff .diff-style {
   border: 0;
   background: transparent;
-  gap: 8px;
+  gap: 16px;
   padding: 0;
 }
 .file-diff .diff-style button {
   width: 72px;
   height: 28px;
+  border-radius: 5px;
   font-size: 12px;
+  color: var(--workspace-toolbar-text, var(--text-icon));
 }
 .file-diff .diff-style button[aria-pressed="true"] {
-  background: var(--row-hover);
-  color: var(--text-body);
+  background: var(--workspace-diff-selected, var(--row-hover));
+  color: var(--workspace-toolbar-text, var(--text-body));
 }
 .file-diff-path {
   font-family: var(--mono);
   margin-left: 16px;
+  color: var(--workspace-diff-path, var(--text-secondary));
 }
 .file-comparison {
   padding: 0 24px;
   min-height: 36px;
   display: flex;
   align-items: center;
-  color: var(--text-dim);
+  color: var(--workspace-diff-comparison, var(--text-dim));
   font-size: 11px;
   border-bottom: 1px solid var(--border);
 }
@@ -408,7 +412,8 @@
 
 :root[data-theme="dark"]:not([data-palette]) .file-diff diffs-container {
   --hunk-text: #8d9bb0;
-  --diffs-bg-addition-override: #172723;
+  --diffs-bg-separator-override: #181a1e;
+  --diffs-bg-addition-override: #172724;
   --diffs-bg-deletion-override: #2b1c20;
   --diffs-fg-number-override: #6f7f78;
   --diffs-fg-number-addition-override: #6f7f78;

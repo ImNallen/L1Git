@@ -19,7 +19,12 @@
     ".toolbar-action.more": { "x": 819, "width": 82 },
     ".inspector-heading": { "height": 56 },
     ".changed-files-filter": { "width": 328, "height": 30 },
-    ".changed-files-filter .workspace-icon": { "width": 16, "height": 16 }
+    ".changed-files-filter .workspace-icon": { "width": 16, "height": 16 },
+    ".inspector-heading .workspace-icon": {
+      "x": 1884,
+      "width": 16,
+      "height": 16
+    }
   },
   "styles": {
     ".sidebar": { "backgroundColor": "rgb(12, 14, 17)" },
@@ -45,7 +50,12 @@
     ".changed-files-filter": {
       "backgroundColor": "rgba(255, 255, 255, 0.03)",
       "borderTopColor": "rgba(255, 255, 255, 0.07)"
-    }
+    },
+    ".history-table th": { "fontWeight": "500", "color": "rgb(152, 163, 178)" },
+    ".history-table tr.selected .commit-subject": { "fontWeight": "500" },
+    ".diffstat .added": { "backgroundColor": "rgb(81, 203, 160)" },
+    ".repository-check": { "maskImage": "none" },
+    ".inspector-heading .workspace-icon": { "maskImage": "none" }
   },
   "absent": [
     ".repository-toggle",

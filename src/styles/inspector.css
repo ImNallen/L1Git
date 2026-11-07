@@ -441,6 +441,9 @@
 .inspector-heading {
   border-bottom: 0;
 }
+.inspector-heading .icon-button {
+  margin-right: -6px;
+}
 .inspector-content.commit-details {
   padding: 0;
 }

@@ -53,11 +53,14 @@ for (const type of ["light", "dark"] as const) {
       "editor.background": type === "dark" ? "#101216" : "#ffffff",
       "editor.foreground": foreground,
     },
-    tokenColors: [
-      {
-        scope: ["comment"],
-        settings: { foreground: type === "dark" ? "#777f8a" : "#737980" },
-      },
-    ],
+    tokenColors:
+      type === "dark"
+        ? []
+        : [
+            {
+              scope: ["comment"],
+              settings: { foreground: "#737980" },
+            },
+          ],
   }));
 }
