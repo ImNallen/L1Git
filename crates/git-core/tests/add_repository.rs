@@ -121,6 +121,30 @@ fn a_symlink_to_a_directory_is_listed_and_one_to_a_file_is_not() {
     assert_eq!(names(&listed(&base.join("list"))), ["to-dir"]);
 }
 
+#[cfg(unix)]
+#[test]
+fn a_symlink_follows_its_target_into_and_out_of_a_repository() {
+    let (_directory, base) = base();
+    folders(&base, &["repo/src", "links", "plain/child"]);
+    git(&base.join("repo"), &["init", "--quiet"]);
+
+    let into = base.join("links/shortcut");
+    std::os::unix::fs::symlink(base.join("repo/src"), &into).unwrap();
+    assert_eq!(
+        listed(&into),
+        [DirectoryEntry {
+            name: "shortcut".to_owned(),
+            path: into.to_str().unwrap().to_owned(),
+            repository: true,
+        }]
+    );
+    assert!(l1_git_core::snapshot(into.to_str().unwrap()).is_ok());
+
+    let out = base.join("repo/out");
+    std::os::unix::fs::symlink(base.join("plain"), &out).unwrap();
+    assert_eq!(names(&listed(&out)), ["child"]);
+}
+
 #[test]
 fn a_path_inside_a_repository_offers_that_one_directory() {
     let (_directory, base) = base();

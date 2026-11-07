@@ -104,7 +104,9 @@ pub fn list_directories(
     let Some(nearest) = nearest_directory(&path) else {
         return Ok(DirectoryListing { entries: vec![] });
     };
-    if nearest.ancestors().any(has_git) {
+    let resolved = nearest.canonicalize();
+    let resolved = resolved.as_deref().unwrap_or(nearest);
+    if resolved.ancestors().any(has_git) {
         return Ok(DirectoryListing {
             entries: vec![DirectoryEntry {
                 name: nearest.file_name().map_or_else(
