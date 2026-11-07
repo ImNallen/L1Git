@@ -1,3 +1,4 @@
+import { WorkspaceIcon } from "./WorkspaceIcon";
 import { Fragment, useRef } from "react";
 import type {
   KeyboardEvent as ReactKeyboardEvent,
@@ -5,23 +6,13 @@ import type {
   MouseEvent as ReactMouseEvent,
 } from "react";
 import {
-  Archive,
   ChevronDown,
   ChevronRight,
-  CircleCheck,
-  Cloud,
   Eye,
   EyeOff,
   Focus,
-  Folder,
-  FolderOpen,
-  GitBranch,
-  Laptop,
   Package,
-  Tag as TagIcon,
-  Tags,
 } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
 import { branchTree } from "../domain/branchTree";
 import type { BranchTree } from "../domain/branchTree";
 import type {
@@ -140,24 +131,24 @@ export function RepositoryBranches({
 
   function section(kind: string) {
     const key = `${root}:${kind}`;
-    const open = overrides.get(key) ?? true;
+    const open = overrides.get(key) ?? (kind === "local" || kind === "remote");
     return { key, open, toggle: () => onOverride(key, !open) };
   }
 
   function refSection(
     kind: string,
     label: string,
-    Icon: LucideIcon,
+    icon: ReactNode,
     total: number,
     rows: ReactNode[],
   ) {
-    if (total === 0) return null;
+    if (total === 0 && kind === "submodule") return null;
     const { open, toggle } = section(kind);
     return (
       <>
         <button className="tree-section" aria-expanded={open} onClick={toggle}>
           {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-          <Icon size={14} />
+          {icon}
           <span>{label}</span>
           <span className="count">{total}</span>
         </button>
@@ -187,8 +178,8 @@ export function RepositoryBranches({
         title={`${tag.reference} · Show in graph`}
         aria-current={selected ? "true" : undefined}
       >
-        <TagIcon size={14} />
-        <span>{tag.name}</span>
+        <WorkspaceIcon name="Tag" />
+        <span className="branch-label">{tag.name}</span>
       </button>
     );
   }
@@ -207,8 +198,10 @@ export function RepositoryBranches({
         title={`${stash.name} · ${stash.message} · Show changes`}
         aria-current={selected ? "true" : undefined}
       >
-        <Archive size={14} />
-        <span>{stash.message.replace(stashPrefix, "")}</span>
+        <WorkspaceIcon name="Stash" />
+        <span className="branch-label">
+          {stash.message.replace(stashPrefix, "")}
+        </span>
         <small className="ref-detail">{stash.name}</small>
       </button>
     );
@@ -240,8 +233,10 @@ export function RepositoryBranches({
                 onClick={() => onOverride(key, !open)}
               >
                 {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                {open ? <FolderOpen size={14} /> : <Folder size={14} />}
-                <span>{folder.name}</span>
+                <WorkspaceIcon
+                  name={kind === "remote" && depth === 0 ? "Cloud" : "Folder"}
+                />
+                <span className="branch-label">{folder.name}</span>
                 <span className="count">{folder.count}</span>
                 {!open &&
                   ruleCue(
@@ -255,7 +250,16 @@ export function RepositoryBranches({
         {node.branches.map((branch) => branchRow(branch, depth))}
       </>
     );
-    return tree(branchTree(shown), 0);
+    const checkedOut =
+      kind === "local"
+        ? shown.find((branch) => branch.reference === headReference)
+        : undefined;
+    return (
+      <>
+        {checkedOut && branchRow(checkedOut, 0)}
+        {tree(branchTree(shown.filter((branch) => branch !== checkedOut)), 0)}
+      </>
+    );
   }
 
   function branchRow(branch: Branch, depth: number) {
@@ -264,11 +268,6 @@ export function RepositoryBranches({
       branch.kind === "local"
         ? sync?.branches.get(branch.reference)
         : undefined;
-    const BranchIcon = checkedOut
-      ? CircleCheck
-      : branch.kind === "remote"
-        ? Cloud
-        : GitBranch;
     const selected = highlighted === branch.reference;
     const state = branchVisibility(rule, branch.reference);
     const toggle =
@@ -314,8 +313,12 @@ export function RepositoryBranches({
                 : "Soloed in the graph"
           }
         >
-          <BranchIcon size={14} />
-          <span>{branch.name.slice(branch.name.lastIndexOf("/") + 1)}</span>
+          <WorkspaceIcon name={checkedOut ? "Check" : "Branch"} />
+          <span className="branch-label">
+            {checkedOut
+              ? branch.name
+              : branch.name.slice(branch.name.lastIndexOf("/") + 1)}
+          </span>
           {checkedOut && (
             <span className="branch-head" aria-label="Checked-out branch">
               HEAD
@@ -352,7 +355,7 @@ export function RepositoryBranches({
         ) : (
           <ChevronRight size={13} />
         )}
-        <Laptop size={14} />
+        <WorkspaceIcon name="Branch" />
         <span>Local</span>
         <span className="count">{local.length}</span>
         {!localSection.open && ruleCue((branch) => branch.kind === "local")}
@@ -362,8 +365,10 @@ export function RepositoryBranches({
           {branchList("local", localShown)}
           {head.kind === "unborn" && (
             <div className="branch-row unborn">
-              <GitBranch size={14} />
-              <span>{head.reference.replace(/^refs\/heads\//, "")}</span>
+              <WorkspaceIcon name="Branch" />
+              <span className="branch-label">
+                {head.reference.replace(/^refs\/heads\//, "")}
+              </span>
               <small>unborn</small>
             </div>
           )}
@@ -382,7 +387,7 @@ export function RepositoryBranches({
         ) : (
           <ChevronRight size={13} />
         )}
-        <Cloud size={14} />
+        <WorkspaceIcon name="Cloud" />
         <span>Remote</span>
         <span className="count">{remote.length}</span>
         {!remoteSection.open && ruleCue((branch) => branch.kind === "remote")}
@@ -398,18 +403,24 @@ export function RepositoryBranches({
           )}
         </div>
       )}
-      {refSection("tag", "Tags", Tags, tags.length, tagsShown.map(tagRow))}
+      {refSection(
+        "tag",
+        "Tags",
+        <WorkspaceIcon name="Tag" />,
+        tags.length,
+        tagsShown.map(tagRow),
+      )}
       {refSection(
         "stash",
         "Stashes",
-        Archive,
+        <WorkspaceIcon name="Stash" />,
         stashes.length,
         stashesShown.map(stashRow),
       )}
       {refSection(
         "submodule",
         "Submodules",
-        Package,
+        <Package size={16} />,
         submodules.length,
         submodulesShown.map((submodule) => (
           <div
@@ -418,7 +429,7 @@ export function RepositoryBranches({
             title={`${submodule.path} · Records ${submodule.oid}`}
           >
             <Package size={14} />
-            <span>{submodule.path}</span>
+            <span className="branch-label">{submodule.path}</span>
             <small className="ref-detail">{submodule.oid.slice(0, 7)}</small>
           </div>
         )),

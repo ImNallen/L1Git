@@ -25,14 +25,11 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 10px 14px;
   border-bottom: 1px solid var(--border);
 }
 .file-diff-path {
   flex: 1;
   min-width: 0;
-  font-family: var(--mono);
-  font-size: 11px;
   color: var(--text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -43,7 +40,6 @@
   padding: 2px;
   border: 1px solid var(--border-control);
   border-radius: 6px;
-  background: var(--control);
 }
 .diff-style button {
   height: 26px;
@@ -335,7 +331,6 @@
 }
 
 .file-diff-toolbar {
-  height: 56px;
   flex-shrink: 0;
   padding-inline: 20px;
 }
@@ -348,4 +343,75 @@
 .diff-style {
   background: transparent;
   border-color: transparent;
+}
+
+.file-diff {
+  --diffs-line-height: 28px;
+}
+.file-diff-toolbar {
+  height: 48px;
+  min-height: 48px;
+  padding: 0 24px;
+}
+.file-diff-path {
+  font-size: 12px;
+}
+.file-diff diffs-container {
+  --diffs-bg-addition-override: color-mix(
+    in srgb,
+    var(--success) 9%,
+    var(--canvas)
+  );
+  --diffs-bg-deletion-override: color-mix(
+    in srgb,
+    var(--deleted) 9%,
+    var(--canvas)
+  );
+  --diffs-bg-separator-override: color-mix(
+    in srgb,
+    var(--text) 4%,
+    var(--canvas)
+  );
+  --diffs-fg-number-override: var(--text-dim);
+}
+.file-diff .diff-style {
+  border: 0;
+  background: transparent;
+  gap: 8px;
+  padding: 0;
+}
+.file-diff .diff-style button {
+  width: 72px;
+  height: 28px;
+  font-size: 12px;
+}
+.file-diff .diff-style button[aria-pressed="true"] {
+  background: var(--row-hover);
+  color: var(--text-body);
+}
+.file-diff-path {
+  font-family: var(--mono);
+  margin-left: 16px;
+}
+.file-comparison {
+  padding: 0 24px;
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  color: var(--text-dim);
+  font-size: 11px;
+  border-bottom: 1px solid var(--border);
+}
+.file-diff {
+  --diffs-gap-block: 0px;
+}
+
+:root[data-theme="dark"]:not([data-palette]) .file-diff diffs-container {
+  --hunk-text: #8d9bb0;
+  --diffs-bg-addition-override: #172723;
+  --diffs-bg-deletion-override: #2b1c20;
+  --diffs-fg-number-override: #6f7f78;
+  --diffs-fg-number-addition-override: #6f7f78;
+  --diffs-fg-number-deletion-override: #6f7f78;
+  --diffs-addition-color-override: #80bb9a;
 }

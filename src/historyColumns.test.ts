@@ -44,7 +44,7 @@ describe("history column layout", () => {
   it.each([
     [8, "100px", 318],
     [10, "100px", 318],
-    [16, "115px", 333],
+    [16, "125px", 343],
   ])("fits a %i-character commit ID", (length, width, minWidth) => {
     const layout = columnLayout(58, new Set<ColumnId>(["sha"]), length);
     expect(layout.template).toBe(`58px minmax(160px, 1fr) ${width}`);

@@ -1,3 +1,4 @@
+import { toolbarItem } from "./test/appHarness";
 // @vitest-environment happy-dom
 import { expect, it } from "vitest";
 import {
@@ -74,7 +75,9 @@ it("Finish writes finishReplay, closes the panel, and lands in Undo with its lab
     `write ${PIN} finishReplay`,
   ]);
   expect(query("region", PANEL)).toBeNull();
-  expect(get("button", "Undo Cherry-pick “Picked commit”")).toBeTruthy();
+  expect(
+    await toolbarItem(app, "More", "Undo Cherry-pick “Picked commit”"),
+  ).toBeTruthy();
 });
 
 it("a refused Finish shows why through the write notice and keeps the panel", async () => {
@@ -381,8 +384,10 @@ it("a clean pick from the menu writes the review, closes, and lands in Undo with
   ]);
   expect(dialogs()).toEqual([]);
   expect(queryAll("alert").length).toBe(noticesBefore);
-  expect(get("button", "Undo Cherry-pick “Picked subject”")).toBeTruthy();
   expect(focused(), "focus returns to History").toBe("grid Commits");
+  expect(
+    await toolbarItem(app, "More", "Undo Cherry-pick “Picked subject”"),
+  ).toBeTruthy();
 });
 
 it("a clean revert from the menu reads Revert on its button and in Undo", async () => {
@@ -391,7 +396,9 @@ it("a clean revert from the menu reads Revert on its button and in Undo", async 
   await fromMenu(app, "Release,", "Revert on main…");
   await app.click(get("button", "Revert", get("dialog", "Revert this commit")));
   expect(dialogs()).toEqual([]);
-  expect(get("button", "Undo Revert “Picked subject”")).toBeTruthy();
+  expect(
+    await toolbarItem(app, "More", "Undo Revert “Picked subject”"),
+  ).toBeTruthy();
 });
 
 it("a stopped pick closes with no failure notice, and the panel takes over", async () => {
@@ -521,7 +528,9 @@ it("a linked worktree's selection is the destination, not the repository root", 
   expect(dialog.textContent).toContain("5".repeat(40));
   await app.click(get("button", "Cherry-pick", dialog));
   expect(writes(app)).toEqual([`write ${PIN_FEATURE} replay`]);
-  expect(get("button", "Undo Cherry-pick “Picked subject”")).toBeTruthy();
+  expect(
+    await toolbarItem(app, "More", "Undo Cherry-pick “Picked subject”"),
+  ).toBeTruthy();
 });
 
 it("the palette offers both for the selected commit and opens the same review", async () => {

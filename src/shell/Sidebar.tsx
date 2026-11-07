@@ -1,4 +1,4 @@
-import { Settings } from "lucide-react";
+import { WorkspaceIcon } from "../components/WorkspaceIcon";
 import type { ReactNode } from "react";
 import type { Commands } from "../actions";
 import { PaneDivider } from "../components/PaneDivider";
@@ -17,7 +17,6 @@ import type { SettingsScreen } from "./useSettingsScreen";
 
 export function Sidebar({
   layout,
-  toggle,
   settings,
   commands,
   entries,
@@ -55,9 +54,7 @@ export function Sidebar({
         style={{ width: layout.sidebarWidth }}
         aria-label="Repository sidebar"
       >
-        <div className="brand" data-tauri-drag-region>
-          {layout.sidebarOpen && toggle}
-        </div>
+        <div className="brand" data-tauri-drag-region />
         <div className="repository-navigation">
           <RepositoryTree
             entries={entries}
@@ -80,7 +77,7 @@ export function Sidebar({
             title="Settings"
             onClick={() => commands.openSettings()}
           >
-            <Settings size={16} />
+            <WorkspaceIcon name="Settings" />
           </button>
           <UpdateAffordance updates={updates} restart={restart} />
         </footer>

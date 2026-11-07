@@ -15,14 +15,9 @@ function Tree({ searching = false }: { searching?: boolean }) {
     <nav ref={nav}>
       <div className="repository-group" data-repository-root="demo">
         <div className="repository-row">
-          <button
-            className="repository-toggle"
-            aria-expanded={open}
-            onClick={() => setOpen(!open)}
-          >
-            chevron
+          <button className="repository-open" onClick={() => setOpen(true)}>
+            demo
           </button>
-          <button className="repository-open">demo</button>
         </div>
         {open && (
           <>
@@ -59,8 +54,6 @@ const press = (key: string) =>
       new KeyboardEvent("keydown", { key, bubbles: true }),
     );
   });
-const expanded = (host: HTMLElement) =>
-  host.querySelector(".repository-toggle")?.getAttribute("aria-expanded");
 const tabbable = (host: HTMLElement) =>
   [...host.querySelectorAll("button")]
     .filter((b) => b.tabIndex === 0)
@@ -70,7 +63,7 @@ it("leaves one Tab stop, on the current row", () => {
   expect(tabbable(render())).toEqual(["main"]);
 });
 
-it("steps through rows with the arrow keys, skipping chevrons and visibility toggles", () => {
+it("steps through rows with the arrow keys, skipping visibility toggles", () => {
   const host = render();
   act(() => button(host, "main").focus());
   press("ArrowDown");
@@ -84,16 +77,13 @@ it("steps through rows with the arrow keys, skipping chevrons and visibility tog
   expect(document.activeElement?.textContent).toBe("main");
 });
 
-it("collapses with Left, returns to the repository, and expands with Right", () => {
+it("returns to the repository with Left and enters its refs with Right", () => {
   const host = render();
   act(() => button(host, "main").focus());
   press("ArrowLeft");
   expect(document.activeElement?.textContent).toBe("demo");
   press("ArrowLeft");
-  expect(expanded(host)).toBe("false");
-  expect(tabbable(host)).toEqual(["demo"]);
-  press("ArrowRight");
-  expect(expanded(host)).toBe("true");
+  expect(button(host, "Local").isConnected).toBe(true);
   press("ArrowRight");
   expect(document.activeElement?.textContent).toBe("Local");
 });

@@ -1,0 +1,42 @@
+[data-type="item"] {
+  column-gap: 8px;
+}
+[data-item-git-status] > [data-item-section="content"],
+[data-item-git-status] > [data-item-section="icon"] {
+  color: var(--trees-fg);
+}
+[data-item-type="folder"] > [data-item-section="content"] {
+  color: var(--trees-fg-muted);
+  font-size: 11px;
+}
+[data-item-type="folder"] > [data-item-section="icon"]::after {
+  content: "";
+  display: block;
+  width: 16px;
+  height: 16px;
+  background: var(--trees-fg-muted);
+  mask: url("/assets/workspace/Folder.svg") center / contain no-repeat;
+}
+[data-item-type="folder"] > [data-item-section="icon"] {
+  display: flex;
+  gap: 8px;
+  width: 40px;
+}
+[data-item-type="file"] > [data-item-section="icon"] > svg {
+  display: none;
+}
+[data-item-type="file"] > [data-item-section="icon"]::after {
+  content: "";
+  display: block;
+  width: 16px;
+  height: 16px;
+  background: var(--trees-fg-muted);
+  mask: url("/assets/workspace/File.svg") center / contain no-repeat;
+}
+[data-item-type="folder"] > [data-item-section="git"] {
+  display: none;
+}
+[data-item-section="decoration"] {
+  color: var(--trees-fg-muted);
+  font-size: 10px;
+}

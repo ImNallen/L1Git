@@ -218,9 +218,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
               layout={layout}
               shown={view.shown}
               snapshot={view.snapshot}
-              writes={writes}
-              sync={sync}
-              commands={commands}
             />
             <Notices
               snapshot={view.snapshot}

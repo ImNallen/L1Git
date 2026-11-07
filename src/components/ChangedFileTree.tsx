@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { Search } from "lucide-react";
-import { FILE_TREE_DENSITY_PRESETS } from "@pierre/trees";
+import { WorkspaceIcon } from "./WorkspaceIcon";
 import type { GitStatus } from "@pierre/trees";
 import { FileTree, useFileTree, useFileTreeSearch } from "@pierre/trees/react";
+import treeStyles from "../styles/changedFileTree.css?inline";
 import focusStyles from "../styles/focus.css?inline";
 import {
   changedFileTreeInput,
@@ -48,7 +48,7 @@ type Props = {
   onRowFocus?: (row: string) => void;
 };
 
-const ITEM_HEIGHT = FILE_TREE_DENSITY_PRESETS.compact.itemHeight;
+const ITEM_HEIGHT = 32;
 
 export function ChangedFileTree({
   files,
@@ -80,10 +80,17 @@ export function ChangedFileTree({
     })),
     initialExpansion,
     flattenEmptyDirectories,
-    density: "compact",
+    density: "default",
+    itemHeight: ITEM_HEIGHT,
+    icons: { set: "minimal", colored: false },
+    renderRowDecoration: ({ item }) =>
+      item.kind === "directory"
+        ? { text: String(pathsUnder(files, item).length) }
+        : null,
     fileTreeSearchMode: "hide-non-matches",
     searchBlurBehavior: "retain",
-    unsafeCSS: focusStyles,
+    unsafeCSS: `${focusStyles}
+${treeStyles}`,
     composition:
       actions.length > 0
         ? {
@@ -186,10 +193,10 @@ export function ChangedFileTree({
     return (
       <>
         <label className="changed-files-filter">
-          <Search size={14} />
+          <WorkspaceIcon name="Search" size={12} />
           <input
             aria-label="Filter changed files"
-            placeholder="Filter changed files"
+            placeholder="Filter changed files…"
             value={search.value}
             onChange={(event) => {
               search.setValue(event.target.value || null);
@@ -199,7 +206,7 @@ export function ChangedFileTree({
         {search.value && search.matchingPaths.length === 0 && (
           <p className="tree-hint">No changed files match.</p>
         )}
-        {(!search.value || search.matchingPaths.length > 0) && tree}
+        {tree}
       </>
     );
   return (

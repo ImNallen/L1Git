@@ -1,3 +1,5 @@
+import { repositoryRow } from "./test/appHarness";
+import { toolbarItem } from "./test/appHarness";
 // @vitest-environment happy-dom
 import { expect, it } from "vitest";
 import {
@@ -10,6 +12,7 @@ import {
 import {
   noUpstream,
   OTHER_COMMON_DIR,
+  OTHER,
   PIN,
   PIN_COMMON_DIR,
 } from "./test/fixtures";
@@ -23,7 +26,8 @@ const TODAY_SNAPSHOT_READS_AFTER_REF_WRITE = 3;
 
 it("window focus rereads overview, snapshot, statuses, undo history, merge state, and sidebar refs", async () => {
   const app = await mountApp();
-  await app.click(get("button", "Expand other"));
+  await app.click(repositoryRow(OTHER));
+  await app.click(repositoryRow(PIN));
   app.bridge.reset();
   await app.refocusWindow();
   expect(app.bridge.lines()).toMatchInlineSnapshot(`
@@ -203,7 +207,7 @@ it("adding a remote in Publish refreshes the overview and rereads the repository
     name: (request.remote as { name: string }).name,
     refresh: { kind: "refreshed", options },
   }));
-  await app.click(get("button", "Publish branch…"));
+  await app.click(await toolbarItem(app, "Push", "Publish branch…"));
   await app.click(get("button", "Add remote…"));
   await app.type(get("textbox", "Remote name"), "upstream");
   await app.type(
@@ -233,14 +237,14 @@ it("while a write runs, Push waits for it and push preparation is redone afterwa
   const write = app.bridge.hold("write", PIN);
   await app.click(get("button", "Stage all"));
   await write.arrived;
-  const push = get("button", "Push");
-  expect(push.getAttribute("title")).toBe(
-    "Wait for the current local write to finish.",
-  );
-  expect((push as HTMLButtonElement).disabled).toBe(true);
+  const push = await toolbarItem(app, "Push", "Push");
+  expect(push.getAttribute("aria-disabled")).toBe("true");
+  await app.click(push);
+  expect(app.bridge.count("push")).toBe(0);
+  await app.press("Escape");
   app.bridge.reset();
   write.release();
   await app.settle();
-  expect(get("button", "Push to origin/main")).toBeTruthy();
+  expect(await toolbarItem(app, "Push", "Push to origin/main")).toBeTruthy();
   expect(app.bridge.count("preparePush", PIN)).toBeGreaterThan(0);
 });

@@ -1,3 +1,4 @@
+import { toolbarItem } from "./test/appHarness";
 // @vitest-environment happy-dom
 import { expect, it } from "vitest";
 import {
@@ -33,7 +34,7 @@ const inspector = () => query("complementary", "Commit inspector");
 
 it("selecting a branch in another repository preserves keyboard focus", async () => {
   const app = await mountApp();
-  await app.click(get("button", "Expand other"));
+  await app.click(repositoryRow(OTHER));
   const row = refRow("refs/heads/trunk", OTHER);
   if (!row) throw new Error("Missing other repository branch");
   row.focus();
@@ -47,7 +48,7 @@ it("selecting a branch in another repository preserves keyboard focus", async ()
 
 it("More supports keyboard navigation past unavailable actions and returns focus", async () => {
   const app = await mountApp();
-  await app.click(get("button", "More"));
+  await app.click(get("button", "Pull"));
   const first = document.querySelector('[role="menuitem"]');
   expect(first?.getAttribute("aria-disabled")).toBe("true");
   expect(document.activeElement).toBe(first);
@@ -55,10 +56,10 @@ it("More supports keyboard navigation past unavailable actions and returns focus
   await app.click(first);
   expect(dialogs()).toEqual([]);
   await app.press("End");
-  expect(document.activeElement?.textContent).toContain("Settings");
+  expect(document.activeElement?.textContent).toContain("Fast-forward");
   await app.press("Escape");
   expect(query("menu", "Repository actions")).toBeNull();
-  expect(focused()).toBe("button More");
+  expect(focused()).toBe("button Pull");
 });
 
 it("beforeunload is guarded while resolution drafts exist, and not while drafts are frozen", async () => {
@@ -105,7 +106,7 @@ it("leaving settings focuses Settings, or the sidebar toggle when the sidebar is
   expect(dialogs()).toEqual([]);
   expect(focused()).toBe("button Settings");
 
-  await app.click(get("button", "Toggle sidebar"));
+  await app.runPaletteItem("Toggle sidebar");
   get("grid", "Commits").focus();
   await app.runPaletteItem("Open Settings");
   expect(dialogs()).toEqual(["Settings"]);
@@ -116,15 +117,13 @@ it("leaving settings focuses Settings, or the sidebar toggle when the sidebar is
 
 it("the toggle buttons keep focus as they move between the toolbar and the pane", async () => {
   const app = await mountApp();
-  const inSidebar = get("button", "Toggle sidebar");
-  expect(inSidebar.closest(".sidebar")).not.toBeNull();
-  await app.click(inSidebar);
+  expect(query("button", "Toggle sidebar")).toBeNull();
+  await app.runPaletteItem("Toggle sidebar");
   const inToolbar = get("button", "Toggle sidebar");
   expect(inToolbar.closest(".toolbar")).not.toBeNull();
   expect(document.activeElement).toBe(inToolbar);
   await app.click(inToolbar);
-  expect(document.activeElement?.closest(".sidebar")).not.toBeNull();
-  expect(focused()).toBe("button Toggle sidebar");
+  expect(document.activeElement).toBe(repositoryRow(PIN));
 
   const inPane = get("button", "Toggle commit inspector");
   expect(inPane.closest(".inspector")).not.toBeNull();
@@ -196,14 +195,11 @@ it("the commit button names the branch the commit would land on when the snapsho
   expect(get("button", "Commit to feature")).toBeTruthy();
 });
 
-it("shows the repository and commit count above history", async () => {
+it("keeps history full width without an added title or count", async () => {
   await mountApp();
-  expect(document.querySelector(".history-heading strong")?.textContent).toBe(
-    "pin",
-  );
-  expect(document.querySelector(".history-heading")?.textContent).toContain(
-    "commits",
-  );
+  expect(document.querySelector(".history-heading")).toBeNull();
+  expect(document.querySelector(".repository-toggle")).toBeNull();
+  expect(document.querySelector(".repositories-heading strong")).toBeNull();
   expect(
     document.querySelector(
       ".toolbar input[aria-label='Search loaded history']",
@@ -219,18 +215,20 @@ it("keeps repository identity while detached", async () => {
         head: headSchema.parse({ kind: "detached", oid: C4 }),
       }),
   });
-  expect(document.querySelector(".history-heading strong")?.textContent).toBe(
-    "pin",
-  );
+  expect(
+    document.querySelector(".repository-open[aria-current='true']")
+      ?.textContent,
+  ).toBe("pin");
 });
 
-it("updates the history heading when switching repositories", async () => {
+it("updates the selected repository without hiding its refs on repeat clicks", async () => {
   const app = await mountApp();
   await app.click(repositoryRow(OTHER));
   await app.settle();
-  expect(document.querySelector(".history-heading strong")?.textContent).toBe(
-    "other",
-  );
+  expect(
+    document.querySelector(".repository-open[aria-current='true']")
+      ?.textContent,
+  ).toBe("other");
 });
 
 async function fromHistoryMenu(app: Harness, row: string, item: string) {
@@ -256,7 +254,7 @@ it("closing Publish moves focus to History even when it opened from another cont
     publishOptionsSchema.parse({ kind: "unavailable", reason: "detached" }),
   );
   get("button", "Settings").focus();
-  await app.click(get("button", "Publish branch…"));
+  await app.click(await toolbarItem(app, "Push", "Publish branch…"));
   expect(dialogs()).toEqual(["Publish branch"]);
   await app.click(get("button", "Close publish branch"));
   expect(dialogs()).toEqual([]);

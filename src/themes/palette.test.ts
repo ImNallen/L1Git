@@ -151,17 +151,17 @@ it("starts each theme's lanes from L1's lane nearest its accent and keeps L1's o
     "#fa7084",
     "#bf83fb",
     "#a2e533",
-    "#497df3",
+    "#6291fe",
   ]);
   expect(
     Object.fromEntries(builtInLanes.map(([id, , lanes]) => [id, lanes[0]])),
   ).toEqual({
     "l1-light": "#1b4ed8",
-    "l1-dark": "#4a7ef4",
+    "l1-dark": "#6392ff",
     "grove-light": "#0d756d",
     "grove-dark": "#2bd3be",
     "ocean-light": "#1a4cd6",
-    "ocean-dark": "#497df3",
+    "ocean-dark": "#6291fe",
     "ember-light": "#b35207",
     "ember-dark": "#fa7084",
     "iris-light": "#9231e8",
@@ -285,7 +285,7 @@ it("tints error washes toward the red a theme brings", () => {
 it("starts lanes from L1's blue when the accent is grey", () => {
   for (const accent of ["#808080", "#7f8081"]) {
     const p = derivePalette("dark", "#0a0a0a", accent);
-    expect([p.graphLane1, p.graphLane3]).toEqual(["#4578ee", "#f8bc1f"]);
+    expect([p.graphLane1, p.graphLane3]).toEqual(["#5f8dfa", "#f8bc1f"]);
   }
 });
 

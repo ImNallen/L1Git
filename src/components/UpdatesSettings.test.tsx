@@ -358,7 +358,6 @@ it("hides the sidebar updater in development while keeping Settings guidance", a
 it("spins the sidebar arrows while checking and stops or offers a download", async () => {
   await render(false);
   expect(sidebar().disabled).toBe(false);
-  expect(sidebar().querySelector(".lucide-refresh-cw")).not.toBeNull();
   expect(sidebar().querySelector(".spin")).toBeNull();
 
   transport.invoke.mockResolvedValue(snapshot({ kind: "checking" }));
@@ -367,12 +366,11 @@ it("spins the sidebar arrows while checking and stops or offers a download", asy
     name: "updater_check",
   });
   expect(sidebar().disabled).toBe(true);
-  expect(sidebar().querySelector(".lucide-refresh-cw.spin")).not.toBeNull();
+  expect(sidebar().querySelector(".spin")).not.toBeNull();
 
   await state({ kind: "current" });
   expect(sidebar().disabled).toBe(false);
   expect(sidebar().getAttribute("aria-label")).toBe("Check for updates");
-  expect(sidebar().querySelector(".lucide-refresh-cw")).not.toBeNull();
   expect(sidebar().querySelector(".spin")).toBeNull();
 
   transport.invoke.mockResolvedValue(snapshot({ kind: "checking" }));
@@ -380,7 +378,7 @@ it("spins the sidebar arrows while checking and stops or offers a download", asy
   expect(transport.invoke.mock.calls.at(-1)?.[0]).toEqual({
     name: "updater_check",
   });
-  expect(sidebar().querySelector(".lucide-refresh-cw.spin")).not.toBeNull();
+  expect(sidebar().querySelector(".spin")).not.toBeNull();
   await state({ kind: "available", candidate, message: null });
   expect(sidebar().disabled).toBe(false);
   expect(sidebar().getAttribute("aria-label")).toBe("Download update");

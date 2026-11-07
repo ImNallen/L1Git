@@ -170,6 +170,7 @@ it("a pending jump resolves against a reread that failed, which keeps the cached
     { kind: "timedOut", message: "Reading other took too long." },
     OTHER,
   );
+  await app.click(repositoryRow(OTHER));
   await app.click(refRow("refs/heads/base", OTHER)!);
   expect(
     get("alert", /The last successful view is retained/),

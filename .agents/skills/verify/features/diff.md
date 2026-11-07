@@ -17,13 +17,13 @@ Open the fixture repository. Select a commit in the history. In the inspector's 
 5. Click **Back to history**. Confirm the history returns.
 6. Open `graph.ts`, then click the inspector's parent hash. Confirm the diff closes and the inspector shows `Merge branch feat/history`.
 7. Select `docs: start the local Git fixture` and click `README.md`. Confirm an all-added diff with the single line `# L1 demo`.
-8. Select `feat(inspector): show commit message and changed paths`, click `history.ts`, then click **History**. Confirm two rows, `3de65de` and `285b405`, the same list as `git log --follow --oneline <commit> -- history.ts`, with the first row selected and its diff below.
+8. Select `feat(inspector): show commit message and changed paths`, click `history.ts`, then open **More → Show file history**. Confirm two rows, `3de65de` and `285b405`, the same list as `git log --follow --oneline <commit> -- history.ts`, with the first row selected and its diff below.
 9. Click the `285b405` row. Confirm an all-added diff of three lines. Click the list, then press Home and Down. Confirm the selection moves with the keys, the selected row takes the accent tint and a 2px left bar while the list has focus, and no outline appears.
-10. Click **Blame**. Confirm three bands above lines 1, 2, and 3, naming `285b405`, `3de65de`, and `285b405`, which match `git blame <commit> -- history.ts`. Press Tab from **Blame** and confirm the first band takes the tint and left bar.
+10. Open **More → Show blame**. Confirm three bands above lines 1, 2, and 3, naming `285b405`, `3de65de`, and `285b405`, which match `git blame <commit> -- history.ts`. Press Tab from **More** and confirm the first band takes the tint and left bar.
 11. Click the `285b405` band. Confirm the diff closes and the graph selects `feat(history): add bounded repository history`.
-12. Open `assets/icon.png` in the inspector commit and click **Blame**. Confirm the notice `Binary file. L1 Git does not blame binary files.`
-13. Switch between **Unified**, **Split**, **History**, and **Blame**. Confirm each view replaces the last one. Press Escape from Blame and confirm the history returns with the commit still selected.
-14. Select a worktree row and open a file. Confirm **History** and **Blame** are off and their tooltip asks for a commit. Confirm a bar above each hunk and the line bar above the diff, which [changes](changes.md) steps 29 to 37 drive. Commit and comparison diffs show neither.
+12. Open `assets/icon.png` in the inspector commit and open **More → Show blame**. Confirm the notice `Binary file. L1 Git does not blame binary files.`
+13. Switch between **Unified**, **Split**, **More → Show file history**, and **More → Show blame**. Confirm each view replaces the last one. Press Escape from Blame and confirm the history returns with the commit still selected.
+14. Select a worktree row and open a file. Open **More** and confirm **Show file history** and **Show blame** have `aria-disabled="true"`. Confirm a bar above each hunk and the line bar above the diff, which [changes](changes.md) steps 29 to 37 drive. Commit and comparison diffs show neither.
 
 ## Gotchas
 

@@ -12,13 +12,13 @@ const SETTLE_DELAY = 100;
 // diff drivers decide which files count as binary, so caches stay per root.
 const caches = new Map<
   RepositoryRoot,
-  { known: Map<Oid, LineStats>; pending: Set<Oid> }
+  { known: Map<Oid, LineStats>; pending: Set<Oid>; listeners: Set<() => void> }
 >();
 
 function cacheOf(root: RepositoryRoot) {
   let cache = caches.get(root);
   if (!cache) {
-    cache = { known: new Map(), pending: new Set() };
+    cache = { known: new Map(), pending: new Set(), listeners: new Set() };
     caches.set(root, cache);
   }
   return cache;
@@ -33,6 +33,14 @@ export function useLineStats(
   commits: readonly Commit[],
 ): ReadonlyMap<Oid, LineStats> {
   const [, setSettled] = useState(0);
+  useEffect(() => {
+    const cache = cacheOf(root);
+    const notify = () => setSettled((count) => count + 1);
+    cache.listeners.add(notify);
+    return () => {
+      cache.listeners.delete(notify);
+    };
+  }, [root]);
   useEffect(() => {
     const timer = window.setTimeout(() => {
       const { known, pending } = cacheOf(root);
@@ -51,7 +59,7 @@ export function useLineStats(
         )
         .finally(() => {
           for (const oid of batch) pending.delete(oid);
-          setSettled((count) => count + 1);
+          for (const notify of cacheOf(root).listeners) notify();
         });
     }, SETTLE_DELAY);
     return () => window.clearTimeout(timer);

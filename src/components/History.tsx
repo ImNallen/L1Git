@@ -8,7 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
-import type { MouseEvent, ReactNode, Ref } from "react";
+import type { CSSProperties, MouseEvent, ReactNode, Ref } from "react";
 import { createPortal, flushSync } from "react-dom";
 import {
   Check,
@@ -74,7 +74,8 @@ import { useLineStats } from "../useLineStats";
 import { ContextMenu } from "./ContextMenu";
 import { HistorySearch } from "./HistorySearch";
 
-const ROW_HEIGHT = 36;
+export const ROW_HEIGHT = Math.round((838 / 22) * 64) / 64;
+const ROW_CENTER = ROW_HEIGHT / 2;
 const OVERSCAN = 10;
 const HIGHLIGHT_DELAY = 400;
 const color = (lane: number) => `var(--graph-lane-${(lane % 6) + 1})`;
@@ -116,14 +117,14 @@ function GraphCell({
         <path
           key={`continue-${edge.from}`}
           className={dim(lit?.continuations[index])}
-          d={curve(edge.from, edge.to, 0, 36)}
+          d={curve(edge.from, edge.to, 0, ROW_HEIGHT)}
           stroke={color(edge.from)}
         />
       ))}
       {row.incoming && (
         <path
           className={dim(lit?.incoming)}
-          d={`M ${x(row.lane)} 0 V 18`}
+          d={`M ${x(row.lane)} 0 V ${ROW_CENTER}`}
           stroke={color(row.lane)}
         />
       )}
@@ -131,7 +132,7 @@ function GraphCell({
         <path
           key={edge.oid}
           className={dim(lit?.parents[index])}
-          d={curve(edge.from, edge.to, 18, 36)}
+          d={curve(edge.from, edge.to, ROW_CENTER, ROW_HEIGHT)}
           stroke={color(edge.to)}
           strokeDasharray={
             parentDash ?? (known.has(edge.oid) ? undefined : "3 3")
@@ -158,10 +159,10 @@ function RowRing({
   return (
     <circle
       cx={x(lane)}
-      cy={18}
-      r={radius + 2}
+      cy={ROW_CENTER}
+      r={radius + 4}
       fill="none"
-      stroke="var(--text)"
+      stroke={color(lane)}
       strokeWidth={2}
       strokeDasharray={ring === "compared" ? "3 2" : undefined}
     />
@@ -174,7 +175,7 @@ function WorktreeNode({ lane, ring }: { lane: number; ring: Ring }) {
       <RowRing lane={lane} radius={5} ring={ring} />
       <circle
         cx={x(lane)}
-        cy={18}
+        cy={ROW_CENTER}
         r={5}
         fill="var(--canvas)"
         stroke={color(lane)}
@@ -203,14 +204,21 @@ function CommitNode({
       {merge ? (
         <circle
           cx={x(lane)}
-          cy={18}
+          cy={ROW_CENTER}
           r={radius}
           fill="var(--canvas)"
           stroke={color(lane)}
           strokeWidth={2}
         />
       ) : (
-        <circle cx={x(lane)} cy={18} r={radius} fill={color(lane)} />
+        <circle
+          cx={x(lane)}
+          cy={ROW_CENTER}
+          r={radius}
+          fill="var(--canvas)"
+          stroke={color(lane)}
+          strokeWidth={1.5}
+        />
       )}
     </g>
   );
@@ -250,7 +258,7 @@ function ChangesCell({ stats }: { stats: LineStats | undefined }) {
       title={label}
     >
       <span className="change-stat added">+{added.toLocaleString()}</span>
-      <span className="change-stat deleted">
+      <span className={`change-stat deleted${deleted === 0 ? " zero" : ""}`}>
         {"\u2212"}
         {deleted.toLocaleString()}
       </span>
@@ -363,7 +371,14 @@ export function RefBadge({
   return (
     <span
       className={`ref-badge ${label.kind}${lane === null ? " off-graph" : ""}`}
-      style={lane === null ? undefined : { color: color(lane) }}
+      style={
+        lane === null
+          ? undefined
+          : ({
+              color: color(lane),
+              "--badge-lane": color(lane),
+            } as CSSProperties)
+      }
       title={title}
     >
       <Icon size={11} />
@@ -394,7 +409,9 @@ function MoreRefs({ labels, lane }: { labels: RefLabel[]; lane: number }) {
     <>
       <span
         className="ref-badge more-refs"
-        style={{ color: color(lane) }}
+        style={
+          { color: color(lane), "--badge-lane": color(lane) } as CSSProperties
+        }
         aria-label={`${labels.length} more: ${labels.map(labelName).join(", ")}`}
         onMouseEnter={open}
         onMouseLeave={() => setAnchor(null)}
@@ -888,15 +905,16 @@ export function History({
           />,
           searchSlot,
         )}
-      <div className="history-heading">
-        <strong>{snapshot.name}</strong>
-        <span>{commits.length.toLocaleString()} commits</span>
-      </div>
       <div className="history-scroll" ref={scrollRef}>
         <table
           ref={tableRef}
           className={`history-table${highlight || searching ? " highlighting" : ""}`}
-          style={{ minWidth: layout.minWidth + 48 }}
+          style={
+            {
+              minWidth: layout.minWidth + 48,
+              "--history-row-height": `${ROW_HEIGHT}px`,
+            } as CSSProperties
+          }
           role="grid"
           tabIndex={0}
           aria-label="Commits"

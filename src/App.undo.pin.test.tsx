@@ -1,3 +1,4 @@
+import { toolbarItem } from "./test/appHarness";
 // @vitest-environment happy-dom
 import { expect, it } from "vitest";
 import {
@@ -84,9 +85,9 @@ it("keyboard undo of a checkout refocuses on the next frame when focus was lost"
   expect(focused()).toBe("grid Commits");
 });
 
-it("the toolbar Undo button does not reveal or refocus (pins current behavior)", async () => {
+it("Undo in More restores its opener without jumping to the restored branch", async () => {
   const app = await mountApp({ bridge: restoreGoneOnUndo });
-  await app.click(get("button", "Undo Delete branch gone"));
+  await app.click(await toolbarItem(app, "More", "Undo Delete branch gone"));
   await app.flushFrames();
   expect(refRow("refs/heads/gone"), "the undo ran").not.toBeNull();
   expect(
@@ -97,10 +98,11 @@ it("the toolbar Undo button does not reveal or refocus (pins current behavior)",
   expect(
     focused(),
     "WebKit leaves focus where it was when a button is clicked",
-  ).toBe("body");
+  ).toBe("button More");
 });
 
 async function deleteTagV1(app: Awaited<ReturnType<typeof mountApp>>) {
+  await app.click(get("button", "Tags1"));
   await app.contextMenu(refRow("refs/tags/v1")!);
   await app.click(get("menuitem", "Delete tag…"));
   expect(dialogs()).toEqual(["Delete tag v1?"]);

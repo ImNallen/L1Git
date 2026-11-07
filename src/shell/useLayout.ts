@@ -14,12 +14,20 @@ const NARROW_SIDEBAR = "(max-width: 939px)";
  * refocuses whichever instance is mounted after `flushSync`, so its ref is
  * shared and owned here rather than by the toggle.
  */
+export type ToolbarMenuKind =
+  | "fetch"
+  | "pull"
+  | "push"
+  | "branch"
+  | "stash"
+  | "more";
+export type ToolbarMenu = { kind: ToolbarMenuKind; anchor: HTMLButtonElement };
+
 export type Layout = {
-  toolbarMoreRef: RefObject<HTMLButtonElement | null>;
   searchSlot: HTMLDivElement | null;
   setSearchSlot: (element: HTMLDivElement | null) => void;
-  toolbarMenu: DOMRect | null;
-  setToolbarMenu: (rect: DOMRect | null) => void;
+  toolbarMenu: ToolbarMenu | null;
+  setToolbarMenu: (menu: ToolbarMenu | null) => void;
   sidebarOpen: boolean;
   inspectorVisible: boolean;
   sidebarWidth: number;
@@ -37,8 +45,7 @@ export type Layout = {
 
 export function useLayout(shown: WorkspaceView["shown"]): Layout {
   const [searchSlot, setSearchSlot] = useState<HTMLDivElement | null>(null);
-  const [toolbarMenu, setToolbarMenu] = useState<DOMRect | null>(null);
-  const toolbarMoreRef = useRef<HTMLButtonElement>(null);
+  const [toolbarMenu, setToolbarMenu] = useState<ToolbarMenu | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(
     () => !window.matchMedia(NARROW_SIDEBAR).matches,
   );
@@ -66,7 +73,6 @@ export function useLayout(shown: WorkspaceView["shown"]): Layout {
     return () => media.removeEventListener("change", narrow);
   }, []);
   return {
-    toolbarMoreRef,
     searchSlot,
     setSearchSlot,
     toolbarMenu,
@@ -83,7 +89,15 @@ export function useLayout(shown: WorkspaceView["shown"]): Layout {
     actions: defineSlice({
       context: { inspectable: shown !== null },
       commands: {
-        toggleSidebar: () => setSidebarOpen((open) => !open),
+        toggleSidebar: () => {
+          flushSync(() => setSidebarOpen((open) => !open));
+          (
+            sidebarToggleRef.current ??
+            document.querySelector<HTMLElement>(
+              ".repository-open[aria-current='true']",
+            )
+          )?.focus();
+        },
         toggleInspector: () => setInspectorOpen((open) => !open),
         focusCommit: () => {
           flushSync(() => setInspectorOpen(true));

@@ -1,6 +1,5 @@
 .pane-divider {
   flex: 0 0 1px;
-  width: 1px;
   background: var(--border);
   position: relative;
   z-index: 3;
@@ -10,13 +9,6 @@
 .pane-divider::before {
   content: "";
   position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 5px;
-  height: 26px;
-  border-radius: 999px;
-  background: var(--border-strong);
-  transform: translate(-50%, -50%);
   pointer-events: none;
 }
 .pane-divider::after {
@@ -89,7 +81,6 @@
 .toolbar-actions {
   display: flex;
   align-items: center;
-  gap: 7px;
   flex-shrink: 0;
 }
 .button {
@@ -502,9 +493,6 @@ kbd {
   color: var(--text-body);
 }
 .toolbar-separator {
-  height: 18px;
-  width: 1px;
-  background: var(--separator);
   margin-inline: 8px;
 }
 @media (max-width: 1200px) {
@@ -567,4 +555,80 @@ kbd {
   .toolbar-separator {
     margin-inline: 3px;
   }
+}
+
+.pane-divider {
+  flex-basis: 0;
+  width: 0;
+}
+.pane-divider::before {
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 1px;
+  height: auto;
+  border-radius: 0;
+  background: var(--border);
+  transform: none;
+}
+.toolbar {
+  padding-inline: 24px;
+}
+.toolbar-action-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.toolbar-actions .toolbar-action {
+  padding: 0;
+  flex-shrink: 0;
+}
+.toolbar-action.fetch {
+  width: 94px;
+}
+.toolbar-action.pull {
+  width: 84px;
+}
+.toolbar-action.push {
+  width: 88px;
+}
+.toolbar-action.branch {
+  width: 102px;
+}
+.toolbar-action.stash {
+  width: 94px;
+}
+.toolbar-action.more {
+  width: 82px;
+}
+.toolbar-action:hover,
+.toolbar-action[aria-expanded="true"] {
+  background: var(--control-hover);
+}
+.workspace-disclosure {
+  width: 10px;
+  height: 10px;
+  background: currentColor;
+  mask: url("/assets/workspace/Disclosure.svg") center / contain no-repeat;
+}
+.toolbar-separator {
+  width: 17px;
+  height: 24px;
+  margin: 0;
+  background: linear-gradient(var(--separator), var(--separator)) center / 1px
+    18px no-repeat;
+}
+@container (max-width: 1000px) {
+  .toolbar-actions .toolbar-action {
+    width: 30px;
+  }
+  .toolbar {
+    padding-inline: 12px;
+  }
+}
+.workspace-icon {
+  display: inline-block;
+  flex-shrink: 0;
+  background: currentColor;
+  mask: var(--icon) center / contain no-repeat;
 }

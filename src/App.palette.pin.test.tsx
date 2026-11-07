@@ -229,9 +229,7 @@ it("opening a repository from the palette focuses the history grid once it loads
   await app.runPaletteItem("other");
   await snapshot.arrived;
   await app.flushFrames();
-  expect(focused(), "the fallback while History is gone").toBe(
-    "button Toggle sidebar",
-  );
+  expect(focused(), "the fallback while History is gone").toBe("button other");
   snapshot.release();
   await app.settle();
   expect(focused()).toBe("grid Commits");
@@ -249,17 +247,14 @@ it("opening a repository from the palette leaves focus alone once the pointer mo
   });
   snapshot.release();
   await app.settle();
-  expect(focused()).toBe("button Toggle sidebar");
+  expect(focused()).toBe("button other");
 });
 
 it("jumping to a branch in another repository selects it from the settled snapshot, not the cached one", async () => {
   const app = await mountApp();
   await app.click(repositoryRow(OTHER));
   await app.click(repositoryRow(PIN));
-  expect(
-    get("button", "Collapse other"),
-    "opening other expanded it",
-  ).toBeTruthy();
+  expect(refRow("refs/heads/trunk", OTHER)).toBeNull();
   const fresh = oidSchema.parse("b".repeat(40));
   const cached = app.bridge.world.snapshots.get(OTHER)!;
   app.bridge.world.snapshots.set(
@@ -291,35 +286,34 @@ it("jumping to a branch in another repository selects it from the settled snapsh
   );
   await app.refocusWindow();
   const reread = app.bridge.hold("snapshot", OTHER);
-  await app.click(refRow("refs/heads/fresh", OTHER)!);
+  await app.click(repositoryRow(OTHER));
   await reread.arrived;
   expect(selectedRow(), "the cached snapshot predates the branch").toBe(
     "Other tip, Pin Author, 8888888",
   );
   reread.release();
   await app.settle();
+  await app.click(refRow("refs/heads/fresh", OTHER)!);
   expect(selectedRow()).toBe("Fresh work, Pin Author, bbbbbbb");
 });
 
 it("showing a stash in another repository selects it once listed", async () => {
   const app = await mountApp();
-  await app.click(get("button", "Expand other"));
+  await app.click(repositoryRow(OTHER));
+  await app.click(get("button", "Stashes1"));
   await app.click(refRow("stash@{0}", OTHER)!);
   expect(inspectorTitle()).toBe("WIP on trunk: 8888888 Other tip");
   expect(refRow("stash@{0}", OTHER)?.getAttribute("aria-current")).toBe("true");
 });
 
-it("a pending stash is dropped when the root changes first", async () => {
+it("switching away from a stash restores the other repository selection", async () => {
   const app = await mountApp();
-  await app.click(get("button", "Expand other"));
-  const snapshot = app.bridge.hold("snapshot", OTHER);
-  await app.click(refRow("stash@{0}", OTHER)!);
-  await snapshot.arrived;
-  await app.click(repositoryRow(PIN));
-  snapshot.release();
-  await app.settle();
   await app.click(repositoryRow(OTHER));
-  expect(inspectorTitle()).toBe("Other tip");
+  await app.click(get("button", "Stashes1"));
+  await app.click(refRow("stash@{0}", OTHER)!);
+  await app.click(repositoryRow(PIN));
+  await app.click(repositoryRow(OTHER));
+  expect(inspectorTitle()).toBe("WIP on trunk: 8888888 Other tip");
 });
 
 it("Commit… opens the inspector and focuses the summary", async () => {
@@ -380,6 +374,7 @@ it("closing the palette returns focus to the element focused before it opened", 
 
 it("closing the palette falls back to History when that element is gone", async () => {
   const app = await mountApp();
+  await app.click(get("button", "Stashes1"));
   refRow("stash@{0}")!.focus();
   await app.press("p", { ctrlKey: true });
   const snapshot = app.bridge.world.snapshots.get(PIN)!;

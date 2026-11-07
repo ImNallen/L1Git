@@ -16,7 +16,7 @@
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
-  --mono: "JetBrains Mono Variable", monospace;
+  --mono: "IBM Plex Mono", monospace;
 }
 
 :root,
@@ -31,7 +31,7 @@
   --control-inset: #0c0e11;
   --control-hover: #1c2027;
   --row-hover: #171b22;
-  --row-selected: #22354f;
+  --row-selected: #1d2b41;
   --segment-selected: #162341;
   --border: #21252c;
   --border-control: #1c2027;
@@ -39,7 +39,7 @@
   --border-input: #636363;
   --separator: #292e36;
   --text: #f3f6fb;
-  --text-heading: #ffffff;
+  --text-heading: #eeeeee;
   --text-strong: #ffffff;
   --text-input: #fbfbfb;
   --text-secondary: #d8d8d8;
@@ -53,8 +53,8 @@
   --focus: #346bf1;
   --selection-bg: #223f83;
   --selection-text: #ffffff;
-  --nav-selected-bg: #15213c;
-  --nav-selected-text: #7fc0ff;
+  --nav-selected-bg: #1a2739;
+  --nav-selected-text: #e2e8f0;
   --ref-on-lane: #0d1118;
   --on-lane: #0d1118;
   --link: #60a5fa;
@@ -63,7 +63,7 @@
   --primary-border: #4983ff;
   --primary-text: #ffffff;
   --primary-hover: #447dff;
-  --warning: #ffb900;
+  --warning: #c4a469;
   --success: #65bd9c;
   --success-muted: #8ad0b9;
   --success-bg: #172920;
@@ -73,8 +73,8 @@
   --error-bg: #221d22;
   --error-border: #402120;
   --warning-icon: #d8a486;
-  --warning-bg: #312108;
-  --warning-border: #372c26;
+  --warning-bg: #24201a;
+  --warning-border: #30291c;
   --empty-icon-bg: #121a2c;
   --empty-icon-end: #0d1016;
   --empty-icon-border: #172749;
@@ -86,7 +86,7 @@
   --shadow-pane: #00000077;
   --shadow-dialog: #000000bb;
   --dialog-backdrop: #00000099;
-  --graph-lane-1: #4a7ef4;
+  --graph-lane-1: #6392ff;
   --graph-lane-2: #2dd4bf;
   --graph-lane-3: #fbbf24;
   --graph-lane-4: #fb7185;

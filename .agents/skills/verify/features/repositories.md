@@ -11,14 +11,14 @@ Open L1 Git with a fresh profile or origin. The empty screen and toolbar both ex
 ## Driving it with T3 preview
 
 1. Open **Add repository**. In the dialog named **Add a repository**, fill **Repository path** with the fixture's `repository` path. Submit **Add repository** inside the dialog.
-2. Confirm `l1-demo` appears in the sidebar and `main` appears as checked-out HEAD in the toolbar. Click the repository name twice to hide and show its sections while keeping the repository open in the workspace. Hover the repository name to see its canonical path, which can be `/private/tmp/...` on macOS.
+2. Confirm `l1-demo` appears in the sidebar and `main` appears as checked-out HEAD in the active repository’s refs. Click the repository name twice and confirm its refs remain open; there is no repository expand chevron. Hover the repository name to see its canonical path, which can be `/private/tmp/...` on macOS.
 3. Create an empty `subfolder` directory in the fixture and add it, then add a symlink to the repository. Confirm there is still one entry for that canonical root.
 4. Add the fixture's `detached` path. Confirm a separate `detached-worktree` entry and a detached HEAD label.
 5. Reload. Confirm both entries remain and the last active repository reopens.
 6. Open Add and submit a missing directory. Confirm an actionable error remains inside the dialog. Press Escape. Confirm the prior repository remains active.
 7. Use **Remove detached-worktree from recents**. Confirm the entry disappears and the directory still exists on disk.
 8. Repeat Add through the sidebar plus and **Cmd/Ctrl+O**. Cancel each dialog and confirm the saved list does not change.
-9. Add the fixture's `sync.repository` path. Open the palette, type `fetch`, and press Enter. Confirm **Fetch** disables while it runs and **Fast-forward (1)** shows in the toolbar.
+9. Add the fixture's `sync.repository` path. Open the palette, type `fetch`, and press Enter. Confirm **Fetch** disables while it runs and **Pull** contains **Fast-forward (1)**.
 10. Open the palette, type `l1-demo`, and press Enter. Confirm `l1-demo` opens. Open the palette again, type a branch name such as `feat/history`, and press Enter. Confirm the graph selects that branch's tip and the sidebar highlights the branch.
 11. Open the palette and press Up once. Confirm the last item is highlighted and scrolled into view, then press Down to wrap to the first. Type `zzqx` and confirm the palette says nothing matches.
 12. Press Escape, then open the palette again and click outside it. Confirm both close it, run nothing, and return focus to where it was.
@@ -27,17 +27,17 @@ Open L1 Git with a fresh profile or origin. The empty screen and toolbar both ex
 
 ## Tags, stashes, and submodules
 
-1. Expand `l1-demo`. Confirm **Tags** follows **Remote** with a count of 1 and lists `v0.1.0`. The fixture has no stashes or submodules, so neither section shows.
+1. Select `l1-demo`, then expand **Tags**. Confirm **Tags** follows **Remote** with a count of 1 and lists `v0.1.0`. The fixture has no stashes or submodules: **Stashes** has count 0, and **Submodules** is absent.
 2. Click `v0.1.0`. Confirm the theme commit `feat(theme): add the L1 dark canvas` is selected, the history scrolls to it, and the tag row is highlighted.
 3. Clone the fixture's `repository` into a scratch directory. In the clone, run `git -c protocol.file.allow=always submodule add <repository> vendor/demo`, commit, edit `README.md`, and run `git stash push -m "Try a README"`. Add the clone. Confirm **Stashes** lists `Try a README` with `stash@{0}`, and its tooltip names `On main: Try a README`, and **Submodules** lists `vendor/demo` with the first seven characters of `git rev-parse HEAD:vendor/demo`.
 4. Click the stash. Confirm the inspector shows `On main: Try a README`, a `stash@{0}` chip, one parent labeled **Stashed on this commit**, and `README.md` as modified. Select `README.md` and confirm its diff matches `git stash show -p`. Confirm no history row shows the stash.
 5. Make a second stash in a terminal and switch back to the app. Confirm it appears as `stash@{0}` and the first stash becomes `stash@{1}`.
 6. Type `v0.1` into **Filter repositories and refs**. Confirm only Tags rows remain and every other section says it has no match. Type `vendor` and `README` to filter submodules and stashes, then clear the filter.
 7. Collapse **Tags**, **Stashes**, and **Submodules** one at a time. Confirm each toggles without the others.
-8. With the clone open, click the `l1-demo` tag. Confirm `l1-demo` opens with the theme commit selected. With `l1-demo` open, click the clone's stash and confirm the clone opens with the stash selected.
+8. With the clone open, select `l1-demo`, expand **Tags**, then click its tag. Confirm `l1-demo` opens with the theme commit selected. With `l1-demo` open, select the clone, expand **Stashes**, then click its stash and confirm the clone opens with the stash selected.
 9. In the clone, run `git tag side origin/feat/squashed`, switch back, and solo `origin/feat/history`. Click `side`. Confirm the notice `side is outside the soloed branches.` and a **Show all branches** button that clears the rule and selects the tag's commit.
 10. On the large fixture, expand **Tags**. Confirm 50 tags in version order, `v1.9.0` before `v1.10.0`.
-11. Open `l1-demo`, then open the clone. Run `git stash push` on an edit in `l1-demo` and switch back to the app. Confirm `l1-demo` lists the stash, click it, and confirm `l1-demo` opens with that stash selected, not the commit it showed before.
+11. Open `l1-demo`, then open the clone. Run `git stash push` on an edit in `l1-demo` and switch back to the app. Select `l1-demo`, expand **Stashes**, confirm it lists the stash, click it, and confirm `l1-demo` opens with that stash selected, not the commit it showed before.
 12. Open the palette, type `stash@{0}`, and confirm it finds the stash.
 
 ## Gotchas

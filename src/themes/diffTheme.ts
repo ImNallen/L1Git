@@ -39,8 +39,25 @@ for (const type of ["light", "dark"] as const) {
   registerCustomTheme(name, async () => ({ ...theme, type }));
 }
 
-/** Pierre's own theme under L1, which paints no palette; the palette's syntax colours under any other theme. */
 export function diffTheme(appearance: Appearance, painted: boolean): string {
-  if (painted) return PALETTE_THEME[appearance];
-  return appearance === "dark" ? "pierre-dark" : "pierre-light";
+  return painted ? PALETTE_THEME[appearance] : `l1-muted-${appearance}`;
+}
+
+for (const type of ["light", "dark"] as const) {
+  const name = `l1-muted-${type}`;
+  const foreground = type === "dark" ? "#bec5cc" : "#464b53";
+  registerCustomTheme(name, async () => ({
+    name,
+    type,
+    colors: {
+      "editor.background": type === "dark" ? "#101216" : "#ffffff",
+      "editor.foreground": foreground,
+    },
+    tokenColors: [
+      {
+        scope: ["comment"],
+        settings: { foreground: type === "dark" ? "#777f8a" : "#737980" },
+      },
+    ],
+  }));
 }

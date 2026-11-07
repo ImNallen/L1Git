@@ -25,9 +25,7 @@ const columnsSchema = z.object({
 
 const MESSAGE_MIN_WIDTH = 260;
 const CROWDED_MESSAGE_MIN_WIDTH = 160;
-// JetBrains Mono advances 0.6em per character, and .sha-cell sets it at 11px with 8px of right padding.
-// Chromium can lay the text out 1/64px wider at some zoom levels, so the column keeps 1px spare.
-const SHA_CHAR_WIDTH = 6.6;
+const SHA_CHAR_WIDTH = 7.2;
 const SHA_PADDING = 8 + 1;
 
 export function columnLayout(

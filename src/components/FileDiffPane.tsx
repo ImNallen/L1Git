@@ -25,8 +25,6 @@ export type FileDiffHandle = {
 const VIEWS: { view: View; label: string }[] = [
   { view: "unified", label: "Unified" },
   { view: "split", label: "Split" },
-  { view: "history", label: "History" },
-  { view: "blame", label: "Blame" },
 ];
 
 type Props = {
@@ -128,6 +126,19 @@ export function FileDiffPane({
           </div>
         )}
       </header>
+      {view !== "history" && view !== "blame" && state.side !== "conflict" && (
+        <div className="file-comparison">
+          {state.side !== null
+            ? state.side === "staged"
+              ? "Staged changes against HEAD"
+              : "Working copy changes against the index"
+            : state.comparison.base.kind === "commit"
+              ? `Changes against ${state.comparison.base.oid.slice(0, 7)}`
+              : state.comparison.target.kind === "commit"
+                ? "Changes against parent revision"
+                : "Working copy changes against HEAD"}
+        </div>
+      )}
       {state.side === "conflict" ? (
         <ConflictResolver
           key={`${state.selection.root}:${state.path}`}

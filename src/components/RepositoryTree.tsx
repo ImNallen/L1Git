@@ -1,3 +1,4 @@
+import { WorkspaceIcon } from "./WorkspaceIcon";
 import { useRef, useState } from "react";
 import type {
   KeyboardEvent as ReactKeyboardEvent,
@@ -5,8 +6,6 @@ import type {
 } from "react";
 import {
   ArchiveRestore,
-  ChevronDown,
-  ChevronRight,
   CircleCheck,
   CornerDownLeft,
   Eye,
@@ -16,7 +15,6 @@ import {
   GitBranchPlus,
   PencilLine,
   Plus,
-  Search,
   Trash2,
 } from "lucide-react";
 import { branchAsks } from "../domain/operations";
@@ -118,8 +116,8 @@ export function RepositoryTree({
       (refs !== null && refMatches(refs))
     );
   });
-  const expandedEntries = entriesShown.filter((entry) =>
-    expanded.has(entry.root),
+  const expandedEntries = entriesShown.filter(
+    (entry) => entry.root === activePath,
   );
 
   function openMenu(
@@ -362,19 +360,18 @@ export function RepositoryTree({
   return (
     <>
       <div className="repositories-heading">
-        <strong>Repositories</strong>{" "}
         <button
           className="icon-button"
           onClick={onAdd}
           title="Add repository"
           aria-label="Add repository"
         >
-          <Plus size={18} />
+          <WorkspaceIcon name="Plus" size={16} />
         </button>
       </div>
       <div className="sidebar-search">
         <label className="sidebar-search-field">
-          <Search size={15} aria-hidden="true" />
+          <WorkspaceIcon name="Search" size={14} />
           <input
             aria-label="Filter repositories and refs"
             placeholder="Search"
@@ -390,8 +387,6 @@ export function RepositoryTree({
       >
         {entriesShown.map((entry) => {
           const active = entry.root === activePath;
-          const open = expanded.has(entry.root);
-          const toggleLabel = `${open ? "Collapse" : "Expand"} ${entry.name}`;
           const head = sync.get(entry.root)?.head;
           return (
             <div
@@ -407,29 +402,23 @@ export function RepositoryTree({
                 }}
               >
                 <button
-                  className="repository-toggle"
-                  aria-expanded={open}
-                  aria-label={toggleLabel}
-                  title={toggleLabel}
-                  onClick={() => onToggle(entry.root)}
-                >
-                  {open ? (
-                    <ChevronDown size={13} />
-                  ) : (
-                    <ChevronRight size={13} />
-                  )}
-                </button>
-                <button
                   className="repository-open"
                   title={entry.root}
                   aria-current={active ? "true" : undefined}
                   onClick={() => {
                     onSelect(entry.root);
-                    onToggle(entry.root);
+                    if (!expanded.has(entry.root)) onToggle(entry.root);
                   }}
                 >
-                  <FolderGit2 size={16} aria-hidden="true" />
+                  <WorkspaceIcon name="Repository" />
                   <span>{entry.name}</span>
+                  {active && (
+                    <WorkspaceIcon
+                      name="SelectedRepository"
+                      className="repository-check"
+                      size={14}
+                    />
+                  )}
                 </button>
                 {head && (
                   <SyncCounts divergence={head.divergence} branch={head.name} />

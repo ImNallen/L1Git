@@ -644,3 +644,8 @@ export async function mountApp(options: MountOptions = {}): Promise<Harness> {
   };
   return harness;
 }
+
+export async function toolbarItem(app: Harness, menu: string, label: string) {
+  await app.click(get("button", menu));
+  return get("menuitem", label);
+}
