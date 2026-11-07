@@ -10,3 +10,5 @@ export type DirectoryEntry = z.infer<typeof directoryEntrySchema>;
 export const directoryListingSchema = z.object({
   entries: z.array(directoryEntrySchema),
 });
+
+export const newRepositorySchema = z.object({ path: z.string() });

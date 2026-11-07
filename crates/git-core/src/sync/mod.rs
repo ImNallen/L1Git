@@ -1,10 +1,12 @@
 mod advance;
+mod create;
 mod fetch;
 mod locks;
 use locks::Locks;
 mod push;
 mod read;
 mod remote;
+pub use create::NewRepository;
 pub use push::{
     PublishChoice, PublishOptions, PublishRemote, PublishRemoteAvailability, PushAvailability,
     PushIntent, PushOutcome, PushPurpose, PushRefresh, PushReport, PushUnavailable,

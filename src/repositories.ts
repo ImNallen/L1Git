@@ -9,7 +9,10 @@ import type { MergeAction } from "./domain/merge";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { z } from "zod";
-import { directoryListingSchema } from "./domain/addRepository";
+import {
+  directoryListingSchema,
+  newRepositorySchema,
+} from "./domain/addRepository";
 import {
   addRemoteInputSchema,
   addRemoteReportSchema,
@@ -83,7 +86,8 @@ type RepositoryRequest =
   | { op: "redo"; path: RepositoryRoot; id: EntryId }
   | { op: "undoHistory"; path: RepositoryRoot }
   | { op: "branchMerged"; path: RepositoryRoot; branch: BranchTip }
-  | { op: "listDirectories"; path: string };
+  | { op: "listDirectories"; path: string }
+  | { op: "createRepository"; path: string };
 
 const responseSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("mergeReview"), data: mergeReviewSchema }),
@@ -114,6 +118,7 @@ const responseSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("undoHistory"), data: undoHistorySchema }),
   z.object({ op: z.literal("branchMerged"), data: branchMergedSchema }),
   z.object({ op: z.literal("listDirectories"), data: directoryListingSchema }),
+  z.object({ op: z.literal("createRepository"), data: newRepositorySchema }),
 ]);
 export const requestOps = responseSchema.options.map(
   (option) => option.shape.op.value,
@@ -277,6 +282,10 @@ export async function branchMerged(path: RepositoryRoot, branch: BranchTip) {
 
 export async function listDirectories(path: string) {
   return (await run({ op: "listDirectories", path })).data;
+}
+
+export async function createRepository(path: string) {
+  return (await run({ op: "createRepository", path })).data;
 }
 
 export async function chooseDirectory(): Promise<string | null> {

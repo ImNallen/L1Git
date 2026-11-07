@@ -1,4 +1,7 @@
-use l1_git_core::{DirectoryEntry, ErrorKind, expand_home, list_directories};
+use l1_git_core::{
+    Coordinator, DirectoryEntry, ErrorKind, Head, Limits, Request, Response, expand_home,
+    list_directories, run,
+};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -209,4 +212,81 @@ fn an_absolute_path_is_kept_and_listed_entries_are_absolute() {
         expand_home("/usr/local", Some(&home)).unwrap(),
         Path::new("/usr/local")
     );
+}
+
+fn coordinator(base: &Path) -> Coordinator {
+    Coordinator::new(Limits::default(), base.join("undo"))
+}
+
+#[test]
+fn a_new_repository_is_created_with_missing_parents_and_opens_with_an_unborn_head() {
+    let (_directory, base) = base();
+    let core = coordinator(&base);
+    let target = base.join("not/yet/here");
+    let Response::CreateRepository(created) = run(
+        &core,
+        Request::CreateRepository {
+            path: target.to_str().unwrap().to_owned(),
+        },
+    )
+    .unwrap() else {
+        panic!("the request answered with something else");
+    };
+    assert_eq!(created.path, target.to_str().unwrap());
+    assert!(target.join(".git").is_dir());
+
+    let Response::Snapshot(snapshot) =
+        run(&core, Request::Snapshot { path: created.path }).unwrap()
+    else {
+        panic!("the request answered with something else");
+    };
+    assert_eq!(snapshot.root.as_str(), target.to_str().unwrap());
+    assert!(matches!(snapshot.head, Head::Unborn { .. }));
+    assert!(snapshot.commits.is_empty());
+}
+
+#[test]
+fn a_new_repository_starts_tracking_a_folder_and_keeps_its_files() {
+    let (_directory, base) = base();
+    let target = base.join("folder");
+    fs::create_dir(&target).unwrap();
+    fs::write(target.join("kept.txt"), "kept\n").unwrap();
+    coordinator(&base).create_repository(&target).unwrap();
+    assert!(target.join(".git").is_dir());
+    assert_eq!(
+        fs::read_to_string(target.join("kept.txt")).unwrap(),
+        "kept\n"
+    );
+}
+
+#[test]
+fn creating_refuses_an_existing_repository_and_a_file() {
+    let (_directory, base) = base();
+    let core = coordinator(&base);
+    let repo = base.join("repo");
+    fs::create_dir(&repo).unwrap();
+    git(&repo, &["init", "--quiet"]);
+    let head = fs::read(repo.join(".git/HEAD")).unwrap();
+    let error = core.create_repository(&repo).unwrap_err();
+    assert!(error.message.contains("Local folder"), "{}", error.message);
+    assert_eq!(fs::read(repo.join(".git/HEAD")).unwrap(), head);
+
+    let file = base.join("file");
+    fs::write(&file, "").unwrap();
+    assert!(core.create_repository(&file).is_err());
+    assert!(file.is_file());
+    assert!(core.create_repository(&file.join("below")).is_err());
+}
+
+#[test]
+fn creating_refuses_a_relative_path() {
+    let (_directory, base) = base();
+    let error = run(
+        &coordinator(&base),
+        Request::CreateRepository {
+            path: "relative/here".to_owned(),
+        },
+    )
+    .unwrap_err();
+    assert_eq!(error.kind, ErrorKind::UnsupportedPath);
 }

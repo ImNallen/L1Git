@@ -554,6 +554,9 @@ pub(crate) enum Mutation<'a> {
     MergeFastForward {
         to: &'a Oid,
     },
+    Init {
+        target: &'a str,
+    },
 }
 
 impl Mutation<'_> {
@@ -631,6 +634,7 @@ impl Mutation<'_> {
                 from.as_str(),
             ]),
             Self::MergeFastForward { to } => owned(&["merge", "--ff-only", to.as_str()]),
+            Self::Init { target } => owned(&["init", "--quiet", "--", target]),
         }
     }
 }

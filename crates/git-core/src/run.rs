@@ -2,10 +2,11 @@ use crate::{
     AddRemote, AddRemoteReport, Advance, Applied, Blame, BranchMerged, BranchTip, CommitDetail,
     Comparison, ConflictFile, Coordinator, EntryId, Expect, FastForwardReport, FetchMode,
     FilePatch, FileRevision, Head, LineStats, MergeAction, MergeReport, MergeReview,
-    MergeSelection, MergeState, Operation, PublishChoice, PublishOptions, PushAvailability,
-    PushIntent, PushReport, ReplayOf, ReplayReview, RepositoryError, RepositoryOverview,
-    RepositoryRefs, RepositorySnapshot, Side, UndoHistory, WorktreePatch, WorktreeStatus,
-    directories::{DirectoryListing, home_dir, list_directories},
+    MergeSelection, MergeState, NewRepository, Operation, PublishChoice, PublishOptions,
+    PushAvailability, PushIntent, PushReport, ReplayOf, ReplayReview, RepositoryError,
+    RepositoryOverview, RepositoryRefs, RepositorySnapshot, Side, UndoHistory, WorktreePatch,
+    WorktreeStatus,
+    directories::{DirectoryListing, expand_home, home_dir, list_directories},
     file_history::{blame_within, file_history_within},
     git::LocalRead,
     repository::{
@@ -129,6 +130,9 @@ pub enum Request {
     ListDirectories {
         path: String,
     },
+    CreateRepository {
+        path: String,
+    },
 }
 
 #[derive(Debug, Serialize)]
@@ -162,6 +166,7 @@ pub enum Response {
     UndoHistory(UndoHistory),
     BranchMerged(BranchMerged),
     ListDirectories(DirectoryListing),
+    CreateRepository(NewRepository),
 }
 
 pub fn run(coordinator: &Coordinator, request: Request) -> Result<Response, RepositoryError> {
@@ -254,5 +259,8 @@ pub fn run(coordinator: &Coordinator, request: Request) -> Result<Response, Repo
         Request::ListDirectories { path } => {
             Response::ListDirectories(list_directories(&path, home_dir().as_deref())?)
         }
+        Request::CreateRepository { path } => Response::CreateRepository(
+            coordinator.create_repository(&expand_home(&path, home_dir().as_deref())?)?,
+        ),
     })
 }
