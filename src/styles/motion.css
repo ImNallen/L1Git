@@ -230,6 +230,8 @@
 }
 .graph-selection-ring {
   animation: motion-appear 220ms ease-out;
+  transform-box: fill-box;
+  transform-origin: center;
 }
 @media (prefers-reduced-motion: reduce) {
   .graph-selection-ring {

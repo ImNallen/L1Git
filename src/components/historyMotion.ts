@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo } from "react";
+import { useEffectEvent, useLayoutEffect, useMemo, useRef } from "react";
 import type { RefObject } from "react";
 import type { MotionSnapshot } from "./MotionBoundary";
 import type { HistoryRow } from "../domain/worktree";
@@ -6,6 +6,7 @@ import type { RepositoryRoot } from "../domain/repository";
 import type { Graph, RowId } from "../domain/graph";
 import { animate, cancelMotion, captureLayout, motionAllowed } from "../motion";
 import { captureExit } from "../motionExit";
+import { playGraphIntro } from "./graphIntro";
 
 type Identity = {
   root: RepositoryRoot;
@@ -34,6 +35,16 @@ function geometry(rows: Map<string, HTMLElement>) {
         });
     }
   return result;
+}
+
+function graphRewritten(
+  before: Map<string, Geometry>,
+  after: Map<string, Geometry>,
+) {
+  return [...after].some(([key, { value }]) => {
+    const old = before.get(key);
+    return old && old.value !== value;
+  });
 }
 
 function moveGeometry(
@@ -154,6 +165,29 @@ export function useHistoryMotion(
     paint.style.height = `${rect.height}px`;
     scroller.dataset.selectionPainted = "";
   };
+  const stopIntro = useRef(() => {});
+  const playIntro = useEffectEvent(() => {
+    const scroller = scroll.current;
+    const paint = marker.current;
+    if (scroller)
+      stopIntro.current = playGraphIntro(
+        scroller,
+        mounted().values(),
+        paint && !paint.hidden ? paint : null,
+      );
+  });
+  useLayoutEffect(() => {
+    let current = true;
+    // React flushes the renders from History's layout effects before microtasks,
+    // and the measured rows exist only after those renders.
+    queueMicrotask(() => {
+      if (current) playIntro();
+    });
+    return () => {
+      current = false;
+      stopIntro.current();
+    };
+  }, [root]);
   useLayoutEffect(positionMarker);
   useLayoutEffect(() => {
     const scroller = scroll.current;
@@ -166,6 +200,8 @@ export function useHistoryMotion(
     identity: token,
     afterLayout: true,
     capture(previous: Identity): MotionSnapshot | null {
+      if (previous.root === root && (hidden || previous.template !== template))
+        stopIntro.current();
       if (
         previous.root !== root ||
         previous.hidden ||
@@ -219,6 +255,7 @@ export function useHistoryMotion(
           positionMarker();
           const next = mounted();
           const nextGeometry = geometry(next);
+          if (graphRewritten(oldGeometry, nextGeometry)) stopIntro.current();
           const cells: { cell: HTMLElement; x: number }[] = [];
           for (const [id, row] of next) {
             const old = oldCells.get(id);
@@ -269,7 +306,9 @@ export function useHistoryMotion(
               view &&
               oldMarker.bottom > view.top + 32 &&
               oldMarker.top < view.bottom;
-            if (visible)
+            const moved =
+              oldMarker.x !== newMarker.x || oldMarker.y !== newMarker.y;
+            if (visible && moved) {
               animate(
                 paint,
                 [
@@ -280,7 +319,8 @@ export function useHistoryMotion(
                 ],
                 220,
               );
-            animated.set("selection", paint);
+              animated.set("selection", paint);
+            }
           }
           stopGeometry = moveGeometry(oldGeometry, nextGeometry);
           for (const exit of exits) exit?.play(220);
