@@ -1,0 +1,20 @@
+:root:not([data-palette])[data-theme="dark"] .app {
+  --border: rgb(255 255 255 / 7%);
+  --workspace-history-text: #e3e8ef;
+  --workspace-identifier: #b8b8b8;
+  --workspace-heading: #e2e2e2;
+  --workspace-message: #a8a8a8;
+  --workspace-reference-background: rgb(255 255 255 / 4%);
+  --workspace-reference-text: #b6b6b6;
+  --workspace-avatar-background: rgb(255 255 255 / 6%);
+  --workspace-author: #d8d8d8;
+  --workspace-email: #818181;
+  --workspace-metadata-label: #777777;
+  --workspace-metadata-value: #b7b7b7;
+  --workspace-filter-background: rgb(255 255 255 / 3%);
+  --workspace-filter-placeholder: #797979;
+  --workspace-folder-text: #9b9b9b;
+  --workspace-file-text: #cccccc;
+  --workspace-file-count: #737373;
+  --workspace-toolbar-text: #bdbdbd;
+}

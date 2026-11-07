@@ -32,6 +32,27 @@ function unload() {
 const sidebar = () => query("complementary", "Repository sidebar");
 const inspector = () => query("complementary", "Commit inspector");
 
+it("unreadable line statistics stay unknown without background polling", async () => {
+  const app = await mountApp();
+  await app.act(() => new Promise((resolve) => setTimeout(resolve, 250)));
+  const reads = app.bridge.count("lineStats", PIN);
+  expect(reads).toBeGreaterThan(0);
+  await app.act(() => new Promise((resolve) => setTimeout(resolve, 350)));
+  expect(app.bridge.count("lineStats", PIN)).toBe(reads);
+});
+
+it("repository search reveals matching tags and stashes without changing collapsed sections", async () => {
+  const app = await mountApp();
+  const filter = get("textbox", "Filter repositories and refs");
+  expect(refRow("refs/tags/v1")).toBeNull();
+  await app.type(filter, "v1");
+  expect(refRow("refs/tags/v1")).not.toBeNull();
+  await app.type(filter, "WIP on main");
+  expect(query("button", /stash@\{0\}/)).not.toBeNull();
+  await app.type(filter, "");
+  expect(refRow("refs/tags/v1")).toBeNull();
+});
+
 it("selecting a branch in another repository preserves keyboard focus", async () => {
   const app = await mountApp();
   await app.click(repositoryRow(OTHER));

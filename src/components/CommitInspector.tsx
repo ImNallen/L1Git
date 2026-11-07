@@ -8,6 +8,7 @@ import {
   useEffect,
   useEffectEvent,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -188,10 +189,14 @@ export function CommitInspector({
     const timer = window.setTimeout(() => setCopy("idle"), 1500);
     return () => window.clearTimeout(timer);
   }, [copy]);
-  const inspected =
+  const inspectedCommit =
     state.kind === "ready" && state.detail.target.kind === "commit"
-      ? [state.detail.target.commit]
-      : [];
+      ? state.detail.target.commit
+      : null;
+  const inspected = useMemo(
+    () => (inspectedCommit === null ? [] : [inspectedCommit]),
+    [inspectedCommit],
+  );
   const lineStats = useLineStats(root, inspected);
   const current = (key: { root: RepositoryRoot; comparison: Comparison }) =>
     key.root === root &&

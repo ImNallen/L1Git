@@ -7,6 +7,7 @@
 @import "./styles/settings.css";
 @import "./styles/menu.css";
 @import "./styles/focus.css";
+@import "./styles/workspacePalette.css";
 
 :root {
   font-family: "Inter Variable", Inter, sans-serif;

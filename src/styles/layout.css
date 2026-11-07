@@ -582,6 +582,7 @@ kbd {
 .toolbar-actions .toolbar-action {
   padding: 0;
   flex-shrink: 0;
+  color: var(--workspace-toolbar-text, var(--text-body));
 }
 .toolbar-action.fetch {
   width: 94px;

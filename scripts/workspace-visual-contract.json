@@ -18,7 +18,8 @@
     ".toolbar-action.stash": { "x": 719, "width": 94 },
     ".toolbar-action.more": { "x": 819, "width": 82 },
     ".inspector-heading": { "height": 56 },
-    ".changed-files-filter": { "width": 328, "height": 30 }
+    ".changed-files-filter": { "width": 328, "height": 30 },
+    ".changed-files-filter .workspace-icon": { "width": 16, "height": 16 }
   },
   "styles": {
     ".sidebar": { "backgroundColor": "rgb(12, 14, 17)" },
@@ -29,7 +30,22 @@
       "fontFamily": "\"IBM Plex Mono\", monospace"
     },
     ".commit-information h2": { "fontSize": "17px", "lineHeight": "24px" },
-    ".repository-row.active": { "boxShadow": "none" }
+    ".repository-row.active": { "boxShadow": "none" },
+    ".toolbar-action.fetch": { "color": "rgb(189, 189, 189)" },
+    ".history-table tr:not(.selected) .commit-subject": {
+      "color": "rgb(227, 232, 239)"
+    },
+    ".commit-information > .sha-chip": { "color": "rgb(184, 184, 184)" },
+    ".commit-information .meta-primary": { "color": "rgb(216, 216, 216)" },
+    ".commit-information .meta-secondary": { "color": "rgb(129, 129, 129)" },
+    ".inspector-refs .ref-badge": {
+      "color": "rgb(182, 182, 182)",
+      "backgroundColor": "rgba(255, 255, 255, 0.04)"
+    },
+    ".changed-files-filter": {
+      "backgroundColor": "rgba(255, 255, 255, 0.03)",
+      "borderTopColor": "rgba(255, 255, 255, 0.07)"
+    }
   },
   "absent": [
     ".repository-toggle",

@@ -193,7 +193,7 @@ ${treeStyles}`,
     return (
       <>
         <label className="changed-files-filter">
-          <WorkspaceIcon name="Search" size={12} />
+          <WorkspaceIcon name="Search" />
           <input
             aria-label="Filter changed files"
             placeholder="Filter changed files…"

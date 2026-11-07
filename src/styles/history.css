@@ -319,6 +319,9 @@
 .history-table tr.selected td {
   background: transparent;
 }
+.history-table tr:not(.selected) .commit-subject {
+  color: var(--workspace-history-text, var(--text));
+}
 .toolbar-search-slot .history-search {
   border: 0;
   background: transparent;

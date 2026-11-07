@@ -131,7 +131,9 @@ export function RepositoryBranches({
 
   function section(kind: string) {
     const key = `${root}:${kind}`;
-    const open = overrides.get(key) ?? (kind === "local" || kind === "remote");
+    const open =
+      search.length > 0 ||
+      (overrides.get(key) ?? (kind === "local" || kind === "remote"));
     return { key, open, toggle: () => onOverride(key, !open) };
   }
 

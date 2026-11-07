@@ -37,6 +37,6 @@
   display: none;
 }
 [data-item-section="decoration"] {
-  color: var(--trees-fg-muted);
+  color: var(--workspace-file-count, var(--trees-fg-muted));
   font-size: 10px;
 }
