@@ -12,6 +12,7 @@ import type { MergeState } from "../domain/merge";
 import type { RepositoryOverview } from "../domain/overview";
 import type { PushAvailability } from "../domain/push";
 import type { Comparison } from "../domain/comparison";
+import type { DirectoryEntry } from "../domain/addRepository";
 import {
   applied,
   deleteGoneBranch,
@@ -46,7 +47,15 @@ export type World = {
   merges: Map<RepositoryRoot, MergeState>;
   overviews: Map<RepositoryRoot, RepositoryOverview>;
   pushes: Map<RepositoryRoot, PushAvailability>;
+  /** What each typed path lists. An open repository lists itself. */
+  directories: Map<string, DirectoryEntry[]>;
 };
+
+export const folder = (path: string, repository: boolean): DirectoryEntry => ({
+  name: path.split("/").at(-1) ?? path,
+  path,
+  repository,
+});
 
 export function createWorld(): World {
   return {
@@ -68,6 +77,16 @@ export function createWorld(): World {
     pushes: new Map([
       [PIN, readyPush()],
       [OTHER, noUpstream()],
+    ]),
+    directories: new Map([
+      ["~", [folder("/fixture/home/Projects", false)]],
+      [
+        "~/Projects",
+        [
+          folder("/fixture/home/Projects/docs-site", true),
+          folder("/fixture/home/Projects/screenshots", false),
+        ],
+      ],
     ]),
   };
 }
@@ -193,6 +212,13 @@ const handlers: Record<string, Handler> = {
       request.path as RepositoryRoot,
       request.operation as Applied["operation"],
     ),
+  listDirectories: (request, world) => ({
+    entries:
+      world.directories.get(request.path) ??
+      (world.snapshots.has(request.path as RepositoryRoot)
+        ? [folder(request.path, true)]
+        : []),
+  }),
   undo: (request, world) => step(request, world, "undo"),
   redo: (request, world) => step(request, world, "redo"),
 };

@@ -5,6 +5,7 @@ use crate::{
     MergeSelection, MergeState, Operation, PublishChoice, PublishOptions, PushAvailability,
     PushIntent, PushReport, ReplayOf, ReplayReview, RepositoryError, RepositoryOverview,
     RepositoryRefs, RepositorySnapshot, Side, UndoHistory, WorktreePatch, WorktreeStatus,
+    directories::{DirectoryListing, home_dir, list_directories},
     file_history::{blame_within, file_history_within},
     git::LocalRead,
     repository::{
@@ -125,6 +126,9 @@ pub enum Request {
         path: String,
         branch: BranchTip,
     },
+    ListDirectories {
+        path: String,
+    },
 }
 
 #[derive(Debug, Serialize)]
@@ -157,6 +161,7 @@ pub enum Response {
     Redo(Applied),
     UndoHistory(UndoHistory),
     BranchMerged(BranchMerged),
+    ListDirectories(DirectoryListing),
 }
 
 pub fn run(coordinator: &Coordinator, request: Request) -> Result<Response, RepositoryError> {
@@ -246,5 +251,8 @@ pub fn run(coordinator: &Coordinator, request: Request) -> Result<Response, Repo
             &branch,
             deadline(LocalRead::BranchMerged),
         )?),
+        Request::ListDirectories { path } => {
+            Response::ListDirectories(list_directories(&path, home_dir().as_deref())?)
+        }
     })
 }
