@@ -78,7 +78,7 @@ const ROW_HEIGHT = 36;
 const OVERSCAN = 10;
 const HIGHLIGHT_DELAY = 400;
 const color = (lane: number) => `var(--graph-lane-${(lane % 6) + 1})`;
-const x = (lane: number) => 14 + lane * 24;
+const x = (lane: number) => 24 + lane * 24;
 const NO_COMMITS: readonly Commit[] = [];
 const WORKTREE_DASH = "2 3";
 const NO_EDGES: RowHighlight = {
@@ -839,7 +839,7 @@ export function History({
     [visible, visibleColumns],
   );
   const lineStats = useLineStats(snapshot.root, visibleCommits);
-  const graphWidth = Math.max(80, graph.lanes * 24 + 10);
+  const graphWidth = Math.max(80, graph.lanes * 24 + 24);
   const layout = columnLayout(graphWidth, visibleColumns, shaLength);
   function revealColumn(id: ColumnId | null) {
     const index = layout.columns.findIndex((column) => column.id === id);

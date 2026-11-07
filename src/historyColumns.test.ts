@@ -12,15 +12,15 @@ describe("history column layout", () => {
   it("shows every metadata column for new preferences", () => {
     const layout = columnLayout(58, restoreColumns({ getItem: () => null }), 7);
     expect(layout.template).toBe(
-      "58px minmax(160px, 1fr) 140px 60px 56px 160px",
+      "58px minmax(160px, 1fr) 140px 60px 100px 202px",
     );
-    expect(layout.minWidth).toBe(634);
+    expect(layout.minWidth).toBe(720);
   });
 
   it("keeps the wider message minimum when only Changes is on", () => {
     const layout = columnLayout(58, new Set<ColumnId>(["changes"]), 7);
-    expect(layout.template).toBe("58px minmax(260px, 1fr) 160px");
-    expect(layout.minWidth).toBe(478);
+    expect(layout.template).toBe("58px minmax(260px, 1fr) 202px");
+    expect(layout.minWidth).toBe(520);
   });
 
   it("lays out every column in table order whatever order they were checked", () => {
@@ -30,9 +30,9 @@ describe("history column layout", () => {
       7,
     );
     expect(layout.template).toBe(
-      "106px minmax(160px, 1fr) 140px 60px 56px 160px",
+      "106px minmax(160px, 1fr) 140px 60px 100px 202px",
     );
-    expect(layout.minWidth).toBe(682);
+    expect(layout.minWidth).toBe(768);
     expect(layout.columns.map((column) => column.label)).toEqual([
       "Author",
       "Age",
@@ -42,9 +42,10 @@ describe("history column layout", () => {
   });
 
   it.each([
-    [8, "62px", 280],
-    [10, "75px", 293],
-  ])("widens SHA to fit a %i-character prefix", (length, width, minWidth) => {
+    [8, "100px", 318],
+    [10, "100px", 318],
+    [16, "115px", 333],
+  ])("fits a %i-character commit ID", (length, width, minWidth) => {
     const layout = columnLayout(58, new Set<ColumnId>(["sha"]), length);
     expect(layout.template).toBe(`58px minmax(160px, 1fr) ${width}`);
     expect(layout.minWidth).toBe(minWidth);

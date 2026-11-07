@@ -67,7 +67,7 @@
   font-weight: 450;
   font-size: 11px;
   color: var(--muted);
-  height: 36px;
+  height: 32px;
   display: flex;
   align-items: center;
   border-top: 1px solid var(--border);
@@ -75,7 +75,7 @@
   min-width: 0;
 }
 .history-table th:first-child {
-  padding-left: 14px;
+  padding-left: 0;
 }
 .history-table td {
   height: 36px;
@@ -311,7 +311,7 @@
 }
 
 .history-heading {
-  height: 56px;
+  height: 32px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -320,8 +320,8 @@
   border-top: 1px solid var(--border);
 }
 .history-heading strong {
-  font-size: 14px;
-  font-weight: 600;
+  font-size: 12px;
+  font-weight: 500;
 }
 .history-heading > span {
   color: var(--muted);

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Search } from "lucide-react";
 import { FILE_TREE_DENSITY_PRESETS } from "@pierre/trees";
 import type { GitStatus } from "@pierre/trees";
-import { FileTree, useFileTree } from "@pierre/trees/react";
+import { FileTree, useFileTree, useFileTreeSearch } from "@pierre/trees/react";
 import focusStyles from "../styles/focus.css?inline";
 import {
   changedFileTreeInput,
@@ -64,7 +64,6 @@ export function ChangedFileTree({
   useEffect(() => {
     onSelectFileRef.current = onSelectFile;
   });
-  const [query, setQuery] = useState("");
   const syncing = useRef(false);
   const [preparedInput] = useState(() => changedFileTreeInput(files));
   const [initialSelectedPaths] = useState(() =>
@@ -82,6 +81,8 @@ export function ChangedFileTree({
     initialExpansion,
     flattenEmptyDirectories,
     density: "compact",
+    fileTreeSearchMode: "hide-non-matches",
+    searchBlurBehavior: "retain",
     unsafeCSS: focusStyles,
     composition:
       actions.length > 0
@@ -100,6 +101,7 @@ export function ChangedFileTree({
         onSelectFileRef.current(path);
     },
   });
+  const search = useFileTreeSearch(model);
   useEffect(() => {
     const shown = selectedPath === null ? null : treePath(selectedPath);
     syncing.current = true;
@@ -188,14 +190,16 @@ export function ChangedFileTree({
           <input
             aria-label="Filter changed files"
             placeholder="Filter changed files"
-            value={query}
+            value={search.value}
             onChange={(event) => {
-              setQuery(event.target.value);
-              model.setSearch(event.target.value || null);
+              search.setValue(event.target.value || null);
             }}
           />
         </label>
-        {tree}
+        {search.value && search.matchingPaths.length === 0 && (
+          <p className="tree-hint">No changed files match.</p>
+        )}
+        {(!search.value || search.matchingPaths.length > 0) && tree}
       </>
     );
   return (

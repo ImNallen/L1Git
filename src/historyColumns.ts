@@ -7,7 +7,7 @@ export const historyColumns = [
   { id: "author", label: "Author", width: 140 },
   { id: "date", label: "Age", width: 60 },
   { id: "sha", label: "Commit ID" },
-  { id: "changes", label: "Changes", width: 160 },
+  { id: "changes", label: "Changes", width: 202 },
 ] as const;
 export type ColumnId = (typeof historyColumns)[number]["id"];
 
@@ -41,7 +41,7 @@ export function columnLayout(
     : MESSAGE_MIN_WIDTH;
   const widths = columns.map((column) =>
     column.id === "sha"
-      ? Math.ceil(shaLength * SHA_CHAR_WIDTH) + SHA_PADDING
+      ? Math.max(100, Math.ceil(shaLength * SHA_CHAR_WIDTH) + SHA_PADDING)
       : column.width,
   );
   return {

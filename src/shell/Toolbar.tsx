@@ -30,7 +30,11 @@ export function Toolbar({
   inspectorToggle: ReactNode;
   layout: Pick<
     Layout,
-    "sidebarOpen" | "inspectorVisible" | "toolbarMenu" | "setToolbarMenu"
+    | "sidebarOpen"
+    | "inspectorVisible"
+    | "toolbarMenu"
+    | "setToolbarMenu"
+    | "toolbarMoreRef"
   >;
   shown: WorkspaceView["shown"];
   snapshot: RepositorySnapshot | null;
@@ -39,6 +43,7 @@ export function Toolbar({
   commands: SyncCommands;
 }) {
   const { toolbarMenu: menu, setToolbarMenu: setMenu } = layout;
+  const moreButton = layout.toolbarMoreRef;
   const branch = actionRegistry.find((action) => action.id === "newBranch");
   const stash = actionRegistry.find((action) => action.id === "stashChanges");
   return (
@@ -79,6 +84,7 @@ export function Toolbar({
               <span>Stash</span>
             </button>
             <button
+              ref={moreButton}
               className="button"
               aria-haspopup="menu"
               aria-expanded={menu !== null}
@@ -108,7 +114,10 @@ export function Toolbar({
           x={menu.left}
           y={menu.bottom}
           label="Repository actions"
-          onClose={() => setMenu(null)}
+          onClose={({ returnFocus }) => {
+            setMenu(null);
+            if (returnFocus) moreButton.current?.focus();
+          }}
         >
           {actionRegistry
             .filter((action) =>
@@ -124,8 +133,9 @@ export function Toolbar({
               <button
                 key={action.id}
                 role="menuitem"
-                disabled={!action.available(actions.context)}
+                aria-disabled={!action.available(actions.context)}
                 onClick={() => {
+                  if (!action.available(actions.context)) return;
                   setMenu(null);
                   action.run(actions.commands);
                 }}

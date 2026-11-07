@@ -118,6 +118,9 @@ export function RepositoryTree({
       (refs !== null && refMatches(refs))
     );
   });
+  const expandedEntries = entriesShown.filter((entry) =>
+    expanded.has(entry.root),
+  );
 
   function openMenu(
     event: ReactMouseEvent<HTMLElement> | ReactKeyboardEvent<HTMLElement>,
@@ -432,23 +435,21 @@ export function RepositoryTree({
                   <SyncCounts divergence={head.divergence} branch={head.name} />
                 )}
               </div>
-              {open && !active && branches(entry)}
             </div>
           );
         })}
-        {entriesShown
-          .filter(
-            (entry) => entry.root === activePath && expanded.has(entry.root),
-          )
-          .map((entry) => (
-            <div
-              className="active-repository-refs"
-              data-repository-root={entry.root}
-              key={entry.root}
-            >
-              {branches(entry)}
-            </div>
-          ))}
+        {expandedEntries.map((entry) => (
+          <div
+            className="active-repository-refs"
+            data-repository-root={entry.root}
+            key={entry.root}
+          >
+            {expandedEntries.length > 1 && (
+              <div className="repository-refs-heading">{entry.name}</div>
+            )}
+            {branches(entry)}
+          </div>
+        ))}
         {entries.length === 0 && (
           <div className="sidebar-empty">
             <FolderGit2 size={24} />

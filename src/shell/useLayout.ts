@@ -15,6 +15,7 @@ const NARROW_SIDEBAR = "(max-width: 939px)";
  * shared and owned here rather than by the toggle.
  */
 export type Layout = {
+  toolbarMoreRef: RefObject<HTMLButtonElement | null>;
   searchSlot: HTMLDivElement | null;
   setSearchSlot: (element: HTMLDivElement | null) => void;
   toolbarMenu: DOMRect | null;
@@ -37,6 +38,7 @@ export type Layout = {
 export function useLayout(shown: WorkspaceView["shown"]): Layout {
   const [searchSlot, setSearchSlot] = useState<HTMLDivElement | null>(null);
   const [toolbarMenu, setToolbarMenu] = useState<DOMRect | null>(null);
+  const toolbarMoreRef = useRef<HTMLButtonElement>(null);
   const [sidebarOpen, setSidebarOpen] = useState(
     () => !window.matchMedia(NARROW_SIDEBAR).matches,
   );
@@ -64,6 +66,7 @@ export function useLayout(shown: WorkspaceView["shown"]): Layout {
     return () => media.removeEventListener("change", narrow);
   }, []);
   return {
+    toolbarMoreRef,
     searchSlot,
     setSearchSlot,
     toolbarMenu,

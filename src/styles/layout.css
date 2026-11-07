@@ -294,7 +294,7 @@ kbd {
     padding-left: 9px;
   }
   /* Hidden visually, not from the accessibility tree, so the button keeps its visible name. */
-  .toolbar-actions .button span {
+  .toolbar-actions .button span:not(.workspace-action-icon) {
     position: absolute;
     width: 1px;
     height: 1px;

@@ -9,6 +9,7 @@ import {
   installHarness,
   mountApp,
   query,
+  refRow,
   repositoryRow,
 } from "./test/appHarness";
 import type { Harness } from "./test/appHarness";
@@ -29,6 +30,36 @@ function unload() {
 
 const sidebar = () => query("complementary", "Repository sidebar");
 const inspector = () => query("complementary", "Commit inspector");
+
+it("selecting a branch in another repository preserves keyboard focus", async () => {
+  const app = await mountApp();
+  await app.click(get("button", "Expand other"));
+  const row = refRow("refs/heads/trunk", OTHER);
+  if (!row) throw new Error("Missing other repository branch");
+  row.focus();
+  await app.click(row);
+  expect(row.isConnected).toBe(true);
+  expect(document.activeElement).toBe(row);
+  await app.press("ArrowUp");
+  expect(document.activeElement).not.toBe(document.body);
+  expect(document.activeElement).not.toBe(row);
+});
+
+it("More supports keyboard navigation past unavailable actions and returns focus", async () => {
+  const app = await mountApp();
+  await app.click(get("button", "More"));
+  const first = document.querySelector('[role="menuitem"]');
+  expect(first?.getAttribute("aria-disabled")).toBe("true");
+  expect(document.activeElement).toBe(first);
+  if (!(first instanceof HTMLElement)) throw new Error("Missing menu action");
+  await app.click(first);
+  expect(dialogs()).toEqual([]);
+  await app.press("End");
+  expect(document.activeElement?.textContent).toContain("Settings");
+  await app.press("Escape");
+  expect(query("menu", "Repository actions")).toBeNull();
+  expect(focused()).toBe("button More");
+});
 
 it("beforeunload is guarded while resolution drafts exist, and not while drafts are frozen", async () => {
   const app = await mountApp();

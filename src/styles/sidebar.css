@@ -457,6 +457,11 @@ input::placeholder {
   padding-top: 12px;
   margin-top: 12px;
 }
+.repository-refs-heading {
+  padding: 8px 10px;
+  color: var(--muted);
+  font-size: 11px;
+}
 .active-repository-refs .tree-section {
   padding-left: 8px;
 }
