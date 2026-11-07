@@ -4,6 +4,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  '@pierre/trees@1.0.0-beta.6':
+    hash: b8503be0f5cd37dc9697f331d1e3b0533f8c14d1d4b6ebd602250dea4a2f1b8e
+    path: patches/@pierre__trees@1.0.0-beta.6.patch
+
 importers:
 
   .:
@@ -19,7 +24,7 @@ importers:
         version: 1.5.2(@shikijs/themes@4.5.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@pierre/trees':
         specifier: 1.0.0-beta.6
-        version: 1.0.0-beta.6(@pierre/theme@2.0.0)(@shikijs/themes@4.5.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(shiki@4.5.0)
+        version: 1.0.0-beta.6(patch_hash=b8503be0f5cd37dc9697f331d1e3b0533f8c14d1d4b6ebd602250dea4a2f1b8e)(@pierre/theme@2.0.0)(@shikijs/themes@4.5.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(shiki@4.5.0)
       '@tauri-apps/api':
         specifier: ^2.12.3
         version: 2.12.4
@@ -1640,7 +1645,7 @@ snapshots:
       react-dom: 19.3.0(react@19.3.0)
       shiki: 4.5.0
 
-  '@pierre/trees@1.0.0-beta.6(@pierre/theme@2.0.0)(@shikijs/themes@4.5.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(shiki@4.5.0)':
+  '@pierre/trees@1.0.0-beta.6(patch_hash=b8503be0f5cd37dc9697f331d1e3b0533f8c14d1d4b6ebd602250dea4a2f1b8e)(@pierre/theme@2.0.0)(@shikijs/themes@4.5.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(shiki@4.5.0)':
     dependencies:
       '@pierre/theming': 1.0.0(@pierre/theme@2.0.0)(@shikijs/themes@4.5.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(shiki@4.5.0)
       preact: 11.0.0-beta.0

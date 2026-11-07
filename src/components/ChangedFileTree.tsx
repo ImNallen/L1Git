@@ -48,7 +48,22 @@ type Props = {
   onRowFocus?: (row: string) => void;
 };
 
-const ITEM_HEIGHT = 32;
+const DIRECTORY_HEIGHT = 32;
+const FILE_HEIGHT = 34;
+
+function fittedTreeHeight(
+  model: ReturnType<typeof useFileTree>["model"],
+  maxRows: number | undefined,
+) {
+  if (maxRows === undefined) return 0;
+  return model
+    .getVisibleRows(0, Math.min(model.getVisibleCount(), maxRows) - 1)
+    .reduce(
+      (height, row) =>
+        height + (row.kind === "directory" ? DIRECTORY_HEIGHT : FILE_HEIGHT),
+      8,
+    );
+}
 
 export function ChangedFileTree({
   files,
@@ -81,7 +96,8 @@ export function ChangedFileTree({
     initialExpansion,
     flattenEmptyDirectories,
     density: "default",
-    itemHeight: ITEM_HEIGHT,
+    itemHeight: DIRECTORY_HEIGHT,
+    fileItemHeight: FILE_HEIGHT,
     icons: { set: "minimal", colored: false },
     renderRowDecoration: ({ item }) =>
       item.kind === "directory"
@@ -118,12 +134,12 @@ ${treeStyles}`,
       model.getItem(shown)?.select();
     syncing.current = false;
   }, [model, selectedPath]);
-  const [rows, setRows] = useState(() => model.getVisibleCount());
+  const [height, setHeight] = useState(() => fittedTreeHeight(model, maxRows));
   useEffect(() => {
     if (maxRows === undefined) return;
-    const count = () => setRows(model.getVisibleCount());
-    count();
-    return model.subscribe(count);
+    const resize = () => setHeight(fittedTreeHeight(model, maxRows));
+    resize();
+    return model.subscribe(resize);
   }, [model, maxRows]);
   useEffect(() => {
     if (refocusPath === null) return;
@@ -210,10 +226,7 @@ ${treeStyles}`,
       </>
     );
   return (
-    <div
-      className="fitted-file-tree"
-      style={{ height: Math.min(rows, maxRows) * ITEM_HEIGHT + 8 }}
-    >
+    <div className="fitted-file-tree" style={{ height }}>
       {tree}
     </div>
   );

@@ -41,7 +41,7 @@ Report browser, reader, build, and native results separately. A successful bundl
 
 With the real development bridge running, run `node scripts/verify-workspace-visual.mjs <repository> [url]`. The default URL is `http://localhost:1423`; use the isolated launch ports above. This requires `agent-browser` on PATH. `L1GIT_VISUAL_SESSION` selects its browser session and `L1GIT_VISUAL_EVIDENCE` selects the output directory (default: a new temporary directory). The script checks geometry and styles against `scripts/workspace-visual-contract.json`, opens all six menus, checks focus return and file filtering, opens a real diff, searches from it, and captures history and diff at 1920, 1440 and 780px. Use the default L1 Dark theme with standard panel widths. It compares repository status before and after without writing Git data.
 
-Inspect the captures after the check passes. Geometry assertions do not establish full visual fidelity. The graph uses 838/22px rows quantized to browser layout units, with one constant shared by SVG, virtualization and scrolling. Changed-file rows currently use Pierre’s uniform 32px geometry.
+Inspect the captures after the check passes. Geometry assertions do not establish full visual fidelity. The graph uses 838/22px rows quantized to browser layout units, with one constant shared by SVG, virtualization and scrolling. Changed-file rows use the pinned Pierre patch for 32px directories and 34px files, including virtualization and scrolling. Run `pnpm test:tree-geometry` for real-package geometry checks and open `/scripts/tree-geometry.html` on an isolated Vite server for the real-browser regression harness. Its report includes keyboard, scrolling, search, sticky folders, and fitted application rows.
 
 ## Native checks
 
