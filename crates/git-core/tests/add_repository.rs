@@ -290,3 +290,144 @@ fn creating_refuses_a_relative_path() {
     .unwrap_err();
     assert_eq!(error.kind, ErrorKind::UnsupportedPath);
 }
+
+/// A bare remote with one commit on main.
+fn remote(base: &Path) -> PathBuf {
+    let work = base.join("seed");
+    fs::create_dir(&work).unwrap();
+    git(&work, &["init", "--quiet", "--initial-branch=main"]);
+    fs::write(work.join("readme.md"), "hello\n").unwrap();
+    git(&work, &["add", "."]);
+    git(&work, &["commit", "--quiet", "-m", "first"]);
+    git(base, &["clone", "--quiet", "--bare", "seed", "remote.git"]);
+    base.join("remote.git")
+}
+
+fn clone_request(url: &str, target: &str) -> Request {
+    serde_json::from_value(serde_json::json!({
+        "op": "cloneRepository",
+        "url": url,
+        "path": target,
+    }))
+    .unwrap()
+}
+
+#[test]
+fn a_clone_from_a_bare_remote_creates_missing_parents_and_opens() {
+    let (_directory, base) = base();
+    let remote = remote(&base);
+    let core = coordinator(&base);
+    let target = base.join("new/parent/clone");
+    let Response::CloneRepository(cloned) = run(
+        &core,
+        clone_request(remote.to_str().unwrap(), target.to_str().unwrap()),
+    )
+    .unwrap() else {
+        panic!("the request answered with something else");
+    };
+    assert_eq!(cloned.path, target.to_str().unwrap());
+    assert_eq!(
+        fs::read_to_string(target.join("readme.md")).unwrap(),
+        "hello\n"
+    );
+    let Response::Snapshot(snapshot) = run(&core, Request::Snapshot { path: cloned.path }).unwrap()
+    else {
+        panic!("the request answered with something else");
+    };
+    assert_eq!(snapshot.commits.len(), 1);
+}
+
+#[test]
+fn a_clone_goes_into_an_existing_empty_folder() {
+    let (_directory, base) = base();
+    let remote = remote(&base);
+    let target = base.join("empty");
+    fs::create_dir(&target).unwrap();
+    coordinator(&base)
+        .clone_repository(remote.to_str().unwrap(), &target)
+        .unwrap();
+    assert!(target.join("readme.md").is_file());
+}
+
+#[test]
+fn a_clone_refuses_a_folder_with_files_and_leaves_it_alone() {
+    let (_directory, base) = base();
+    let remote = remote(&base);
+    let target = base.join("busy");
+    fs::create_dir(&target).unwrap();
+    fs::write(target.join("mine.txt"), "mine\n").unwrap();
+    let error = coordinator(&base)
+        .clone_repository(remote.to_str().unwrap(), &target)
+        .unwrap_err();
+    assert!(error.message.contains("not empty"), "{}", error.message);
+    assert_eq!(
+        fs::read_to_string(target.join("mine.txt")).unwrap(),
+        "mine\n"
+    );
+    assert_eq!(fs::read_dir(&target).unwrap().count(), 1);
+
+    let file = base.join("file");
+    fs::write(&file, "mine\n").unwrap();
+    assert!(
+        coordinator(&base)
+            .clone_repository(remote.to_str().unwrap(), &file)
+            .is_err()
+    );
+    assert_eq!(fs::read_to_string(&file).unwrap(), "mine\n");
+}
+
+#[test]
+fn a_clone_refuses_an_invalid_endpoint_before_touching_the_target() {
+    let (_directory, base) = base();
+    let target = base.join("never");
+    for url in [
+        "",
+        " https://example.test/a.git",
+        "-upload-pack=touch",
+        "ext::sh -c touch",
+        "ftp://example.test/a.git",
+        "https://:",
+        "https:only",
+    ] {
+        let result = coordinator(&base).clone_repository(url, &target);
+        assert!(result.is_err(), "{url}");
+        assert!(!target.exists(), "{url}");
+    }
+}
+
+#[test]
+fn a_failed_clone_reports_git_without_the_urls_credentials() {
+    let (_directory, base) = base();
+    let target = base.join("failed");
+    let request = clone_request(
+        "https://ada:s3cret@127.0.0.1:1/team/app.git",
+        target.to_str().unwrap(),
+    );
+    assert!(
+        !format!("{request:?}").contains("s3cret"),
+        "the request's Debug output hides the URL"
+    );
+    let error = run(&coordinator(&base), request).unwrap_err();
+    assert!(!error.message.contains("s3cret"), "{}", error.message);
+    assert!(!error.message.is_empty());
+    assert!(!target.exists());
+}
+
+#[test]
+fn cancelling_nothing_is_fine() {
+    let (_directory, base) = base();
+    let core = coordinator(&base);
+    for _ in 0..2 {
+        let answer = run(
+            &core,
+            Request::CancelClone {
+                path: base.join("nothing").to_str().unwrap().to_owned(),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::to_value(answer).unwrap(),
+            serde_json::json!({ "op": "cancelClone" })
+        );
+    }
+}

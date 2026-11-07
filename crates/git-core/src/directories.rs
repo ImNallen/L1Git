@@ -176,3 +176,15 @@ fn is_private_parent(directory: &Path, home: Option<&Path>) -> bool {
                 .is_ok_and(|directory| home.canonicalize().is_ok_and(|home| home == directory))
         })
 }
+
+/// A stable name for a path that may not exist yet: its nearest existing
+/// directory with symlinks resolved, then the rest of the path.
+pub(crate) fn resolved_target(path: &Path) -> PathBuf {
+    let Some(nearest) = nearest_directory(path) else {
+        return path.to_owned();
+    };
+    let rest = path.strip_prefix(nearest).unwrap_or(Path::new(""));
+    nearest
+        .canonicalize()
+        .map_or_else(|_| path.to_owned(), |nearest| nearest.join(rest))
+}

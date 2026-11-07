@@ -1,7 +1,7 @@
 use crate::{
-    AddRemote, AddRemoteReport, Advance, Applied, Blame, BranchMerged, BranchTip, CommitDetail,
-    Comparison, ConflictFile, Coordinator, EntryId, Expect, FastForwardReport, FetchMode,
-    FilePatch, FileRevision, Head, LineStats, MergeAction, MergeReport, MergeReview,
+    AddRemote, AddRemoteReport, Advance, Applied, Blame, BranchMerged, BranchTip, CloneUrl,
+    CommitDetail, Comparison, ConflictFile, Coordinator, EntryId, Expect, FastForwardReport,
+    FetchMode, FilePatch, FileRevision, Head, LineStats, MergeAction, MergeReport, MergeReview,
     MergeSelection, MergeState, NewRepository, Operation, PublishChoice, PublishOptions,
     PushAvailability, PushIntent, PushReport, ReplayOf, ReplayReview, RepositoryError,
     RepositoryOverview, RepositoryRefs, RepositorySnapshot, Side, UndoHistory, WorktreePatch,
@@ -133,6 +133,13 @@ pub enum Request {
     CreateRepository {
         path: String,
     },
+    CloneRepository {
+        url: CloneUrl,
+        path: String,
+    },
+    CancelClone {
+        path: String,
+    },
 }
 
 #[derive(Debug, Serialize)]
@@ -167,6 +174,8 @@ pub enum Response {
     BranchMerged(BranchMerged),
     ListDirectories(DirectoryListing),
     CreateRepository(NewRepository),
+    CloneRepository(NewRepository),
+    CancelClone,
 }
 
 pub fn run(coordinator: &Coordinator, request: Request) -> Result<Response, RepositoryError> {
@@ -262,5 +271,12 @@ pub fn run(coordinator: &Coordinator, request: Request) -> Result<Response, Repo
         Request::CreateRepository { path } => Response::CreateRepository(
             coordinator.create_repository(&expand_home(&path, home_dir().as_deref())?)?,
         ),
+        Request::CloneRepository { url, path } => Response::CloneRepository(
+            coordinator.clone_repository(&url.0, &expand_home(&path, home_dir().as_deref())?)?,
+        ),
+        Request::CancelClone { path } => {
+            coordinator.cancel_clone(&expand_home(&path, home_dir().as_deref())?);
+            Response::CancelClone
+        }
     })
 }

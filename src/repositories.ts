@@ -87,7 +87,9 @@ type RepositoryRequest =
   | { op: "undoHistory"; path: RepositoryRoot }
   | { op: "branchMerged"; path: RepositoryRoot; branch: BranchTip }
   | { op: "listDirectories"; path: string }
-  | { op: "createRepository"; path: string };
+  | { op: "createRepository"; path: string }
+  | { op: "cloneRepository"; url: string; path: string }
+  | { op: "cancelClone"; path: string };
 
 const responseSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("mergeReview"), data: mergeReviewSchema }),
@@ -119,6 +121,8 @@ const responseSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("branchMerged"), data: branchMergedSchema }),
   z.object({ op: z.literal("listDirectories"), data: directoryListingSchema }),
   z.object({ op: z.literal("createRepository"), data: newRepositorySchema }),
+  z.object({ op: z.literal("cloneRepository"), data: newRepositorySchema }),
+  z.object({ op: z.literal("cancelClone") }),
 ]);
 export const requestOps = responseSchema.options.map(
   (option) => option.shape.op.value,
@@ -286,6 +290,23 @@ export async function listDirectories(path: string) {
 
 export async function createRepository(path: string) {
   return (await run({ op: "createRepository", path })).data;
+}
+
+/** An abort asks the core to stop the clone and remove what it copied. */
+export async function cloneRepository(
+  url: string,
+  path: string,
+  signal: AbortSignal,
+) {
+  const cancel = () => {
+    run({ op: "cancelClone", path }).catch(() => {});
+  };
+  signal.addEventListener("abort", cancel, { once: true });
+  try {
+    return (await run({ op: "cloneRepository", url, path })).data;
+  } finally {
+    signal.removeEventListener("abort", cancel);
+  }
 }
 
 export async function chooseDirectory(): Promise<string | null> {

@@ -1,4 +1,5 @@
 mod advance;
+mod clone;
 mod create;
 mod fetch;
 mod locks;
@@ -6,6 +7,7 @@ use locks::Locks;
 mod push;
 mod read;
 mod remote;
+pub use clone::CloneUrl;
 pub use create::NewRepository;
 pub use push::{
     PublishChoice, PublishOptions, PublishRemote, PublishRemoteAvailability, PushAvailability,
@@ -40,6 +42,8 @@ pub struct Limits {
     /// How long a probe, ref move, or worktree fast-forward may take. A partial
     /// clone downloads blobs during the fast-forward.
     pub local_deadline: Duration,
+    /// How long cloning a new repository may take.
+    pub clone_deadline: Duration,
     /// Remote operations that may run at once across all repositories.
     pub network_slots: NonZeroUsize,
 }
@@ -50,6 +54,7 @@ impl Default for Limits {
             fetch_deadline: Duration::from_secs(300),
             push_deadline: Duration::from_secs(300),
             local_deadline: Duration::from_secs(120),
+            clone_deadline: Duration::from_secs(3600),
             network_slots: NonZeroUsize::new(4).unwrap(),
         }
     }
@@ -72,6 +77,7 @@ pub struct Coordinator {
     repositories: Repositories,
     refreshes: Arc<Refreshes>,
     slots: Semaphore,
+    clones: clone::Clones,
 }
 
 type Repositories = Arc<Mutex<HashMap<PathBuf, Arc<Locks>>>>;
@@ -128,6 +134,7 @@ impl Coordinator {
             repositories: Repositories::default(),
             refreshes: Arc::default(),
             slots: Semaphore::new(limits.network_slots),
+            clones: clone::Clones::default(),
         }
     }
 
