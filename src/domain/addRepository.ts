@@ -33,10 +33,10 @@ type Source = {
 
 export const SOURCES: readonly Source[] = [
   {
-    kind: "new",
-    title: "New repository",
-    detail: "Create an empty repository on this computer",
-    start: () => ({ kind: "new", name: "", location: null }),
+    kind: "local",
+    title: "Local folder",
+    detail: "Open an existing Git repository on disk",
+    start: (base) => ({ kind: "local", path: base }),
   },
   {
     kind: "url",
@@ -45,10 +45,10 @@ export const SOURCES: readonly Source[] = [
     start: () => ({ kind: "url", url: "", location: null }),
   },
   {
-    kind: "local",
-    title: "Local folder",
-    detail: "Add a repository from this computer",
-    start: (base) => ({ kind: "local", path: base }),
+    kind: "new",
+    title: "New repository",
+    detail: "Start an empty Git repository",
+    start: () => ({ kind: "new", name: "", location: null }),
   },
 ];
 
@@ -104,12 +104,12 @@ export const STEP_TEXT: Record<
     input: "Path",
     placeholder: DEFAULT_BASE,
     mono: true,
-    submit: "Add",
-    busy: "Adding…",
+    submit: "Open",
+    busy: "Opening…",
     section: "Directories",
     hints: [
       NAVIGATE,
-      { keys: "↵", label: "Add", role: "submit" },
+      { keys: "↵", label: "Open", role: "submit" },
       { keys: "⌫", label: "Back" },
       CLOSE,
     ],

@@ -24,7 +24,7 @@ describe("filterSources", () => {
     filterSources(query).map((source) => source.title);
 
   it("lists every source in order for an empty query", () => {
-    expect(titles("")).toEqual(["New repository", "Git URL", "Local folder"]);
+    expect(titles("")).toEqual(["Local folder", "Git URL", "New repository"]);
     expect(titles("  ")).toEqual(titles(""));
   });
 
@@ -123,7 +123,7 @@ describe("shownHints", () => {
     });
     expect(
       local.filter((hint) => hint.disabled).map(({ label }) => label),
-    ).toEqual(["Add"]);
+    ).toEqual(["Open"]);
   });
 });
 
@@ -159,8 +159,8 @@ describe("descendInto", () => {
 
 it("every source starts its own step", () => {
   expect(SOURCES.map((source) => source.start("~/x"))).toEqual([
-    { kind: "new", name: "", location: null },
-    { kind: "url", url: "", location: null },
     { kind: "local", path: "~/x" },
+    { kind: "url", url: "", location: null },
+    { kind: "new", name: "", location: null },
   ]);
 });

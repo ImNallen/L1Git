@@ -128,16 +128,6 @@
 .file-diff {
   position: relative;
 }
-:root:not([data-palette])[data-theme="dark"] .toolbar-action:hover {
-  background: #292929;
-  color: #f2f2f2;
-}
-:root:not([data-palette])[data-theme="dark"]
-  .toolbar-action[aria-expanded="true"] {
-  background: #343434;
-  color: #f2f2f2;
-  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 12%);
-}
 .file-comparison {
   display: grid;
   grid-template-columns: 0fr 1fr;

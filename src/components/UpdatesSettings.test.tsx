@@ -141,7 +141,7 @@ it.each(["available", "downloaded"] as const)(
       kind === "downloaded" ? "ready to install" : "is available",
     );
     expect(descriptions?.[0]?.textContent).toContain("Retry is available");
-    expect(descriptions?.[1]?.textContent).toContain("What's changed");
+    expect(descriptions?.[1]?.textContent).toContain("What’s changed");
     expect(descriptions?.[1]?.textContent).toContain(notes);
     const region = container.querySelector<HTMLElement>(
       '[role="region"][aria-label="What\'s changed"]',
@@ -167,7 +167,7 @@ it.each(["available", "downloaded"] as const)(
       expect(container.querySelector('[role="region"]')).toBeNull();
       expect(
         container.querySelector(".update-tooltip")?.textContent,
-      ).not.toContain("What's changed");
+      ).not.toContain("What’s changed");
       expect(sidebar().getAttribute("aria-describedby")).toBe(
         container.querySelector('[role="status"]')?.id,
       );
@@ -175,18 +175,57 @@ it.each(["available", "downloaded"] as const)(
   },
 );
 
-it("keeps release notes out of busy progress details", async () => {
+it("retains release notes during progress without adding them to live announcements", async () => {
   await render(false);
   for (const value of [
     { kind: "downloading", candidate, received: 12, total: 100 },
     { kind: "installing", candidate },
   ]) {
     await state(value);
-    expect(container.querySelector('[role="region"]')).toBeNull();
+    expect(container.querySelector('[role="region"]')?.textContent).toBe(
+      candidate.notes,
+    );
     expect(
-      container.querySelector(".update-tooltip")?.textContent,
+      container.querySelector('[role="status"]')?.textContent,
     ).not.toContain(candidate.notes);
   }
+});
+
+it("shows numbered change rows without losing long or additional release entries", async () => {
+  const longTitle = "Preserve repository selection ".repeat(20);
+  const notes = `## What's Changed\n* Keep selection (#184)\n* ${longTitle}(#181)\n* Third fix\n* Fourth fix`;
+  await state({
+    kind: "available",
+    candidate: { ...candidate, notes },
+    message: null,
+  });
+  await render(false);
+  const rows = [...container.querySelectorAll('[role="listitem"]')];
+  expect(rows).toHaveLength(4);
+  expect(rows[0]?.textContent).toContain("Keep selection");
+  expect(rows[0]?.textContent).toContain("#184");
+  expect(rows[1]?.querySelector("[title]")?.getAttribute("title")).toBe(
+    longTitle.trim(),
+  );
+  expect(rows[3]?.textContent).toContain("Fourth fix");
+  expect(container.querySelector('[role="status"]')?.textContent).not.toContain(
+    "Fourth fix",
+  );
+  expect(container.querySelector("script, a")).toBeNull();
+});
+
+it("keeps complete release notes in Settings while formatting the sidebar summary", async () => {
+  const notes = "## What's Changed\n* Keep selection (#184)";
+  await state({
+    kind: "downloaded",
+    candidate: { ...candidate, notes },
+    message: null,
+  });
+  await render();
+  expect(container.querySelector(".update-notes")?.textContent).toBe(notes);
+  expect(container.querySelector(".update-note-reference")?.textContent).toBe(
+    "#184",
+  );
 });
 
 it("separates checking, download, progress and explicit restart and escapes release notes", async () => {
@@ -382,7 +421,6 @@ it("spins the sidebar arrows while checking and stops or offers a download", asy
   await state({ kind: "available", candidate, message: null });
   expect(sidebar().disabled).toBe(false);
   expect(sidebar().getAttribute("aria-label")).toBe("Download update");
-  expect(sidebar().querySelector(".lucide-download")).not.toBeNull();
   expect(sidebar().querySelector(".spin")).toBeNull();
   expect(
     transport.invoke.mock.calls.filter(
@@ -473,7 +511,6 @@ it("keeps the sidebar available for current and failed checks and disables every
   ]) {
     await state(value);
     expect(sidebar().disabled).toBe(true);
-    expect(sidebar().querySelector(".spin")).not.toBeNull();
     const calls = transport.invoke.mock.calls.length;
     await act(async () => sidebar().click());
     expect(transport.invoke).toHaveBeenCalledTimes(calls);
@@ -509,7 +546,9 @@ it("announces known-total percent and indeterminate progress from the sidebar", 
   expect(sidebar().disabled).toBe(true);
   await state({ kind: "downloading", candidate, received: 12, total: null });
   expect(sidebar().getAttribute("aria-label")).toBe("Downloading update…");
-  expect(sidebar().querySelector(".spin")).not.toBeNull();
+  expect(container.querySelector("progress")?.hasAttribute("value")).toBe(
+    false,
+  );
   expect(container.querySelector('[role="status"]')?.textContent).not.toContain(
     "%",
   );

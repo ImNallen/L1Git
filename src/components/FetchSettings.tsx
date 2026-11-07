@@ -1,4 +1,5 @@
 import { settingsDestinations } from "../settingsSearch";
+import { WorkspaceIcon } from "./WorkspaceIcon";
 import { fetchIntervals } from "../fetchSettings";
 import type { FetchInterval } from "../fetchSettings";
 
@@ -22,15 +23,27 @@ export function FetchSettings({
         Fetching
       </h2>
       <div
-        className="settings-row"
+        className="settings-row settings-fetch-row"
         id={settingsDestinations.fetch.targetId}
         tabIndex={-1}
       >
         <div>
-          <h3 id="interval-label">Fetch automatically</h3>
+          <h3 id="interval-label">
+            Background fetch
+            {intervalMinutes !== 15 && (
+              <button
+                type="button"
+                className="settings-reset-small"
+                aria-label="Restore Background fetch default"
+                onClick={() => onIntervalChange(15)}
+              >
+                <WorkspaceIcon name="SettingsResetSmall" />
+              </button>
+            )}
+          </h3>
           <p id="interval-description">
-            L1 Git always fetches at launch and when you click Fetch. It waits
-            while the window is hidden.
+            Runs while the window is visible. L1 Git also fetches at launch and
+            whenever you click Fetch.
           </p>
         </div>
         <div

@@ -77,7 +77,7 @@ export function Sidebar({
             title="Settings"
             onClick={() => commands.openSettings()}
           >
-            <WorkspaceIcon name="Settings" />
+            <WorkspaceIcon name="Settings" size={18} />
           </button>
           <UpdateAffordance updates={updates} restart={restart} />
         </footer>

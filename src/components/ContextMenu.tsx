@@ -21,6 +21,7 @@ export function ContextMenu({
   y,
   motion = false,
   label,
+  className = "",
   ignoreScrollIn,
   onClose,
   children,
@@ -29,6 +30,7 @@ export function ContextMenu({
   x: number;
   y: number;
   label: string;
+  className?: string;
   ignoreScrollIn?: RefObject<HTMLElement | null>;
   onClose: (options: { returnFocus: boolean }) => void;
   children: ReactNode;
@@ -184,7 +186,7 @@ export function ContextMenu({
   return createPortal(
     <div
       ref={ref}
-      className="context-menu"
+      className={`context-menu ${className}`.trim()}
       role="menu"
       data-file-tree-context-menu-root="true"
       aria-label={label}

@@ -18,18 +18,17 @@
   width: 520px;
   max-width: calc(100vw - 40px);
   max-height: calc(100dvh - 40px);
-  margin: 12.9dvh auto auto;
+  margin: min(124px, 13dvh) auto auto;
   padding: 0;
   background: var(--panel);
   border: 1px solid var(--border-strong);
-  border-radius: 13px;
+  border-radius: 12px;
   color: var(--text-secondary);
-  box-shadow: 0 24px 100px var(--shadow-dialog);
+  box-shadow: 0 18px 52px var(--shadow-dialog);
   overflow: hidden;
 }
 .add-palette::backdrop {
-  background: var(--dialog-backdrop);
-  backdrop-filter: blur(10px);
+  background: var(--add-palette-backdrop, var(--dialog-backdrop));
 }
 .add-palette-header {
   display: flex;
@@ -40,11 +39,11 @@
 .add-palette-header input {
   flex: 1;
   min-width: 0;
-  height: 31px;
+  height: 32px;
   padding: 0 6px;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: 5px;
   color: var(--text-input);
   font-size: 13px;
   outline: none;
@@ -60,14 +59,14 @@
 }
 .add-palette-search {
   gap: 2px;
-  padding: 0 14px 0 16px;
+  padding: 0 14px 0 15px;
   color: var(--text-dim);
 }
 .add-palette-step-header {
   padding: 0 11px 0 8px;
 }
 .add-palette-step-header input {
-  margin-right: 8px;
+  margin-right: 32px;
 }
 .add-palette-step-header input:focus {
   outline: var(--focus-ring);
@@ -82,7 +81,7 @@
   flex-shrink: 0;
   width: 30px;
   height: 30px;
-  border-radius: 6px;
+  border-radius: 5px;
   color: var(--muted);
 }
 .add-palette-back:hover:not(:disabled) {
@@ -96,8 +95,8 @@
   gap: 8px;
   flex-shrink: 0;
   min-width: 96px;
-  height: 30px;
-  padding: 0 7px 0 9px;
+  height: 29px;
+  padding: 0 8px 0 9px;
   background: var(--add-palette-primary);
   border-radius: 6px;
   color: var(--add-palette-primary-text);
@@ -121,19 +120,20 @@
   color: inherit;
 }
 .add-palette-body {
-  padding: 11px 11px 10px;
+  padding: 10px 11px;
 }
 .add-palette-label {
   display: block;
-  margin: 0 4px 4px;
+  margin: 0 4px 3px;
   color: var(--muted);
-  font-size: 11.5px;
-  line-height: 14px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
 }
 .add-palette-options {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 1px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -150,9 +150,9 @@
   color: var(--text);
 }
 .add-palette-source {
-  gap: 11px;
-  min-height: 44px;
-  padding: 0 11px 0 12px;
+  gap: 10px;
+  min-height: 45px;
+  padding: 0 10px 0 11px;
 }
 .add-palette-source-text {
   flex: 1;
@@ -168,7 +168,8 @@
 .add-palette-source-title {
   color: var(--text);
   font-size: 13px;
-  line-height: 18px;
+  line-height: 19px;
+  font-weight: 500;
 }
 .add-palette-source-detail {
   color: var(--muted);
@@ -176,6 +177,7 @@
   line-height: 16px;
 }
 .add-palette-directories {
+  gap: 4px;
   max-height: min(288px, 40dvh);
   margin-bottom: 10px;
   overflow: auto;
@@ -183,30 +185,39 @@
   scrollbar-color: var(--scrollbar) transparent;
 }
 .add-palette-directory {
-  gap: 10px;
+  gap: 9px;
   flex-shrink: 0;
   height: 32px;
-  padding: 0 14px 0 11px;
+  padding: 0 14px 0 10px;
 }
 .add-palette-directory-name {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   color: var(--text);
-  font-size: 12.5px;
+  font-size: 12px;
+  line-height: 17px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .add-palette-directory-kind {
   flex-shrink: 0;
   color: var(--text-dim);
-  font-size: 10.5px;
+  font-size: 10px;
+  line-height: 14px;
 }
 .add-palette-directory-kind.repository {
   color: var(--add-palette-repository);
+  font-weight: 500;
+}
+.add-palette-directory[aria-selected="true"] .add-palette-directory-name {
+  font-weight: 500;
+}
+.add-palette-step-header.local + .add-palette-body {
+  padding-top: 11px;
 }
 label.add-palette-label {
-  margin-top: 3px;
+  margin-top: 2px;
 }
 .add-palette-location {
   display: flex;
@@ -214,7 +225,7 @@ label.add-palette-label {
   gap: 8px;
   height: 36px;
   margin: 7px 4px 23px;
-  padding: 0 11px;
+  padding: 0 9px;
   background: var(--add-palette-field);
   border: 1px solid var(--add-palette-field-border);
   border-radius: 6px;
@@ -233,6 +244,7 @@ label.add-palette-label {
   border: 0;
   color: var(--text-input);
   outline: none;
+  line-height: 17px;
 }
 .add-palette .error-message {
   margin: 0 4px 10px;
@@ -253,9 +265,9 @@ label.add-palette-label {
 .add-palette-footer {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 15px;
   height: 36px;
-  padding: 0 15px;
+  padding: 0 14px;
   border-top: 1px solid var(--border);
   color: var(--muted);
   font-size: 11px;
@@ -263,7 +275,7 @@ label.add-palette-label {
 .add-palette-hint {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 5px;
   white-space: nowrap;
 }
 .add-palette-hint.disabled {
@@ -279,11 +291,37 @@ label.add-palette-label {
   padding: 0 5px;
   border-radius: 4px;
   font-family: inherit;
-  font-size: 10.5px;
+  font-size: 10px;
   font-weight: 500;
   line-height: 1;
 }
 .add-palette-hint kbd {
   background: var(--add-palette-key);
   border-color: transparent;
+}
+
+.add-palette-source > .workspace-icon:first-child {
+  align-self: flex-start;
+  margin-top: 9px;
+}
+
+.add-palette-hint kbd[data-keys="↑ ↓"] {
+  width: 33px;
+}
+.add-palette-hint kbd[data-keys="↵"] {
+  width: 24px;
+}
+.add-palette-hint kbd[data-keys="Esc"] {
+  width: 28px;
+}
+.add-palette-hint kbd[data-keys="Tab"] {
+  width: 30px;
+}
+.add-palette-hint kbd[data-keys="⌫"] {
+  width: 26px;
+}
+.add-palette-primary kbd {
+  min-width: 18px;
+  width: 18px;
+  padding: 0;
 }

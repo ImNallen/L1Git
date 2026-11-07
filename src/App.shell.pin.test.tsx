@@ -53,6 +53,21 @@ it("repository search reveals matching tags and stashes without changing collaps
   expect(refRow("refs/tags/v1")?.closest("[inert]") ?? true).toBeTruthy();
 });
 
+it.each(["Escape", "clear button"])(
+  "closing an unmatched repository search with %s restores the active repository and focus",
+  async (close) => {
+    const app = await mountApp();
+    const filter = get("textbox", "Filter repositories and refs");
+    await app.type(filter, "no-such-repository-or-branch");
+    expect(query("button", "pin")).toBeNull();
+    filter.focus();
+    if (close === "Escape") await app.press("Escape", { target: filter });
+    else await app.click(get("button", "Close repository search"));
+    expect(document.activeElement).toBe(repositoryRow(PIN));
+    expect(filter).toHaveProperty("value", "");
+  },
+);
+
 it("selecting a branch in another repository preserves keyboard focus", async () => {
   const app = await mountApp();
   await app.click(repositoryRow(OTHER));
@@ -216,9 +231,11 @@ it("the commit button names the branch the commit would land on when the snapsho
   expect(get("button", "Commit to feature")).toBeTruthy();
 });
 
-it("keeps history full width without an added title or count", async () => {
+it("names the repository history while keeping its toolbar search visible", async () => {
   await mountApp();
-  expect(document.querySelector(".history-heading")).toBeNull();
+  expect(document.querySelector(".history-heading")?.textContent).toBe(
+    "pin commits",
+  );
   expect(document.querySelector(".repository-toggle")).toBeNull();
   expect(document.querySelector(".repositories-heading strong")).toBeNull();
   expect(

@@ -14,9 +14,12 @@ export function GeneralSettings({ fetching, updates, restart }: Props) {
   return (
     <section className="settings-page" aria-labelledby="general-heading">
       <div className="settings-content">
-        <h1 className="visually-hidden" id="general-heading" tabIndex={-1}>
-          General
-        </h1>
+        <div className="settings-page-heading">
+          <h1 id="general-heading" tabIndex={-1}>
+            General
+          </h1>
+          <p>Manage background fetching and app updates.</p>
+        </div>
         <FetchSettings {...fetching} />
         <UpdatesSettings updates={updates} restart={restart} />
       </div>

@@ -11,7 +11,7 @@
 @import "./styles/workspacePalette.css";
 
 :root {
-  font-family: "Inter Variable", Inter, sans-serif;
+  font-family: "InterVariable", Inter, sans-serif;
   font-size: 13px;
   color: var(--text);
   background: var(--canvas);

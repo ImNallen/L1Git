@@ -7,6 +7,8 @@
   display: flex;
   flex-direction: column;
   background: var(--panel);
+  border-top: 1px solid var(--border);
+  box-shadow: inset 1px 0 var(--border);
 }
 .inspector-heading {
   height: 56px;
@@ -14,7 +16,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 20px;
+  padding: 0 19px 0 21px;
   font-size: 13px;
   font-weight: 600;
   color: var(--workspace-heading, var(--text-heading));
@@ -227,7 +229,7 @@
   --trees-border-color-override: var(--border);
   --trees-indent-guide-bg-override: var(--separator);
   --trees-scrollbar-thumb-override: var(--scrollbar);
-  --trees-font-family-override: "Inter Variable", Inter, sans-serif;
+  --trees-font-family-override: "InterVariable", Inter, sans-serif;
   --trees-status-added-override: var(--success);
   --trees-status-deleted-override: var(--deleted);
   --trees-status-modified-override: var(--warning);
@@ -412,8 +414,10 @@
 }
 .changed-files-filter input {
   border: 0;
+  padding: 0;
   background: transparent;
   font-size: 11px;
+  line-height: 13px;
   width: 100%;
   min-width: 0;
 }
@@ -448,7 +452,7 @@
   padding: 0;
 }
 .commit-information {
-  padding: 20px 20px 24px;
+  padding: 20px 19px 24px 21px;
   display: flex;
   flex-direction: column;
   gap: 18px;
@@ -479,7 +483,7 @@
   margin: 0;
 }
 .commit-information .commit-message-block {
-  margin: 0;
+  margin: 0 0 -3px;
 }
 .commit-information .commit-message {
   font-size: 13px;
@@ -494,6 +498,7 @@
 }
 .inspector-refs .ref-badge {
   font-size: 11px;
+  line-height: 13px;
   font-weight: 400;
   border-radius: 5px;
   gap: 8px;
@@ -506,6 +511,29 @@
 .inspector-refs .ref-badge > svg {
   width: 16px;
   height: 16px;
+}
+.inspector-refs .ref-badge.local {
+  --reference-icon: url("/assets/inspector/Branch.svg");
+}
+.inspector-refs .ref-badge.remote {
+  --reference-icon: url("/assets/inspector/Cloud.svg");
+}
+.inspector-refs .ref-badge:is(.local, .remote) > svg {
+  display: none;
+}
+.inspector-refs .ref-badge:is(.local, .remote)::before {
+  content: "";
+  width: 16px;
+  height: 16px;
+  flex: none;
+  background: currentColor;
+  mask: var(--reference-icon) center / contain no-repeat;
+}
+:root:not([data-palette])[data-theme="dark"]
+  .inspector-refs
+  .ref-badge:is(.local, .remote)::before {
+  background: var(--reference-icon) center / contain no-repeat;
+  mask: none;
 }
 .inspector-refs .ref-worktree {
   display: none;
@@ -527,7 +555,7 @@
     --workspace-avatar-background,
     color-mix(in srgb, var(--text) 6%, transparent)
   );
-  color: var(--text-secondary);
+  color: var(--workspace-avatar-text, var(--text-secondary));
   font-weight: 500;
 }
 .commit-information .meta-lines {
@@ -535,9 +563,11 @@
 }
 .commit-information .meta-primary {
   font-size: 12px;
+  line-height: 15px;
   color: var(--workspace-author, var(--text-heading));
 }
 .commit-information .meta-secondary {
+  line-height: 13px;
   color: var(--workspace-email, var(--text-dim));
 }
 .commit-information dt:not(.visually-hidden) {
@@ -554,6 +584,7 @@
 .commit-information .parents .sha-chip {
   margin: 0;
   padding: 0;
+  color: var(--workspace-metadata-value, var(--text-body));
 }
 .commit-information .parents .sha-chip code {
   font-family: inherit;
@@ -567,7 +598,7 @@
   display: flex;
   flex-direction: column;
   border-top: 1px solid var(--border);
-  padding: 18px 16px 0;
+  padding: 18px 15px 0 17px;
   gap: 12px;
   flex: 1;
 }
@@ -582,6 +613,7 @@
 .changed-files-title {
   gap: 8px;
   font-weight: 500;
+  color: var(--workspace-changes-heading, var(--text-heading));
 }
 .changed-files-title > svg {
   display: none;
@@ -591,10 +623,19 @@
   border-radius: 0;
   background: none;
   font-weight: 400;
+  line-height: 13px;
+  color: var(--workspace-changes-count, var(--text-dim));
 }
 .change-summary {
   font-family: inherit;
   font-weight: 400;
+  line-height: 13px;
+}
+.changed-files-section .change-stat.added {
+  color: var(--workspace-changes-added, var(--success));
+}
+.changed-files-section .change-stat.deleted.zero {
+  color: var(--workspace-changes-zero, var(--text-dim));
 }
 .changed-files-filter {
   border: 1px solid var(--border);
@@ -609,6 +650,15 @@
 .changed-files-filter input::placeholder {
   color: var(--workspace-filter-placeholder, var(--text-dim));
 }
+.changed-files-filter .workspace-icon {
+  mask: url("/assets/inspector/Search.svg") center / contain no-repeat;
+}
+:root:not([data-palette])[data-theme="dark"]
+  .changed-files-filter
+  .workspace-icon {
+  background: url("/assets/inspector/Search.svg") center / contain no-repeat;
+  mask: none;
+}
 .changed-file-tree {
   margin: 0;
   --trees-fg-override: var(--workspace-file-text, var(--text-body));
@@ -616,5 +666,6 @@
   --trees-indent-guide-bg-override: transparent;
   --trees-font-size-override: 12px;
   --trees-padding-inline-override: 0px;
+  --trees-item-margin-x-override: 0px;
   --trees-selected-bg-override: var(--row-hover);
 }

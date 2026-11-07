@@ -538,6 +538,8 @@ kbd {
 }
 .toolbar-search-slot {
   flex: 0 1 300px;
+  position: relative;
+  top: 1px;
 }
 @container (max-width: 1000px) {
   .toolbar-actions .button span:not(.workspace-action-icon) {
@@ -573,6 +575,7 @@ kbd {
 }
 .toolbar {
   padding-inline: 24px;
+  margin-bottom: 1px;
 }
 .toolbar-action-group {
   display: flex;
@@ -581,6 +584,7 @@ kbd {
 }
 .toolbar-actions .toolbar-action {
   padding: 0;
+  border: 1px solid transparent;
   flex-shrink: 0;
   color: var(--workspace-toolbar-text, var(--text-body));
 }
@@ -602,9 +606,18 @@ kbd {
 .toolbar-action.more {
   width: 82px;
 }
-.toolbar-action:hover,
+.toolbar-action:hover {
+  background: var(--workspace-toolbar-hover, var(--control-hover));
+  color: var(--workspace-toolbar-active-text, var(--text));
+}
 .toolbar-action[aria-expanded="true"] {
-  background: var(--control-hover);
+  background: var(--workspace-toolbar-open, var(--control-hover));
+  border-color: var(--workspace-toolbar-border, var(--border-control));
+  color: var(--workspace-toolbar-active-text, var(--text));
+}
+.toolbar-action .workspace-action-icon,
+.toolbar-action .workspace-disclosure {
+  color: var(--workspace-toolbar-text, var(--text-body));
 }
 .workspace-disclosure {
   width: 10px;

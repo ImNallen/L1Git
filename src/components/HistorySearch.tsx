@@ -1,5 +1,6 @@
 import type { RefObject } from "react";
-import { ChevronDown, ChevronUp, Search, X } from "lucide-react";
+import { ChevronDown, ChevronUp, X } from "lucide-react";
+import { WorkspaceIcon } from "./WorkspaceIcon";
 
 export function HistorySearch({
   inputRef,
@@ -20,7 +21,7 @@ export function HistorySearch({
 }) {
   return (
     <div className="history-search" role="search">
-      <Search size={14} />
+      <WorkspaceIcon name="SettingsSearch" />
       <input
         ref={inputRef}
         aria-label="Search loaded history"
