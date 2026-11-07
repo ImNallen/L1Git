@@ -379,7 +379,11 @@ export function RepositoryTree({
       <div className="repositories-heading">
         <button
           className="icon-button"
-          onClick={onAdd}
+          onClick={(event) => {
+            // WebKit leaves a clicked button unfocused, and closing Add returns focus here.
+            event.currentTarget.focus();
+            onAdd();
+          }}
           title="Add repository"
           aria-label="Add repository"
         >

@@ -47,6 +47,10 @@ import {
   pushAvailabilitySchema,
   pushReportSchema,
 } from "./domain/push";
+import {
+  directoryListingSchema,
+  newRepositorySchema,
+} from "./domain/addRepository";
 import { requestOps } from "./repositories";
 
 const fixtureSchema = z.object({
@@ -582,6 +586,47 @@ describe("real Rust transport contract", () => {
         .parse(await (await post({ op: "refs", path: fixture.remote })).json())
         .error.kind,
     ).toBe("bareRepository");
+  });
+
+  it("lists, creates, clones, and cancels through the bridge", async () => {
+    const scratch = join(fixture.root, "add repository");
+    const run = async (body: unknown) => (await post(body)).json();
+    const created = answer("createRepository", newRepositorySchema).parse(
+      await run({ op: "createRepository", path: join(scratch, "created") }),
+    ).data;
+    expect(created.path).toBe(join(scratch, "created"));
+    const opened = answer("snapshot", snapshotSchema).parse(
+      await run({ op: "snapshot", path: created.path }),
+    ).data;
+    expect(opened.head.kind).toBe("unborn");
+
+    const cloned = answer("cloneRepository", newRepositorySchema).parse(
+      await run({
+        op: "cloneRepository",
+        url: fixture.remote,
+        path: join(scratch, "cloned"),
+      }),
+    ).data;
+    expect(cloned.path).toBe(join(scratch, "cloned"));
+    expect(existsSync(join(cloned.path, ".git"))).toBe(true);
+
+    expect(
+      await run({ op: "cancelClone", path: join(scratch, "cloned") }),
+    ).toEqual({ ok: true, op: "cancelClone" });
+
+    const listed = answer("listDirectories", directoryListingSchema).parse(
+      await run({ op: "listDirectories", path: scratch }),
+    ).data;
+    expect(listed.entries).toEqual([
+      { name: "cloned", path: cloned.path, repository: true },
+      { name: "created", path: created.path, repository: true },
+    ]);
+    expect(
+      z
+        .object({ ok: z.literal(false), error: repositoryErrorSchema })
+        .parse(await run({ op: "listDirectories", path: "relative" })).error
+        .kind,
+    ).toBe("unsupportedPath");
   });
 
   it("lists a stash and a submodule, and details the stash against its first parent", async () => {

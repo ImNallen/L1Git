@@ -1,7 +1,7 @@
 import { paletteItems } from "../actions";
 import type { AppearanceState } from "../appearance";
 import { AppearanceSettings } from "../components/AppearanceSettings";
-import { AddRepositoryDialog } from "../components/AddRepositoryDialog";
+import { AddRepositoryPalette } from "../components/AddRepositoryPalette";
 import { CommandPalette } from "../components/CommandPalette";
 import { DiscardDialog, DiscardPartDialog } from "../components/DiscardDialog";
 import { GeneralSettings } from "../components/GeneralSettings";
@@ -112,11 +112,15 @@ export function PaletteHost({
 export function AddRepositoryHost({
   nav,
 }: {
-  nav: Pick<Navigation, "adding" | "closeAdd" | "addRepository">;
+  nav: Pick<Navigation, "adding" | "closeAdd" | "finishAdd" | "addRepository">;
 }) {
   if (!nav.adding) return null;
   return (
-    <AddRepositoryDialog onAdd={nav.addRepository} onClose={nav.closeAdd} />
+    <AddRepositoryPalette
+      onAdd={nav.addRepository}
+      onAdded={nav.finishAdd}
+      onClose={nav.closeAdd}
+    />
   );
 }
 
