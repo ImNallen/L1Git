@@ -554,6 +554,13 @@ pub(crate) enum Mutation<'a> {
     MergeFastForward {
         to: &'a Oid,
     },
+    Init {
+        target: &'a str,
+    },
+    Clone {
+        url: &'a str,
+        target: &'a str,
+    },
 }
 
 impl Mutation<'_> {
@@ -631,6 +638,8 @@ impl Mutation<'_> {
                 from.as_str(),
             ]),
             Self::MergeFastForward { to } => owned(&["merge", "--ff-only", to.as_str()]),
+            Self::Init { target } => owned(&["init", "--quiet", "--", target]),
+            Self::Clone { url, target } => owned(&["clone", "--quiet", "--", url, target]),
         }
     }
 }
@@ -726,11 +735,30 @@ pub(crate) enum Captured {
     TimedOut,
 }
 
+pub(crate) enum Stoppable {
+    Ran(Captured),
+    Stopped,
+}
+
 pub(crate) fn capture_mutation(
     path: &Path,
     mutation: Mutation<'_>,
     deadline: Duration,
 ) -> Result<Captured, RepositoryError> {
+    let never = AtomicBool::new(false);
+    Ok(match capture_until(path, mutation, deadline, &never)? {
+        Stoppable::Ran(captured) => captured,
+        Stoppable::Stopped => Captured::TimedOut,
+    })
+}
+
+/// Stops Git and every process it started once `stop` turns true.
+pub(crate) fn capture_until(
+    path: &Path,
+    mutation: Mutation<'_>,
+    deadline: Duration,
+    stop: &AtomicBool,
+) -> Result<Stoppable, RepositoryError> {
     let merge = matches!(mutation, Mutation::MergeFastForward { .. });
     let capture = matches!(mutation, Mutation::Push { .. });
     let mut command = base(path, merge);
@@ -769,15 +797,19 @@ pub(crate) fn capture_mutation(
         if exited {
             let status = child.wait().map_err(failed)?;
             let stderr = stderr.after_exit();
-            return Ok(Captured::Completed {
+            return Ok(Stoppable::Ran(Captured::Completed {
                 success: status.success(),
                 stdout: stdout.after_exit(),
                 stderr: text(&stderr),
-            });
+            }));
+        }
+        if stop.load(Ordering::SeqCst) {
+            child.stop();
+            return Ok(Stoppable::Stopped);
         }
         if started.elapsed() >= deadline {
             child.stop();
-            return Ok(Captured::TimedOut);
+            return Ok(Stoppable::Ran(Captured::TimedOut));
         }
         thread::sleep(POLL);
     }

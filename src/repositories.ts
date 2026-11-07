@@ -7,8 +7,11 @@ import {
 } from "./domain/merge";
 import type { MergeAction } from "./domain/merge";
 import { invoke, isTauri } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-dialog";
 import { z } from "zod";
+import {
+  directoryListingSchema,
+  newRepositorySchema,
+} from "./domain/addRepository";
 import {
   addRemoteInputSchema,
   addRemoteReportSchema,
@@ -81,7 +84,11 @@ type RepositoryRequest =
   | { op: "undo"; path: RepositoryRoot; id: EntryId }
   | { op: "redo"; path: RepositoryRoot; id: EntryId }
   | { op: "undoHistory"; path: RepositoryRoot }
-  | { op: "branchMerged"; path: RepositoryRoot; branch: BranchTip };
+  | { op: "branchMerged"; path: RepositoryRoot; branch: BranchTip }
+  | { op: "listDirectories"; path: string }
+  | { op: "createRepository"; path: string }
+  | { op: "cloneRepository"; url: string; path: string }
+  | { op: "cancelClone"; path: string };
 
 const responseSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("mergeReview"), data: mergeReviewSchema }),
@@ -111,6 +118,10 @@ const responseSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("redo"), data: appliedSchema }),
   z.object({ op: z.literal("undoHistory"), data: undoHistorySchema }),
   z.object({ op: z.literal("branchMerged"), data: branchMergedSchema }),
+  z.object({ op: z.literal("listDirectories"), data: directoryListingSchema }),
+  z.object({ op: z.literal("createRepository"), data: newRepositorySchema }),
+  z.object({ op: z.literal("cloneRepository"), data: newRepositorySchema }),
+  z.object({ op: z.literal("cancelClone") }),
 ]);
 export const requestOps = responseSchema.options.map(
   (option) => option.shape.op.value,
@@ -272,14 +283,29 @@ export async function branchMerged(path: RepositoryRoot, branch: BranchTip) {
   return (await run({ op: "branchMerged", path, branch })).data;
 }
 
-export async function chooseDirectory(): Promise<string | null> {
-  if (!native) return null;
-  const result = await open({
-    title: "Add a Git repository",
-    directory: true,
-    multiple: false,
-  });
-  return typeof result === "string" ? result : null;
+export async function listDirectories(path: string) {
+  return (await run({ op: "listDirectories", path })).data;
+}
+
+export async function createRepository(path: string) {
+  return (await run({ op: "createRepository", path })).data;
+}
+
+/** An abort asks the core to stop the clone and remove what it copied. */
+export async function cloneRepository(
+  url: string,
+  path: string,
+  signal: AbortSignal,
+) {
+  const cancel = () => {
+    run({ op: "cancelClone", path }).catch(() => {});
+  };
+  signal.addEventListener("abort", cancel, { once: true });
+  try {
+    return (await run({ op: "cloneRepository", url, path })).data;
+  } finally {
+    signal.removeEventListener("abort", cancel);
+  }
 }
 
 export async function preparePush(path: RepositoryRoot) {

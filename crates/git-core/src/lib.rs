@@ -1,3 +1,4 @@
+mod directories;
 mod exit_signals;
 mod file_history;
 mod git;
@@ -13,6 +14,7 @@ mod untracked;
 mod windows_fs;
 mod write;
 
+pub use directories::{DirectoryEntry, DirectoryListing, expand_home, list_directories};
 pub use exit_signals::{OnQuit, stop_git_on_exit_signals};
 pub use file_history::{blame, file_history};
 pub use git::stop_all_git;
@@ -24,9 +26,10 @@ pub use repository::{
 pub use run::{Request, Response, run};
 pub use status::{worktree_patch, worktree_status};
 pub use sync::{
-    AddRemote, AddRemoteRefresh, AddRemoteReport, Coordinator, Limits, PublishChoice,
-    PublishOptions, PublishRemote, PublishRemoteAvailability, PushAvailability, PushIntent,
-    PushOutcome, PushPurpose, PushRefresh, PushReport, PushUnavailable, TrackingOutcome,
+    AddRemote, AddRemoteRefresh, AddRemoteReport, CloneUrl, Coordinator, Limits, NewRepository,
+    PublishChoice, PublishOptions, PublishRemote, PublishRemoteAvailability, PushAvailability,
+    PushIntent, PushOutcome, PushPurpose, PushRefresh, PushReport, PushUnavailable,
+    TrackingOutcome,
 };
 pub use write::{
     Applied, BranchTip, EntryId, Expect, LinePick, LineSide, MergeAction, MergeAttention,

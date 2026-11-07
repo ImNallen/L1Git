@@ -1,10 +1,12 @@
 use crate::{
-    AddRemote, AddRemoteReport, Advance, Applied, Blame, BranchMerged, BranchTip, CommitDetail,
-    Comparison, ConflictFile, Coordinator, EntryId, Expect, FastForwardReport, FetchMode,
-    FilePatch, FileRevision, Head, LineStats, MergeAction, MergeReport, MergeReview,
-    MergeSelection, MergeState, Operation, PublishChoice, PublishOptions, PushAvailability,
-    PushIntent, PushReport, ReplayOf, ReplayReview, RepositoryError, RepositoryOverview,
-    RepositoryRefs, RepositorySnapshot, Side, UndoHistory, WorktreePatch, WorktreeStatus,
+    AddRemote, AddRemoteReport, Advance, Applied, Blame, BranchMerged, BranchTip, CloneUrl,
+    CommitDetail, Comparison, ConflictFile, Coordinator, EntryId, Expect, FastForwardReport,
+    FetchMode, FilePatch, FileRevision, Head, LineStats, MergeAction, MergeReport, MergeReview,
+    MergeSelection, MergeState, NewRepository, Operation, PublishChoice, PublishOptions,
+    PushAvailability, PushIntent, PushReport, ReplayOf, ReplayReview, RepositoryError,
+    RepositoryOverview, RepositoryRefs, RepositorySnapshot, Side, UndoHistory, WorktreePatch,
+    WorktreeStatus,
+    directories::{DirectoryListing, expand_home, home_dir, list_directories},
     file_history::{blame_within, file_history_within},
     git::LocalRead,
     repository::{
@@ -125,6 +127,19 @@ pub enum Request {
         path: String,
         branch: BranchTip,
     },
+    ListDirectories {
+        path: String,
+    },
+    CreateRepository {
+        path: String,
+    },
+    CloneRepository {
+        url: CloneUrl,
+        path: String,
+    },
+    CancelClone {
+        path: String,
+    },
 }
 
 #[derive(Debug, Serialize)]
@@ -157,6 +172,10 @@ pub enum Response {
     Redo(Applied),
     UndoHistory(UndoHistory),
     BranchMerged(BranchMerged),
+    ListDirectories(DirectoryListing),
+    CreateRepository(NewRepository),
+    CloneRepository(NewRepository),
+    CancelClone,
 }
 
 pub fn run(coordinator: &Coordinator, request: Request) -> Result<Response, RepositoryError> {
@@ -246,5 +265,18 @@ pub fn run(coordinator: &Coordinator, request: Request) -> Result<Response, Repo
             &branch,
             deadline(LocalRead::BranchMerged),
         )?),
+        Request::ListDirectories { path } => {
+            Response::ListDirectories(list_directories(&path, home_dir().as_deref())?)
+        }
+        Request::CreateRepository { path } => Response::CreateRepository(
+            coordinator.create_repository(&expand_home(&path, home_dir().as_deref())?)?,
+        ),
+        Request::CloneRepository { url, path } => Response::CloneRepository(
+            coordinator.clone_repository(&url.0, &expand_home(&path, home_dir().as_deref())?)?,
+        ),
+        Request::CancelClone { path } => {
+            coordinator.cancel_clone(&expand_home(&path, home_dir().as_deref())?);
+            Response::CancelClone
+        }
     })
 }

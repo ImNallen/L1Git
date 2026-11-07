@@ -1,10 +1,14 @@
 mod advance;
+mod clone;
+mod create;
 mod fetch;
 mod locks;
 use locks::Locks;
 mod push;
 mod read;
 mod remote;
+pub use clone::CloneUrl;
+pub use create::NewRepository;
 pub use push::{
     PublishChoice, PublishOptions, PublishRemote, PublishRemoteAvailability, PushAvailability,
     PushIntent, PushOutcome, PushPurpose, PushRefresh, PushReport, PushUnavailable,
@@ -24,7 +28,10 @@ use std::{
     collections::HashMap,
     num::NonZeroUsize,
     path::{Path, PathBuf},
-    sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError},
+    sync::{
+        Arc, Condvar, Mutex, MutexGuard, PoisonError,
+        atomic::{AtomicBool, Ordering},
+    },
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -38,6 +45,8 @@ pub struct Limits {
     /// How long a probe, ref move, or worktree fast-forward may take. A partial
     /// clone downloads blobs during the fast-forward.
     pub local_deadline: Duration,
+    /// How long cloning a new repository may take.
+    pub clone_deadline: Duration,
     /// Remote operations that may run at once across all repositories.
     pub network_slots: NonZeroUsize,
 }
@@ -48,6 +57,7 @@ impl Default for Limits {
             fetch_deadline: Duration::from_secs(300),
             push_deadline: Duration::from_secs(300),
             local_deadline: Duration::from_secs(120),
+            clone_deadline: Duration::from_secs(3600),
             network_slots: NonZeroUsize::new(4).unwrap(),
         }
     }
@@ -70,6 +80,7 @@ pub struct Coordinator {
     repositories: Repositories,
     refreshes: Arc<Refreshes>,
     slots: Semaphore,
+    clones: clone::Clones,
 }
 
 type Repositories = Arc<Mutex<HashMap<PathBuf, Arc<Locks>>>>;
@@ -126,6 +137,7 @@ impl Coordinator {
             repositories: Repositories::default(),
             refreshes: Arc::default(),
             slots: Semaphore::new(limits.network_slots),
+            clones: clone::Clones::default(),
         }
     }
 
@@ -291,6 +303,8 @@ fn lock_ignoring_poison<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+const STOP_POLL: Duration = Duration::from_millis(20);
+
 struct Semaphore {
     free: Mutex<usize>,
     released: Condvar,
@@ -313,6 +327,30 @@ impl Semaphore {
             .unwrap_or_else(PoisonError::into_inner);
         *free -= 1;
         Permit(self)
+    }
+
+    /// Waits for a slot until `stop` turns true. Setting `stop` wakes nothing,
+    /// so the wait polls it.
+    fn acquire_unless(&self, stop: &AtomicBool) -> Option<Permit<'_>> {
+        let mut free = lock_ignoring_poison(&self.free);
+        loop {
+            if stop.load(Ordering::SeqCst) {
+                // This wait may hold the wake-up of a slot that it will not take.
+                if *free > 0 {
+                    self.released.notify_one();
+                }
+                return None;
+            }
+            if *free > 0 {
+                *free -= 1;
+                return Some(Permit(self));
+            }
+            free = self
+                .released
+                .wait_timeout(free, STOP_POLL)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
+        }
     }
 }
 

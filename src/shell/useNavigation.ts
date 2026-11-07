@@ -1,4 +1,5 @@
 import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import type { Compare } from "../domain/comparison";
 import { swapEnds } from "../domain/comparison";
 import type { RefStep } from "../domain/operations";
@@ -53,7 +54,10 @@ export type Navigation = {
   checkedOut: ReadonlyMap<FullRef, string>;
   sidebar: SidebarNavigation;
   adding: boolean;
+  /** Closes, then returns focus to the element focused before it opened, else `focus.fallback()`. */
   closeAdd: () => void;
+  /** Closes after a repository opened, then `focus.fallback()`. */
+  finishAdd: () => void;
   addRepository: (path: string, signal: AbortSignal) => Promise<Problem | null>;
   jumpTo: (root: RepositoryRoot, target: JumpTarget) => void;
   showInGraph: (root: RepositoryRoot, target: JumpTarget) => void;
@@ -108,6 +112,7 @@ export function useNavigation({
   paletteOpen: boolean;
 }): Navigation {
   const [adding, setAdding] = useState(false);
+  const addReturn = useRef<Element | null>(null);
   const [headOf, setHeadOf] = useState<RepositoryRoot | null>(null);
   const [steppedRef, setSteppedRef] = useState<RefStepTarget | null>(null);
   const focusJumpedRow = useRef(false);
@@ -213,6 +218,10 @@ export function useNavigation({
       pending: false,
     }));
     historyRef.current?.focus();
+  }
+  function showAdd() {
+    if (!adding) addReturn.current = focusedElement();
+    setAdding(true);
   }
   async function addRepository(path: string, signal: AbortSignal) {
     const added = await app.addRepository(path, signal);
@@ -325,10 +334,19 @@ export function useNavigation({
           return next;
         });
       },
-      onAdd: () => setAdding(true),
+      onAdd: showAdd,
     },
     adding,
-    closeAdd: () => setAdding(false),
+    closeAdd: () => {
+      flushSync(() => setAdding(false));
+      const back = addReturn.current;
+      if (shownElement(back)) back.focus({ preventScroll: true });
+      if (!shownElement(back) || focusedElement() !== back) fallback();
+    },
+    finishAdd: () => {
+      flushSync(() => setAdding(false));
+      fallback();
+    },
     addRepository,
     jumpTo,
     showInGraph,
@@ -350,7 +368,7 @@ export function useNavigation({
         rule: rule.kind,
       },
       commands: {
-        addRepository: () => setAdding(true),
+        addRepository: showAdd,
         openRepository: (root: RepositoryRoot) => {
           showRepository(root);
           if (root === snapshot?.root) return;

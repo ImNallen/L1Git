@@ -21,15 +21,15 @@ it("Ctrl+P opens the palette, but not in a text field and not while a dialog is 
   expect(dialogs(), "not while typing").toEqual([]);
 
   await app.press("o", { ctrlKey: true, target: document.body });
-  expect(dialogs()).toEqual(["Add a repository"]);
+  expect(dialogs()).toEqual(["Add repository"]);
   const underDialog = await app.press("p", {
     ctrlKey: true,
-    target: get("button", "Close add repository"),
+    target: get("listbox", "Sources"),
   });
   expect(underDialog.defaultPrevented).toBe(true);
-  expect(dialogs(), "not under a dialog").toEqual(["Add a repository"]);
+  expect(dialogs(), "not under a dialog").toEqual(["Add repository"]);
 
-  await app.click(get("button", "Close add repository"));
+  await app.press("Escape", { target: get("combobox", "Search sources") });
   const opened = await app.press("p", { ctrlKey: true, target: document.body });
   expect(opened.defaultPrevented).toBe(true);
   expect(dialogs()).toEqual(["Command palette"]);
@@ -58,7 +58,7 @@ it("Escape closes the open file; under an open dialog it does not", async () => 
 
   await app.press("o", { ctrlKey: true, target: document.body });
   const underDialog = await app.press("Escape", {
-    target: get("button", "Close add repository"),
+    target: get("combobox", "Search sources"),
   });
   expect(underDialog.defaultPrevented, "the app leaves Escape alone").toBe(
     false,
@@ -111,7 +111,7 @@ it("Ctrl+O opens Add repository even while another dialog is open", async () => 
     target: get("button", "Close edit message"),
   });
   expect(event.defaultPrevented).toBe(true);
-  expect(dialogs()).toEqual(["Edit message", "Add a repository"]);
+  expect(dialogs()).toEqual(["Edit message", "Add repository"]);
 });
 
 it("exactly one window keydown listener stays registered across renders", async () => {

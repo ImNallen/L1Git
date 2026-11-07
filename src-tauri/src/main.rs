@@ -38,7 +38,6 @@ fn main() {
         eprintln!("L1 Git cannot stop Git when a signal ends it: {error}");
     }
     tauri::Builder::default()
-        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let undo_dir = app.path().app_data_dir()?.join("undo");

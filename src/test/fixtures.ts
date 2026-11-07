@@ -314,6 +314,54 @@ export function otherOverview(): RepositoryOverview {
   });
 }
 
+/** A repository as `git init` leaves it: an unborn HEAD and nothing else. */
+export function addEmptyRepository(
+  world: {
+    snapshots: Map<RepositoryRoot, RepositorySnapshot>;
+    statuses: Map<RepositoryRoot, WorktreeStatus>;
+    overviews: Map<RepositoryRoot, RepositoryOverview>;
+    pushes: Map<RepositoryRoot, PushAvailability>;
+  },
+  root: RepositoryRoot,
+) {
+  const name = root.split("/").at(-1) ?? root;
+  const head = { kind: "unborn" as const, reference: "refs/heads/main" };
+  world.snapshots.set(
+    root,
+    snapshotSchema.parse({
+      root,
+      name,
+      head,
+      branches: [],
+      tags: [],
+      stashes: [],
+      submodules: [],
+      worktrees: [{ root, name, head, current: true }],
+      remotes: [],
+      commits: [],
+      squashes: [],
+      historyTruncated: false,
+      observedAt: 1_700_000_200,
+    }),
+  );
+  world.statuses.set(
+    root,
+    worktreeStatusSchema.parse({ root, head, entries: [], stagedStamp: STAMP }),
+  );
+  world.overviews.set(
+    root,
+    overviewSchema.parse({
+      root,
+      commonDir: `${root}/.git`,
+      name,
+      branches: [],
+      fetch: null,
+      observedAt: 1_700_000_200,
+    }),
+  );
+  world.pushes.set(root, noUpstream());
+}
+
 export const PIN_COMMON_DIR = "/fixture/pin/.git" as RepositoryRoot;
 export const OTHER_COMMON_DIR = "/fixture/other/.git" as RepositoryRoot;
 

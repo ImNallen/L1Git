@@ -122,7 +122,12 @@ fn validate(root: &Path, remote: &AddRemote, reads: Deadline) -> Result<(), Repo
             "Enter a valid Git remote name.",
         ));
     }
-    let endpoint = &remote.url;
+    validate_endpoint(&remote.url)
+}
+
+/// Refuses what Git would run or read as an option, such as `ext::` helpers
+/// and a leading `-`.
+pub(super) fn validate_endpoint(endpoint: &str) -> Result<(), RepositoryError> {
     if endpoint.is_empty()
         || endpoint.trim() != endpoint
         || endpoint.starts_with('-')

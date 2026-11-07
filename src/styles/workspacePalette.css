@@ -26,6 +26,24 @@
   --workspace-folder-icon: #858585;
   --workspace-file-icon: #909090;
 }
+:root:not([data-palette])[data-theme="dark"] .add-palette {
+  --add-palette-primary: #253c5b;
+  --add-palette-primary-text: #e5efff;
+  --add-palette-field: #161a20;
+  --add-palette-field-border: #2b2f34;
+  --add-palette-selected: #203149;
+  --add-palette-disabled: #20242c;
+  --add-palette-disabled-text: #949dac;
+  --add-palette-key: #242830;
+  --add-palette-repository: #98c9ad;
+  --add-palette-focus: #82adfc;
+}
+:root:not([data-palette])[data-theme="dark"]
+  .repositories-heading
+  .icon-button:focus-visible {
+  outline: 1.5px solid #70a8ff;
+  outline-offset: -1.5px;
+}
 :root:not([data-palette])[data-theme="dark"] .workspace-icon {
   background: var(--icon) center / contain no-repeat;
   mask: none;

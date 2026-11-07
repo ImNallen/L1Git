@@ -107,10 +107,9 @@ it("removing a repository forgets its last branch and its rule", async () => {
   expect(query("grid", "Commits")).toBeNull();
 
   await app.press("o", { ctrlKey: true, target: document.body });
-  await app.type(get("textbox", /repository/i), PIN);
-  await app.click(
-    get("button", "Add repository", get("dialog", "Add a repository")),
-  );
+  await app.click(get("option", /^Local folder/));
+  await app.type(get("combobox", "Path"), PIN);
+  await app.click(get("button", "Add", get("dialog", "Add repository")));
   expect(dialogs()).toEqual([]);
   expect(get("button", "Hide topic"), "the rule is forgotten").toBeTruthy();
   await app.click(historyRow("Feature work,"));

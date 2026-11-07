@@ -60,9 +60,9 @@ To run in a browser instead:
 pnpm dev
 ```
 
-Open <http://127.0.0.1:1422>. The preview uses the same Rust core through a local development bridge. Enter an absolute repository path in the Add dialog.
+Open <http://127.0.0.1:1422>. The preview uses the same Rust core through a local development bridge.
 
-To try the app with sample repositories, run `pnpm fixture` and open the printed `repository` path. Use `pnpm fixture:large` for a larger test repository. These commands create temporary local repositories. `pnpm fixture:merge` creates clean and conflicting upstream merges for testing.
+To try the app with sample repositories, run `pnpm fixture` and add the printed `repository` path with **Local folder**. Use `pnpm fixture:large` for a larger test repository. These commands create temporary local repositories. `pnpm fixture:merge` creates clean and conflicting upstream merges for testing.
 
 ## Check and build
 

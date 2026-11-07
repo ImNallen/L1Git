@@ -12,7 +12,9 @@ import type { MergeState } from "../domain/merge";
 import type { RepositoryOverview } from "../domain/overview";
 import type { PushAvailability } from "../domain/push";
 import type { Comparison } from "../domain/comparison";
+import type { DirectoryEntry } from "../domain/addRepository";
 import {
+  addEmptyRepository,
   applied,
   deleteGoneBranch,
   editableConflict,
@@ -46,7 +48,19 @@ export type World = {
   merges: Map<RepositoryRoot, MergeState>;
   overviews: Map<RepositoryRoot, RepositoryOverview>;
   pushes: Map<RepositoryRoot, PushAvailability>;
+  /** What each typed path lists. An open repository lists itself. */
+  directories: Map<string, DirectoryEntry[]>;
 };
+
+export const FAKE_HOME = "/fixture/home";
+
+const fromHome = (path: string) => path.replace(/^~(?=\/|$)/, FAKE_HOME);
+
+export const folder = (path: string, repository: boolean): DirectoryEntry => ({
+  name: path.split("/").at(-1) ?? path,
+  path,
+  repository,
+});
 
 export function createWorld(): World {
   return {
@@ -68,6 +82,16 @@ export function createWorld(): World {
     pushes: new Map([
       [PIN, readyPush()],
       [OTHER, noUpstream()],
+    ]),
+    directories: new Map([
+      ["~", [folder(`${FAKE_HOME}/Projects`, false)]],
+      [
+        "~/Projects",
+        [
+          folder(`${FAKE_HOME}/Projects/docs-site`, true),
+          folder(`${FAKE_HOME}/Projects/screenshots`, false),
+        ],
+      ],
     ]),
   };
 }
@@ -193,6 +217,23 @@ const handlers: Record<string, Handler> = {
       request.path as RepositoryRoot,
       request.operation as Applied["operation"],
     ),
+  listDirectories: (request, world) => ({
+    entries:
+      world.directories.get(request.path) ??
+      (world.snapshots.has(request.path as RepositoryRoot)
+        ? [folder(request.path, true)]
+        : []),
+  }),
+  createRepository: (request, world) => {
+    const path = fromHome(request.path);
+    addEmptyRepository(world, path as RepositoryRoot);
+    return { path };
+  },
+  cloneRepository: (request, world) => {
+    const path = fromHome(request.path);
+    addEmptyRepository(world, path as RepositoryRoot);
+    return { path };
+  },
   undo: (request, world) => step(request, world, "undo"),
   redo: (request, world) => step(request, world, "redo"),
 };
@@ -236,6 +277,7 @@ export function createBridge(world: World = createWorld()) {
 
   function answer(request: BridgeRequest): unknown {
     const handler = overrides.get(request.op) ?? handlers[request.op];
+    if (request.op === "cancelClone") return { ok: true, op: request.op };
     if (handler === undefined) {
       unexpected.push(line(request));
       throw new Error(`The fake bridge has no answer for ${request.op}.`);
