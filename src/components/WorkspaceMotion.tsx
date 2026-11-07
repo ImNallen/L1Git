@@ -21,14 +21,15 @@ export function WorkspaceMotion({
     history.style.cssText =
       "display:flex;position:absolute;inset:0;pointer-events:none";
     history.inert = true;
-    const animation = animate(
-      history,
-      [
-        { translate: "0px 0px", opacity: 1 },
-        { translate: "0px -64px", opacity: 0 },
-      ],
-      240,
-    );
+    const animation = animate(history, [{ opacity: 1 }, { opacity: 0 }], 240);
+    const rows = history.querySelector<HTMLElement>("tbody");
+    const rowAnimation = rows
+      ? animate(
+          rows,
+          [{ translate: "0px 0px" }, { translate: "0px -32px" }],
+          240,
+        )
+      : undefined;
     let active = true;
     const restore = () => {
       if (!active) return;
@@ -39,6 +40,7 @@ export function WorkspaceMotion({
     animation?.finished.then(restore, restore);
     return () => {
       animation?.cancel();
+      rowAnimation?.cancel();
       restore();
       active = false;
     };

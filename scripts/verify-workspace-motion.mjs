@@ -25,12 +25,16 @@ for (const [selector, control] of [
 ]) {
   if (
     JSON.parse(
-      browser("eval", `!document.querySelector(${JSON.stringify(selector)})`),
+      browser(
+        "eval",
+        `!document.querySelector(${JSON.stringify(selector)})?.getBoundingClientRect().width`,
+      ),
     )
   )
-    browser("click", `[aria-label="${control}"]`);
+    browser("find", "role", "button", "click", "--name", control, "--exact");
 }
 browser("wait", "file-tree-container");
+browser("wait", "400");
 const sections = evaluate(async () => {
   const toggle = document.querySelector(".tree-section");
   const body = toggle.nextElementSibling;
@@ -157,7 +161,8 @@ const opening = evaluate(async () => {
       const diff = document.querySelector(".file-diff");
       samples.push({
         t: performance.now() - start,
-        historyY: history.getBoundingClientRect().y,
+        historyY: history.querySelector("tbody").getBoundingClientRect().y,
+        headingsY: history.querySelector("thead").getBoundingClientRect().y,
         historyOpacity: getComputedStyle(history).opacity,
         diffOpacity: diff && getComputedStyle(diff).opacity,
       });
@@ -172,6 +177,13 @@ save("open-diff", opening);
 assert(
   changing(opening, "historyY"),
   "Outgoing history moves while diff enters",
+);
+assert(
+  !changing(
+    opening.filter((x) => Number(x.historyOpacity) > 0),
+    "headingsY",
+  ),
+  "History column headings stay in place while rows leave",
 );
 browser("wait", "diffs-container");
 if (
