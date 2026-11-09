@@ -150,6 +150,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     rereadChanges: loop.rereadChanges,
     selecting: nav.selecting,
     openInspector: layout.openInspector,
+    pull: overview.store.pull,
   });
   const drafts = useResolutionDrafts({
     snapshot: view.snapshot,

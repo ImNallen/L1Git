@@ -9,6 +9,7 @@ import {
   typingIn,
 } from "./actions";
 import type { ActionContext, Commands } from "./actions";
+import type { BranchRef } from "./domain/overview";
 import type { FullRef, Oid, RepositoryRoot } from "./domain/repository";
 
 const repositoryScreen: ActionContext = {
@@ -43,6 +44,7 @@ const repositoryScreen: ActionContext = {
   mergeAvailable: false,
   selectedMergeAvailable: false,
   replay: null,
+  pull: { kind: "unavailable", reason: "Check out a branch to pull into it." },
   typing: false,
 };
 
@@ -56,6 +58,8 @@ function commands(): Commands {
     fetch: vi.fn(),
     fetchAll: vi.fn(),
     fastForward: vi.fn(),
+    pullFastForwardIfPossible: vi.fn(),
+    pullFastForwardOnly: vi.fn(),
     mergeUpstream: vi.fn(),
     mergeBranch: vi.fn(),
     replay: vi.fn(),
@@ -185,6 +189,31 @@ describe("command palette", () => {
     expect(titles(solo, "fetch")).toEqual(["Fetch all", "feature/fetch-retry"]);
   });
 
+  it("offers both Pull modes for a branch with an upstream", () => {
+    const handlers = commands();
+    const pulling: ActionContext = {
+      ...repositoryScreen,
+      pull: {
+        kind: "ready",
+        branch: "refs/heads/main" as BranchRef,
+        name: "main",
+        upstream: "origin/main",
+      },
+    };
+    const items = paletteItems(pulling, handlers, false, [], null);
+    const only = items.find((item) => item.id === "action:pullFastForwardOnly");
+    expect(only?.detail).toBe(
+      "Fetch origin/main, then fast-forward main. Nothing changes if it has diverged.",
+    );
+    only?.run();
+    expect(handlers.pullFastForwardOnly).toHaveBeenCalledOnce();
+    expect(titles(pulling, "pull")).toEqual([
+      "Pull (Fast-forward if possible)",
+      "Pull (Fast-forward only)",
+    ]);
+    expect(titles(repositoryScreen, "pull")).toEqual([]);
+  });
+
   it("folds case and accents and says nothing for no match", () => {
     expect(titles(repositoryScreen, "  FETCH ")[0]).toBe("Fetch");
     expect(titles(repositoryScreen, "zzzz")).toEqual([]);
@@ -284,7 +313,7 @@ describe("command palette", () => {
       },
       rule: "solo",
     };
-    expect(titles(ready, "o")).toContain("Fast-forward (1)");
+    expect(titles(ready, "o")).toContain("Fast-forward all branches (1)");
     expect(titles(ready, "show")).toEqual([
       "Show unified diff",
       "Show split diff",

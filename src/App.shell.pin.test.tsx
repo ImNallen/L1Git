@@ -14,7 +14,16 @@ import {
   repositoryRow,
 } from "./test/appHarness";
 import type { Harness } from "./test/appHarness";
-import { C4, noUpstream, OTHER, PIN, pinStatus } from "./test/fixtures";
+import {
+  C4,
+  C5,
+  noUpstream,
+  OTHER,
+  PIN,
+  pinOverview,
+  pinStatus,
+} from "./test/fixtures";
+import { overviewSchema } from "./domain/overview";
 import { headSchema } from "./domain/repository";
 import { publishOptionsSchema } from "./domain/push";
 
@@ -110,9 +119,10 @@ it("Fetch fetches the selected branch, else the checked-out one, and Fetch all e
   );
 });
 
-it("More supports keyboard navigation past unavailable actions and returns focus", async () => {
+it("a toolbar menu supports keyboard navigation past unavailable actions and returns focus", async () => {
   const app = await mountApp();
-  await app.click(get("button", "Pull"));
+  await app.click(refRow("refs/heads/topic")!);
+  await app.click(get("button", "Fetch"));
   const first = document.querySelector('[role="menuitem"]');
   expect(first?.getAttribute("aria-disabled")).toBe("true");
   expect(document.activeElement).toBe(first);
@@ -120,10 +130,66 @@ it("More supports keyboard navigation past unavailable actions and returns focus
   await app.click(first);
   expect(dialogs()).toEqual([]);
   await app.press("End");
-  expect(document.activeElement?.textContent).toContain("Fast-forward");
+  expect(document.activeElement?.textContent).toBe("Fetch all");
   await app.press("Escape");
   expect(query("menu", "Repository actions")).toBeNull();
-  expect(focused()).toBe("button Pull");
+  expect(focused()).toBe("button Fetch");
+});
+
+it("Pull fetches the checked-out branch, then reviews a merge or refuses one when diverged", async () => {
+  const app = await mountApp();
+  app.bridge.reset();
+  await app.click(await toolbarItem(app, "Pull", "Pull (Fast-forward only)"));
+  expect(app.bridge.lines((request) => request.op === "overview").at(0)).toBe(
+    "overview /fixture/pin refs/heads/main",
+  );
+  expect(get("alert", /Did not fast-forward main/).textContent).toBe(
+    "Did not fast-forward main. It has diverged from its upstream. Use Pull (Fast-forward if possible) to merge instead.",
+  );
+  expect(dialogs()).toEqual([]);
+
+  await app.click(
+    await toolbarItem(app, "Pull", "Pull (Fast-forward if possible)"),
+  );
+  expect(dialogs()).toEqual(["Merge upstream"]);
+  expect(app.bridge.count("fastForward", PIN)).toBe(0);
+});
+
+it("Pull fast-forwards a branch that is behind its upstream", async () => {
+  const app = await mountApp();
+  const behind = overviewSchema.parse({
+    ...pinOverview(),
+    branches: pinOverview().branches.map((branch) =>
+      branch.name === "main"
+        ? {
+            ...branch,
+            state: {
+              kind: "behind",
+              upstream: "refs/remotes/origin/main",
+              target: C5,
+              behind: 1,
+              blocker: null,
+            },
+          }
+        : branch,
+    ),
+  });
+  app.bridge.respond("overview", () => behind);
+  app.bridge.respond("fastForward", () => ({
+    outcomes: [
+      { kind: "advanced", reference: "refs/heads/main", from: C4, to: C5 },
+    ],
+    overview: pinOverview(),
+  }));
+  await app.click(
+    await toolbarItem(app, "Pull", "Pull (Fast-forward if possible)"),
+  );
+  expect(
+    app.bridge.log
+      .filter((request) => request.op === "fastForward")
+      .map((request) => request.advances),
+  ).toEqual([[{ reference: "refs/heads/main", from: C4, to: C5 }]]);
+  expect(dialogs()).toEqual([]);
 });
 
 it("beforeunload is guarded while resolution drafts exist, and not while drafts are frozen", async () => {

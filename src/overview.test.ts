@@ -538,6 +538,97 @@ describe("overview store", () => {
     ]);
   });
 
+  describe("pull", () => {
+    const dir = root("/code/app/.git");
+    const main = ref("main");
+    const at = (row: object) => ({ ...row, checkedOutAt: app });
+    const diverged = at({
+      ...upToDate("main"),
+      state: {
+        kind: "diverged",
+        upstream: "refs/remotes/origin/main",
+        ahead: 1,
+        behind: 1,
+      },
+    });
+    async function opened() {
+      const h = harness();
+      h.store.track([app]);
+      await h.answerOne(overview(app, dir, [at(upToDate("main"))]));
+      await h.answerOne(
+        overview(app, dir, [at(upToDate("main"))], { changed: false }),
+      );
+      return h;
+    }
+
+    it("fetches the upstream, then fast-forwards before later jobs run", async () => {
+      const h = await opened();
+      const pulled = h.store.pull(app, main, "ffOnly");
+      void h.store.fetch(dir);
+      expect(h.pendingLabels()).toEqual(["refs/heads/main /code/app"]);
+      await h.answerOne(
+        overview(app, dir, [at(behind("main", b))], { changed: true }),
+      );
+      expect(h.pendingLabels()).toEqual(["fastForward /code/app"]);
+      await h.answerOne(
+        fastForwardReportSchema.parse({
+          outcomes: [
+            { kind: "advanced", reference: "refs/heads/main", from: a, to: b },
+          ],
+          overview: overview(app, dir, [at(upToDate("main"))]),
+        }),
+      );
+      await expect(pulled).resolves.toBeNull();
+      expect(h.advances).toEqual([
+        [{ reference: "refs/heads/main", from: a, to: b }],
+      ]);
+      expect(h.pendingLabels()).toEqual(["remote /code/app"]);
+    });
+
+    it("leaves an up-to-date branch alone", async () => {
+      const h = await opened();
+      const pulled = h.store.pull(app, main, "ffIfPossible");
+      await h.answerOne(
+        overview(app, dir, [at(upToDate("main"))], { changed: false }),
+      );
+      await expect(pulled).resolves.toBeNull();
+      expect(h.pendingLabels()).toEqual([]);
+      expect(
+        repositoryWarnings(h.store.getSnapshot().repositories[0]!),
+      ).toEqual([]);
+    });
+
+    it("hands a diverged branch to a merge review unless fast-forward only", async () => {
+      const h = await opened();
+      const merging = h.store.pull(app, main, "ffIfPossible");
+      await h.answerOne(overview(app, dir, [diverged], { changed: true }));
+      await expect(merging).resolves.toEqual({ kind: "merge" });
+
+      const refusing = h.store.pull(app, main, "ffOnly");
+      await h.answerOne(overview(app, dir, [diverged], { changed: false }));
+      await expect(refusing).resolves.toBeNull();
+      expect(h.pendingLabels()).toEqual([]);
+      expect(
+        repositoryWarnings(h.store.getSnapshot().repositories[0]!),
+      ).toEqual([
+        "Did not fast-forward main. It has diverged from its upstream. Use Pull (Fast-forward if possible) to merge instead.",
+      ]);
+    });
+
+    it("moves nothing when the fetch fails", async () => {
+      const h = await opened();
+      const pulled = h.store.pull(app, main, "ffOnly");
+      await h.answerOne(
+        overview(app, dir, [at(behind("main", b))], {
+          changed: false,
+          failed: true,
+        }),
+      );
+      await expect(pulled).resolves.toBeNull();
+      expect(h.pendingLabels()).toEqual([]);
+    });
+  });
+
   it("keeps an unreadable root visible and retries it on Fetch", async () => {
     const h = harness();
     h.store.track([app]);

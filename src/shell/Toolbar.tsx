@@ -9,7 +9,11 @@ import type { WorkspaceView } from "./workspaceView";
 
 const menus: { kind: ToolbarMenuKind; label: string; actions: ActionId[] }[] = [
   { kind: "fetch", label: "Fetch", actions: ["fetch", "fetchAll"] },
-  { kind: "pull", label: "Pull", actions: ["fastForward"] },
+  {
+    kind: "pull",
+    label: "Pull",
+    actions: ["pullFastForwardIfPossible", "pullFastForwardOnly"],
+  },
   { kind: "push", label: "Push", actions: ["push"] },
   {
     kind: "branch",

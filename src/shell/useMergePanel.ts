@@ -7,6 +7,9 @@ import {
   useDraftImpact,
 } from "../draftProtection";
 import type { MergeSelection } from "../domain/merge";
+import { pullTarget } from "../domain/overview";
+import type { PullMode } from "../domain/overview";
+import type { OverviewStore } from "../overview";
 import { branchName } from "../domain/operations";
 import type { SidebarRefActions } from "./useRefWrites";
 import type {
@@ -33,7 +36,7 @@ export type CommitReplay = {
 };
 
 /**
- * Merging, cherry-picking, and reverting into the active worktree. The
+ * Pulling, merging, cherry-picking, and reverting into the active worktree. The
  * palette's `dialogOpen` is these reviews' state; the keydown handler reads
  * open dialogs from the DOM instead.
  */
@@ -49,8 +52,13 @@ export type MergePanel = {
     | "merging"
     | "mergeAvailable"
     | "selectedMergeAvailable"
-    | "replay",
-    "mergeUpstream" | "mergeBranch" | "replay"
+    | "replay"
+    | "pull",
+    | "mergeUpstream"
+    | "mergeBranch"
+    | "replay"
+    | "pullFastForwardIfPossible"
+    | "pullFastForwardOnly"
   >;
 };
 
@@ -64,12 +72,14 @@ export function useMergePanel({
   rereadChanges,
   selecting,
   openInspector,
+  pull,
 }: {
   snapshot: RepositorySnapshot | null;
   active: ActiveWorktree;
   selectedBranch: Branch | null;
   selection: Selection | null;
   opened: OpenedRepository;
+  pull: OverviewStore["pull"];
   writes: Pick<
     WritesView,
     "running" | "merge" | "write" | "abortReplay" | "dismiss"
@@ -108,6 +118,25 @@ export function useMergePanel({
   const canMerge = head?.kind === "attached" && idle;
   const replayBranch = head?.kind === "attached" ? branchName(head) : null;
   const available = eligible && canMerge;
+  const pullable = !opened.repository
+    ? {
+        kind: "unavailable" as const,
+        reason: "Checking the current repository…",
+      }
+    : pullTarget(
+        opened.repository.overview.branches.find(
+          (branch) => root !== null && branch.checkedOutAt === root,
+        ),
+        writes.running !== null
+          ? "Wait for the current local write to finish."
+          : opened.repository.activity.kind !== "idle"
+            ? "Wait for this repository's current operation to finish."
+            : !mergeState
+              ? "Checking this worktree…"
+              : mergeState.kind !== "idle"
+                ? "Finish or abort the operation in progress in this worktree first."
+                : null,
+      );
   const selectedMergeAvailable = canMerge && selectedBranch !== null;
   const pinned = review?.root === root ? review : null;
   const pinnedReplay = replayReview?.root === root ? replayReview : null;
@@ -116,6 +145,13 @@ export function useMergePanel({
   }
   function openReplay(of: ReplayOf) {
     if (root && idle) setReplayReview({ root, of });
+  }
+  function pullWith(mode: PullMode) {
+    if (root === null || pullable.kind !== "ready") return;
+    void pull(root, pullable.branch, mode).then((handOff) => {
+      // `open` checks `canMerge` from this render, which a ready pull implies.
+      if (handOff?.kind === "merge") open({ kind: "upstream" });
+    });
   }
   const inspect = () => {
     if (root) selecting.select({ kind: "worktree", root });
@@ -171,6 +207,7 @@ export function useMergePanel({
         mergeAvailable: available,
         selectedMergeAvailable,
         replay: idle ? { branch: replayBranch } : null,
+        pull: pullable,
       },
       commands: {
         mergeBranch: () => {
@@ -184,6 +221,8 @@ export function useMergePanel({
           if (selection?.kind === "commit")
             openReplay({ kind, commit: selection.oid });
         },
+        pullFastForwardIfPossible: () => pullWith("ffIfPossible"),
+        pullFastForwardOnly: () => pullWith("ffOnly"),
       },
     }),
   };

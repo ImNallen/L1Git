@@ -1632,3 +1632,42 @@ fn a_branch_without_a_remote_upstream_fetches_nothing() {
         world.initial
     );
 }
+
+#[test]
+fn a_branch_fetch_shows_whether_the_checked_out_branch_can_fast_forward() {
+    let world = World::new();
+    let coordinator = coordinator(&world);
+    let theirs = world.colleague_pushes("main", "f", "one\ntwo\n");
+
+    let fetched = coordinator
+        .overview(world.path(), fetch_local("main"))
+        .unwrap();
+    assert_eq!(
+        branch(&fetched, "main").state,
+        behind("main", &theirs, 1, None)
+    );
+    let report = coordinator
+        .fast_forward(world.path(), &[advance("main", &world.initial, &theirs)])
+        .unwrap();
+    assert_eq!(report.outcomes, [advanced("main", &world.initial, &theirs)]);
+    assert_eq!(git(&world.work, &["rev-parse", "HEAD"]), theirs);
+
+    let next = world.colleague_pushes("main", "g", "colleague\n");
+    let ours = commit(&world.work, "h", "mine\n", "local work");
+    let fetched = coordinator
+        .overview(world.path(), fetch_local("main"))
+        .unwrap();
+    assert_eq!(
+        branch(&fetched, "main").state,
+        BranchState::Diverged {
+            upstream: upstream("main"),
+            ahead: 1,
+            behind: 1
+        }
+    );
+    let report = coordinator
+        .fast_forward(world.path(), &[advance("main", &ours, &next)])
+        .unwrap();
+    assert_eq!(report.outcomes, [skipped("main", SkipReason::NotBehind)]);
+    assert_eq!(git(&world.work, &["rev-parse", "HEAD"]), ours);
+}

@@ -1,4 +1,4 @@
-import type { SyncTarget } from "./domain/overview";
+import type { PullTarget, SyncTarget } from "./domain/overview";
 import type { PushControl } from "./domain/push";
 import { normalizeSearch } from "./domain/search";
 import { replayEntry } from "./domain/merge";
@@ -57,6 +57,8 @@ export type ActionContext = {
   selectedMergeAvailable: boolean;
   /** Null unless the active worktree could start one. `branch` is null when it is on no branch. */
   replay: { branch: string | null } | null;
+  /** The active worktree's branch, which Pull updates. */
+  pull: PullTarget;
   typing: boolean;
 };
 
@@ -69,6 +71,8 @@ export type Commands = {
   fetch: () => void;
   fetchAll: () => void;
   fastForward: () => void;
+  pullFastForwardIfPossible: () => void;
+  pullFastForwardOnly: () => void;
   mergeUpstream: () => void;
   mergeBranch: () => void;
   replay: (kind: ReplayKind) => void;
@@ -127,6 +131,8 @@ export type ActionId =
   | "mergeUpstream"
   | "mergeBranch"
   | "fastForward"
+  | "pullFastForwardIfPossible"
+  | "pullFastForwardOnly"
   | "push"
   | "search"
   | "closeFile"
@@ -333,8 +339,31 @@ export const actions: readonly Action[] = [
     run: (commands) => commands.mergeUpstream(),
   },
   {
+    id: "pullFastForwardIfPossible",
+    title: "Pull (Fast-forward if possible)",
+    detail: (context) =>
+      context.pull.kind === "ready"
+        ? `Fetch ${context.pull.upstream}, then fast-forward ${context.pull.name}, or review a merge if it has diverged.`
+        : context.pull.reason,
+    available: (context) =>
+      onRepository(context) && context.pull.kind === "ready",
+    run: (commands) => commands.pullFastForwardIfPossible(),
+  },
+  {
+    id: "pullFastForwardOnly",
+    title: "Pull (Fast-forward only)",
+    detail: (context) =>
+      context.pull.kind === "ready"
+        ? `Fetch ${context.pull.upstream}, then fast-forward ${context.pull.name}. Nothing changes if it has diverged.`
+        : context.pull.reason,
+    available: (context) =>
+      onRepository(context) && context.pull.kind === "ready",
+    run: (commands) => commands.pullFastForwardOnly(),
+  },
+  {
     id: "fastForward",
-    title: (context) => `Fast-forward (${context.repository?.ready ?? 0})`,
+    title: (context) =>
+      `Fast-forward all branches (${context.repository?.ready ?? 0})`,
     available: (context) =>
       onRepository(context) &&
       context.repository !== null &&
