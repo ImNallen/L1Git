@@ -225,6 +225,19 @@ export function verifyAssets(
   return { manifest, assets, feed };
 }
 
+function updateNotes(body) {
+  return body
+    .split(/\r?\n/)
+    .filter(
+      (line) =>
+        !/^(<!-- l1git-source:[a-f0-9]{40} -->|Promoted from \S+\.|\*\*Full Changelog\*\*: \S+)$/.test(
+          line,
+        ),
+    )
+    .join("\n")
+    .trim();
+}
+
 export async function publishRelease(
   plan,
   directory,
@@ -240,22 +253,6 @@ export async function publishRelease(
     repository,
   );
   const manifestBytes = Buffer.from(json(manifest));
-  const feedBytes = Buffer.from(json(feed));
-  const uploads = [
-    ...assets.map((entry) => ({ ...entry, bytes: readFileSync(entry.path) })),
-    {
-      name: "latest.json",
-      bytes: feedBytes,
-      size: feedBytes.length,
-      sha256: digest(feedBytes),
-    },
-    {
-      name: "release-manifest.json",
-      size: manifestBytes.length,
-      sha256: digest(manifestBytes),
-      bytes: manifestBytes,
-    },
-  ];
   const r = plan.release;
   const marker = `<!-- l1git-source:${r.sha} -->`;
   const tag = await remote.commitOf(r.tag);
@@ -295,6 +292,23 @@ export async function publishRelease(
     release.prerelease !== (r.channel === "nightly")
   )
     throw new Error("Existing release identity conflicts with the plan.");
+  const notes = updateNotes(release.body);
+  const feedBytes = Buffer.from(json(notes ? { ...feed, notes } : feed));
+  const uploads = [
+    ...assets.map((entry) => ({ ...entry, bytes: readFileSync(entry.path) })),
+    {
+      name: "latest.json",
+      bytes: feedBytes,
+      size: feedBytes.length,
+      sha256: digest(feedBytes),
+    },
+    {
+      name: "release-manifest.json",
+      size: manifestBytes.length,
+      sha256: digest(manifestBytes),
+      bytes: manifestBytes,
+    },
+  ];
   const names = release.assets.map((entry) => entry.name);
   if (
     new Set(names).size !== names.length ||

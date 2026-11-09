@@ -115,7 +115,7 @@ export function buildManifest({
   files,
   publicKey = PUBLIC_KEY,
 }) {
-  const { version, tag, createdAt, sha } = plan.release;
+  const { version, tag, createdAt } = plan.release;
   const platforms = {};
   for (const target of TARGETS) {
     for (const bundle of target.bundles) {
@@ -139,7 +139,6 @@ export function buildManifest({
   }
   return {
     version,
-    notes: `${tag} from ${sha}. ${plan.reason}`,
     pub_date: createdAt,
     platforms,
   };
