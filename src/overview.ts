@@ -1,12 +1,19 @@
 import { useEffect, useSyncExternalStore } from "react";
 import * as repositories from "./repositories";
-import { divergence, readyAdvances, repositoryRank } from "./domain/overview";
+import {
+  divergence,
+  pullStep,
+  readyAdvances,
+  repositoryRank,
+} from "./domain/overview";
 import type {
   Advance,
   AdvanceOutcome,
   BranchRef,
   Divergence,
   FetchSummary,
+  PullMode,
+  PullStep,
   RepositoryOverview,
 } from "./domain/overview";
 import { problemFrom } from "./domain/repository";
@@ -53,6 +60,9 @@ export type PushState = {
   } | null;
 };
 
+/** The pull steps that need the shell: a merge to review. */
+export type PullHandOff = Extract<PullStep, { kind: "merge" }>;
+
 export type OverviewView = {
   pushByRoot: ReadonlyMap<RepositoryRoot, PushState>;
   roots: ReadonlyMap<RepositoryRoot, RootState>;
@@ -79,6 +89,17 @@ export type OverviewStore = {
   /** Fetches only `branch`'s remote counterpart. A pending fetch of every remote covers it. */
   fetchBranch(commonDir: RepositoryRoot, branch: FullRef): Promise<void>;
   fastForward(commonDir: RepositoryRoot, branch: BranchRef): Promise<void>;
+  /**
+   * Fetches `branch`'s upstream, then fast-forwards it in `root`, a worktree of
+   * `commonDir` that need not be tracked itself. Answers the step left to the
+   * caller when the branch has diverged, else null.
+   */
+  pull(
+    commonDir: RepositoryRoot,
+    root: RepositoryRoot,
+    branch: BranchRef,
+    mode: PullMode,
+  ): Promise<PullHandOff | null>;
   updateAll(commonDir?: RepositoryRoot): Promise<void>;
   setInterval(minutes: FetchInterval): void;
   onRefsChanged(listener: (roots: RepositoryRoot[]) => void): () => void;
@@ -92,6 +113,13 @@ type Request =
   /** A null `branch` fetches every remote. */
   | { kind: "fetch"; branch: FullRef | null }
   | { kind: "fastForward"; advances: Map<BranchRef, Advance> }
+  | {
+      kind: "pull";
+      root: RepositoryRoot;
+      branch: BranchRef;
+      mode: PullMode;
+      handOff: (step: PullHandOff) => void;
+    }
   | {
       kind: "push";
       root: RepositoryRoot;
@@ -370,43 +398,101 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
       return;
     }
     if (request.kind === "fetch") {
-      repo.activity = { kind: "fetching" };
-      emit();
-      try {
-        const overview = await deps.overview(
-          root,
-          request.branch === null ? "remote" : { branch: request.branch },
-        );
-        const remotes = overview.fetch?.remotes ?? [];
-        const kept =
-          request.branch !== null && repo.fetch.kind === "fetched"
-            ? repo.fetch.remotes.filter(
-                ({ remote }) => !remotes.some((each) => each.remote === remote),
-              )
-            : [];
-        repo.overview = overview;
-        repo.fetch = {
-          kind: "fetched",
-          at: deps.now(),
-          remotes: [...kept, ...remotes],
-        };
-        repo.outcomes = new Map();
-        if (overview.fetch?.changed && repos.get(commonDir) === repo)
-          notifyRefsChanged(commonDir);
-      } catch (error) {
-        repo.fetch = {
-          kind: "failed",
-          at: deps.now(),
-          problem: problemFrom(error),
-        };
+      await fetchInto(commonDir, repo, root, request.branch);
+    } else if (request.kind === "fastForward") {
+      await advance(commonDir, repo, root, [...request.advances.values()]);
+    } else if (
+      (await fetchInto(commonDir, repo, root, request.branch)) &&
+      repos.get(commonDir) === repo
+    ) {
+      const step = pullStep(
+        repo.overview.branches.find(
+          ({ reference }) => reference === request.branch,
+        ),
+        request.root,
+        request.mode,
+      );
+      switch (step.kind) {
+        case "nothing":
+          break;
+        case "fastForward":
+          await advance(commonDir, repo, root, [step.advance]);
+          break;
+        case "refuse":
+          repo.outcomes = new Map([
+            ...repo.outcomes,
+            [
+              request.branch,
+              {
+                kind: "skipped",
+                reference: request.branch,
+                reason: { kind: "failed", message: step.reason },
+              },
+            ],
+          ]);
+          break;
+        case "merge":
+          request.handOff(step);
+          break;
+        default: {
+          const exhaustive: never = step;
+          return exhaustive;
+        }
       }
-      if (repos.get(commonDir) === repo) await prepareRoots(commonDir);
-      return;
     }
-    const advances = [...request.advances.values()];
+    if (repos.get(commonDir) === repo) await prepareRoots(commonDir);
+  }
+
+  /** False when the fetch, or a remote it contacted, failed. */
+  async function fetchInto(
+    commonDir: RepositoryRoot,
+    repo: Repository,
+    root: RepositoryRoot,
+    branch: FullRef | BranchRef | null,
+  ): Promise<boolean> {
+    repo.activity = { kind: "fetching" };
+    emit();
+    try {
+      const overview = await deps.overview(
+        root,
+        branch === null ? "remote" : { branch },
+      );
+      const remotes = overview.fetch?.remotes ?? [];
+      const kept =
+        branch !== null && repo.fetch.kind === "fetched"
+          ? repo.fetch.remotes.filter(
+              ({ remote }) => !remotes.some((each) => each.remote === remote),
+            )
+          : [];
+      repo.overview = overview;
+      repo.fetch = {
+        kind: "fetched",
+        at: deps.now(),
+        remotes: [...kept, ...remotes],
+      };
+      repo.outcomes = new Map();
+      if (overview.fetch?.changed && repos.get(commonDir) === repo)
+        notifyRefsChanged(commonDir);
+      return remotes.every(({ outcome }) => outcome.kind !== "failed");
+    } catch (error) {
+      repo.fetch = {
+        kind: "failed",
+        at: deps.now(),
+        problem: problemFrom(error),
+      };
+      return false;
+    }
+  }
+
+  async function advance(
+    commonDir: RepositoryRoot,
+    repo: Repository,
+    root: RepositoryRoot,
+    advances: Advance[],
+  ) {
     repo.activity = {
       kind: "updating",
-      branches: new Set(request.advances.keys()),
+      branches: new Set(advances.map(({ reference }) => reference)),
     };
     emit();
     let outcomes: AdvanceOutcome[];
@@ -431,7 +517,6 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
       repos.get(commonDir) === repo
     )
       notifyRefsChanged(commonDir);
-    if (repos.get(commonDir) === repo) await prepareRoots(commonDir);
   }
 
   function fetch(commonDir?: RepositoryRoot): Promise<void> {
@@ -517,6 +602,16 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
       return enqueue(owner.commonDir, { kind: "push", root, intent, owner });
     },
     refreshLocal: (commonDir) => refreshLocal(commonDir).catch(() => {}),
+    pull(commonDir, root, branch, mode) {
+      let handedOff: PullHandOff | null = null;
+      return enqueue(commonDir, {
+        kind: "pull",
+        root,
+        branch,
+        mode,
+        handOff: (step) => (handedOff = step),
+      }).then(() => handedOff);
+    },
     fastForward(commonDir, branch) {
       const repo = repos.get(commonDir);
       if (!repo) return Promise.resolve();

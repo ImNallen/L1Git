@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { oidSchema, refSchema, rootSchema } from "./repository";
-import type { Branch, FullRef, Oid } from "./repository";
+import type { Branch, FullRef, Oid, RepositoryRoot } from "./repository";
 
 export const branchRefSchema = z
   .string()
@@ -107,7 +107,7 @@ export type RepositoryOverview = z.infer<typeof overviewSchema>;
 export type AdvanceOutcome = z.infer<typeof advanceOutcomeSchema>;
 export type FastForwardReport = z.infer<typeof fastForwardReportSchema>;
 /** `branch` fetches only the remote branch behind a local branch's upstream, or behind a remote-tracking branch. */
-export type FetchMode = "local" | "remote" | { branch: FullRef };
+export type FetchMode = "local" | "remote" | { branch: FullRef | BranchRef };
 export type Advance = { reference: BranchRef; from: Oid; to: Oid };
 export type Divergence = { upstream: FullRef; ahead: number; behind: number };
 
@@ -137,6 +137,101 @@ export function divergence(state: BranchState): Divergence | null {
 
 export function upstreamName(upstream: string): string {
   return upstream.replace(/^refs\/remotes\//, "");
+}
+
+/** How Pull joins a branch that has diverged from its upstream. */
+export type PullMode = "ffIfPossible" | "ffOnly";
+
+/** What Pull does once it has fetched the branch's upstream. */
+export type PullStep =
+  | { kind: "nothing" }
+  | { kind: "fastForward"; advance: Advance }
+  | { kind: "refuse"; reason: string }
+  | { kind: "merge" };
+
+const onDiverged: Record<PullMode, PullStep> = {
+  ffIfPossible: { kind: "merge" },
+  ffOnly: {
+    kind: "refuse",
+    reason:
+      "It has diverged from its upstream. Use Pull (Fast-forward if possible) to merge instead.",
+  },
+};
+
+/** `branch` is the fresh status of the branch Pull started on in `root`. */
+export function pullStep(
+  branch: BranchStatus | undefined,
+  root: RepositoryRoot,
+  mode: PullMode,
+): PullStep {
+  if (branch?.checkedOutAt !== root)
+    return {
+      kind: "refuse",
+      reason: "It is no longer checked out here. Refresh and pull again.",
+    };
+  const { state } = branch;
+  switch (state.kind) {
+    case "untracked":
+      return { kind: "refuse", reason: "It has no upstream." };
+    case "gone":
+      return {
+        kind: "refuse",
+        reason: `Its upstream ${upstreamName(state.upstream)} is gone.`,
+      };
+    case "upToDate":
+    case "ahead":
+      return { kind: "nothing" };
+    case "behind":
+      return {
+        kind: "fastForward",
+        advance: {
+          reference: branch.reference,
+          from: branch.oid,
+          to: state.target,
+        },
+      };
+    case "diverged":
+      return onDiverged[mode];
+    default: {
+      const exhaustive: never = state;
+      return exhaustive;
+    }
+  }
+}
+
+/** The checked-out branch Pull updates, or why it cannot. */
+export type PullTarget =
+  | { kind: "ready"; branch: BranchRef; name: string; upstream: string }
+  | { kind: "unavailable"; reason: string };
+
+/** `branch` is the branch checked out in the worktree Pull acts on. */
+export function pullTarget(
+  branch: BranchStatus | undefined,
+  busy: string | null,
+): PullTarget {
+  if (!branch)
+    return {
+      kind: "unavailable",
+      reason: "Check out a branch to pull into it.",
+    };
+  const { state } = branch;
+  if (state.kind === "untracked" || !state.upstream.startsWith("refs/remotes/"))
+    return {
+      kind: "unavailable",
+      reason: `${branch.name} has no upstream on a remote. Publish it first.`,
+    };
+  if (state.kind === "gone")
+    return {
+      kind: "unavailable",
+      reason: `The upstream of ${branch.name}, ${upstreamName(state.upstream)}, is gone.`,
+    };
+  if (busy) return { kind: "unavailable", reason: busy };
+  return {
+    kind: "ready",
+    branch: branch.reference,
+    name: branch.name,
+    upstream: upstreamName(state.upstream),
+  };
 }
 
 /** The branch a sync command acts on, or why it cannot act. */

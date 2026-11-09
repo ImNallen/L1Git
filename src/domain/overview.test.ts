@@ -5,6 +5,7 @@ import {
   divergence,
   fetchTarget,
   overviewSchema,
+  pullTarget,
   readyAdvances,
   repositoryRank,
 } from "./overview";
@@ -226,5 +227,66 @@ describe("fetch target", () => {
       "unavailable",
     );
     expect(fetchTarget(null, null).kind).toBe("unavailable");
+  });
+});
+
+describe("pull target", () => {
+  const status = (state: Record<string, unknown>) =>
+    overviewSchema.parse({
+      root: "/code/app",
+      commonDir: "/code/app/.git",
+      name: "app",
+      branches: [row("main", "default", state, "/code/app")],
+      fetch: null,
+      observedAt: 0,
+    }).branches[0];
+  const reason = (target: ReturnType<typeof pullTarget>) =>
+    target.kind === "unavailable" ? target.reason : null;
+
+  it("pulls the checked-out branch from its remote upstream", () => {
+    expect(
+      pullTarget(
+        status({ kind: "upToDate", upstream: "refs/remotes/origin/main" }),
+        null,
+      ),
+    ).toEqual({
+      kind: "ready",
+      branch: "refs/heads/main",
+      name: "main",
+      upstream: "origin/main",
+    });
+  });
+
+  it("explains why it cannot pull", () => {
+    expect(reason(pullTarget(undefined, null))).toBe(
+      "Check out a branch to pull into it.",
+    );
+    expect(reason(pullTarget(status({ kind: "untracked" }), null))).toBe(
+      "main has no upstream on a remote. Publish it first.",
+    );
+    expect(
+      reason(
+        pullTarget(
+          status({ kind: "upToDate", upstream: "refs/heads/trunk" }),
+          null,
+        ),
+      ),
+    ).toBe("main has no upstream on a remote. Publish it first.");
+    expect(
+      reason(
+        pullTarget(
+          status({ kind: "gone", upstream: "refs/remotes/origin/main" }),
+          null,
+        ),
+      ),
+    ).toBe("The upstream of main, origin/main, is gone.");
+    expect(
+      reason(
+        pullTarget(
+          status({ kind: "upToDate", upstream: "refs/remotes/origin/main" }),
+          "Wait.",
+        ),
+      ),
+    ).toBe("Wait.");
   });
 });
