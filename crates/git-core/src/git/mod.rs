@@ -539,8 +539,12 @@ pub(crate) enum Mutation<'a> {
         source: &'a Oid,
         destination: &'a BranchRef,
     },
+    /// Every branch of `remote` with pruning, or only `branch`, the full name of
+    /// one branch there. Git then moves that branch's remote-tracking ref as the
+    /// remote's fetch refspecs map it.
     Fetch {
         remote: &'a str,
+        branch: Option<&'a str>,
     },
     ProbeFastForward {
         branch: &'a BranchRef,
@@ -606,16 +610,22 @@ impl Mutation<'_> {
                     |oid| oid.as_str().to_owned(),
                 ),
             ]),
-            Self::Fetch { remote } => owned(&[
-                "fetch",
-                "--prune",
-                "--no-prune-tags",
-                "--no-write-fetch-head",
-                "--no-auto-maintenance",
-                "--recurse-submodules=no",
-                "--",
-                remote,
-            ]),
+            Self::Fetch { remote, branch } => {
+                let mut args = vec!["fetch"];
+                if branch.is_none() {
+                    args.push("--prune");
+                }
+                args.extend([
+                    "--no-prune-tags",
+                    "--no-write-fetch-head",
+                    "--no-auto-maintenance",
+                    "--recurse-submodules=no",
+                    "--",
+                    remote,
+                ]);
+                args.extend(branch);
+                owned(&args)
+            }
             // The probe reads only this repository, so a ban on the file
             // transport does not apply to it.
             Self::ProbeFastForward { branch, to } => owned(&[

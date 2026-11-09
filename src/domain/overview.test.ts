@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { branchSchema } from "./repository";
 import {
   branchStateSchema,
   divergence,
+  fetchTarget,
   overviewSchema,
   readyAdvances,
   repositoryRank,
@@ -180,5 +182,49 @@ describe("divergence", () => {
   it("has nothing to compare without a live upstream", () => {
     expect(of({ kind: "untracked" })).toBeNull();
     expect(of({ kind: "gone", upstream })).toBeNull();
+  });
+});
+
+describe("fetch target", () => {
+  const local = (name: string, upstream: string | null) =>
+    branchSchema.parse({
+      kind: "local",
+      reference: `refs/heads/${name}`,
+      name,
+      oid: a,
+      upstream,
+    });
+  const remote = branchSchema.parse({
+    kind: "remote",
+    reference: "refs/remotes/origin/feat",
+    name: "origin/feat",
+    oid: a,
+    remote: "origin",
+  });
+  const main = local("main", "refs/remotes/origin/main");
+
+  it("fetches the selected branch before the checked-out one", () => {
+    expect(fetchTarget(remote, main)).toEqual({
+      kind: "ready",
+      branch: "refs/remotes/origin/feat",
+      detail: "Fetch origin/feat.",
+    });
+    expect(fetchTarget(null, main)).toEqual({
+      kind: "ready",
+      branch: "refs/heads/main",
+      detail: "Fetch origin/main, the upstream of main.",
+    });
+  });
+
+  it("explains why a branch with no remote upstream cannot fetch", () => {
+    expect(fetchTarget(local("solo", null), main)).toEqual({
+      kind: "unavailable",
+      reason:
+        "solo has no upstream on a remote, so there is nothing to fetch for it. Use Fetch all.",
+    });
+    expect(fetchTarget(local("stacked", "refs/heads/main"), null).kind).toBe(
+      "unavailable",
+    );
+    expect(fetchTarget(null, null).kind).toBe("unavailable");
   });
 });

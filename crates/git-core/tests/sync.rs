@@ -1,7 +1,7 @@
 use l1_git_core::{
     Advance, AdvanceOutcome, Blocker, BranchRef, BranchRole, BranchState, BranchStatus,
-    Coordinator, ErrorKind, Expect, FetchFailure, FetchMode, FetchOutcome, Limits, Oid, Operation,
-    RemoteFetch, RepositoryOverview, SkipReason, worktree_status,
+    Coordinator, ErrorKind, Expect, FetchBranch, FetchFailure, FetchMode, FetchOutcome, Limits,
+    Oid, Operation, RemoteFetch, RemoteRef, RepositoryOverview, SkipReason, worktree_status,
 };
 use std::{
     fs,
@@ -1473,5 +1473,162 @@ fn a_fast_forward_ref_move_and_a_stage_take_turns_on_the_write_lock() {
     assert_eq!(
         git(&world.work, &["status", "--porcelain"]),
         "A  staged.txt"
+    );
+}
+
+fn fetch_local(name: &str) -> FetchMode {
+    FetchMode::Branch(FetchBranch::Local(branch_ref(name)))
+}
+
+fn fetch_remote(reference: &str) -> FetchMode {
+    FetchMode::Branch(FetchBranch::Remote(
+        RemoteRef::try_from(reference.to_owned()).unwrap(),
+    ))
+}
+
+#[test]
+fn a_branch_fetch_moves_only_that_branch_tracking_ref() {
+    let world = World::new();
+    let coordinator = coordinator(&world);
+    git(&world.work, &["branch", "feat"]);
+    world.publish("feat");
+    let main = world.colleague_pushes("main", "f", "one\ntwo\n");
+    let feat = world.colleague_pushes("feat", "g", "colleague\n");
+
+    let fetched = coordinator
+        .overview(world.path(), fetch_local("main"))
+        .unwrap();
+    let summary = fetched.fetch.clone().unwrap();
+    assert!(summary.changed);
+    assert!(!summary.coalesced);
+    assert_eq!(
+        summary.remotes,
+        [RemoteFetch {
+            remote: "origin".into(),
+            outcome: FetchOutcome::Fetched
+        }]
+    );
+    assert_eq!(git(&world.work, &["rev-parse", "origin/main"]), main);
+    assert_eq!(
+        git(&world.work, &["rev-parse", "origin/feat"]),
+        world.initial
+    );
+    assert_eq!(
+        branch(&fetched, "main").state,
+        behind("main", &main, 1, None)
+    );
+    assert_eq!(branch(&fetched, "feat").state, up_to_date("feat"));
+    assert_eq!(git(&world.work, &["rev-parse", "main"]), world.initial);
+
+    coordinator
+        .overview(world.path(), fetch_remote("refs/remotes/origin/feat"))
+        .unwrap();
+    assert_eq!(git(&world.work, &["rev-parse", "origin/feat"]), feat);
+}
+
+#[test]
+fn a_branch_fetch_keeps_tracking_refs_whose_branches_are_gone() {
+    let world = World::new();
+    let coordinator = coordinator(&world);
+    git(&world.work, &["branch", "feat"]);
+    world.publish("feat");
+    git(
+        &world.colleague,
+        &["push", "--quiet", "origin", "--delete", "feat"],
+    );
+
+    coordinator
+        .overview(world.path(), fetch_local("main"))
+        .unwrap();
+    assert_eq!(
+        git(&world.work, &["rev-parse", "origin/feat"]),
+        world.initial
+    );
+}
+
+#[test]
+fn a_remote_tracking_branch_fetches_from_the_remote_named_in_its_path() {
+    let world = World::new();
+    let coordinator = coordinator(&world);
+    let remote = world.remote.to_str().unwrap();
+    git(&world.work, &["remote", "add", "team/mirror", remote]);
+    git(&world.work, &["fetch", "--quiet", "team/mirror"]);
+    let main = world.colleague_pushes("main", "f", "one\ntwo\n");
+
+    let fetched = coordinator
+        .overview(world.path(), fetch_remote("refs/remotes/team/mirror/main"))
+        .unwrap();
+    assert_eq!(
+        fetched.fetch.unwrap().remotes,
+        [RemoteFetch {
+            remote: "team/mirror".into(),
+            outcome: FetchOutcome::Fetched
+        }]
+    );
+    assert_eq!(git(&world.work, &["rev-parse", "team/mirror/main"]), main);
+    assert_eq!(
+        git(&world.work, &["rev-parse", "origin/main"]),
+        world.initial
+    );
+}
+
+#[test]
+fn a_remote_tracking_branch_fetches_the_source_its_refspec_maps() {
+    let world = World::new();
+    let coordinator = coordinator(&world);
+    git(
+        &world.work,
+        &[
+            "config",
+            "remote.origin.fetch",
+            "+refs/heads/*:refs/remotes/origin/review/*",
+        ],
+    );
+    git(&world.work, &["fetch", "--quiet", "origin"]);
+    let main = world.colleague_pushes("main", "f", "one\ntwo\n");
+
+    let fetched = coordinator
+        .overview(
+            world.path(),
+            fetch_remote("refs/remotes/origin/review/main"),
+        )
+        .unwrap();
+    assert_eq!(
+        fetched.fetch.unwrap().remotes,
+        [RemoteFetch {
+            remote: "origin".into(),
+            outcome: FetchOutcome::Fetched
+        }]
+    );
+    assert_eq!(git(&world.work, &["rev-parse", "origin/review/main"]), main);
+
+    let error = coordinator
+        .overview(world.path(), fetch_remote("refs/remotes/elsewhere/main"))
+        .unwrap_err();
+    assert_eq!(error.kind, ErrorKind::InvalidRef);
+}
+
+#[test]
+fn a_branch_without_a_remote_upstream_fetches_nothing() {
+    let world = World::new();
+    let coordinator = coordinator(&world);
+    git(&world.work, &["branch", "solo"]);
+    git(&world.work, &["branch", "local", "--track", "main"]);
+    world.colleague_pushes("main", "f", "one\ntwo\n");
+
+    for name in ["solo", "local"] {
+        let error = coordinator
+            .overview(world.path(), fetch_local(name))
+            .unwrap_err();
+        assert_eq!(error.kind, ErrorKind::InvalidRef, "{name}");
+        assert!(
+            error
+                .message
+                .starts_with(&format!("{name} has no upstream"))
+        );
+    }
+    assert_eq!(
+        git(&world.work, &["rev-parse", "origin/main"]),
+        world.initial
     );
 }

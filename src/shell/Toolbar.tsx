@@ -8,7 +8,7 @@ import type { Layout, ToolbarMenuKind } from "./useLayout";
 import type { WorkspaceView } from "./workspaceView";
 
 const menus: { kind: ToolbarMenuKind; label: string; actions: ActionId[] }[] = [
-  { kind: "fetch", label: "Fetch", actions: ["fetch"] },
+  { kind: "fetch", label: "Fetch", actions: ["fetch", "fetchAll"] },
   { kind: "pull", label: "Pull", actions: ["fastForward"] },
   { kind: "push", label: "Push", actions: ["push"] },
   {
@@ -117,7 +117,10 @@ export function Toolbar({
                   <button
                     key={action.id}
                     role="menuitem"
-                    title={titleOf(action, actions.context)}
+                    title={
+                      action.detail?.(actions.context) ??
+                      titleOf(action, actions.context)
+                    }
                     aria-disabled={!action.available(actions.context)}
                     onClick={() => {
                       if (!action.available(actions.context)) return;
