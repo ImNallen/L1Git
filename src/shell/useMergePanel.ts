@@ -59,6 +59,7 @@ export type MergePanel = {
     | "replay"
     | "pullFastForwardIfPossible"
     | "pullFastForwardOnly"
+    | "pullRebase"
   >;
 };
 
@@ -148,10 +149,25 @@ export function useMergePanel({
   }
   function pullWith(mode: PullMode) {
     const commonDir = opened.repository?.commonDir;
-    if (root === null || !commonDir || pullable.kind !== "ready") return;
+    if (
+      root === null ||
+      !commonDir ||
+      head?.kind !== "attached" ||
+      pullable.kind !== "ready"
+    )
+      return;
     void pull(commonDir, root, pullable.branch, mode).then((handOff) => {
       // `open` checks `canMerge` from this render, which a ready pull implies.
       if (handOff?.kind === "merge") open({ kind: "upstream" });
+      if (handOff?.kind === "rebase")
+        void writes.write(root, {
+          operation: {
+            kind: "rebase",
+            branch: head.reference,
+            onto: handOff.onto,
+          },
+          expect: { head },
+        });
     });
   }
   const inspect = () => {
@@ -224,6 +240,7 @@ export function useMergePanel({
         },
         pullFastForwardIfPossible: () => pullWith("ffIfPossible"),
         pullFastForwardOnly: () => pullWith("ffOnly"),
+        pullRebase: () => pullWith("rebase"),
       },
     }),
   };

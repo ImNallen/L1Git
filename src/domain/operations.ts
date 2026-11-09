@@ -1,5 +1,6 @@
 import { subjectOf } from "./commitMessage";
 import { replayNames } from "./merge";
+import { upstreamName } from "./overview";
 import { shownText, splittable } from "./lineSelection";
 import type { ListSide } from "./worktree";
 import type {
@@ -145,7 +146,8 @@ export const movesRefs = (operation: Operation) =>
   isTagOperation(operation) ||
   isStashOperation(operation) ||
   operation.kind === "checkout" ||
-  operation.kind === "replay";
+  operation.kind === "replay" ||
+  operation.kind === "rebase";
 
 export type BranchAsk =
   | { kind: "create"; at: Start; from: string }
@@ -485,6 +487,8 @@ export function describe(operation: Operation): string {
       return `${replayNames[operation.review.kind].title} ${quoted(operation.review.subject)}`;
     case "finishReplay":
       return `${replayNames[operation.of.kind].title} ${quoted(operation.message)}`;
+    case "rebase":
+      return `Rebase ${operation.branch.replace(/^refs\/heads\//, "")} onto ${upstreamName(operation.onto)}`;
   }
   if ("message" in operation)
     return `${commitVerbs[operation.kind]} ${quoted(operation.message)}`;

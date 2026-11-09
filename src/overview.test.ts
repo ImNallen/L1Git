@@ -598,11 +598,18 @@ describe("overview store", () => {
       ).toEqual([]);
     });
 
-    it("hands a diverged branch to a merge review unless fast-forward only", async () => {
+    it("hands a diverged branch to a merge review or a rebase unless fast-forward only", async () => {
       const h = await opened();
       const merging = h.store.pull(dir, app, main, "ffIfPossible");
       await h.answerOne(overview(app, dir, [diverged], { changed: true }));
       await expect(merging).resolves.toEqual({ kind: "merge" });
+
+      const rebasing = h.store.pull(dir, app, main, "rebase");
+      await h.answerOne(overview(app, dir, [diverged], { changed: false }));
+      await expect(rebasing).resolves.toEqual({
+        kind: "rebase",
+        onto: "refs/remotes/origin/main",
+      });
 
       const refusing = h.store.pull(dir, app, main, "ffOnly");
       await h.answerOne(overview(app, dir, [diverged], { changed: false }));

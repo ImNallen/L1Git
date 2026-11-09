@@ -2,8 +2,8 @@ use super::{Capped, Deadline, Work, base, execute, text, too_old, without_prompt
 use crate::{
     ErrorKind, RepositoryError, StaleReason, stderr,
     write::{
-        CommitTxn, HOOK_OFF, MergeIndexTxn, MergeTxn, Outside, Published, RefTxn, ReplayKind,
-        ReplayOf, ReplayTxn, ScratchIndex, Txn,
+        CommitTxn, HOOK_OFF, MergeIndexTxn, MergeTxn, Outside, Published, RebaseTxn, RefTxn,
+        ReplayKind, ReplayOf, ReplayTxn, ScratchIndex, Txn,
     },
 };
 use std::{
@@ -49,6 +49,9 @@ pub(crate) enum LocalWrite {
     RedoStash,
     UndoReplay,
     RedoReplay,
+    Rebase,
+    UndoRebase,
+    RedoRebase,
     RefreshIndex,
 }
 
@@ -89,7 +92,10 @@ impl LocalWrite {
             | Self::UndoStash
             | Self::RedoStash
             | Self::UndoReplay
-            | Self::RedoReplay => 600,
+            | Self::RedoReplay
+            | Self::Rebase
+            | Self::UndoRebase
+            | Self::RedoRebase => 600,
         })
     }
 
@@ -129,6 +135,9 @@ impl LocalWrite {
             Self::RedoStash => "Redoing the stash change",
             Self::UndoReplay => "Undoing the cherry-pick or revert",
             Self::RedoReplay => "Redoing the cherry-pick or revert",
+            Self::Rebase => "Rebasing the branch",
+            Self::UndoRebase => "Undoing the rebase",
+            Self::RedoRebase => "Redoing the rebase",
             Self::RefreshIndex => "Refreshing the index",
         }
     }
@@ -161,8 +170,17 @@ impl LocalWrite {
             Self::StashApply => "l1git stash apply",
             Self::StashPop => "l1git stash pop",
             Self::StashDrop => "l1git stash drop",
-            Self::Undo | Self::UndoCheckout | Self::UndoStash | Self::UndoReplay => "l1git undo",
-            Self::Redo | Self::RedoCheckout | Self::RedoStash | Self::RedoReplay => "l1git redo",
+            Self::Rebase => "l1git rebase",
+            Self::Undo
+            | Self::UndoCheckout
+            | Self::UndoStash
+            | Self::UndoReplay
+            | Self::UndoRebase => "l1git undo",
+            Self::Redo
+            | Self::RedoCheckout
+            | Self::RedoStash
+            | Self::RedoReplay
+            | Self::RedoRebase => "l1git redo",
             Self::RefreshIndex => "l1git refresh",
         }
     }
@@ -193,7 +211,10 @@ impl LocalWrite {
             | Self::UndoCheckout
             | Self::RedoCheckout
             | Self::UndoReplay
-            | Self::RedoReplay => "L1 Git rereads HEAD to see whether Git moved it.",
+            | Self::RedoReplay
+            | Self::Rebase
+            | Self::UndoRebase
+            | Self::RedoRebase => "L1 Git rereads HEAD to see whether Git moved it.",
             Self::StashPush
             | Self::StashApply
             | Self::StashPop
@@ -403,6 +424,41 @@ impl<'a> Write<'a> {
         Self {
             dir: txn.root(),
             args: vec![NO_REPLACE, kind.command(), "--abort"],
+            env: Vec::new(),
+            input: None,
+            cap: None,
+            as_user: true,
+            lazy_fetch: true,
+        }
+    }
+
+    /// The merge backend, with no autostash, autosquash, or fork point, and no
+    /// other branch moved, so the only ref that moves is the checked-out branch.
+    pub(crate) fn rebase(txn: &'a RebaseTxn<'_>, onto: &'a crate::Oid) -> Self {
+        Self {
+            dir: txn.root(),
+            args: vec![
+                NO_REPLACE,
+                "rebase",
+                "--merge",
+                "--no-autostash",
+                "--no-autosquash",
+                "--no-update-refs",
+                "--no-fork-point",
+                onto.as_str(),
+            ],
+            env: Vec::new(),
+            input: None,
+            cap: None,
+            as_user: true,
+            lazy_fetch: true,
+        }
+    }
+
+    pub(crate) fn rebase_abort(txn: &'a RebaseTxn<'_>) -> Self {
+        Self {
+            dir: txn.root(),
+            args: vec![NO_REPLACE, "rebase", "--abort"],
             env: Vec::new(),
             input: None,
             cap: None,

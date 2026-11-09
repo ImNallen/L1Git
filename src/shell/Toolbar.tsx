@@ -12,7 +12,7 @@ const menus: { kind: ToolbarMenuKind; label: string; actions: ActionId[] }[] = [
   {
     kind: "pull",
     label: "Pull",
-    actions: ["pullFastForwardIfPossible", "pullFastForwardOnly"],
+    actions: ["pullFastForwardIfPossible", "pullFastForwardOnly", "pullRebase"],
   },
   { kind: "push", label: "Push", actions: ["push"] },
   {
