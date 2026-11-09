@@ -265,6 +265,24 @@ test("partial draft resumes missing uploads using original artifacts", async (t)
   assert.equal(state.writes.filter((write) => write === "create").length, 1);
 });
 
+test("the updater feed shows the generated release notes", async (t) => {
+  const { staged } = fixture(t);
+  const { state, remote } = fakeRemote();
+  const changes =
+    "## What's Changed\n* Publish nightlies hourly by @ImNallen in https://github.com/ImNallen/L1Git/pull/90";
+  remote.notes = async () =>
+    `${changes}\n\n\n**Full Changelog**: https://github.com/ImNallen/L1Git/compare/v1...v2`;
+  await publishRelease(plan, staged, remote);
+  const feed = (release) =>
+    JSON.parse(
+      state.bytes.get(
+        release.assets.find((asset) => asset.name === "latest.json").id,
+      ),
+    );
+  assert.equal(feed(state.release).notes, changes);
+  assert.equal(feed(state.feed).notes, changes);
+});
+
 test("a lost publish response recovers as matching published success without writes", async (t) => {
   const { staged } = fixture(t);
   const { state, remote } = fakeRemote();
