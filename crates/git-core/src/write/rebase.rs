@@ -109,6 +109,18 @@ pub(super) fn apply(
             ),
         ));
     }
+    let collisions = merge::colliding_files(
+        repo,
+        WHO,
+        &written(repo, &before, &target, deadline)?,
+        deadline,
+    )?;
+    if !collisions.is_empty() {
+        return Err(merge::refused(format!(
+            "Preserve these untracked or ignored files first, because the rebase would write to their paths: {}.",
+            collisions.join(", ")
+        )));
+    }
     let (applied, _, recorded) = store.record_with(repo, log, operation, |_| {
         Ok(RebaseChange::Pending {
             before: head.clone(),
@@ -160,6 +172,44 @@ fn commit_of(repo: &Repo, name: &str, deadline: WriteDeadline) -> Result<Oid, Re
         deadline.reads(),
     )?;
     Oid::try_from(git::line(&output))
+}
+
+/// Every path the rebase may write: Git first checks out `onto`, then replays
+/// each local commit, so a path a commit adds and a later one deletes counts.
+fn written(
+    repo: &Repo,
+    before: &Oid,
+    onto: &Oid,
+    deadline: WriteDeadline,
+) -> Result<Vec<String>, RepositoryError> {
+    let mut paths = merge::names(
+        repo,
+        WHO,
+        &[
+            "diff",
+            "--name-only",
+            "--no-renames",
+            "-z",
+            before.as_str(),
+            onto.as_str(),
+        ],
+        deadline,
+    )?;
+    paths.extend(merge::names(
+        repo,
+        WHO,
+        &[
+            "log",
+            "--no-show-signature",
+            "--format=",
+            "--name-only",
+            "--no-renames",
+            "-z",
+            &format!("{}..{}", onto.as_str(), before.as_str()),
+        ],
+        deadline,
+    )?);
+    Ok(paths)
 }
 
 fn ancestor(

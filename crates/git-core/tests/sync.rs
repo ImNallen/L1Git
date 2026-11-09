@@ -1676,6 +1676,8 @@ fn rebase_main(
     coordinator: &Coordinator,
     world: &World,
 ) -> Result<l1_git_core::Applied, l1_git_core::RepositoryError> {
+    git(&world.work, &["config", "user.name", "Ada"]);
+    git(&world.work, &["config", "user.email", "ada@example.test"]);
     let status = worktree_status(world.path()).unwrap();
     coordinator.write(
         world.path(),
@@ -1768,6 +1770,33 @@ fn a_pull_rebase_that_conflicts_aborts_and_changes_nothing() {
     );
     assert_eq!(git(&world.work, &["status", "--porcelain"]), "");
     assert_eq!(fs::read_to_string(world.work.join("f")).unwrap(), "ours\n");
+    assert_eq!(coordinator.undo_history(world.path()).unwrap().undo, None);
+}
+
+#[test]
+fn a_pull_rebase_refuses_to_overwrite_an_ignored_file() {
+    let world = World::new();
+    let coordinator = coordinator(&world);
+    world.colleague_pushes("main", "collision", "theirs\n");
+    let ours = commit(&world.work, "h", "mine\n", "local work");
+    coordinator
+        .overview(world.path(), fetch_local("main"))
+        .unwrap();
+    fs::write(world.work.join(".git/info/exclude"), "collision\n").unwrap();
+    fs::write(world.work.join("collision"), "local data\n").unwrap();
+
+    let error = rebase_main(&coordinator, &world).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::Conflict);
+    assert_eq!(
+        error.message,
+        "Preserve these untracked or ignored files first, because the rebase would write to their paths: collision."
+    );
+    assert!(!rebasing(&world));
+    assert_eq!(git(&world.work, &["rev-parse", "HEAD"]), ours);
+    assert_eq!(
+        fs::read_to_string(world.work.join("collision")).unwrap(),
+        "local data\n"
+    );
     assert_eq!(coordinator.undo_history(world.path()).unwrap().undo, None);
 }
 
