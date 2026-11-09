@@ -140,22 +140,24 @@ export function upstreamName(upstream: string): string {
 }
 
 /** How Pull joins a branch that has diverged from its upstream. */
-export type PullMode = "ffIfPossible" | "ffOnly";
+export type PullMode = "ffIfPossible" | "ffOnly" | "rebase";
 
 /** What Pull does once it has fetched the branch's upstream. */
 export type PullStep =
   | { kind: "nothing" }
   | { kind: "fastForward"; advance: Advance }
   | { kind: "refuse"; reason: string }
-  | { kind: "merge" };
+  | { kind: "merge" }
+  | { kind: "rebase"; onto: FullRef };
 
-const onDiverged: Record<PullMode, PullStep> = {
-  ffIfPossible: { kind: "merge" },
-  ffOnly: {
+const onDiverged: Record<PullMode, (upstream: FullRef) => PullStep> = {
+  ffIfPossible: () => ({ kind: "merge" }),
+  ffOnly: () => ({
     kind: "refuse",
     reason:
       "It has diverged from its upstream. Use Pull (Fast-forward if possible) to merge instead.",
-  },
+  }),
+  rebase: (upstream) => ({ kind: "rebase", onto: upstream }),
 };
 
 /** `branch` is the fresh status of the branch Pull started on in `root`. */
@@ -191,7 +193,7 @@ export function pullStep(
         },
       };
     case "diverged":
-      return onDiverged[mode];
+      return onDiverged[mode](state.upstream);
     default: {
       const exhaustive: never = state;
       return exhaustive;

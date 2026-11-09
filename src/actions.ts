@@ -73,6 +73,7 @@ export type Commands = {
   fastForward: () => void;
   pullFastForwardIfPossible: () => void;
   pullFastForwardOnly: () => void;
+  pullRebase: () => void;
   mergeUpstream: () => void;
   mergeBranch: () => void;
   replay: (kind: ReplayKind) => void;
@@ -133,6 +134,7 @@ export type ActionId =
   | "fastForward"
   | "pullFastForwardIfPossible"
   | "pullFastForwardOnly"
+  | "pullRebase"
   | "push"
   | "search"
   | "closeFile"
@@ -359,6 +361,17 @@ export const actions: readonly Action[] = [
     available: (context) =>
       onRepository(context) && context.pull.kind === "ready",
     run: (commands) => commands.pullFastForwardOnly(),
+  },
+  {
+    id: "pullRebase",
+    title: "Pull (Rebase)",
+    detail: (context) =>
+      context.pull.kind === "ready"
+        ? `Fetch ${context.pull.upstream}, then fast-forward ${context.pull.name}, or rebase it onto ${context.pull.upstream} if it has diverged.`
+        : context.pull.reason,
+    available: (context) =>
+      onRepository(context) && context.pull.kind === "ready",
+    run: (commands) => commands.pullRebase(),
   },
   {
     id: "fastForward",

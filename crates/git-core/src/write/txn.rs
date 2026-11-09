@@ -537,6 +537,38 @@ impl<'r> ReplayTxn<'r> {
     }
 }
 
+/// Runs `git rebase` as the user on the real index, as [`ReplayTxn`] runs a pick.
+pub(crate) struct RebaseTxn<'r>(Outside<'r>);
+
+impl<'r> RebaseTxn<'r> {
+    pub(super) fn begin(repo: &'r Repo, deadline: WriteDeadline) -> Result<Self, RepositoryError> {
+        Outside::begin(repo, deadline).map(Self)
+    }
+
+    pub(crate) fn root(&self) -> &Path {
+        self.0.root()
+    }
+
+    pub(super) const fn runner(&self) -> &Outside<'r> {
+        &self.0
+    }
+
+    pub(super) fn rebase<'a>(&'a self, onto: &'a Oid) -> Write<'a> {
+        Write::rebase(self, onto)
+    }
+
+    pub(super) fn abort(&self) -> Write<'_> {
+        Write::rebase_abort(self)
+    }
+
+    pub(super) fn renewed(self) -> Self {
+        Self(Outside {
+            deadline: self.0.deadline.renewed(),
+            ..self.0
+        })
+    }
+}
+
 pub(crate) struct RefTxn<'r>(Outside<'r>);
 
 impl<'r> RefTxn<'r> {

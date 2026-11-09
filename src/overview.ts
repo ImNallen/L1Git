@@ -60,8 +60,8 @@ export type PushState = {
   } | null;
 };
 
-/** The pull steps that need the shell: a merge to review. */
-export type PullHandOff = Extract<PullStep, { kind: "merge" }>;
+/** The pull steps that need the shell: a merge to review or a rebase to write. */
+export type PullHandOff = Extract<PullStep, { kind: "merge" | "rebase" }>;
 
 export type OverviewView = {
   pushByRoot: ReadonlyMap<RepositoryRoot, PushState>;
@@ -432,6 +432,7 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
           ]);
           break;
         case "merge":
+        case "rebase":
           request.handOff(step);
           break;
         default: {

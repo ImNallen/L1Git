@@ -60,6 +60,7 @@ function commands(): Commands {
     fastForward: vi.fn(),
     pullFastForwardIfPossible: vi.fn(),
     pullFastForwardOnly: vi.fn(),
+    pullRebase: vi.fn(),
     mergeUpstream: vi.fn(),
     mergeBranch: vi.fn(),
     replay: vi.fn(),
@@ -210,6 +211,7 @@ describe("command palette", () => {
     expect(titles(pulling, "pull")).toEqual([
       "Pull (Fast-forward if possible)",
       "Pull (Fast-forward only)",
+      "Pull (Rebase)",
     ]);
     expect(titles(repositoryScreen, "pull")).toEqual([]);
   });

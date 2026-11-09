@@ -11,6 +11,7 @@ mod files;
 mod index;
 mod merge;
 mod partial;
+mod rebase;
 mod refresh;
 mod refs;
 mod replay;
@@ -21,7 +22,8 @@ mod tags;
 mod txn;
 
 use crate::{
-    Coordinator, ErrorKind, Head, Oid, RepositoryError, StagedStamp, StaleReason, StatusEntry,
+    BranchRef, Coordinator, ErrorKind, Head, Oid, RemoteRef, RepositoryError, StagedStamp,
+    StaleReason, StatusEntry,
     git::{self, Deadline, LocalWrite, WriteDeadline},
     repository,
 };
@@ -45,7 +47,7 @@ use std::{
 use store::{EntryObjects, LockedStore, Log, Objects, Position, Step};
 pub use tags::TagTip;
 pub(crate) use txn::{
-    CommitTxn, HOOK_OFF, MergeIndexTxn, MergeTxn, Outside, Published, RefTxn, ReplayTxn,
+    CommitTxn, HOOK_OFF, MergeIndexTxn, MergeTxn, Outside, Published, RebaseTxn, RefTxn, ReplayTxn,
     ScratchIndex, Txn,
 };
 
@@ -184,6 +186,11 @@ pub enum Operation {
         tree: Oid,
         message: String,
     },
+    /// Rebases the checked-out `branch` onto the commit `onto` names, its
+    /// upstream, with Git's merge backend, the user's hooks, and signing. A
+    /// clean worktree is required. A rebase that stops is aborted, so nothing
+    /// changes, and conflicts answer `conflict`. Undo puts the old tip back.
+    Rebase { branch: BranchRef, onto: RemoteRef },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -262,6 +269,7 @@ enum Change {
     Tag(tags::TagChange),
     Stash(stash::StashChange),
     Replay(replay::ReplayChange),
+    Rebase(rebase::RebaseChange),
 }
 
 impl From<resolution::ResolutionChange> for Change {
@@ -300,6 +308,12 @@ impl From<stash::StashChange> for Change {
     }
 }
 
+impl From<rebase::RebaseChange> for Change {
+    fn from(change: rebase::RebaseChange) -> Self {
+        Self::Rebase(change)
+    }
+}
+
 impl From<replay::ReplayChange> for Change {
     fn from(change: replay::ReplayChange) -> Self {
         Self::Replay(change)
@@ -311,6 +325,7 @@ impl Change {
         match self {
             Self::Index(change) => Objects::exact(change.objects()),
             Self::Ref(change) => change.objects(),
+            Self::Rebase(change) => change.objects(),
             Self::Stash(change) => Objects::exact(change.objects()),
             Self::Resolution(_)
             | Self::Discard(_)
@@ -384,6 +399,11 @@ impl Change {
                 store.save(step.log())?;
                 Ok(None)
             }
+            Self::Rebase(change) => {
+                rebase::step(repo, entry, change, direction, deadline)?;
+                store.save(step.log())?;
+                Ok(None)
+            }
         }
     }
 
@@ -395,6 +415,8 @@ impl Change {
             (Self::Stash(_), Direction::Redo) => Some(LocalWrite::RedoStash),
             (Self::Replay(_), Direction::Undo) => Some(LocalWrite::UndoReplay),
             (Self::Replay(_), Direction::Redo) => Some(LocalWrite::RedoReplay),
+            (Self::Rebase(_), Direction::Undo) => Some(LocalWrite::UndoRebase),
+            (Self::Rebase(_), Direction::Redo) => Some(LocalWrite::RedoRebase),
             (
                 Self::Resolution(_)
                 | Self::Index(_)
@@ -428,6 +450,7 @@ impl Change {
                 Ok(stash::landed(repo, entry, change, deadline)?.map(Self::Stash))
             }
             Self::Replay(change) => Ok(replay::landed(repo, change, deadline)?.map(Self::Replay)),
+            Self::Rebase(change) => Ok(rebase::landed(repo, change, deadline)?.map(Self::Rebase)),
         }
     }
 
@@ -440,7 +463,8 @@ impl Change {
             | Self::Ref(_)
             | Self::Discard(_)
             | Self::Checkout(_)
-            | Self::Replay(_) => false,
+            | Self::Replay(_)
+            | Self::Rebase(_) => false,
         }
     }
 
@@ -454,7 +478,8 @@ impl Change {
             | Self::Checkout(_)
             | Self::Tag(_)
             | Self::Stash(_)
-            | Self::Replay(_) => false,
+            | Self::Replay(_)
+            | Self::Rebase(_) => false,
         }
     }
 
@@ -470,7 +495,8 @@ impl Change {
             | Self::Checkout(_)
             | Self::Tag(_)
             | Self::Stash(_)
-            | Self::Replay(_) => {}
+            | Self::Replay(_)
+            | Self::Rebase(_) => {}
         }
     }
 
@@ -484,7 +510,8 @@ impl Change {
             | Self::Branch(_)
             | Self::Checkout(_)
             | Self::Tag(_)
-            | Self::Replay(_) => false,
+            | Self::Replay(_)
+            | Self::Rebase(_) => false,
         }
     }
 }
@@ -535,6 +562,7 @@ impl Operation {
             Self::StashDrop { .. } => LocalWrite::StashDrop,
             Self::Replay { .. } => LocalWrite::ReplayStart,
             Self::FinishReplay { .. } => LocalWrite::ReplayFinish,
+            Self::Rebase { .. } => LocalWrite::Rebase,
         }
     }
 
@@ -641,6 +669,9 @@ impl Operation {
                 message,
             } => replay::finish(&writing, expect, of, staged, tree, message)
                 .map(|applied| (applied, None)),
+            Self::Rebase { branch, onto } => {
+                rebase::apply(&writing, expect, branch, onto).map(|applied| (applied, None))
+            }
         }
     }
 }

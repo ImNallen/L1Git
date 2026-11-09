@@ -454,6 +454,11 @@ const otherOperationSchema = z.discriminatedUnion("kind", [
     tree: oidSchema,
     message: z.string(),
   }),
+  z.strictObject({
+    kind: z.literal("rebase"),
+    branch: localRefSchema,
+    onto: remoteRefSchema,
+  }),
 ]);
 const saveConflictDescriptor = z.strictObject({
   kind: z.literal("saveConflict"),

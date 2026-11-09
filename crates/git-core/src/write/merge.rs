@@ -1679,7 +1679,8 @@ pub(super) fn edit(operation: &Operation) -> Edit {
         | Operation::StashPush { .. }
         | Operation::StashApply { .. }
         | Operation::StashPop { .. }
-        | Operation::StashDrop { .. } => Edit::Refused,
+        | Operation::StashDrop { .. }
+        | Operation::Rebase { .. } => Edit::Refused,
     }
 }
 
@@ -1694,6 +1695,7 @@ fn branch_names(
         }
         Operation::DeleteBranch { branch } => vec![branch.reference.as_str().into()],
         Operation::CreateBranch { name, .. } => vec![format!("refs/heads/{name}")],
+        Operation::Rebase { branch, .. } => vec![branch.as_str().into()],
         Operation::Commit { .. }
         | Operation::Amend { .. }
         | Operation::EditMessage { .. }

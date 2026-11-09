@@ -1671,3 +1671,156 @@ fn a_branch_fetch_shows_whether_the_checked_out_branch_can_fast_forward() {
     assert_eq!(report.outcomes, [skipped("main", SkipReason::NotBehind)]);
     assert_eq!(git(&world.work, &["rev-parse", "HEAD"]), ours);
 }
+
+fn rebase_main(
+    coordinator: &Coordinator,
+    world: &World,
+) -> Result<l1_git_core::Applied, l1_git_core::RepositoryError> {
+    git(&world.work, &["config", "user.name", "Ada"]);
+    git(&world.work, &["config", "user.email", "ada@example.test"]);
+    let status = worktree_status(world.path()).unwrap();
+    coordinator.write(
+        world.path(),
+        &Operation::Rebase {
+            branch: branch_ref("main"),
+            onto: RemoteRef::try_from(upstream("main")).unwrap(),
+        },
+        &Expect { head: status.head },
+    )
+}
+
+fn rebasing(world: &World) -> bool {
+    world
+        .work
+        .join(git(
+            &world.work,
+            &["rev-parse", "--git-path", "rebase-merge"],
+        ))
+        .exists()
+}
+
+#[test]
+fn a_pull_rebase_replays_local_commits_onto_the_upstream_and_undoes() {
+    let world = World::new();
+    let coordinator = coordinator(&world);
+    let theirs = world.colleague_pushes("main", "g", "colleague\n");
+    let ours = commit(&world.work, "h", "mine\n", "local work");
+    coordinator
+        .overview(world.path(), fetch_local("main"))
+        .unwrap();
+
+    let applied = rebase_main(&coordinator, &world).unwrap();
+    let rebased = git(&world.work, &["rev-parse", "HEAD"]);
+    assert_ne!(rebased, ours);
+    assert_eq!(git(&world.work, &["rev-parse", "HEAD^"]), theirs);
+    assert_eq!(
+        git(&world.work, &["log", "-1", "--format=%s"]),
+        "local work"
+    );
+    assert_eq!(
+        git(&world.work, &["symbolic-ref", "HEAD"]),
+        "refs/heads/main"
+    );
+    assert_eq!(git(&world.work, &["status", "--porcelain"]), "");
+    assert_eq!(
+        fs::read_to_string(world.work.join("g")).unwrap(),
+        "colleague\n"
+    );
+    let overview = coordinator
+        .overview(world.path(), FetchMode::Local)
+        .unwrap();
+    assert_eq!(
+        branch(&overview, "main").state,
+        BranchState::Ahead {
+            upstream: upstream("main"),
+            ahead: 1
+        }
+    );
+
+    coordinator.undo(world.path(), applied.id).unwrap();
+    assert_eq!(git(&world.work, &["rev-parse", "HEAD"]), ours);
+    assert!(!world.work.join("g").exists());
+    assert_eq!(git(&world.work, &["status", "--porcelain"]), "");
+    coordinator.redo(world.path(), applied.id).unwrap();
+    assert_eq!(git(&world.work, &["rev-parse", "HEAD"]), rebased);
+    assert_eq!(git(&world.work, &["status", "--porcelain"]), "");
+}
+
+#[test]
+fn a_pull_rebase_that_conflicts_aborts_and_changes_nothing() {
+    let world = World::new();
+    let coordinator = coordinator(&world);
+    world.colleague_pushes("main", "f", "theirs\n");
+    let ours = commit(&world.work, "f", "ours\n", "local work");
+    coordinator
+        .overview(world.path(), fetch_local("main"))
+        .unwrap();
+
+    let error = rebase_main(&coordinator, &world).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::Conflict);
+    assert_eq!(
+        error.message,
+        "The rebase stopped on conflicts in f, so L1 Git aborted it and nothing changed. Use Pull (Fast-forward if possible) to merge instead."
+    );
+    assert!(!rebasing(&world));
+    assert_eq!(git(&world.work, &["rev-parse", "HEAD"]), ours);
+    assert_eq!(
+        git(&world.work, &["symbolic-ref", "HEAD"]),
+        "refs/heads/main"
+    );
+    assert_eq!(git(&world.work, &["status", "--porcelain"]), "");
+    assert_eq!(fs::read_to_string(world.work.join("f")).unwrap(), "ours\n");
+    assert_eq!(coordinator.undo_history(world.path()).unwrap().undo, None);
+}
+
+#[test]
+fn a_pull_rebase_refuses_to_overwrite_an_ignored_file() {
+    let world = World::new();
+    let coordinator = coordinator(&world);
+    world.colleague_pushes("main", "collision", "theirs\n");
+    let ours = commit(&world.work, "h", "mine\n", "local work");
+    coordinator
+        .overview(world.path(), fetch_local("main"))
+        .unwrap();
+    fs::write(world.work.join(".git/info/exclude"), "collision\n").unwrap();
+    fs::write(world.work.join("collision"), "local data\n").unwrap();
+
+    let error = rebase_main(&coordinator, &world).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::Conflict);
+    assert_eq!(
+        error.message,
+        "Preserve these untracked or ignored files first, because the rebase would write to their paths: collision."
+    );
+    assert!(!rebasing(&world));
+    assert_eq!(git(&world.work, &["rev-parse", "HEAD"]), ours);
+    assert_eq!(
+        fs::read_to_string(world.work.join("collision")).unwrap(),
+        "local data\n"
+    );
+    assert_eq!(coordinator.undo_history(world.path()).unwrap().undo, None);
+}
+
+#[test]
+fn a_pull_rebase_refuses_tracked_changes_and_changes_nothing() {
+    let world = World::new();
+    let coordinator = coordinator(&world);
+    world.colleague_pushes("main", "g", "colleague\n");
+    let ours = commit(&world.work, "h", "mine\n", "local work");
+    coordinator
+        .overview(world.path(), fetch_local("main"))
+        .unwrap();
+    fs::write(world.work.join("h"), "unsaved\n").unwrap();
+
+    let error = rebase_main(&coordinator, &world).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::Conflict);
+    assert_eq!(
+        error.message,
+        "Commit or stash these changes before you rebase: h."
+    );
+    assert!(!rebasing(&world));
+    assert_eq!(git(&world.work, &["rev-parse", "HEAD"]), ours);
+    assert_eq!(
+        fs::read_to_string(world.work.join("h")).unwrap(),
+        "unsaved\n"
+    );
+}

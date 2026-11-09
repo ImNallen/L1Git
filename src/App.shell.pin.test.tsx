@@ -155,6 +155,36 @@ it("Pull fetches the checked-out branch, then reviews a merge or refuses one whe
   expect(app.bridge.count("fastForward", PIN)).toBe(0);
 });
 
+it("Pull (Rebase) rebases a diverged branch as a write and reports a stop", async () => {
+  const app = await mountApp();
+  app.bridge.reset();
+  await app.click(await toolbarItem(app, "Pull", "Pull (Rebase)"));
+  expect(
+    app.bridge.log
+      .filter((request) => request.op === "write")
+      .map(({ operation, expect }) => ({ operation, expect })),
+  ).toEqual([
+    {
+      operation: {
+        kind: "rebase",
+        branch: "refs/heads/main",
+        onto: "refs/remotes/origin/main",
+      },
+      expect: {
+        head: { kind: "attached", reference: "refs/heads/main", oid: C4 },
+      },
+    },
+  ]);
+
+  const message =
+    "The rebase stopped on conflicts in notes.txt, so L1 Git aborted it and nothing changed. Use Pull (Fast-forward if possible) to merge instead.";
+  app.bridge.fail("write", { kind: "conflict", message });
+  await app.click(await toolbarItem(app, "Pull", "Pull (Rebase)"));
+  expect(get("alert", /Could not rebase/).textContent).toBe(
+    `Could not rebase main onto origin/main. ${message}`,
+  );
+});
+
 it("Pull fast-forwards a branch that is behind its upstream", async () => {
   const app = await mountApp();
   const behind = overviewSchema.parse({
