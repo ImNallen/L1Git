@@ -147,8 +147,9 @@ export function useMergePanel({
     if (root && idle) setReplayReview({ root, of });
   }
   function pullWith(mode: PullMode) {
-    if (root === null || pullable.kind !== "ready") return;
-    void pull(root, pullable.branch, mode).then((handOff) => {
+    const commonDir = opened.repository?.commonDir;
+    if (root === null || !commonDir || pullable.kind !== "ready") return;
+    void pull(commonDir, root, pullable.branch, mode).then((handOff) => {
       // `open` checks `canMerge` from this render, which a ready pull implies.
       if (handOff?.kind === "merge") open({ kind: "upstream" });
     });

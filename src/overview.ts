@@ -90,10 +90,12 @@ export type OverviewStore = {
   fetchBranch(commonDir: RepositoryRoot, branch: FullRef): Promise<void>;
   fastForward(commonDir: RepositoryRoot, branch: BranchRef): Promise<void>;
   /**
-   * Fetches `branch`'s upstream, then fast-forwards it in `root`. Answers the
-   * step left to the caller when the branch has diverged, else null.
+   * Fetches `branch`'s upstream, then fast-forwards it in `root`, a worktree of
+   * `commonDir` that need not be tracked itself. Answers the step left to the
+   * caller when the branch has diverged, else null.
    */
   pull(
+    commonDir: RepositoryRoot,
     root: RepositoryRoot,
     branch: BranchRef,
     mode: PullMode,
@@ -600,11 +602,9 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
       return enqueue(owner.commonDir, { kind: "push", root, intent, owner });
     },
     refreshLocal: (commonDir) => refreshLocal(commonDir).catch(() => {}),
-    pull(root, branch, mode) {
-      const owner = roots.get(root);
-      if (owner?.kind !== "open") return Promise.resolve(null);
+    pull(commonDir, root, branch, mode) {
       let handedOff: PullHandOff | null = null;
-      return enqueue(owner.commonDir, {
+      return enqueue(commonDir, {
         kind: "pull",
         root,
         branch,

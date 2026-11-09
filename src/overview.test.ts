@@ -563,7 +563,7 @@ describe("overview store", () => {
 
     it("fetches the upstream, then fast-forwards before later jobs run", async () => {
       const h = await opened();
-      const pulled = h.store.pull(app, main, "ffOnly");
+      const pulled = h.store.pull(dir, app, main, "ffOnly");
       void h.store.fetch(dir);
       expect(h.pendingLabels()).toEqual(["refs/heads/main /code/app"]);
       await h.answerOne(
@@ -587,7 +587,7 @@ describe("overview store", () => {
 
     it("leaves an up-to-date branch alone", async () => {
       const h = await opened();
-      const pulled = h.store.pull(app, main, "ffIfPossible");
+      const pulled = h.store.pull(dir, app, main, "ffIfPossible");
       await h.answerOne(
         overview(app, dir, [at(upToDate("main"))], { changed: false }),
       );
@@ -600,11 +600,11 @@ describe("overview store", () => {
 
     it("hands a diverged branch to a merge review unless fast-forward only", async () => {
       const h = await opened();
-      const merging = h.store.pull(app, main, "ffIfPossible");
+      const merging = h.store.pull(dir, app, main, "ffIfPossible");
       await h.answerOne(overview(app, dir, [diverged], { changed: true }));
       await expect(merging).resolves.toEqual({ kind: "merge" });
 
-      const refusing = h.store.pull(app, main, "ffOnly");
+      const refusing = h.store.pull(dir, app, main, "ffOnly");
       await h.answerOne(overview(app, dir, [diverged], { changed: false }));
       await expect(refusing).resolves.toBeNull();
       expect(h.pendingLabels()).toEqual([]);
@@ -615,9 +615,35 @@ describe("overview store", () => {
       ]);
     });
 
+    it("pulls in a linked worktree that is not tracked itself", async () => {
+      const h = await opened();
+      const linked = root("/code/app-linked");
+      const pulled = h.store.pull(dir, linked, main, "ffOnly");
+      await h.answerOne(
+        overview(app, dir, [{ ...behind("main", b), checkedOutAt: linked }], {
+          changed: true,
+        }),
+      );
+      expect(h.pendingLabels()).toEqual(["fastForward /code/app"]);
+      await h.answerOne(
+        fastForwardReportSchema.parse({
+          outcomes: [
+            { kind: "advanced", reference: "refs/heads/main", from: a, to: b },
+          ],
+          overview: overview(app, dir, [
+            { ...upToDate("main"), checkedOutAt: linked },
+          ]),
+        }),
+      );
+      await expect(pulled).resolves.toBeNull();
+      expect(h.advances).toEqual([
+        [{ reference: "refs/heads/main", from: a, to: b }],
+      ]);
+    });
+
     it("moves nothing when the fetch fails", async () => {
       const h = await opened();
-      const pulled = h.store.pull(app, main, "ffOnly");
+      const pulled = h.store.pull(dir, app, main, "ffOnly");
       await h.answerOne(
         overview(app, dir, [at(behind("main", b))], {
           changed: false,
