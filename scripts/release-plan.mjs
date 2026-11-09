@@ -7,7 +7,6 @@ import {
 } from "node:fs";
 import { pathToFileURL } from "node:url";
 
-const NIGHTLY_GAP_MS = 6 * 60 * 60 * 1000;
 const VERSION =
   /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-nightly\.(\d{8})\.([1-9]\d*))?$/;
 const SHA = /^[a-f0-9]{40}$/;
@@ -132,11 +131,6 @@ function choose(facts, git) {
     case "schedule": {
       const last = latestNightly(facts.releases);
       if (last) {
-        if (facts.now - last.publishedAt < NIGHTLY_GAP_MS)
-          return {
-            action: "skip",
-            reason: `${last.tag} was published less than 6 h ago.`,
-          };
         const shipped = recordedCommit(last, git);
         if (shipped === facts.sha)
           return {
@@ -149,7 +143,7 @@ function choose(facts, git) {
       return {
         action: "publish",
         release: nightlyRelease(facts),
-        reason: "Nightly is due and main has new commits.",
+        reason: "main has new commits since the last nightly.",
       };
     }
     case "workflow_dispatch": {
@@ -163,7 +157,7 @@ function choose(facts, git) {
         return {
           action: "publish",
           release: nightlyRelease(facts),
-          reason: "Manual nightly bypasses cadence.",
+          reason: "Manual nightly.",
         };
       }
       if (facts.channel !== "stable")

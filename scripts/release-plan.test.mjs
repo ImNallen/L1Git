@@ -73,13 +73,10 @@ test("scheduled nightly uses the next stable patch, UTC date and run number", ()
   );
 });
 
-test("schedule requires at least six hours and new main commits", () => {
+test("schedule publishes on the first run after new main commits", () => {
   assert.equal(planRelease(facts({ sha: sha(3) }), git()).action, "skip");
-  const recent = facts({ now: new Date("2026-10-22T14:59:59Z") });
-  assert.equal(planRelease(recent, git()).action, "skip");
   assert.equal(
-    planRelease({ ...recent, now: new Date("2026-10-22T15:00:00Z") }, git())
-      .action,
+    planRelease(facts({ now: new Date("2026-10-22T09:17:00Z") }), git()).action,
     "publish",
   );
   assert.throws(
@@ -88,7 +85,7 @@ test("schedule requires at least six hours and new main commits", () => {
   );
 });
 
-test("manual nightly bypasses cadence and requires main", () => {
+test("manual nightly publishes without new commits and requires main", () => {
   const manual = facts({
     event: "workflow_dispatch",
     channel: "nightly",

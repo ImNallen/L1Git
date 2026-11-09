@@ -4,9 +4,9 @@ L1 Git publishes a universal macOS DMG, Linux x86_64 AppImage and deb, and a Win
 
 ## Publish a nightly
 
-The workflow checks eligibility at minute 17 each hour. A scheduled nightly requires at least six hours since the last published nightly and additional commits on main. GitHub can delay scheduled runs.
+The workflow checks main at minute 17 each hour and publishes a nightly when main has commits since the last published nightly. GitHub can delay scheduled runs.
 
-To bypass both checks, dispatch from main:
+To publish a nightly now, even without new commits, dispatch from main:
 
 ```sh
 gh workflow run release.yml --repo ImNallen/L1Git --ref main -f channel=nightly
