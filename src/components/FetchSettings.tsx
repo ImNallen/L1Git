@@ -42,8 +42,8 @@ export function FetchSettings({
             )}
           </h3>
           <p id="interval-description">
-            Runs while the window is visible. L1 Git also fetches at launch and
-            whenever you click Fetch.
+            Fetches every remote while the window is visible. L1 Git also
+            fetches every remote at launch and whenever you click Fetch all.
           </p>
         </div>
         <div

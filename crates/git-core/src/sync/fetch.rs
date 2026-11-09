@@ -1,6 +1,6 @@
 use super::now;
 use crate::{
-    FetchFailure, FetchOutcome, FetchSummary, RemoteFetch, RepositoryError,
+    ErrorKind, FetchBranch, FetchFailure, FetchOutcome, FetchSummary, RemoteFetch, RepositoryError,
     git::{self, Deadline, Finished, Mutation},
     stderr,
 };
@@ -20,7 +20,7 @@ pub(super) fn fetch_all(
             let outcome = if skipped.contains(remote) {
                 FetchOutcome::Skipped
             } else {
-                fetch(root, remote, deadline)?
+                fetch(root, remote, None, deadline)?
             };
             Ok(RemoteFetch {
                 remote: remote.to_owned(),
@@ -36,9 +36,102 @@ pub(super) fn fetch_all(
     })
 }
 
-fn fetch(root: &Path, remote: &str, deadline: Duration) -> Result<FetchOutcome, RepositoryError> {
+/// Where a branch's commits come from.
+pub(super) struct Source {
+    pub(super) remote: String,
+    /// The branch's full name on `remote`.
+    branch: String,
+}
+
+/// A local branch's `branch.<name>.remote` and `branch.<name>.merge`, or for a
+/// remote-tracking branch the remote whose name is its longest prefix.
+pub(super) fn source(
+    root: &Path,
+    branch: &FetchBranch,
+    reads: Deadline,
+) -> Result<Source, RepositoryError> {
+    match branch {
+        FetchBranch::Local(branch) => {
+            let config = |key: &str| -> Result<Option<String>, RepositoryError> {
+                let key = format!("branch.{}.{key}", branch.name());
+                let output = git::run(root, &["config", "--get", &key], reads)?;
+                match output.status.code() {
+                    Some(0) => Ok(Some(git::line(&output.stdout))),
+                    Some(1) => Ok(None),
+                    _ => Err(git::read_failed()),
+                }
+            };
+            match (config("remote")?, config("merge")?) {
+                (Some(remote), Some(merge)) if remote != "." => Ok(Source {
+                    remote,
+                    branch: merge,
+                }),
+                _ => Err(RepositoryError::new(
+                    ErrorKind::InvalidRef,
+                    format!(
+                        "{} has no upstream on a remote, so there is nothing to fetch for it. Publish it, or use Fetch all.",
+                        branch.name()
+                    ),
+                )),
+            }
+        }
+        FetchBranch::Remote(reference) => {
+            let tracked = &reference.as_str()["refs/remotes/".len()..];
+            let names = git::read(root, &["remote"], reads)?;
+            git::text(&names)
+                .lines()
+                .filter(|remote| {
+                    tracked
+                        .strip_prefix(remote)
+                        .and_then(|rest| rest.strip_prefix('/'))
+                        .is_some_and(|rest| !rest.is_empty())
+                })
+                .max_by_key(|remote| remote.len())
+                .map(|remote| Source {
+                    remote: remote.to_owned(),
+                    branch: format!("refs/heads/{}", &tracked[remote.len() + 1..]),
+                })
+                .ok_or_else(|| {
+                    RepositoryError::new(
+                        ErrorKind::InvalidRef,
+                        format!(
+                            "No remote of this repository is named for {tracked}, so there is nothing to fetch for it. Use Fetch all."
+                        ),
+                    )
+                })
+        }
+    }
+}
+
+/// Fetches one branch without pruning, so other remote-tracking branches stay
+/// as they were.
+pub(super) fn fetch_branch(
+    root: &Path,
+    source: &Source,
+    deadline: Duration,
+    reads: Deadline,
+) -> Result<FetchSummary, RepositoryError> {
+    let before = tips(root, reads)?;
+    let outcome = fetch(root, &source.remote, Some(&source.branch), deadline)?;
+    Ok(FetchSummary {
+        at: now(),
+        changed: tips(root, reads.renewed())? != before,
+        coalesced: false,
+        remotes: vec![RemoteFetch {
+            remote: source.remote.clone(),
+            outcome,
+        }],
+    })
+}
+
+fn fetch(
+    root: &Path,
+    remote: &str,
+    branch: Option<&str>,
+    deadline: Duration,
+) -> Result<FetchOutcome, RepositoryError> {
     Ok(
-        match git::mutate(root, Mutation::Fetch { remote }, deadline)? {
+        match git::mutate(root, Mutation::Fetch { remote, branch }, deadline)? {
             Finished::Succeeded => FetchOutcome::Fetched,
             Finished::Failed { stderr } => FetchOutcome::Failed {
                 failure: stderr::classify(&stderr),

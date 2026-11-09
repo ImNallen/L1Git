@@ -10,7 +10,7 @@ import type {
   RepositoryOverview,
 } from "./domain/overview";
 import { problemFrom } from "./domain/repository";
-import type { Problem, RepositoryRoot } from "./domain/repository";
+import type { FullRef, Problem, RepositoryRoot } from "./domain/repository";
 import type { PushIntent, PushOutcome, PushPreparation } from "./domain/push";
 import type { FetchInterval } from "./fetchSettings";
 
@@ -76,6 +76,8 @@ export type OverviewStore = {
   getSnapshot(): OverviewView;
   track(roots: readonly RepositoryRoot[]): void;
   fetch(commonDir?: RepositoryRoot): Promise<void>;
+  /** Fetches only `branch`'s remote counterpart. A pending fetch of every remote covers it. */
+  fetchBranch(commonDir: RepositoryRoot, branch: FullRef): Promise<void>;
   fastForward(commonDir: RepositoryRoot, branch: BranchRef): Promise<void>;
   updateAll(commonDir?: RepositoryRoot): Promise<void>;
   setInterval(minutes: FetchInterval): void;
@@ -87,7 +89,8 @@ export type OverviewStore = {
 };
 
 type Request =
-  | { kind: "fetch" }
+  /** A null `branch` fetches every remote. */
+  | { kind: "fetch"; branch: FullRef | null }
   | { kind: "fastForward"; advances: Map<BranchRef, Advance> }
   | {
       kind: "push";
@@ -256,7 +259,7 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
         running: null,
         queue: [],
       });
-      void enqueue(overview.commonDir, { kind: "fetch" });
+      void enqueue(overview.commonDir, { kind: "fetch", branch: null });
     } else {
       void prepareRoot(root);
     }
@@ -268,8 +271,18 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
     if (!repo) return Promise.resolve();
     const pending = [...(repo.running ? [repo.running] : []), ...repo.queue];
     if (request.kind === "fetch") {
-      const joined = pending.find((job) => job.request.kind === "fetch");
+      const covers = (job: Job) =>
+        job.request.kind === "fetch" &&
+        (job.request.branch === null || job.request.branch === request.branch);
+      const joined = pending.find(covers);
       if (joined) return joined.done;
+      const widened =
+        request.branch === null &&
+        repo.queue.find((job) => job.request.kind === "fetch");
+      if (widened) {
+        widened.request = request;
+        return widened.done;
+      }
     } else if (request.kind === "fastForward") {
       const queued = repo.queue.find(
         (job) => job.request.kind === "fastForward",
@@ -360,12 +373,22 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
       repo.activity = { kind: "fetching" };
       emit();
       try {
-        const overview = await deps.overview(root, "remote");
+        const overview = await deps.overview(
+          root,
+          request.branch === null ? "remote" : { branch: request.branch },
+        );
+        const remotes = overview.fetch?.remotes ?? [];
+        const kept =
+          request.branch !== null && repo.fetch.kind === "fetched"
+            ? repo.fetch.remotes.filter(
+                ({ remote }) => !remotes.some((each) => each.remote === remote),
+              )
+            : [];
         repo.overview = overview;
         repo.fetch = {
           kind: "fetched",
           at: deps.now(),
-          remotes: overview.fetch?.remotes ?? [],
+          remotes: [...kept, ...remotes],
         };
         repo.outcomes = new Map();
         if (overview.fetch?.changed && repos.get(commonDir) === repo)
@@ -412,12 +435,15 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
   }
 
   function fetch(commonDir?: RepositoryRoot): Promise<void> {
-    if (commonDir !== undefined) return enqueue(commonDir, { kind: "fetch" });
+    if (commonDir !== undefined)
+      return enqueue(commonDir, { kind: "fetch", branch: null });
     for (const [root, state] of roots)
       if (state.kind === "unavailable") void open(root);
     emit();
     return Promise.all(
-      [...repos.keys()].map((dir) => enqueue(dir, { kind: "fetch" })),
+      [...repos.keys()].map((dir) =>
+        enqueue(dir, { kind: "fetch", branch: null }),
+      ),
     ).then(() => {});
   }
 
@@ -479,6 +505,8 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
       emit();
     },
     fetch,
+    fetchBranch: (commonDir, branch) =>
+      enqueue(commonDir, { kind: "fetch", branch }),
     invalidatePush(commonDir) {
       invalidatePush(commonDir);
       emit();

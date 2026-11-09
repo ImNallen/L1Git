@@ -98,12 +98,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     reloadRefs: sidebarRefs.reload,
   });
   const { writes } = loop;
-  const sync = useSyncControls(
-    overview.store,
-    overview.view,
-    opened,
-    writes.running !== null,
-  );
   const nav = useNavigation({
     app,
     view,
@@ -118,6 +112,15 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   });
   // After navigation: its ref-step effect must see lost focus before this restores it.
   useFocusRecovery(focus);
+  const sync = useSyncControls({
+    store: overview.store,
+    view: overview.view,
+    opened,
+    writing: writes.running !== null,
+    snapshot: view.snapshot,
+    activeRoot: active.root,
+    selectedBranch: nav.jump.ruledBranch,
+  });
   const diff = useDiffPane({ app, writes, active, focus });
   const staging = useStaging({
     snapshot: view.snapshot,

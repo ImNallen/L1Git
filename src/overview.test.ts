@@ -9,7 +9,7 @@ import type {
   FastForwardReport,
   RepositoryOverview,
 } from "./domain/overview";
-import { oidSchema, rootSchema } from "./domain/repository";
+import { oidSchema, refSchema, rootSchema } from "./domain/repository";
 import type { RepositoryRoot } from "./domain/repository";
 import { createOverviewStore, repositoryWarnings } from "./overview";
 import type { OverviewDeps } from "./overview";
@@ -111,7 +111,8 @@ function harness() {
     push: async () => {
       throw new Error("Unexpected push");
     },
-    overview: (path, mode) => push(`${mode} ${path}`),
+    overview: (path, mode) =>
+      push(`${typeof mode === "string" ? mode : mode.branch} ${path}`),
     fastForward: (path, sent) => {
       advances.push(sent);
       return push(`fastForward ${path}`);
@@ -481,6 +482,60 @@ describe("overview store", () => {
         ],
       ]),
     );
+  });
+
+  it("lets a fetch of every remote cover a branch fetch, not the reverse", async () => {
+    const h = harness();
+    const dir = root("/code/app/.git");
+    const main = refSchema.parse("refs/heads/main");
+    const feat = refSchema.parse("refs/remotes/origin/feat");
+    const local = overview(app, dir, [upToDate("main")]);
+    const fetched = overview(app, dir, [upToDate("main")], { changed: false });
+    h.store.track([app]);
+    await h.answerOne(local);
+    void h.store.fetchBranch(dir, main);
+    expect(h.pendingLabels()).toEqual(["remote /code/app"]);
+    await h.answerOne(fetched);
+
+    void h.store.fetchBranch(dir, main);
+    void h.store.fetchBranch(dir, main);
+    void h.store.fetchBranch(dir, feat);
+    void h.store.fetch(dir);
+    void h.store.fetchBranch(dir, feat);
+    expect(h.pendingLabels()).toEqual(["refs/heads/main /code/app"]);
+    await h.answer(() => fetched);
+    expect(h.calls).toEqual([
+      "local /code/app",
+      "remote /code/app",
+      "refs/heads/main /code/app",
+      "remote /code/app",
+    ]);
+  });
+
+  it("keeps other remotes' fetch failures after a branch fetch", async () => {
+    const h = harness();
+    const dir = root("/code/app/.git");
+    const failed = { kind: "failed", failure: "network", message: "Offline." };
+    const withRemotes = (remotes: unknown[]) =>
+      overviewSchema.parse({
+        ...overview(app, dir, [upToDate("main")], { changed: false }),
+        fetch: { at: 0, changed: false, coalesced: false, remotes },
+      });
+    h.store.track([app]);
+    await h.answerOne(overview(app, dir, [upToDate("main")]));
+    await h.answerOne(
+      withRemotes([
+        { remote: "origin", outcome: failed },
+        { remote: "archive", outcome: failed },
+      ]),
+    );
+    void h.store.fetchBranch(dir, refSchema.parse("refs/heads/main"));
+    await h.answerOne(
+      withRemotes([{ remote: "origin", outcome: { kind: "fetched" } }]),
+    );
+    expect(repositoryWarnings(h.store.getSnapshot().repositories[0]!)).toEqual([
+      "archive: Network error. Offline.",
+    ]);
   });
 
   it("keeps an unreadable root visible and retries it on Fetch", async () => {

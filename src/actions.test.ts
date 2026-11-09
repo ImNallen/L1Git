@@ -18,7 +18,16 @@ const repositoryScreen: ActionContext = {
   adding: false,
   searchable: true,
   inspectable: true,
-  repository: { fetching: false, idle: true, ready: 0 },
+  repository: {
+    fetching: false,
+    idle: true,
+    ready: 0,
+    fetch: {
+      kind: "ready",
+      branch: "refs/heads/main" as FullRef,
+      detail: "Fetch origin/main, the upstream of main.",
+    },
+  },
   push: null,
   file: null,
   selection: null,
@@ -45,6 +54,7 @@ function commands(): Commands {
     toggleSidebar: vi.fn(),
     toggleInspector: vi.fn(),
     fetch: vi.fn(),
+    fetchAll: vi.fn(),
     fastForward: vi.fn(),
     mergeUpstream: vi.fn(),
     mergeBranch: vi.fn(),
@@ -148,11 +158,31 @@ describe("command palette", () => {
   it("ranks a prefix, then word starts, then letters in order", () => {
     expect(titles(repositoryScreen, "fetch")).toEqual([
       "Fetch",
+      "Fetch all",
       "feature/fetch-retry",
     ]);
     expect(titles(repositoryScreen, "main")).toEqual(["main", "origin/main"]);
     expect(titles(repositoryScreen, "sync")).toEqual(["sync"]);
     expect(titles(repositoryScreen, "tgsb")).toEqual(["Toggle sidebar"]);
+  });
+
+  it("offers Fetch only with a branch to fetch, and Fetch all regardless", () => {
+    const handlers = commands();
+    const items = paletteItems(repositoryScreen, handlers, false, [], null);
+    expect(items.find((item) => item.id === "action:fetch")?.detail).toBe(
+      "Fetch origin/main, the upstream of main.",
+    );
+    items.find((item) => item.id === "action:fetchAll")?.run();
+    expect(handlers.fetchAll).toHaveBeenCalledOnce();
+    expect(handlers.fetch).not.toHaveBeenCalled();
+    const solo: ActionContext = {
+      ...repositoryScreen,
+      repository: {
+        ...repositoryScreen.repository!,
+        fetch: { kind: "unavailable", reason: "solo has no upstream." },
+      },
+    };
+    expect(titles(solo, "fetch")).toEqual(["Fetch all", "feature/fetch-retry"]);
   });
 
   it("folds case and accents and says nothing for no match", () => {
@@ -163,6 +193,7 @@ describe("command palette", () => {
   it("lists actions, then repositories, then branches when empty", () => {
     expect(titles(repositoryScreen, "")).toEqual([
       "Fetch",
+      "Fetch all",
       "Search history",
       "Add repository",
       "Toggle sidebar",
@@ -194,7 +225,12 @@ describe("command palette", () => {
   it("offers selection and comparison actions only when they apply", () => {
     const comparing: ActionContext = {
       ...repositoryScreen,
-      repository: { fetching: true, idle: false, ready: 2 },
+      repository: {
+        ...repositoryScreen.repository!,
+        fetching: true,
+        idle: false,
+        ready: 2,
+      },
       selection: { kind: "commit", oid: "a".repeat(40) as Oid },
       compare: { swappable: true },
       file: { hasCommit: false, lineActions: [] },
@@ -237,7 +273,7 @@ describe("command palette", () => {
     ]);
     const ready: ActionContext = {
       ...repositoryScreen,
-      repository: { fetching: false, idle: true, ready: 1 },
+      repository: { ...repositoryScreen.repository!, ready: 1 },
       file: { hasCommit: true, lineActions: [] },
       sidebarBranch: {
         name: "main",

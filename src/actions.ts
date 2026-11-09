@@ -1,3 +1,4 @@
+import type { SyncTarget } from "./domain/overview";
 import type { PushControl } from "./domain/push";
 import { normalizeSearch } from "./domain/search";
 import { replayEntry } from "./domain/merge";
@@ -24,7 +25,12 @@ export type ActionContext = {
   searchable: boolean;
   inspectable: boolean;
   push: PushControl | null;
-  repository: { fetching: boolean; idle: boolean; ready: number } | null;
+  repository: {
+    fetching: boolean;
+    idle: boolean;
+    ready: number;
+    fetch: SyncTarget;
+  } | null;
   file: { hasCommit: boolean; lineActions: readonly PartAction[] } | null;
   selection: Selection | null;
   picked: Oid | null;
@@ -61,6 +67,7 @@ export type Commands = {
   toggleSidebar: () => void;
   toggleInspector: () => void;
   fetch: () => void;
+  fetchAll: () => void;
   fastForward: () => void;
   mergeUpstream: () => void;
   mergeBranch: () => void;
@@ -116,6 +123,7 @@ export type ActionId =
   | "undo"
   | "redo"
   | "fetch"
+  | "fetchAll"
   | "mergeUpstream"
   | "mergeBranch"
   | "fastForward"
@@ -154,6 +162,8 @@ export type ActionId =
 export type Action = {
   id: ActionId;
   title: string | ((context: ActionContext) => string);
+  /** What the action would do, or why it is unavailable. */
+  detail?: (context: ActionContext) => string;
   shortcut?: Shortcut;
   available: (context: ActionContext) => boolean;
   run: (commands: Commands) => void;
@@ -281,11 +291,27 @@ export const actions: readonly Action[] = [
   {
     id: "fetch",
     title: "Fetch",
+    detail: (context) => {
+      const target = context.repository?.fetch;
+      if (target?.kind === "ready") return target.detail;
+      return target?.reason ?? "Checking the current repository…";
+    },
+    available: (context) =>
+      onRepository(context) &&
+      context.repository !== null &&
+      !context.repository.fetching &&
+      context.repository.fetch.kind === "ready",
+    run: (commands) => commands.fetch(),
+  },
+  {
+    id: "fetchAll",
+    title: "Fetch all",
+    detail: () => "Fetch every remote of this repository.",
     available: (context) =>
       onRepository(context) &&
       context.repository !== null &&
       !context.repository.fetching,
-    run: (commands) => commands.fetch(),
+    run: (commands) => commands.fetchAll(),
   },
   {
     id: "mergeBranch",
@@ -670,6 +696,7 @@ export function paletteItems(
     id: `action:${action.id}`,
     kind: "action",
     title: titleOf(action, context),
+    detail: action.detail?.(context),
     shortcut: action.shortcut && shortcutLabel(action.shortcut, mac),
     run: () => action.run(commands),
   }));

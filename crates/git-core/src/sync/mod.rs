@@ -20,8 +20,8 @@ pub(crate) use advance::is_at;
 pub(crate) use read::{InProgress, in_progress, pseudoref_exists};
 
 use crate::{
-    Advance, AdvanceOutcome, FastForwardReport, FetchMode, FetchSummary, RepositoryError,
-    RepositoryOverview, SkipReason,
+    Advance, AdvanceOutcome, FastForwardReport, FetchMode, FetchOutcome, FetchSummary,
+    RepositoryError, RepositoryOverview, SkipReason,
     git::{Deadline, LocalRead, LocalWrite, WriteDeadline},
 };
 use std::{
@@ -206,8 +206,9 @@ impl Coordinator {
     }
 
     /// The local branches of the repository containing `path`. With
-    /// `FetchMode::Remote`, fetch its remotes first, unless a fetch of the same
-    /// repository finished after this call started.
+    /// `FetchMode::Remote`, fetch its remotes first, and with
+    /// `FetchMode::Branch` only that branch, unless a fetch of every remote of
+    /// the same repository finished after this call started.
     pub fn overview(
         &self,
         path: &str,
@@ -217,17 +218,38 @@ impl Coordinator {
         let reads = self.deadline(LocalRead::BranchStatus);
         let repository = read::open(path, reads)?;
         let deadline = self.limits.local_deadline;
-        if mode == FetchMode::Local {
-            return read::read(&repository, None, deadline, reads);
-        }
+        let source = match &mode {
+            FetchMode::Local => return read::read(&repository, None, deadline, reads),
+            FetchMode::Remote => None,
+            FetchMode::Branch(branch) => Some(fetch::source(&repository.root, branch, reads)?),
+        };
         let locks = self.locks(&repository.common_dir);
         let mut gate = lock_ignoring_poison(&locks.gate);
-        let summary = match &gate.last_fetch {
-            Some((finished, summary)) if *finished > requested => FetchSummary {
-                coalesced: true,
-                ..summary.clone()
-            },
-            _ => {
+        let summary = match (&gate.last_fetch, &source) {
+            (Some((finished, summary)), _)
+                if *finished > requested
+                    && source.as_ref().is_none_or(|source| {
+                        summary.remotes.iter().any(|fetched| {
+                            fetched.remote == source.remote
+                                && fetched.outcome == FetchOutcome::Fetched
+                        })
+                    }) =>
+            {
+                FetchSummary {
+                    coalesced: true,
+                    ..summary.clone()
+                }
+            }
+            (_, Some(source)) => {
+                let _slot = self.slots.acquire();
+                fetch::fetch_branch(
+                    &repository.root,
+                    source,
+                    self.limits.fetch_deadline,
+                    reads.renewed(),
+                )?
+            }
+            (_, None) => {
                 let summary = {
                     let _slot = self.slots.acquire();
                     fetch::fetch_all(

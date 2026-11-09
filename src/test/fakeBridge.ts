@@ -260,7 +260,10 @@ type Held = {
 
 function line(request: BridgeRequest): string {
   const parts = [request.op, request.path];
-  if (request.op === "overview") parts.push(String(request.mode));
+  if (request.op === "overview") {
+    const mode = request.mode as string | { branch: string };
+    parts.push(typeof mode === "string" ? mode : mode.branch);
+  }
   if (request.op === "write")
     parts.push((request.operation as { kind: string }).kind);
   if (request.op === "filePatch" || request.op === "worktreePatch")

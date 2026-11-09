@@ -719,13 +719,25 @@ impl From<BranchRef> for String {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum FetchMode {
     /// Refs already on disk. Never contacts a remote.
     Local,
     /// Fetch every remote of the repository first, once per common dir.
     Remote,
+    /// Fetch only the remote branch behind one branch. A fetch of every remote
+    /// that finished after the request covers it.
+    Branch(FetchBranch),
+}
+
+/// A branch with a counterpart on a remote: a local branch whose upstream is a
+/// remote's branch, or a remote-tracking branch.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum FetchBranch {
+    Local(BranchRef),
+    Remote(RemoteRef),
 }
 
 /// One repository seen through one worktree root. Two worktrees of a repository

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { oidSchema, refSchema, rootSchema } from "./repository";
-import type { FullRef, Oid } from "./repository";
+import type { Branch, FullRef, Oid } from "./repository";
 
 export const branchRefSchema = z
   .string()
@@ -106,7 +106,8 @@ export type FetchSummary = z.infer<typeof fetchSummarySchema>;
 export type RepositoryOverview = z.infer<typeof overviewSchema>;
 export type AdvanceOutcome = z.infer<typeof advanceOutcomeSchema>;
 export type FastForwardReport = z.infer<typeof fastForwardReportSchema>;
-export type FetchMode = "local" | "remote";
+/** `branch` fetches only the remote branch behind a local branch's upstream, or behind a remote-tracking branch. */
+export type FetchMode = "local" | "remote" | { branch: FullRef };
 export type Advance = { reference: BranchRef; from: Oid; to: Oid };
 export type Divergence = { upstream: FullRef; ahead: number; behind: number };
 
@@ -136,6 +137,40 @@ export function divergence(state: BranchState): Divergence | null {
 
 export function upstreamName(upstream: string): string {
   return upstream.replace(/^refs\/remotes\//, "");
+}
+
+/** The branch a sync command acts on, or why it cannot act. */
+export type SyncTarget =
+  | { kind: "ready"; branch: FullRef; detail: string }
+  | { kind: "unavailable"; reason: string };
+
+/** Fetch takes the selected branch, else the checked-out one. */
+export function fetchTarget(
+  selected: Branch | null,
+  current: Branch | null,
+): SyncTarget {
+  const branch = selected ?? current;
+  if (branch === null)
+    return {
+      kind: "unavailable",
+      reason: "Select a branch to fetch it, or use Fetch all.",
+    };
+  if (branch.kind === "remote")
+    return {
+      kind: "ready",
+      branch: branch.reference,
+      detail: `Fetch ${branch.name}.`,
+    };
+  if (branch.upstream?.startsWith("refs/remotes/"))
+    return {
+      kind: "ready",
+      branch: branch.reference,
+      detail: `Fetch ${upstreamName(branch.upstream)}, the upstream of ${branch.name}.`,
+    };
+  return {
+    kind: "unavailable",
+    reason: `${branch.name} has no upstream on a remote, so there is nothing to fetch for it. Use Fetch all.`,
+  };
 }
 
 export function readyAdvances(overview: RepositoryOverview): Advance[] {

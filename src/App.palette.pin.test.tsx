@@ -52,6 +52,7 @@ it("palette titles with a commit selected", async () => {
     [
       "Undo Delete branch gone",
       "Fetch",
+      "Fetch all",
       "Merge upstream…",
       "Push to origin/main",
       "Search history",
@@ -91,6 +92,7 @@ it("palette titles with a worktree that has staged and unstaged entries", async 
       "Commit…",
       "Undo Delete branch gone",
       "Fetch",
+      "Fetch all",
       "Merge upstream…",
       "Push to origin/main",
       "Search history",
@@ -122,6 +124,7 @@ it("palette titles while a write runs", async () => {
   expect(await openPalette(app)).toMatchInlineSnapshot(`
     [
       "Fetch",
+      "Fetch all",
       "Search history",
       "Add repository",
       "Toggle sidebar",
@@ -155,7 +158,7 @@ it("palette titles while the active worktree merges", async () => {
   expect(await openPalette(app)).toMatchInlineSnapshot(`
     [
       "Unstage all",
-      "Fetch",
+      "Fetch all",
       "Push to origin/main",
       "Search history",
       "Add repository",
@@ -186,6 +189,7 @@ it("palette titles with a file open, and none on the settings screen", async () 
     [
       "Undo Delete branch gone",
       "Fetch",
+      "Fetch all",
       "Merge upstream…",
       "Push to origin/main",
       "Back to history",

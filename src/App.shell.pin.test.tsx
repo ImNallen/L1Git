@@ -82,6 +82,34 @@ it("selecting a branch in another repository preserves keyboard focus", async ()
   expect(document.activeElement).not.toBe(row);
 });
 
+it("Fetch fetches the selected branch, else the checked-out one, and Fetch all every remote", async () => {
+  const app = await mountApp();
+  const fetches = () =>
+    app.bridge
+      .lines()
+      .filter(
+        (line) => line.startsWith("overview ") && !line.endsWith(" local"),
+      );
+  app.bridge.reset();
+  await app.click(await toolbarItem(app, "Fetch", "Fetch"));
+  await app.click(await toolbarItem(app, "Fetch", "Fetch all"));
+  await app.click(get("button", /^origin/));
+  await app.click(refRow("refs/remotes/origin/main")!);
+  await app.click(await toolbarItem(app, "Fetch", "Fetch"));
+  expect(fetches()).toEqual([
+    "overview /fixture/pin refs/heads/main",
+    "overview /fixture/pin remote",
+    "overview /fixture/pin refs/remotes/origin/main",
+  ]);
+
+  await app.click(refRow("refs/heads/topic")!);
+  const unavailable = await toolbarItem(app, "Fetch", "Fetch");
+  expect(unavailable.getAttribute("aria-disabled")).toBe("true");
+  expect(unavailable.getAttribute("title")).toBe(
+    "topic has no upstream on a remote, so there is nothing to fetch for it. Use Fetch all.",
+  );
+});
+
 it("More supports keyboard navigation past unavailable actions and returns focus", async () => {
   const app = await mountApp();
   await app.click(get("button", "Pull"));
