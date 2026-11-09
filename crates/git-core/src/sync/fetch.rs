@@ -44,7 +44,7 @@ pub(super) struct Source {
 }
 
 /// A local branch's `branch.<name>.remote` and `branch.<name>.merge`, or for a
-/// remote-tracking branch the remote whose name is its longest prefix.
+/// remote-tracking branch the remote and source whose fetch refspec writes it.
 pub(super) fn source(
     root: &Path,
     branch: &FetchBranch,
@@ -76,30 +76,53 @@ pub(super) fn source(
             }
         }
         FetchBranch::Remote(reference) => {
-            let tracked = &reference.as_str()["refs/remotes/".len()..];
-            let names = git::read(root, &["remote"], reads)?;
-            git::text(&names)
+            let tracking = reference.as_str();
+            let output = git::run(
+                root,
+                &["config", "--get-regexp", r"^remote\..*\.fetch$"],
+                reads,
+            )?;
+            if !matches!(output.status.code(), Some(0 | 1)) {
+                return Err(git::read_failed());
+            }
+            git::text(&output.stdout)
                 .lines()
-                .filter(|remote| {
-                    tracked
-                        .strip_prefix(remote)
-                        .and_then(|rest| rest.strip_prefix('/'))
-                        .is_some_and(|rest| !rest.is_empty())
-                })
-                .max_by_key(|remote| remote.len())
-                .map(|remote| Source {
-                    remote: remote.to_owned(),
-                    branch: format!("refs/heads/{}", &tracked[remote.len() + 1..]),
+                .find_map(|line| {
+                    let (key, refspec) = line.split_once(' ')?;
+                    let remote = key.strip_prefix("remote.")?.strip_suffix(".fetch")?;
+                    Some(Source {
+                        remote: remote.to_owned(),
+                        branch: fetched_into(refspec, tracking)?,
+                    })
                 })
                 .ok_or_else(|| {
                     RepositoryError::new(
                         ErrorKind::InvalidRef,
                         format!(
-                            "No remote of this repository is named for {tracked}, so there is nothing to fetch for it. Use Fetch all."
+                            "No remote of this repository fetches into {}, so there is nothing to fetch for it. Use Fetch all.",
+                            tracking.trim_start_matches("refs/remotes/")
                         ),
                     )
                 })
         }
+    }
+}
+
+/// The source ref that `refspec` fetches into `tracking`, if it writes there.
+/// A negative refspec writes nothing.
+fn fetched_into(refspec: &str, tracking: &str) -> Option<String> {
+    let refspec = refspec.strip_prefix('+').unwrap_or(refspec);
+    if refspec.starts_with('^') {
+        return None;
+    }
+    let (source, destination) = refspec.split_once(':')?;
+    match (source.split_once('*'), destination.split_once('*')) {
+        (Some((source_head, source_tail)), Some((head, tail))) => {
+            let matched = tracking.strip_prefix(head)?.strip_suffix(tail)?;
+            (!matched.is_empty()).then(|| format!("{source_head}{matched}{source_tail}"))
+        }
+        (None, None) => (destination == tracking).then(|| source.to_owned()),
+        _ => None,
     }
 }
 

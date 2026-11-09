@@ -1573,6 +1573,42 @@ fn a_remote_tracking_branch_fetches_from_the_remote_named_in_its_path() {
 }
 
 #[test]
+fn a_remote_tracking_branch_fetches_the_source_its_refspec_maps() {
+    let world = World::new();
+    let coordinator = coordinator(&world);
+    git(
+        &world.work,
+        &[
+            "config",
+            "remote.origin.fetch",
+            "+refs/heads/*:refs/remotes/origin/review/*",
+        ],
+    );
+    git(&world.work, &["fetch", "--quiet", "origin"]);
+    let main = world.colleague_pushes("main", "f", "one\ntwo\n");
+
+    let fetched = coordinator
+        .overview(
+            world.path(),
+            fetch_remote("refs/remotes/origin/review/main"),
+        )
+        .unwrap();
+    assert_eq!(
+        fetched.fetch.unwrap().remotes,
+        [RemoteFetch {
+            remote: "origin".into(),
+            outcome: FetchOutcome::Fetched
+        }]
+    );
+    assert_eq!(git(&world.work, &["rev-parse", "origin/review/main"]), main);
+
+    let error = coordinator
+        .overview(world.path(), fetch_remote("refs/remotes/elsewhere/main"))
+        .unwrap_err();
+    assert_eq!(error.kind, ErrorKind::InvalidRef);
+}
+
+#[test]
 fn a_branch_without_a_remote_upstream_fetches_nothing() {
     let world = World::new();
     let coordinator = coordinator(&world);
