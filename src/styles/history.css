@@ -347,6 +347,13 @@
 .history-search input {
   width: 100%;
 }
+.history-search:has(input:focus-visible) {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+.history-search input:focus-visible {
+  outline: none;
+}
 .history-search .icon-button {
   width: 22px;
   height: 24px;
