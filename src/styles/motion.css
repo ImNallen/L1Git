@@ -53,7 +53,7 @@
   border-color: var(--border-strong);
 }
 .button.primary:active:not(:disabled, [aria-disabled="true"]) {
-  background: color-mix(in srgb, var(--primary-hover), var(--primary-text) 15%);
+  background: var(--primary-bg);
   border-color: var(--primary-text);
 }
 .button.danger:active:not(:disabled, [aria-disabled="true"]) {

@@ -98,7 +98,6 @@ export function ContextMenu({
     const outside = (event: PointerEvent) => {
       if (!ref.current?.contains(event.target as Node)) close();
     };
-    // Capture so the app's own Escape handling never sees this keypress.
     const key = (event: KeyboardEvent) => {
       if (event.key === "Escape" || event.key === "Tab") {
         event.preventDefault();
