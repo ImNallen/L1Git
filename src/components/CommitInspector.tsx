@@ -73,7 +73,6 @@ type Props = {
   placement: CommitPlacement;
   selectedFile: OpenedFile | null;
   onSelectFile: (path: string, side: ListSide | null) => void;
-  toggleButton: ReactNode;
   onRetry: () => void;
   worktree: { worktree: Worktree; changes: WorktreeChanges | undefined } | null;
   onRefreshChanges: () => void;
@@ -101,19 +100,16 @@ export type WorktreeWrites = {
 export function InspectorFrame({
   ref,
   heading,
-  toggleButton,
   children,
 }: {
   ref?: Ref<HTMLElement>;
   heading?: ReactNode;
-  toggleButton: ReactNode;
   children?: ReactNode;
 }) {
   return (
     <aside ref={ref} className="inspector" aria-label="Commit inspector">
       <div className="inspector-heading">
         {heading ?? <span>Commit details</span>}
-        {toggleButton}
       </div>
       {children}
     </aside>
@@ -172,7 +168,6 @@ export function CommitInspector({
   placement,
   selectedFile,
   onSelectFile,
-  toggleButton,
   onRetry,
   worktree,
   onRefreshChanges,
@@ -230,7 +225,7 @@ export function CommitInspector({
 
   if (selection?.kind === "worktree" && compare === null)
     return (
-      <InspectorFrame ref={motionRoot} toggleButton={toggleButton}>
+      <InspectorFrame ref={motionRoot}>
         <MotionBoundary {...repositoryMotion} />
         <MotionBoundary {...motion} />
         {worktree ? (
@@ -279,7 +274,6 @@ export function CommitInspector({
     return (
       <InspectorFrame
         ref={motionRoot}
-        toggleButton={toggleButton}
         heading={
           <span className="compare-ends">
             <code>{compare.base.slice(0, 7)}</code>
@@ -382,7 +376,7 @@ export function CommitInspector({
       ? (target?.commit.parents.slice(0, 1) ?? [])
       : (target?.commit.parents ?? []);
   return (
-    <InspectorFrame ref={motionRoot} toggleButton={toggleButton}>
+    <InspectorFrame ref={motionRoot}>
       <MotionBoundary {...repositoryMotion} />
       <MotionBoundary {...motion} />
       {detail && target ? (

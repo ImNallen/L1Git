@@ -176,16 +176,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   usePrefetchLazyViews();
 
   const { commands } = actions;
-  const sidebarToggle = (
-    <SidebarToggle layout={layout} toggle={commands.toggleSidebar} />
-  );
-  const inspectorToggle = (
-    <InspectorToggle
-      layout={layout}
-      disabled={!view.shown}
-      toggle={commands.toggleInspector}
-    />
-  );
   const persistenceError =
     app.persistenceError ??
     expansion.persistenceError ??
@@ -194,11 +184,11 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
 
   return (
     <div
-      className={`app ${macNative ? "native-mac" : ""} ${layout.sidebarOpen ? "" : "sidebar-hidden"}`}
+      className={`app ${macNative ? "native-mac" : ""} ${layout.sidebarOpen ? "" : "sidebar-hidden"} ${layout.inspectorVisible ? "" : "inspector-hidden"}`}
     >
+      <SidebarToggle layout={layout} toggle={commands.toggleSidebar} />
       <Sidebar
         layout={layout}
-        toggle={sidebarToggle}
         settings={settings}
         commands={commands}
         entries={app.catalog.entries}
@@ -217,8 +207,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
             <Toolbar
               actions={actions}
               searchSlot={layout.setSearchSlot}
-              sidebarToggle={sidebarToggle}
-              inspectorToggle={inspectorToggle}
               layout={layout}
               shown={view.shown}
               snapshot={view.snapshot}
@@ -253,7 +241,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
           </div>
           <InspectorPane
             layout={layout}
-            toggle={inspectorToggle}
             app={app}
             snapshot={view.snapshot}
             nav={nav}
@@ -263,6 +250,11 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
           />
         </div>
       </main>
+      <InspectorToggle
+        layout={layout}
+        disabled={!view.shown}
+        toggle={commands.toggleInspector}
+      />
       {/* Overlays in this order, so dialogs opened in one commit stack as before. */}
       <RetainedResolutionHost
         drafts={drafts}

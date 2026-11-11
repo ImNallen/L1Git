@@ -1,4 +1,3 @@
-import type { ReactNode } from "react";
 import { CommitInspector, InspectorFrame } from "../components/CommitInspector";
 import { PaneDivider } from "../components/PaneDivider";
 import type { RepositorySnapshot } from "../domain/repository";
@@ -10,7 +9,6 @@ import type { WorkspaceApi } from "./workspaceView";
 
 export function InspectorPane({
   layout,
-  toggle,
   app,
   snapshot,
   nav,
@@ -22,7 +20,6 @@ export function InspectorPane({
     Layout,
     "inspectorVisible" | "inspectorWidth" | "setInspectorWidth"
   >;
-  toggle: ReactNode;
   app: WorkspaceApi;
   snapshot: RepositorySnapshot | null;
   nav: Pick<Navigation, "selecting">;
@@ -56,14 +53,13 @@ export function InspectorPane({
             placement={history.placement}
             selectedFile={fileDiff.kind !== "closed" ? fileDiff : null}
             onSelectFile={app.openFile}
-            toggleButton={toggle}
             onRetry={app.retryDetail}
             worktree={staging.selectedWorktree}
             onRefreshChanges={rereadChanges}
             writes={staging.inspectorWrites}
           />
         ) : (
-          <InspectorFrame toggleButton={toggle} />
+          <InspectorFrame />
         )}
       </div>
     </>

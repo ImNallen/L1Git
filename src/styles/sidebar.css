@@ -22,8 +22,34 @@
   padding-left: 100px;
   gap: 8px;
 }
-.native-mac.sidebar-hidden .toolbar {
-  padding-left: 100px;
+.app {
+  --pane-toggle-top: 15px;
+  --sidebar-toggle-left: 24px;
+  --inspector-toggle-right: 13px;
+  --inspector-toggle-reserve: calc(var(--inspector-toggle-right) + 28px + 12px);
+  position: relative;
+}
+.native-mac {
+  --sidebar-toggle-left: 100px;
+}
+/* Above the narrow-window inspector overlay (z-index 5), below popovers and menus. */
+.sidebar-toggle,
+.inspector-toggle {
+  position: absolute;
+  top: var(--pane-toggle-top);
+  z-index: 6;
+}
+.sidebar-toggle {
+  left: var(--sidebar-toggle-left);
+}
+.inspector-toggle {
+  right: var(--inspector-toggle-right);
+}
+.sidebar-hidden .toolbar {
+  padding-left: calc(var(--sidebar-toggle-left) + 28px + 12px);
+}
+.inspector-hidden .toolbar {
+  padding-right: var(--inspector-toggle-reserve);
 }
 .sidebar-search {
   display: flex;
@@ -410,15 +436,6 @@ input::placeholder {
   outline-offset: var(--focus-ring-offset);
 }
 
-.brand {
-  position: relative;
-  z-index: 1;
-}
-.brand > .icon-button {
-  position: absolute;
-  top: 14px;
-  right: 48px;
-}
 .repositories-heading {
   height: 56px;
   flex-shrink: 0;

@@ -33,11 +33,11 @@ export function useFocus(
     for (const focus of [
       () => historyRef.current?.focus(),
       () => fileDiffRef.current?.focus(),
-      () => sidebarToggleRef.current?.focus(),
       () =>
         document
           .querySelector<HTMLElement>(".repository-open[aria-current='true']")
           ?.focus(),
+      () => sidebarToggleRef.current?.focus(),
     ]) {
       focus();
       if (shownElement(focusedElement())) return;

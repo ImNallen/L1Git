@@ -1,4 +1,4 @@
-import type { ReactNode, Ref } from "react";
+import type { Ref } from "react";
 import { actions as actionRegistry, titleOf } from "../actions";
 import type { ActionId } from "../actions";
 import type { ComposedActions } from "./actionSlices";
@@ -44,20 +44,13 @@ const menus: { kind: ToolbarMenuKind; label: string; actions: ActionId[] }[] = [
 export function Toolbar({
   actions,
   searchSlot,
-  sidebarToggle,
-  inspectorToggle,
   layout,
   shown,
   snapshot,
 }: {
   actions: ComposedActions;
   searchSlot: Ref<HTMLDivElement>;
-  sidebarToggle: ReactNode;
-  inspectorToggle: ReactNode;
-  layout: Pick<
-    Layout,
-    "sidebarOpen" | "inspectorVisible" | "toolbarMenu" | "setToolbarMenu"
-  >;
+  layout: Pick<Layout, "toolbarMenu" | "setToolbarMenu">;
   shown: WorkspaceView["shown"];
   snapshot: RepositorySnapshot | null;
 }) {
@@ -75,7 +68,6 @@ export function Toolbar({
       className="toolbar"
       data-tauri-drag-region
     >
-      {!layout.sidebarOpen && sidebarToggle}
       <div className="toolbar-actions">
         {snapshot &&
           menus.map(({ kind, label }) => (
@@ -98,7 +90,6 @@ export function Toolbar({
               </button>
             </div>
           ))}
-        {!layout.inspectorVisible && inspectorToggle}
       </div>
       <div className="toolbar-search-slot" ref={searchSlot} />
       {menu && anchor && (

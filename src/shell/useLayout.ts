@@ -9,11 +9,6 @@ import type { WorkspaceView } from "./workspaceView";
 // Below this the default sidebar leaves the history too narrow for its columns.
 const NARROW_SIDEBAR = "(max-width: 939px)";
 
-/**
- * Pane open state and widths. Each toggle renders in one of two places and
- * refocuses whichever instance is mounted after `flushSync`, so its ref is
- * shared and owned here rather than by the toggle.
- */
 export type ToolbarMenuKind =
   | "fetch"
   | "pull"
@@ -23,6 +18,11 @@ export type ToolbarMenuKind =
   | "more";
 export type ToolbarMenu = { kind: ToolbarMenuKind; anchor: HTMLButtonElement };
 
+/**
+ * Pane open state and widths. The toggle refs live here because the toggle
+ * commands focus their button, which WebKit does not do on click, and the
+ * focus fallback focuses the sidebar toggle.
+ */
 export type Layout = {
   searchSlot: HTMLDivElement | null;
   setSearchSlot: (element: HTMLDivElement | null) => void;
@@ -91,14 +91,12 @@ export function useLayout(shown: WorkspaceView["shown"]): Layout {
       commands: {
         toggleSidebar: () => {
           flushSync(() => setSidebarOpen((open) => !open));
-          (
-            sidebarToggleRef.current ??
-            document.querySelector<HTMLElement>(
-              ".repository-open[aria-current='true']",
-            )
-          )?.focus();
+          sidebarToggleRef.current?.focus();
         },
-        toggleInspector: () => setInspectorOpen((open) => !open),
+        toggleInspector: () => {
+          flushSync(() => setInspectorOpen((open) => !open));
+          inspectorToggleRef.current?.focus();
+        },
         focusCommit: () => {
           flushSync(() => setInspectorOpen(true));
           document.getElementById(COMMIT_SUMMARY_ID)?.focus();

@@ -14,7 +14,6 @@ type WorkspaceName =
   | "Search"
   | "Plus"
   | "File"
-  | "Panel"
   | "Copy";
 
 const sources = {
@@ -31,7 +30,6 @@ const sources = {
   Search: ["workspace/Search", 16, 16],
   Plus: ["workspace/Plus", 16, 16],
   File: ["workspace/File", 16, 16],
-  Panel: ["workspace/Panel", 16, 16],
   Copy: ["workspace/Copy", 16, 16],
   SettingsSearch: ["settings/Search", 14, 14],
   SettingsGeneral: ["settings/Settings", 16, 16],

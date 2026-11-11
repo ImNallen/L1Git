@@ -538,8 +538,6 @@ kbd {
 }
 .toolbar-search-slot {
   flex: 0 1 300px;
-  position: relative;
-  top: 1px;
 }
 @container (max-width: 1000px) {
   .toolbar-actions .button span:not(.workspace-action-icon) {
@@ -575,7 +573,7 @@ kbd {
 }
 .toolbar {
   padding-inline: 24px;
-  margin-bottom: 1px;
+  margin-top: 1px;
 }
 .toolbar-action-group {
   display: flex;

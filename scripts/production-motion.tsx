@@ -153,7 +153,6 @@ export function ProductionMotionRegression() {
           placement={{ refs: [], lane: 0 }}
           selectedFile={null}
           onSelectFile={() => {}}
-          toggleButton={null}
           onRetry={() => {}}
           worktree={null}
           onRefreshChanges={() => {}}
