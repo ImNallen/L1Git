@@ -198,6 +198,16 @@ const handlers: Record<string, Handler> = {
   },
   conflictFile: (request) =>
     editableConflict(request.path, String(request.file)),
+  conflictSummary: (request, world) => {
+    const state = world.merges.get(request.path as RepositoryRoot);
+    const unresolved =
+      state?.kind === "active"
+        ? state.unresolved
+        : state?.kind === "replay"
+          ? state.progress.unresolved
+          : [];
+    return unresolved.map((path) => ({ kind: "text", path, conflicts: 1 }));
+  },
   lineStats: () => [],
   filePatch: () => ({
     kind: "text",

@@ -1,9 +1,19 @@
 import { describe, expect, it } from "vitest";
 import { activeMerge, idleMerge, replayInProgress } from "../test/fixtures";
-import { finishBlock, inProgress } from "./inProgress";
+import {
+  conflictLabel,
+  finishBlock,
+  inProgress,
+  operationGroups,
+  operationMessage,
+} from "./inProgress";
 import { mergeStateSchema } from "./merge";
 import type { MergeState } from "./merge";
-import { oidSchema } from "./repository";
+import {
+  conflictVersionSchema,
+  oidSchema,
+  statusEntrySchema,
+} from "./repository";
 import type { RepositoryRoot } from "./repository";
 
 const root = "/repo" as RepositoryRoot;
@@ -175,5 +185,130 @@ describe("finishBlock", () => {
     );
     expect(finishBlock(staged, amending)).toBeNull();
     expect(finishBlock(staged, { ...ready, message: "\n" })).toBe("noMessage");
+  });
+});
+
+describe("operationMessage", () => {
+  const running = { suggestedMessage: "Merge topic into main\n\nWhy.\n" };
+
+  it("stands a blank draft in for the suggested message", () => {
+    expect(operationMessage(running, { summary: "", description: "" })).toEqual(
+      {
+        draft: { summary: "Merge topic into main", description: "Why." },
+        message: "Merge topic into main\n\nWhy.\n",
+        edited: false,
+      },
+    );
+  });
+
+  it("commits what the user typed once they edit", () => {
+    expect(
+      operationMessage(running, { summary: "Mine", description: "" }),
+    ).toMatchObject({ message: "Mine\n", edited: true });
+  });
+});
+
+describe("operationGroups", () => {
+  const staged = (path: string, code: "A" | "M" | "D") =>
+    statusEntrySchema.parse({
+      kind: "ordinary",
+      path,
+      submodule: null,
+      sides: { kind: "staged", staged: code },
+      index: null,
+    });
+  const entries = [
+    staged("a.ts", "M"),
+    staged("clean.ts", "A"),
+    statusEntrySchema.parse({
+      kind: "ordinary",
+      path: "b.ts",
+      submodule: null,
+      sides: { kind: "both", staged: "M", unstaged: "M" },
+      index: null,
+    }),
+    statusEntrySchema.parse({ kind: "untracked", path: "notes.txt" }),
+  ];
+
+  it("queues what is left, then what was resolved, merged cleanly, and not staged", () => {
+    const groups = operationGroups(
+      {
+        unresolved: ["c.ts"],
+        resolved: ["a.ts", "b.ts"],
+        clean: ["clean.ts"],
+        total: 3,
+      },
+      entries,
+    );
+    expect(
+      groups.map(({ kind, title, side, files }) => [
+        kind,
+        title,
+        side,
+        files.map((file) => `${file.path}:${file.status}`),
+      ]),
+    ).toEqual([
+      ["unresolved", "Needs resolution", "conflict", ["c.ts:modified"]],
+      ["resolved", "Resolved", "staged", ["a.ts:modified", "b.ts:modified"]],
+      ["clean", "Merged cleanly", "staged", ["clean.ts:added"]],
+      [
+        "unstaged",
+        "Not staged",
+        "unstaged",
+        ["b.ts:modified", "notes.txt:untracked"],
+      ],
+    ]);
+  });
+
+  it("drops empty groups and keeps one staged group without the recorded conflicts", () => {
+    const groups = operationGroups(
+      { unresolved: [], resolved: null, clean: null, total: null },
+      [staged("a.ts", "M")],
+    );
+    expect(groups.map(({ kind, title }) => [kind, title])).toEqual([
+      ["staged", "Staged"],
+    ]);
+  });
+});
+
+describe("conflictLabel", () => {
+  const whole = (
+    shape:
+      | "deletedByThem"
+      | "deletedByUs"
+      | "addedByUs"
+      | "addedByThem"
+      | "binary"
+      | "symlink",
+  ) =>
+    conflictLabel({
+      kind: "wholeFile",
+      path: "x",
+      version: conflictVersionSchema.parse("f".repeat(40)),
+      shape,
+      current: null,
+      incoming: null,
+      disk: "unknown",
+    });
+
+  it("names what still stands between a path and Mark resolved", () => {
+    expect(conflictLabel({ kind: "text", path: "x", conflicts: 2 })).toBe(
+      "2 conflicts",
+    );
+    expect(conflictLabel({ kind: "text", path: "x", conflicts: 1 })).toBe(
+      "1 conflict",
+    );
+    expect(conflictLabel({ kind: "text", path: "x", conflicts: 0 })).toBe(
+      "Ready to mark resolved",
+    );
+    expect(whole("deletedByThem")).toBe("Deleted vs edited");
+    expect(whole("deletedByUs")).toBe("Deleted vs edited");
+    expect(whole("binary")).toBe("Binary file");
+    expect(whole("symlink")).toBe("Symlink");
+    expect(whole("addedByUs")).toBe("Added on one side");
+    expect(whole("addedByThem")).toBe("Added on one side");
+    expect(
+      conflictLabel({ kind: "external", path: "x", reason: "structural" }),
+    ).toBe("Resolve outside L1 Git");
   });
 });

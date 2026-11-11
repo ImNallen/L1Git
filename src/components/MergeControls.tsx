@@ -13,14 +13,9 @@ import { useRead } from "../useRead";
 import type { Read } from "../useRead";
 import { useDraftImpact } from "../draftProtection";
 import { clearSubmitted, useCommitDraft } from "../commitDrafts";
-import { messageFor, splitMessage } from "../domain/commitMessage";
-import type { Draft } from "../domain/commitMessage";
-import {
-  discardConsentedResolutions,
-  resolutionConsent,
-} from "../resolutionDrafts";
+import { inProgress } from "../domain/inProgress";
 import type { MergeCommandOutcome } from "../useWrites";
-import { ConfirmDialog } from "./ConfirmDialog";
+import { OperationStrip } from "./OperationStrip";
 
 export function MergePair({ review }: { review: MergeReview }) {
   return (
@@ -36,57 +31,6 @@ export function MergePair({ review }: { review: MergeReview }) {
         <code>{review.destination.oid}</code>
       </dd>
     </dl>
-  );
-}
-
-export function OperationMessage({
-  summaryLabel,
-  descriptionLabel,
-  suggested,
-  draft,
-  setDraft,
-  disabled,
-}: {
-  summaryLabel: string;
-  descriptionLabel: string;
-  suggested: string;
-  draft: Draft;
-  setDraft: (draft: Draft) => void;
-  disabled: boolean;
-}) {
-  return (
-    <>
-      <label className="merge-message">
-        {summaryLabel}
-        <input
-          aria-label={summaryLabel}
-          className="commit-summary"
-          value={draft.summary}
-          placeholder={splitMessage(suggested).summary}
-          readOnly={disabled}
-          onChange={(event) =>
-            setDraft({ ...draft, summary: event.target.value })
-          }
-        />
-        <textarea
-          aria-label={descriptionLabel}
-          className="commit-description"
-          value={draft.description}
-          placeholder="Description (optional)"
-          readOnly={disabled}
-          onChange={(event) =>
-            setDraft({ ...draft, description: event.target.value })
-          }
-        />
-      </label>
-      <button
-        className="button secondary"
-        disabled={disabled}
-        onClick={() => setDraft(splitMessage(suggested))}
-      >
-        Use suggested message
-      </button>
-    </>
   );
 }
 
@@ -177,55 +121,68 @@ export function MergeControls({
     return result;
   }
   const state = read.kind === "ready" ? read.value : null;
-  if (
-    !notice &&
-    !review &&
-    (read.kind === "loading" ||
-      state?.kind === "replay" ||
-      (state?.kind === "idle" && !eligible))
-  )
-    return null;
+  const shown = state?.kind === "replay" ? null : inProgress(state);
+  const operation = shown?.kind === "none" ? null : shown;
+  const offer = state?.kind === "idle" && eligible;
   return (
-    <section className="merge-controls" aria-label="Branch merge">
-      {state?.kind === "idle" && eligible && (
-        <div className="merge-actions">
-          <button
-            className="button secondary"
-            disabled={busy || frozen}
-            onClick={onReview}
-          >
-            <GitMerge size={14} /> Merge upstream…
-          </button>
-        </div>
-      )}
-      {notice && (
-        <div
-          role={notice.error ? "alert" : "status"}
-          className={notice.error ? "error-message" : "muted"}
-        >
-          {notice.message}
-        </div>
-      )}
-      {read.kind === "error" && <p role="alert">{read.error.message}</p>}
-      {state?.kind === "attention" && (
-        <div role="alert">
-          <strong>
-            {state.reason === "externalOperation"
-              ? "Git operation in progress"
-              : "Merge needs attention"}
-          </strong>
-          <p>{state.message}</p>
-          {state.session && <MergePair review={state.session.review} />}
-        </div>
-      )}
-      {state?.kind === "active" && (
-        <ActiveMerge
-          key={state.session.id}
-          state={state}
+    <>
+      {operation && (
+        <OperationStrip
+          key={operation.kind === "running" ? operation.key : operation.kind}
+          shown={operation}
           busy={busy}
-          run={execute}
           onInspect={onInspect}
+          onFinish={async (message, draft) => {
+            if (state?.kind !== "active" || state.tree === null) return;
+            const result = await execute({
+              kind: "finish",
+              session: state.session.id,
+              staged: state.staged,
+              tree: state.tree,
+              message,
+            });
+            if (
+              result.kind === "merged" &&
+              result.report.outcome.kind === "finished"
+            )
+              clearSubmitted(root, draft);
+          }}
+          onAbort={async () => {
+            if (state?.kind !== "active") return false;
+            const result = await execute({
+              kind: "abort",
+              session: state.session.id,
+            });
+            return (
+              result.kind === "merged" &&
+              result.report.outcome.kind === "aborted"
+            );
+          }}
         />
+      )}
+      {(offer || notice || read.kind === "error") && (
+        <section className="merge-controls" aria-label="Branch merge">
+          {offer && (
+            <div className="merge-actions">
+              <button
+                className="button secondary"
+                disabled={busy || frozen}
+                onClick={onReview}
+              >
+                <GitMerge size={14} /> Merge upstream…
+              </button>
+            </div>
+          )}
+          {notice && (
+            <div
+              role={notice.error ? "alert" : "status"}
+              className={notice.error ? "error-message" : "muted"}
+            >
+              {notice.message}
+            </div>
+          )}
+          {read.kind === "error" && <p role="alert">{read.error.message}</p>}
+        </section>
       )}
       {review && (
         <MergeReviewDialog
@@ -236,158 +193,6 @@ export function MergeControls({
           run={execute}
           onClose={onCloseReview}
         />
-      )}
-    </section>
-  );
-}
-
-function ActiveMerge({
-  state,
-  busy,
-  run,
-  onInspect,
-}: {
-  state: Extract<MergeState, { kind: "active" }>;
-  busy: boolean;
-  run: (action: MergeAction) => Promise<MergeCommandOutcome>;
-  onInspect: () => void;
-}) {
-  const { session } = state;
-  const root = session.review.root;
-  const [draft, setDraft] = useCommitDraft(root);
-  const impact = useDraftImpact();
-  const [aborting, setAborting] = useState<ReturnType<
-    typeof resolutionConsent
-  > | null>(null);
-  const message = messageFor(draft.draft, null);
-  const dirty = impact.resolutions.some((draft) => draft.root === root);
-  const disabled = busy || impact.frozen;
-  async function finish() {
-    if (
-      disabled ||
-      dirty ||
-      !state.tree ||
-      state.unresolved.length > 0 ||
-      !message.trim()
-    )
-      return;
-    const result = await run({
-      kind: "finish",
-      session: session.id,
-      staged: state.staged,
-      tree: state.tree,
-      message,
-    });
-    if (result.kind === "merged" && result.report.outcome.kind === "finished")
-      clearSubmitted(root, draft);
-  }
-  return (
-    <>
-      <strong>Merge in progress</strong>
-      <details>
-        <summary>
-          {session.review.source.reference} into{" "}
-          {session.review.destination.reference}
-        </summary>
-        <MergePair review={session.review} />
-      </details>
-      {state.sourceMoved && (
-        <p>
-          The source branch has moved. This merge still uses the source commit
-          you reviewed above.
-        </p>
-      )}
-      <p>
-        {state.unresolved.length
-          ? `${state.unresolved.length} unresolved path${state.unresolved.length === 1 ? "" : "s"}. Resolve and mark each path.`
-          : "All conflicts are resolved. Review the staged result before finishing."}
-      </p>
-      <button className="button secondary" onClick={onInspect}>
-        Review staged result and conflicts
-      </button>
-      {state.tree && (
-        <details>
-          <summary>Reviewed staged tree</summary>
-          <code>{state.tree}</code>
-        </details>
-      )}
-      <OperationMessage
-        summaryLabel="Merge commit message"
-        descriptionLabel="Merge description"
-        suggested={session.suggestedMessage}
-        draft={draft.draft}
-        setDraft={(next) => setDraft({ draft: next, amend: null })}
-        disabled={disabled}
-      />
-      {dirty && (
-        <p role="status">
-          Unsaved conflict results must be saved before Finish. Abort asks
-          before discarding the drafts shown when you confirm.
-        </p>
-      )}
-      <div className="merge-actions">
-        <button
-          className="button primary"
-          disabled={
-            disabled ||
-            dirty ||
-            state.tree === null ||
-            state.unresolved.length > 0 ||
-            !message.trim()
-          }
-          onClick={() => void finish()}
-        >
-          Finish merge
-        </button>
-        <button
-          className="button secondary"
-          disabled={disabled}
-          onClick={() =>
-            setAborting(resolutionConsent(root, session.footprint))
-          }
-        >
-          Abort merge…
-        </button>
-      </div>
-      <p className="muted">
-        Start, Finish, and Abort cannot be undone. Resolution edits have Undo
-        and Redo until Finish or Abort.
-      </p>
-      {aborting && (
-        <ConfirmDialog
-          icon={GitMerge}
-          title="Abort this merge?"
-          closeLabel="Close abort merge"
-          confirm="Discard merge and abort"
-          onClose={() => setAborting(null)}
-          onConfirm={() => {
-            if (disabled) return;
-            void run({ kind: "abort", session: session.id }).then((result) => {
-              if (
-                result.kind === "merged" &&
-                result.report.outcome.kind === "aborted"
-              )
-                discardConsentedResolutions(aborting);
-            });
-          }}
-        >
-          <p>
-            Discard the merge result and saved resolutions in its affected
-            paths. Unrelated tracked changes block Abort; untracked and ignored
-            files are preserved.
-          </p>
-          {aborting.length > 0 && (
-            <p>
-              Also discard these resolution drafts if they have not changed
-              since this confirmation opened:{" "}
-              {aborting.map(([, draft]) => draft.snapshot.path).join(", ")}.
-            </p>
-          )}
-          <p>
-            The commit message draft stays available. This action cannot be
-            undone.
-          </p>
-        </ConfirmDialog>
       )}
     </>
   );

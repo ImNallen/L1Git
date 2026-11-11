@@ -196,7 +196,7 @@ it("the inspector hides Stash and Commit while the active worktree merges", asyn
   expect(query("group", "Commit")).toBeNull();
 });
 
-it("Inspect in the merge panel selects the worktree, opens the inspector, and clears the sidebar jump", async () => {
+it("the progress in the strip selects the worktree, opens the inspector, and clears the sidebar jump", async () => {
   const app = await mountApp({
     world: (world) =>
       world.merges.set(PIN_FEATURE, activeMerge(PIN_FEATURE, ["feature.txt"])),
@@ -208,7 +208,7 @@ it("Inspect in the merge panel selects the worktree, opens the inspector, and cl
   expect(query("complementary", "Commit inspector")).toBeNull();
   await app.click(refRow("refs/heads/topic")!);
   expect(get("status", /topic is hidden in the graph/)).toBeTruthy();
-  await app.click(get("button", "Review staged result and conflicts"));
+  await app.click(get("button", "1 of 1 resolved"));
   expect(selectedRow()).toBe("Uncommitted changes in pin-feature, 1 modified");
   expect(query("complementary", "Commit inspector")).toBeTruthy();
   expect(query("status", /topic is hidden in the graph/)).toBeNull();
@@ -283,4 +283,58 @@ it("a late merge review response cannot reopen or retarget a review after switch
   expect(dialogs()).toEqual([]);
   expect(app.bridge.count("mergeReview", OTHER)).toBe(0);
   expect(app.bridge.count("merge")).toBe(0);
+});
+
+it("the worktree inspector shows the operation's files by state, labelled from the conflict summary", async () => {
+  const app = await mountApp({
+    world: (world) => {
+      const state = activeMerge(PIN_FEATURE, ["feature.txt", "gone.txt"]);
+      if (state.kind !== "active") throw new Error("expected an active merge");
+      state.session.conflicted = ["feature.txt", "gone.txt"];
+      state.unresolved = ["gone.txt"];
+      world.merges.set(PIN_FEATURE, state);
+    },
+  });
+  app.bridge.respond("conflictSummary", () => [
+    {
+      kind: "wholeFile",
+      path: "gone.txt",
+      version: "f".repeat(40),
+      shape: "deletedByThem",
+      current: { mode: "100644", size: 3 },
+      incoming: null,
+      disk: "matchesCurrent",
+    },
+  ]);
+  await app.click(historyRow("Uncommitted changes in pin-feature,"));
+  const inspector = get("complementary", "Commit inspector");
+  expect(inspector.querySelector(".inspector-heading")?.textContent).toBe(
+    "Merge",
+  );
+  expect(
+    queryAll("region", undefined, inspector).map((region) =>
+      region.getAttribute("aria-label"),
+    ),
+  ).toEqual(["Sides", "Needs resolution", "Resolved", "Commit message"]);
+  const rows = (group: string) => {
+    const tree = get("region", group, inspector).querySelector(
+      "file-tree-container",
+    );
+    return [
+      ...(tree?.shadowRoot?.querySelectorAll(
+        '[data-item-type="file"][data-item-path]',
+      ) ?? []),
+    ].map(
+      (row) =>
+        `${row.getAttribute("data-item-path")}: ${row.querySelector('[data-item-section="decoration"]')?.textContent}`,
+    );
+  };
+  expect(rows("Needs resolution")).toEqual(["gone.txt: Deleted vs edited"]);
+  expect(rows("Resolved")).toEqual(["feature.txt: Resolved"]);
+  expect(app.bridge.count("conflictSummary")).toBeGreaterThan(0);
+  await app.click(historyRow("Feature work,"));
+  expect(
+    get("complementary", "Commit inspector").querySelector(".inspector-heading")
+      ?.textContent,
+  ).toBe("Commit details");
 });

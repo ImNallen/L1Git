@@ -8,6 +8,7 @@ type Props = {
   title: string;
   closeLabel: string;
   confirm: string;
+  cancel?: string;
   onConfirm: () => void;
   onClose: () => void;
   children: ReactNode;
@@ -18,16 +19,17 @@ export function ConfirmDialog({
   title,
   closeLabel,
   confirm,
+  cancel = "Cancel",
   onConfirm,
   onClose,
   children,
 }: Props) {
   const dialog = useRef<HTMLDialogElement>(null);
-  const cancel = useRef<HTMLButtonElement>(null);
+  const cancelButton = useRef<HTMLButtonElement>(null);
   const titleId = useId();
   useEffect(() => {
     dialog.current?.showModal();
-    cancel.current?.focus();
+    cancelButton.current?.focus();
   }, []);
   // Closing the native dialog before React removes it hands focus back to
   // whatever had it when the dialog opened.
@@ -67,11 +69,11 @@ export function ConfirmDialog({
       <div className="dialog-actions">
         <button
           type="button"
-          ref={cancel}
+          ref={cancelButton}
           className="button secondary"
           onClick={close}
         >
-          Cancel
+          {cancel}
         </button>
         <button
           type="button"

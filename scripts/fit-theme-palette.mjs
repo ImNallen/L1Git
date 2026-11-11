@@ -46,6 +46,8 @@ const STATUS = [
   "deleted",
   "errorText",
   "warningIcon",
+  "sideCurrent",
+  "sideIncoming",
 ];
 // A wash only tints toward its own family, so an imported red reaches the error borders.
 const WASHES = {

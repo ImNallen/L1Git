@@ -456,20 +456,6 @@ kbd {
   font-size: 11px;
   user-select: text;
 }
-.merge-message {
-  display: grid;
-  gap: 4px;
-  margin: 8px 0;
-}
-.merge-message textarea {
-  min-height: 56px;
-  resize: vertical;
-  color: inherit;
-  background: var(--control-inset);
-  border: 1px solid var(--border-input);
-  border-radius: 4px;
-  padding: 6px;
-}
 .merge-dialog {
   width: min(620px, 90vw);
 }

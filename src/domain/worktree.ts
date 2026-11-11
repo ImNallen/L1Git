@@ -81,7 +81,7 @@ export function patchSide(side: ListSide): Side {
 }
 
 export type WorktreeGroup = {
-  title: "Conflicts" | "Unstaged" | "Staged";
+  title: string;
   side: ListSide;
   files: WorktreeFile[];
 };
