@@ -82,6 +82,18 @@ const OVERSCAN = 10;
 const HIGHLIGHT_DELAY = 400;
 const color = (lane: number) => `var(--graph-lane-${(lane % 6) + 1})`;
 const x = (lane: number) => 24 + lane * 24;
+// Rows are separate SVGs at fractional offsets, so lane ends overlap the row edge to avoid antialiased seams.
+const SEAM = 0.5;
+const ROW_BOTTOM = ROW_HEIGHT + SEAM;
+const continuation = (from: number, to: number) =>
+  `M ${x(from)} ${-SEAM} V 0 C ${x(from)} ${ROW_CENTER}, ${x(to)} ${ROW_CENTER}, ${x(to)} ${ROW_HEIGHT} V ${ROW_BOTTOM}`;
+const QUARTER_CIRCLE = 0.5523;
+// A cubic, not an arc: history motion interpolates every number in a path, and arc flags are discrete.
+const parent = (from: number, to: number) => {
+  const turn = Math.sign(to - from) * ROW_CENTER;
+  const handle = QUARTER_CIRCLE * ROW_CENTER;
+  return `M ${x(from)} ${ROW_CENTER} H ${x(to) - turn} C ${x(to) - turn + Math.sign(turn) * handle} ${ROW_CENTER}, ${x(to)} ${ROW_HEIGHT - handle}, ${x(to)} ${ROW_HEIGHT} V ${ROW_BOTTOM}`;
+};
 const NO_COMMITS: readonly Commit[] = [];
 const WORKTREE_DASH = "2 3";
 const NO_EDGES: RowHighlight = {
@@ -106,8 +118,6 @@ function GraphCell({
   children: ReactNode;
 }) {
   const dim = (on: boolean | undefined) => (lit && !on ? "dim" : undefined);
-  const curve = (from: number, to: number, start: number, end: number) =>
-    `M ${x(from)} ${start} C ${x(from)} ${(start + end) / 2}, ${x(to)} ${(start + end) / 2}, ${x(to)} ${end}`;
   return (
     <svg
       className="graph-cell"
@@ -121,8 +131,9 @@ function GraphCell({
           data-graph-key={`continue:${edge.oid}`}
           data-graph-lane={edge.from}
           className={dim(lit?.continuations[index])}
-          d={curve(edge.from, edge.to, 0, ROW_HEIGHT)}
-          stroke={color(edge.from)}
+          d={continuation(edge.from, edge.to)}
+          color={color(edge.from)}
+          stroke="currentColor"
         />
       ))}
       {row.incoming && (
@@ -130,8 +141,9 @@ function GraphCell({
           data-graph-key="incoming"
           data-graph-lane={row.lane}
           className={dim(lit?.incoming)}
-          d={`M ${x(row.lane)} 0 V ${ROW_CENTER}`}
-          stroke={color(row.lane)}
+          d={`M ${x(row.lane)} ${-SEAM} V ${ROW_CENTER}`}
+          color={color(row.lane)}
+          stroke="currentColor"
         />
       )}
       {row.parents.map((edge, index) => (
@@ -140,8 +152,9 @@ function GraphCell({
           data-graph-key={`parent:${edge.oid}`}
           data-graph-lane={edge.to}
           className={dim(lit?.parents[index])}
-          d={curve(edge.from, edge.to, ROW_CENTER, ROW_HEIGHT)}
-          stroke={color(edge.to)}
+          d={parent(edge.from, edge.to)}
+          color={color(edge.to)}
+          stroke="currentColor"
           strokeDasharray={
             parentDash ?? (known.has(edge.oid) ? undefined : "3 3")
           }
