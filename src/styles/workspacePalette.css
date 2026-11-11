@@ -1,7 +1,7 @@
 :root:not([data-palette])[data-theme="dark"] .app {
   --border: rgb(255 255 255 / 7%);
-  --workspace-history-text: #e3e8ef;
-  --workspace-history-title: #e8ebf1;
+  --workspace-history-text: #e7e7e7;
+  --workspace-history-title: #ebebeb;
   --workspace-identifier: #b8b8b8;
   --workspace-heading: #e2e2e2;
   --workspace-message: #a8a8a8;
@@ -23,9 +23,9 @@
   --workspace-branch-text: #bdbdbd;
   --workspace-branch-count: #787878;
   --workspace-branch-head-text: #ececec;
-  --workspace-branch-head-label: #a7b9d8;
+  --workspace-branch-head-label: #b8b8b8;
   --workspace-branch-head-background: rgb(255 255 255 / 6.5%);
-  --workspace-repository-selected-text: #d8e7ff;
+  --workspace-repository-selected-text: #e6e6e6;
   --workspace-sidebar-icon: #858585;
   --workspace-navigation-divider: rgb(255 255 255 / 7.5%);
   --workspace-changes-heading: #dfdfdf;
@@ -33,7 +33,7 @@
   --workspace-changes-added: #6db99a;
   --workspace-changes-zero: #858585;
   --workspace-toolbar-text: #bdbdbd;
-  --workspace-search-placeholder: #a2a6ae;
+  --workspace-search-placeholder: #a6a6a6;
   --workspace-toolbar-hover: #292929;
   --workspace-toolbar-open: #343434;
   --workspace-toolbar-border: rgb(255 255 255 / 12%);
@@ -41,7 +41,7 @@
   --workspace-diff-selected: rgb(255 255 255 / 8%);
   --workspace-diff-path: #dfdfdf;
   --workspace-diff-comparison: #8b8b8b;
-  --workspace-history-heading: #98a3b2;
+  --workspace-history-heading: #a2a2a2;
   --workspace-diffstat-added: #51cba0;
   --workspace-diffstat-neutral: #478c75;
   --workspace-folder-icon: #909090;
@@ -50,18 +50,18 @@
 :root:not([data-palette])[data-theme="dark"] .add-palette {
   --border-strong: rgb(255 255 255 / 12%);
   --border: rgb(255 255 255 / 8%);
-  --text: #e7eaf0;
-  --muted: #a0a9b7;
+  --text: #eaeaea;
+  --muted: #a8a8a8;
   --shadow-dialog: rgb(0 0 0 / 60%);
-  --add-palette-primary: #253c5b;
+  --add-palette-primary: #3b3b3b;
   --add-palette-backdrop: rgb(0 0 0 / 42%);
-  --add-palette-primary-text: #e5efff;
-  --add-palette-field: #161a20;
-  --add-palette-field-border: #2b2f34;
-  --add-palette-selected: #203149;
-  --add-palette-disabled: #20242c;
-  --add-palette-disabled-text: #949dac;
-  --add-palette-key: #242830;
+  --add-palette-primary-text: #eeeeee;
+  --add-palette-field: #1a1a1a;
+  --add-palette-field-border: #2f2f2f;
+  --add-palette-selected: #303030;
+  --add-palette-disabled: #242424;
+  --add-palette-disabled-text: #9c9c9c;
+  --add-palette-key: #282828;
   --add-palette-repository: #98c9ad;
   --add-palette-focus: #82adfc;
 }
@@ -84,19 +84,19 @@
 }
 
 :root:not([data-palette])[data-theme="dark"] .sidebar-updater {
-  --workspace-update-tooltip: #e3e6eb;
+  --workspace-update-tooltip: #e6e6e6;
   --workspace-update-button-hover: rgb(255 255 255 / 7%);
   --workspace-update-border: rgb(255 255 255 / 12%);
   --workspace-update-surface: rgb(255 255 255 / 5%);
   --workspace-update-divider: rgb(255 255 255 / 8%);
-  --workspace-update-heading: #f0f2f6;
-  --workspace-update-version: #9ca5b3;
-  --workspace-update-track: #b7bfcb;
-  --workspace-update-notes-heading: #e4e8f0;
-  --workspace-update-source: #929ba9;
-  --workspace-update-notes: #cbd2dd;
-  --workspace-update-reference: #9fbdf0;
-  --workspace-update-progress-text: #cbd7e8;
+  --workspace-update-heading: #f2f2f2;
+  --workspace-update-version: #a4a4a4;
+  --workspace-update-track: #bebebe;
+  --workspace-update-notes-heading: #e8e8e8;
+  --workspace-update-source: #9a9a9a;
+  --workspace-update-notes: #d1d1d1;
+  --workspace-update-reference: #bcbcbc;
+  --workspace-update-progress-text: #d6d6d6;
   --workspace-update-progress-track: rgb(255 255 255 / 10%);
   --workspace-update-progress: #82acf8;
 }

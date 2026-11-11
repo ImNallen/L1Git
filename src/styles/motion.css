@@ -48,7 +48,7 @@
 .button.secondary:active:not(:disabled, [aria-disabled="true"]),
 .icon-button:active:not(:disabled, [aria-disabled="true"]),
 .toolbar-action:active:not(:disabled, [aria-disabled="true"]) {
-  background: var(--row-selected);
+  background: var(--control-pressed);
   color: var(--text);
   border-color: var(--border-strong);
 }
@@ -224,7 +224,7 @@
   z-index: 0;
   pointer-events: none;
   background: var(--row-selected);
-  box-shadow: inset 2px 0 var(--blue);
+  box-shadow: inset 2px 0 var(--muted);
 }
 .history-table {
   position: relative;

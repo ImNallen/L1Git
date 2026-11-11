@@ -316,7 +316,7 @@
   cursor: default;
 }
 .command-palette-results li[aria-selected="true"] {
-  background: color-mix(in srgb, var(--primary-bg) 16%, var(--row-selected));
+  background: var(--row-selected);
 }
 .command-palette:has(.command-palette-input input:focus-visible)
   .command-palette-results

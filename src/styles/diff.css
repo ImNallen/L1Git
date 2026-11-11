@@ -421,8 +421,8 @@
 }
 
 :root[data-theme="dark"]:not([data-palette]) .file-diff diffs-container {
-  --hunk-text: #8d9bb0;
-  --diffs-bg-separator-override: #181a1e;
+  --hunk-text: #9a9a9a;
+  --diffs-bg-separator-override: #1a1a1a;
   --diffs-bg-addition-override: #172724;
   --diffs-bg-deletion-override: #2b1c20;
   --diffs-fg-number-override: #6f7f78;
