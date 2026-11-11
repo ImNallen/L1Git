@@ -318,7 +318,7 @@
   flex: 1;
 }
 .history-table tr.selected {
-  box-shadow: inset 2px 0 var(--blue);
+  box-shadow: inset 2px 0 var(--muted);
   background: var(--row-selected);
 }
 .history-table tr.selected td {

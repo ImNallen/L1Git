@@ -865,7 +865,7 @@
 }
 :root:not([data-palette])[data-theme="dark"] .settings-dialog {
   --canvas: #0d0d0d;
-  --settings-search-placeholder: #a2a6ae;
+  --settings-search-placeholder: #a6a6a6;
   --sidebar: #141414;
   --border: #262626;
   --border-strong: #343434;
@@ -877,10 +877,6 @@
   --text-secondary: #cfcfcf;
   --text-icon: #a0a0a0;
   --muted: #a0a0a0;
-  --nav-selected-bg: #17243a;
-  --nav-selected-text: #a6c6fa;
-  --segment-selected: #17243a;
-  --text-strong: #a6c6fa;
 }
 @media (max-width: 700px) {
   .settings-navigation > nav {

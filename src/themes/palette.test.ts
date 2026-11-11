@@ -146,11 +146,11 @@ const builtInLanes = BUILT_IN_FAMILIES.flatMap((f) => f.variants).map(
 
 it("starts each theme's lanes from L1's lane nearest its accent and keeps L1's order", () => {
   expect(LANES.map((lane) => variantPalette("grove-dark")[lane])).toEqual([
-    "#2bd3be",
-    "#fabe23",
-    "#fa7084",
+    "#2cd4bf",
+    "#fbbf23",
+    "#fa7085",
     "#bf83fb",
-    "#a2e533",
+    "#a3e534",
     "#6291fe",
   ]);
   expect(
@@ -159,15 +159,15 @@ it("starts each theme's lanes from L1's lane nearest its accent and keeps L1's o
     "l1-light": "#1b4ed8",
     "l1-dark": "#6392ff",
     "grove-light": "#0d756d",
-    "grove-dark": "#2bd3be",
+    "grove-dark": "#2cd4bf",
     "ocean-light": "#1a4cd6",
     "ocean-dark": "#6291fe",
     "ember-light": "#b35207",
-    "ember-dark": "#fa7084",
+    "ember-dark": "#fa7085",
     "iris-light": "#9231e8",
     "iris-dark": "#be82fa",
     "rose-light": "#df1946",
-    "rose-dark": "#fa7084",
+    "rose-dark": "#f96f84",
   });
 });
 
@@ -248,14 +248,14 @@ it.each(derived.map((v) => [v.id, v.palette] as const))(
 it("tints status washes and shadows with the theme's background", () => {
   const grove = variantPalette("grove-dark");
   expect([grove.success, grove.successBg, grove.shadowPane]).toEqual([
-    "#64bc9b",
+    "#64bd9c",
     "#182822",
-    "#00000077",
+    "#00010077",
   ]);
   const ember = variantPalette("ember-light");
   expect([ember.errorBg, ember.accentMuted, ember.shadowPane]).toEqual([
     "#fbeae5",
-    "#895b46",
+    "#696766",
     "#19181826",
   ]);
 });
@@ -279,13 +279,13 @@ it("tints error washes toward the red a theme brings", () => {
     accent: "#bd93f9",
     deleted: "#ff5555",
   });
-  expect(p.errorBorder).toBe("#53373f");
+  expect(p.errorBorder).toBe("#52363e");
 });
 
 it("starts lanes from L1's blue when the accent is grey", () => {
   for (const accent of ["#808080", "#7f8081"]) {
     const p = derivePalette("dark", "#0a0a0a", accent);
-    expect([p.graphLane1, p.graphLane3]).toEqual(["#5f8dfa", "#f8bc1f"]);
+    expect([p.graphLane1, p.graphLane3]).toEqual(["#5e8df9", "#f8bc1e"]);
   }
 });
 
@@ -307,7 +307,7 @@ it("colours keywords with the accent and turns the rest of the code with it", ()
     grove.syntaxKeyword,
     grove.syntaxString,
     grove.syntaxComment,
-  ]).toEqual(["#72daa7", "#fbb76d", "#959997"]);
+  ]).toEqual(["#72dba7", "#fbb86e", "#959998"]);
   expect([
     ember.syntaxKeyword,
     ember.syntaxString,

@@ -227,7 +227,7 @@ input::placeholder {
   color: var(--nav-selected-text);
 }
 .branch-row.selected > svg {
-  color: var(--blue);
+  color: var(--nav-selected-text);
 }
 .branch-row.head:not(.selected) {
   background: var(--success-bg);
@@ -276,7 +276,7 @@ input::placeholder {
   color: var(--text-faint);
 }
 .branch-item.soloed > .branch-visibility {
-  color: var(--blue);
+  color: var(--text-strong);
 }
 .rule-cue {
   display: inline-flex;
@@ -284,7 +284,7 @@ input::placeholder {
   color: var(--text-faint);
 }
 .rule-cue.solo {
-  color: var(--blue);
+  color: var(--text-strong);
 }
 .branch-head {
   font-size: 10px;
@@ -419,7 +419,7 @@ input::placeholder {
   gap: 2px;
 }
 .sync-counts .incoming {
-  color: var(--blue);
+  color: var(--text-secondary);
 }
 .sync-counts .outgoing {
   color: var(--success);

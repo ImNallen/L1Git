@@ -22,6 +22,7 @@ export const STYLESHEET_TOKENS = {
   control: "--control",
   controlInset: "--control-inset",
   controlHover: "--control-hover",
+  controlPressed: "--control-pressed",
   rowHover: "--row-hover",
   rowSelected: "--row-selected",
   segmentSelected: "--segment-selected",

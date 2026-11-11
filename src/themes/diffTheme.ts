@@ -45,12 +45,12 @@ export function diffTheme(appearance: Appearance, painted: boolean): string {
 
 for (const type of ["light", "dark"] as const) {
   const name = `l1-muted-${type}`;
-  const foreground = type === "dark" ? "#bec5cc" : "#464b53";
+  const foreground = type === "dark" ? "#c4c4c4" : "#4b4b4b";
   registerCustomTheme(name, async () => ({
     name,
     type,
     colors: {
-      "editor.background": type === "dark" ? "#101216" : "#ffffff",
+      "editor.background": type === "dark" ? "#121212" : "#ffffff",
       "editor.foreground": foreground,
     },
     tokenColors:
@@ -59,7 +59,7 @@ for (const type of ["light", "dark"] as const) {
         : [
             {
               scope: ["comment"],
-              settings: { foreground: "#737980" },
+              settings: { foreground: "#787878" },
             },
           ],
   }));
