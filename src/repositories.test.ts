@@ -352,3 +352,46 @@ it.each([true, false])(
     await expect(api.mergeState(root)).rejects.toThrow();
   },
 );
+
+it.each([true, false])(
+  "sends conflictSummary and operationProbe through native=%s transport and validates the answers",
+  async (native) => {
+    const api = await load(native);
+    const answer = (op: string, data: unknown) => {
+      if (native) invoke.mockResolvedValueOnce({ op, data });
+      else reply(200, { ok: true, op, data });
+    };
+    const summary = [
+      { kind: "text", path: "a.txt", conflicts: 2 },
+      {
+        kind: "wholeFile",
+        path: "b.txt",
+        version: "e".repeat(40),
+        shape: "deletedByThem",
+        current: { mode: "100644", size: 5 },
+        incoming: null,
+        disk: "edited",
+      },
+      { kind: "external", path: "c", reason: "specialFile" },
+    ];
+    answer("conflictSummary", summary);
+    expect(await api.conflictSummary(root)).toEqual(summary);
+    const probe = { kind: "external", operations: ["rebase"] };
+    answer("operationProbe", probe);
+    expect(await api.operationProbe(root)).toEqual(probe);
+    const sent = (call: number) =>
+      native
+        ? (invoke.mock.calls[call]?.[1] as { request: unknown }).request
+        : (JSON.parse(
+            (fetch.mock.calls[call]?.[1] as { body: string }).body,
+          ) as unknown);
+    expect([sent(0), sent(1)]).toEqual([
+      { op: "conflictSummary", path: root },
+      { op: "operationProbe", path: root },
+    ]);
+    answer("conflictSummary", [{ ...summary[0], conflicts: -1 }]);
+    await expect(api.conflictSummary(root)).rejects.toThrow();
+    answer("operationProbe", { kind: "merge" });
+    await expect(api.operationProbe(root)).rejects.toThrow();
+  },
+);

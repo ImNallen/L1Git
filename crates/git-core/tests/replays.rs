@@ -529,6 +529,7 @@ fn a_replay_started_in_a_terminal_reads_from_gits_state_alone() {
         );
         assert_eq!(progress.footprint, ["f.txt", "n.txt"], "{format} {pick:?}");
         assert_eq!(progress.footprint, repo.staged_paths());
+        assert_eq!(progress.conflicted, ["f.txt"]);
         assert_eq!(progress.unresolved, ["f.txt"]);
         assert_eq!(progress.tree, None);
         assert!(!progress.empty);
@@ -551,7 +552,12 @@ fn resolving_a_conflict_keeps_the_footprint_and_reports_the_staged_tree() {
         repo.git(&["add", "f.txt"]);
         let progress = repo.progress();
         assert_eq!(progress.footprint, before);
+        assert_eq!(progress.conflicted, ["f.txt"]);
         assert_eq!(progress.unresolved, Vec::<String>::new());
+        for memo in fs::read_dir(repo.root.join(".git/l1git/replay")).unwrap() {
+            fs::remove_file(memo.unwrap().path().join("conflicted.json")).unwrap();
+        }
+        assert_eq!(repo.progress().conflicted, ["f.txt"], "{format} {pick:?}");
         assert_eq!(
             progress.tree.as_ref().map(|tree| tree.as_str().to_owned()),
             Some(repo.git(&["write-tree"]).trim().to_owned())
@@ -603,11 +609,13 @@ fn a_modify_delete_conflict_stays_in_the_footprint_after_it_is_resolved() {
         for repo in modify_delete_stops(format) {
             let progress = repo.progress();
             assert_eq!(progress.footprint, ["u.txt"], "{format}");
+            assert_eq!(progress.conflicted, ["u.txt"], "{format}");
             assert_eq!(progress.unresolved, ["u.txt"], "{format}");
             let _ = fs::remove_file(repo.root.join("u.txt"));
             repo.git(&["rm", "--quiet", "--cached", "--ignore-unmatch", "u.txt"]);
             let progress = repo.progress();
             assert_eq!(progress.footprint, ["u.txt"], "{format}");
+            assert_eq!(progress.conflicted, ["u.txt"], "{format}");
             assert_eq!(progress.unresolved, Vec::<String>::new(), "{format}");
         }
     }

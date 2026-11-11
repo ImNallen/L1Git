@@ -4,6 +4,7 @@ import {
   mergeStateSchema,
   mergeActionSchema,
   mergeReportSchema,
+  operationProbeSchema,
 } from "./domain/merge";
 import type { MergeAction } from "./domain/merge";
 import { invoke, isTauri } from "@tauri-apps/api/core";
@@ -26,6 +27,7 @@ import type { Advance, FetchMode } from "./domain/overview";
 import {
   appliedSchema,
   conflictFileSchema,
+  conflictSummarySchema,
   operationSchema,
   blameSchema,
   branchMergedSchema,
@@ -60,6 +62,7 @@ export const macNative = native && mac;
 type RepositoryRequest =
   | { op: "mergeReview"; path: RepositoryRoot; selection: MergeSelection }
   | { op: "mergeState"; path: RepositoryRoot }
+  | { op: "operationProbe"; path: RepositoryRoot }
   | { op: "merge"; path: RepositoryRoot; action: MergeAction }
   | { op: "replayReview"; path: RepositoryRoot; of: ReplayOf }
   | { op: "replayAbort"; path: RepositoryRoot; of: ReplayOf; head: Head }
@@ -78,6 +81,7 @@ type RepositoryRequest =
   | { op: "push"; path: RepositoryRoot; intent: PushIntent }
   | { op: "fastForward"; path: RepositoryRoot; advances: Advance[] }
   | { op: "conflictFile"; path: RepositoryRoot; file: string }
+  | { op: "conflictSummary"; path: RepositoryRoot }
   | { op: "worktreeStatus"; path: RepositoryRoot }
   | { op: "worktreePatch"; path: RepositoryRoot; file: string; side: Side }
   | { op: "write"; path: RepositoryRoot; operation: Operation; expect: Expect }
@@ -93,6 +97,7 @@ type RepositoryRequest =
 const responseSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("mergeReview"), data: mergeReviewSchema }),
   z.object({ op: z.literal("mergeState"), data: mergeStateSchema }),
+  z.object({ op: z.literal("operationProbe"), data: operationProbeSchema }),
   z.object({ op: z.literal("merge"), data: mergeReportSchema }),
   z.object({ op: z.literal("replayReview"), data: replayReviewSchema }),
   z.object({ op: z.literal("replayAbort"), data: mergeStateSchema }),
@@ -112,6 +117,7 @@ const responseSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("fastForward"), data: fastForwardReportSchema }),
   z.object({ op: z.literal("worktreeStatus"), data: worktreeStatusSchema }),
   z.object({ op: z.literal("conflictFile"), data: conflictFileSchema }),
+  z.object({ op: z.literal("conflictSummary"), data: conflictSummarySchema }),
   z.object({ op: z.literal("worktreePatch"), data: worktreePatchSchema }),
   z.object({ op: z.literal("write"), data: appliedSchema }),
   z.object({ op: z.literal("undo"), data: appliedSchema }),
@@ -240,6 +246,10 @@ export async function conflictFile(path: RepositoryRoot, file: string) {
   return (await run({ op: "conflictFile", path, file })).data;
 }
 
+export async function conflictSummary(path: RepositoryRoot) {
+  return (await run({ op: "conflictSummary", path })).data;
+}
+
 export async function worktreeStatus(path: RepositoryRoot) {
   return (await run({ op: "worktreeStatus", path })).data;
 }
@@ -343,6 +353,9 @@ export async function mergeReview(
 }
 export async function mergeState(path: RepositoryRoot) {
   return (await run({ op: "mergeState", path })).data;
+}
+export async function operationProbe(path: RepositoryRoot) {
+  return (await run({ op: "operationProbe", path })).data;
 }
 export async function merge(path: RepositoryRoot, action: MergeAction) {
   return (

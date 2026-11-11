@@ -461,6 +461,8 @@ export function describe(operation: Operation): string {
   switch (operation.kind) {
     case "saveConflict":
       return `Save conflict result for ${operation.path}`;
+    case "resolveWhole":
+      return `Keep the ${operation.keep} side of ${operation.path}`;
     case "createBranch":
       return `Create branch ${operation.name}`;
     case "renameBranch":

@@ -1,13 +1,14 @@
 use super::{
-    BranchTip, Change, CommitTxn, EntryId, MergeIndexTxn, MergeTxn, Operation, Published, ReplayOf,
-    ReplayProgress, ReplayReview, Repo, commit, index, refs, replay,
+    BranchTip, Change, CommitTxn, EntryId, MergeIndexTxn, MergeTxn, Operation, Published,
+    ReplayKind, ReplayOf, ReplayProgress, ReplayReview, Repo, commit, index, refs, replay,
     store::{EntryObjects, Identity, LockedStore, Objects},
     txn::Runner,
 };
 use crate::{
     BranchRef, Coordinator, ErrorKind, Head, Oid, RepositoryError, StagedStamp, StaleReason,
     StatusEntry,
-    git::{self, LocalWrite, WriteDeadline},
+    git::{self, Deadline, LocalWrite, WriteDeadline},
+    repository,
     status::{self, Untracked},
     sync::{self, InProgress},
 };
@@ -101,6 +102,11 @@ pub struct MergeSession {
     pub id: EntryId,
     pub review: MergeReview,
     pub footprint: Vec<String>,
+    /// The paths that were unmerged when Git stopped, still listed after the
+    /// user resolves them. `None` before Git ran, and for a session recorded
+    /// before L1 Git kept this list, whose set nothing can recover.
+    #[serde(default)]
+    pub conflicted: Option<Vec<String>>,
     pub suggested_message: String,
 }
 
@@ -128,6 +134,32 @@ pub enum MergeState {
     /// One cherry-pick or revert that Git holds in progress, wherever it started.
     Replay {
         progress: ReplayProgress,
+    },
+}
+
+/// What a list of repositories shows for one worktree, read without locks.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum OperationProbe {
+    Idle,
+    /// L1 Git's merge session. `attention` means it cannot continue as it is:
+    /// it needs recovery, or the next `mergeState` would settle an interrupted
+    /// step.
+    Merge {
+        attention: bool,
+    },
+    /// One cherry-pick or revert that L1 Git can finish, wherever it started.
+    Replay {
+        replay: ReplayKind,
+    },
+    /// Operations L1 Git cannot finish, which always need attention.
+    External {
+        operations: Vec<InProgress>,
     },
 }
 
@@ -276,6 +308,7 @@ fn decode_record(value: StoredRecord) -> Result<Record, RepositoryError> {
                 session: MergeSession {
                     id: old.session.id,
                     footprint: old.session.footprint,
+                    conflicted: None,
                     suggested_message: old.session.suggested_message,
                     review: MergeReview {
                         root: old.session.review.root,
@@ -497,14 +530,16 @@ fn marker(repo: &Repo, name: &str) -> Result<Option<String>, RepositoryError> {
     }
 }
 
-fn owned(repo: &Repo, record: &Record, deadline: WriteDeadline) -> Result<bool, RepositoryError> {
-    let operations = sync::in_progress(&repo.root, deadline.reads())?;
-    Ok(repo.head(deadline)? == expected_head(&record.session)
-        && marker(repo, "MERGE_HEAD")?.as_deref()
-            == Some(record.session.review.source.oid.as_str())
-        && operations.len() == 1
-        && operations[0].name() == "a merge"
-        && marker(repo, "MERGE_AUTOSTASH")?.is_none())
+fn owned(repo: &Repo, record: &Record, deadline: Deadline) -> Result<bool, RepositoryError> {
+    let operations = sync::in_progress(&repo.root, deadline)?;
+    Ok(
+        repository::head(&repo.root, deadline)? == expected_head(&record.session)
+            && marker(repo, "MERGE_HEAD")?.as_deref()
+                == Some(record.session.review.source.oid.as_str())
+            && operations.len() == 1
+            && operations[0].name() == "a merge"
+            && marker(repo, "MERGE_AUTOSTASH")?.is_none(),
+    )
 }
 
 fn baseline(
@@ -622,7 +657,7 @@ fn reconcile(repo: &Repo, deadline: WriteDeadline) -> Result<Option<Record>, Rep
                     problem.get_or_insert_with(|| "The merge commit landed during an interrupted Finish. Inspect it before pushing.".into());
                 }
                 record.close(repo, outcome)?;
-            } else if owned(repo, &record, deadline)? {
+            } else if owned(repo, &record, deadline.reads())? {
                 record.phase = SessionPhase::Active;
                 record.save(repo)?;
             }
@@ -659,7 +694,7 @@ fn state(
     if let Some(record) = record {
         match &record.phase {
             SessionPhase::Closed { .. } => {}
-            SessionPhase::Active if owned(repo, record, deadline)? => {
+            SessionPhase::Active if owned(repo, record, deadline.reads())? => {
                 let (entries, staged) =
                     status::entries(&repo.root, Untracked::No, deadline.reads())?;
                 let unresolved = unresolved(&entries);
@@ -1308,6 +1343,7 @@ impl Coordinator {
                         id,
                         review: shown.clone(),
                         footprint: Vec::new(),
+                        conflicted: None,
                         suggested_message: format!(
                             "Merge {} into {}",
                             shown.source.reference,
@@ -1369,17 +1405,20 @@ impl Coordinator {
                 let txn = txn.ok_or_else(|| refused("Missing three-way merge index."))?;
                 let ran = txn.start(&shown.source.oid).run(deadline);
                 let deadline = deadline.renewed();
-                if owned(repo, &record, deadline)? {
+                if owned(repo, &record, deadline.reads())? {
                     if ran.is_err() {
                         return Err(refused(
                             "Merge was interrupted. Its affected paths cannot be proved; preserve the session and resolve it externally.",
                         ));
                     }
                     record.session.footprint = index_paths(&txn, &shown.destination.oid, deadline)?;
-                    let conflicts = index::read(txn.runner())?
-                        .values()
-                        .flatten()
-                        .any(|entry| entry.stage != 0);
+                    let conflicted = index::read(txn.runner())?
+                        .into_iter()
+                        .filter(|(_, entries)| entries.iter().any(|entry| entry.stage != 0))
+                        .map(|(path, _)| String::from_utf8(path).map_err(|_| git::malformed()))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let conflicts = !conflicted.is_empty();
+                    record.session.conflicted = Some(conflicted);
                     let problem = match ran {
                         Ok(wrote) if wrote.code() == Some(1) && conflicts => None,
                         result => result
@@ -1435,7 +1474,7 @@ impl Coordinator {
             }
             if current.as_ref().map(|record| record.session.id) != Some(*id)
                 || !matches!(record.phase, SessionPhase::Active)
-                || !owned(repo, &record, deadline)?
+                || !owned(repo, &record, deadline.reads())?
             {
                 return Err(refused(
                     "The merge session changed or needs recovery. Refresh and inspect its state before continuing.",
@@ -1534,7 +1573,7 @@ impl Coordinator {
                             None,
                         ));
                     }
-                    if owned(repo, &record, deadline)? {
+                    if owned(repo, &record, deadline.reads())? {
                         record.phase = SessionPhase::Active;
                         record.save(repo)?;
                     }
@@ -1547,7 +1586,7 @@ impl Coordinator {
                         &record.session,
                         paths(&status::entries(&repo.root, Untracked::No, deadline.reads())?.0),
                     )?;
-                    if !owned(repo, &record, deadline)? {
+                    if !owned(repo, &record, deadline.reads())? {
                         return Err(refused(
                             "The merge changed before Abort acquired index ownership. Refresh and inspect its state.",
                         ));
@@ -1598,6 +1637,31 @@ impl Coordinator {
     }
 }
 
+pub(crate) fn operation_within(
+    path: &str,
+    deadline: Deadline,
+) -> Result<OperationProbe, RepositoryError> {
+    let repo = Repo::open(path, deadline)?;
+    match load(&repo) {
+        Ok(Some(record)) if !matches!(record.phase, SessionPhase::Closed { .. }) => {
+            let ready =
+                matches!(record.phase, SessionPhase::Active) && owned(&repo, &record, deadline)?;
+            return Ok(OperationProbe::Merge { attention: !ready });
+        }
+        Ok(_) => {}
+        Err(_) => return Ok(OperationProbe::Merge { attention: true }),
+    }
+    if let Some(of) = replay::in_flight(&repo, deadline)? {
+        return Ok(OperationProbe::Replay { replay: of.kind });
+    }
+    let operations = sync::in_progress(&repo.root, deadline)?;
+    Ok(if operations.is_empty() {
+        OperationProbe::Idle
+    } else {
+        OperationProbe::External { operations }
+    })
+}
+
 pub(super) fn journal(
     repo: &Repo,
     deadline: WriteDeadline,
@@ -1629,7 +1693,8 @@ pub(super) fn admit(
     if let Some(record) = record
         && !matches!(record.phase, SessionPhase::Closed { .. })
     {
-        if !matches!(record.phase, SessionPhase::Active) || !owned(repo, &record, deadline)? {
+        if !matches!(record.phase, SessionPhase::Active) || !owned(repo, &record, deadline.reads())?
+        {
             return Err(refused(
                 "The merge needs recovery before more changes are safe.",
             ));
@@ -1655,6 +1720,7 @@ pub(super) enum Edit {
 pub(super) fn edit(operation: &Operation) -> Edit {
     match operation {
         Operation::SaveConflict { path, .. }
+        | Operation::ResolveWhole { path, .. }
         | Operation::StageHunk { path, .. }
         | Operation::UnstageHunk { path, .. }
         | Operation::StageLines { path, .. }
@@ -1706,6 +1772,7 @@ fn branch_names(
         // Finish moves the branch its own replay holds, which `guard_refs` refuses.
         Operation::FinishReplay { .. }
         | Operation::SaveConflict { .. }
+        | Operation::ResolveWhole { .. }
         | Operation::StageFiles { .. }
         | Operation::UnstageFiles { .. }
         | Operation::Discard { .. }
@@ -1774,7 +1841,7 @@ pub(super) fn guard_refs(
                     path
                 )));
             }
-            if let Some(of) = replay::in_flight(&target, deadline)?
+            if let Some(of) = replay::in_flight(&target, deadline.reads())?
                 && let Head::Attached { reference, .. } = target.head(deadline)?
                 && names.contains(&reference)
             {
@@ -1802,7 +1869,7 @@ pub(super) fn admit_step(
     }
     let target = opened.worktree(&applied.root, deadline.reads())?;
     if target.root != opened.root && journal(&target, deadline)?.is_some() {
-        let holder = match replay::in_flight(&target, deadline)? {
+        let holder = match replay::in_flight(&target, deadline.reads())? {
             Some(of) => format!("{} in progress", of.kind.operation().name()),
             None => "an active merge".to_owned(),
         };

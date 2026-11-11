@@ -329,6 +329,14 @@ export const conflictSnapshotSchema = z.strictObject({
   incoming: conflictTextSchema,
   working: conflictTextSchema,
 });
+export const conflictUnsupportedSchema = z.enum([
+  "structural",
+  "binary",
+  "encoding",
+  "tooLarge",
+  "specialFile",
+  "attributes",
+]);
 export const conflictFileSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("editable"),
@@ -338,18 +346,55 @@ export const conflictFileSchema = z.discriminatedUnion("kind", [
     kind: z.literal("external"),
     root: rootSchema,
     path: z.string(),
-    reason: z.enum([
-      "structural",
-      "binary",
-      "encoding",
-      "tooLarge",
-      "specialFile",
-      "attributes",
-    ]),
+    reason: conflictUnsupportedSchema,
   }),
 ]);
+const conflictSideSchema = z.strictObject({
+  mode: modeSchema,
+  size: z.number().int().nonnegative(),
+});
+export const conflictSummarySchema = z.array(
+  z.discriminatedUnion("kind", [
+    z.strictObject({
+      kind: z.literal("text"),
+      path: z.string(),
+      conflicts: z.number().int().nonnegative(),
+    }),
+    z.strictObject({
+      kind: z.literal("wholeFile"),
+      path: z.string(),
+      version: conflictVersionSchema,
+      shape: z.enum([
+        "deletedByThem",
+        "deletedByUs",
+        "addedByUs",
+        "addedByThem",
+        "binary",
+        "symlink",
+      ]),
+      current: conflictSideSchema.nullable(),
+      incoming: conflictSideSchema.nullable(),
+      /** The file on disk as Git would stage it. A null side matches an absent file. */
+      disk: z.enum([
+        "matchesCurrent",
+        "matchesIncoming",
+        "missing",
+        "edited",
+        "unknown",
+      ]),
+    }),
+    z.strictObject({
+      kind: z.literal("external"),
+      path: z.string(),
+      reason: conflictUnsupportedSchema,
+    }),
+  ]),
+);
+export const conflictKeepSchema = z.enum(["current", "incoming"]);
 export type ConflictFile = z.infer<typeof conflictFileSchema>;
 export type ConflictSnapshot = z.infer<typeof conflictSnapshotSchema>;
+export type ConflictSummary = z.infer<typeof conflictSummarySchema>[number];
+export type ConflictKeep = z.infer<typeof conflictKeepSchema>;
 
 export const entryIdSchema = z
   .string()
@@ -389,6 +434,12 @@ const linesPart = {
   shown: z.string(),
 };
 const otherOperationSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("resolveWhole"),
+    path: z.string().max(4096),
+    version: conflictVersionSchema,
+    keep: conflictKeepSchema,
+  }),
   z.strictObject({
     kind: z.literal("stageFiles"),
     entries: z.array(statusEntrySchema),

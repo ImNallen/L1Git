@@ -273,7 +273,7 @@ impl LockedStore {
         }
         match opened.worktree(&applied.root, deadline.reads()) {
             Ok(repo) => change.landed(&repo, &entry, deadline),
-            Err(error) if matches!(change, Change::Resolution(_)) => Err(error),
+            Err(error) if matches!(change, Change::Resolution(_) | Change::Whole(_)) => Err(error),
             Err(_) => Ok(None),
         }
     }

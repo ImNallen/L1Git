@@ -22,6 +22,7 @@ pub(crate) enum LocalWrite {
     ReplayFinish,
     ReplayAbort,
     SaveConflict,
+    ResolveWhole,
     StageFiles,
     UnstageFiles,
     StagePart,
@@ -59,6 +60,7 @@ impl LocalWrite {
     pub(crate) const fn budget(self) -> Duration {
         Duration::from_secs(match self {
             Self::SaveConflict
+            | Self::ResolveWhole
             | Self::StageFiles
             | Self::UnstageFiles
             | Self::StagePart
@@ -108,6 +110,7 @@ impl LocalWrite {
             Self::ReplayFinish => "Finishing the cherry-pick or revert",
             Self::ReplayAbort => "Aborting the cherry-pick or revert",
             Self::SaveConflict => "Saving the conflict result",
+            Self::ResolveWhole => "Resolving the conflict",
             Self::StageFiles => "Staging the files",
             Self::UnstageFiles => "Unstaging the files",
             Self::StagePart => "Staging part of the file",
@@ -151,6 +154,7 @@ impl LocalWrite {
             Self::ReplayFinish => "l1git replay finish",
             Self::ReplayAbort => "l1git replay abort",
             Self::SaveConflict => "l1git save conflict",
+            Self::ResolveWhole => "l1git resolve conflict",
             Self::StageFiles => "l1git stage",
             Self::UnstageFiles => "l1git unstage",
             Self::StagePart => "l1git stage part",
@@ -202,7 +206,9 @@ impl LocalWrite {
             | Self::EditMessage
             | Self::ReplayStart
             | Self::ReplayFinish => "Git may have finished the commit, so check the history.",
-            Self::SaveConflict | Self::Discard | Self::DiscardPart => "No file changed.",
+            Self::SaveConflict | Self::ResolveWhole | Self::Discard | Self::DiscardPart => {
+                "No file changed."
+            }
             Self::CreateBranch | Self::RenameBranch | Self::DeleteBranch => {
                 "L1 Git rereads the branch to see what changed."
             }

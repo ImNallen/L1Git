@@ -37,6 +37,7 @@ export const mergeSessionSchema = z.strictObject({
   id: entryIdSchema,
   review: mergeReviewSchema,
   footprint: z.array(z.string()),
+  conflicted: z.array(z.string()).nullable(),
   suggestedMessage: z.string(),
 });
 export const replayProgressSchema = z.strictObject({
@@ -46,6 +47,7 @@ export const replayProgressSchema = z.strictObject({
   subject: z.string(),
   destination: headSchema,
   footprint: z.array(z.string()),
+  conflicted: z.array(z.string()),
   unresolved: z.array(z.string()),
   staged: stagedStampSchema,
   tree: oidSchema.nullable(),
@@ -69,6 +71,25 @@ export const mergeStateSchema = z.discriminatedUnion("kind", [
     message: z.string(),
   }),
   z.strictObject({ kind: z.literal("replay"), progress: replayProgressSchema }),
+]);
+export const operationProbeSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("idle") }),
+  z.strictObject({ kind: z.literal("merge"), attention: z.boolean() }),
+  z.strictObject({ kind: z.literal("replay"), replay: replayKindSchema }),
+  z.strictObject({
+    kind: z.literal("external"),
+    operations: z.array(
+      z.enum([
+        "merge",
+        "cherryPick",
+        "revert",
+        "rebase",
+        "rebaseOrAm",
+        "sequence",
+        "bisect",
+      ]),
+    ),
+  }),
 ]);
 export const mergeActionSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("start"), review: mergeReviewSchema }),
@@ -111,6 +132,7 @@ export type MergeAction = z.infer<typeof mergeActionSchema>;
 export type MergeReport = z.infer<typeof mergeReportSchema>;
 export type MergeSession = z.infer<typeof mergeSessionSchema>;
 export type ReplayProgress = z.infer<typeof replayProgressSchema>;
+export type OperationProbe = z.infer<typeof operationProbeSchema>;
 
 export const replayNames: Record<ReplayKind, { noun: string; title: string }> =
   {
@@ -139,6 +161,7 @@ export function mergeAllows(
         : state.reason === "externalOperation";
   switch (operation.kind) {
     case "saveConflict":
+    case "resolveWhole":
     case "stageHunk":
     case "unstageHunk":
     case "stageLines":

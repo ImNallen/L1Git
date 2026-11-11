@@ -34,6 +34,7 @@ const active = mergeStateSchema.parse({
     id: "a".repeat(16),
     review,
     footprint: ["conflict.txt"],
+    conflicted: ["conflict.txt"],
     suggestedMessage: "Merge origin/main into main",
   },
   unresolved: [],

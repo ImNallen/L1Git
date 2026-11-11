@@ -60,7 +60,7 @@ pub(crate) fn conflict_file_within(
     })
 }
 
-fn text(bytes: Vec<u8>) -> Result<String, ConflictUnsupported> {
+pub(super) fn text(bytes: Vec<u8>) -> Result<String, ConflictUnsupported> {
     if bytes.len() > CONFLICT_TEXT_LIMIT {
         return Err(ConflictUnsupported::TooLarge);
     }
@@ -113,7 +113,11 @@ fn scope(repo: &Repo, path: &str) -> Result<Vec<Option<(u64, u64)>>, RepositoryE
         .collect()
 }
 
-fn same_repository(repo: &Repo, path: &str, deadline: Deadline) -> Result<(), RepositoryError> {
+pub(super) fn same_repository(
+    repo: &Repo,
+    path: &str,
+    deadline: Deadline,
+) -> Result<(), RepositoryError> {
     let live = Repo::open(&repo.root(), deadline)?;
     if live.root != repo.root
         || live.git_dir != repo.git_dir
@@ -125,31 +129,21 @@ fn same_repository(repo: &Repo, path: &str, deadline: Deadline) -> Result<(), Re
     Ok(())
 }
 
-fn transforms(
-    repo: &Repo,
-    path: &str,
-    deadline: Deadline,
-) -> Result<(Vec<u8>, bool), RepositoryError> {
-    let attrs = git::read(
-        &repo.root,
-        &[
-            "check-attr",
-            "-z",
-            "filter",
-            "ident",
-            "working-tree-encoding",
-            "text",
-            "eol",
-            "--",
-            path,
-        ],
-        deadline,
-    )?;
+pub(super) const TRANSFORM_ATTRIBUTES: [&str; 5] =
+    ["filter", "ident", "working-tree-encoding", "text", "eol"];
+
+pub(super) fn supported(attrs: &[u8]) -> bool {
     let fields: Vec<_> = attrs.split(|byte| *byte == 0).collect();
-    let supported = fields.chunks_exact(3).all(|field| {
+    fields.chunks_exact(3).all(|field| {
         ![b"filter".as_slice(), b"ident", b"working-tree-encoding"].contains(&field[1])
             || [b"unspecified".as_slice(), b"unset"].contains(&field[2])
-    });
+    })
+}
+
+pub(super) fn transform_config(
+    repo: &Repo,
+    deadline: Deadline,
+) -> Result<Vec<u8>, RepositoryError> {
     let config = git::run(
         &repo.root,
         &[
@@ -163,8 +157,20 @@ fn transforms(
     if !matches!(config.status.code(), Some(0 | 1)) {
         return Err(git::read_failed());
     }
-    let mut result = attrs;
-    result.extend_from_slice(&config.stdout);
+    Ok(config.stdout)
+}
+
+fn transforms(
+    repo: &Repo,
+    path: &str,
+    deadline: Deadline,
+) -> Result<(Vec<u8>, bool), RepositoryError> {
+    let mut args = vec!["check-attr", "-z"];
+    args.extend(TRANSFORM_ATTRIBUTES);
+    args.extend(["--", path]);
+    let mut result = git::read(&repo.root, &args, deadline)?;
+    let supported = supported(&result);
+    result.extend(transform_config(repo, deadline)?);
     Ok((result, supported))
 }
 

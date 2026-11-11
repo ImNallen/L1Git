@@ -26,12 +26,14 @@ const OPERATION_STATE: [(&str, InProgress); 7] = [
     ("BISECT_LOG", InProgress::Bisect),
 ];
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum InProgress {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum InProgress {
     Merge,
     CherryPick,
     Revert,
     Rebase,
+    /// `rebase-apply`, which `git am` and `git rebase --apply` share.
     RebaseOrAm,
     Sequence,
     Bisect,

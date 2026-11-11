@@ -54,6 +54,7 @@ const replayState = (): MergeState =>
         oid: head,
       },
       footprint: ["conflict.txt"],
+      conflicted: ["conflict.txt"],
       unresolved: ["conflict.txt"],
       staged: "c".repeat(40),
       tree: null,

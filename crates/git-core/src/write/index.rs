@@ -833,7 +833,7 @@ pub(super) fn stored_blobs_of(rows: &Rows, paths: &[String]) -> Vec<Oid> {
     objects.into_iter().collect()
 }
 
-fn put(txn: &Txn<'_>, targets: &[(&str, &[IndexEntry])]) -> Result<(), RepositoryError> {
+pub(super) fn put(txn: &Txn<'_>, targets: &[(&str, &[IndexEntry])]) -> Result<(), RepositoryError> {
     let null_oid = &txn.repo().null_oid;
     let mut info = Vec::new();
     for (path, _) in targets {

@@ -6,6 +6,7 @@
 mod branches;
 mod checkout;
 mod commit;
+mod conflicts;
 mod discard;
 mod files;
 mod index;
@@ -29,9 +30,11 @@ use crate::{
 };
 pub(crate) use branches::merged_within;
 pub use branches::{BranchTip, Start};
+pub(crate) use conflicts::conflict_summary_within;
+pub(crate) use merge::operation_within;
 pub use merge::{
     MergeAction, MergeAttention, MergeContext, MergeOutcome, MergePlan, MergeReport, MergeReview,
-    MergeSelection, MergeSession, MergeSource, MergeState, MergeTracking,
+    MergeSelection, MergeSession, MergeSource, MergeState, MergeTracking, OperationProbe,
 };
 use partial::{Action, Part, Picks};
 pub use partial::{LinePick, LineSide};
@@ -68,6 +71,15 @@ pub enum Operation {
         version: crate::ConflictVersion,
         #[serde(skip_serializing, default)]
         text: Option<String>,
+    },
+    /// Resolves a conflict with no lines to merge by keeping one side whole:
+    /// writes that side's file, or removes the file when that side has none,
+    /// and stages the result. `version` is what `conflictSummary` showed. Undo
+    /// puts the conflict's stage rows and the file on disk back.
+    ResolveWhole {
+        path: String,
+        version: crate::ConflictVersion,
+        keep: crate::ConflictKeep,
     },
     /// Puts each entry's paths back to HEAD's version in the index, or
     /// removes them before the first commit. Unmerged paths are refused.
@@ -262,6 +274,7 @@ impl fmt::Display for EntryId {
 enum Change {
     Index(index::IndexChange),
     Resolution(resolution::ResolutionChange),
+    Whole(conflicts::WholeChange),
     Ref(refs::RefChange),
     Discard(discard::DiscardChange),
     Branch(branches::BranchChange),
@@ -275,6 +288,12 @@ enum Change {
 impl From<resolution::ResolutionChange> for Change {
     fn from(change: resolution::ResolutionChange) -> Self {
         Self::Resolution(change)
+    }
+}
+
+impl From<conflicts::WholeChange> for Change {
+    fn from(change: conflicts::WholeChange) -> Self {
+        Self::Whole(change)
     }
 }
 
@@ -327,6 +346,7 @@ impl Change {
             Self::Ref(change) => change.objects(),
             Self::Rebase(change) => change.objects(),
             Self::Stash(change) => Objects::exact(change.objects()),
+            Self::Whole(change) => change.objects(),
             Self::Resolution(_)
             | Self::Discard(_)
             | Self::Branch(_)
@@ -360,6 +380,16 @@ impl Change {
                 let txn = Txn::begin(repo, deadline)?;
                 resolution::step(&txn, entry, change, direction)?;
                 Ok(Some(txn.commit_step(store, step, self)?))
+            }
+            Self::Whole(change) => {
+                let txn = Txn::begin(repo, deadline)?;
+                match conflicts::step(&txn, entry, change, direction)? {
+                    Restored::AlreadyThere => {
+                        store.save(step.log())?;
+                        Ok(None)
+                    }
+                    Restored::Staged => Ok(Some(txn.commit_step(store, step, self)?)),
+                }
             }
             Self::Ref(change) => {
                 refs::restore(repo, entry, change, direction, deadline)?;
@@ -419,6 +449,7 @@ impl Change {
             (Self::Rebase(_), Direction::Redo) => Some(LocalWrite::RedoRebase),
             (
                 Self::Resolution(_)
+                | Self::Whole(_)
                 | Self::Index(_)
                 | Self::Ref(_)
                 | Self::Discard(_)
@@ -438,6 +469,9 @@ impl Change {
         match self {
             Self::Resolution(change) => {
                 Ok(resolution::landed(repo, entry, change, deadline)?.then(|| self.clone()))
+            }
+            Self::Whole(change) => {
+                Ok(conflicts::landed(repo, entry, change, deadline)?.map(Self::Whole))
             }
             Self::Index(change) => Ok(index::landed(repo, change, deadline)?.then(|| self.clone())),
             Self::Ref(_) | Self::Discard(_) => Ok(Some(self.clone())),
@@ -459,6 +493,7 @@ impl Change {
             Self::Branch(_) | Self::Tag(_) => true,
             Self::Stash(change) => change.repository_wide(),
             Self::Resolution(_)
+            | Self::Whole(_)
             | Self::Index(_)
             | Self::Ref(_)
             | Self::Discard(_)
@@ -472,6 +507,7 @@ impl Change {
         match self {
             Self::Discard(_) => true,
             Self::Resolution(_)
+            | Self::Whole(_)
             | Self::Index(_)
             | Self::Ref(_)
             | Self::Branch(_)
@@ -486,6 +522,7 @@ impl Change {
     fn remove_copies_beside(&self, applied: &Applied) {
         match self {
             Self::Resolution(change) => resolution::remove_copy_beside(applied, change),
+            Self::Whole(change) => conflicts::remove_copy_beside(applied, change),
             Self::Discard(change) => {
                 discard::remove_copies_beside(Path::new(&applied.root), applied.id, change);
             }
@@ -505,6 +542,7 @@ impl Change {
             Self::Index(change) => change.touches_skip_worktree(),
             Self::Stash(change) => change.touches_skip_worktree(),
             Self::Resolution(_)
+            | Self::Whole(_)
             | Self::Ref(_)
             | Self::Discard(_)
             | Self::Branch(_)
@@ -541,6 +579,7 @@ impl Operation {
     fn local_write(&self) -> LocalWrite {
         match self {
             Self::SaveConflict { .. } => LocalWrite::SaveConflict,
+            Self::ResolveWhole { .. } => LocalWrite::ResolveWhole,
             Self::StageFiles { .. } => LocalWrite::StageFiles,
             Self::UnstageFiles { .. } => LocalWrite::UnstageFiles,
             Self::Commit { .. } => LocalWrite::Commit,
@@ -615,6 +654,11 @@ impl Operation {
                 text.as_deref()
                     .ok_or_else(|| files::unsupported("Save result needs result text.".into()))?,
             ),
+            Self::ResolveWhole {
+                path,
+                version,
+                keep,
+            } => conflicts::resolve(&writing, expect, path, version, *keep),
             Self::StageFiles { entries } => index(index::Command::Stage, entries),
             Self::UnstageFiles { entries } => index(index::Command::Unstage, entries),
             Self::Commit { message, staged } => commit(commit::Kind::New(staged), message),

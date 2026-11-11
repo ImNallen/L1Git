@@ -10,7 +10,8 @@ use super::{
 use crate::{
     BranchRef, ErrorKind, Head, MoveSide, Oid, RepositoryError, Sides, StagedStamp, StaleReason,
     StatusEntry,
-    git::{self, WriteDeadline, Wrote},
+    git::{self, Deadline, WriteDeadline, Wrote},
+    repository,
     status::{self, Untracked},
     sync::{self, InProgress},
 };
@@ -82,7 +83,7 @@ impl ReplayOf {
         repo: &Repo,
         deadline: WriteDeadline,
     ) -> Result<(String, String), RepositoryError> {
-        let parent = parents(repo, &self.commit, deadline)?
+        let parent = parents(repo, &self.commit, deadline.reads())?
             .into_iter()
             .next()
             .unwrap_or_else(|| {
@@ -137,6 +138,9 @@ pub struct ReplayProgress {
     pub subject: String,
     pub destination: Head,
     pub footprint: Vec<String>,
+    /// The paths `merge-tree` says conflict, under the names Git gives them,
+    /// which are the paths Git stopped on. They stay listed once resolved.
+    pub conflicted: Vec<String>,
     pub unresolved: Vec<String>,
     pub staged: StagedStamp,
     /// `None` while a path is unmerged.
@@ -176,36 +180,32 @@ pub(super) enum ReplayChange {
 /// no parent number; a pruned commit; and an unborn branch.
 pub(super) fn in_flight(
     repo: &Repo,
-    deadline: WriteDeadline,
+    deadline: Deadline,
 ) -> Result<Option<ReplayOf>, RepositoryError> {
-    let kind = match sync::in_progress(&repo.root, deadline.reads())?.as_slice() {
+    let kind = match sync::in_progress(&repo.root, deadline)?.as_slice() {
         [InProgress::CherryPick] => ReplayKind::CherryPick,
         [InProgress::Revert] => ReplayKind::Revert,
         _ => return Ok(None),
     };
-    if !sync::pseudoref_exists(&repo.root, kind.marker(), deadline.reads())? {
+    if !sync::pseudoref_exists(&repo.root, kind.marker(), deadline)? {
         return Ok(None);
     }
-    let Some(commit) = commit::resolve(repo, deadline, kind.marker())? else {
+    let Some(commit) = commit::resolve_within(repo, deadline, kind.marker())? else {
         return Ok(None);
     };
     if parents(repo, &commit, deadline)?.len() > 1
-        || matches!(repo.head(deadline)?, Head::Unborn { .. })
+        || matches!(repository::head(&repo.root, deadline)?, Head::Unborn { .. })
     {
         return Ok(None);
     }
     Ok(Some(ReplayOf { kind, commit }))
 }
 
-fn parents(
-    repo: &Repo,
-    commit: &Oid,
-    deadline: WriteDeadline,
-) -> Result<Vec<String>, RepositoryError> {
+fn parents(repo: &Repo, commit: &Oid, deadline: Deadline) -> Result<Vec<String>, RepositoryError> {
     let output = git::read(
         &repo.root,
         &["show", "-s", "--format=%P", commit.as_str()],
-        deadline.reads(),
+        deadline,
     )?;
     Ok(git::text(&output)
         .split_whitespace()
@@ -335,32 +335,65 @@ fn simulate(
     Ok(listed_paths(&ran.stdout[end..]).map(|conflicted| Simulated { tree, conflicted }))
 }
 
+struct Paths {
+    footprint: Vec<String>,
+    conflicted: Vec<String>,
+}
+
 /// The conflicted paths and every path the simulated result changes, under the names
 /// Git really gives them. Nothing here reads the index, so a staged edit the operation
 /// did not make stays outside, which is what lets Abort refuse to drop it. `merge-tree`
 /// runs custom merge drivers, so each (kind, commit, HEAD) runs it once, and the memo
 /// keeps the answer. Losing the memo costs one more run.
+fn paths(
+    repo: &Repo,
+    of: &ReplayOf,
+    head: &Oid,
+    deadline: WriteDeadline,
+) -> Result<Option<Paths>, RepositoryError> {
+    let folder = folder(repo, of, head);
+    let (footprint_memo, conflicted_memo) = (
+        folder.join("footprint.json"),
+        folder.join("conflicted.json"),
+    );
+    if let (Ok(Some(footprint)), Ok(Some(conflicted))) = (
+        merge::read::<Vec<String>>(&footprint_memo),
+        merge::read::<Vec<String>>(&conflicted_memo),
+    ) {
+        return Ok(Some(Paths {
+            footprint,
+            conflicted,
+        }));
+    }
+    let Some(simulated) = simulate(repo, of, head, deadline)? else {
+        return Ok(None);
+    };
+    let Some(footprint) = simulated.footprint(repo, head, deadline)? else {
+        return Ok(None);
+    };
+    let named = |paths: BTreeSet<String>| -> Result<Vec<String>, RepositoryError> {
+        Ok(real_names(repo, of, head, paths, deadline)?
+            .into_iter()
+            .collect())
+    };
+    let paths = Paths {
+        footprint: named(footprint.into_iter().collect())?,
+        conflicted: named(simulated.conflicted)?,
+    };
+    let _ = prepared(repo, of, head).and_then(|_| {
+        merge::persist(&footprint_memo, &paths.footprint)?;
+        merge::persist(&conflicted_memo, &paths.conflicted)
+    });
+    Ok(Some(paths))
+}
+
 fn footprint(
     repo: &Repo,
     of: &ReplayOf,
     head: &Oid,
     deadline: WriteDeadline,
 ) -> Result<Option<Vec<String>>, RepositoryError> {
-    let memo = folder(repo, of, head).join("footprint.json");
-    if let Ok(Some(paths)) = merge::read::<Vec<String>>(&memo) {
-        return Ok(Some(paths));
-    }
-    let Some(simulated) = simulate(repo, of, head, deadline)? else {
-        return Ok(None);
-    };
-    let Some(paths) = simulated.footprint(repo, head, deadline)? else {
-        return Ok(None);
-    };
-    let paths: Vec<_> = real_names(repo, of, head, paths.into_iter().collect(), deadline)?
-        .into_iter()
-        .collect();
-    let _ = prepared(repo, of, head).and_then(|_| merge::persist(&memo, &paths));
-    Ok(Some(paths))
+    Ok(paths(repo, of, head, deadline)?.map(|paths| paths.footprint))
 }
 
 /// A path Git renames to avoid a clash is `<path>~<label>`. `merge-tree` labels it with
@@ -447,12 +480,16 @@ pub(super) fn progress(
     repo: &Repo,
     deadline: WriteDeadline,
 ) -> Result<Option<ReplayProgress>, RepositoryError> {
-    let Some(of) = in_flight(repo, deadline)? else {
+    let Some(of) = in_flight(repo, deadline.reads())? else {
         return Ok(None);
     };
     let destination = repo.head(deadline)?;
     let head = refs::oid(&destination).ok_or_else(git::malformed)?;
-    let Some(footprint) = footprint(repo, &of, &head, deadline)? else {
+    let Some(Paths {
+        footprint,
+        conflicted,
+    }) = paths(repo, &of, &head, deadline)?
+    else {
         return Ok(None);
     };
     let (entries, staged) = status::entries(&repo.root, Untracked::No, deadline.reads())?;
@@ -478,6 +515,7 @@ pub(super) fn progress(
         subject,
         destination,
         footprint,
+        conflicted,
         unresolved,
         staged,
         tree,
@@ -511,7 +549,7 @@ pub(super) fn review(
     let head = Oid::try_from(oid).map_err(|_| git::malformed())?;
     commit::refuse_non_commit(repo, deadline, &of.commit)?;
     let short = commit::short(&of.commit);
-    if parents(repo, &of.commit, deadline)?.len() > 1 {
+    if parents(repo, &of.commit, deadline.reads())?.len() > 1 {
         return Err(merge::refused(format!(
             "{short} is a merge commit, and L1 Git applies only a commit with one parent. Use Git to choose a parent."
         )));
@@ -631,7 +669,7 @@ pub(super) fn admit(
     operation: &Operation,
     deadline: WriteDeadline,
 ) -> Result<(), RepositoryError> {
-    let Some(of) = in_flight(repo, deadline)? else {
+    let Some(of) = in_flight(repo, deadline.reads())? else {
         return Ok(());
     };
     let head = refs::oid(&repo.head(deadline)?).ok_or_else(git::malformed)?;
@@ -852,7 +890,7 @@ pub(super) fn finish(
         return Ok(applied);
     }
     let name = of.kind.operation().name();
-    match in_flight(repo, deadline)? {
+    match in_flight(repo, deadline.reads())? {
         Some(found) if found == *of => {}
         Some(_) => {
             return Err(RepositoryError::stale(
@@ -1059,7 +1097,7 @@ pub(super) fn abort(
     let Some(operation) = running.first() else {
         return Ok(());
     };
-    let Some(found) = in_flight(repo, deadline)? else {
+    let Some(found) = in_flight(repo, deadline.reads())? else {
         return Err(merge::refused(format!(
             "{} is in progress in this worktree, and L1 Git cannot abort it. End it with Git.",
             refs::capitalized(operation.name())

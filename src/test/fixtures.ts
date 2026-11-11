@@ -247,6 +247,7 @@ export function activeMerge(
         },
       },
       footprint,
+      conflicted: footprint,
       suggestedMessage: "Merge origin/feature into feature",
     },
     unresolved: [],
@@ -399,6 +400,7 @@ export function replayInProgress(
           ? { kind: "attached", reference: "refs/heads/feature", oid: C5 }
           : { kind: "attached", reference: "refs/heads/main", oid: C4 },
       footprint,
+      conflicted: footprint,
       unresolved: [],
       staged: STAMP,
       tree: C3,
