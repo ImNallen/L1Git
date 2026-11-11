@@ -87,10 +87,12 @@ const SEAM = 0.5;
 const ROW_BOTTOM = ROW_HEIGHT + SEAM;
 const continuation = (from: number, to: number) =>
   `M ${x(from)} ${-SEAM} V 0 C ${x(from)} ${ROW_CENTER}, ${x(to)} ${ROW_CENTER}, ${x(to)} ${ROW_HEIGHT} V ${ROW_BOTTOM}`;
+const QUARTER_CIRCLE = 0.5523;
+// A cubic, not an arc: history motion interpolates every number in a path, and arc flags are discrete.
 const parent = (from: number, to: number) => {
-  if (from === to) return `M ${x(from)} ${ROW_CENTER} V ${ROW_BOTTOM}`;
-  const sign = Math.sign(to - from);
-  return `M ${x(from)} ${ROW_CENTER} H ${x(to) - sign * ROW_CENTER} A ${ROW_CENTER} ${ROW_CENTER} 0 0 ${sign > 0 ? 1 : 0} ${x(to)} ${ROW_HEIGHT} V ${ROW_BOTTOM}`;
+  const turn = Math.sign(to - from) * ROW_CENTER;
+  const handle = QUARTER_CIRCLE * ROW_CENTER;
+  return `M ${x(from)} ${ROW_CENTER} H ${x(to) - turn} C ${x(to) - turn + Math.sign(turn) * handle} ${ROW_CENTER}, ${x(to)} ${ROW_HEIGHT - handle}, ${x(to)} ${ROW_HEIGHT} V ${ROW_BOTTOM}`;
 };
 const NO_COMMITS: readonly Commit[] = [];
 const WORKTREE_DASH = "2 3";
