@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { activeMerge, idleMerge, replayInProgress } from "../test/fixtures";
 import {
+  draftConflictLabel,
   conflictLabel,
   finishBlock,
   inProgress,
@@ -310,5 +311,17 @@ describe("conflictLabel", () => {
     expect(
       conflictLabel({ kind: "external", path: "x", reason: "structural" }),
     ).toBe("Resolve outside L1 Git");
+  });
+});
+
+describe("draftConflictLabel", () => {
+  it("counts what is left in an unsaved result", () => {
+    const region = "<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> topic\n";
+    expect(draftConflictLabel(region + region)).toBe("2 conflicts · unsaved");
+    expect(draftConflictLabel(region)).toBe("1 conflict · unsaved");
+    expect(draftConflictLabel("ours\n=======\ntheirs\n")).toBe(
+      "Leftover markers · unsaved",
+    );
+    expect(draftConflictLabel("ours\n")).toBe("Unsaved result");
   });
 });

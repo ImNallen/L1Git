@@ -1,4 +1,5 @@
 import { composeMessage, splitMessage } from "./commitMessage";
+import { conflictRegions, hasLeftoverMarkers } from "./conflictRegions";
 import type { Draft } from "./commitMessage";
 import { replayNames } from "./merge";
 import type { MergeSession, MergeState } from "./merge";
@@ -271,6 +272,15 @@ const wholeFileLabels: Record<
   addedByUs: "Added on one side",
   addedByThem: "Added on one side",
 };
+
+export function draftConflictLabel(text: string): string {
+  const regions = conflictRegions(text);
+  if (regions > 0)
+    return `${regions} ${regions === 1 ? "conflict" : "conflicts"} · unsaved`;
+  return hasLeftoverMarkers(text)
+    ? "Leftover markers · unsaved"
+    : "Unsaved result";
+}
 
 export function conflictLabel(summary: ConflictSummary): string {
   switch (summary.kind) {

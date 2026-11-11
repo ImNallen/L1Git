@@ -6,7 +6,13 @@ import { WorkspaceIcon } from "./WorkspaceIcon";
 import type { MergeState } from "../domain/merge";
 import { mergeAllows } from "../domain/merge";
 import { useDraftImpact } from "../draftProtection";
-import { canMark, resolutionKey, resolutionOf } from "../resolutionDrafts";
+import {
+  canMark,
+  isDirty,
+  markBlock,
+  resolutionKey,
+  resolutionOf,
+} from "../resolutionDrafts";
 import {
   useCallback,
   useEffect,
@@ -63,6 +69,7 @@ import { ChangedFileTree, changeStatuses } from "./ChangedFileTree";
 import { CommitBox } from "./CommitBox";
 import type { RowAction, RowLabel } from "./ChangedFileTree";
 import {
+  draftConflictLabel,
   inProgress,
   operationGroups,
   operationWords,
@@ -853,6 +860,12 @@ function WorktreeInspector({
         : worktreeGroups(changes.status.entries).filter(
             (group) => group.files.length > 0,
           );
+  const unresolvedLabel = (path: string) => {
+    const draft = resolutionOf(resolutionKey(worktree.root, path));
+    if (draft && isDirty(draft)) return draftConflictLabel(draft.text);
+    if (draft && markBlock(draft) === "markers") return "Leftover markers";
+    return conflictLabels?.get(path) ?? "Conflicted";
+  };
   const labelsOf = (group: WorktreeGroup | OperationGroup) =>
     !("kind" in group) ||
     (group.kind !== "unresolved" && group.kind !== "resolved")
@@ -863,7 +876,7 @@ function WorktreeInspector({
             group.kind === "resolved"
               ? { text: "Resolved", tone: "success" }
               : {
-                  text: conflictLabels?.get(path) ?? "Conflicted",
+                  text: unresolvedLabel(path),
                   tone: "warning",
                 },
           ]),
