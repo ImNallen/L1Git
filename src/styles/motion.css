@@ -27,6 +27,8 @@
     transition: none;
   }
 }
+.button,
+.icon-button,
 .toolbar-action,
 .tree-section,
 .branch-row,
@@ -35,10 +37,28 @@
   transition:
     background-color 120ms ease-out,
     color 120ms ease-out,
-    border-color 160ms ease-out;
+    border-color 120ms ease-out;
 }
-.toolbar-action[aria-expanded="true"] {
-  transition-duration: 160ms;
+:is(.button, .icon-button, .toolbar-action):active:not(
+    :disabled,
+    [aria-disabled="true"]
+  ) {
+  transition-duration: 0s;
+}
+.button.secondary:active:not(:disabled, [aria-disabled="true"]),
+.icon-button:active:not(:disabled, [aria-disabled="true"]),
+.toolbar-action:active:not(:disabled, [aria-disabled="true"]) {
+  background: var(--row-selected);
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.button.primary:active:not(:disabled, [aria-disabled="true"]) {
+  background: var(--primary-bg);
+  border-color: var(--primary-text);
+}
+.button.danger:active:not(:disabled, [aria-disabled="true"]) {
+  background: color-mix(in srgb, var(--error-bg), var(--deleted) 20%);
+  border-color: var(--deleted);
 }
 .history-table tr,
 .history-table td {
@@ -85,6 +105,8 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
+  .button,
+  .icon-button,
   .toolbar-action,
   .tree-section,
   .branch-row,

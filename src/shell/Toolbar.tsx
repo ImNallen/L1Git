@@ -103,7 +103,7 @@ export function Toolbar({
       <div className="toolbar-search-slot" ref={searchSlot} />
       {menu && anchor && (
         <ContextMenu
-          motion
+          closeOnPointerLeave
           className="toolbar-menu"
           x={anchor.left}
           y={anchor.bottom + 6}
