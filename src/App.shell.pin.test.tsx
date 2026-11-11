@@ -275,16 +275,26 @@ it("leaving settings focuses Settings, or the sidebar toggle when the sidebar is
   expect(focused()).toBe("button Toggle sidebar");
 });
 
-it("the toggle buttons keep focus as they move between the toolbar and the pane", async () => {
+it("the sidebar toggle stays put and keeps focus while the sidebar opens and closes", async () => {
   const app = await mountApp();
-  expect(query("button", "Toggle sidebar")).toBeNull();
+  const toggle = get("button", "Toggle sidebar");
+  expect(toggle.getAttribute("aria-pressed")).toBe("true");
+  expect(toggle.closest(".toolbar, .sidebar")).toBeNull();
+  await app.click(toggle);
+  expect(get("button", "Toggle sidebar")).toBe(toggle);
+  expect(toggle.getAttribute("aria-pressed")).toBe("false");
+  expect(document.activeElement).toBe(toggle);
+  await app.click(toggle);
+  expect(get("button", "Toggle sidebar")).toBe(toggle);
+  expect(toggle.getAttribute("aria-pressed")).toBe("true");
+  expect(document.activeElement).toBe(toggle);
   await app.runPaletteItem("Toggle sidebar");
-  const inToolbar = get("button", "Toggle sidebar");
-  expect(inToolbar.closest(".toolbar")).not.toBeNull();
-  expect(document.activeElement).toBe(inToolbar);
-  await app.click(inToolbar);
-  expect(document.activeElement).toBe(repositoryRow(PIN));
+  expect(toggle.getAttribute("aria-pressed")).toBe("false");
+  expect(document.activeElement).toBe(toggle);
+});
 
+it("the inspector toggle keeps focus as it moves between the toolbar and the pane", async () => {
+  const app = await mountApp();
   const inPane = get("button", "Toggle commit inspector");
   expect(inPane.closest(".inspector")).not.toBeNull();
   await app.click(inPane);

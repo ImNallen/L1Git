@@ -17,15 +17,7 @@ export function SidebarToggle({
       aria-label="Toggle sidebar"
       title="Toggle sidebar"
       aria-pressed={layout.sidebarOpen}
-      onClick={() => {
-        flushSync(toggle);
-        (
-          layout.sidebarToggleRef.current ??
-          document.querySelector<HTMLElement>(
-            ".repository-open[aria-current='true']",
-          )
-        )?.focus();
-      }}
+      onClick={toggle}
     >
       <PanelLeft size={16} />
     </button>

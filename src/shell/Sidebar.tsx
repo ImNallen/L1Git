@@ -1,5 +1,4 @@
 import { WorkspaceIcon } from "../components/WorkspaceIcon";
-import type { ReactNode } from "react";
 import type { Commands } from "../actions";
 import { PaneDivider } from "../components/PaneDivider";
 import { RepositoryTree } from "../components/RepositoryTree";
@@ -30,7 +29,6 @@ export function Sidebar({
   restart,
 }: {
   layout: Layout;
-  toggle: ReactNode;
   settings: Pick<SettingsScreen, "settingsRef">;
   commands: Pick<Commands, "openSettings">;
   entries: RecentRepository[];

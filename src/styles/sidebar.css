@@ -22,8 +22,21 @@
   padding-left: 100px;
   gap: 8px;
 }
-.native-mac.sidebar-hidden .toolbar {
-  padding-left: 100px;
+.app {
+  --sidebar-toggle-left: 24px;
+  position: relative;
+}
+.native-mac {
+  --sidebar-toggle-left: 100px;
+}
+.sidebar-toggle {
+  position: absolute;
+  top: 14px;
+  left: var(--sidebar-toggle-left);
+  z-index: 4;
+}
+.sidebar-hidden .toolbar {
+  padding-left: calc(var(--sidebar-toggle-left) + 28px + 12px);
 }
 .sidebar-search {
   display: flex;
@@ -410,15 +423,6 @@ input::placeholder {
   outline-offset: var(--focus-ring-offset);
 }
 
-.brand {
-  position: relative;
-  z-index: 1;
-}
-.brand > .icon-button {
-  position: absolute;
-  top: 14px;
-  right: 48px;
-}
 .repositories-heading {
   height: 56px;
   flex-shrink: 0;

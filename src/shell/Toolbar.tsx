@@ -44,7 +44,6 @@ const menus: { kind: ToolbarMenuKind; label: string; actions: ActionId[] }[] = [
 export function Toolbar({
   actions,
   searchSlot,
-  sidebarToggle,
   inspectorToggle,
   layout,
   shown,
@@ -52,12 +51,8 @@ export function Toolbar({
 }: {
   actions: ComposedActions;
   searchSlot: Ref<HTMLDivElement>;
-  sidebarToggle: ReactNode;
   inspectorToggle: ReactNode;
-  layout: Pick<
-    Layout,
-    "sidebarOpen" | "inspectorVisible" | "toolbarMenu" | "setToolbarMenu"
-  >;
+  layout: Pick<Layout, "inspectorVisible" | "toolbarMenu" | "setToolbarMenu">;
   shown: WorkspaceView["shown"];
   snapshot: RepositorySnapshot | null;
 }) {
@@ -75,7 +70,6 @@ export function Toolbar({
       className="toolbar"
       data-tauri-drag-region
     >
-      {!layout.sidebarOpen && sidebarToggle}
       <div className="toolbar-actions">
         {snapshot &&
           menus.map(({ kind, label }) => (

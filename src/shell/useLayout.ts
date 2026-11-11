@@ -10,9 +10,9 @@ import type { WorkspaceView } from "./workspaceView";
 const NARROW_SIDEBAR = "(max-width: 939px)";
 
 /**
- * Pane open state and widths. Each toggle renders in one of two places and
- * refocuses whichever instance is mounted after `flushSync`, so its ref is
- * shared and owned here rather than by the toggle.
+ * Pane open state and widths. The inspector toggle renders in one of two
+ * places and refocuses whichever instance is mounted after `flushSync`, so the
+ * toggle refs are owned here rather than by the toggles.
  */
 export type ToolbarMenuKind =
   | "fetch"
@@ -91,12 +91,7 @@ export function useLayout(shown: WorkspaceView["shown"]): Layout {
       commands: {
         toggleSidebar: () => {
           flushSync(() => setSidebarOpen((open) => !open));
-          (
-            sidebarToggleRef.current ??
-            document.querySelector<HTMLElement>(
-              ".repository-open[aria-current='true']",
-            )
-          )?.focus();
+          sidebarToggleRef.current?.focus();
         },
         toggleInspector: () => setInspectorOpen((open) => !open),
         focusCommit: () => {

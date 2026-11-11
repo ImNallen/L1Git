@@ -176,9 +176,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   usePrefetchLazyViews();
 
   const { commands } = actions;
-  const sidebarToggle = (
-    <SidebarToggle layout={layout} toggle={commands.toggleSidebar} />
-  );
   const inspectorToggle = (
     <InspectorToggle
       layout={layout}
@@ -196,9 +193,9 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     <div
       className={`app ${macNative ? "native-mac" : ""} ${layout.sidebarOpen ? "" : "sidebar-hidden"}`}
     >
+      <SidebarToggle layout={layout} toggle={commands.toggleSidebar} />
       <Sidebar
         layout={layout}
-        toggle={sidebarToggle}
         settings={settings}
         commands={commands}
         entries={app.catalog.entries}
@@ -217,7 +214,6 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
             <Toolbar
               actions={actions}
               searchSlot={layout.setSearchSlot}
-              sidebarToggle={sidebarToggle}
               inspectorToggle={inspectorToggle}
               layout={layout}
               shown={view.shown}
