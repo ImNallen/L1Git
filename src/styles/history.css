@@ -169,8 +169,7 @@
 .commit-cell,
 .text-cell > *,
 .changes-cell > *,
-.graph-node,
-.graph-cell path {
+.graph-node {
   transition: opacity 120ms ease-out;
 }
 .history-table.highlighting
@@ -182,8 +181,7 @@
     .text-cell > *,
     .changes-cell > *,
     .graph-node
-  ),
-.graph-cell path.dim {
+  ) {
   opacity: 0.3;
 }
 .ref-badge {
@@ -237,10 +235,17 @@
 .graph-cell {
   display: block;
   flex-shrink: 0;
+  overflow: visible;
 }
 .graph-cell path {
   stroke-width: 2px;
   fill: none;
+  transition:
+    opacity 120ms ease-out,
+    stroke 120ms ease-out;
+}
+.graph-cell path.dim {
+  stroke: color-mix(in srgb, currentColor 30%, var(--canvas));
 }
 .graph-node text {
   pointer-events: none;
