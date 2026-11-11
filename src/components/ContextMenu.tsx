@@ -19,14 +19,14 @@ export function opensMenu(event: ReactKeyboardEvent): boolean {
 export function ContextMenu({
   x,
   y,
-  motion = false,
+  closeOnPointerLeave = false,
   label,
   className = "",
   ignoreScrollIn,
   onClose,
   children,
 }: {
-  motion?: boolean;
+  closeOnPointerLeave?: boolean;
   x: number;
   y: number;
   label: string;
@@ -36,7 +36,6 @@ export function ContextMenu({
   children: ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  const exitDuration = useRef(160);
   const leaveTimer = useRef(0);
   useEffect(() => () => window.clearTimeout(leaveTimer.current), []);
   const [position, setPosition] = useState({ top: y, left: x });
@@ -47,20 +46,16 @@ export function ContextMenu({
   useLayoutEffect(() => {
     const outgoing = exitingMenu;
     const reversal =
-      motion &&
       outgoing?.layer.isConnected &&
       outgoing.paint.getAttribute("aria-label") === label
         ? {
-            height: outgoing.paint.getBoundingClientRect().height,
+            top: outgoing.paint.getBoundingClientRect().top,
             opacity:
               Number(getComputedStyle(outgoing.layer).opacity) *
               Number(getComputedStyle(outgoing.paint).opacity),
-            items: [...outgoing.paint.querySelectorAll("button")].map((item) =>
-              item.getBoundingClientRect(),
-            ),
           }
         : null;
-    if (reversal) outgoing?.dispose();
+    outgoing?.dispose();
     exitingMenu = null;
     const menu = ref.current;
     if (!menu) return;
@@ -72,78 +67,25 @@ export function ContextMenu({
     menu.style.left = `${clamped.left}px`;
     setPosition(clamped);
     menu.querySelector<HTMLElement>(ITEMS)?.focus();
-    if (motion) {
-      const height = menu.getBoundingClientRect().height;
-      animate(
-        menu,
-        [
-          {
-            height: `${reversal?.height ?? 100}px`,
-            opacity: reversal?.opacity ?? 0,
-          },
-          { height: `${height}px`, opacity: 1 },
-        ],
-        160,
-      );
-      for (const [index, item] of [
-        ...menu.querySelectorAll<HTMLElement>(ITEMS),
-      ].entries()) {
-        const previous = reversal?.items[index];
-        const rect = item.getBoundingClientRect();
-        animate(
-          item,
-          [
-            {
-              translate: previous
-                ? `${previous.x - rect.x}px ${previous.y - rect.y}px`
-                : `${-item.offsetLeft}px ${-item.offsetTop}px`,
-            },
-            { translate: "0px 0px" },
-          ],
-          160,
-        );
-      }
-    }
+    animate(
+      menu,
+      [
+        {
+          opacity: reversal?.opacity ?? 0,
+          translate: `0px ${reversal ? Math.max(-4, Math.min(0, reversal.top - clamped.top)) : -4}px`,
+        },
+        { opacity: 1, translate: "0px 0px" },
+      ],
+      160,
+    );
     return () => {
-      if (motion) {
-        exitingMenu = captureExit(menu, "menu");
-        exitingMenu?.play(exitDuration.current);
-        if (exitingMenu) {
-          exitingMenu.layer.style.height = `${Math.max(100, menu.getBoundingClientRect().height)}px`;
-          animate(
-            exitingMenu.paint,
-            [
-              { height: `${menu.getBoundingClientRect().height}px` },
-              { height: "100px" },
-            ],
-            exitDuration.current,
-          );
-          for (const item of exitingMenu.paint.querySelectorAll<HTMLElement>(
-            "button",
-          ))
-            animate(
-              item,
-              [
-                { translate: getComputedStyle(item).translate },
-                { translate: `${-item.offsetLeft}px ${-item.offsetTop}px` },
-              ],
-              exitDuration.current,
-            );
-        }
-      }
-      cancelMotion(
-        new Map([
-          ["menu", menu],
-          ...[...menu.querySelectorAll<HTMLElement>(ITEMS)].map(
-            (item, index): [string, HTMLElement] => [String(index), item],
-          ),
-        ]),
-      );
+      exitingMenu = captureExit(menu, "menu");
+      exitingMenu?.play(100);
+      cancelMotion(new Map([["menu", menu]]));
     };
-  }, [x, y, motion, label]);
+  }, [x, y, label]);
   useEffect(() => {
     const close = () => {
-      exitDuration.current = 160;
       onCloseRef.current({ returnFocus: true });
     };
     const scrolled = (event: Event) => {
@@ -193,22 +135,11 @@ export function ContextMenu({
       style={position}
       onMouseEnter={() => window.clearTimeout(leaveTimer.current)}
       onMouseLeave={() => {
-        if (!motion) return;
+        if (!closeOnPointerLeave) return;
         window.clearTimeout(leaveTimer.current);
         leaveTimer.current = window.setTimeout(() => {
-          exitDuration.current = 120;
           onCloseRef.current({ returnFocus: true });
         }, 200);
-      }}
-      onClickCapture={(event) => {
-        const item =
-          event.target instanceof Element ? event.target.closest(ITEMS) : null;
-        if (
-          item &&
-          item.getAttribute("aria-disabled") !== "true" &&
-          !item.hasAttribute("disabled")
-        )
-          exitDuration.current = 100;
       }}
       onContextMenu={(event) => event.preventDefault()}
       onKeyDown={(event) => {

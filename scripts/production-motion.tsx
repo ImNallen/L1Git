@@ -129,7 +129,7 @@ export function ProductionMotionRegression() {
       </div>
       {menu && (
         <ContextMenu
-          motion
+          closeOnPointerLeave
           x={window.innerWidth - 10}
           y={window.innerHeight - 10}
           label="Regression menu"
@@ -287,9 +287,14 @@ export async function verifyProductionMotion() {
   const effect = exit.getAnimations()[0]?.effect;
   if (
     !(effect instanceof KeyframeEffect) ||
-    effect.getTiming().duration !== 160
+    effect
+      .getKeyframes()
+      .some((frame) => "height" in frame || "translate" in frame) ||
+    exit.getAnimations({ subtree: true }).length !== 1
   )
-    throw new Error("Escape after a disabled click must retain its 160ms exit");
+    throw new Error(
+      "Escape after a disabled click must fade only the exit layer",
+    );
   await wait(220);
   if (document.querySelector("[data-motion-exit]"))
     throw new Error("Exit layers must be removed");
@@ -304,6 +309,6 @@ export async function verifyProductionMotion() {
     reopenedOpacity,
     oldItem: { x: oldItem.x, y: oldItem.y },
     newItem: { x: newItem.x, y: newItem.y },
-    escapeDuration: 160,
+    escapeFadeOnly: true,
   };
 }
