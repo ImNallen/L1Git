@@ -4,7 +4,7 @@
     ".sidebar": { "x": 0, "width": 280 },
     ".repository-content": { "x": 280, "width": 1280 },
     ".inspector-container": { "x": 1560, "width": 360 },
-    ".toolbar": { "height": 56 },
+    ".toolbar": { "y": 1, "height": 56 },
     ".toolbar-search-slot": { "width": 300 },
     ".history-table thead": { "y": 56, "height": 32 },
     ".history-table tbody tr[aria-rowindex]": {
@@ -17,14 +17,11 @@
     ".toolbar-action.branch": { "x": 611, "width": 102 },
     ".toolbar-action.stash": { "x": 719, "width": 94 },
     ".toolbar-action.more": { "x": 819, "width": 82 },
-    ".inspector-heading": { "height": 56 },
+    ".inspector-heading": { "y": 1, "height": 56 },
     ".changed-files-filter": { "width": 328, "height": 30 },
     ".changed-files-filter .workspace-icon": { "width": 16, "height": 16 },
-    ".inspector-heading .workspace-icon": {
-      "x": 1884,
-      "width": 16,
-      "height": 16
-    }
+    ".sidebar-toggle": { "x": 24, "y": 15, "width": 28, "height": 28 },
+    ".inspector-toggle": { "x": 1879, "y": 15, "width": 28, "height": 28 }
   },
   "styles": {
     ".sidebar": { "backgroundColor": "rgb(12, 14, 17)" },
@@ -54,14 +51,14 @@
     ".history-table th": { "fontWeight": "500", "color": "rgb(152, 163, 178)" },
     ".history-table tr.selected .commit-subject": { "fontWeight": "500" },
     ".diffstat .added": { "backgroundColor": "rgb(81, 203, 160)" },
-    ".repository-check": { "maskImage": "none" },
-    ".inspector-heading .workspace-icon": { "maskImage": "none" }
+    ".repository-check": { "maskImage": "none" }
   },
   "absent": [
     ".repository-toggle",
     ".history-heading",
     ".repositories-heading strong",
-    ".sidebar .sidebar-toggle"
+    ".sidebar .sidebar-toggle",
+    ".inspector .inspector-toggle"
   ],
   "rowGeometry": "838/22px, quantized to a browser layout unit; SVG and virtualization share the same constant. The title above history is intentionally absent.",
   "responsive": [

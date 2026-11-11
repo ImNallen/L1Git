@@ -293,16 +293,26 @@ it("the sidebar toggle stays put and keeps focus while the sidebar opens and clo
   expect(document.activeElement).toBe(toggle);
 });
 
-it("the inspector toggle keeps focus as it moves between the toolbar and the pane", async () => {
+it("the inspector toggle stays put and keeps focus while the inspector opens and closes", async () => {
   const app = await mountApp();
-  const inPane = get("button", "Toggle commit inspector");
-  expect(inPane.closest(".inspector")).not.toBeNull();
-  await app.click(inPane);
-  expect(document.activeElement?.closest(".toolbar")).not.toBeNull();
-  expect(focused()).toBe("button Toggle commit inspector");
-  await app.click(get("button", "Toggle commit inspector"));
-  expect(document.activeElement?.closest(".inspector")).not.toBeNull();
-  expect(focused()).toBe("button Toggle commit inspector");
+  const toggle = get("button", "Toggle commit inspector");
+  expect(inspector()).not.toBeNull();
+  expect(toggle.getAttribute("aria-pressed")).toBe("true");
+  expect(toggle.closest(".toolbar, .inspector")).toBeNull();
+  await app.click(toggle);
+  expect(inspector()).toBeNull();
+  expect(get("button", "Toggle commit inspector")).toBe(toggle);
+  expect(toggle.getAttribute("aria-pressed")).toBe("false");
+  expect(document.activeElement).toBe(toggle);
+  await app.click(toggle);
+  expect(inspector()).not.toBeNull();
+  expect(get("button", "Toggle commit inspector")).toBe(toggle);
+  expect(toggle.getAttribute("aria-pressed")).toBe("true");
+  expect(document.activeElement).toBe(toggle);
+  await app.runPaletteItem("Toggle commit inspector");
+  expect(inspector()).toBeNull();
+  expect(toggle.getAttribute("aria-pressed")).toBe("false");
+  expect(document.activeElement).toBe(toggle);
 });
 
 it("the commit box stays out of the inspector's scrolling content, and the file lists stay in it", async () => {

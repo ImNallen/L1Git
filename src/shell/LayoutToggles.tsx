@@ -1,6 +1,4 @@
-import { WorkspaceIcon } from "../components/WorkspaceIcon";
-import { PanelLeft } from "lucide-react";
-import { flushSync } from "react-dom";
+import { PanelLeft, PanelRight } from "lucide-react";
 import type { Layout } from "./useLayout";
 
 export function SidebarToggle({
@@ -36,17 +34,14 @@ export function InspectorToggle({
   return (
     <button
       ref={layout.inspectorToggleRef}
-      className={`icon-button ${layout.inspectorVisible ? "toggled" : ""}`}
+      className={`icon-button inspector-toggle ${layout.inspectorVisible ? "toggled" : ""}`}
       disabled={disabled}
       aria-label="Toggle commit inspector"
       title="Toggle commit inspector"
       aria-pressed={layout.inspectorVisible}
-      onClick={() => {
-        flushSync(toggle);
-        layout.inspectorToggleRef.current?.focus();
-      }}
+      onClick={toggle}
     >
-      <WorkspaceIcon name="Panel" />
+      <PanelRight size={16} />
     </button>
   );
 }

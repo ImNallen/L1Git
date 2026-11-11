@@ -23,20 +23,33 @@
   gap: 8px;
 }
 .app {
+  --pane-toggle-top: 15px;
   --sidebar-toggle-left: 24px;
+  --inspector-toggle-right: 13px;
+  --inspector-toggle-reserve: calc(var(--inspector-toggle-right) + 28px + 12px);
   position: relative;
 }
 .native-mac {
   --sidebar-toggle-left: 100px;
 }
-.sidebar-toggle {
+/* Above the narrow-window inspector overlay (z-index 5), below popovers and menus. */
+.sidebar-toggle,
+.inspector-toggle {
   position: absolute;
-  top: 14px;
+  top: var(--pane-toggle-top);
+  z-index: 6;
+}
+.sidebar-toggle {
   left: var(--sidebar-toggle-left);
-  z-index: 4;
+}
+.inspector-toggle {
+  right: var(--inspector-toggle-right);
 }
 .sidebar-hidden .toolbar {
   padding-left: calc(var(--sidebar-toggle-left) + 28px + 12px);
+}
+.inspector-hidden .toolbar {
+  padding-right: var(--inspector-toggle-reserve);
 }
 .sidebar-search {
   display: flex;
