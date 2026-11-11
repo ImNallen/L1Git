@@ -3,6 +3,6 @@
 <g id="Update status icon">
 <path id="Vector" d="M16 9.8125V17.6875M19.15 14.65L16 17.6875L12.85 14.65M10.375 18.25V21.0625H21.625V18.25" stroke-width="1.40625" stroke-linecap="round" stroke-linejoin="round" stroke="#A7C8FF"/>
 </g>
-<circle id="Update status dot" cx="26" cy="8" r="3.5" fill="#79A9FF" stroke="#0C0E11"/>
+<circle id="Update status dot" cx="26" cy="8" r="3.5" fill="#79A9FF" stroke="#0E0E0E"/>
 </g>
 </svg>
