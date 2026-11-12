@@ -68,6 +68,8 @@ export const STYLESHEET_TOKENS = {
   warningIcon: "--warning-icon",
   warningBg: "--warning-bg",
   warningBorder: "--warning-border",
+  sideCurrent: "--side-current",
+  sideIncoming: "--side-incoming",
   emptyIconBg: "--empty-icon-bg",
   emptyIconEnd: "--empty-icon-end",
   emptyIconBorder: "--empty-icon-border",

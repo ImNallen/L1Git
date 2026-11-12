@@ -31,14 +31,15 @@ import type { Applied, ReplayOf, RepositoryRoot } from "./domain/repository";
 
 installHarness();
 
-const PANEL = "Cherry-pick or revert";
+const PANEL = /^(Cherry-picking|Reverting) /;
+const NOTICES = "Cherry-pick or revert";
 
 it("a cherry-pick started in a terminal opens the panel on the next refocus", async () => {
   const app = await mountApp();
   expect(query("region", PANEL)).toBeNull();
   app.bridge.world.merges.set(PIN, replayInProgress(PIN, ["notes.txt"]));
   await app.refocusWindow();
-  expect(get("region", PANEL).textContent).toContain("Cherry-pick in progress");
+  expect(get("region", PANEL).textContent).toContain("Picked commit");
   expect(query("region", "Branch merge")).toBeNull();
 });
 
@@ -52,7 +53,7 @@ it("the panel follows the active worktree", async () => {
   });
   expect(query("region", PANEL)).toBeNull();
   await app.click(historyRow("Uncommitted changes in pin-feature,"));
-  expect(get("region", PANEL).textContent).toContain("refs/heads/feature");
+  expect(get("region", /onto feature$/)).toBeTruthy();
 });
 
 it("Finish writes finishReplay, closes the panel, and lands in Undo with its label", async () => {
@@ -69,7 +70,6 @@ it("Finish writes finishReplay, closes the panel, and lands in Undo with its lab
     return entry;
   });
   app.bridge.reset();
-  await app.click(get("button", "Use suggested message"));
   await app.click(get("button", "Finish cherry-pick"));
   expect(app.bridge.lines((request) => request.op === "write")).toEqual([
     `write ${PIN} finishReplay`,
@@ -90,7 +90,6 @@ it("a refused Finish shows why through the write notice and keeps the panel", as
     message: "pre-commit said no.",
     output: "",
   });
-  await app.click(get("button", "Use suggested message"));
   await app.click(get("button", "Finish cherry-pick"));
   expect(
     get("alert", /Could not finish cherry-pick “Picked commit”/).textContent,
@@ -114,11 +113,14 @@ it("Abort names the unsaved draft, asks first, and discards only what was shown"
   app.bridge.reset();
   await app.click(get("button", "Abort revert…"));
   expect(dialogs()).toEqual(["Abort this revert?"]);
-  expect(get("dialog", "Abort this revert?").textContent).toContain(
-    "Also discard these resolution drafts if they have not changed since this confirmation opened: notes.txt.",
+  expect(get("region", "Discarded").textContent).toContain(
+    "notes.txt unsaved result draft",
+  );
+  expect(get("region", "Discarded").textContent).toContain(
+    "A draft you change after this opens is kept.",
   );
   expect(app.bridge.count("replayAbort")).toBe(0);
-  await app.click(get("button", "Discard revert and abort"));
+  await app.click(get("button", "Abort revert"));
   expect(app.bridge.log.filter(({ op }) => op === "replayAbort")).toEqual([
     {
       op: "replayAbort",
@@ -134,11 +136,11 @@ it("Abort names the unsaved draft, asks first, and discards only what was shown"
       app.modules.resolutionDrafts.resolutionKey(PIN, "notes.txt"),
     ),
   ).toBeNull();
-  expect(get("region", PANEL).textContent).toContain("Revert aborted.");
+  expect(get("region", NOTICES).textContent).toContain("Revert aborted.");
   expect(query("button", "Finish revert")).toBeNull();
 });
 
-it("Review in the panel selects the worktree and opens the inspector", async () => {
+it("the progress in the strip selects the worktree and opens the inspector", async () => {
   const app = await mountApp({
     world: (world) =>
       world.merges.set(
@@ -150,7 +152,7 @@ it("Review in the panel selects the worktree and opens the inspector", async () 
   await app.click(historyRow("Release,"));
   await app.click(get("button", "Toggle commit inspector"));
   expect(query("complementary", "Commit inspector")).toBeNull();
-  await app.click(get("button", "Review staged result and conflicts"));
+  await app.click(get("button", "1 of 1 resolved"));
   expect(selectedRow()).toBe("Uncommitted changes in pin-feature, 1 modified");
   expect(query("complementary", "Commit inspector")).toBeTruthy();
 });
@@ -429,7 +431,9 @@ it("a stopped pick closes with no failure notice, and the panel takes over", asy
   await app.click(get("button", "Cherry-pick", get("dialog", REVIEW)));
   expect(dialogs()).toEqual([]);
   expect(queryAll("alert").length).toBe(noticesBefore);
-  expect(get("region", PANEL).textContent).toContain("1 unresolved path");
+  expect(get("region", PANEL).textContent).toContain(
+    "1 file still has a conflict.",
+  );
 });
 
 it("a hook that stops a clean pick shows Git's output in the panel, not a notice", async () => {
@@ -451,9 +455,10 @@ it("a hook that stops a clean pick shows Git's output in the panel, not a notice
   await app.click(get("button", "Cherry-pick", get("dialog", REVIEW)));
   expect(dialogs()).toEqual([]);
   expect(query("alert", /Could not/)).toBeNull();
-  const panel = get("region", PANEL);
-  expect(panel.textContent).toContain(message);
-  expect(panel.textContent).toContain("hook says no");
+  expect(get("region", PANEL)).toBeTruthy();
+  const stopped = get("alert", /^Git could not make the commit/);
+  expect(stopped.textContent).toContain(message);
+  expect(stopped.textContent).toContain("hook says no");
 });
 
 it("a stale answer keeps the review open, says to review again, and leaves no notice", async () => {

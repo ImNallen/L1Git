@@ -227,7 +227,7 @@ it("closes on a plain conflict and shows no failure, because the panel takes ove
   await show({ state: replayState(), open: false });
   expect(host.querySelector("dialog")).toBeNull();
   expect(alerts()).toEqual([]);
-  expect(host.textContent).toContain("1 unresolved path");
+  expect(host.textContent).toContain("1 file still has a conflict.");
 });
 
 it("closes on a hook or signing stop and the panel shows Git's output until Finish or Abort", async () => {

@@ -41,13 +41,13 @@ export function Notices({
   const { jumped, jumpedUnloaded, hiddenJump } = nav.jump;
   return (
     <>
-      <WriteNoticeRow writes={writes} />
       {merge.controls && (
         <MergeControls key={merge.controls.root} {...merge.controls} />
       )}
       {merge.replay && (
         <ReplayPanel key={`replay:${merge.replay.root}`} {...merge.replay} />
       )}
+      <WriteNoticeRow writes={writes} />
       <ResolutionDraftList drafts={drafts} />
       <PushNotice push={sync.push} />
       {persistenceError && (

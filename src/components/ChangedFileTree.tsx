@@ -33,6 +33,13 @@ export type RowAction = {
   appliesTo?: ReadonlySet<string>;
 };
 
+export type RowLabel = { text: string; tone: "warning" | "success" };
+
+const labelColors: Record<RowLabel["tone"], string> = {
+  warning: "var(--warning)",
+  success: "var(--success)",
+};
+
 export const focusedRow = '[data-type="item"][tabindex="0"]';
 
 const focusIsFree = () =>
@@ -47,6 +54,7 @@ type Props = {
   refocusPath?: string | null;
   onFocused?: () => void;
   onRowFocus?: (row: string) => void;
+  labels?: ReadonlyMap<string, RowLabel>;
 };
 
 const DIRECTORY_HEIGHT = 32;
@@ -75,6 +83,7 @@ export function ChangedFileTree({
   refocusPath = null,
   onFocused,
   onRowFocus,
+  labels,
 }: Props) {
   const onSelectFileRef = useRef(onSelectFile);
   useEffect(() => {
@@ -90,20 +99,30 @@ export function ChangedFileTree({
   const { model } = useFileTree({
     preparedInput,
     initialSelectedPaths,
-    gitStatus: files.map((file) => ({
-      path: treePath(file.path),
-      status: file.status,
-    })),
+    gitStatus: files
+      .filter((file) => !labels?.has(file.path))
+      .map((file) => ({
+        path: treePath(file.path),
+        status: file.status,
+      })),
     initialExpansion,
     flattenEmptyDirectories,
     density: "default",
     itemHeight: DIRECTORY_HEIGHT,
     fileItemHeight: FILE_HEIGHT,
     icons: { set: "minimal", colored: false },
-    renderRowDecoration: ({ item }) =>
-      item.kind === "directory"
-        ? { text: String(pathsUnder(files, item).length) }
-        : null,
+    renderRowDecoration: ({ item }) => {
+      if (item.kind === "directory")
+        return { text: String(pathsUnder(files, item).length) };
+      const path = changedPathAt(files, item.path);
+      const label = path === undefined ? undefined : labels?.get(path);
+      return label
+        ? {
+            text: label.text,
+            parts: [{ text: label.text, color: labelColors[label.tone] }],
+          }
+        : null;
+    },
     fileTreeSearchMode: "hide-non-matches",
     searchBlurBehavior: "retain",
     unsafeCSS: `${focusStyles}

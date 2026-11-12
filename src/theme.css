@@ -9,6 +9,7 @@
 @import "./styles/menu.css";
 @import "./styles/focus.css";
 @import "./styles/workspacePalette.css";
+@import "./styles/operation.css";
 
 :root {
   font-family: "InterVariable", Inter, sans-serif;
@@ -78,6 +79,8 @@
   --warning-icon: #d8a486;
   --warning-bg: #24201a;
   --warning-border: #30291c;
+  --side-current: #7ba6ff;
+  --side-incoming: #b392f0;
   --empty-icon-bg: #1a1a1a;
   --empty-icon-end: #101010;
   --empty-icon-border: #282828;
@@ -153,6 +156,8 @@
   --warning-icon: #955f34;
   --warning-bg: #fcf4e8;
   --warning-border: #f1d4c7;
+  --side-current: #2f63d6;
+  --side-incoming: #7c4dd6;
   --empty-icon-bg: #f0f0f0;
   --empty-icon-end: #f7f7f7;
   --empty-icon-border: #dbdbdb;

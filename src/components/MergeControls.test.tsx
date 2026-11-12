@@ -66,6 +66,14 @@ function button(name: string) {
   if (!button) throw new Error(`No ${name}`);
   return button;
 }
+const blocked = (name: string) => {
+  const found = button(name);
+  return found.disabled || found.getAttribute("aria-disabled") === "true";
+};
+const finishReason = () => {
+  const id = button("Finish merge").getAttribute("aria-describedby");
+  return id === null ? null : document.getElementById(id)?.textContent;
+};
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.clearAllMocks();
@@ -124,14 +132,13 @@ it("offers a relevant merge action without the generic worktree and refresh tool
 it("protects unsaved conflict text from Finish while permitting reviewed Abort", async () => {
   publishResolutionImpact([{ root: review.root, path: "conflict.txt" }]);
   await act(async () => root.render(<MergeControls {...props} />));
-  await act(async () => button("Use suggested message").click());
-  expect(button("Finish merge").disabled).toBe(true);
-  expect(button("Abort merge…").disabled).toBe(false);
-  expect(host.textContent).toContain("Unsaved conflict results");
+  expect(blocked("Finish merge")).toBe(true);
+  expect(finishReason()).toBe("Save your unsaved conflict results first.");
+  expect(blocked("Abort merge…")).toBe(false);
   await act(async () => button("Finish merge").click());
   expect(run).not.toHaveBeenCalled();
   await act(async () => publishResolutionImpact([]));
-  expect(button("Finish merge").disabled).toBe(false);
+  expect(blocked("Finish merge")).toBe(false);
 });
 it("keeps an amend's saved message protected before Start", async () => {
   const loaded = loadMessage("Previous commit\n");
@@ -174,12 +181,16 @@ it("reviews exact refs and OIDs and starts only after explicit Start", async () 
   await act(async () => button("Start merge").click());
   expect(run).toHaveBeenCalledWith({ kind: "start", review });
 });
-it("requires a message, permits an empty-tree merge, and binds the reviewed staged result", async () => {
+it("finishes with the suggested message unless edited, and binds the reviewed staged result", async () => {
+  setDraft(review.root, {
+    draft: { summary: " ", description: "" },
+    amend: null,
+  });
   await act(async () => root.render(<MergeControls {...props} />));
-  expect(button("Finish merge").disabled).toBe(true);
+  expect(finishReason()).toBe("Write a commit message first.");
   expect(host.textContent).toContain("source branch has moved");
-  await act(async () => button("Use suggested message").click());
-  expect(button("Finish merge").disabled).toBe(false);
+  await act(async () => clearSubmitted(review.root, draftOf(review.root)));
+  expect(blocked("Finish merge")).toBe(false);
   await act(async () => button("Finish merge").click());
   expect(run).toHaveBeenCalledWith({
     kind: "finish",
@@ -198,10 +209,10 @@ it("keeps Abort behind a discard confirmation and preserves the message draft", 
   await act(async () => button("Abort merge…").click());
   expect(run).not.toHaveBeenCalled();
   expect(host.textContent).toContain("Unrelated tracked changes block Abort");
-  await act(async () => button("Cancel").click());
+  await act(async () => button("Keep merging").click());
   expect(run).not.toHaveBeenCalled();
   await act(async () => button("Abort merge…").click());
-  await act(async () => button("Discard merge and abort").click());
+  await act(async () => button("Abort merge").click());
   expect(run).toHaveBeenCalledWith({ kind: "abort", session: "a".repeat(16) });
   expect(draftOf(review.root).draft.summary).toBe("keep my message");
 });
@@ -223,13 +234,15 @@ it("shows recovery instructions without destructive continuation and freezes lif
     ),
   );
   expect(host.textContent).toContain("Preserve external changes.");
-  expect(host.querySelector("textarea")).toBeNull();
+  expect(host.textContent).toContain("Merge needs attention");
+  expect(host.textContent).not.toContain("Finish merge");
+  expect(host.textContent).not.toContain("Abort merge");
   await act(async () => root.render(<MergeControls {...props} />));
   const freeze = freezeDrafts(draftImpact().revision);
   if (freeze.kind !== "frozen") throw new Error("Expected restart freeze");
   await act(async () => root.render(<MergeControls {...props} />));
   expect(button("Abort merge…").disabled).toBe(true);
-  expect(host.querySelector("textarea")?.readOnly).toBe(true);
+  expect(finishReason()).toBe("Wait for L1 Git to restart.");
   await act(async () => freeze.release());
 });
 it("keeps a readable failure and refreshes state after a rejected Finish", async () => {
@@ -241,7 +254,6 @@ it("keeps a readable failure and refreshes state after a rejected Finish", async
     },
   });
   await act(async () => root.render(<MergeControls {...props} />));
-  await act(async () => button("Use suggested message").click());
   await act(async () => button("Finish merge").click());
   expect(host.querySelector('[role="alert"]')?.textContent).toContain(
     "other.txt",

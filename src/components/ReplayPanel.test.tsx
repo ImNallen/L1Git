@@ -77,6 +77,15 @@ function button(name: string) {
   if (!found) throw new Error(`No ${name}`);
   return found;
 }
+const blocked = (name: string) => {
+  const found = button(name);
+  return found.disabled || found.getAttribute("aria-disabled") === "true";
+};
+const finishReason = () => {
+  const id = button("Finish cherry-pick").getAttribute("aria-describedby");
+  return id === null ? null : document.getElementById(id)?.textContent;
+};
+const strip = () => host.querySelector(".operation-strip");
 const names = () =>
   [...host.querySelectorAll("button")].map((item) => item.textContent?.trim());
 
@@ -98,48 +107,46 @@ afterEach(async () => {
 });
 
 it.each([
-  ["cherryPick", "Cherry-pick in progress", "cherry-pick"],
-  ["revert", "Revert in progress", "revert"],
+  ["cherryPick", "Cherry-picking", "onto", "cherry-pick"],
+  ["revert", "Reverting", "on", "revert"],
 ])(
-  "names the %s, its commit, and its destination",
-  async (kind, title, noun) => {
-    await render(state({ kind, unresolved: ["a.txt", "b.txt"], tree: null }));
-    expect(host.querySelector("strong")?.textContent).toBe(title);
-    expect(host.textContent).toContain("Picked subject");
-    expect(host.textContent).toContain(commit);
-    expect(host.textContent).toContain("refs/heads/main");
-    expect(host.textContent).toContain(head);
-    expect(host.textContent).toContain("2 unresolved paths");
+  "names the %s by its commit and the branch it lands on",
+  async (kind, doing, onto, noun) => {
+    await render(
+      state({
+        kind,
+        conflicted: ["a.txt", "b.txt"],
+        unresolved: ["a.txt", "b.txt"],
+        tree: null,
+      }),
+    );
+    expect(host.querySelector(".operation-title")?.textContent).toBe(
+      `${doing} aaaaaaa Picked subject ${onto} main`,
+    );
+    expect(strip()?.textContent).toContain(
+      `2 files still have conflicts. Resolve them, then finish the ${noun}.`,
+    );
+    expect(strip()?.textContent).toContain("0 of 2 resolved");
     expect(button(`Finish ${noun}`)).toBeDefined();
     expect(button(`Abort ${noun}…`)).toBeDefined();
   },
 );
 
-it("names a detached destination by its commit", async () => {
+it("names a detached destination", async () => {
   await render(state({ destination: { kind: "detached", oid: head } }));
-  expect(host.textContent).toContain("Detached HEAD");
-  expect(host.textContent).toContain(head);
-});
-
-it("says what Undo and Abort can do", async () => {
-  await render(state());
-  expect(host.textContent).toContain("Finish can be undone like a commit.");
-  expect(host.textContent).toContain("does not reopen the conflict");
-  expect(host.textContent).toContain("Abort cannot be undone.");
-  expect(host.textContent).toContain(
-    "Resolution edits have Undo and Redo until Finish or Abort.",
+  expect(host.querySelector(".side-chip.current")?.textContent).toBe(
+    "Detached HEAD",
   );
 });
 
-it("opens the resolver from the panel", async () => {
+it("opens the inspector from the progress", async () => {
   await render(state());
-  await act(async () => button("Review staged result and conflicts").click());
+  await act(async () => button("1 of 1 resolved").click());
   expect(inspect).toHaveBeenCalledOnce();
 });
 
-it("sends Finish through a write with the state the panel showed", async () => {
+it("sends Finish through a write with the state the strip showed and the suggested message", async () => {
   await render(state());
-  await act(async () => button("Use suggested message").click());
   await act(async () => button("Finish cherry-pick").click());
   expect(write).toHaveBeenCalledWith(worktree, {
     operation: {
@@ -153,62 +160,60 @@ it("sends Finish through a write with the state the panel showed", async () => {
   });
 });
 
-it("disables Finish with an unresolved path, an unsaved draft, an empty message, or while busy", async () => {
+it("blocks Finish with a reason for an unresolved path, an unsaved draft, an empty message, or while busy", async () => {
   await render(state({ unresolved: ["conflict.txt"], tree: null }));
-  await act(async () => button("Use suggested message").click());
-  expect(button("Finish cherry-pick").disabled).toBe(true);
+  expect(blocked("Finish cherry-pick")).toBe(true);
+  expect(finishReason()).toBe("Resolve every conflicted file first.");
+  await act(async () => button("Finish cherry-pick").click());
+  expect(write).not.toHaveBeenCalled();
 
   await render(state());
-  expect(button("Finish cherry-pick").disabled).toBe(false);
+  expect(blocked("Finish cherry-pick")).toBe(false);
+  expect(finishReason()).toBeNull();
 
   publishResolutionImpact([{ root: worktree, path: "conflict.txt" }]);
   await render(state());
-  expect(button("Finish cherry-pick").disabled).toBe(true);
-  expect(button("Abort cherry-pick…").disabled).toBe(false);
-  expect(host.textContent).toContain("Unsaved conflict results");
+  expect(finishReason()).toBe("Save your unsaved conflict results first.");
+  expect(blocked("Abort cherry-pick…")).toBe(false);
   await act(async () => button("Finish cherry-pick").click());
   expect(write).not.toHaveBeenCalled();
   await act(async () => publishResolutionImpact([]));
-  expect(button("Finish cherry-pick").disabled).toBe(false);
+  expect(blocked("Finish cherry-pick")).toBe(false);
 
   await render(state(), true);
-  expect(button("Finish cherry-pick").disabled).toBe(true);
-  expect(button("Abort cherry-pick…").disabled).toBe(true);
+  expect(finishReason()).toBe("Wait for the current operation to finish.");
+  expect(blocked("Abort cherry-pick…")).toBe(true);
 
-  await act(async () => clearSubmitted(worktree, draftOf(worktree)));
+  setDraft(worktree, {
+    draft: { summary: " ", description: "" },
+    amend: null,
+  });
   await render(state());
-  expect(button("Finish cherry-pick").disabled).toBe(true);
+  expect(finishReason()).toBe("Write a commit message first.");
 });
 
 it("ignores unsaved drafts in other worktrees", async () => {
   publishResolutionImpact([{ root: rootSchema.parse("/other"), path: "x" }]);
   await render(state());
-  await act(async () => button("Use suggested message").click());
-  expect(button("Finish cherry-pick").disabled).toBe(false);
+  expect(blocked("Finish cherry-pick")).toBe(false);
 });
 
-it("freezes the panel for a restart", async () => {
+it("freezes the strip for a restart", async () => {
   await render(state());
   const freeze = freezeDrafts(draftImpact().revision);
   if (freeze.kind !== "frozen") throw new Error("Expected restart freeze");
   await render(state());
-  expect(button("Abort cherry-pick…").disabled).toBe(true);
-  expect(button("Use suggested message").disabled).toBe(true);
-  expect(host.querySelector("textarea")?.readOnly).toBe(true);
+  expect(blocked("Abort cherry-pick…")).toBe(true);
+  expect(finishReason()).toBe("Wait for L1 Git to restart.");
   await act(async () => freeze.release());
 });
 
 it("offers only Abort when the result matches HEAD, and says why", async () => {
   await render(state({ empty: true, tree: head }));
-  expect(host.textContent).toContain(
+  expect(strip()?.textContent).toContain(
     "The staged result matches HEAD, so there is nothing to commit.",
   );
-  expect(names()).toEqual([
-    "Review staged result and conflicts",
-    "Abort cherry-pick…",
-  ]);
-  expect(host.querySelector("textarea")).toBeNull();
-  expect(host.textContent).not.toContain("Finish can be undone");
+  expect(names()).toEqual(["1 of 1 resolved", "Abort cherry-pick…"]);
 });
 
 it("keeps Abort behind a confirmation, and the message draft through it", async () => {
@@ -219,12 +224,14 @@ it("keeps Abort behind a confirmation, and the message draft through it", async 
   await render(state({ kind: "revert" }));
   await act(async () => button("Abort revert…").click());
   expect(abort).not.toHaveBeenCalled();
-  expect(host.textContent).toContain("A staged change outside those paths");
-  expect(host.textContent).toContain("This action cannot be undone.");
-  await act(async () => button("Cancel").click());
+  expect(host.textContent).toContain(
+    "A staged change outside the revert's files blocks Abort.",
+  );
+  expect(host.textContent).toContain("This cannot be undone.");
+  await act(async () => button("Keep reverting").click());
   expect(abort).not.toHaveBeenCalled();
   await act(async () => button("Abort revert…").click());
-  await act(async () => button("Discard revert and abort").click());
+  await act(async () => button("Abort revert").click());
   expect(abort).toHaveBeenCalledWith(
     worktree,
     { kind: "revert", commit },
@@ -233,10 +240,10 @@ it("keeps Abort behind a confirmation, and the message draft through it", async 
   expect(draftOf(worktree).draft.summary).toBe("keep my message");
 });
 
-it("tells the user when Abort ended the operation, after the panel closes", async () => {
+it("tells the user when Abort ended the operation, after the strip closes", async () => {
   await render(state());
   await act(async () => button("Abort cherry-pick…").click());
-  await act(async () => button("Discard cherry-pick and abort").click());
+  await act(async () => button("Abort cherry-pick").click());
   await act(async () => root.render(panel({ kind: "idle" })));
   expect(host.querySelector('[role="status"]')?.textContent).toContain(
     "Cherry-pick aborted.",
@@ -254,12 +261,12 @@ it.each([
   ],
   ["a busy answer", { kind: "busy" }, "Wait for the current operation"],
 ] as const)(
-  "keeps the panel and shows %s from Abort",
+  "keeps the strip and shows %s from Abort",
   async (_, answer, text) => {
     abort.mockResolvedValue(answer);
     await render(state());
     await act(async () => button("Abort cherry-pick…").click());
-    await act(async () => button("Discard cherry-pick and abort").click());
+    await act(async () => button("Abort cherry-pick").click());
     expect(host.querySelector('[role="alert"]')?.textContent).toContain(text);
     expect(button("Finish cherry-pick")).toBeDefined();
   },
@@ -285,7 +292,7 @@ it.each([
                 of: { kind: "cherryPick", commit },
                 staged,
                 tree,
-                message: "Picked subject\n",
+                message: "My message\n",
               },
             }),
           }
@@ -294,12 +301,13 @@ it.each([
             problem: { kind: answer, message: "Stopped.", output: "" },
           } as Awaited<ReturnType<typeof write>>),
     );
+    setDraft(worktree, {
+      draft: { summary: "My message", description: "" },
+      amend: null,
+    });
     await render(state());
-    await act(async () => button("Use suggested message").click());
     await act(async () => button("Finish cherry-pick").click());
-    expect(draftOf(worktree).draft.summary).toBe(
-      cleared ? "" : "Picked subject",
-    );
+    expect(draftOf(worktree).draft.summary).toBe(cleared ? "" : "My message");
   },
 );
 
@@ -313,7 +321,6 @@ it("shows what a refusing hook printed, as the Commit box does, until the next F
     },
   });
   await render(state());
-  await act(async () => button("Use suggested message").click());
   await act(async () => button("Finish cherry-pick").click());
   expect(host.querySelector(".problem-detail")?.textContent).toBe(
     "lint failed in conflict.txt",
@@ -322,7 +329,7 @@ it("shows what a refusing hook printed, as the Commit box does, until the next F
   expect(host.querySelector(".problem-detail")).toBeNull();
 });
 
-it("makes the user turn off a saved Amend before writing a message", async () => {
+it("blocks Finish while a saved Amend is on", async () => {
   const loaded = loadMessage("Previous commit\n");
   setDraft(worktree, {
     draft: loaded.draft,
@@ -333,13 +340,14 @@ it("makes the user turn off a saved Amend before writing a message", async () =>
     },
   });
   await render(state());
-  expect(host.textContent).toContain("Amend is on");
-  expect(host.querySelector("textarea")).toBeNull();
-  expect(button("Finish cherry-pick").disabled).toBe(true);
-  await act(async () => button("Turn off Amend").click());
-  expect(draftOf(worktree).amend).toBeNull();
-  expect(host.querySelector("input")?.value).toBe("unsent draft");
-  expect(button("Finish cherry-pick").disabled).toBe(false);
+  expect(finishReason()).toBe("Turn off Amend in the commit message first.");
+  await act(async () =>
+    setDraft(worktree, {
+      draft: { summary: "unsent draft", description: "" },
+      amend: null,
+    }),
+  );
+  expect(blocked("Finish cherry-pick")).toBe(false);
 });
 
 it("shows nothing when Git holds no cherry-pick or revert", async () => {
@@ -362,7 +370,7 @@ const controls = (value: ReturnType<typeof mergeStateSchema.parse>) => (
   />
 );
 
-it("names an external operation as a Git operation and leaves recovery as a merge", async () => {
+it("shows an operation started in a terminal as read-only, and recovery as a merge", async () => {
   await act(async () =>
     root.render(
       controls({
@@ -373,10 +381,13 @@ it("names an external operation as a Git operation and leaves recovery as a merg
       }),
     ),
   );
-  expect(host.querySelector("strong")?.textContent).toBe(
-    "Git operation in progress",
+  expect(host.querySelector(".operation-title")?.textContent).toBe(
+    "A rebase is in progress",
   );
-  expect(host.textContent).toContain("A rebase is in progress.");
+  expect(strip()?.textContent).toContain(
+    "Started outside L1 Git. You can resolve files here, then continue or abort in your terminal.",
+  );
+  expect(names()).toEqual([]);
   await act(async () =>
     root.render(
       controls({
@@ -387,9 +398,10 @@ it("names an external operation as a Git operation and leaves recovery as a merg
       }),
     ),
   );
-  expect(host.querySelector("strong")?.textContent).toBe(
+  expect(host.querySelector(".operation-title")?.textContent).toBe(
     "Merge needs attention",
   );
+  expect(names()).toEqual(["Copy recovery steps"]);
 });
 
 it("leaves a cherry-pick or revert to the replay panel", async () => {
