@@ -750,6 +750,11 @@ pub(super) fn resolve(
         ConflictKeep::Incoming => seen.incoming.as_ref(),
     }
     .map(|side| &side.row);
+    if side.is_some() && seen.scope.contains(&Parent::Missing) {
+        return Err(files::unsupported(format!(
+            "The folder that holds {path} is missing. Restore the folder, or keep the side without the file."
+        )));
+    }
     let existing = fs::symlink_metadata(repo.root.join(path))
         .ok()
         .filter(fs::Metadata::is_file)

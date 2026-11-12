@@ -549,6 +549,51 @@ fn a_changed_conflict_or_a_path_outside_the_merge_is_refused() {
 }
 
 #[test]
+fn keeping_a_file_whose_folder_is_gone_is_refused_and_deleting_it_stays_undoable() {
+    let repo = Repo::new();
+    fs::create_dir(repo.root.join("sub")).unwrap();
+    repo.put("sub/f.txt", LINES.join("\n").as_bytes());
+    repo.commit("nested");
+    repo.git(&["switch", "--quiet", "-c", "topic"]);
+    fs::remove_dir_all(repo.root.join("sub")).unwrap();
+    repo.commit("theirs");
+    repo.git(&["switch", "--quiet", "main"]);
+    repo.put("sub/f.txt", &edited("ours"));
+    repo.commit("ours");
+    repo.start_merge();
+    fs::remove_dir_all(repo.root.join("sub")).unwrap();
+    let conflict = repo.rows("sub/f.txt");
+
+    let refused = repo
+        .resolve("sub/f.txt", ConflictKeep::Current)
+        .unwrap_err();
+    assert_eq!(
+        refused.kind,
+        ErrorKind::UnsupportedPath,
+        "{}",
+        refused.message
+    );
+    assert_eq!(
+        (repo.rows("sub/f.txt"), repo.disk("sub/f.txt")),
+        (conflict.clone(), Disk::Absent),
+        "a refused resolution changes nothing"
+    );
+    assert_eq!(
+        repo.coordinator.undo_history(repo.path()).unwrap().undo,
+        None
+    );
+
+    let applied = repo.resolve("sub/f.txt", ConflictKeep::Incoming).unwrap();
+    assert_eq!(repo.rows("sub/f.txt"), "", "the deletion is staged");
+    repo.coordinator.undo(repo.path(), applied.id).unwrap();
+    assert_eq!(
+        (repo.rows("sub/f.txt"), repo.disk("sub/f.txt")),
+        (conflict, Disk::Absent),
+        "undo restores the conflict"
+    );
+}
+
+#[test]
 fn the_summary_labels_text_whole_file_and_external_conflicts() {
     let repo = Repo::diverged(
         |repo| {
