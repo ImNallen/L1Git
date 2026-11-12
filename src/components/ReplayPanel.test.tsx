@@ -35,6 +35,7 @@ const state = (progress: Partial<Record<keyof ReplayProgress, unknown>> = {}) =>
       subject: "Picked subject",
       destination,
       footprint: ["conflict.txt"],
+      conflicted: ["conflict.txt"],
       unresolved: [],
       staged,
       tree,

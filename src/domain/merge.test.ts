@@ -17,6 +17,7 @@ const replay = mergeStateSchema.parse({
       oid: oid("b"),
     },
     footprint: ["inside.txt"],
+    conflicted: ["inside.txt"],
     unresolved: ["inside.txt"],
     staged: "c".repeat(40),
     tree: null,
@@ -85,5 +86,34 @@ describe("mergeAllows during a replay", () => {
         operation({ kind: "commit", message: "m", staged: "c".repeat(40) }),
       ),
     ).toBe(false);
+  });
+});
+
+describe("mergeAllows for a whole-file resolution", () => {
+  const resolveWhole = (path: string) =>
+    operation({
+      kind: "resolveWhole",
+      path,
+      version: "e".repeat(40),
+      keep: "incoming",
+    });
+
+  it("owns only paths inside the footprint", () => {
+    expect(mergeAllows(replay, resolveWhole("inside.txt"))).toBe(true);
+    expect(mergeAllows(replay, resolveWhole("outside.txt"))).toBe(false);
+  });
+
+  it("leaves an external operation's paths to Git's own rules", () => {
+    expect(
+      mergeAllows(
+        mergeStateSchema.parse({
+          kind: "attention",
+          session: null,
+          reason: "externalOperation",
+          message: "A merge is in progress.",
+        }),
+        resolveWhole("anything.txt"),
+      ),
+    ).toBe(true);
   });
 });

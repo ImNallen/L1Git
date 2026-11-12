@@ -424,7 +424,7 @@ fn same_bytes(a: &Path, b: &Path) -> io::Result<bool> {
     }
 }
 
-fn prepare(content: &Content, files: &Path, temporary: &Path) -> io::Result<()> {
+pub(super) fn prepare(content: &Content, files: &Path, temporary: &Path) -> io::Result<()> {
     match content {
         Content::Absent => Ok(()),
         Content::File { copy, permissions } => {

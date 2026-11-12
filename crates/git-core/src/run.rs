@@ -1,11 +1,11 @@
 use crate::{
     AddRemote, AddRemoteReport, Advance, Applied, Blame, BranchMerged, BranchTip, CloneUrl,
-    CommitDetail, Comparison, ConflictFile, Coordinator, EntryId, Expect, FastForwardReport,
-    FetchMode, FilePatch, FileRevision, Head, LineStats, MergeAction, MergeReport, MergeReview,
-    MergeSelection, MergeState, NewRepository, Operation, PublishChoice, PublishOptions,
-    PushAvailability, PushIntent, PushReport, ReplayOf, ReplayReview, RepositoryError,
-    RepositoryOverview, RepositoryRefs, RepositorySnapshot, Side, UndoHistory, WorktreePatch,
-    WorktreeStatus,
+    CommitDetail, Comparison, ConflictFile, ConflictSummary, Coordinator, EntryId, Expect,
+    FastForwardReport, FetchMode, FilePatch, FileRevision, Head, LineStats, MergeAction,
+    MergeReport, MergeReview, MergeSelection, MergeState, NewRepository, Operation, OperationProbe,
+    PublishChoice, PublishOptions, PushAvailability, PushIntent, PushReport, ReplayOf,
+    ReplayReview, RepositoryError, RepositoryOverview, RepositoryRefs, RepositorySnapshot, Side,
+    UndoHistory, WorktreePatch, WorktreeStatus,
     directories::{DirectoryListing, expand_home, home_dir, list_directories},
     file_history::{blame_within, file_history_within},
     git::LocalRead,
@@ -25,6 +25,9 @@ pub enum Request {
         selection: MergeSelection,
     },
     MergeState {
+        path: String,
+    },
+    OperationProbe {
         path: String,
     },
     Merge {
@@ -102,6 +105,9 @@ pub enum Request {
         path: String,
         file: String,
     },
+    ConflictSummary {
+        path: String,
+    },
     WorktreePatch {
         path: String,
         file: String,
@@ -147,6 +153,7 @@ pub enum Request {
 pub enum Response {
     MergeReview(MergeReview),
     MergeState(MergeState),
+    OperationProbe(OperationProbe),
     Merge(MergeReport),
     ReplayReview(ReplayReview),
     ReplayAbort(MergeState),
@@ -167,6 +174,7 @@ pub enum Response {
     WorktreeStatus(WorktreeStatus),
     WorktreePatch(WorktreePatch),
     ConflictFile(ConflictFile),
+    ConflictSummary(Vec<ConflictSummary>),
     Write(Applied),
     Undo(Applied),
     Redo(Applied),
@@ -185,6 +193,9 @@ pub fn run(coordinator: &Coordinator, request: Request) -> Result<Response, Repo
             Response::MergeReview(coordinator.review_merge(&path, &selection)?)
         }
         Request::MergeState { path } => Response::MergeState(coordinator.merge_state(&path)?),
+        Request::OperationProbe { path } => Response::OperationProbe(
+            crate::write::operation_within(&path, deadline(LocalRead::OperationProbe))?,
+        ),
         Request::Merge { path, action } => Response::Merge(coordinator.merge(&path, &action)?),
         Request::ReplayReview { path, of } => {
             Response::ReplayReview(coordinator.review_replay(&path, &of)?)
@@ -248,6 +259,9 @@ pub fn run(coordinator: &Coordinator, request: Request) -> Result<Response, Repo
         }
         Request::ConflictFile { path, file } => Response::ConflictFile(
             crate::write::conflict_file_within(&path, &file, deadline(LocalRead::ConflictFile))?,
+        ),
+        Request::ConflictSummary { path } => Response::ConflictSummary(
+            crate::write::conflict_summary_within(&path, deadline(LocalRead::ConflictSummary))?,
         ),
         Request::WorktreePatch { path, file, side } => Response::WorktreePatch(
             worktree_patch_within(&path, &file, side, deadline(LocalRead::WorktreePatch))?,

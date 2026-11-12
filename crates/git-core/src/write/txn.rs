@@ -251,7 +251,7 @@ impl<'r> Txn<'r> {
             change.touches_skip_worktree(),
             matches!(
                 change,
-                Change::Resolution(_) | Change::Discard(_) | Change::Stash(_)
+                Change::Resolution(_) | Change::Whole(_) | Change::Discard(_) | Change::Stash(_)
             ),
         )
     }

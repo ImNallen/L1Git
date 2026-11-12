@@ -1210,6 +1210,7 @@ impl Fixture {
                 id,
                 review,
                 footprint: vec![],
+                conflicted: None,
                 suggested_message: "Fast-forward".into(),
             },
             phase: SessionPhase::FastForwarding,
@@ -1538,6 +1539,10 @@ fn legacy_active_session_decodes_pins_without_resolving_tracking_and_writes_v2()
     let path = directory(&repo, session.id).join("state.json");
     let mut value = serde_json::to_value(record).unwrap();
     value["version"] = 1.into();
+    value["session"]
+        .as_object_mut()
+        .unwrap()
+        .remove("conflicted");
     let review = value["session"]["review"].as_object_mut().unwrap();
     let tracking = review.remove("context").unwrap()["tracking"].clone();
     review.remove("plan");
@@ -1549,8 +1554,9 @@ fn legacy_active_session_decodes_pins_without_resolving_tracking_and_writes_v2()
         "refs/heads/upstream",
         session.review.destination.oid.as_str(),
     ]);
-    let state = f.coordinator().merge_state(f.path()).unwrap();
-    assert_eq!(active(state).review, session.review);
+    let state = active(f.coordinator().merge_state(f.path()).unwrap());
+    assert_eq!(state.review, session.review);
+    assert_eq!(state.conflicted, None);
     f.coordinator()
         .merge(
             f.path(),
@@ -1574,6 +1580,37 @@ fn legacy_active_session_decodes_pins_without_resolving_tracking_and_writes_v2()
         fs::read(&path).unwrap(),
         serde_json::to_vec(&value).unwrap()
     );
+}
+
+#[test]
+fn the_conflicted_set_outlives_resolution_and_is_unknown_for_older_records() {
+    let f = Fixture::new(true);
+    let coordinator = f.coordinator();
+    let session = f.start(&coordinator);
+    assert_eq!(session.conflicted, Some(vec!["conflict.txt".to_owned()]));
+    f.put("conflict.txt", "resolved\n");
+    f.stage(&coordinator, "conflict.txt");
+    let MergeState::Active {
+        session: resolved,
+        unresolved,
+        ..
+    } = coordinator.merge_state(f.path()).unwrap()
+    else {
+        panic!("the merge should stay active");
+    };
+    assert_eq!(unresolved, Vec::<String>::new());
+    assert_eq!(resolved.conflicted, session.conflicted);
+    let (repo, record, _) = f.record();
+    let path = directory(&repo, session.id).join("state.json");
+    let mut value = serde_json::to_value(record).unwrap();
+    value["session"]
+        .as_object_mut()
+        .unwrap()
+        .remove("conflicted");
+    fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+    let older = active(coordinator.merge_state(f.path()).unwrap());
+    assert_eq!(older.conflicted, None);
+    assert_eq!(older.footprint, session.footprint);
 }
 
 #[cfg(unix)]

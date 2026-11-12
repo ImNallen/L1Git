@@ -3319,6 +3319,7 @@ describe("a cherry-pick or revert", () => {
       commit: picked,
       subject: "incoming",
       footprint: ["file.txt"],
+      conflicted: ["file.txt"],
       unresolved: ["file.txt"],
       tree: null,
       suggestedMessage: "incoming\n",
@@ -3370,6 +3371,76 @@ describe("a cherry-pick or revert", () => {
     );
     expect(git("rev-parse", "HEAD")).toBe(finished);
     expect(readFileSync(join(path, "file.txt"), "utf8")).toBe("resolved\n");
+  }, 30_000);
+
+  it("labels a deleted-by-them conflict and resolves it whole with Undo back to the conflict", async () => {
+    const { appliedSchema, conflictSummarySchema, operationSchema } =
+      await import("./domain/repository");
+    const { operationProbeSchema } = await import("./domain/merge");
+    const { path, git } = stopped("terminal whole-file pick");
+    git("switch", "source");
+    git("rm", "-q", "file.txt");
+    git("commit", "-m", "removes file");
+    const removes = git("rev-parse", "HEAD");
+    git("switch", "main");
+    expect(
+      spawnSync("git", ["-C", path, "cherry-pick", removes], { env: env() })
+        .status,
+    ).toBe(1);
+    expect(
+      answer("operationProbe", operationProbeSchema).parse(
+        await (await post({ op: "operationProbe", path })).json(),
+      ).data,
+    ).toEqual({ kind: "replay", replay: "cherryPick" });
+    const [summary, ...rest] = answer(
+      "conflictSummary",
+      conflictSummarySchema,
+    ).parse(await (await post({ op: "conflictSummary", path })).json()).data;
+    expect(rest).toEqual([]);
+    if (summary?.kind !== "wholeFile") throw new Error(summary?.kind);
+    expect(summary).toMatchObject({
+      path: "file.txt",
+      shape: "deletedByThem",
+      current: { mode: "100644", size: 8 },
+      incoming: null,
+      disk: "matchesCurrent",
+    });
+    const conflict = git("ls-files", "--stage", "--", "file.txt");
+    const progress = await state(path);
+    if (progress.kind !== "replay") throw new Error(progress.kind);
+    const applied = answer("write", appliedSchema).parse(
+      await (
+        await post({
+          op: "write",
+          path,
+          operation: operationSchema.parse({
+            kind: "resolveWhole",
+            path: "file.txt",
+            version: summary.version,
+            keep: "incoming",
+          }),
+          expect: { head: progress.progress.destination },
+        })
+      ).json(),
+    ).data;
+    expect(applied.operation).toEqual({
+      kind: "resolveWhole",
+      path: "file.txt",
+      version: summary.version,
+      keep: "incoming",
+    });
+    expect(existsSync(join(path, "file.txt"))).toBe(false);
+    expect(git("ls-files", "--stage", "--", "file.txt")).toBe("");
+    const resolved = await state(path);
+    if (resolved.kind !== "replay") throw new Error(resolved.kind);
+    expect(resolved.progress.conflicted).toEqual(["file.txt"]);
+    expect(resolved.progress.unresolved).toEqual([]);
+
+    answer("undo", appliedSchema).parse(
+      await (await post({ op: "undo", path, id: applied.id })).json(),
+    );
+    expect(git("ls-files", "--stage", "--", "file.txt")).toBe(conflict);
+    expect(readFileSync(join(path, "file.txt"), "utf8")).toBe("current\n");
   }, 30_000);
 
   it.each([

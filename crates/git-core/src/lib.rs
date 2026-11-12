@@ -26,14 +26,14 @@ pub use repository::{
 pub use run::{Request, Response, run};
 pub use status::{worktree_patch, worktree_status};
 pub use sync::{
-    AddRemote, AddRemoteRefresh, AddRemoteReport, CloneUrl, Coordinator, Limits, NewRepository,
-    PublishChoice, PublishOptions, PublishRemote, PublishRemoteAvailability, PushAvailability,
-    PushIntent, PushOutcome, PushPurpose, PushRefresh, PushReport, PushUnavailable,
-    TrackingOutcome,
+    AddRemote, AddRemoteRefresh, AddRemoteReport, CloneUrl, Coordinator, InProgress, Limits,
+    NewRepository, PublishChoice, PublishOptions, PublishRemote, PublishRemoteAvailability,
+    PushAvailability, PushIntent, PushOutcome, PushPurpose, PushRefresh, PushReport,
+    PushUnavailable, TrackingOutcome,
 };
 pub use write::{
     Applied, BranchTip, EntryId, Expect, LinePick, LineSide, MergeAction, MergeAttention,
     MergeContext, MergeOutcome, MergePlan, MergeReport, MergeReview, MergeSelection, MergeSession,
-    MergeSource, MergeState, MergeTracking, Operation, ReplayKind, ReplayOf, ReplayPrediction,
-    ReplayProgress, ReplayReview, Start, StashTip, TagTip, UndoHistory,
+    MergeSource, MergeState, MergeTracking, Operation, OperationProbe, ReplayKind, ReplayOf,
+    ReplayPrediction, ReplayProgress, ReplayReview, Start, StashTip, TagTip, UndoHistory,
 };

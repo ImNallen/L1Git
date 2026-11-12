@@ -503,6 +503,76 @@ pub enum ConflictUnsupported {
     Attributes,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum ConflictSummary {
+    /// `conflictFile` reads this path as editable. `conflicts` counts the
+    /// conflict regions whose markers are still in the working file.
+    Text { path: String, conflicts: u32 },
+    /// No lines to merge, so one side is kept whole. A side that is `None` has
+    /// no file, and keeping it deletes the path. `version` is what
+    /// `resolveWhole` expects, and it covers the file on disk.
+    WholeFile {
+        path: String,
+        version: ConflictVersion,
+        shape: WholeFileShape,
+        current: Option<ConflictSide>,
+        incoming: Option<ConflictSide>,
+        disk: WholeFileDisk,
+    },
+    External {
+        path: String,
+        reason: ConflictUnsupported,
+    },
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum WholeFileShape {
+    DeletedByThem,
+    DeletedByUs,
+    AddedByUs,
+    AddedByThem,
+    Binary,
+    Symlink,
+}
+
+/// The file on disk against the two sides, compared as Git would stage it:
+/// the blob it hashes to and its mode, or a link's target. A side that is
+/// `None` matches when the path is absent. When both sides match, this is
+/// `MatchesCurrent`.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum WholeFileDisk {
+    MatchesCurrent,
+    MatchesIncoming,
+    /// Absent, while both sides have a file.
+    Missing,
+    /// Present, and neither side's content.
+    Edited,
+    /// Too large to hash within the cap, with no cheap proof of a difference.
+    Unknown,
+}
+
+/// One side's blob. `size` is the blob's, before line-ending conversion.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ConflictSide {
+    pub mode: Mode,
+    pub size: u64,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ConflictKeep {
+    Current,
+    Incoming,
+}
+
 /// `Staged` compares HEAD, or the empty tree before the first commit, with the
 /// index. `Unstaged` compares the index with the working tree.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
