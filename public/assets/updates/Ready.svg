@@ -1,8 +1,8 @@
 <svg preserveAspectRatio="none" overflow="visible" style="display: block;" width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
 <g id="Ready to install">
 <g id="Update status icon">
-<path id="Vector" d="M10.6 14.0875C11.0956 13.0032 11.9229 12.1044 12.9625 11.5209C14.0021 10.9373 15.2002 10.6991 16.384 10.8407C17.5677 10.9823 18.6759 11.4963 19.5485 12.3086C20.4211 13.1209 21.0131 14.1894 21.239 15.36C21.4649 16.5306 21.3131 17.7427 20.8053 18.8214C20.2976 19.9 19.4603 20.7895 18.4143 21.3614C17.3682 21.9333 16.1675 22.1581 14.9854 22.0032C13.8033 21.8484 12.701 21.322 11.8375 20.5M14.3125 14.0875H10.6V10.375" stroke-width="1.40625" stroke-linecap="round" stroke-linejoin="round" stroke="#8DD6B2"/>
-<path id="Vector_2" d="M13.975 17.2375L15.55 18.8125L18.5875 15.4375" stroke-width="1.40625" stroke-linecap="round" stroke-linejoin="round" stroke="#8DD6B2"/>
+<path id="Vector" d="M10.6 14.0875C11.0956 13.0032 11.9229 12.1044 12.9625 11.5209C14.0021 10.9373 15.2002 10.6991 16.384 10.8407C17.5677 10.9823 18.6759 11.4963 19.5485 12.3086C20.4211 13.1209 21.0131 14.1894 21.239 15.36C21.4649 16.5306 21.3131 17.7427 20.8053 18.8214C20.2976 19.9 19.4603 20.7895 18.4143 21.3614C17.3682 21.9333 16.1675 22.1581 14.9854 22.0032C13.8033 21.8484 12.701 21.322 11.8375 20.5M14.3125 14.0875H10.6V10.375" stroke-width="1.40625" stroke-linecap="round" stroke-linejoin="round" stroke="#C7C7C7"/>
+<path id="Vector_2" d="M13.975 17.2375L15.55 18.8125L18.5875 15.4375" stroke-width="1.40625" stroke-linecap="round" stroke-linejoin="round" stroke="#C7C7C7"/>
 </g>
 <circle id="Update status dot" cx="26" cy="8" r="3.5" fill="#70CBA1" stroke="#0E0E0E"/>
 </g>
