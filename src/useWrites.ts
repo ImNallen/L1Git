@@ -48,9 +48,6 @@ export type Outcome =
   | { kind: "failed"; problem: Problem }
   | { kind: "busy" };
 
-const labelled = (applied: Applied | null): HistoryEntry | null =>
-  applied && { ...applied, label: describe(applied.operation) };
-
 export function useWrites(
   root: RepositoryRoot | null,
   reread: {
@@ -68,6 +65,12 @@ export function useWrites(
     new Map(),
   );
   const inFlight = useRef(new Set<RepositoryRoot>());
+  const labels = useRef(new Map<EntryId, string>());
+  const labelled = (applied: Applied | null): HistoryEntry | null =>
+    applied && {
+      ...applied,
+      label: labels.current.get(applied.id) ?? describe(applied.operation),
+    };
   const update = useCallback(
     (repository: RepositoryRoot, change: (writes: Writes) => Writes) =>
       setByRoot((previous) =>
@@ -285,13 +288,17 @@ export function useWrites(
     ...writes,
     merge,
     abortReplay,
-    write: (worktree: RepositoryRoot, { operation, expect }: Write) =>
+    write: (worktree: RepositoryRoot, { operation, expect, label }: Write) =>
       run(
         { action: "write" },
-        attemptLabel(operation),
+        label ?? attemptLabel(operation),
         worktree,
         operation,
-        () => repositories.write(worktree, operation, expect),
+        async () => {
+          const applied = await repositories.write(worktree, operation, expect);
+          if (label !== undefined) labels.current.set(applied.id, label);
+          return applied;
+        },
       ),
     undo: () => step("undo"),
     redo: () => step("redo"),

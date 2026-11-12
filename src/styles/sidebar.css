@@ -770,3 +770,30 @@ input::placeholder {
 .sidebar-updater > .icon-button:hover:not(:disabled) {
   background: var(--workspace-update-button-hover, var(--control-hover));
 }
+.repository-open > .repository-operation {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  height: 18px;
+  padding: 0 7px 0 6px;
+  border: 1px solid var(--warning-border);
+  border-radius: 9px;
+  background: var(--warning-bg);
+  color: var(--warning);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 16px;
+}
+.repository-operation::before {
+  content: "";
+  flex-shrink: 0;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.repository-operation + .repository-check {
+  margin-left: 0;
+}

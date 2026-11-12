@@ -21,6 +21,8 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { operationBadge } from "../domain/inProgress";
+import type { OperationProbe } from "../domain/merge";
 import { branchAsks } from "../domain/operations";
 import type { BranchAsk } from "../domain/operations";
 import type { RecentRepository } from "../domain/recents";
@@ -50,6 +52,7 @@ type Props = {
   refs: ReadonlyMap<RepositoryRoot, RefsState>;
   activePath: string | null;
   sync: ReadonlyMap<RepositoryRoot, RootSync>;
+  operations: ReadonlyMap<RepositoryRoot, OperationProbe>;
   navigation: SidebarNavigation;
   refActions: SidebarRefActions;
 };
@@ -61,6 +64,7 @@ export function RepositoryTree({
   refs,
   activePath,
   sync,
+  operations,
   navigation,
   refActions,
 }: Props) {
@@ -424,6 +428,8 @@ export function RepositoryTree({
         {entriesShown.map((entry) => {
           const active = entry.root === activePath;
           const head = sync.get(entry.root)?.head;
+          const probe = operations.get(entry.root);
+          const badge = probe === undefined ? null : operationBadge(probe);
           return (
             <div
               className="repository-group"
@@ -440,6 +446,9 @@ export function RepositoryTree({
                 <button
                   className="repository-open"
                   title={entry.root}
+                  aria-label={
+                    badge ? `${entry.name}, ${badge.label}` : undefined
+                  }
                   aria-current={active ? "true" : undefined}
                   onClick={() => {
                     onSelect(entry.root);
@@ -448,6 +457,11 @@ export function RepositoryTree({
                 >
                   <WorkspaceIcon name="Repository" />
                   <span>{entry.name}</span>
+                  {badge && (
+                    <span className="repository-operation" title={badge.title}>
+                      {badge.label}
+                    </span>
+                  )}
                   {active && (
                     <WorkspaceIcon
                       name="SelectedRepository"

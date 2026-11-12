@@ -73,15 +73,23 @@ export function FileDiffPane({
   const [mode, setMode] = useState<"diff" | "history" | "blame">("diff");
   const revision = revisionOf(state);
   const view: View = revision === null || mode === "diff" ? diffStyle : mode;
-  useLayoutEffect(function takeFocusFromHiddenHistory() {
-    const focused = document.activeElement;
-    if (
-      focused === null ||
-      focused === document.body ||
-      focused.closest(".history")
-    )
-      backRef.current?.focus();
-  }, []);
+  const conflict = state.side === "conflict";
+  const openedConflict = conflict
+    ? `${state.selection.root}:${state.path}`
+    : null;
+  useLayoutEffect(
+    function takeFocusOnOpen() {
+      const focused = document.activeElement;
+      if (
+        focused === null ||
+        focused === document.body ||
+        focused.closest(".history") ||
+        (openedConflict !== null && focused.closest(".inspector-container"))
+      )
+        backRef.current?.focus();
+    },
+    [openedConflict],
+  );
   const choose = (next: View) => {
     if (next === "history" || next === "blame") setMode(next);
     else {
@@ -101,7 +109,6 @@ export function FileDiffPane({
     focus: () => backRef.current?.focus(),
   }));
   const look = { diffStyle, theme, painted };
-  const conflict = state.side === "conflict";
   const back = (
     <button
       ref={backRef}

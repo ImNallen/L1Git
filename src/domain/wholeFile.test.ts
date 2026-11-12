@@ -239,6 +239,45 @@ describe("whole-file choice", () => {
     expect(card(choice, 0).preview).toBe("note: Link to ../ours");
     expect(card(choice, 1).preview).toBe("note: Symbolic link · 300 bytes");
   });
+
+  it("names each choice for Undo by what it does to the file", () => {
+    const labels = (fields: Partial<WholeFileConflict>, path: string) =>
+      wholeChoice(conflict(fields), path, names).cards.map(
+        ({ label }) => label,
+      );
+    expect(
+      labels(
+        { shape: "deletedByThem", current: file(edited) },
+        "src/sync/legacy-retry.ts",
+      ),
+    ).toEqual(["Keep legacy-retry.ts", "Delete legacy-retry.ts"]);
+    expect(
+      labels({ shape: "deletedByUs", incoming: file(edited) }, "src/f.txt"),
+    ).toEqual(["Delete f.txt", "Restore f.txt"]);
+    expect(
+      labels({ shape: "addedByUs", base: null, current: file("x\n") }, "c.txt"),
+    ).toEqual(["Keep c.txt", "Delete c.txt"]);
+    expect(
+      labels(
+        { shape: "addedByThem", base: null, incoming: file("x\n") },
+        "b.txt",
+      ),
+    ).toEqual(["Delete b.txt", "Add b.txt"]);
+    expect(
+      labels(
+        {
+          shape: "binary",
+          base: null,
+          current: file(null),
+          incoming: file(null),
+        },
+        "assets/logo.png",
+      ),
+    ).toEqual([
+      "Keep the current version of logo.png",
+      "Keep the incoming version of logo.png",
+    ]);
+  });
 });
 
 it("writes sizes in bytes, KB and MB", () => {

@@ -5,11 +5,13 @@ import {
   conflictLabel,
   finishBlock,
   inProgress,
+  operationBadge,
   operationGroups,
   operationMessage,
+  probeOf,
 } from "./inProgress";
 import { mergeStateSchema } from "./merge";
-import type { MergeState } from "./merge";
+import type { MergeState, OperationProbe } from "./merge";
 import {
   conflictVersionSchema,
   oidSchema,
@@ -323,5 +325,79 @@ describe("draftConflictLabel", () => {
       "Leftover markers · unsaved",
     );
     expect(draftConflictLabel("ours\n")).toBe("Unsaved result");
+  });
+});
+
+describe("operationBadge", () => {
+  const label = (probe: OperationProbe) => operationBadge(probe)?.label;
+
+  it("names each operation the way the strip does", () => {
+    expect(operationBadge({ kind: "idle" })).toBeNull();
+    expect(operationBadge({ kind: "merge", attention: false })).toEqual({
+      label: "Merging",
+      title:
+        "A merge is in progress. Open the repository to finish or abort it.",
+    });
+    expect(label({ kind: "merge", attention: true })).toBe("Needs attention");
+    expect(label({ kind: "replay", replay: "cherryPick" })).toBe(
+      "Cherry-picking",
+    );
+    expect(label({ kind: "replay", replay: "revert" })).toBe("Reverting");
+  });
+
+  it("names an operation L1 Git cannot finish by the first one Git holds", () => {
+    const external = (
+      ...operations: Extract<OperationProbe, { kind: "external" }>["operations"]
+    ) => operationBadge({ kind: "external", operations });
+    expect(external("rebase", "bisect")).toEqual({
+      label: "Rebasing",
+      title:
+        "A rebase started outside L1 Git is in progress. Continue or abort it in your terminal.",
+    });
+    expect(external("bisect")?.label).toBe("Bisecting");
+    expect(external("merge")?.label).toBe("Merging");
+    expect(external("sequence")?.label).toBe("In progress");
+    expect(external("rebaseOrAm")?.label).toBe("In progress");
+    expect(external()?.label).toBe("In progress");
+  });
+});
+
+describe("probeOf", () => {
+  it("answers what a probe would for a merge state the app read", () => {
+    expect(probeOf(idleMerge(), undefined)).toEqual({ kind: "idle" });
+    expect(probeOf(activeMerge(root, ["a.ts"]), undefined)).toEqual({
+      kind: "merge",
+      attention: false,
+    });
+    expect(
+      probeOf(replayInProgress(root, ["a.ts"], { kind: "revert" }), undefined),
+    ).toEqual({ kind: "replay", replay: "revert" });
+    expect(
+      probeOf(
+        {
+          kind: "attention",
+          session: null,
+          reason: "recoveryRequired",
+          message: "Recover it.",
+        },
+        undefined,
+      ),
+    ).toEqual({ kind: "merge", attention: true });
+  });
+
+  it("keeps the operations a probe found for an external operation", () => {
+    const external = {
+      kind: "attention",
+      session: null,
+      reason: "externalOperation",
+      message: "A rebase is in progress.",
+    } as const;
+    expect(
+      probeOf(external, { kind: "external", operations: ["rebase"] }),
+    ).toEqual({ kind: "external", operations: ["rebase"] });
+    expect(probeOf(external, { kind: "idle" })).toEqual({
+      kind: "external",
+      operations: [],
+    });
   });
 });

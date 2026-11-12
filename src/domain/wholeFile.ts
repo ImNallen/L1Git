@@ -23,6 +23,7 @@ export type WholeCard = {
   consequence: string;
   preview: WholePreview;
   action: string;
+  label: string;
   onDisk: boolean;
 };
 
@@ -159,6 +160,7 @@ export function wholeChoice(
           consequence: `${names.current} keeps ${name}, including ${changes("your", kept.changed)}. ${names.incoming}’s deletion is not applied.`,
           preview: kept.preview,
           action: "Keep file",
+          label: `Keep ${name}`,
         },
         {
           icon: "delete",
@@ -166,6 +168,7 @@ export function wholeChoice(
           consequence: `Matches ${names.incoming}, which deleted it. ${dropped("Your", kept.changed)}`,
           preview: removed(name, current),
           action: "Delete file",
+          label: `Delete ${name}`,
         },
       );
     return choice(
@@ -182,6 +185,7 @@ export function wholeChoice(
         consequence: `${names.current}’s ${name} stays in the result.`,
         preview: kept.preview,
         action: "Keep file",
+        label: `Keep ${name}`,
       },
       {
         icon: "delete",
@@ -189,6 +193,7 @@ export function wholeChoice(
         consequence: `Matches ${names.incoming}. ${name} is deleted.`,
         preview: removed(name, current),
         action: "Leave out",
+        label: `Delete ${name}`,
       },
     );
   }
@@ -204,6 +209,7 @@ export function wholeChoice(
           consequence: `Matches ${names.current}. ${dropped(`${names.incoming}’s`, kept.changed)}`,
           preview: removed(name, incoming),
           action: "Keep deleted",
+          label: `Delete ${name}`,
         },
         {
           icon: "file",
@@ -211,6 +217,7 @@ export function wholeChoice(
           consequence: `Brings ${name} back as ${names.incoming} has it, including ${changes("its", kept.changed)}. ${names.current}’s deletion is not applied.`,
           preview: kept.preview,
           action: "Restore file",
+          label: `Restore ${name}`,
         },
       );
     return choice(
@@ -227,6 +234,7 @@ export function wholeChoice(
         consequence: `Matches ${names.current}. ${names.incoming}’s ${name} is not added.`,
         preview: removed(name, incoming),
         action: "Leave out",
+        label: `Delete ${name}`,
       },
       {
         icon: "file",
@@ -234,6 +242,7 @@ export function wholeChoice(
         consequence: `Adds ${name} as ${names.incoming} has it.`,
         preview: kept.preview,
         action: "Add file",
+        label: `Add ${name}`,
       },
     );
   }
@@ -251,6 +260,7 @@ export function wholeChoice(
       consequence: `${name} becomes ${kept}’s version. ${dropped}’s version is dropped.`,
       preview: holds(name, side, base, hasBase).preview,
       action: `Keep ${keep} version`,
+      label: `Keep the ${keep} version of ${name}`,
     };
   };
   return choice(

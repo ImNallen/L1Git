@@ -11,6 +11,7 @@ import type {
 } from "./domain/overview";
 import { oidSchema, refSchema, rootSchema } from "./domain/repository";
 import type { RepositoryRoot } from "./domain/repository";
+import type { OperationProbe } from "./domain/merge";
 import { createOverviewStore, repositoryWarnings } from "./overview";
 import type { OverviewDeps } from "./overview";
 
@@ -97,6 +98,8 @@ function harness() {
   let visible = true;
   let visibilityListener = () => {};
   let clock = 0;
+  const probed: string[] = [];
+  const probes = new Map<RepositoryRoot, OperationProbe | "fails">();
   const push = <T>(label: string) =>
     new Promise<T>((resolve, reject) => {
       calls.push(label);
@@ -117,6 +120,12 @@ function harness() {
       advances.push(sent);
       return push(`fastForward ${path}`);
     },
+    operationProbe: async (path) => {
+      probed.push(path);
+      const probe = probes.get(path) ?? { kind: "idle" };
+      if (probe === "fails") throw new Error("Probe failed");
+      return probe;
+    },
     now: () => clock,
     every(run, ms) {
       const timer = { ms, run, stopped: false };
@@ -136,6 +145,8 @@ function harness() {
   return {
     store,
     calls,
+    probed,
+    probes,
     advances,
     timers,
     pendingLabels: () => pending.map(({ label }) => label),
@@ -678,6 +689,79 @@ describe("overview store", () => {
     });
     void h.store.fetch();
     expect(h.pendingLabels()).toEqual(["local /code/app"]);
+  });
+
+  describe("operations", () => {
+    const merging: OperationProbe = { kind: "merge", attention: false };
+    const operations = (h: ReturnType<typeof harness>) =>
+      Object.fromEntries(h.store.getSnapshot().operations);
+
+    it("probes each root once it opens, never one that is unavailable", async () => {
+      const h = harness();
+      h.probes.set(api, merging);
+      h.store.track([app, api]);
+      await h.answerOne(overview(app, "/code/app/.git", [upToDate("main")]));
+      await h.failOne({ kind: "missingPath", message: "Gone." });
+      expect(h.probed).toEqual([app]);
+      expect(operations(h)).toEqual({ [app]: { kind: "idle" } });
+    });
+
+    it("probes again after a fetch and on demand, and drops a root whose probe fails", async () => {
+      const h = harness();
+      const dir = root("/code/app/.git");
+      h.store.track([app, api]);
+      await h.answer((label) =>
+        overview(
+          label.split(" ")[1]!,
+          label.endsWith(app) ? dir : "/code/api/.git",
+          [upToDate("main")],
+        ),
+      );
+      h.probed.length = 0;
+      h.probes.set(app, merging);
+      void h.store.fetch(dir);
+      await h.answer(() => overview(app, dir, [upToDate("main")]));
+      expect(h.probed, "a fetch probes its repository's roots").toEqual([app]);
+      expect(operations(h)[app]).toEqual(merging);
+      h.probes.set(app, "fails");
+      h.probes.set(api, { kind: "replay", replay: "revert" });
+      h.store.probe();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(operations(h)).toEqual({
+        [api]: { kind: "replay", replay: "revert" },
+      });
+    });
+
+    it("takes an observed merge state over a probe still in flight", async () => {
+      const h = harness();
+      h.store.track([app]);
+      await h.answer(() => overview(app, "/code/app/.git", [upToDate("main")]));
+      h.probes.set(app, merging);
+      h.store.probe();
+      h.store.observe(app, { kind: "idle" });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(operations(h)[app]).toEqual({ kind: "idle" });
+    });
+
+    it("lets a probe in flight name an operation the merge state only calls external", async () => {
+      const h = harness();
+      h.store.track([app]);
+      await h.answer(() => overview(app, "/code/app/.git", [upToDate("main")]));
+      h.probes.set(app, { kind: "external", operations: ["rebase"] });
+      h.store.probe();
+      h.store.observe(app, {
+        kind: "attention",
+        session: null,
+        reason: "externalOperation",
+        message: "A rebase is in progress.",
+      });
+      expect(operations(h)[app]).toEqual({ kind: "external", operations: [] });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(operations(h)[app]).toEqual({
+        kind: "external",
+        operations: ["rebase"],
+      });
+    });
   });
 });
 

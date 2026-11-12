@@ -8,6 +8,7 @@ import type {
   WorktreeStatus,
 } from "../domain/repository";
 import { mergeSelectionSchema } from "../domain/merge";
+import { probeOf } from "../domain/inProgress";
 import type { MergeState } from "../domain/merge";
 import type { RepositoryOverview } from "../domain/overview";
 import type { PushAvailability } from "../domain/push";
@@ -173,6 +174,11 @@ const handlers: Record<string, Handler> = {
     world.histories.get(request.path as RepositoryRoot) ?? history(null),
   mergeState: (request, world) =>
     world.merges.get(request.path as RepositoryRoot) ?? idleMerge(),
+  operationProbe: (request, world) =>
+    probeOf(
+      world.merges.get(request.path as RepositoryRoot) ?? idleMerge(),
+      undefined,
+    ),
   overview: (request, world) => known(world.overviews, request.path),
   preparePush: (request, world) => known(world.pushes, request.path),
   commitDetail,

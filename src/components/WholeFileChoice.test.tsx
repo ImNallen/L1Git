@@ -154,11 +154,11 @@ it("offers both outcomes of a deleted-vs-edited file, named by ref, with the kep
 });
 
 it.each([
-  ["1", "current"],
-  ["2", "incoming"],
+  ["1", "current", "Keep legacy-retry.ts"],
+  ["2", "incoming", "Delete legacy-retry.ts"],
 ] as const)(
-  "resolves with key %s by keeping %s at the version it read, then leaves",
-  async (key, keep) => {
+  "resolves with key %s by keeping %s at the version it read, named %j for Undo, then leaves",
+  async (key, keep, label) => {
     write.mockResolvedValueOnce({ kind: "applied", applied });
     await render();
     await vi.waitFor(() => expect(host.textContent).toContain("Keep file"));
@@ -166,6 +166,7 @@ it.each([
     expect(write).toHaveBeenCalledExactlyOnceWith(workspace, {
       expect: { head },
       operation: { kind: "resolveWhole", path, version: deleted.version, keep },
+      label,
     });
     expect(resolved).toHaveBeenCalledOnce();
   },

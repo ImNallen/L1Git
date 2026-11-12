@@ -2,7 +2,7 @@ import { composeMessage, splitMessage } from "./commitMessage";
 import { conflictRegions, hasLeftoverMarkers } from "./conflictRegions";
 import type { Draft } from "./commitMessage";
 import { replayNames } from "./merge";
-import type { MergeSession, MergeState } from "./merge";
+import type { MergeSession, MergeState, OperationProbe } from "./merge";
 import type {
   ConflictSummary,
   Head,
@@ -294,5 +294,86 @@ export function conflictLabel(summary: ConflictSummary): string {
       return wholeFileLabels[summary.shape];
     case "external":
       return "Resolve outside L1 Git";
+  }
+}
+
+type ExternalOperation = Extract<
+  OperationProbe,
+  { kind: "external" }
+>["operations"][number];
+
+export function probeOf(
+  state: MergeState,
+  known: OperationProbe | undefined,
+): OperationProbe {
+  switch (state.kind) {
+    case "idle":
+      return { kind: "idle" };
+    case "active":
+      return { kind: "merge", attention: false };
+    case "replay":
+      return { kind: "replay", replay: state.progress.kind };
+    case "attention":
+      if (state.session !== null || state.reason === "recoveryRequired")
+        return { kind: "merge", attention: true };
+      return known?.kind === "external"
+        ? known
+        : { kind: "external", operations: [] };
+  }
+}
+
+const externalWords: Record<
+  ExternalOperation,
+  { doing: string; noun: string }
+> = {
+  merge: { doing: "Merging", noun: "a merge" },
+  cherryPick: { doing: "Cherry-picking", noun: "a cherry-pick" },
+  revert: { doing: "Reverting", noun: "a revert" },
+  rebase: { doing: "Rebasing", noun: "a rebase" },
+  rebaseOrAm: { doing: "In progress", noun: "a rebase or am" },
+  sequence: {
+    doing: "In progress",
+    noun: "a cherry-pick or revert of several commits",
+  },
+  bisect: { doing: "Bisecting", noun: "a bisect" },
+};
+
+const openToFinish = "Open the repository to finish or abort it.";
+
+export function operationBadge(
+  probe: OperationProbe,
+): { label: string; title: string } | null {
+  switch (probe.kind) {
+    case "idle":
+      return null;
+    case "merge":
+      return probe.attention
+        ? {
+            label: "Needs attention",
+            title:
+              "A merge stopped partway and needs attention. Open the repository to see how to continue.",
+          }
+        : {
+            label: operationWords.merge.doing,
+            title: `A merge is in progress. ${openToFinish}`,
+          };
+    case "replay": {
+      const { doing, noun } = operationWords[probe.replay];
+      return {
+        label: doing,
+        title: `A ${noun} is in progress. ${openToFinish}`,
+      };
+    }
+    case "external": {
+      const [first] = probe.operations;
+      const { doing, noun } =
+        first === undefined
+          ? { doing: "In progress", noun: "a Git operation" }
+          : externalWords[first];
+      return {
+        label: doing,
+        title: `${noun.replace(/^a/, "A")} started outside L1 Git is in progress. Continue or abort it in your terminal.`,
+      };
+    }
   }
 }

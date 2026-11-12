@@ -25,6 +25,7 @@ import {
   STAMP,
 } from "./test/fixtures";
 import type { World } from "./test/fakeBridge";
+import type { Applied } from "./domain/repository";
 
 installHarness();
 
@@ -337,4 +338,92 @@ it("the worktree inspector shows the operation's files by state, labelled from t
     get("complementary", "Commit inspector").querySelector(".inspector-heading")
       ?.textContent,
   ).toBe("Commit details");
+});
+
+it("opening a conflict from the inspector moves focus into the resolver, so its keys work at once; arrows stay in the list", async () => {
+  const app = await mountApp({
+    world: (world) => {
+      const state = activeMerge(PIN, ["gone.txt", "notes.txt"]);
+      if (state.kind !== "active") throw new Error("expected an active merge");
+      state.session.conflicted = ["gone.txt", "notes.txt"];
+      state.unresolved = ["gone.txt", "notes.txt"];
+      world.merges.set(PIN, state);
+    },
+  });
+  const head = app.bridge.world.statuses.get(PIN)!.head;
+  app.bridge.respond("conflictFile", (request, _world, fallback) =>
+    request.file === "gone.txt"
+      ? { kind: "external", root: PIN, path: "gone.txt", reason: "structural" }
+      : fallback(),
+  );
+  app.bridge.respond("wholeFileConflict", (request) =>
+    request.file === "gone.txt"
+      ? {
+          head,
+          version: "f".repeat(40),
+          shape: "deletedByThem",
+          base: "a\n",
+          current: { mode: "100644", size: 4, text: "a\nb\n" },
+          incoming: null,
+          disk: "matchesCurrent",
+        }
+      : null,
+  );
+  app.bridge.respond("write", (_request, world, fallback) => {
+    const entry = fallback() as Applied;
+    world.histories.set(PIN, history(entry));
+    return entry;
+  });
+  await app.click(historyRow("Uncommitted changes in pin,"));
+  const tree = () =>
+    get(
+      "region",
+      "Needs resolution",
+      get("complementary", "Commit inspector"),
+    ).querySelector("file-tree-container");
+  const row = (path: string) => {
+    const found = tree()?.shadowRoot?.querySelector<HTMLElement>(
+      `[data-item-type="file"][data-item-path="${path}"]`,
+    );
+    if (!found) throw new Error(`Missing inspector row ${path}`);
+    return found;
+  };
+  const resolverFocused = () =>
+    document.activeElement?.classList.contains("conflict-resolver");
+
+  row("gone.txt").focus();
+  await app.press("ArrowDown", { target: row("gone.txt") });
+  expect(
+    tree()?.shadowRoot?.activeElement?.getAttribute("data-item-path"),
+    "arrows move within the list",
+  ).toBe("notes.txt");
+  expect(query("region", "Changes to notes.txt")).toBeNull();
+
+  await app.click(row("notes.txt"));
+  expect(resolverFocused(), "a text conflict takes focus").toBe(true);
+  await app.press("1");
+  expect(
+    app.modules.resolutionDrafts.resolutionOf(
+      app.modules.resolutionDrafts.resolutionKey(PIN, "notes.txt"),
+    )?.text,
+    "1 keeps Current without a click in the resolver",
+  ).toBe("ours\n");
+
+  row("gone.txt").focus();
+  await app.click(row("gone.txt"));
+  expect(resolverFocused(), "a whole-file conflict takes focus").toBe(true);
+  app.bridge.reset();
+  await app.press("2");
+  expect(app.bridge.lines((request) => request.op === "write")).toEqual([
+    `write ${PIN} resolveWhole`,
+  ]);
+  expect(
+    await toolbarItem(app, "More", "Undo Delete gone.txt"),
+    "Undo names what the choice did",
+  ).toBeTruthy();
+  await app.press("Escape");
+  await app.press("z", { ctrlKey: true });
+  expect(get("status", /^Undid /).querySelector("span")?.textContent).toBe(
+    "Undid Delete gone.txt",
+  );
 });
