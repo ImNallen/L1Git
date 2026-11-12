@@ -208,6 +208,7 @@ const handlers: Record<string, Handler> = {
           : [];
     return unresolved.map((path) => ({ kind: "text", path, conflicts: 1 }));
   },
+  wholeFileConflict: () => null,
   lineStats: () => [],
   filePatch: () => ({
     kind: "text",

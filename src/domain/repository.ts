@@ -353,6 +353,21 @@ const conflictSideSchema = z.strictObject({
   mode: modeSchema,
   size: z.number().int().nonnegative(),
 });
+const wholeFileShapeSchema = z.enum([
+  "deletedByThem",
+  "deletedByUs",
+  "addedByUs",
+  "addedByThem",
+  "binary",
+  "symlink",
+]);
+const wholeFileDiskSchema = z.enum([
+  "matchesCurrent",
+  "matchesIncoming",
+  "missing",
+  "edited",
+  "unknown",
+]);
 export const conflictSummarySchema = z.array(
   z.discriminatedUnion("kind", [
     z.strictObject({
@@ -364,24 +379,10 @@ export const conflictSummarySchema = z.array(
       kind: z.literal("wholeFile"),
       path: z.string(),
       version: conflictVersionSchema,
-      shape: z.enum([
-        "deletedByThem",
-        "deletedByUs",
-        "addedByUs",
-        "addedByThem",
-        "binary",
-        "symlink",
-      ]),
+      shape: wholeFileShapeSchema,
       current: conflictSideSchema.nullable(),
       incoming: conflictSideSchema.nullable(),
-      /** The file on disk as Git would stage it. A null side matches an absent file. */
-      disk: z.enum([
-        "matchesCurrent",
-        "matchesIncoming",
-        "missing",
-        "edited",
-        "unknown",
-      ]),
+      disk: wholeFileDiskSchema,
     }),
     z.strictObject({
       kind: z.literal("external"),
@@ -390,11 +391,29 @@ export const conflictSummarySchema = z.array(
     }),
   ]),
 );
+const wholeFileSideSchema = conflictSideSchema.extend({
+  text: z.string().nullable(),
+});
+export const wholeFileConflictSchema = z
+  .strictObject({
+    head: headSchema,
+    version: conflictVersionSchema,
+    shape: wholeFileShapeSchema,
+    base: z.string().nullable(),
+    current: wholeFileSideSchema.nullable(),
+    incoming: wholeFileSideSchema.nullable(),
+    disk: wholeFileDiskSchema,
+  })
+  .nullable();
 export const conflictKeepSchema = z.enum(["current", "incoming"]);
 export type ConflictFile = z.infer<typeof conflictFileSchema>;
 export type ConflictSnapshot = z.infer<typeof conflictSnapshotSchema>;
 export type ConflictSummary = z.infer<typeof conflictSummarySchema>[number];
 export type ConflictKeep = z.infer<typeof conflictKeepSchema>;
+export type WholeFileConflict = NonNullable<
+  z.infer<typeof wholeFileConflictSchema>
+>;
+export type WholeFileSide = NonNullable<WholeFileConflict["current"]>;
 
 export const entryIdSchema = z
   .string()

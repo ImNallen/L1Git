@@ -28,6 +28,7 @@ import {
   appliedSchema,
   conflictFileSchema,
   conflictSummarySchema,
+  wholeFileConflictSchema,
   operationSchema,
   blameSchema,
   branchMergedSchema,
@@ -82,6 +83,7 @@ type RepositoryRequest =
   | { op: "fastForward"; path: RepositoryRoot; advances: Advance[] }
   | { op: "conflictFile"; path: RepositoryRoot; file: string }
   | { op: "conflictSummary"; path: RepositoryRoot }
+  | { op: "wholeFileConflict"; path: RepositoryRoot; file: string }
   | { op: "worktreeStatus"; path: RepositoryRoot }
   | { op: "worktreePatch"; path: RepositoryRoot; file: string; side: Side }
   | { op: "write"; path: RepositoryRoot; operation: Operation; expect: Expect }
@@ -118,6 +120,10 @@ const responseSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("worktreeStatus"), data: worktreeStatusSchema }),
   z.object({ op: z.literal("conflictFile"), data: conflictFileSchema }),
   z.object({ op: z.literal("conflictSummary"), data: conflictSummarySchema }),
+  z.object({
+    op: z.literal("wholeFileConflict"),
+    data: wholeFileConflictSchema,
+  }),
   z.object({ op: z.literal("worktreePatch"), data: worktreePatchSchema }),
   z.object({ op: z.literal("write"), data: appliedSchema }),
   z.object({ op: z.literal("undo"), data: appliedSchema }),
@@ -248,6 +254,10 @@ export async function conflictFile(path: RepositoryRoot, file: string) {
 
 export async function conflictSummary(path: RepositoryRoot) {
   return (await run({ op: "conflictSummary", path })).data;
+}
+
+export async function wholeFileConflict(path: RepositoryRoot, file: string) {
+  return (await run({ op: "wholeFileConflict", path, file })).data;
 }
 
 export async function worktreeStatus(path: RepositoryRoot) {

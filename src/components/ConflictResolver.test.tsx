@@ -18,6 +18,8 @@ import type { WritesView } from "../useWrites";
 vi.mock("../repositories", () => ({
   conflictFile: vi.fn(),
   mergeState: vi.fn(),
+  wholeFileConflict: vi.fn(async () => null),
+  mac: true,
 }));
 Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
   configurable: true,

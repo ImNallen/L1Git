@@ -5,7 +5,7 @@ use crate::{
     MergeReport, MergeReview, MergeSelection, MergeState, NewRepository, Operation, OperationProbe,
     PublishChoice, PublishOptions, PushAvailability, PushIntent, PushReport, ReplayOf,
     ReplayReview, RepositoryError, RepositoryOverview, RepositoryRefs, RepositorySnapshot, Side,
-    UndoHistory, WorktreePatch, WorktreeStatus,
+    UndoHistory, WholeFileConflict, WorktreePatch, WorktreeStatus,
     directories::{DirectoryListing, expand_home, home_dir, list_directories},
     file_history::{blame_within, file_history_within},
     git::LocalRead,
@@ -108,6 +108,10 @@ pub enum Request {
     ConflictSummary {
         path: String,
     },
+    WholeFileConflict {
+        path: String,
+        file: String,
+    },
     WorktreePatch {
         path: String,
         file: String,
@@ -175,6 +179,7 @@ pub enum Response {
     WorktreePatch(WorktreePatch),
     ConflictFile(ConflictFile),
     ConflictSummary(Vec<ConflictSummary>),
+    WholeFileConflict(Option<WholeFileConflict>),
     Write(Applied),
     Undo(Applied),
     Redo(Applied),
@@ -262,6 +267,9 @@ pub fn run(coordinator: &Coordinator, request: Request) -> Result<Response, Repo
         ),
         Request::ConflictSummary { path } => Response::ConflictSummary(
             crate::write::conflict_summary_within(&path, deadline(LocalRead::ConflictSummary))?,
+        ),
+        Request::WholeFileConflict { path, file } => Response::WholeFileConflict(
+            crate::write::whole_file_within(&path, &file, deadline(LocalRead::ConflictFile))?,
         ),
         Request::WorktreePatch { path, file, side } => Response::WorktreePatch(
             worktree_patch_within(&path, &file, side, deadline(LocalRead::WorktreePatch))?,

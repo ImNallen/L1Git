@@ -566,6 +566,30 @@ pub struct ConflictSide {
     pub size: u64,
 }
 
+/// `head` is what `resolveWhole` expects, with `version`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WholeFileConflict {
+    pub head: Head,
+    pub version: ConflictVersion,
+    pub shape: WholeFileShape,
+    /// The common ancestor's text, or `None` when it has no file or no text.
+    pub base: Option<String>,
+    pub current: Option<WholeFileSide>,
+    pub incoming: Option<WholeFileSide>,
+    pub disk: WholeFileDisk,
+}
+
+/// `text` is the blob as UTF-8 without NUL bytes, at most
+/// `CONFLICT_TEXT_LIMIT` bytes, or a link's target. Otherwise it is `None`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WholeFileSide {
+    pub mode: Mode,
+    pub size: u64,
+    pub text: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum ConflictKeep {

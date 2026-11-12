@@ -19,12 +19,20 @@ import { typingIn } from "../actions";
 import { diffTheme } from "../themes/diffTheme";
 import type { Appearance } from "../themes/palette";
 import { conflictRegions, hasLeftoverMarkers } from "../domain/conflictRegions";
-import { inProgress } from "../domain/inProgress";
+import { inProgress, wholeFileLabels } from "../domain/inProgress";
 import { conflictTextSchema, problemFrom } from "../domain/repository";
-import type { ConflictFile, RepositoryRoot } from "../domain/repository";
+import type {
+  ConflictFile,
+  Operation,
+  RepositoryRoot,
+  WholeFileConflict,
+} from "../domain/repository";
 import { useDraftImpact } from "../draftProtection";
 import { useMergeState } from "../useMergeState";
+import type { Read } from "../useRead";
 import { mergeAllows, replayNames } from "../domain/merge";
+import type { MergeState } from "../domain/merge";
+import { mac, wholeFileConflict } from "../repositories";
 import {
   attachEditor,
   chooseResolution,
@@ -47,6 +55,7 @@ import type { ConflictCard, ConflictChoicesHandle } from "./ConflictChoices";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { ContextMenu } from "./ContextMenu";
 import { SideChip } from "./OperationStrip";
+import { WholeFileChoice } from "./WholeFileChoice";
 
 const createEditor: EditorFactory<undefined, undefined> = (
   type,
@@ -101,6 +110,28 @@ const shortcuts: Record<string, Command> = {
 
 type Sides = { current: string; incoming: string } | null;
 
+function notAllowedBy(
+  mergeRead: Read<MergeState>,
+  operation: Operation,
+): string | null {
+  if (mergeRead.kind === "loading")
+    return "Checking for an operation in progress…";
+  if (mergeRead.kind === "error") return mergeRead.error.message;
+  const state = mergeRead.value;
+  if (mergeAllows(state, operation)) return null;
+  return state.kind === "attention"
+    ? state.message
+    : `This path is outside the ${state.kind === "replay" ? replayNames[state.progress.kind].noun : "merge"}'s affected paths. Preserve it externally before continuing.`;
+}
+
+type MenuItem = {
+  label: string;
+  icon: typeof Copy;
+  disabled: boolean;
+  run: () => void;
+  separated?: true;
+};
+
 type Props = {
   root: RepositoryRoot;
   path: string;
@@ -126,7 +157,11 @@ export function ConflictResolver({
   const { frozen } = useDraftImpact();
   const [read, setRead] = useState<
     | { kind: "loading" }
-    | { kind: "ready"; source: ConflictFile }
+    | {
+        kind: "ready";
+        source: ConflictFile;
+        whole: WholeFileConflict | null;
+      }
     | { kind: "error"; message: string }
   >({ kind: "loading" });
   const [mergeRead] = useMergeState(root, read);
@@ -145,16 +180,22 @@ export function ConflictResolver({
   const choicesRef = useRef<ConflictChoicesHandle>(null);
   useEffect(() => {
     let active = true;
-    setRead({ kind: "loading" });
-    void readResolution(root, path).then(
-      (source) => {
-        if (active && source) setRead({ kind: "ready", source });
-      },
-      (error) => {
+    setRead((shown) =>
+      shown.kind === "ready" && shown.whole ? shown : { kind: "loading" },
+    );
+    void readResolution(root, path)
+      .then(async (source) => {
+        if (!source) return;
+        const whole =
+          source.kind === "external"
+            ? await wholeFileConflict(root, path)
+            : null;
+        if (active) setRead({ kind: "ready", source, whole });
+      })
+      .catch((error: unknown) => {
         if (active)
           setRead({ kind: "error", message: problemFrom(error).message });
-      },
-    );
+      });
     return () => {
       active = false;
     };
@@ -182,6 +223,65 @@ export function ConflictResolver({
   );
   const name = path.slice(path.lastIndexOf("/") + 1);
   const directory = path.slice(0, Math.max(path.lastIndexOf("/"), 0));
+  const anchor = menu?.getBoundingClientRect();
+  const moreMenu = (items: MenuItem[]) =>
+    menu &&
+    anchor && (
+      <ContextMenu
+        className="conflict-menu"
+        x={anchor.right - 200}
+        y={anchor.bottom + 6}
+        label="More actions"
+        onClose={({ returnFocus }) => {
+          setMenu(null);
+          if (returnFocus) menu.focus();
+        }}
+      >
+        {items.map(({ label, icon: Icon, disabled, run, separated }) => [
+          separated && (
+            <div
+              key={`${label} separator`}
+              className="menu-separator"
+              role="separator"
+            />
+          ),
+          <button
+            key={label}
+            role="menuitem"
+            aria-disabled={disabled}
+            onClick={() => {
+              if (disabled) return;
+              setMenu(null);
+              menu.focus();
+              run();
+            }}
+          >
+            <Icon size={14} aria-hidden="true" />
+            {label}
+          </button>,
+        ])}
+      </ContextMenu>
+    );
+  const moreButton = (
+    <button
+      className="icon-button conflict-more"
+      aria-label="More actions"
+      aria-haspopup="menu"
+      aria-expanded={menu !== null}
+      onClick={(event) => setMenu(event.currentTarget)}
+    >
+      <Ellipsis size={16} aria-hidden="true" />
+    </button>
+  );
+  const refreshConflict = () => setRetry((value) => value + 1);
+  const revertHelp = mergeRead.kind === "ready" &&
+    mergeRead.value.kind === "replay" &&
+    mergeRead.value.progress.kind === "revert" && (
+      <p className="conflict-help">
+        In a revert, Incoming holds the reverse of the commit. Base is that
+        commit and Incoming is its parent.
+      </p>
+    );
   const header = (children?: ReactNode) => (
     <header className="conflict-header">
       {leading}
@@ -196,6 +296,53 @@ export function ConflictResolver({
       {children}
     </header>
   );
+  if (!draft && read.kind === "ready" && read.whole) {
+    const busy = frozen || writes.running !== null;
+    return (
+      <>
+        <WholeFileChoice
+          key={read.whole.version}
+          root={root}
+          path={path}
+          conflict={read.whole}
+          names={sides ?? { current: "Current", incoming: "Incoming" }}
+          header={header(
+            <>
+              <span className="conflict-tag">
+                {wholeFileLabels[read.whole.shape]}
+              </span>
+              <span className="conflict-header-space" />
+              <span className="conflict-header-hint">
+                Choosing resolves the file. {mac ? "⌘Z" : "Ctrl+Z"} undoes it.
+              </span>
+              {moreButton}
+            </>,
+          )}
+          help={revertHelp}
+          notAllowed={notAllowedBy(mergeRead, {
+            kind: "resolveWhole",
+            path,
+            version: read.whole.version,
+            keep: "current",
+          })}
+          busy={busy}
+          theme={theme}
+          painted={painted}
+          writes={writes}
+          onResolved={onResolved}
+          onRefresh={refreshConflict}
+        />
+        {moreMenu([
+          {
+            label: "Refresh conflict",
+            icon: RefreshCw,
+            disabled: busy,
+            run: refreshConflict,
+          },
+        ])}
+      </>
+    );
+  }
   if (!draft)
     return (
       <div className="conflict-resolver">
@@ -211,10 +358,7 @@ export function ConflictResolver({
                   : "Reading result…"}
           </p>
           {read.kind !== "loading" && (
-            <button
-              className="button secondary"
-              onClick={() => setRetry((value) => value + 1)}
-            >
+            <button className="button secondary" onClick={refreshConflict}>
               Refresh conflict
             </button>
           )}
@@ -226,21 +370,11 @@ export function ConflictResolver({
   const regions = conflictRegions(draft.text);
   const leftover = regions === 0 && hasLeftoverMarkers(draft.text);
   const focused = Math.max(0, Math.min(focus, regions - 1));
-  const allowed =
-    mergeRead.kind === "ready" &&
-    mergeAllows(mergeRead.value, {
-      kind: "stageFiles",
-      entries: [draft.snapshot.entry],
-    });
-  const notAllowed = allowed
-    ? null
-    : mergeRead.kind === "loading"
-      ? "Checking for an operation in progress…"
-      : mergeRead.kind === "error"
-        ? mergeRead.error.message
-        : mergeRead.value.kind === "attention"
-          ? mergeRead.value.message
-          : `This path is outside the ${mergeRead.value.kind === "replay" ? replayNames[mergeRead.value.progress.kind].noun : "merge"}'s affected paths. Preserve it externally before continuing.`;
+  const notAllowed = notAllowedBy(mergeRead, {
+    kind: "stageFiles",
+    entries: [draft.snapshot.entry],
+  });
+  const allowed = notAllowed === null;
   const busy =
     frozen || draft.phase.kind !== "editing" || writes.running !== null;
   const problem = draft.phase.kind === "editing" ? draft.phase.problem : null;
@@ -312,14 +446,7 @@ export function ConflictResolver({
           "Could not copy the result. Select the text in Edit and copy it.",
         ),
     );
-  const anchor = menu?.getBoundingClientRect();
-  const menuItems: {
-    label: string;
-    icon: typeof Copy;
-    disabled: boolean;
-    run: () => void;
-    separated?: true;
-  }[] = [
+  const menuItems: MenuItem[] = [
     { label: "Copy result", icon: Copy, disabled: false, run: copy },
     {
       label: "Reload from disk…",
@@ -331,7 +458,7 @@ export function ConflictResolver({
       label: "Refresh conflict",
       icon: RefreshCw,
       disabled: busy,
-      run: () => setRetry((value) => value + 1),
+      run: refreshConflict,
       separated: true,
     },
   ];
@@ -409,15 +536,7 @@ export function ConflictResolver({
               >
                 Save result
               </button>
-              <button
-                className="icon-button conflict-more"
-                aria-label="More actions"
-                aria-haspopup="menu"
-                aria-expanded={menu !== null}
-                onClick={(event) => setMenu(event.currentTarget)}
-              >
-                <Ellipsis size={16} aria-hidden="true" />
-              </button>
+              {moreButton}
             </div>
           </>,
         )}
@@ -450,14 +569,7 @@ export function ConflictResolver({
           </div>
         </div>
         <div className="conflict-body">
-          {mergeRead.kind === "ready" &&
-            mergeRead.value.kind === "replay" &&
-            mergeRead.value.progress.kind === "revert" && (
-              <p className="conflict-help">
-                In a revert, Incoming holds the reverse of the commit. Base is
-                that commit and Incoming is its parent.
-              </p>
-            )}
+          {revertHelp}
           {notAllowed && (
             <p className="conflict-help" role="status">
               {notAllowed}
@@ -548,44 +660,7 @@ export function ConflictResolver({
               `${card.index}`,
             ),
           )}
-        {menu && anchor && (
-          <ContextMenu
-            className="conflict-menu"
-            x={anchor.right - 200}
-            y={anchor.bottom + 6}
-            label="More actions"
-            onClose={({ returnFocus }) => {
-              setMenu(null);
-              if (returnFocus) menu.focus();
-            }}
-          >
-            {menuItems.map(
-              ({ label, icon: Icon, disabled, run, separated }) => [
-                separated && (
-                  <div
-                    key={`${label} separator`}
-                    className="menu-separator"
-                    role="separator"
-                  />
-                ),
-                <button
-                  key={label}
-                  role="menuitem"
-                  aria-disabled={disabled}
-                  onClick={() => {
-                    if (disabled) return;
-                    setMenu(null);
-                    menu.focus();
-                    run();
-                  }}
-                >
-                  <Icon size={14} aria-hidden="true" />
-                  {label}
-                </button>,
-              ],
-            )}
-          </ContextMenu>
-        )}
+        {moreMenu(menuItems)}
       </div>
       {discardRevision !== null && (
         <ConfirmDialog
