@@ -484,6 +484,9 @@ fn classify(
     if target.iter().any(|row| row.mode == Mode::Submodule) {
         return Ok(Classified::External(ConflictUnsupported::SpecialFile));
     }
+    if under_a_non_folder(repo, path) {
+        return Ok(Classified::External(ConflictUnsupported::Structural));
+    }
     let attributes = seen.attributes.get(path).map_or(&[][..], Vec::as_slice);
     let mut binary = false;
     if let Some(rows) = text_candidate(target) {
@@ -605,6 +608,15 @@ fn text_conflict(
         }
     }
     Ok(Ok(conflict_regions(&working)))
+}
+
+fn under_a_non_folder(repo: &Repo, path: &str) -> bool {
+    let mut folder = repo.root.clone();
+    let parts: Vec<_> = path.split('/').collect();
+    parts[..parts.len() - 1].iter().any(|name| {
+        folder.push(name);
+        fs::symlink_metadata(&folder).is_ok_and(|metadata| !metadata.is_dir())
+    })
 }
 
 fn binary_on_disk(repo: &Repo, path: &str) -> bool {

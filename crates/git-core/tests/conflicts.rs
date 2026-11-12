@@ -594,6 +594,42 @@ fn keeping_a_file_whose_folder_is_gone_is_refused_and_deleting_it_stays_undoable
 }
 
 #[test]
+fn a_path_whose_folder_became_a_file_is_external_and_the_rest_still_summarize() {
+    let repo = Repo::new();
+    fs::create_dir(repo.root.join("d")).unwrap();
+    repo.put("d/f.txt", LINES.join("\n").as_bytes());
+    repo.commit("nested");
+    repo.git(&["switch", "--quiet", "-c", "topic"]);
+    repo.put("d/f.txt", &edited("theirs"));
+    repo.put("f.txt", &edited("theirs"));
+    repo.commit("theirs");
+    repo.git(&["switch", "--quiet", "main"]);
+    fs::remove_dir_all(repo.root.join("d")).unwrap();
+    repo.put("d", b"a file where the folder was\n");
+    repo.put("f.txt", &edited("ours"));
+    repo.commit("ours");
+    repo.start_merge();
+    fs::remove_dir_all(repo.root.join("d")).ok();
+    fs::remove_file(repo.root.join("d")).ok();
+    fs::rename(repo.root.join("d~HEAD"), repo.root.join("d")).unwrap();
+
+    let summary = repo.summary();
+    assert!(
+        summary.iter().any(|entry| matches!(
+            entry,
+            ConflictSummary::External { path, reason: ConflictUnsupported::Structural } if path == "d/f.txt"
+        )),
+        "{summary:?}"
+    );
+    assert!(
+        summary
+            .iter()
+            .any(|entry| matches!(entry, ConflictSummary::Text { path, .. } if path == "f.txt")),
+        "{summary:?}"
+    );
+}
+
+#[test]
 fn the_summary_labels_text_whole_file_and_external_conflicts() {
     let repo = Repo::diverged(
         |repo| {
