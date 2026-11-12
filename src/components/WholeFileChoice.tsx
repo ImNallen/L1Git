@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import type { KeyboardEvent, ReactNode } from "react";
+import type { KeyboardEvent, ReactNode, Ref } from "react";
 import { FileDiff, Virtualizer } from "@pierre/diffs/react";
 import { FileText, Trash2, TriangleAlert } from "lucide-react";
 import { typingIn } from "../actions";
@@ -7,15 +7,12 @@ import { diffTheme } from "../themes/diffTheme";
 import type { Appearance } from "../themes/palette";
 import { wholeChoice } from "../domain/wholeFile";
 import type { SideNames, WholeCard, WholePreview } from "../domain/wholeFile";
-import type {
-  ConflictKeep,
-  RepositoryRoot,
-  WholeFileConflict,
-} from "../domain/repository";
+import type { RepositoryRoot, WholeFileConflict } from "../domain/repository";
 import type { WritesView } from "../useWrites";
 import { SideChip } from "./OperationStrip";
 
 type Props = {
+  ref?: Ref<HTMLDivElement>;
   root: RepositoryRoot;
   path: string;
   conflict: WholeFileConflict;
@@ -32,6 +29,7 @@ type Props = {
 };
 
 export function WholeFileChoice({
+  ref,
   root,
   path,
   conflict,
@@ -68,7 +66,7 @@ export function WholeFileChoice({
   const blocked =
     notAllowed ??
     (busy || choosing ? "Wait for the current operation to finish." : null);
-  const choose = async (keep: ConflictKeep) => {
+  const choose = async ({ keep, label }: WholeCard) => {
     if (blocked) return;
     setChoosing(true);
     setProblem(null);
@@ -80,6 +78,7 @@ export function WholeFileChoice({
         version: conflict.version,
         keep,
       },
+      label,
     });
     setChoosing(false);
     if (outcome.kind === "applied") onResolved();
@@ -105,10 +104,15 @@ export function WholeFileChoice({
     )
       return;
     event.preventDefault();
-    void choose(card.keep);
+    void choose(card);
   };
   return (
-    <div className="conflict-resolver" tabIndex={-1} onKeyDown={onKeyDown}>
+    <div
+      ref={ref}
+      className="conflict-resolver"
+      tabIndex={-1}
+      onKeyDown={onKeyDown}
+    >
       {header}
       <div className="conflict-body">
         <div className="whole-choice">
@@ -155,7 +159,7 @@ export function WholeFileChoice({
                 card={card}
                 options={options}
                 blocked={blocked}
-                onChoose={() => void choose(card.keep)}
+                onChoose={() => void choose(card)}
               />
             ))}
           </div>

@@ -16,6 +16,8 @@ import type {
   PullStep,
   RepositoryOverview,
 } from "./domain/overview";
+import { probeOf } from "./domain/inProgress";
+import type { MergeState, OperationProbe } from "./domain/merge";
 import { problemFrom } from "./domain/repository";
 import type { FullRef, Problem, RepositoryRoot } from "./domain/repository";
 import type { PushIntent, PushOutcome, PushPreparation } from "./domain/push";
@@ -68,6 +70,7 @@ export type OverviewView = {
   roots: ReadonlyMap<RepositoryRoot, RootState>;
   repositories: readonly RepositoryState[];
   syncByRoot: ReadonlyMap<RepositoryRoot, RootSync>;
+  operations: ReadonlyMap<RepositoryRoot, OperationProbe>;
 };
 
 export type OverviewDeps = {
@@ -75,6 +78,7 @@ export type OverviewDeps = {
   fastForward: typeof repositories.fastForward;
   preparePush: typeof repositories.preparePush;
   push: typeof repositories.push;
+  operationProbe: typeof repositories.operationProbe;
   now: () => number;
   every: (run: () => void, ms: number) => () => void;
   visible: () => boolean;
@@ -106,6 +110,8 @@ export type OverviewStore = {
   refreshLocal(commonDir: RepositoryRoot): Promise<void>;
   push(root: RepositoryRoot, intent: PushIntent): Promise<void>;
   invalidatePush(commonDir: RepositoryRoot): void;
+  probe(): void;
+  observe(root: RepositoryRoot, state: MergeState): void;
   dispose(): void;
 };
 
@@ -142,6 +148,8 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
   const repos = new Map<RepositoryRoot, Repository>();
   const pushes = new Map<RepositoryRoot, PushState>();
   const preparations = new Map<RepositoryRoot, symbol>();
+  const operations = new Map<RepositoryRoot, OperationProbe>();
+  const probes = new Map<RepositoryRoot, symbol>();
   let intervalMinutes: FetchInterval = 0;
   let stopTimer: (() => void) | null = null;
   let missedTick = false;
@@ -209,6 +217,9 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
       repositories: states,
       syncByRoot,
       pushByRoot: new Map(pushes),
+      operations: new Map(
+        [...operations].filter(([root]) => roots.get(root)?.kind === "open"),
+      ),
     };
   }
 
@@ -264,6 +275,33 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
     );
   }
 
+  function settleOperation(root: RepositoryRoot, probe: OperationProbe | null) {
+    const shown = operations.get(root);
+    if (probe === null) operations.delete(root);
+    else operations.set(root, probe);
+    if (JSON.stringify(shown) !== JSON.stringify(probe ?? undefined)) emit();
+  }
+
+  async function probeRoot(root: RepositoryRoot) {
+    const owner = roots.get(root);
+    if (owner?.kind !== "open") return;
+    const generation = Symbol();
+    probes.set(root, generation);
+    let probe: OperationProbe | null;
+    try {
+      probe = await deps.operationProbe(root);
+    } catch {
+      probe = null;
+    }
+    if (roots.get(root) !== owner || probes.get(root) !== generation) return;
+    settleOperation(root, probe);
+  }
+
+  function probeRoots(commonDir?: RepositoryRoot) {
+    for (const root of commonDir === undefined ? tracked : rootsOf(commonDir))
+      void probeRoot(root);
+  }
+
   async function open(root: RepositoryRoot) {
     const opening: RootState = { kind: "opening" };
     roots.set(root, opening);
@@ -278,6 +316,7 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
     }
     if (roots.get(root) !== opening) return;
     roots.set(root, { kind: "open", commonDir: overview.commonDir });
+    void probeRoot(root);
     if (!repos.has(overview.commonDir)) {
       repos.set(overview.commonDir, {
         overview,
@@ -340,6 +379,7 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
       repo.activity = idle;
       job.finish();
       if (repos.get(commonDir) === repo) {
+        probeRoots(commonDir);
         emit();
         void pump(commonDir, repo);
       }
@@ -584,6 +624,8 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
           roots.delete(root);
           pushes.delete(root);
           preparations.delete(root);
+          operations.delete(root);
+          probes.delete(root);
         }
       for (const commonDir of [...repos.keys()])
         if (rootsOf(commonDir).length === 0) repos.delete(commonDir);
@@ -644,6 +686,13 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
         else missedTick = true;
       }, minutes * 60_000);
     },
+    probe: () => probeRoots(),
+    observe(root, state) {
+      if (roots.get(root)?.kind !== "open") return;
+      const probe = probeOf(state, operations.get(root));
+      if (probe.kind !== "external") probes.set(root, Symbol());
+      settleOperation(root, probe);
+    },
     onRefsChanged(listener) {
       refListeners.add(listener);
       return () => refListeners.delete(listener);
@@ -665,6 +714,7 @@ export function overviewStore(): OverviewStore {
     fastForward: repositories.fastForward,
     preparePush: repositories.preparePush,
     push: repositories.push,
+    operationProbe: repositories.operationProbe,
     now: Date.now,
     every(run, ms) {
       const handle = window.setInterval(run, ms);

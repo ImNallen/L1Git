@@ -4,6 +4,7 @@ import { PaneDivider } from "../components/PaneDivider";
 import { RepositoryTree } from "../components/RepositoryTree";
 import type { UpdateRestart } from "../components/UpdateRestart";
 import { UpdateAffordance } from "../components/UpdatesSettings";
+import type { OperationProbe } from "../domain/merge";
 import type { RecentRepository } from "../domain/recents";
 import type { RepositoryRoot } from "../domain/repository";
 import type { RootSync } from "../overview";
@@ -23,6 +24,7 @@ export function Sidebar({
   refs,
   activePath,
   sync,
+  operations,
   navigation,
   refActions,
   updates,
@@ -39,6 +41,7 @@ export function Sidebar({
   refs: ReadonlyMap<RepositoryRoot, RefsState>;
   activePath: RepositoryRoot | null;
   sync: ReadonlyMap<RepositoryRoot, RootSync>;
+  operations: ReadonlyMap<RepositoryRoot, OperationProbe>;
   navigation: SidebarNavigation;
   refActions: SidebarRefActions;
   updates: Updates;
@@ -63,6 +66,7 @@ export function Sidebar({
             refs={refs}
             activePath={activePath}
             sync={sync}
+            operations={operations}
             navigation={navigation}
             refActions={refActions}
           />

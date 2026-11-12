@@ -196,6 +196,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
         refs={sidebarRefs.refs}
         activePath={view.activePath}
         sync={overview.view.syncByRoot}
+        operations={overview.view.operations}
         navigation={nav.sidebar}
         refActions={{ ...refWrites.sidebarActions, merge: merge.sidebar }}
         updates={updates}

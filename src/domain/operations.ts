@@ -44,7 +44,11 @@ export type FileWrite = FileOperation["kind"];
 export type CommitWrite = CommitOperation["kind"];
 export type PartWrite = PartOperation["kind"];
 
-export type Write = { operation: Operation; expect: Expect };
+export type Write = {
+  operation: Operation;
+  expect: Expect;
+  label?: string;
+};
 
 export function writeFor(
   kind: FileWrite,

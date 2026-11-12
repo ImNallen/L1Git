@@ -28,7 +28,7 @@ const TODAY_SNAPSHOT_READS_AFTER_REF_WRITE = 3;
 const refreshRequests = (app: Harness) =>
   app.bridge.lines().filter((line) => !line.startsWith("lineStats "));
 
-it("window focus rereads overview, snapshot, statuses, undo history, merge state, and sidebar refs", async () => {
+it("window focus rereads overview, snapshot, statuses, undo history, merge state, sidebar refs, and every repository's operation probe", async () => {
   const app = await mountApp();
   await app.click(repositoryRow(OTHER));
   await app.click(repositoryRow(PIN));
@@ -41,6 +41,8 @@ it("window focus rereads overview, snapshot, statuses, undo history, merge state
       "mergeState /fixture/pin",
       "snapshot /fixture/pin",
       "refs /fixture/other",
+      "operationProbe /fixture/pin",
+      "operationProbe /fixture/other",
       "worktreeStatus /fixture/pin",
       "worktreeStatus /fixture/pin-feature",
       "mergeState /fixture/pin",

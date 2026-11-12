@@ -17,7 +17,8 @@ import type { WorkspaceApi } from "./workspaceView";
  *   write ends     -> refreshLocal(commonDir) -> onRefsChanged
  *   onRefsChanged  -> rereadAll() when the active root changed
  *   ref-moving     -> reread.refs: refreshLocal + rereadOpenRepository
- *   window focus   -> refreshRepository() + reloadRefs(), 1 s throttle
+ *   window focus   -> refreshRepository() + reloadRefs() + probe(), 1 s throttle
+ *   merge state    -> observe(active root), so its sidebar pill follows at once
  *
  * A ref-moving write and a window focus therefore request the snapshot more
  * than once; the refresh pins record the counts.
@@ -52,7 +53,7 @@ export function useWriteLoop({
   snapshotRoot: RepositoryRoot | null;
   overview: { view: OverviewView; store: OverviewStore };
   opened: OpenedRepository;
-  active: Pick<ActiveWorktree, "root" | "refreshMerge">;
+  active: Pick<ActiveWorktree, "root" | "refreshMerge" | "mergeState">;
   reloadRefs: () => void;
 }): WriteLoop {
   const writes = useWrites(
@@ -105,6 +106,7 @@ export function useWriteLoop({
       last = performance.now();
       void refreshRepositoryRef.current();
       reloadRefsRef.current();
+      store.probe();
     };
     window.addEventListener("focus", reread);
     document.addEventListener("visibilitychange", reread);
@@ -112,7 +114,12 @@ export function useWriteLoop({
       window.removeEventListener("focus", reread);
       document.removeEventListener("visibilitychange", reread);
     };
-  }, []);
+  }, [store]);
+  const { root: activeWorktree, mergeState } = active;
+  useEffect(() => {
+    if (activeWorktree !== null && mergeState !== null)
+      store.observe(activeWorktree, mergeState);
+  }, [store, activeWorktree, mergeState]);
   const { activeRoot } = app;
   useEffect(
     () =>

@@ -177,6 +177,7 @@ export function ConflictResolver({
   const [discardRevision, setDiscardRevision] = useState<number | null>(null);
   const [copyProblem, setCopyProblem] = useState<string | null>(null);
   const resolver = useRef<HTMLDivElement>(null);
+  const wholeChoice = useRef<HTMLDivElement>(null);
   const choicesRef = useRef<ConflictChoicesHandle>(null);
   useEffect(() => {
     let active = true;
@@ -200,6 +201,25 @@ export function ConflictResolver({
       active = false;
     };
   }, [root, path, refresh, retry]);
+  const surface = draft
+    ? resolver
+    : read.kind === "ready" && read.whole
+      ? wholeChoice
+      : null;
+  useEffect(
+    function takeFocusFromHeader() {
+      const home = surface?.current;
+      const focused = document.activeElement;
+      if (
+        home &&
+        (focused === null ||
+          focused === document.body ||
+          (home.contains(focused) && focused.closest(".conflict-header")))
+      )
+        home.focus({ preventScroll: true });
+    },
+    [surface],
+  );
   const running =
     mergeRead.kind === "ready" ? inProgress(mergeRead.value) : null;
   const sides: Sides =
@@ -301,6 +321,7 @@ export function ConflictResolver({
     return (
       <>
         <WholeFileChoice
+          ref={wholeChoice}
           key={read.whole.version}
           root={root}
           path={path}

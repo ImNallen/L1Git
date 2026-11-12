@@ -41,6 +41,7 @@ function harness(overrides: Partial<OverviewDeps> = {}) {
     overview: async () => overview,
     fastForward: async () => ({ outcomes: [], overview }),
     preparePush: async () => ready,
+    operationProbe: async () => ({ kind: "idle" }),
     push: async (path, intent) => {
       pushed.push({ path, intent });
       return {

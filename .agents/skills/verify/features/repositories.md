@@ -2,7 +2,7 @@
 
 ## Sub-features
 
-Add by path, native directory picker, canonical deduplication, linked worktree identity, saved-list restore, failed Add, removal from recents, the command palette, and the sidebar's Tags, Stashes, and Submodules sections.
+Add by path, operation pills on every repository row, native directory picker, canonical deduplication, linked worktree identity, saved-list restore, failed Add, removal from recents, the command palette, and the sidebar's Tags, Stashes, and Submodules sections.
 
 ## How to get to it (user POV)
 
@@ -39,6 +39,12 @@ Open L1 Git with a fresh profile or origin. The empty screen and toolbar both ex
 10. On the large fixture, expand **Tags**. Confirm 50 tags in version order, `v1.9.0` before `v1.10.0`.
 11. Open `l1-demo`, then open the clone. Run `git stash push` on an edit in `l1-demo` and switch back to the app. Select `l1-demo`, expand **Stashes**, confirm it lists the stash, click it, and confirm `l1-demo` opens with that stash selected, not the commit it showed before.
 12. Open the palette, type `stash@{0}`, and confirm it finds the stash.
+
+## Operation pills
+
+1. In disposable repositories, start a merge in L1 Git in one, stop a cherry-pick in a terminal in another, stop a rebase in a third, and leave a fourth idle. Add all four. Every repository row with an unfinished operation shows an amber pill before its checkmark: **Merging**, **Cherry-picking**, **Reverting**, **Rebasing**, **Bisecting**, **In progress** for `git am` or a multi-commit sequence, or **Needs attention** for an L1 Git merge that needs recovery. The idle row has none. Each row's accessible name includes the pill, such as `beta, Cherry-picking`, and hovering the pill explains it. A long repository name truncates before the pill does.
+2. Abort the open repository's merge from the strip. Its pill clears as soon as the merge state is read again, without a probe. Abort the other repository's cherry-pick in a terminal and switch back to L1 Git. Its pill clears on that window focus. A finished fetch also probes the repositories it fetched.
+3. Probes skip a repository whose path is unavailable, and a failed probe shows no pill.
 
 ## Gotchas
 
