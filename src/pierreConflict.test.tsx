@@ -1,9 +1,13 @@
 // @vitest-environment happy-dom
-import { act } from "react";
+import { act, createRef } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 import { File, EditProvider } from "@pierre/diffs/react";
 import { ConflictChoices } from "./components/ConflictChoices";
+import type {
+  ConflictCard,
+  ConflictChoicesHandle,
+} from "./components/ConflictChoices";
 import { Editor, type EditorFactory, TextDocument } from "@pierre/diffs/edit";
 
 vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -38,32 +42,45 @@ it.each(["one\ntwo\n", "one\r\ntwo\r\n", "one\ntwo", "one\r\ntwo", ""])(
 
 it.each(
   ["\n", "\r\n"].flatMap((eol) =>
-    ["current", "incoming", "both"].map((choice) => ({ eol, choice })),
+    (["current", "incoming", "both"] as const).map((choice) => ({
+      eol,
+      choice,
+    })),
   ),
 )(
-  "renders Pierre $choice choices with exact separators $eol and final bytes",
+  "slots a card per region and resolves $choice with exact separators $eol and final bytes",
   async ({ eol, choice }) => {
     const host = document.createElement("div");
     document.body.append(host);
     const root = createRoot(host);
-    const resolved = vi.fn();
+    const chosen = vi.fn();
+    const cards = vi.fn<(cards: ConflictCard[]) => void>();
+    const choices = createRef<ConflictChoicesHandle>();
+    const region = (side: string) => [
+      `<<<<<<< ${side}`,
+      "ours",
+      "=======",
+      "theirs",
+      ">>>>>>> incoming",
+    ];
     const file = {
       name: "f.txt",
       contents: [
         "before",
-        "<<<<<<< current",
-        "ours",
-        "=======",
-        "theirs",
-        ">>>>>>> incoming",
+        ...region("first"),
+        "middle",
+        ...region("second"),
         "after",
       ].join(eol),
     };
     await act(async () =>
       root.render(
         <ConflictChoices
+          ref={choices}
           file={file}
-          options={{ theme: "pierre-dark", onMergeConflictResolve: resolved }}
+          options={{ theme: "pierre-dark" }}
+          onCards={cards}
+          onChoose={chosen}
         />,
       ),
     );
@@ -72,18 +89,24 @@ it.each(
         host.querySelector("diffs-container")?.shadowRoot?.textContent,
       ).toContain("ours"),
     );
-    const shadow = host.querySelector("diffs-container")?.shadowRoot;
-    const button = [
-      ...host.querySelectorAll("button"),
-      ...(shadow?.querySelectorAll("button") ?? []),
-    ].find((button) =>
-      button.textContent?.toLowerCase().includes(`accept ${choice}`),
-    );
-    expect(button).toBeDefined();
-    await act(async () => button?.click());
-    expect(resolved.mock.calls[0]?.[0].contents).toBe(
+    const slotted = cards.mock.calls.at(-1)?.[0] ?? [];
+    expect(
+      slotted.map(({ index, startLineIndex }) => [index, startLineIndex]),
+    ).toEqual([
+      [0, 1],
+      [1, 7],
+    ]);
+    expect(
+      slotted.every(({ host: slot }) =>
+        host.querySelector("diffs-container")?.contains(slot),
+      ),
+    ).toBe(true);
+    await act(async () => choices.current?.choose(1, choice));
+    expect(chosen.mock.calls[0]?.[0]).toBe(
       [
         "before",
+        ...region("first"),
+        "middle",
         ...(choice === "current"
           ? ["ours"]
           : choice === "incoming"
@@ -93,6 +116,7 @@ it.each(
       ].join(eol),
     );
     await act(async () => root.unmount());
+    expect(cards.mock.calls.at(-1)?.[0]).toEqual([]);
   },
 );
 

@@ -101,6 +101,38 @@ export function FileDiffPane({
     focus: () => backRef.current?.focus(),
   }));
   const look = { diffStyle, theme, painted };
+  const conflict = state.side === "conflict";
+  const back = (
+    <button
+      ref={backRef}
+      className={conflict ? "button ghost" : "button secondary"}
+      aria-label="Back to history"
+      onClick={onBack}
+      title="Back to history (Esc)"
+    >
+      <span>{conflict ? "History" : "←  Back to history"}</span>
+    </button>
+  );
+  if (state.side === "conflict")
+    return (
+      <section
+        ref={pane}
+        className="file-diff"
+        aria-label={`Changes to ${state.path}`}
+      >
+        <ConflictResolver
+          key={`${state.selection.root}:${state.path}`}
+          root={state.selection.root}
+          path={state.path}
+          refresh={state}
+          theme={theme}
+          painted={painted}
+          writes={writes}
+          onResolved={onBack}
+          leading={back}
+        />
+      </section>
+    );
   return (
     <section
       ref={pane}
@@ -108,51 +140,41 @@ export function FileDiffPane({
       aria-label={`Changes to ${state.path}`}
     >
       <header className="file-diff-toolbar">
-        <button
-          ref={backRef}
-          className="button secondary"
-          aria-label="Back to history"
-          onClick={onBack}
-          title="Back to history (Esc)"
-        >
-          <span>{"←  Back to history"}</span>
-        </button>
+        {back}
         <span className="file-diff-path" title={state.path}>
           {state.path}
         </span>
         {state.side !== null && (
           <span className="file-diff-side">{sideLabels[state.side]}</span>
         )}
-        {state.side !== "conflict" && (
-          <div
-            className="diff-style"
-            data-view={view}
-            role="group"
-            aria-label="File view"
-          >
-            {VIEWS.map(({ view: each, label }) => {
-              const needsCommit =
-                revision === null && (each === "history" || each === "blame");
-              return (
-                <button
-                  key={each}
-                  aria-pressed={view === each}
-                  disabled={needsCommit}
-                  title={
-                    needsCommit
-                      ? "History and blame need a commit. Select a commit to read this file's history."
-                      : undefined
-                  }
-                  onClick={() => choose(each)}
-                >
-                  {label}
-                </button>
-              );
-            })}
-          </div>
-        )}
+        <div
+          className="diff-style"
+          data-view={view}
+          role="group"
+          aria-label="File view"
+        >
+          {VIEWS.map(({ view: each, label }) => {
+            const needsCommit =
+              revision === null && (each === "history" || each === "blame");
+            return (
+              <button
+                key={each}
+                aria-pressed={view === each}
+                disabled={needsCommit}
+                title={
+                  needsCommit
+                    ? "History and blame need a commit. Select a commit to read this file's history."
+                    : undefined
+                }
+                onClick={() => choose(each)}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
       </header>
-      {view !== "history" && view !== "blame" && state.side !== "conflict" && (
+      {view !== "history" && view !== "blame" && (
         <div className="file-comparison" data-split={view === "split"}>
           <span className="comparison-base" aria-hidden={view !== "split"}>
             {state.side === "staged"
@@ -184,18 +206,7 @@ export function FileDiffPane({
           </span>
         </div>
       )}
-      {state.side === "conflict" ? (
-        <ConflictResolver
-          key={`${state.selection.root}:${state.path}`}
-          root={state.selection.root}
-          path={state.path}
-          refresh={state}
-          theme={theme}
-          painted={painted}
-          writes={writes}
-          onResolved={onBack}
-        />
-      ) : revision !== null && view === "history" ? (
+      {revision !== null && view === "history" ? (
         <FileHistory revision={revision} {...look} />
       ) : revision !== null && view === "blame" ? (
         <FileBlame

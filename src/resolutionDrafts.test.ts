@@ -11,6 +11,7 @@ import {
   editResolution,
   isDirty,
   isStale,
+  markBlock,
   markResolution,
   readResolution,
   reloadResolution,
@@ -305,4 +306,39 @@ it("discards only the merge drafts consented to and retains newer text", async (
     resolutionConsent(snapshot.root, [snapshot.path]),
   );
   expect(resolutionOf(key)).toBeNull();
+});
+
+it("never marks a saved result that still holds a conflict region, and says why first", async () => {
+  const marked = conflictSnapshotSchema.parse({
+    ...snapshot,
+    version: "c".repeat(40),
+    working: "<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> topic\n",
+  });
+  vi.mocked(repositories.conflictFile).mockResolvedValue({
+    kind: "editable",
+    snapshot: marked,
+  });
+  await readResolution(snapshot.root, snapshot.path);
+  expect(markBlock(draft())).toBe("conflicts");
+  expect(await markResolution(key, write)).toBe(false);
+  expect(write).not.toHaveBeenCalled();
+  editor().edit("ours\n");
+  expect(markBlock(draft())).toBe("unsaved");
+  await reloadResolution(key, draft().revision);
+  expect(markBlock(draft())).toBe("conflicts");
+});
+
+it("never marks a saved result that keeps a stray conflict marker", async () => {
+  vi.mocked(repositories.conflictFile).mockResolvedValue({
+    kind: "editable",
+    snapshot: conflictSnapshotSchema.parse({
+      ...snapshot,
+      version: "c".repeat(40),
+      working: "ours\n=======\ntheirs\n>>>>>>> topic\n",
+    }),
+  });
+  await readResolution(snapshot.root, snapshot.path);
+  expect(markBlock(draft())).toBe("markers");
+  expect(await markResolution(key, write)).toBe(false);
+  expect(write).not.toHaveBeenCalled();
 });

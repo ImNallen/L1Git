@@ -18,4 +18,4 @@
 
 Browser and native journeys use real working copies. Reader and build checks passed for the implementation baseline. UI journeys require a live verification pass.
 
-The [conflict resolver journey](changes.md#resolve-a-stash-text-conflict) covers source versions, Pierre choices and editing, separate Save and Mark resolved, ordered Undo/Redo, retained drafts, and restart protection.
+The [conflict resolver journey](changes.md#resolve-a-stash-text-conflict) covers source versions, conflict cards with keyboard choices and editing, separate Save and Mark resolved, ordered Undo/Redo, retained drafts, and restart protection.

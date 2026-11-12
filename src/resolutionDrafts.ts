@@ -5,6 +5,7 @@ import {
   draftImpact,
   publishResolutionImpact,
 } from "./draftProtection";
+import { conflictRegions, hasLeftoverMarkers } from "./domain/conflictRegions";
 import { conflictTextSchema, problemFrom } from "./domain/repository";
 import type {
   ConflictFile,
@@ -42,12 +43,26 @@ export const isDirty = (draft: ResolutionDraft) =>
 export const isStale = (draft: ResolutionDraft) =>
   draft.observed.kind !== "editable" ||
   draft.observed.snapshot.version !== draft.snapshot.version;
-export const canMark = (draft: ResolutionDraft) =>
-  draft.phase.kind === "editing" &&
-  !pendingReads.has(resolutionKey(draft.snapshot.root, draft.snapshot.path)) &&
-  !isDirty(draft) &&
-  !isStale(draft) &&
-  draft.phase.problem === null;
+export type MarkBlock =
+  | "conflicts"
+  | "markers"
+  | "unsaved"
+  | "stale"
+  | "problem"
+  | "working"
+  | "reading";
+export function markBlock(draft: ResolutionDraft): MarkBlock | null {
+  if (conflictRegions(draft.text) > 0) return "conflicts";
+  if (hasLeftoverMarkers(draft.text)) return "markers";
+  if (isDirty(draft)) return "unsaved";
+  if (isStale(draft)) return "stale";
+  if (draft.phase.kind !== "editing") return "working";
+  if (draft.phase.problem !== null) return "problem";
+  if (pendingReads.has(resolutionKey(draft.snapshot.root, draft.snapshot.path)))
+    return "reading";
+  return null;
+}
+export const canMark = (draft: ResolutionDraft) => markBlock(draft) === null;
 function publish(key: string, draft: ResolutionDraft | null) {
   if (draft) drafts.set(key, draft);
   else drafts.delete(key);
