@@ -9,7 +9,8 @@ use super::{
 };
 use crate::{
     CONFLICT_TEXT_LIMIT, ConflictKeep, ConflictSide, ConflictSummary, ConflictUnsupported,
-    ConflictVersion, Head, Mode, Oid, RepositoryError, WholeFileDisk, WholeFileShape,
+    ConflictVersion, Head, Mode, Oid, RepositoryError, WholeFileConflict, WholeFileDisk,
+    WholeFileShape, WholeFileSide,
     git::{self, Deadline, WriteDeadline},
     repository,
 };
@@ -88,6 +89,7 @@ pub(crate) fn conflict_summary_within(
 ) -> Result<Vec<ConflictSummary>, RepositoryError> {
     let repo = Repo::open(path, deadline)?;
     Ok(classify_all(&repo, None, deadline)?
+        .1
         .into_iter()
         .map(|(path, classified)| match classified {
             Classified::Text(conflicts) => ConflictSummary::Text { path, conflicts },
@@ -104,11 +106,74 @@ pub(crate) fn conflict_summary_within(
         .collect())
 }
 
+pub(crate) fn whole_file_within(
+    path: &str,
+    file: &str,
+    deadline: Deadline,
+) -> Result<Option<WholeFileConflict>, RepositoryError> {
+    let repo = Repo::open(path, deadline)?;
+    crate::status::check(file)?;
+    let (head, mut classified) = classify_all(&repo, Some(file), deadline)?;
+    let Some((_, Classified::Whole(whole))) = classified.pop() else {
+        return Ok(None);
+    };
+    let texts = texts(&repo, &whole.rows, deadline)?;
+    let text = |stage: u8| {
+        whole
+            .rows
+            .iter()
+            .find(|row| row.stage == stage)
+            .and_then(|row| texts.get(&row.oid).cloned())
+    };
+    let shown = |side: Option<&Side>, stage| {
+        side.map(|side| WholeFileSide {
+            mode: side.shown.mode,
+            size: side.shown.size,
+            text: text(stage),
+        })
+    };
+    Ok(Some(WholeFileConflict {
+        head,
+        version: whole.version.clone(),
+        shape: whole.shape,
+        base: text(1),
+        current: shown(whole.current.as_ref(), 2),
+        incoming: shown(whole.incoming.as_ref(), 3),
+        disk: whole.disk,
+    }))
+}
+
+fn texts(
+    repo: &Repo,
+    rows: &[IndexEntry],
+    deadline: Deadline,
+) -> Result<BTreeMap<Oid, String>, RepositoryError> {
+    let oids: Vec<&Oid> = rows
+        .iter()
+        .filter(|row| row.mode != Mode::Submodule)
+        .map(|row| &row.oid)
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let sizes = sizes(repo, &oids, deadline)?;
+    let wanted: Vec<&Oid> = oids
+        .into_iter()
+        .filter(|oid| sizes[*oid] <= CONFLICT_TEXT_LIMIT as u64)
+        .collect();
+    let keep = wanted.iter().copied().collect();
+    let (_, bytes) = blobs(repo, &wanted, &sizes, &keep, deadline)?;
+    Ok(bytes
+        .into_iter()
+        .filter(|(_, bytes)| !bytes.contains(&0))
+        .filter_map(|(oid, bytes)| Some((oid, String::from_utf8(bytes).ok()?)))
+        .collect())
+}
+
 fn classify_all(
     repo: &Repo,
     only: Option<&str>,
     deadline: Deadline,
-) -> Result<Vec<(String, Classified)>, RepositoryError> {
+) -> Result<(Head, Vec<(String, Classified)>), RepositoryError> {
     let head = repository::head(&repo.root, deadline)?;
     let (rows, _) = index::read_worktree(&repo.root, deadline)?;
     let mut unmerged = Vec::new();
@@ -122,9 +187,9 @@ fn classify_all(
         }
     }
     if unmerged.is_empty() {
-        return Ok(Vec::new());
+        return Ok((head, Vec::new()));
     }
-    let seen = read_seen(repo, head, &unmerged, deadline)?;
+    let seen = read_seen(repo, head.clone(), &unmerged, deadline)?;
     let mut classified = unmerged
         .into_iter()
         .map(|(path, target)| {
@@ -147,7 +212,7 @@ fn classify_all(
             whole.disk = disk(repo, &seen, path, whole, hashed.get(path))?;
         }
     }
-    Ok(classified)
+    Ok((head, classified))
 }
 
 /// Hashes each regular file within `HASH_LIMIT` as `git add` would store it,
@@ -700,7 +765,7 @@ fn scope(repo: &Repo, path: &str) -> Result<Vec<Parent>, RepositoryError> {
 
 fn whole(repo: &Repo, path: &str, deadline: Deadline) -> Result<Whole, RepositoryError> {
     crate::status::check(path)?;
-    match classify_all(repo, Some(path), deadline)?.pop() {
+    match classify_all(repo, Some(path), deadline)?.1.pop() {
         Some((_, Classified::Whole(whole))) => Ok(*whole),
         Some((_, Classified::Text(_) | Classified::External(_))) | None => {
             Err(files::changed(path))

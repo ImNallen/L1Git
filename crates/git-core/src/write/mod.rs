@@ -30,7 +30,7 @@ use crate::{
 };
 pub(crate) use branches::merged_within;
 pub use branches::{BranchTip, Start};
-pub(crate) use conflicts::conflict_summary_within;
+pub(crate) use conflicts::{conflict_summary_within, whole_file_within};
 pub(crate) use merge::operation_within;
 pub use merge::{
     MergeAction, MergeAttention, MergeContext, MergeOutcome, MergePlan, MergeReport, MergeReview,

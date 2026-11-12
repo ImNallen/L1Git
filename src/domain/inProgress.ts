@@ -261,7 +261,7 @@ export function operationGroups(
   return groups.filter((group) => group.files.length > 0);
 }
 
-const wholeFileLabels: Record<
+export const wholeFileLabels: Record<
   Extract<ConflictSummary, { kind: "wholeFile" }>["shape"],
   string
 > = {
