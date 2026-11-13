@@ -824,11 +824,7 @@ pub(super) fn config(
     if !ran.status.success() && ran.status.code() != Some(1) {
         return Err(git::malformed());
     }
-    ran.stdout
-        .split(|byte| *byte == 0)
-        .filter(|value| !value.is_empty())
-        .map(|value| String::from_utf8(value.to_vec()).map_err(|_| git::malformed()))
-        .collect()
+    nul_strings(&ran.stdout, git::malformed)
 }
 
 fn review(
@@ -1031,11 +1027,7 @@ fn index_paths(
         ])
         .run(deadline)?
         .succeeded()?;
-    output
-        .split(|byte| *byte == 0)
-        .filter(|path| !path.is_empty())
-        .map(|path| String::from_utf8(path.to_vec()).map_err(|_| git::malformed()))
-        .collect()
+    nul_strings(&output, git::malformed)
 }
 
 fn aborted_index(
@@ -1074,13 +1066,19 @@ pub(super) fn names(
     args: &[&str],
     deadline: WriteDeadline,
 ) -> Result<Vec<String>, RepositoryError> {
-    git::read(&repo.root, args, deadline.reads())?
+    nul_strings(&git::read(&repo.root, args, deadline.reads())?, || {
+        refused(format!("{who} paths must be valid UTF-8."))
+    })
+}
+
+fn nul_strings(
+    bytes: &[u8],
+    on_bad: impl Fn() -> RepositoryError,
+) -> Result<Vec<String>, RepositoryError> {
+    bytes
         .split(|byte| *byte == 0)
-        .filter(|path| !path.is_empty())
-        .map(|path| {
-            String::from_utf8(path.to_vec())
-                .map_err(|_| refused(format!("{who} paths must be valid UTF-8.")))
-        })
+        .filter(|value| !value.is_empty())
+        .map(|value| String::from_utf8(value.to_vec()).map_err(|_| on_bad()))
         .collect()
 }
 
