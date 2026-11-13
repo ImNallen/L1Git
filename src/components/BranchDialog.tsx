@@ -1,11 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
-import {
-  GitBranchPlus,
-  LoaderCircle,
-  PencilLine,
-  Trash2,
-  X,
-} from "lucide-react";
+import { GitBranchPlus, LoaderCircle, PencilLine, Trash2 } from "lucide-react";
 import * as repositories from "../repositories";
 import {
   branchWrite,
@@ -26,6 +20,7 @@ import type {
 } from "../domain/repository";
 import type { Outcome } from "../useWrites";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { DialogHeader, busyProblem, useModalDialog } from "./Dialog";
 
 type Props = {
   ask: BranchAsk;
@@ -51,7 +46,6 @@ function NameBranchDialog({
   onNamedBranch,
   onClose,
 }: Props & { ask: Exclude<BranchAsk, { kind: "delete" }> }) {
-  const dialog = useRef<HTMLDialogElement>(null);
   const input = useRef<HTMLInputElement>(null);
   const titleId = useId();
   const errorId = useId();
@@ -59,14 +53,9 @@ function NameBranchDialog({
   const [problem, setProblem] = useState<Problem | null>(null);
   const [saving, setSaving] = useState(false);
   const [checkOut, setCheckOut] = useState(false);
-  useEffect(() => {
-    dialog.current?.showModal();
-    input.current?.select();
-  }, []);
-  const close = () => {
-    dialog.current?.close();
-    onClose();
-  };
+  const { ref, close, onCancel } = useModalDialog(onClose, () =>
+    input.current?.select(),
+  );
   const creating = ask.kind === "create";
   const ready = name.trim() !== "" && !saving;
 
@@ -87,10 +76,7 @@ function NameBranchDialog({
       await onWrite(checkoutWrite(startAt(named), head));
     setSaving(false);
     if (outcome.kind === "busy") {
-      setProblem({
-        kind: "transport",
-        message: "Another change is still running. Try again when it ends.",
-      });
+      setProblem(busyProblem);
       return;
     }
     if (outcome.kind === "failed") {
@@ -104,13 +90,10 @@ function NameBranchDialog({
 
   return (
     <dialog
-      ref={dialog}
+      ref={ref}
       className="add-dialog branch-dialog"
       aria-labelledby={titleId}
-      onCancel={(event) => {
-        event.preventDefault();
-        close();
-      }}
+      onCancel={onCancel}
       onClick={(event) => {
         if (event.target === event.currentTarget) close();
       }}
@@ -121,20 +104,15 @@ function NameBranchDialog({
           void save();
         }}
       >
-        <div className="dialog-title">
-          <div className="dialog-icon">
-            {creating ? <GitBranchPlus size={20} /> : <PencilLine size={20} />}
-          </div>
-          <button
-            type="button"
-            className="icon-button"
-            onClick={close}
-            aria-label={creating ? "Close new branch" : "Close rename branch"}
-          >
-            <X size={17} />
-          </button>
-        </div>
-        <h1 id={titleId}>{creating ? "New branch" : `Rename ${ask.name}`}</h1>
+        <DialogHeader
+          icon={
+            creating ? <GitBranchPlus size={20} /> : <PencilLine size={20} />
+          }
+          titleId={titleId}
+          title={creating ? "New branch" : `Rename ${ask.name}`}
+          closeLabel={creating ? "Close new branch" : "Close rename branch"}
+          onClose={close}
+        />
         <p>
           {ask.kind === "create"
             ? `The branch starts at ${ask.from}${ask.at.kind === "commit" ? "" : ", and Git sets its upstream as git branch would"}.`

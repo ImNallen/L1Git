@@ -102,7 +102,7 @@ type Props = {
 
 export type WorktreeWrites = {
   busy: boolean;
-  merge?: MergeState | null;
+  merge: MergeState | null;
   write: (
     worktree: RepositoryRoot,
     kind: FileWrite,
@@ -245,7 +245,7 @@ export function CommitInspector({
   }
 
   if (selection?.kind === "worktree" && compare === null) {
-    const operation = worktree ? inProgress(writes.merge ?? null) : null;
+    const operation = worktree ? inProgress(writes.merge) : null;
     return (
       <InspectorFrame
         ref={motionRoot}
@@ -350,29 +350,18 @@ export function CommitInspector({
                   onSelect={onSelect}
                 />
               ) : (
-                <div className="meta-row">
-                  <dt className="visually-hidden">Target</dt>
-                  <dd>
-                    <span className="meta-icon" aria-hidden="true">
-                      <FolderGit2 size={13} />
-                    </span>
-                    <span className="meta-lines">
-                      <span className="meta-primary">
-                        {snapshot.worktrees.find(
-                          (listed) =>
-                            detail.target.kind === "worktree" &&
-                            listed.root === detail.target.root,
-                        )?.name ?? "Working copy"}
-                      </span>
-                      <span
-                        className="meta-secondary"
-                        title={detail.target.root}
-                      >
-                        {detail.target.root}
-                      </span>
-                    </span>
-                  </dd>
-                </div>
+                <MetaRow label="Target" icon={<FolderGit2 size={13} />}>
+                  <span className="meta-primary">
+                    {snapshot.worktrees.find(
+                      (listed) =>
+                        detail.target.kind === "worktree" &&
+                        listed.root === detail.target.root,
+                    )?.name ?? "Working copy"}
+                  </span>
+                  <span className="meta-secondary" title={detail.target.root}>
+                    {detail.target.root}
+                  </span>
+                </MetaRow>
               )}
             </dl>
             <ChangedFiles
@@ -452,75 +441,45 @@ export function CommitInspector({
               ))}
             </div>
             <dl className="commit-metadata">
-              <div className="meta-row">
-                <dt className="visually-hidden">Author</dt>
-                <dd>
-                  <span className="meta-icon avatar" aria-hidden="true">
-                    {initials(target.commit.author)}
-                  </span>
-                  <span className="meta-lines">
-                    <span className="meta-primary">{target.commit.author}</span>
-                    <span
-                      className="meta-secondary"
-                      title={target.commit.email}
-                    >
-                      {target.commit.email}
-                    </span>
-                  </span>
-                </dd>
-              </div>
+              <MetaRow
+                label="Author"
+                avatar
+                icon={initials(target.commit.author)}
+              >
+                <span className="meta-primary">{target.commit.author}</span>
+                <span className="meta-secondary" title={target.commit.email}>
+                  {target.commit.email}
+                </span>
+              </MetaRow>
               <div className="meta-row">
                 <dt>Committed</dt>
                 <dd>
-                  <time
-                    dateTime={new Date(
-                      target.commit.timestamp * 1000,
-                    ).toISOString()}
-                  >
-                    {new Date(
-                      target.commit.timestamp * 1000,
-                    ).toLocaleDateString("en-GB", {
-                      day: "numeric",
-                      month: "short",
-                      year: "numeric",
-                    })}{" "}
-                    ·{" "}
-                    {new Date(
-                      target.commit.timestamp * 1000,
-                    ).toLocaleTimeString("en-GB", {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
-                  </time>
+                  <CommitTime timestamp={target.commit.timestamp} />
                 </dd>
               </div>
-              <div className="meta-row">
-                <dt>{parents.length === 1 ? "Parent" : "Parents"}</dt>
-                <dd>
-                  <span className="meta-icon" aria-hidden="true">
-                    <GitCommitHorizontal size={14} />
-                  </span>
-                  <span className="meta-lines">
-                    <span className="meta-primary parents">
-                      {parents.length === 0
-                        ? "Root commit"
-                        : parents.map((parent) => (
-                            <button
-                              className="sha-chip"
-                              key={parent}
-                              title={`Open parent ${parent}`}
-                              onClick={() =>
-                                onSelect({ kind: "commit", oid: parent })
-                              }
-                            >
-                              <code>{shortOid(parent)}</code>
-                              <ArrowUpRight size={12} />
-                            </button>
-                          ))}
-                    </span>
-                  </span>
-                </dd>
-              </div>
+              <MetaRow
+                label={parents.length === 1 ? "Parent" : "Parents"}
+                showLabel
+                icon={<GitCommitHorizontal size={14} />}
+              >
+                <span className="meta-primary parents">
+                  {parents.length === 0
+                    ? "Root commit"
+                    : parents.map((parent) => (
+                        <button
+                          className="sha-chip"
+                          key={parent}
+                          title={`Open parent ${parent}`}
+                          onClick={() =>
+                            onSelect({ kind: "commit", oid: parent })
+                          }
+                        >
+                          <code>{shortOid(parent)}</code>
+                          <ArrowUpRight size={12} />
+                        </button>
+                      ))}
+                </span>
+              </MetaRow>
             </dl>
           </div>
           <ChangedFiles
@@ -552,30 +511,69 @@ function CompareEnd({
   onSelect: (selection: Selection) => void;
 }) {
   return (
+    <MetaRow label={label} icon={<GitCommitHorizontal size={14} />}>
+      <span className="meta-primary" title={commit.subject}>
+        {commit.subject || "(no subject)"}
+      </span>
+      <span className="meta-secondary parents">
+        <span aria-hidden="true">{label}</span>
+        <button
+          className="sha-chip"
+          title={`Open ${commit.oid}`}
+          onClick={() => onSelect({ kind: "commit", oid: commit.oid })}
+        >
+          <code>{shortOid(commit.oid)}</code>
+          <ArrowUpRight size={12} />
+        </button>
+      </span>
+    </MetaRow>
+  );
+}
+
+function MetaRow({
+  label,
+  showLabel = false,
+  avatar = false,
+  icon,
+  children,
+}: {
+  label: ReactNode;
+  showLabel?: boolean;
+  avatar?: boolean;
+  icon: ReactNode;
+  children: ReactNode;
+}) {
+  return (
     <div className="meta-row">
-      <dt className="visually-hidden">{label}</dt>
+      <dt className={showLabel ? undefined : "visually-hidden"}>{label}</dt>
       <dd>
-        <span className="meta-icon" aria-hidden="true">
-          <GitCommitHorizontal size={14} />
+        <span
+          className={avatar ? "meta-icon avatar" : "meta-icon"}
+          aria-hidden="true"
+        >
+          {icon}
         </span>
-        <span className="meta-lines">
-          <span className="meta-primary" title={commit.subject}>
-            {commit.subject || "(no subject)"}
-          </span>
-          <span className="meta-secondary parents">
-            <span aria-hidden="true">{label}</span>
-            <button
-              className="sha-chip"
-              title={`Open ${commit.oid}`}
-              onClick={() => onSelect({ kind: "commit", oid: commit.oid })}
-            >
-              <code>{shortOid(commit.oid)}</code>
-              <ArrowUpRight size={12} />
-            </button>
-          </span>
-        </span>
+        <span className="meta-lines">{children}</span>
       </dd>
     </div>
+  );
+}
+
+function CommitTime({ timestamp }: { timestamp: number }) {
+  const at = new Date(timestamp * 1000);
+  return (
+    <time dateTime={at.toISOString()}>
+      {at.toLocaleDateString("en-GB", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      })}{" "}
+      ·{" "}
+      {at.toLocaleTimeString("en-GB", {
+        hour: "2-digit",
+        minute: "2-digit",
+      })}
+    </time>
   );
 }
 
@@ -845,11 +843,12 @@ function WorktreeInspector({
   const resume = useRef<(RowFocus & { near?: string[] }) | null>(null);
   const writing = useRef(false);
   const lists = useRef<HTMLDivElement>(null);
-  const operation = inProgress(writes.merge ?? null);
+  const operation = inProgress(writes.merge);
   const running = operation.kind === "running" ? operation : null;
+  const idle = writes.merge === null || writes.merge.kind === "idle";
   const conflictLabels = useConflictLabels(
     worktree.root,
-    writes.merge ?? null,
+    writes.merge,
     running?.progress.unresolved.length ?? 0,
   );
   const [cleanShown, setCleanShown] = useState<string | null>(null);
@@ -982,7 +981,7 @@ function WorktreeInspector({
               <h2>Uncommitted changes</h2>
               {changes?.kind === "ready" &&
                 changes.status.entries.length > 0 &&
-                (!writes.merge || writes.merge.kind === "idle") && (
+                idle && (
                   <button
                     className="button secondary list-action"
                     aria-disabled={writes.busy}
@@ -995,49 +994,33 @@ function WorktreeInspector({
                 )}
             </header>
             <dl className="commit-metadata">
-              <div className="meta-row">
-                <dt className="visually-hidden">Worktree</dt>
-                <dd>
-                  <span className="meta-icon" aria-hidden="true">
-                    <FolderGit2 size={13} />
-                  </span>
-                  <span className="meta-lines">
-                    <span className="meta-primary">{worktree.name}</span>
-                    <span className="meta-secondary" title={worktree.root}>
-                      {worktree.root}
-                    </span>
-                  </span>
-                </dd>
-              </div>
-              <div className="meta-row">
-                <dt className="visually-hidden">HEAD</dt>
-                <dd>
-                  <span className="meta-icon" aria-hidden="true">
-                    <GitCommitHorizontal size={14} />
-                  </span>
-                  <span className="meta-lines">
-                    <span className="meta-primary parents">
-                      {head.kind === "unborn" ? (
-                        "No commits yet"
-                      ) : (
-                        <button
-                          className="sha-chip"
-                          title={`Open HEAD ${head.oid}`}
-                          onClick={() =>
-                            onSelect({ kind: "commit", oid: head.oid })
-                          }
-                        >
-                          <code>{shortOid(head.oid)}</code>
-                          <ArrowUpRight size={12} />
-                        </button>
-                      )}
-                    </span>
-                    <span className="meta-secondary">
-                      {branch === null ? "Detached HEAD" : `On ${branch}`}
-                    </span>
-                  </span>
-                </dd>
-              </div>
+              <MetaRow label="Worktree" icon={<FolderGit2 size={13} />}>
+                <span className="meta-primary">{worktree.name}</span>
+                <span className="meta-secondary" title={worktree.root}>
+                  {worktree.root}
+                </span>
+              </MetaRow>
+              <MetaRow label="HEAD" icon={<GitCommitHorizontal size={14} />}>
+                <span className="meta-primary parents">
+                  {head.kind === "unborn" ? (
+                    "No commits yet"
+                  ) : (
+                    <button
+                      className="sha-chip"
+                      title={`Open HEAD ${head.oid}`}
+                      onClick={() =>
+                        onSelect({ kind: "commit", oid: head.oid })
+                      }
+                    >
+                      <code>{shortOid(head.oid)}</code>
+                      <ArrowUpRight size={12} />
+                    </button>
+                  )}
+                </span>
+                <span className="meta-secondary">
+                  {branch === null ? "Detached HEAD" : `On ${branch}`}
+                </span>
+              </MetaRow>
             </dl>
           </>
         )}
@@ -1069,11 +1052,7 @@ function WorktreeInspector({
                 group={group}
                 labels={labelsOf(group)}
                 collapse={collapseOf(group)}
-                managed={
-                  writes.merge !== undefined &&
-                  writes.merge !== null &&
-                  writes.merge.kind !== "idle"
-                }
+                managed={!idle}
                 resolvable={
                   new Set(
                     group.files
@@ -1081,7 +1060,7 @@ function WorktreeInspector({
                         const draft = resolutionOf(
                           resolutionKey(worktree.root, path),
                         );
-                        const owned = mergeAllows(writes.merge ?? null, {
+                        const owned = mergeAllows(writes.merge, {
                           kind:
                             group.side === "staged"
                               ? "unstageFiles"
@@ -1129,18 +1108,17 @@ function WorktreeInspector({
         )}
       </div>
       {running && <p className="operation-footer">{undoNote(running)}</p>}
-      {changes?.kind === "ready" &&
-        (!writes.merge || writes.merge.kind === "idle") && (
-          <CommitBox
-            status={changes.status}
-            branch={headBranchName(changes.status.head, snapshot.branches)}
-            staged={
-              groups.find((group) => group.side === "staged")?.files.length ?? 0
-            }
-            busy={writes.busy}
-            onCommit={writes.commit}
-          />
-        )}
+      {changes?.kind === "ready" && idle && (
+        <CommitBox
+          status={changes.status}
+          branch={headBranchName(changes.status.head, snapshot.branches)}
+          staged={
+            groups.find((group) => group.side === "staged")?.files.length ?? 0
+          }
+          busy={writes.busy}
+          onCommit={writes.commit}
+        />
+      )}
     </div>
   );
 }

@@ -99,6 +99,12 @@ const parent = (from: number, to: number) => {
   return `M ${x(from)} ${ROW_CENTER} H ${x(to) - turn} C ${x(to) - turn + Math.sign(turn) * handle} ${ROW_CENTER}, ${x(to)} ${ROW_HEIGHT - handle}, ${x(to)} ${ROW_HEIGHT} V ${ROW_BOTTOM}`;
 };
 const NO_COMMITS: readonly Commit[] = [];
+const viewportOf = (scroller: HTMLElement) => ({
+  top: scroller.scrollTop,
+  height: scroller.clientHeight,
+});
+const indexOfRow = (rows: readonly { id: RowId }[], id: RowId | null) =>
+  rows.findIndex((row) => row.id === id);
 const WORKTREE_DASH = "2 3";
 const NO_EDGES: RowHighlight = {
   incoming: false,
@@ -229,27 +235,15 @@ function CommitNode({
     <g className="graph-node">
       <title>{`${commit.author} <${commit.email}>`}</title>
       <RowRing lane={lane} radius={radius} ring={ring} />
-      {merge ? (
-        <circle
-          data-graph-key="node"
-          cx={x(lane)}
-          cy={ROW_CENTER}
-          r={radius}
-          fill="var(--canvas)"
-          stroke={color(lane)}
-          strokeWidth={2}
-        />
-      ) : (
-        <circle
-          data-graph-key="node"
-          cx={x(lane)}
-          cy={ROW_CENTER}
-          r={radius}
-          fill="var(--canvas)"
-          stroke={color(lane)}
-          strokeWidth={1.5}
-        />
-      )}
+      <circle
+        data-graph-key="node"
+        cx={x(lane)}
+        cy={ROW_CENTER}
+        r={radius}
+        fill="var(--canvas)"
+        stroke={color(lane)}
+        strokeWidth={merge ? 2 : 1.5}
+      />
     </g>
   );
 }
@@ -670,8 +664,7 @@ export function History({
   useLayoutEffect(() => {
     const scroller = scrollRef.current;
     if (!scroller) return;
-    const measure = () =>
-      setViewport({ top: scroller.scrollTop, height: scroller.clientHeight });
+    const measure = () => setViewport(viewportOf(scroller));
     // A hovered row can scroll out of the window and unmount without a mouseleave.
     const scrolled = () => {
       window.clearTimeout(hoverTimer.current);
@@ -694,10 +687,13 @@ export function History({
     rootRef.current = snapshot.root;
   });
 
+  const bodyHeight = (scroller: HTMLElement) =>
+    scroller.clientHeight - (headRef.current?.offsetHeight ?? 0);
+
   function rowShown(index: number): boolean {
     const scroller = scrollRef.current;
     if (!scroller) return false;
-    const height = scroller.clientHeight - (headRef.current?.offsetHeight ?? 0);
+    const height = bodyHeight(scroller);
     const rowTop = index * ROW_HEIGHT;
     return (
       rowTop + ROW_HEIGHT > scroller.scrollTop &&
@@ -708,9 +704,9 @@ export function History({
   function revealCentered(index: number) {
     const scroller = scrollRef.current;
     if (index < 0 || !scroller || rowShown(index)) return;
-    const height = scroller.clientHeight - (headRef.current?.offsetHeight ?? 0);
+    const height = bodyHeight(scroller);
     scroller.scrollTop = index * ROW_HEIGHT + ROW_HEIGHT / 2 - height / 2;
-    setViewport({ top: scroller.scrollTop, height: scroller.clientHeight });
+    setViewport(viewportOf(scroller));
   }
   const revealFromEffect = useEffectEvent(revealCentered);
 
@@ -727,7 +723,7 @@ export function History({
     // remembered selection. A branch jump reveals with a later `revealSeq`.
     if (last?.root !== snapshot.root) {
       scroller.scrollTop = scrollTopOf(snapshot.root);
-      setViewport({ top: scroller.scrollTop, height: scroller.clientHeight });
+      setViewport(viewportOf(scroller));
       return;
     }
     if (
@@ -735,7 +731,7 @@ export function History({
       (last.id === selectedId && last.seq === revealSeq)
     )
       return;
-    revealFromEffect(rowsRef.current.findIndex((row) => row.id === selectedId));
+    revealFromEffect(indexOfRow(rowsRef.current, selectedId));
   }, [snapshot.root, scrollTopOf, selectedId, revealSeq, hidden]);
 
   const ruleShown = useRef({ root: snapshot.root, rule });
@@ -743,7 +739,7 @@ export function History({
     const last = ruleShown.current;
     ruleShown.current = { root: snapshot.root, rule };
     if (last.root === snapshot.root && last.rule !== rule)
-      revealFromEffect(rows.findIndex((row) => row.id === selectedId));
+      revealFromEffect(indexOfRow(rows, selectedId));
   }, [snapshot.root, rule, rows, selectedId]);
 
   useLayoutEffect(
@@ -779,7 +775,7 @@ export function History({
       const atBottom =
         scroller !== null &&
         scroller.scrollTop >= scroller.scrollHeight - scroller.clientHeight - 1;
-      const selectedRow = rows.findIndex((row) => row.id === selectedId);
+      const selectedRow = indexOfRow(rows, selectedId);
       const selectedShown = selectedRow >= 0 && rowShown(selectedRow);
       flushSync(() => {
         onShowHistory();
@@ -793,9 +789,9 @@ export function History({
             selectedRow,
             ROW_HEIGHT,
             scroller.scrollTop,
-            scroller.clientHeight - (headRef.current?.offsetHeight ?? 0),
+            bodyHeight(scroller),
           );
-        setViewport({ top: scroller.scrollTop, height: scroller.clientHeight });
+        setViewport(viewportOf(scroller));
       }
       searchInput.current?.focus();
       searchInput.current?.select();
@@ -811,7 +807,7 @@ export function History({
     flushSync(onShowHistory);
     const oid = stepMatch(snapshot.commits, matches, selectedOid, by);
     if (oid === null) return;
-    revealCentered(rows.findIndex((row) => row.id === oid));
+    revealCentered(indexOfRow(rows, oid));
     onSelect({ kind: "commit", oid });
   }
 
@@ -819,6 +815,11 @@ export function History({
     setMenu(null);
     revealColumn(revealOnClose.current);
     revealOnClose.current = null;
+  }
+
+  function returnToTable() {
+    closeMenu();
+    tableRef.current?.focus({ preventScroll: true });
   }
 
   function run(action: HistoryAction) {
@@ -858,17 +859,16 @@ export function History({
         : { id: landing, trail: null };
     trail.current = next.trail;
     const scroller = scrollRef.current;
-    const index = rows.findIndex((row) => row.id === next.id);
+    const index = indexOfRow(rows, next.id);
     const row = rows[index];
     if (row === undefined || !scroller) return;
-    const header = headRef.current?.offsetHeight ?? 0;
     scroller.scrollTop = revealRow(
       index,
       ROW_HEIGHT,
       scroller.scrollTop,
-      scroller.clientHeight - header,
+      bodyHeight(scroller),
     );
-    setViewport({ top: scroller.scrollTop, height: scroller.clientHeight });
+    setViewport(viewportOf(scroller));
     onSelect(rowSelection(row));
   }
 
@@ -1208,8 +1208,7 @@ export function History({
                 role="menuitem"
                 onClick={() => {
                   compareWithWorkingCopy(menuCommit);
-                  closeMenu();
-                  tableRef.current?.focus({ preventScroll: true });
+                  returnToTable();
                 }}
               >
                 <GitCompareArrows size={14} />
@@ -1221,8 +1220,7 @@ export function History({
                   title={picked.subject}
                   onClick={() => {
                     compareWithPick(menuCommit);
-                    closeMenu();
-                    tableRef.current?.focus({ preventScroll: true });
+                    returnToTable();
                   }}
                 >
                   <GitCompareArrows size={14} />
@@ -1237,8 +1235,7 @@ export function History({
                       ? null
                       : { root: snapshot.root, oid: menuCommit },
                   );
-                  closeMenu();
-                  tableRef.current?.focus({ preventScroll: true });
+                  returnToTable();
                 }}
               >
                 <Pin size={14} />
@@ -1255,8 +1252,7 @@ export function History({
                 <button
                   role="menuitem"
                   onClick={() => {
-                    closeMenu();
-                    tableRef.current?.focus({ preventScroll: true });
+                    returnToTable();
                     onCheckout(menuCommit);
                   }}
                 >
@@ -1267,8 +1263,7 @@ export function History({
               <button
                 role="menuitem"
                 onClick={() => {
-                  closeMenu();
-                  tableRef.current?.focus({ preventScroll: true });
+                  returnToTable();
                   onNewBranch(menuCommit);
                 }}
               >
@@ -1278,8 +1273,7 @@ export function History({
               <button
                 role="menuitem"
                 onClick={() => {
-                  closeMenu();
-                  tableRef.current?.focus({ preventScroll: true });
+                  returnToTable();
                   onCreateTag(menuCommit);
                 }}
               >
@@ -1298,8 +1292,7 @@ export function History({
                   aria-disabled={commitReplay.disabled}
                   onClick={() => {
                     if (commitReplay.disabled) return;
-                    closeMenu();
-                    tableRef.current?.focus({ preventScroll: true });
+                    returnToTable();
                     commitReplay.onReview({ kind, commit: menuCommit });
                   }}
                 >

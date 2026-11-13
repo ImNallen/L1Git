@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import type { DragEvent } from "react";
-import { FileJson, Plus, Upload, X } from "lucide-react";
+import { FileJson, Plus, Upload } from "lucide-react";
 import type { ThemeFamilyDraft } from "../themes/catalog";
 import { parseThemeFile, type ImportResult } from "../themes/importers";
+import { DialogHeader, useModalDialog } from "./Dialog";
 import { ThemeSearch } from "./ThemeSearch";
 
 type Props = {
@@ -44,17 +45,11 @@ async function readFiles(files: readonly File[]) {
 const holdDrop = (event: DragEvent) => event.preventDefault();
 
 export function AddThemeDialog({ onAdd, onClose }: Props) {
-  const dialog = useRef<HTMLDialogElement>(null);
   const picker = useRef<HTMLInputElement>(null);
   const [json, setJson] = useState("");
   const [errors, setErrors] = useState<string[]>([]);
   const [dragging, setDragging] = useState(false);
-  useEffect(() => dialog.current?.showModal(), []);
-
-  const close = () => {
-    dialog.current?.close();
-    onClose();
-  };
+  const { ref, close, onCancel } = useModalDialog(onClose);
 
   async function importFiles(files: readonly File[]) {
     const { families, errors } = await readFiles(files);
@@ -72,33 +67,23 @@ export function AddThemeDialog({ onAdd, onClose }: Props) {
 
   return (
     <dialog
-      ref={dialog}
+      ref={ref}
       className="add-dialog add-theme-dialog"
       aria-labelledby="add-theme-title"
-      onCancel={(event) => {
-        event.preventDefault();
-        close();
-      }}
+      onCancel={onCancel}
       onClick={(event) => {
         if (event.target === event.currentTarget) close();
       }}
       onDragOver={holdDrop}
       onDrop={holdDrop}
     >
-      <div className="dialog-title">
-        <div className="dialog-icon">
-          <FileJson size={21} />
-        </div>
-        <button
-          type="button"
-          className="icon-button"
-          onClick={close}
-          aria-label="Close add theme"
-        >
-          <X size={17} />
-        </button>
-      </div>
-      <h1 id="add-theme-title">Add a theme</h1>
+      <DialogHeader
+        icon={<FileJson size={21} />}
+        titleId="add-theme-title"
+        title="Add a theme"
+        closeLabel="Close add theme"
+        onClose={close}
+      />
       <p>Search community themes, or import an L1 or VS Code theme file.</p>
       <ThemeSearch
         onImported={(family) => {

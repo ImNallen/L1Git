@@ -1,7 +1,7 @@
-import { useEffect, useId, useRef } from "react";
+import { useId, useRef } from "react";
 import type { ReactNode } from "react";
-import { X } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { DialogHeader, useModalDialog } from "./Dialog";
 
 type Props = {
   icon: LucideIcon;
@@ -24,47 +24,29 @@ export function ConfirmDialog({
   onClose,
   children,
 }: Props) {
-  const dialog = useRef<HTMLDialogElement>(null);
   const cancelButton = useRef<HTMLButtonElement>(null);
   const titleId = useId();
-  useEffect(() => {
-    dialog.current?.showModal();
-    cancelButton.current?.focus();
-  }, []);
-  // Closing the native dialog before React removes it hands focus back to
-  // whatever had it when the dialog opened.
-  const close = () => {
-    dialog.current?.close();
-    onClose();
-  };
+  const { ref, close, onCancel } = useModalDialog(onClose, () =>
+    cancelButton.current?.focus(),
+  );
 
   return (
     <dialog
-      ref={dialog}
+      ref={ref}
       className="add-dialog"
       aria-labelledby={titleId}
-      onCancel={(event) => {
-        event.preventDefault();
-        close();
-      }}
+      onCancel={onCancel}
       onClick={(event) => {
         if (event.target === event.currentTarget) close();
       }}
     >
-      <div className="dialog-title">
-        <div className="dialog-icon">
-          <Icon size={20} />
-        </div>
-        <button
-          type="button"
-          className="icon-button"
-          onClick={close}
-          aria-label={closeLabel}
-        >
-          <X size={17} />
-        </button>
-      </div>
-      <h1 id={titleId}>{title}</h1>
+      <DialogHeader
+        icon={<Icon size={20} />}
+        titleId={titleId}
+        title={title}
+        closeLabel={closeLabel}
+        onClose={close}
+      />
       {children}
       <div className="dialog-actions">
         <button
