@@ -14,7 +14,7 @@ use std::{
 };
 
 pub const HISTORY_LIMIT: usize = 50_000;
-pub const PATCH_LIMIT: usize = 1024 * 1024;
+pub(crate) const PATCH_LIMIT: usize = 1024 * 1024;
 pub const LINE_STATS_LIMIT: usize = 500;
 pub(crate) const COMMIT_FORMAT: &str = "--format=%H%x00%P%x00%s%x00%an%x00%ae%x00%at";
 const SQUASH_SCAN_LIMIT: usize = 2000;
@@ -47,13 +47,28 @@ pub(crate) fn root(path: &str, deadline: Deadline) -> Result<PathBuf, Repository
         ));
     }
     let top = git::read(&path, &["rev-parse", "--show-toplevel"], deadline)?;
-    let top = std::str::from_utf8(top.strip_suffix(b"\n").unwrap_or(&top)).map_err(|_| {
-        RepositoryError::new(
-            ErrorKind::UnsupportedPath,
-            "Repository paths must be valid UTF-8.",
-        )
-    })?;
+    let top = std::str::from_utf8(top.strip_suffix(b"\n").unwrap_or(&top))
+        .map_err(|_| non_utf8_repository())?;
     canonical(top)
+}
+
+pub(crate) fn utf8(path: &Path) -> Result<String, RepositoryError> {
+    path.to_str()
+        .map(str::to_owned)
+        .ok_or_else(non_utf8_repository)
+}
+
+fn non_utf8_repository() -> RepositoryError {
+    RepositoryError::new(
+        ErrorKind::UnsupportedPath,
+        "Repository paths must be valid UTF-8.",
+    )
+}
+
+pub(crate) fn display_name(root: &Path) -> String {
+    root.file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "Repository".into())
 }
 
 pub(crate) fn canonical(path: &str) -> Result<PathBuf, RepositoryError> {
@@ -179,6 +194,8 @@ fn tags(path: &Path, deadline: Deadline) -> Result<Vec<Tag>, RepositoryError> {
         let reference = git::text(reference);
         let oid = match *kind {
             b"commit" => git::text(oid),
+            // Older Git dereferences `%(*objectname)` only once, so a tag of a
+            // tag can still name a tag object.
             b"tag" => match peel_to_commit(path, &reference, deadline)? {
                 Some(oid) => oid,
                 None => continue,
@@ -199,9 +216,7 @@ fn tags(path: &Path, deadline: Deadline) -> Result<Vec<Tag>, RepositoryError> {
     Ok(tags)
 }
 
-/// Older Git dereferences `%(*objectname)` only once, so a tag of a tag can
-/// still name a tag object.
-fn peel_to_commit(
+pub(crate) fn peel_to_commit(
     path: &Path,
     reference: &str,
     deadline: Deadline,
@@ -326,19 +341,8 @@ fn read_refs(
     });
     let head = head?;
     let (remotes, branches) = branches?;
-    let name = root
-        .file_name()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "Repository".into());
-    let root = root
-        .to_str()
-        .ok_or_else(|| {
-            RepositoryError::new(
-                ErrorKind::UnsupportedPath,
-                "Repository paths must be valid UTF-8.",
-            )
-        })?
-        .to_owned();
+    let name = display_name(root);
+    let root = utf8(root)?;
     let refs = RepositoryRefs {
         root,
         name,
@@ -521,11 +525,15 @@ pub(crate) fn snapshot_within(
         commits,
         squashes,
         history_truncated,
-        observed_at: SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs(),
+        observed_at: now(),
     })
+}
+
+pub(crate) fn now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }
 
 /// Pairs each branch tip that no loaded commit builds on with a newer commit

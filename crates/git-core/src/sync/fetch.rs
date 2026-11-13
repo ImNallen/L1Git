@@ -1,7 +1,8 @@
-use super::now;
 use crate::{
     ErrorKind, FetchBranch, FetchFailure, FetchOutcome, FetchSummary, RemoteFetch, RepositoryError,
     git::{self, Deadline, Finished, Mutation},
+    remotes,
+    repository::now,
     stderr,
 };
 use std::{collections::HashSet, path::Path, time::Duration};
@@ -12,22 +13,28 @@ pub(super) fn fetch_all(
     reads: Deadline,
 ) -> Result<FetchSummary, RepositoryError> {
     let before = tips(root, reads)?;
-    let names = git::read(root, &["remote"], reads)?;
+    let names = remotes::names(root, reads)?;
     let skipped = skipped_remotes(root, reads)?;
-    let remotes = git::text(&names)
-        .lines()
+    let remotes = names
+        .into_iter()
         .map(|remote| {
-            let outcome = if skipped.contains(remote) {
+            let outcome = if skipped.contains(remote.as_str()) {
                 FetchOutcome::Skipped
             } else {
-                fetch(root, remote, None, deadline)?
+                fetch(root, &remote, None, deadline)?
             };
-            Ok(RemoteFetch {
-                remote: remote.to_owned(),
-                outcome,
-            })
+            Ok(RemoteFetch { remote, outcome })
         })
         .collect::<Result<_, RepositoryError>>()?;
+    summary(root, &before, reads, remotes)
+}
+
+fn summary(
+    root: &Path,
+    before: &[u8],
+    reads: Deadline,
+    remotes: Vec<RemoteFetch>,
+) -> Result<FetchSummary, RepositoryError> {
     Ok(FetchSummary {
         at: now(),
         changed: tips(root, reads.renewed())? != before,
@@ -136,15 +143,15 @@ pub(super) fn fetch_branch(
 ) -> Result<FetchSummary, RepositoryError> {
     let before = tips(root, reads)?;
     let outcome = fetch(root, &source.remote, Some(&source.branch), deadline)?;
-    Ok(FetchSummary {
-        at: now(),
-        changed: tips(root, reads.renewed())? != before,
-        coalesced: false,
-        remotes: vec![RemoteFetch {
+    summary(
+        root,
+        &before,
+        reads,
+        vec![RemoteFetch {
             remote: source.remote.clone(),
             outcome,
         }],
-    })
+    )
 }
 
 fn fetch(

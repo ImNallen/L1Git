@@ -193,6 +193,7 @@ pub enum Response {
 
 pub fn run(coordinator: &Coordinator, request: Request) -> Result<Response, RepositoryError> {
     let deadline = |read| coordinator.deadline(read);
+    let typed = |path: &str| expand_home(path, home_dir().as_deref());
     Ok(match request {
         Request::MergeReview { path, selection } => {
             Response::MergeReview(coordinator.review_merge(&path, &selection)?)
@@ -290,14 +291,14 @@ pub fn run(coordinator: &Coordinator, request: Request) -> Result<Response, Repo
         Request::ListDirectories { path } => {
             Response::ListDirectories(list_directories(&path, home_dir().as_deref())?)
         }
-        Request::CreateRepository { path } => Response::CreateRepository(
-            coordinator.create_repository(&expand_home(&path, home_dir().as_deref())?)?,
-        ),
-        Request::CloneRepository { url, path } => Response::CloneRepository(
-            coordinator.clone_repository(&url.0, &expand_home(&path, home_dir().as_deref())?)?,
-        ),
+        Request::CreateRepository { path } => {
+            Response::CreateRepository(coordinator.create_repository(&typed(&path)?)?)
+        }
+        Request::CloneRepository { url, path } => {
+            Response::CloneRepository(coordinator.clone_repository(&url.0, &typed(&path)?)?)
+        }
         Request::CancelClone { path } => {
-            coordinator.cancel_clone(&expand_home(&path, home_dir().as_deref())?);
+            coordinator.cancel_clone(&typed(&path)?);
             Response::CancelClone
         }
     })

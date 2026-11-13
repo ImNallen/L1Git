@@ -1,9 +1,9 @@
 use crate::{
     ChangeStatus, ChangedFile, Conflict, ErrorKind, FilePatch, IndexObject, Mode, MoveSide, Moved,
-    Oid, PATCH_LIMIT, RepositoryError, Side, Sides, StagedStamp, Stages, StatusEntry,
-    SubmoduleState, WorktreePatch, WorktreeStatus,
+    Oid, RepositoryError, Side, Sides, StagedStamp, Stages, StatusEntry, SubmoduleState,
+    WorktreePatch, WorktreeStatus,
     git::{self, Deadline, LocalRead},
-    repository::{self, text_patch},
+    repository::{self, PATCH_LIMIT, text_patch},
     untracked::untracked,
 };
 use std::{
@@ -552,10 +552,7 @@ fn lists(entry: &StatusEntry, file: &str, side: Side) -> bool {
 
 fn no_changes(file: &str, side: Side) -> RepositoryError {
     if file.contains(char::REPLACEMENT_CHARACTER) {
-        return RepositoryError::new(
-            ErrorKind::UnsupportedPath,
-            "L1 Git cannot open diffs for file names that are not valid UTF-8.",
-        );
+        return repository::non_utf8_path();
     }
     RepositoryError::new(
         ErrorKind::UnchangedPath,
@@ -567,13 +564,8 @@ fn no_changes(file: &str, side: Side) -> RepositoryError {
 }
 
 fn head_or_empty_tree(root: &Path, deadline: Deadline) -> Result<String, RepositoryError> {
-    let head = git::run(
-        root,
-        &["rev-parse", "--verify", "--quiet", "HEAD^{commit}"],
-        deadline,
-    )?;
-    if head.status.success() {
-        return Ok(git::line(&head.stdout));
+    if let Some(head) = repository::peel_to_commit(root, "HEAD", deadline)? {
+        return Ok(head);
     }
     Ok(git::line(&git::read_with_input(
         root,

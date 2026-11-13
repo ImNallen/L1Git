@@ -290,11 +290,7 @@ impl StagedStamp {
 impl TryFrom<String> for StagedStamp {
     type Error = RepositoryError;
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        if value.len() == 40
-            && value
-                .bytes()
-                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-        {
+        if value.len() == 40 && lower_hex(&value) {
             Ok(Self(value))
         } else {
             Err(RepositoryError::stale(
@@ -475,11 +471,7 @@ pub struct ConflictVersion(String);
 impl TryFrom<String> for ConflictVersion {
     type Error = &'static str;
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        if value.len() == 40
-            && value
-                .bytes()
-                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-        {
+        if value.len() == 40 && lower_hex(&value) {
             Ok(Self(value))
         } else {
             Err("Use the conflict version that L1 Git read.")
@@ -650,11 +642,7 @@ impl Oid {
 impl TryFrom<String> for Oid {
     type Error = RepositoryError;
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        if matches!(value.len(), 40 | 64)
-            && value
-                .bytes()
-                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-        {
+        if matches!(value.len(), 40 | 64) && lower_hex(&value) {
             Ok(Self(value))
         } else {
             Err(RepositoryError::new(
@@ -663,6 +651,12 @@ impl TryFrom<String> for Oid {
             ))
         }
     }
+}
+
+fn lower_hex(value: &str) -> bool {
+    value
+        .bytes()
+        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 impl From<Oid> for String {

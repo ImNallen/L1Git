@@ -1,4 +1,9 @@
-use super::{Coordinator, create::runnable, lock_ignoring_poison, remote::validate_endpoint};
+use super::{
+    Coordinator,
+    create::{file_in_the_way, runnable, unusable_location},
+    lock_ignoring_poison,
+    remote::validate_endpoint,
+};
 use crate::{
     ErrorKind, NewRepository, RepositoryError,
     directories::resolved_target,
@@ -74,12 +79,8 @@ fn before_clone(target: &Path) -> Result<Before, RepositoryError> {
     let refused = |message: &str| RepositoryError::new(ErrorKind::UnsupportedPath, message);
     match target.metadata() {
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Before::Missing),
-        Err(_) => Err(refused(
-            "L1 Git cannot use this location. Choose another location.",
-        )),
-        Ok(found) if !found.is_dir() => Err(refused(
-            "A file already exists at this location. Choose another location.",
-        )),
+        Err(_) => Err(unusable_location()),
+        Ok(found) if !found.is_dir() => Err(file_in_the_way()),
         Ok(_) => {
             let unreadable = |_| refused("L1 Git cannot read this folder. Check its permissions.");
             if fs::read_dir(target).map_err(unreadable)?.next().is_some() {

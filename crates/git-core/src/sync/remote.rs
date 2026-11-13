@@ -103,24 +103,19 @@ impl Coordinator {
 
 fn validate(root: &Path, remote: &AddRemote, reads: Deadline) -> Result<(), RepositoryError> {
     let name = &remote.name;
+    let invalid = || RepositoryError::new(ErrorKind::GitFailed, "Enter a valid Git remote name.");
     if name.is_empty()
         || name == "."
         || name.starts_with('-')
         || name.ends_with('/')
         || name.chars().any(|c| c.is_control() || c.is_whitespace())
     {
-        return Err(RepositoryError::new(
-            ErrorKind::GitFailed,
-            "Enter a valid Git remote name.",
-        ));
+        return Err(invalid());
     }
     let namespace = format!("refs/remotes/{name}/__l1git_probe");
     let checked = git::run(root, &["check-ref-format", &namespace], reads).map_err(|_| failed())?;
     if !checked.status.success() {
-        return Err(RepositoryError::new(
-            ErrorKind::GitFailed,
-            "Enter a valid Git remote name.",
-        ));
+        return Err(invalid());
     }
     validate_endpoint(&remote.url)
 }

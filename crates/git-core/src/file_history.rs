@@ -3,7 +3,10 @@ use crate::{
     git::{self, Deadline, LocalRead},
     repository::{COMMIT_FORMAT, PATCH_LIMIT, non_utf8_path, parse_commits, root, verify_commit},
 };
-use std::{collections::HashMap, path::Path};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+};
 
 const BLAME_LIMIT: usize = 16 * PATCH_LIMIT;
 const BINARY_PROBE: usize = 8000;
@@ -26,14 +29,7 @@ pub(crate) fn file_history_within(
     file: &str,
     deadline: Deadline,
 ) -> Result<Vec<FileRevision>, RepositoryError> {
-    let root = root(path, deadline)?;
-    verify_commit(&root, oid, deadline)?;
-    if file.is_empty() {
-        return Err(missing_file());
-    }
-    if file.contains(char::REPLACEMENT_CHARACTER) {
-        return Err(non_utf8_path());
-    }
+    let root = file_root(path, oid, file, deadline)?;
     let output = git::read(
         &root,
         &[
@@ -52,6 +48,23 @@ pub(crate) fn file_history_within(
         deadline,
     )?;
     revisions(&output, file)
+}
+
+fn file_root(
+    path: &str,
+    oid: &str,
+    file: &str,
+    deadline: Deadline,
+) -> Result<PathBuf, RepositoryError> {
+    let root = root(path, deadline)?;
+    verify_commit(&root, oid, deadline)?;
+    if file.is_empty() {
+        return Err(missing_file());
+    }
+    if file.contains(char::REPLACEMENT_CHARACTER) {
+        return Err(non_utf8_path());
+    }
+    Ok(root)
 }
 
 /// Each record is the six commit fields, then a field holding a newline and
@@ -88,14 +101,7 @@ pub(crate) fn blame_within(
     file: &str,
     deadline: Deadline,
 ) -> Result<Blame, RepositoryError> {
-    let root = root(path, deadline)?;
-    verify_commit(&root, oid, deadline)?;
-    if file.is_empty() {
-        return Err(missing_file());
-    }
-    if file.contains(char::REPLACEMENT_CHARACTER) {
-        return Err(non_utf8_path());
-    }
+    let root = file_root(path, oid, file, deadline)?;
     let entry = git::read(
         &root,
         &[

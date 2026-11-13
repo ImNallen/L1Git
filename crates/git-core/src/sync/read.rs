@@ -1,7 +1,6 @@
-use super::now;
 use crate::{
-    Blocker, BranchRef, BranchRole, BranchState, BranchStatus, ErrorKind, FetchSummary, Oid,
-    RepositoryError, RepositoryOverview,
+    Blocker, BranchRef, BranchRole, BranchState, BranchStatus, FetchSummary, Oid, RepositoryError,
+    RepositoryOverview,
     git::{self, Deadline, Finished, Mutation},
     repository, stderr,
 };
@@ -230,15 +229,12 @@ pub(super) fn read(
         root
     };
     Ok(RepositoryOverview {
-        root: utf8(root)?,
-        common_dir: utf8(common_dir)?,
-        name: main_worktree
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "Repository".into()),
+        root: repository::utf8(root)?,
+        common_dir: repository::utf8(common_dir)?,
+        name: repository::display_name(main_worktree),
         branches,
         fetch,
-        observed_at: now(),
+        observed_at: repository::now(),
     })
 }
 
@@ -342,33 +338,12 @@ fn upstream_oid(
 ) -> Result<Option<Oid>, RepositoryError> {
     let tip = match tips.get(upstream) {
         Some(tip) => (*tip).to_owned(),
-        None => {
-            let output = git::run(
-                root,
-                &[
-                    "rev-parse",
-                    "--verify",
-                    "--quiet",
-                    &format!("{upstream}^{{commit}}"),
-                ],
-                reads,
-            )?;
-            if !output.status.success() {
-                return Ok(None);
-            }
-            git::line(&output.stdout)
-        }
+        None => match repository::peel_to_commit(root, upstream, reads)? {
+            Some(tip) => tip,
+            None => return Ok(None),
+        },
     };
     Ok(Oid::try_from(tip).ok())
-}
-
-fn utf8(path: &Path) -> Result<String, RepositoryError> {
-    path.to_str().map(str::to_owned).ok_or_else(|| {
-        RepositoryError::new(
-            ErrorKind::UnsupportedPath,
-            "Repository paths must be valid UTF-8.",
-        )
-    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

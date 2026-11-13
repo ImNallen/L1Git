@@ -133,19 +133,15 @@ impl Coordinator {
             Ok(source) => source,
             Err(reason) => return Ok(PublishOptions::Unavailable { reason }),
         };
-        let names = git::read(&repository.root, &["remote"], reads)?;
         let mut remotes = Vec::new();
-        for name in git::text(&names).lines() {
-            let availability = match remote_endpoint(&repository.root, name, reads)? {
+        for name in remotes::names(&repository.root, reads)? {
+            let availability = match remote_endpoint(&repository.root, &name, reads)? {
                 Ok(endpoint) => PublishRemoteAvailability::Eligible {
                     endpoint: display_endpoint(PushPurpose::Publish, &endpoint),
                 },
                 Err(reason) => PublishRemoteAvailability::Unavailable { reason },
             };
-            remotes.push(PublishRemote {
-                name: name.into(),
-                availability,
-            });
+            remotes.push(PublishRemote { name, availability });
         }
         Ok(PublishOptions::Available {
             branch,
@@ -173,20 +169,14 @@ impl Coordinator {
         let (current, updates) = {
             let _write = locks.write_lock();
             let current = prepare_intent(&repository, intent, reads.renewed())?;
-            let updates = if current
-                == (PushAvailability::Ready {
-                    intent: intent.clone(),
-                }) {
+            let updates = if current.ready_for(intent) {
                 tracking_updates(&repository.root, intent, reads.renewed())?
             } else {
                 Vec::new()
             };
             (current, updates)
         };
-        let mut outcome = if current
-            != (PushAvailability::Ready {
-                intent: intent.clone(),
-            }) {
+        let mut outcome = if !current.ready_for(intent) {
             PushOutcome::Stale
         } else {
             match git::capture_mutation(
@@ -265,6 +255,25 @@ fn unavailable(reason: PushUnavailable) -> PushAvailability {
     PushAvailability::Unavailable { reason }
 }
 
+impl PushAvailability {
+    fn ready_for(&self, intent: &PushIntent) -> bool {
+        matches!(self, Self::Ready { intent: ready } if ready == intent)
+    }
+}
+
+fn attached_head(
+    root: &Path,
+    reads: Deadline,
+) -> Result<Result<(BranchRef, Oid), PushUnavailable>, RepositoryError> {
+    Ok(match repository::head(root, reads)? {
+        Head::Detached { .. } => Err(PushUnavailable::Detached),
+        Head::Unborn { .. } => Err(PushUnavailable::Unborn),
+        Head::Attached { reference, oid } => {
+            Ok((BranchRef::try_from(reference)?, Oid::try_from(oid)?))
+        }
+    })
+}
+
 fn values(root: &Path, key: &str, reads: Deadline) -> Result<Vec<String>, RepositoryError> {
     let output = git::run(root, &["config", "--null", "--get-all", key], reads)?;
     match output.status.code() {
@@ -285,10 +294,9 @@ fn prepare(
     reads: Deadline,
 ) -> Result<PushAvailability, RepositoryError> {
     let root = &repository.root;
-    let (branch, source) = match repository::head(root, reads)? {
-        Head::Detached { .. } => return Ok(unavailable(PushUnavailable::Detached)),
-        Head::Unborn { .. } => return Ok(unavailable(PushUnavailable::Unborn)),
-        Head::Attached { reference, oid } => (BranchRef::try_from(reference)?, Oid::try_from(oid)?),
+    let (branch, source) = match attached_head(root, reads)? {
+        Ok(head) => head,
+        Err(reason) => return Ok(unavailable(reason)),
     };
     let remotes = values(root, &format!("branch.{}.remote", branch.name()), reads)?;
     let merges = values(root, &format!("branch.{}.merge", branch.name()), reads)?;
@@ -320,8 +328,11 @@ fn remote_endpoint(
     remote: &str,
     reads: Deadline,
 ) -> Result<Result<String, PushUnavailable>, RepositoryError> {
-    let names = git::read(root, &["remote"], reads)?;
-    if !git::text(&names).lines().any(|name| name == remote) || remote.starts_with('-') {
+    if !remotes::names(root, reads)?
+        .iter()
+        .any(|name| name == remote)
+        || remote.starts_with('-')
+    {
         return Ok(Err(PushUnavailable::UnsupportedConfiguration));
     }
     let mirror_key = format!("remote.{remote}.mirror");
@@ -530,10 +541,9 @@ fn publish_source(
     repository: &read::Repository,
     reads: Deadline,
 ) -> Result<Result<(BranchRef, Oid), PushUnavailable>, RepositoryError> {
-    let (branch, source) = match repository::head(&repository.root, reads)? {
-        Head::Detached { .. } => return Ok(Err(PushUnavailable::Detached)),
-        Head::Unborn { .. } => return Ok(Err(PushUnavailable::Unborn)),
-        Head::Attached { reference, oid } => (BranchRef::try_from(reference)?, Oid::try_from(oid)?),
+    let (branch, source) = match attached_head(&repository.root, reads)? {
+        Ok(head) => head,
+        Err(reason) => return Ok(Err(reason)),
     };
     if !std::fs::symlink_metadata(repository.common_dir.join("config"))
         .is_ok_and(|metadata| metadata.is_file())
@@ -659,12 +669,7 @@ fn establish_tracking(
     intent: &PushIntent,
     reads: Deadline,
 ) -> Result<TrackingOutcome, RepositoryError> {
-    let unchanged = || {
-        Ok(prepare_intent(repository, intent, reads.renewed())?
-            == PushAvailability::Ready {
-                intent: intent.clone(),
-            })
-    };
+    let unchanged = || Ok(prepare_intent(repository, intent, reads.renewed())?.ready_for(intent));
     if !unchanged()? {
         return Ok(TrackingOutcome::SkippedChanged {
             message: "The branch or configuration changed. Upstream was not set.".into(),
