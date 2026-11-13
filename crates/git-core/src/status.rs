@@ -567,13 +567,8 @@ fn no_changes(file: &str, side: Side) -> RepositoryError {
 }
 
 fn head_or_empty_tree(root: &Path, deadline: Deadline) -> Result<String, RepositoryError> {
-    let head = git::run(
-        root,
-        &["rev-parse", "--verify", "--quiet", "HEAD^{commit}"],
-        deadline,
-    )?;
-    if head.status.success() {
-        return Ok(git::line(&head.stdout));
+    if let Some(head) = repository::peel_to_commit(root, "HEAD", deadline)? {
+        return Ok(head);
     }
     Ok(git::line(&git::read_with_input(
         root,

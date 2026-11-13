@@ -179,6 +179,8 @@ fn tags(path: &Path, deadline: Deadline) -> Result<Vec<Tag>, RepositoryError> {
         let reference = git::text(reference);
         let oid = match *kind {
             b"commit" => git::text(oid),
+            // Older Git dereferences `%(*objectname)` only once, so a tag of a
+            // tag can still name a tag object.
             b"tag" => match peel_to_commit(path, &reference, deadline)? {
                 Some(oid) => oid,
                 None => continue,
@@ -199,9 +201,7 @@ fn tags(path: &Path, deadline: Deadline) -> Result<Vec<Tag>, RepositoryError> {
     Ok(tags)
 }
 
-/// Older Git dereferences `%(*objectname)` only once, so a tag of a tag can
-/// still name a tag object.
-fn peel_to_commit(
+pub(crate) fn peel_to_commit(
     path: &Path,
     reference: &str,
     deadline: Deadline,

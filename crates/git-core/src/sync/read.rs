@@ -342,22 +342,10 @@ fn upstream_oid(
 ) -> Result<Option<Oid>, RepositoryError> {
     let tip = match tips.get(upstream) {
         Some(tip) => (*tip).to_owned(),
-        None => {
-            let output = git::run(
-                root,
-                &[
-                    "rev-parse",
-                    "--verify",
-                    "--quiet",
-                    &format!("{upstream}^{{commit}}"),
-                ],
-                reads,
-            )?;
-            if !output.status.success() {
-                return Ok(None);
-            }
-            git::line(&output.stdout)
-        }
+        None => match repository::peel_to_commit(root, upstream, reads)? {
+            Some(tip) => tip,
+            None => return Ok(None),
+        },
     };
     Ok(Oid::try_from(tip).ok())
 }
