@@ -450,9 +450,6 @@ kbd {
   padding-inline: 10px;
   color: var(--text-body);
 }
-.toolbar-separator {
-  margin-inline: 8px;
-}
 @media (max-width: 1200px) {
   .toolbar-actions .button {
     padding-inline: 6px;

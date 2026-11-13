@@ -187,7 +187,6 @@
 .changed-files-title {
   display: flex;
   align-items: center;
-  color: var(--text-heading);
   font-size: 12px;
 }
 .changed-files-title svg {
@@ -196,7 +195,6 @@
   color: var(--muted);
 }
 .changed-files-title .count {
-  color: var(--text-dim);
   font-size: 11px;
 }
 .change-summary {
@@ -221,13 +219,10 @@
 .changed-file-tree {
   flex: 1 0 240px;
   --trees-bg-muted-override: var(--border);
-  --trees-fg-override: var(--text-body);
-  --trees-fg-muted-override: var(--muted);
   --trees-accent-override: var(--blue);
   --trees-selected-fg-override: var(--text-strong);
   --trees-focus-ring-width-override: 0px;
   --trees-border-color-override: var(--border);
-  --trees-indent-guide-bg-override: var(--separator);
   --trees-scrollbar-thumb-override: var(--scrollbar);
   --trees-font-family-override: "InterVariable", Inter, sans-serif;
   --trees-status-added-override: var(--success);
@@ -396,13 +391,10 @@
 }
 .inspector-refs .ref-badge {
   height: 28px;
-  color: var(--text-body) !important;
   padding-inline: 8px;
 }
 .changed-files-heading {
-  border-top: 1px solid var(--border);
   border-radius: 0;
-  padding-top: 16px;
 }
 .changed-files-filter {
   display: flex;
