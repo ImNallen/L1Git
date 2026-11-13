@@ -8,8 +8,8 @@ const fetchSettingsSchema = z.object({
   version: z.literal(1),
   intervalMinutes: z.literal(fetchIntervals),
 });
-export type FetchSettings = z.infer<typeof fetchSettingsSchema>;
-export const defaultFetchSettings: FetchSettings = {
+type FetchSettings = z.infer<typeof fetchSettingsSchema>;
+const defaultFetchSettings: FetchSettings = {
   version: 1,
   intervalMinutes: 15,
 };

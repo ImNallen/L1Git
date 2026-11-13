@@ -1,5 +1,4 @@
 import { useState } from "react";
-import type { Commands } from "../actions";
 import { fetchTarget, readyAdvances } from "../domain/overview";
 import { pushControl } from "../domain/push";
 import type { PushControl, PushIntent } from "../domain/push";
@@ -54,7 +53,6 @@ export type SyncControls = {
 };
 
 type SyncCommand = "fetch" | "fetchAll" | "push" | "fastForward";
-export type SyncCommands = Pick<Commands, SyncCommand>;
 
 /** The local branch checked out in `root`, null when it is on no branch. */
 function checkedOut(

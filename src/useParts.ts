@@ -15,7 +15,7 @@ import type { Parts } from "./components/FilePatchView";
 import type { FileDiffState } from "./useWorkspace";
 import type { Outcome } from "./useWrites";
 
-export type PartDiscard = {
+type PartDiscard = {
   root: RepositoryRoot;
   write: Write;
   path: string;

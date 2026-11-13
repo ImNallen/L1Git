@@ -10,7 +10,7 @@ export type RowHighlight = {
 };
 
 /** What one hovered branch tip affects: its commits and every graph stroke among them. */
-export type BranchHighlight = {
+type BranchHighlight = {
   commits: Set<RowId>;
   rows: Map<RowId, RowHighlight>;
 };

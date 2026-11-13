@@ -69,7 +69,7 @@ function fromOklab(lab: Lab, alpha: number): Rgba {
 }
 
 /** OKLab in polar form: lightness, chroma, and hue in degrees. */
-export type Lch = { L: number; C: number; h: number };
+type Lch = { L: number; C: number; h: number };
 
 export function toOklch(color: Rgba): Lch {
   const { L, a, b } = toOklab(color);

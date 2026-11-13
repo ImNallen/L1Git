@@ -5,7 +5,7 @@ import { hasRow } from "./worktree";
 import type { ChangesByWorktree } from "./worktree";
 
 /** A snapshot can hold 50,000 commits, so only a few stay in memory. */
-export const SNAPSHOT_CACHE_SIZE = 8;
+const SNAPSHOT_CACHE_SIZE = 8;
 
 /** Snapshots by root, least recently used first. */
 export type SnapshotCache = ReadonlyMap<RepositoryRoot, RepositorySnapshot>;

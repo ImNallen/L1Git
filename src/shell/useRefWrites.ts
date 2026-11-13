@@ -212,7 +212,7 @@ export function useRefWrites({
  * refocus after a checkout, then ask navigation to follow the moved ref. The
  * toolbar's undo buttons call `writes.undo` directly and skip all of this.
  */
-export type UndoSteps = {
+type UndoSteps = {
   actions: ActionSlice<"history", "undo" | "redo">;
 };
 

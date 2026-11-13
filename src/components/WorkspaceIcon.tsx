@@ -51,7 +51,7 @@ const sources = {
   UpdateBullet: ["updates/Bullet", 3, 3],
 } satisfies Record<string, readonly [string, number, number]>;
 
-export type WorkspaceIconName = keyof typeof sources;
+type WorkspaceIconName = keyof typeof sources;
 type Props = { className?: string } & (
   | { name: WorkspaceName; size?: number }
   | { name: Exclude<WorkspaceIconName, WorkspaceName>; size?: never }

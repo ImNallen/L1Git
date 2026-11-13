@@ -102,7 +102,7 @@ export const mergeActionSchema = z.discriminatedUnion("kind", [
   }),
   z.strictObject({ kind: z.literal("abort"), session: entryIdSchema }),
 ]);
-export const mergeOutcomeSchema = z.discriminatedUnion("kind", [
+const mergeOutcomeSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("upToDate") }),
   z.strictObject({
     kind: z.literal("fastForwarded"),

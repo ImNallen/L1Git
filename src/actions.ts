@@ -109,7 +109,7 @@ export type Commands = {
   writeLines: (action: PartAction) => void;
 };
 
-export type Shortcut = {
+type Shortcut = {
   key: string;
   modifier: "platform" | "cmdOrCtrl" | "unchecked";
   shift?: true;
@@ -167,7 +167,7 @@ export type ActionId =
   | "generalSettings"
   | "leaveSettings";
 
-export type Action = {
+type Action = {
   id: ActionId;
   title: string | ((context: ActionContext) => string);
   /** What the action would do, or why it is unavailable. */
@@ -197,12 +197,12 @@ const branchName = (context: ActionContext) =>
   context.sidebarBranch?.name ?? "";
 
 export const PALETTE_SHORTCUT: Shortcut = { key: "p", modifier: "platform" };
-export const UNDO_SHORTCUT: Shortcut = {
+const UNDO_SHORTCUT: Shortcut = {
   key: "z",
   modifier: "platform",
   yieldsToTyping: true,
 };
-export const REDO_SHORTCUT: Shortcut = { ...UNDO_SHORTCUT, shift: true };
+const REDO_SHORTCUT: Shortcut = { ...UNDO_SHORTCUT, shift: true };
 
 export const actions: readonly Action[] = [
   {
@@ -626,7 +626,7 @@ export const actions: readonly Action[] = [
   },
 ];
 
-export function availableActions(context: ActionContext): Action[] {
+function availableActions(context: ActionContext): Action[] {
   return actions.filter((action) => action.available(context));
 }
 
@@ -699,7 +699,7 @@ export function typingIn(
   );
 }
 
-export function shortcutLabel(shortcut: Shortcut, mac: boolean): string {
+function shortcutLabel(shortcut: Shortcut, mac: boolean): string {
   if (shortcut.modifier === "unchecked")
     return shortcut.key === "Escape" ? "Esc" : shortcut.key;
   const key = shortcut.key.toUpperCase();

@@ -31,7 +31,7 @@ export const branchStateSchema = z.discriminatedUnion("kind", [
     blocker: blockerSchema.nullable(),
   }),
 ]);
-export const branchRoleSchema = z.enum(["default", "mainline", "other"]);
+const branchRoleSchema = z.enum(["default", "mainline", "other"]);
 export const branchStatusSchema = z.object({
   reference: branchRefSchema,
   name: z.string(),
@@ -40,7 +40,7 @@ export const branchStatusSchema = z.object({
   checkedOutAt: rootSchema.nullable(),
   state: branchStateSchema,
 });
-export const fetchFailureSchema = z.enum([
+const fetchFailureSchema = z.enum([
   "auth",
   "network",
   "timedOut",
@@ -100,7 +100,7 @@ export const fastForwardReportSchema = z.object({
 });
 
 export type BranchRef = z.infer<typeof branchRefSchema>;
-export type BranchState = z.infer<typeof branchStateSchema>;
+type BranchState = z.infer<typeof branchStateSchema>;
 export type BranchStatus = z.infer<typeof branchStatusSchema>;
 export type FetchSummary = z.infer<typeof fetchSummarySchema>;
 export type RepositoryOverview = z.infer<typeof overviewSchema>;

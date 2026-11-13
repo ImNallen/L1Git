@@ -207,12 +207,12 @@ function installDom(
 
 type Dom = ReturnType<typeof installDom>;
 
-export type SavedRepositories = {
+type SavedRepositories = {
   entries: readonly RepositoryRoot[];
   lastRoot: RepositoryRoot | null;
 };
 
-export type MountOptions = {
+type MountOptions = {
   world?: (world: World) => void;
   bridge?: (bridge: Bridge) => void;
   media?: Record<string, boolean>;

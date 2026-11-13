@@ -1,4 +1,4 @@
-export type DiffstatBlock = "added" | "deleted" | "neutral";
+type DiffstatBlock = "added" | "deleted" | "neutral";
 
 /**
  * GitHub's five diffstat blocks: one colored block per changed line, at most
