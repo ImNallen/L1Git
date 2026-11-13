@@ -52,6 +52,8 @@ export type InProgress =
     }
   | { kind: "external"; message: string };
 
+export type Running = Extract<InProgress, { kind: "running" }>;
+
 const headSide = (head: Head): OperationSide =>
   head.kind === "detached"
     ? { name: "Detached HEAD", oid: head.oid }
@@ -153,7 +155,7 @@ export type FinishBlock =
   | "noMessage";
 
 export function finishBlock(
-  running: Extract<InProgress, { kind: "running" }>,
+  running: Running,
   {
     unsavedResults,
     amending,
@@ -167,8 +169,6 @@ export function finishBlock(
   if (message.trim() === "") return "noMessage";
   return null;
 }
-
-type Running = Extract<InProgress, { kind: "running" }>;
 
 export function progressLabel({ unresolved, total }: ConflictProgress) {
   if (total === null)

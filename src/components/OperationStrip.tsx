@@ -15,7 +15,7 @@ import {
   operationWords,
   progressLabel,
 } from "../domain/inProgress";
-import type { FinishBlock, InProgress } from "../domain/inProgress";
+import type { FinishBlock, InProgress, Running } from "../domain/inProgress";
 import { useDraftImpact } from "../draftProtection";
 import {
   discardConsentedResolutions,
@@ -24,7 +24,6 @@ import {
 import { ConfirmDialog } from "./ConfirmDialog";
 import { shortOid } from "../domain/shortOid";
 
-type Running = Extract<InProgress, { kind: "running" }>;
 type Shown = Exclude<InProgress, { kind: "none" }>;
 
 export function SideChip({

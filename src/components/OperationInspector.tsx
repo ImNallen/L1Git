@@ -6,15 +6,13 @@ import {
   operationMessage,
   operationWords,
 } from "../domain/inProgress";
-import type { InProgress } from "../domain/inProgress";
+import type { Running } from "../domain/inProgress";
 import type { MergeState } from "../domain/merge";
 import type { RepositoryRoot } from "../domain/repository";
 import { useDraftImpact } from "../draftProtection";
 import * as repositories from "../repositories";
 import { IncomingChip, SideChip } from "./OperationStrip";
 import { shortOid } from "../domain/shortOid";
-
-type Running = Extract<InProgress, { kind: "running" }>;
 
 function explanation({ verb, current, subject }: Running): string {
   const moves = `${current.name === "Detached HEAD" ? "HEAD" : current.name} moves only when you finish.`;
