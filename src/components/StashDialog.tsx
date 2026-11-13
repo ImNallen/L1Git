@@ -1,11 +1,11 @@
 import { useId, useRef, useState } from "react";
 import { Archive, LoaderCircle } from "lucide-react";
-import { shownPaths, stashPushWrite } from "../domain/operations";
+import { stashPushWrite } from "../domain/operations";
 import type { Write } from "../domain/operations";
 import type { Head, Problem } from "../domain/repository";
 import type { Outcome } from "../useWrites";
 import { messageKeys } from "./CommitBox";
-import { DialogHeader, busyProblem, useModalDialog } from "./Dialog";
+import { DialogHeader, PathList, busyProblem, useModalDialog } from "./Dialog";
 
 type Props = {
   paths: readonly string[];
@@ -31,7 +31,6 @@ export function StashDialog({
   const { ref, close, onCancel } = useModalDialog(onClose, () =>
     messageField.current?.focus(),
   );
-  const { shown, more } = shownPaths(paths);
   const everyChange = paths.length === 0;
 
   async function save() {
@@ -81,16 +80,7 @@ export function StashDialog({
             ? "Stash every change in this worktree. You can undo this."
             : `Stash ${paths.length.toLocaleString()} ${paths.length === 1 ? "path" : "paths"}. You can undo this.`}
         </p>
-        {!everyChange && (
-          <ul className="dialog-paths" aria-label="Paths to stash">
-            {shown.map((path) => (
-              <li key={path}>{path}</li>
-            ))}
-            {more > 0 && (
-              <li className="muted">and {more.toLocaleString()} more</li>
-            )}
-          </ul>
-        )}
+        {!everyChange && <PathList paths={paths} label="Paths to stash" />}
         <label htmlFor={`${titleId}-message`}>Message</label>
         <textarea
           id={`${titleId}-message`}

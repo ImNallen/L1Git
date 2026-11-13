@@ -1,6 +1,7 @@
 import { useEffect, useEffectEvent, useRef } from "react";
 import type { ReactNode, SyntheticEvent } from "react";
 import { X } from "lucide-react";
+import { shownPaths } from "../domain/operations";
 import type { Problem } from "../domain/repository";
 
 export const busyProblem: Problem = {
@@ -59,5 +60,23 @@ export function DialogHeader({
       </div>
       <h1 id={titleId}>{title}</h1>
     </>
+  );
+}
+
+export function PathList({
+  paths,
+  label,
+}: {
+  paths: readonly string[];
+  label: string;
+}) {
+  const { shown, more } = shownPaths(paths);
+  return (
+    <ul className="dialog-paths" aria-label={label}>
+      {shown.map((path) => (
+        <li key={path}>{path}</li>
+      ))}
+      {more > 0 && <li className="muted">and {more.toLocaleString()} more</li>}
+    </ul>
   );
 }
