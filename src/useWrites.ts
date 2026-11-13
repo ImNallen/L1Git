@@ -48,6 +48,16 @@ export type Outcome =
   | { kind: "failed"; problem: Problem }
   | { kind: "busy" };
 
+async function attempt<T>(
+  request: () => Promise<T>,
+): Promise<T | { kind: "failed"; problem: Problem }> {
+  try {
+    return await request();
+  } catch (error) {
+    return { kind: "failed", problem: problemFrom(error) };
+  }
+}
+
 export function useWrites(
   root: RepositoryRoot | null,
   reread: {
@@ -105,6 +115,11 @@ export function useWrites(
     if (historyRoot !== null) void readHistory(historyRoot);
   }, [historyRoot, readHistory]);
   useEffect(rereadHistory, [rereadHistory]);
+  const rereadAfter = (worktree: RepositoryRoot) =>
+    Promise.all([
+      readHistory(historyRoot ?? worktree),
+      reread.worktree(worktree),
+    ]);
 
   async function run(
     job: { action: "write" } | { action: Step; entry: EntryId },
@@ -115,12 +130,10 @@ export function useWrites(
   ): Promise<Outcome> {
     const { action } = job;
     return task(action, label, async (repository) => {
-      let outcome: Exclude<Outcome, { kind: "busy" }>;
-      try {
-        outcome = { kind: "applied", applied: await request() };
-      } catch (error) {
-        outcome = { kind: "failed", problem: problemFrom(error) };
-      }
+      const outcome = await attempt(async () => ({
+        kind: "applied" as const,
+        applied: await request(),
+      }));
       const changed =
         outcome.kind === "applied" ? outcome.applied.root : worktree;
       if (outcome.kind === "failed" && rereadsRepository(outcome.problem))
@@ -133,8 +146,7 @@ export function useWrites(
         restoreUndone(changed, operation.message);
       if (movesRefs(operation)) await reread.refs(changed, repository);
       await Promise.all([
-        readHistory(historyRoot ?? worktree),
-        reread.worktree(worktree),
+        rereadAfter(worktree),
         changed === worktree ? null : reread.worktree(changed),
       ]);
       const notice: WriteNotice | null =
@@ -188,23 +200,16 @@ export function useWrites(
       "merge",
       `${action.kind === "start" ? "Start" : action.kind === "finish" ? "Finish" : "Abort"} merge`,
       async (repository) => {
-        let outcome: Exclude<MergeCommandOutcome, { kind: "busy" }>;
-        try {
-          outcome = {
-            kind: "merged",
+        let outcome: Exclude<MergeCommandOutcome, { kind: "busy" }> =
+          await attempt(async () => ({
+            kind: "merged" as const,
             report: await repositories.merge(worktree, action),
-          };
-        } catch (error) {
-          outcome = { kind: "failed", problem: problemFrom(error) };
-        }
+          }));
         try {
           try {
             await reread.refs(worktree, repository);
           } finally {
-            await Promise.all([
-              readHistory(historyRoot ?? worktree),
-              reread.worktree(worktree),
-            ]);
+            await rereadAfter(worktree);
           }
         } catch (error) {
           if (outcome.kind === "merged") {
@@ -244,19 +249,13 @@ export function useWrites(
       "merge",
       `Abort ${replayNames[of.kind].noun}`,
       async (repository) => {
-        let outcome: Exclude<ReplayAbortOutcome, { kind: "busy" }>;
-        try {
+        const outcome = await attempt(async () => {
           await repositories.replayAbort(worktree, of, head);
-          outcome = { kind: "aborted" };
-        } catch (error) {
-          outcome = { kind: "failed", problem: problemFrom(error) };
-        }
+          return { kind: "aborted" as const };
+        });
         if (outcome.kind === "failed" && rereadsRepository(outcome.problem))
           reread.repository(repository);
-        await Promise.all([
-          readHistory(historyRoot ?? worktree),
-          reread.worktree(worktree),
-        ]);
+        await rereadAfter(worktree);
         return outcome;
       },
     );
