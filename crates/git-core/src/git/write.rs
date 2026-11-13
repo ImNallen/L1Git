@@ -769,12 +769,16 @@ pub(crate) fn install_config_values(
             return Err(failed("edit the staged config with Git"));
         }
     }
-    if !unchanged()?
-        || fs::read(config).map_err(|error| failed(&format!("recheck the config ({error})")))?
-            != bytes
-    {
-        return Err(failed("save over an externally changed config"));
-    }
+    let recheck = || {
+        if !unchanged()?
+            || fs::read(config).map_err(|error| failed(&format!("recheck the config ({error})")))?
+                != bytes
+        {
+            return Err(failed("save over an externally changed config"));
+        }
+        Ok(())
+    };
+    recheck()?;
     lock.file
         .set_permissions(metadata.permissions())
         .map_err(|error| failed(&format!("preserve config permissions ({error})")))?;
@@ -787,12 +791,7 @@ pub(crate) fn install_config_values(
     lock.file
         .sync_all()
         .map_err(|error| failed(&format!("flush the config lock ({error})")))?;
-    if !unchanged()?
-        || fs::read(config).map_err(|error| failed(&format!("recheck the config ({error})")))?
-            != bytes
-    {
-        return Err(failed("save over an externally changed config"));
-    }
+    recheck()?;
     if !lock.owns_path() {
         return Err(failed("verify config lock ownership"));
     }
