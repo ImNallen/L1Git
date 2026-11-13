@@ -18,6 +18,7 @@ import {
   statusEntrySchema,
 } from "./repository";
 import type { RepositoryRoot } from "./repository";
+import { shortOid } from "./shortOid";
 
 const root = "/repo" as RepositoryRoot;
 
@@ -97,7 +98,7 @@ describe("inProgress", () => {
       key: `cherryPick:${state.progress.commit}`,
       current: { name: "main" },
       incoming: {
-        name: state.progress.commit.slice(0, 7),
+        name: shortOid(state.progress.commit),
         oid: state.progress.commit,
       },
       subject: "Picked commit",

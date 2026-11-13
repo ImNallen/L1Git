@@ -12,10 +12,9 @@ import type { RepositoryRoot } from "../domain/repository";
 import { useDraftImpact } from "../draftProtection";
 import * as repositories from "../repositories";
 import { IncomingChip, SideChip } from "./OperationStrip";
+import { shortOid } from "../domain/shortOid";
 
 type Running = Extract<InProgress, { kind: "running" }>;
-
-const short = (oid: string | null) => (oid === null ? null : oid.slice(0, 7));
 
 function explanation({ verb, current, subject }: Running): string {
   const moves = `${current.name === "Detached HEAD" ? "HEAD" : current.name} moves only when you finish.`;
@@ -38,7 +37,7 @@ export function OperationOverview({ running }: { running: Running }) {
           <dt>Into</dt>
           <dd>
             <SideChip side="current">{current.name}</SideChip>
-            {current.oid !== null && <code>{short(current.oid)}</code>}
+            {current.oid !== null && <code>{shortOid(current.oid)}</code>}
           </dd>
         </div>
         <div>
@@ -47,7 +46,7 @@ export function OperationOverview({ running }: { running: Running }) {
             {verb === "merge" ? (
               <>
                 <SideChip side="incoming">{incoming.name}</SideChip>
-                <code>{short(incoming.oid)}</code>
+                <code>{incoming.oid !== null && shortOid(incoming.oid)}</code>
               </>
             ) : (
               <IncomingChip running={running} />

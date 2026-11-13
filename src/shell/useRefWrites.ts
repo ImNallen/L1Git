@@ -28,6 +28,7 @@ import type { ActionSlice } from "./actionSlices";
 import type { Focus } from "./useFocus";
 import type { Navigation } from "./useNavigation";
 import type { Staging } from "./useStaging";
+import { shortOid } from "../domain/shortOid";
 
 /** History's commit-row write actions. */
 export type CommitActions = {
@@ -160,7 +161,7 @@ export function useRefWrites({
         setBranchAsk({
           kind: "create",
           at: { kind: "commit", oid },
-          from: `commit ${oid.slice(0, 7)}`,
+          from: `commit ${shortOid(oid)}`,
         }),
       onCreateTag: askTag,
       onCheckout: setDetaching,

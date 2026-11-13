@@ -30,6 +30,7 @@ import type {
   WorktreePatch,
   WorktreeStatus,
 } from "./repository";
+import { shortOid } from "./shortOid";
 
 type FileOperation = Extract<Operation, { entries: unknown }>;
 type BranchOperation = Extract<
@@ -351,7 +352,7 @@ export const checkoutWrite = (target: Start, head: Head): Write => ({
 });
 
 const startName = (start: Start) =>
-  start.kind === "commit" ? start.oid.slice(0, 7) : shortRef(start.reference);
+  start.kind === "commit" ? shortOid(start.oid) : shortRef(start.reference);
 
 export function notMergedInto(
   name: string,

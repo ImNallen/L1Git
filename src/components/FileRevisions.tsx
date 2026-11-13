@@ -6,7 +6,7 @@ import type { LineAnnotation } from "@pierre/diffs/react";
 import focusStyles from "../styles/focus.css?inline";
 import * as repositories from "../repositories";
 import { singleCommit } from "../domain/comparison";
-import { SHORT_OID_MIN_LENGTH } from "../domain/shortOid";
+import { shortOid } from "../domain/shortOid";
 import { relativeTime } from "../domain/time";
 import { clampMessage } from "../domain/worktree";
 import type {
@@ -28,7 +28,6 @@ export type Revision = { root: RepositoryRoot; oid: Oid; path: string };
 
 type Look = { diffStyle: DiffStyle; theme: Appearance; painted: boolean };
 
-const short = (oid: Oid) => oid.slice(0, SHORT_OID_MIN_LENGTH);
 /** Keys that move the history list read a diff only once the row stays this long. */
 const SETTLE_MS = 150;
 
@@ -122,7 +121,7 @@ function RevisionList({
               setSettled(at);
             }}
           >
-            <span className="file-revision-oid">{short(commit.oid)}</span>
+            <span className="file-revision-oid">{shortOid(commit.oid)}</span>
             <span className="file-revision-subject" title={commit.subject}>
               {commit.subject}
             </span>
@@ -268,7 +267,7 @@ function BlameEntry({
   onSelect: () => void;
 }) {
   const age = relativeTime(range.timestamp, now);
-  const label = `${range.author}, ${age}, ${short(range.oid)} ${range.summary}`;
+  const label = `${range.author}, ${age}, ${shortOid(range.oid)} ${range.summary}`;
   return (
     <button
       className="blame-entry"
@@ -281,13 +280,13 @@ function BlameEntry({
       }
       title={
         selectable
-          ? `Select ${short(range.oid)} in the graph`
+          ? `Select ${shortOid(range.oid)} in the graph`
           : "This commit is hidden or not loaded in the graph."
       }
     >
       <span className="blame-author">{range.author}</span>
       <span className="blame-age">{age}</span>
-      <span className="blame-oid">{short(range.oid)}</span>
+      <span className="blame-oid">{shortOid(range.oid)}</span>
       <span className="blame-summary">{range.summary}</span>
     </button>
   );

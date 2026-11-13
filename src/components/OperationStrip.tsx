@@ -22,6 +22,7 @@ import {
   resolutionConsent,
 } from "../resolutionDrafts";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { shortOid } from "../domain/shortOid";
 
 type Running = Extract<InProgress, { kind: "running" }>;
 type Shown = Exclude<InProgress, { kind: "none" }>;
@@ -384,7 +385,7 @@ function AbortDialog({
         {current.oid === null ? (
           "where it was"
         ) : (
-          <code>{current.oid.slice(0, 7)}</code>
+          <code>{shortOid(current.oid)}</code>
         )}{" "}
         exactly as before you started.
       </p>

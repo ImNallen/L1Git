@@ -24,6 +24,7 @@ import type { VisibilityRule } from "../domain/visibility";
 import type { RootSync } from "../overview";
 import { opensMenu } from "./ContextMenu";
 import { SyncCounts } from "./SyncCounts";
+import { shortOid } from "../domain/shortOid";
 
 declare module "react" {
   interface CSSProperties {
@@ -411,7 +412,7 @@ export function RepositoryBranches({
           >
             <Package size={14} />
             <span className="branch-label">{submodule.path}</span>
-            <small className="ref-detail">{submodule.oid.slice(0, 7)}</small>
+            <small className="ref-detail">{shortOid(submodule.oid)}</small>
           </div>
         )),
       )}

@@ -19,6 +19,7 @@ import { Diff } from "./FilePatchView";
 import type { DiffStyle, Parts } from "./FilePatchView";
 import { FileBlame, FileHistory } from "./FileRevisions";
 import { revisionOf } from "./revision";
+import { shortOid } from "../domain/shortOid";
 
 export type { DiffStyle };
 
@@ -189,7 +190,7 @@ export function FileDiffPane({
               : state.side !== null
                 ? "Index"
                 : state.comparison.base.kind === "commit"
-                  ? state.comparison.base.oid.slice(0, 7)
+                  ? shortOid(state.comparison.base.oid)
                   : "Parent revision"}
           </span>
           <span className="comparison-target">
@@ -206,7 +207,7 @@ export function FileDiffPane({
                   ? "Staged changes against HEAD"
                   : "Working copy changes against the index"
                 : state.comparison.base.kind === "commit"
-                  ? `Changes against ${state.comparison.base.oid.slice(0, 7)}`
+                  ? `Changes against ${shortOid(state.comparison.base.oid)}`
                   : state.comparison.target.kind === "commit"
                     ? "Changes against parent revision"
                     : "Working copy changes against HEAD"}

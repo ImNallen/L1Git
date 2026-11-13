@@ -14,6 +14,7 @@ import type {
 } from "./repository";
 import { worktreeGroups } from "./worktree";
 import type { WorktreeGroup } from "./worktree";
+import { shortOid } from "./shortOid";
 
 export type OperationVerb = "merge" | ReplayKind;
 
@@ -122,7 +123,7 @@ export function inProgress(state: MergeState | null): InProgress {
         verb: progress.kind,
         key: `${progress.kind}:${progress.commit}`,
         current: headSide(progress.destination),
-        incoming: { name: progress.commit.slice(0, 7), oid: progress.commit },
+        incoming: { name: shortOid(progress.commit), oid: progress.commit },
         subject: progress.subject,
         progress: progressOf(
           progress.footprint,

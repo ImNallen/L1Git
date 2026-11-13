@@ -12,6 +12,7 @@ import type {
 import type { Selection } from "./domain/selection";
 import type { PartAction } from "./domain/operations";
 import type { BranchVisibility, VisibilityRule } from "./domain/visibility";
+import { shortOid } from "./domain/shortOid";
 
 export type Screen = "repository" | "settings";
 export type SettingsSection = "general" | "appearance";
@@ -442,7 +443,8 @@ export const actions: readonly Action[] = [
   },
   {
     id: "compareWithPick",
-    title: (context) => `Compare with ${context.picked?.slice(0, 7) ?? ""}`,
+    title: (context) =>
+      `Compare with ${context.picked === null ? "" : shortOid(context.picked)}`,
     available: (context) =>
       onRepository(context) &&
       context.picked !== null &&

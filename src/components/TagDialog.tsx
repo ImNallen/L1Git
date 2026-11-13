@@ -10,6 +10,7 @@ import type { Head, Problem } from "../domain/repository";
 import type { Outcome } from "../useWrites";
 import { commitOutput, messageKeys } from "./CommitBox";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { shortOid } from "../domain/shortOid";
 
 type Props = {
   ask: TagAsk;
@@ -107,7 +108,7 @@ function CreateTagDialog({
         </div>
         <h1 id={titleId}>Create tag</h1>
         <p>
-          The tag goes on commit <code>{ask.at.slice(0, 7)}</code>
+          The tag goes on commit <code>{shortOid(ask.at)}</code>
           {ask.subject === "" ? "" : ` “${ask.subject}”`}.
         </p>
         <label htmlFor={`${titleId}-name`}>Tag name</label>
@@ -190,7 +191,7 @@ function DeleteTagDialog({
     >
       <p>
         {tag.name} is {tag.annotated ? "an annotated" : "a lightweight"} tag on
-        commit {tag.oid.slice(0, 7)}, and you can undo this.
+        commit {shortOid(tag.oid)}, and you can undo this.
       </p>
     </ConfirmDialog>
   );
