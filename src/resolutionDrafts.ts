@@ -89,6 +89,9 @@ function invalidateReads(key: string) {
   reads.set(key, next);
   return next;
 }
+function showProblem(key: string, draft: ResolutionDraft, problem: string) {
+  publish(key, { ...draft, phase: { kind: "editing", problem } });
+}
 function fresh(snapshot: ConflictSnapshot): ResolutionDraft {
   return {
     snapshot,
@@ -139,10 +142,7 @@ export async function readResolution(
   } catch (error) {
     const draft = resolutionOf(key);
     if (reads.get(key) === token && draft?.phase.kind === "editing")
-      publish(key, {
-        ...draft,
-        phase: { kind: "editing", problem: problemFrom(error).message },
-      });
+      showProblem(key, draft, problemFrom(error).message);
     throw error;
   } finally {
     const remaining = (pendingReads.get(key) ?? 1) - 1;
@@ -235,10 +235,7 @@ export async function reloadResolution(key: string, revision: number) {
   } catch (error) {
     const current = resolutionOf(key);
     if (current?.phase.kind === "editing")
-      publish(key, {
-        ...current,
-        phase: { kind: "editing", problem: problemFrom(error).message },
-      });
+      showProblem(key, current, problemFrom(error).message);
   } finally {
     done();
   }
@@ -299,25 +296,19 @@ export async function saveResolution(key: string, write: WritesView["write"]) {
         phase: { kind: "editing", problem: null },
       });
     } else {
-      const problem =
+      showProblem(
+        key,
+        { ...latest, observed: source },
         outcome.kind === "failed"
           ? outcome.problem.message
           : outcome.kind === "busy"
             ? "Another write is running. Your result is intact. Try Save result again."
-            : "The file changed after Save. Your result is intact. Copy it or reload from disk.";
-      publish(key, {
-        ...latest,
-        observed: source,
-        phase: { kind: "editing", problem },
-      });
+            : "The file changed after Save. Your result is intact. Copy it or reload from disk.",
+      );
     }
   } catch (error) {
     const current = resolutionOf(key);
-    if (current)
-      publish(key, {
-        ...current,
-        phase: { kind: "editing", problem: problemFrom(error).message },
-      });
+    if (current) showProblem(key, current, problemFrom(error).message);
   } finally {
     invalidateReads(key);
     done();
@@ -343,15 +334,11 @@ export async function markResolution(
       source.kind !== "editable" ||
       source.snapshot.version !== draft.snapshot.version
     ) {
-      publish(key, {
-        ...draft,
-        observed: source,
-        phase: {
-          kind: "editing",
-          problem:
-            "The conflict changed. Review the file before marking it resolved.",
-        },
-      });
+      showProblem(
+        key,
+        { ...draft, observed: source },
+        "The conflict changed. Review the file before marking it resolved.",
+      );
       return false;
     }
     const outcome = await write(source.snapshot.root, {
@@ -363,22 +350,16 @@ export async function markResolution(
       publish(key, null);
       return true;
     }
-    publish(key, {
-      ...draft,
-      phase: {
-        kind: "editing",
-        problem:
-          outcome.kind === "failed"
-            ? outcome.problem.message
-            : "Another write is running. Try again.",
-      },
-    });
+    showProblem(
+      key,
+      draft,
+      outcome.kind === "failed"
+        ? outcome.problem.message
+        : "Another write is running. Try again.",
+    );
     return false;
   } catch (error) {
-    publish(key, {
-      ...draft,
-      phase: { kind: "editing", problem: problemFrom(error).message },
-    });
+    showProblem(key, draft, problemFrom(error).message);
     return false;
   } finally {
     invalidateReads(key);
