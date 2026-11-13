@@ -625,11 +625,9 @@ impl Operation {
             deadline,
             operation: self,
         };
-        let branch =
+        let unpublished =
             |written: Result<Applied, RepositoryError>| written.map(|applied| (applied, None));
-        let commit = |kind, message| {
-            commit::commit(&writing, expect, kind, message).map(|applied| (applied, None))
-        };
+        let commit = |kind, message| unpublished(commit::commit(&writing, expect, kind, message));
         let index_part = |action, path, picks, shown| {
             let part = Part::new(action, path, picks, shown)?;
             let (txn, change) = index::edit_part(repo, deadline, expect, &part)?;
@@ -682,14 +680,16 @@ impl Operation {
             Self::DiscardLines { path, lines, shown } => {
                 discard_part(path, Picks::Lines(lines), shown)
             }
-            Self::CreateBranch { name, at } => branch(branches::create(&writing, name, at)),
-            Self::RenameBranch { branch: tip, to } => branch(branches::rename(&writing, tip, to)),
-            Self::DeleteBranch { branch: tip } => branch(branches::delete(&writing, tip)),
-            Self::Checkout { target } => branch(checkout::checkout(&writing, expect, target)),
-            Self::CreateTag { name, at, message } => {
-                branch(tags::create(&writing, name, at, message.as_deref()))
+            Self::CreateBranch { name, at } => unpublished(branches::create(&writing, name, at)),
+            Self::RenameBranch { branch: tip, to } => {
+                unpublished(branches::rename(&writing, tip, to))
             }
-            Self::DeleteTag { tag } => branch(tags::delete(&writing, tag)),
+            Self::DeleteBranch { branch: tip } => unpublished(branches::delete(&writing, tip)),
+            Self::Checkout { target } => unpublished(checkout::checkout(&writing, expect, target)),
+            Self::CreateTag { name, at, message } => {
+                unpublished(tags::create(&writing, name, at, message.as_deref()))
+            }
+            Self::DeleteTag { tag } => unpublished(tags::delete(&writing, tag)),
             Self::StashPush {
                 message,
                 untracked,
@@ -697,21 +697,16 @@ impl Operation {
             } => stash::push(&writing, expect, message, *untracked, paths),
             Self::StashApply { stash } => stash::apply(&writing, expect, stash, false),
             Self::StashPop { stash } => stash::apply(&writing, expect, stash, true),
-            Self::StashDrop { stash } => {
-                stash::drop_stash(&writing, stash).map(|applied| (applied, None))
-            }
-            Self::Replay { review } => {
-                replay::apply(&writing, expect, review).map(|applied| (applied, None))
-            }
+            Self::StashDrop { stash } => unpublished(stash::drop_stash(&writing, stash)),
+            Self::Replay { review } => unpublished(replay::apply(&writing, expect, review)),
             Self::FinishReplay {
                 of,
                 staged,
                 tree,
                 message,
-            } => replay::finish(&writing, expect, of, staged, tree, message)
-                .map(|applied| (applied, None)),
+            } => unpublished(replay::finish(&writing, expect, of, staged, tree, message)),
             Self::Rebase { branch, onto } => {
-                rebase::apply(&writing, expect, branch, onto).map(|applied| (applied, None))
+                unpublished(rebase::apply(&writing, expect, branch, onto))
             }
         }
     }
