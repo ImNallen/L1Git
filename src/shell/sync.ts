@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { fetchTarget, readyAdvances } from "../domain/overview";
 import { pushControl } from "../domain/push";
+import { worktreeHead } from "../domain/worktree";
 import type { PushControl, PushIntent } from "../domain/push";
 import type {
   Branch,
@@ -54,14 +55,22 @@ export type SyncControls = {
 
 type SyncCommand = "fetch" | "fetchAll" | "push" | "fastForward";
 
+export const localBusyReason = (
+  writing: boolean,
+  repository: RepositoryState | null,
+) =>
+  writing
+    ? "Wait for the current local write to finish."
+    : repository && repository.activity.kind !== "idle"
+      ? "Wait for this repository's current operation to finish."
+      : null;
+
 /** The local branch checked out in `root`, null when it is on no branch. */
 function checkedOut(
   snapshot: RepositorySnapshot | null,
   root: RepositoryRoot | null,
 ): Branch | null {
-  const head = snapshot?.worktrees.find(
-    (worktree) => worktree.root === root,
-  )?.head;
+  const head = worktreeHead(snapshot?.worktrees, root);
   if (head?.kind !== "attached") return null;
   return (
     snapshot?.branches.find(
@@ -96,15 +105,12 @@ export function useSyncControls({
   const push = root === null ? undefined : view.pushByRoot.get(root);
   const publishControl = pushControl(
     push?.availability,
-    writing
-      ? "Wait for the current local write to finish."
-      : !repository
-        ? state?.kind === "unavailable"
+    localBusyReason(writing, repository) ??
+      (repository
+        ? null
+        : state?.kind === "unavailable"
           ? state.problem.message
-          : "Checking the current repository…"
-        : repository.activity.kind !== "idle"
-          ? "Wait for this repository's current operation to finish."
-          : null,
+          : "Checking the current repository…"),
   );
   const fetching = repository?.activity.kind === "fetching";
   const ready = repository ? readyAdvances(repository.overview).length : 0;

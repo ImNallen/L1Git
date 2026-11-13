@@ -7,6 +7,7 @@ import {
   useDraftImpact,
 } from "../draftProtection";
 import type { MergeSelection } from "../domain/merge";
+import { worktreeHead } from "../domain/worktree";
 import { pullTarget } from "../domain/overview";
 import type { PullMode } from "../domain/overview";
 import type { OverviewStore } from "../overview";
@@ -24,6 +25,7 @@ import type { WritesView } from "../useWrites";
 import { defineSlice } from "./actionSlices";
 import type { ActionSlice } from "./actionSlices";
 import type { UserSelection } from "./navigation";
+import { localBusyReason } from "./sync";
 import type { OpenedRepository } from "./sync";
 import type { ActiveWorktree } from "./useActiveWorktree";
 
@@ -103,9 +105,7 @@ export function useMergePanel({
     setReview(null);
     setReplayReview(null);
   }, [root]);
-  const head = snapshot?.worktrees.find(
-    (worktree) => worktree.root === root,
-  )?.head;
+  const head = worktreeHead(snapshot?.worktrees, root);
   const eligible =
     head?.kind === "attached" &&
     opened.repository?.overview.branches.some(
@@ -129,15 +129,12 @@ export function useMergePanel({
         opened.repository.overview.branches.find(
           (branch) => root !== null && branch.checkedOutAt === root,
         ),
-        writes.running !== null
-          ? "Wait for the current local write to finish."
-          : opened.repository.activity.kind !== "idle"
-            ? "Wait for this repository's current operation to finish."
-            : !mergeState
-              ? "Checking this worktree…"
-              : mergeState.kind !== "idle"
-                ? "Finish or abort the operation in progress in this worktree first."
-                : null,
+        localBusyReason(writes.running !== null, opened.repository) ??
+          (!mergeState
+            ? "Checking this worktree…"
+            : mergeState.kind !== "idle"
+              ? "Finish or abort the operation in progress in this worktree first."
+              : null),
       );
   const selectedMergeAvailable = canMerge && selectedBranch !== null;
   const pinned = review?.root === root ? review : null;
