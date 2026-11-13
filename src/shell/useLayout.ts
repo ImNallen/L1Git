@@ -16,7 +16,7 @@ export type ToolbarMenuKind =
   | "branch"
   | "stash"
   | "more";
-export type ToolbarMenu = { kind: ToolbarMenuKind; anchor: HTMLButtonElement };
+type ToolbarMenu = { kind: ToolbarMenuKind; anchor: HTMLButtonElement };
 
 /**
  * Pane open state and widths. The toggle refs live here because the toggle

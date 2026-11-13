@@ -1,7 +1,7 @@
 import type { Branch } from "./repository";
 
 export type BranchTree = { folders: BranchFolder[]; branches: Branch[] };
-export type BranchFolder = BranchTree & {
+type BranchFolder = BranchTree & {
   path: string;
   name: string;
   count: number;

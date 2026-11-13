@@ -33,14 +33,14 @@ export const mergeReviewSchema = z.strictObject({
   ]),
   plan: z.enum(["upToDate", "fastForward", "mergeCommit"]),
 });
-export const mergeSessionSchema = z.strictObject({
+const mergeSessionSchema = z.strictObject({
   id: entryIdSchema,
   review: mergeReviewSchema,
   footprint: z.array(z.string()),
   conflicted: z.array(z.string()).nullable(),
   suggestedMessage: z.string(),
 });
-export const replayProgressSchema = z.strictObject({
+const replayProgressSchema = z.strictObject({
   root: rootSchema,
   kind: replayKindSchema,
   commit: oidSchema,

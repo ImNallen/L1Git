@@ -74,9 +74,12 @@ pnpm test
 pnpm build
 pnpm format:check
 pnpm lint
+pnpm knip
 cargo fmt --all --check
 cargo clippy --locked --all-targets -- -D warnings
 ```
+
+`pnpm knip` fails on unused files, exports, and dependencies. To add a script that runs outside the app, add its path to `entry` in `knip.json`.
 
 Build the desktop app with `pnpm tauri build`.
 

@@ -25,7 +25,7 @@ import type { Layout } from "./useLayout";
 import type { SettingsScreen } from "./useSettingsScreen";
 import type { WorkspaceApi, WorkspaceView } from "./workspaceView";
 
-export type RefStepTarget = RefStep & { root: RepositoryRoot };
+type RefStepTarget = RefStep & { root: RepositoryRoot };
 
 /** RepositoryTree's navigation props. */
 export type SidebarNavigation = {

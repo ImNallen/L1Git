@@ -48,7 +48,7 @@ const fetchFailureSchema = z.enum([
   "busy",
   "other",
 ]);
-export const fetchSummarySchema = z.object({
+const fetchSummarySchema = z.object({
   at: z.number().int().nonnegative(),
   changed: z.boolean(),
   coalesced: z.boolean(),
@@ -82,7 +82,7 @@ const skipReasonSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("inUse"), worktree: rootSchema }),
   z.object({ kind: z.literal("failed"), message: z.string() }),
 ]);
-export const advanceOutcomeSchema = z.discriminatedUnion("kind", [
+const advanceOutcomeSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("advanced"),
     reference: branchRefSchema,

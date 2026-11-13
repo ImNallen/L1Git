@@ -77,7 +77,7 @@ export function historyRows(
   return rows;
 }
 
-export type WorktreeFile = { path: string; status: GitStatus };
+type WorktreeFile = { path: string; status: GitStatus };
 
 export type ListSide = Side | "conflict";
 

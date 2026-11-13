@@ -7,7 +7,7 @@ import {
   type ThemeColors,
 } from "./palette";
 
-export type ThemeId = string;
+type ThemeId = string;
 export type ColorScheme = "system" | "light" | "dark";
 
 export type ThemeVariant = {

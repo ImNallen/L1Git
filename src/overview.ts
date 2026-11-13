@@ -29,13 +29,13 @@ export type RootState =
   | { kind: "unavailable"; problem: Problem }
   | { kind: "open"; commonDir: RepositoryRoot };
 
-export type Activity =
+type Activity =
   | { kind: "idle" }
   | { kind: "fetching" }
   | { kind: "pushing"; root: RepositoryRoot }
   | { kind: "updating"; branches: ReadonlySet<BranchRef> };
 
-export type FetchStatus =
+type FetchStatus =
   | { kind: "never" }
   | { kind: "fetched"; at: number; remotes: FetchSummary["remotes"] }
   | { kind: "failed"; at: number; problem: Problem };
@@ -64,7 +64,7 @@ export type PushState = {
 };
 
 /** The pull steps that need the shell: a merge to review or a rebase to write. */
-export type PullHandOff = Extract<PullStep, { kind: "merge" | "rebase" }>;
+type PullHandOff = Extract<PullStep, { kind: "merge" | "rebase" }>;
 
 export type OverviewView = {
   pushByRoot: ReadonlyMap<RepositoryRoot, PushState>;
@@ -715,6 +715,7 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
 
 let singleton: OverviewStore | null = null;
 
+/** @public Pin tests read it through the harness's dynamic module map. */
 export function overviewStore(): OverviewStore {
   singleton ??= createOverviewStore({
     overview: repositories.overview,

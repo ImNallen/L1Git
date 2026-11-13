@@ -10,7 +10,7 @@ import type { ActiveWorktree } from "./useActiveWorktree";
 import type { Focus } from "./useFocus";
 import type { WorkspaceApi } from "./workspaceView";
 
-export type Parts = ReturnType<typeof useParts>;
+type Parts = ReturnType<typeof useParts>;
 
 /** The open file's diff style and its hunk and line staging, busy during a merge on the file's root. */
 export type DiffPane = {
