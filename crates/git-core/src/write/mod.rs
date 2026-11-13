@@ -710,6 +710,15 @@ impl Operation {
     }
 }
 
+fn entry_path(entry: &StatusEntry) -> &str {
+    match entry {
+        StatusEntry::Ordinary { path, .. }
+        | StatusEntry::Renamed { path, .. }
+        | StatusEntry::Unmerged { path, .. }
+        | StatusEntry::Untracked { path } => path,
+    }
+}
+
 struct Writing<'a> {
     repo: &'a Repo,
     store: &'a LockedStore,

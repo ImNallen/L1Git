@@ -1,6 +1,7 @@
 use super::{
     Applied, Change, Direction, EntryId, Expect, Repo, Restored, Writing, checkout,
     discard::refresh,
+    entry_path,
     files::{self, FileChange, STASH, STASH_WORDS},
     index::{self, IndexChange, Rows},
     store::{self, EntryObjects, LockedStore, Objects, Step},
@@ -1369,15 +1370,6 @@ fn unmerged_paths(entries: &[StatusEntry]) -> Vec<&str> {
             | StatusEntry::Untracked { .. } => None,
         })
         .collect()
-}
-
-fn entry_path(entry: &StatusEntry) -> &str {
-    match entry {
-        StatusEntry::Ordinary { path, .. }
-        | StatusEntry::Renamed { path, .. }
-        | StatusEntry::Unmerged { path, .. }
-        | StatusEntry::Untracked { path } => path,
-    }
 }
 
 fn entry_original(entry: &StatusEntry) -> Option<&str> {

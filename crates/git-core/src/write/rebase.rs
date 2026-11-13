@@ -1,11 +1,11 @@
 use super::{
-    Applied, Change, Direction, Expect, RebaseTxn, Repo, Writing, merge,
+    Applied, Change, Direction, Expect, RebaseTxn, Repo, Writing, entry_path, merge,
     refs::{self, Files, RefChange},
     store::{self, EntryObjects, Objects, Recorded},
     txn::Runner,
 };
 use crate::{
-    BranchRef, ErrorKind, Head, Oid, RemoteRef, RepositoryError, StaleReason, StatusEntry,
+    BranchRef, ErrorKind, Head, Oid, RemoteRef, RepositoryError, StaleReason,
     git::{self, WriteDeadline, Wrote},
     status::{self, Untracked},
     stderr,
@@ -79,7 +79,11 @@ pub(super) fn apply(
     if !entries.is_empty() {
         return Err(merge::refused(format!(
             "Commit or stash these changes before you rebase: {}.",
-            entries.iter().map(path).collect::<Vec<_>>().join(", ")
+            entries
+                .iter()
+                .map(entry_path)
+                .collect::<Vec<_>>()
+                .join(", ")
         )));
     }
     let upstream = git::read(
@@ -140,15 +144,6 @@ pub(super) fn apply(
             recorded.stay_pending();
             Err(stopped(repo, &txn, &head, &wrote).unwrap_or_else(|error| error))
         }
-    }
-}
-
-fn path(entry: &StatusEntry) -> &str {
-    match entry {
-        StatusEntry::Ordinary { path, .. }
-        | StatusEntry::Renamed { path, .. }
-        | StatusEntry::Unmerged { path, .. }
-        | StatusEntry::Untracked { path } => path,
     }
 }
 
