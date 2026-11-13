@@ -5,8 +5,8 @@ mod updater;
 
 use l1_git_core::{Coordinator, ErrorKind, Limits, RepositoryError, Request, Response};
 use std::sync::Arc;
-use tauri::webview::PageLoadEvent;
 use tauri::Manager;
+use tauri::webview::PageLoadEvent;
 
 fn worker_error() -> RepositoryError {
     RepositoryError {
