@@ -2,7 +2,7 @@ use super::now;
 use crate::{
     ErrorKind, FetchBranch, FetchFailure, FetchOutcome, FetchSummary, RemoteFetch, RepositoryError,
     git::{self, Deadline, Finished, Mutation},
-    stderr,
+    remotes, stderr,
 };
 use std::{collections::HashSet, path::Path, time::Duration};
 
@@ -12,20 +12,17 @@ pub(super) fn fetch_all(
     reads: Deadline,
 ) -> Result<FetchSummary, RepositoryError> {
     let before = tips(root, reads)?;
-    let names = git::read(root, &["remote"], reads)?;
+    let names = remotes::names(root, reads)?;
     let skipped = skipped_remotes(root, reads)?;
-    let remotes = git::text(&names)
-        .lines()
+    let remotes = names
+        .into_iter()
         .map(|remote| {
-            let outcome = if skipped.contains(remote) {
+            let outcome = if skipped.contains(remote.as_str()) {
                 FetchOutcome::Skipped
             } else {
-                fetch(root, remote, None, deadline)?
+                fetch(root, &remote, None, deadline)?
             };
-            Ok(RemoteFetch {
-                remote: remote.to_owned(),
-                outcome,
-            })
+            Ok(RemoteFetch { remote, outcome })
         })
         .collect::<Result<_, RepositoryError>>()?;
     Ok(FetchSummary {

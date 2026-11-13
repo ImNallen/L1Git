@@ -133,19 +133,15 @@ impl Coordinator {
             Ok(source) => source,
             Err(reason) => return Ok(PublishOptions::Unavailable { reason }),
         };
-        let names = git::read(&repository.root, &["remote"], reads)?;
         let mut remotes = Vec::new();
-        for name in git::text(&names).lines() {
-            let availability = match remote_endpoint(&repository.root, name, reads)? {
+        for name in remotes::names(&repository.root, reads)? {
+            let availability = match remote_endpoint(&repository.root, &name, reads)? {
                 Ok(endpoint) => PublishRemoteAvailability::Eligible {
                     endpoint: display_endpoint(PushPurpose::Publish, &endpoint),
                 },
                 Err(reason) => PublishRemoteAvailability::Unavailable { reason },
             };
-            remotes.push(PublishRemote {
-                name: name.into(),
-                availability,
-            });
+            remotes.push(PublishRemote { name, availability });
         }
         Ok(PublishOptions::Available {
             branch,
@@ -332,8 +328,11 @@ fn remote_endpoint(
     remote: &str,
     reads: Deadline,
 ) -> Result<Result<String, PushUnavailable>, RepositoryError> {
-    let names = git::read(root, &["remote"], reads)?;
-    if !git::text(&names).lines().any(|name| name == remote) || remote.starts_with('-') {
+    if !remotes::names(root, reads)?
+        .iter()
+        .any(|name| name == remote)
+        || remote.starts_with('-')
+    {
         return Ok(Err(PushUnavailable::UnsupportedConfiguration));
     }
     let mirror_key = format!("remote.{remote}.mirror");

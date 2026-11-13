@@ -5,10 +5,14 @@ use crate::{
 use std::path::Path;
 use url::Url;
 
-pub(crate) fn read(path: &Path, deadline: Deadline) -> Result<Vec<Remote>, RepositoryError> {
+pub(crate) fn names(path: &Path, deadline: Deadline) -> Result<Vec<String>, RepositoryError> {
     let names = git::read(path, &["remote"], deadline)?;
-    git::text(&names)
-        .lines()
+    Ok(git::text(&names).lines().map(str::to_owned).collect())
+}
+
+pub(crate) fn read(path: &Path, deadline: Deadline) -> Result<Vec<Remote>, RepositoryError> {
+    names(path, deadline)?
+        .into_iter()
         .map(|name| {
             let output = git::run(
                 path,
@@ -17,11 +21,7 @@ pub(crate) fn read(path: &Path, deadline: Deadline) -> Result<Vec<Remote>, Repos
             )?;
             let raw = git::text(output.stdout.strip_suffix(&[0]).unwrap_or(&output.stdout));
             let (url, github) = display_url(&raw);
-            Ok(Remote {
-                name: name.to_owned(),
-                url,
-                github,
-            })
+            Ok(Remote { name, url, github })
         })
         .collect()
 }
