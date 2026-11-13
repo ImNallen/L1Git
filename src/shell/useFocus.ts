@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 import type { FileDiffHandle } from "../components/FileDiffPane";
 import type { HistoryHandle } from "../components/History";
-import { focusedElement, shownElement } from "./dom";
+import { focusIsShown } from "./dom";
 
 /**
  * Where focus goes when its element disappears: History, then the open diff,
@@ -40,7 +40,7 @@ export function useFocus(
       () => sidebarToggleRef.current?.focus(),
     ]) {
       focus();
-      if (shownElement(focusedElement())) return;
+      if (focusIsShown()) return;
     }
   }, [sidebarToggleRef]);
   return {
@@ -49,10 +49,10 @@ export function useFocus(
     fallback,
     refocusIfLost: () =>
       requestAnimationFrame(() => {
-        if (!shownElement(focusedElement())) fallback();
+        if (!focusIsShown()) fallback();
       }),
     focusNamedBranch: () => {
-      if (shownElement(focusedElement())) return;
+      if (focusIsShown()) return;
       const named = document.querySelector<HTMLElement>(
         ".repository-tree .branch-row[aria-current='true']",
       );
@@ -74,6 +74,6 @@ export function useFocusRecovery({
   fallback,
 }: Pick<Focus, "lostFocusChecks" | "fallback">) {
   useEffect(() => {
-    if (lostFocusChecks > 0 && !shownElement(focusedElement())) fallback();
+    if (lostFocusChecks > 0 && !focusIsShown()) fallback();
   }, [lostFocusChecks, fallback]);
 }

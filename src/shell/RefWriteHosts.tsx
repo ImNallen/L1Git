@@ -8,7 +8,7 @@ import { TagDialog } from "../components/TagDialog";
 import { answeredInTagDialog, stashDropWrite } from "../domain/operations";
 import type { RepositorySnapshot } from "../domain/repository";
 import type { WritesView } from "../useWrites";
-import { focusedElement, shownElement } from "./dom";
+import { focusIsShown } from "./dom";
 import type { Focus } from "./useFocus";
 import type { Navigation } from "./useNavigation";
 import type { RefWrites } from "./useRefWrites";
@@ -71,7 +71,7 @@ export function BranchHost({
           write.operation.kind === "createBranch" ||
           write.operation.kind === "renameBranch";
         if (outcome.kind === "failed" && shownInDialog) writes.dismiss();
-        if (!shownElement(focusedElement())) focus.fallback();
+        if (!focusIsShown()) focus.fallback();
         return outcome;
       }}
       onNamedBranch={(branch) => nav.jumpTo(snapshot.root, branch)}
