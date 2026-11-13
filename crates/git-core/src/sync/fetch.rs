@@ -26,6 +26,15 @@ pub(super) fn fetch_all(
             Ok(RemoteFetch { remote, outcome })
         })
         .collect::<Result<_, RepositoryError>>()?;
+    summary(root, &before, reads, remotes)
+}
+
+fn summary(
+    root: &Path,
+    before: &[u8],
+    reads: Deadline,
+    remotes: Vec<RemoteFetch>,
+) -> Result<FetchSummary, RepositoryError> {
     Ok(FetchSummary {
         at: now(),
         changed: tips(root, reads.renewed())? != before,
@@ -134,15 +143,15 @@ pub(super) fn fetch_branch(
 ) -> Result<FetchSummary, RepositoryError> {
     let before = tips(root, reads)?;
     let outcome = fetch(root, &source.remote, Some(&source.branch), deadline)?;
-    Ok(FetchSummary {
-        at: now(),
-        changed: tips(root, reads.renewed())? != before,
-        coalesced: false,
-        remotes: vec![RemoteFetch {
+    summary(
+        root,
+        &before,
+        reads,
+        vec![RemoteFetch {
             remote: source.remote.clone(),
             outcome,
         }],
-    })
+    )
 }
 
 fn fetch(
