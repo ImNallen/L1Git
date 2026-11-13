@@ -25,15 +25,7 @@ use std::{
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct DiscardChange {
-    paths: Vec<Discarded>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Discarded {
-    path: String,
-    before: Content,
-    after: Content,
+    paths: Vec<FileChange>,
 }
 
 impl DiscardChange {
@@ -46,15 +38,13 @@ impl DiscardChange {
     }
 }
 
-impl Discarded {
-    fn held(&self) -> String {
-        let path = &self.path;
-        match &self.before {
-            Content::Absent => format!("{path} did not exist"),
-            Content::File { copy, .. } => format!("{path} matched the copy {copy}"),
-            Content::Symlink { target } => {
-                format!("{path} was a link to {}", String::from_utf8_lossy(target))
-            }
+fn held(discarded: &FileChange) -> String {
+    let path = &discarded.path;
+    match &discarded.before {
+        Content::Absent => format!("{path} did not exist"),
+        Content::File { copy, .. } => format!("{path} matched the copy {copy}"),
+        Content::Symlink { target } => {
+            format!("{path} was a link to {}", String::from_utf8_lossy(target))
         }
     }
 }
@@ -352,7 +342,7 @@ fn land(
                         }
                         After::Absent => Content::Absent,
                     };
-                    Ok(Discarded {
+                    Ok(FileChange {
                         path: landing.path.to_owned(),
                         before,
                         after,
@@ -403,7 +393,7 @@ fn land(
                 .paths
                 .iter()
                 .filter(|path| !holds(root, &path.path, &path.before, &files).unwrap_or(false))
-                .map(Discarded::held)
+                .map(held)
                 .collect();
             format!(
                 "L1 Git could not write its undo history ({unsaved}) or put back what it discarded, so Undo cannot restore it. Before the discard, {}. The copies are in {}.",
@@ -499,21 +489,12 @@ fn place_step(
     change: &DiscardChange,
     direction: Direction,
 ) -> Result<(), RepositoryError> {
-    let changes: Vec<FileChange> = change
-        .paths
-        .iter()
-        .map(|discarded| FileChange {
-            path: discarded.path.clone(),
-            before: discarded.before.clone(),
-            after: discarded.after.clone(),
-        })
-        .collect();
     let files = entry.files();
     let pending = check_files(
         &txn.repo().root,
         rows,
         &files,
-        &changes,
+        &change.paths,
         direction,
         &DISCARD,
     )?;
@@ -869,6 +850,27 @@ mod tests {
     }
 
     #[test]
+    fn a_discard_is_stored_in_the_same_json() {
+        let change = Change::Discard(DiscardChange {
+            paths: vec![FileChange {
+                path: "f".to_owned(),
+                before: Content::File {
+                    copy: "0.before".to_owned(),
+                    permissions: 0o644,
+                },
+                after: Content::Symlink {
+                    target: b"g".to_vec(),
+                },
+            }],
+        });
+        let json = serde_json::to_string(&change).unwrap();
+        assert_eq!(
+            json,
+            r#"{"domain":"discard","paths":[{"path":"f","before":{"kind":"file","copy":"0.before","permissions":420},"after":{"kind":"symlink","target":[103]}}]}"#
+        );
+    }
+
+    #[test]
     fn the_next_write_removes_copies_that_a_crashed_discard_left_beside_its_paths() {
         let repo = Repo::new(&[("f", "one\n"), ("g", "one\n")]);
         repo.put("f", "two\n");
@@ -884,7 +886,7 @@ mod tests {
                     let (applied, _, recorded) =
                         store.record_with(txn.repo(), &log, &operation, |_| {
                             Ok(DiscardChange {
-                                paths: vec![Discarded {
+                                paths: vec![FileChange {
                                     path: "f".to_owned(),
                                     before: Content::Absent,
                                     after: Content::Absent,
