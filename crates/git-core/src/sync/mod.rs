@@ -34,7 +34,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
     thread,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant},
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -382,11 +382,4 @@ impl Drop for Permit<'_> {
         *lock_ignoring_poison(&self.0.free) += 1;
         self.0.released.notify_one();
     }
-}
-
-fn now() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
 }

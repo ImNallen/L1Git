@@ -525,11 +525,15 @@ pub(crate) fn snapshot_within(
         commits,
         squashes,
         history_truncated,
-        observed_at: SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs(),
+        observed_at: now(),
     })
+}
+
+pub(crate) fn now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }
 
 /// Pairs each branch tip that no loaded commit builds on with a newer commit

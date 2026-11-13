@@ -1,4 +1,3 @@
-use super::now;
 use crate::{
     Blocker, BranchRef, BranchRole, BranchState, BranchStatus, FetchSummary, Oid, RepositoryError,
     RepositoryOverview,
@@ -235,7 +234,7 @@ pub(super) fn read(
         name: repository::display_name(main_worktree),
         branches,
         fetch,
-        observed_at: now(),
+        observed_at: repository::now(),
     })
 }
 
