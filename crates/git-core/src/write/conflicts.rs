@@ -14,7 +14,7 @@ use crate::{
     repository,
 };
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, fs, io, path::Path};
+use std::{collections::BTreeMap, fs, io};
 
 const RESOLVE: files::Verb = files::Verb {
     verb: "resolve",
@@ -936,7 +936,7 @@ pub(super) fn resolve(
 
 /// The nearest folder that still exists holds the new name or the removal.
 #[cfg(unix)]
-fn sync_parent(root: &Path, path: &str) -> Result<(), RepositoryError> {
+fn sync_parent(root: &std::path::Path, path: &str) -> Result<(), RepositoryError> {
     let mut folder = root.join(path);
     while folder.pop() && folder.starts_with(root) {
         if folder.is_dir() {
