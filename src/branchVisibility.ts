@@ -4,6 +4,7 @@ import { refSchema, rootSchema } from "./domain/repository";
 import type { Branch, FullRef, RepositoryRoot } from "./domain/repository";
 import { NO_RULE, pruneRule, revealBranch } from "./domain/visibility";
 import type { VisibilityRule } from "./domain/visibility";
+import { browserStorage, readStored, writeStored } from "./persisted";
 
 export const VISIBILITY_KEY = "l1git.visibility.v1";
 
@@ -20,66 +21,48 @@ const visibilitySchema = z.object({
   ),
 });
 
-export function restoreVisibility(storage: Pick<Storage, "getItem">): Rules {
-  try {
-    const saved = storage.getItem(VISIBILITY_KEY);
-    if (saved === null) return new Map();
-    return new Map(
-      visibilitySchema
-        .parse(JSON.parse(saved))
-        .repositories.map(({ root, kind, refs }) => [
-          root,
-          { kind, refs: new Set(refs) },
-        ]),
-    );
-  } catch {
-    return new Map();
-  }
+export function restoreVisibility(
+  storage: Pick<Storage, "getItem"> | null,
+): Rules {
+  const saved = readStored(storage, VISIBILITY_KEY, visibilitySchema);
+  if (saved === null) return new Map();
+  return new Map(
+    saved.repositories.map(({ root, kind, refs }) => [
+      root,
+      { kind, refs: new Set(refs) },
+    ]),
+  );
 }
 
-const unsaved =
-  "Hidden and soloed branches changed for this session. Could not save them.";
-
 export function persistVisibility(
-  storage: Pick<Storage, "setItem">,
+  storage: Pick<Storage, "setItem"> | null,
   rules: Rules,
 ): string | null {
-  try {
-    storage.setItem(
-      VISIBILITY_KEY,
-      JSON.stringify({
-        version: 1,
-        repositories: [...rules].flatMap(([root, rule]) =>
-          rule.kind === "none"
-            ? []
-            : [{ root, kind: rule.kind, refs: [...rule.refs] }],
-        ),
-      }),
-    );
-    return null;
-  } catch {
-    return unsaved;
-  }
+  return writeStored(
+    storage,
+    VISIBILITY_KEY,
+    {
+      version: 1,
+      repositories: [...rules].flatMap(([root, rule]) =>
+        rule.kind === "none"
+          ? []
+          : [{ root, kind: rule.kind, refs: [...rule.refs] }],
+      ),
+    },
+    "Hidden and soloed branches changed for this session. Could not save them.",
+  );
 }
 
 export function useBranchVisibility() {
-  const [rules, setRules] = useState<Rules>(() => {
-    try {
-      return restoreVisibility(localStorage);
-    } catch {
-      return new Map();
-    }
-  });
+  const [rules, setRules] = useState<Rules>(() =>
+    restoreVisibility(browserStorage()),
+  );
   const [persistenceError, setPersistenceError] = useState<string | null>(null);
   const saved = useRef(rules);
   useEffect(() => {
     if (saved.current === rules) return;
     saved.current = rules;
-    try {
-      setPersistenceError(persistVisibility(localStorage, rules));
-    } catch {
-      setPersistenceError(unsaved);
-    }
+    setPersistenceError(persistVisibility(browserStorage(), rules));
   }, [rules]);
 
   const update = useCallback(

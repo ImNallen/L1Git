@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useEffectEvent } from "react";
 import type { RepositoryRoot } from "../domain/repository";
 import type { OverviewStore, OverviewView } from "../overview";
 import { useWrites } from "../useWrites";
@@ -56,16 +56,17 @@ export function useWriteLoop({
   active: Pick<ActiveWorktree, "root" | "refreshMerge" | "mergeState">;
   reloadRefs: () => void;
 }): WriteLoop {
+  const rereadRefs = (worktree: RepositoryRoot, repository: RepositoryRoot) => {
+    const state = view.roots.get(worktree) ?? view.roots.get(repository);
+    if (state?.kind === "open") void store.refreshLocal(state.commonDir);
+    return app.rereadOpenRepository(repository);
+  };
   const writes = useWrites(
     snapshotRoot,
     {
       worktree: app.rereadWorktree,
       repository: app.rereadOpenRepository,
-      refs: (worktree, repository) => {
-        const state = view.roots.get(worktree) ?? view.roots.get(repository);
-        if (state?.kind === "open") void store.refreshLocal(state.commonDir);
-        return app.rereadOpenRepository(repository);
-      },
+      refs: rereadRefs,
     },
     active.root,
   );
@@ -90,22 +91,18 @@ export function useWriteLoop({
     if (opened.repository) void store.refreshLocal(opened.repository.commonDir);
     return rereadAll();
   };
-  const refreshRef = useRef(rereadAll);
-  const refreshRepositoryRef = useRef(refreshRepository);
-  const reloadRefsRef = useRef(reloadRefs);
-  useEffect(() => {
-    refreshRef.current = rereadAll;
-    refreshRepositoryRef.current = refreshRepository;
-    reloadRefsRef.current = reloadRefs;
+  const rereadOnFocus = useEffectEvent(() => {
+    void refreshRepository();
+    reloadRefs();
   });
+  const rereadOnRefsChanged = useEffectEvent(rereadAll);
   // Commits and branches made outside L1 Git show up when its window regains focus.
   useEffect(() => {
     let last = 0;
     const reread = () => {
       if (document.hidden || performance.now() - last < 1000) return;
       last = performance.now();
-      void refreshRepositoryRef.current();
-      reloadRefsRef.current();
+      rereadOnFocus();
       store.probe();
     };
     window.addEventListener("focus", reread);
@@ -125,7 +122,7 @@ export function useWriteLoop({
     () =>
       store.onRefsChanged((roots) => {
         if (roots.some((root) => root === activeRoot))
-          void refreshRef.current();
+          void rereadOnRefsChanged();
       }),
     [store, activeRoot],
   );
@@ -134,11 +131,7 @@ export function useWriteLoop({
     rereadChanges,
     rereadAll,
     refreshRepository,
-    remoteAdded: (root) => {
-      const state = view.roots.get(root);
-      if (state?.kind === "open") void store.refreshLocal(state.commonDir);
-      void app.rereadOpenRepository(root);
-    },
+    remoteAdded: (root) => void rereadRefs(root, root),
     actions: defineSlice({
       context: { writing: writes.running !== null },
       commands: {},

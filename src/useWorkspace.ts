@@ -19,6 +19,7 @@ import {
 import type { Compare, Comparison } from "./domain/comparison";
 import { latestReader } from "./latestReader";
 import { oneReadPerKey } from "./oneReadPerKey";
+import { browserStorage } from "./persisted";
 import {
   emptyCatalog,
   forget,
@@ -128,17 +129,23 @@ function sameChanges(
   return left !== undefined && JSON.stringify(left) === JSON.stringify(right);
 }
 
+function patchView(
+  views: Map<RepositoryRoot, RepositoryView>,
+  root: RepositoryRoot,
+  patch: Partial<RepositoryView>,
+) {
+  views.set(root, { ...(views.get(root) ?? emptyView), ...patch });
+}
+
+const storageUnavailable =
+  "Local storage is unavailable. Repositories will not be restored after restart.";
+
 export function useWorkspace() {
   const [saved] = useState(() => {
-    try {
-      return restoreCatalog(localStorage);
-    } catch {
-      return {
-        catalog: emptyCatalog,
-        error:
-          "Local storage is unavailable. Repositories will not be restored after restart.",
-      };
-    }
+    const storage = browserStorage();
+    return storage === null
+      ? { catalog: emptyCatalog, error: storageUnavailable }
+      : restoreCatalog(storage);
   });
   const [catalog, setCatalog] = useState(saved.catalog);
   const catalogRef = useRef(catalog);
@@ -193,13 +200,10 @@ export function useWorkspace() {
   const save = useCallback((next: Catalog) => {
     catalogRef.current = next;
     setCatalog(next);
-    try {
-      setPersistenceError(persistCatalog(localStorage, next));
-    } catch {
-      setPersistenceError(
-        "Local storage is unavailable. Repositories will not be restored after restart.",
-      );
-    }
+    const storage = browserStorage();
+    setPersistenceError(
+      storage === null ? storageUnavailable : persistCatalog(storage, next),
+    );
   }, []);
 
   const accept = useCallback(
@@ -221,9 +225,30 @@ export function useWorkspace() {
     [save],
   );
 
+  const readSnapshot = useCallback(
+    async (
+      path: RepositoryRoot,
+      rememberRepository: boolean,
+      previous: ReadyWorkspace | null,
+    ) => {
+      const id = ++requestId.current;
+      try {
+        const snapshot = await repositories.snapshot(path);
+        if (id === requestId.current) accept(snapshot, rememberRepository);
+      } catch (error) {
+        if (id === requestId.current)
+          setWorkspace(
+            previous
+              ? { ...previous, error: problemFrom(error) }
+              : { kind: "error", path, error: problemFrom(error) },
+          );
+      }
+    },
+    [accept],
+  );
+
   const selectRepository = useCallback(
     async (path: RepositoryRoot) => {
-      const id = ++requestId.current;
       const remembered = views.current.get(path)?.selection ?? null;
       const cached = snapshots.current.get(path);
       const previous: ReadyWorkspace | null = cached
@@ -242,19 +267,9 @@ export function useWorkspace() {
         setWorkspace({ kind: "opening", path, name });
         setSelection(remembered);
       }
-      try {
-        const snapshot = await repositories.snapshot(path);
-        if (id === requestId.current) accept(snapshot, true);
-      } catch (error) {
-        if (id === requestId.current)
-          setWorkspace(
-            previous
-              ? { ...previous, error: problemFrom(error) }
-              : { kind: "error", path, error: problemFrom(error) },
-          );
-      }
+      await readSnapshot(path, true, previous);
     },
-    [accept],
+    [readSnapshot],
   );
 
   useEffect(() => {
@@ -291,16 +306,8 @@ export function useWorkspace() {
     }
     if (!current) return;
     const path = current.snapshot.root;
-    const id = ++requestId.current;
-    const previous = current;
-    setWorkspace({ kind: "loading", path, previous });
-    try {
-      const snapshot = await repositories.snapshot(path);
-      if (id === requestId.current) accept(snapshot, false);
-    } catch (error) {
-      if (id === requestId.current)
-        setWorkspace({ ...previous, error: problemFrom(error) });
-    }
+    setWorkspace({ kind: "loading", path, previous: current });
+    await readSnapshot(path, false, current);
   };
 
   const latest = useRef({ activeRoot, refresh });
@@ -324,10 +331,7 @@ export function useWorkspace() {
 
   useEffect(() => {
     if (root === null) return;
-    views.current.set(root, {
-      ...(views.current.get(root) ?? emptyView),
-      selection,
-    });
+    patchView(views.current, root, { selection });
   }, [root, selection]);
 
   const scrollTopOf = useCallback(
@@ -335,12 +339,8 @@ export function useWorkspace() {
     [],
   );
   const rememberScroll = useCallback(
-    (root: RepositoryRoot, scrollTop: number) => {
-      views.current.set(root, {
-        ...(views.current.get(root) ?? emptyView),
-        scrollTop,
-      });
-    },
+    (root: RepositoryRoot, scrollTop: number) =>
+      patchView(views.current, root, { scrollTop }),
     [],
   );
 

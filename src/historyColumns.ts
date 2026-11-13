@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { z } from "zod";
+import { browserStorage, readStored, writeStored } from "./persisted";
 
 export const COLUMNS_KEY = "l1git.columns.v1";
 
@@ -57,54 +58,35 @@ export function columnLayout(
 }
 
 export function restoreColumns(
-  storage: Pick<Storage, "getItem">,
+  storage: Pick<Storage, "getItem"> | null,
 ): ReadonlySet<ColumnId> {
-  try {
-    const saved = storage.getItem(COLUMNS_KEY);
-    if (saved === null) return DEFAULT_COLUMNS;
-    return new Set(columnsSchema.parse(JSON.parse(saved)).visible);
-  } catch {
-    return DEFAULT_COLUMNS;
-  }
+  const saved = readStored(storage, COLUMNS_KEY, columnsSchema);
+  return saved === null ? DEFAULT_COLUMNS : new Set(saved.visible);
 }
 
-const unsaved =
-  "History columns changed for this session. Could not save them.";
-
 export function persistColumns(
-  storage: Pick<Storage, "setItem">,
+  storage: Pick<Storage, "setItem"> | null,
   visible: ReadonlySet<ColumnId>,
 ): string | null {
-  try {
-    storage.setItem(
-      COLUMNS_KEY,
-      JSON.stringify({ version: 1, visible: [...visible] }),
-    );
-    return null;
-  } catch {
-    return unsaved;
-  }
+  return writeStored(
+    storage,
+    COLUMNS_KEY,
+    { version: 1, visible: [...visible] },
+    "History columns changed for this session. Could not save them.",
+  );
 }
 
 export function useHistoryColumns() {
-  const [visible, setVisible] = useState(() => {
-    try {
-      return restoreColumns(localStorage);
-    } catch {
-      return DEFAULT_COLUMNS;
-    }
-  });
+  const [visible, setVisible] = useState(() =>
+    restoreColumns(browserStorage()),
+  );
   const [persistenceError, setPersistenceError] = useState<string | null>(null);
 
   function toggle(id: ColumnId) {
     const next = new Set(visible);
     if (!next.delete(id)) next.add(id);
     setVisible(next);
-    try {
-      setPersistenceError(persistColumns(localStorage, next));
-    } catch {
-      setPersistenceError(unsaved);
-    }
+    setPersistenceError(persistColumns(browserStorage(), next));
   }
 
   return { visible, toggle, persistenceError };
