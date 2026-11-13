@@ -6,6 +6,37 @@
     <meta name="theme-color" content="#0a0a0a" />
     <link rel="icon" type="image/x-icon" href="/favicon.ico" />
     <title>L1 Git</title>
+    <style>
+      #splash {
+        position: fixed;
+        inset: 0;
+        z-index: 2147483647;
+        display: grid;
+        place-items: center;
+        background: var(--canvas, #121212);
+      }
+      @media (prefers-color-scheme: light) {
+        #splash {
+          background: var(--canvas, #ffffff);
+        }
+      }
+      #splash img {
+        width: 72px;
+        height: 72px;
+        pointer-events: none;
+      }
+    </style>
   </head>
-  <body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body>
+  <body>
+    <div id="root"></div>
+    <div
+      id="splash"
+      role="status"
+      aria-label="Opening L1 Git"
+      data-tauri-drag-region
+    >
+      <img src="/icon.png" alt="" width="72" height="72" />
+    </div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
 </html>

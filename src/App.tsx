@@ -3,6 +3,7 @@ import { useBranchVisibility } from "./branchVisibility";
 import { useUpdateRestart } from "./components/UpdateRestart";
 import { useExpandedRepositories } from "./expandedRepositories";
 import { useFetchSettings } from "./fetchSettings";
+import { useLaunchSplash } from "./launchSplash";
 import { useHistoryColumns } from "./historyColumns";
 import { useOverview } from "./overview";
 import { macNative } from "./repositories";
@@ -174,6 +175,11 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   );
   useShortcuts(actions, palette);
   usePrefetchLazyViews();
+  useLaunchSplash(
+    app.catalog.lastRoot === null ||
+      app.workspace.kind === "ready" ||
+      app.workspace.kind === "error",
+  );
 
   const { commands } = actions;
   const persistenceError =

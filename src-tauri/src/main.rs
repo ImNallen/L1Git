@@ -5,6 +5,7 @@ mod updater;
 
 use l1_git_core::{Coordinator, ErrorKind, Limits, RepositoryError, Request, Response};
 use std::sync::Arc;
+use tauri::webview::PageLoadEvent;
 use tauri::Manager;
 
 fn worker_error() -> RepositoryError {
@@ -51,6 +52,11 @@ fn main() {
             app.manage(Arc::clone(&updater));
             updater.start();
             Ok(())
+        })
+        .on_page_load(|webview, payload| {
+            if payload.event() == PageLoadEvent::Finished {
+                let _ = webview.window().show();
+            }
         })
         .invoke_handler(tauri::generate_handler![
             repository_run,
