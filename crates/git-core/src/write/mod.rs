@@ -618,7 +618,7 @@ impl Operation {
             let (applied, published) = txn.commit_write(store, log, self, &change)?;
             Ok((applied, Some(published)))
         };
-        let writing = branches::Writing {
+        let writing = Writing {
             repo,
             store,
             log,
@@ -628,8 +628,7 @@ impl Operation {
         let branch =
             |written: Result<Applied, RepositoryError>| written.map(|applied| (applied, None));
         let commit = |kind, message| {
-            commit::commit(repo, store, log, deadline, expect, self, kind, message)
-                .map(|applied| (applied, None))
+            commit::commit(&writing, expect, kind, message).map(|applied| (applied, None))
         };
         let index_part = |action, path, picks, shown| {
             let part = Part::new(action, path, picks, shown)?;
@@ -639,7 +638,7 @@ impl Operation {
         };
         let discard_part = |path, picks, shown| {
             let part = Part::new(Action::Discard, path, picks, shown)?;
-            discard::discard_part(repo, store, log, deadline, expect, self, &part)
+            discard::discard_part(&writing, expect, &part)
         };
         match self {
             Self::SaveConflict {
@@ -664,9 +663,7 @@ impl Operation {
             Self::Commit { message, staged } => commit(commit::Kind::New(staged), message),
             Self::Amend { message, staged } => commit(commit::Kind::Amend(staged), message),
             Self::EditMessage { message } => commit(commit::Kind::EditMessage, message),
-            Self::Discard { entries } => {
-                discard::discard(repo, store, log, deadline, expect, self, entries)
-            }
+            Self::Discard { entries } => discard::discard(&writing, expect, entries),
             Self::StageHunk { path, hunk, shown } => {
                 index_part(Action::Stage, path, Picks::Hunk(*hunk), shown)
             }
@@ -718,6 +715,14 @@ impl Operation {
             }
         }
     }
+}
+
+struct Writing<'a> {
+    repo: &'a Repo,
+    store: &'a LockedStore,
+    log: &'a Log,
+    deadline: WriteDeadline,
+    operation: &'a Operation,
 }
 
 struct Repo {

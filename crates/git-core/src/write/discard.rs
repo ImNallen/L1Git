@@ -5,7 +5,7 @@ use super::files::{
     unsupported,
 };
 use super::{
-    Applied, Change, Direction, EntryId, Expect, Operation, Repo, Restored, index,
+    Applied, Change, Direction, EntryId, Expect, Operation, Restored, Writing, index,
     partial::{self, Part},
     store::{self, EntryObjects, LockedStore, Log},
     txn::{Published, Txn},
@@ -199,14 +199,17 @@ fn reported_now(
 }
 
 pub(super) fn discard(
-    repo: &Repo,
-    store: &LockedStore,
-    log: &Log,
-    deadline: WriteDeadline,
+    writing: &Writing<'_>,
     expect: &Expect,
-    operation: &Operation,
     entries: &[StatusEntry],
 ) -> Result<(Applied, Option<Published>), RepositoryError> {
+    let &Writing {
+        repo,
+        store,
+        log,
+        deadline,
+        operation,
+    } = writing;
     let targets = targets(entries)?;
     let txn = Txn::begin(repo, deadline)?;
     repo.head_as_seen(expect, deadline)?;
@@ -254,14 +257,17 @@ pub(super) fn discard(
 }
 
 pub(super) fn discard_part(
-    repo: &Repo,
-    store: &LockedStore,
-    log: &Log,
-    deadline: WriteDeadline,
+    writing: &Writing<'_>,
     expect: &Expect,
-    operation: &Operation,
     part: &Part<'_>,
 ) -> Result<(Applied, Option<Published>), RepositoryError> {
+    let &Writing {
+        repo,
+        store,
+        log,
+        deadline,
+        operation,
+    } = writing;
     let path = part.path();
     let txn = Txn::begin(repo, deadline)?;
     repo.head_as_seen(expect, deadline)?;

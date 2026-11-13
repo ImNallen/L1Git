@@ -1,6 +1,6 @@
 use super::{
-    Applied, Change, Direction, Expect, RefTxn, Repo, Start,
-    branches::{self, Listing, Setting, Writing},
+    Applied, Change, Direction, Expect, RefTxn, Repo, Start, Writing,
+    branches::{self, Listing, Setting},
     commit::{self, short},
     discard::Stat,
     refs::{capitalized, oid},

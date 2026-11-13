@@ -1,6 +1,5 @@
 use super::{
-    Applied, BranchTip, Change, CommitTxn, Direction, Expect, Operation, ReplayTxn, Repo,
-    branches::Writing,
+    Applied, BranchTip, Change, CommitTxn, Direction, Expect, Operation, ReplayTxn, Repo, Writing,
     commit::{self, Target, Trace},
     merge::{self, Edit},
     refs::{self, Files, RefChange},

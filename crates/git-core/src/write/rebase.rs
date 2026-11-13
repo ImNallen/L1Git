@@ -1,7 +1,5 @@
 use super::{
-    Applied, Change, Direction, Expect, RebaseTxn, Repo,
-    branches::Writing,
-    merge,
+    Applied, Change, Direction, Expect, RebaseTxn, Repo, Writing, merge,
     refs::{self, Files, RefChange},
     store::{self, EntryObjects, Objects, Recorded},
     txn::Runner,

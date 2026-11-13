@@ -1,7 +1,5 @@
 use super::{
-    Applied, Change, Direction, RefTxn, Repo,
-    branches::{self, Writing},
-    commit,
+    Applied, Change, Direction, RefTxn, Repo, Writing, branches, commit,
     refs::{self, Move},
     store::EntryObjects,
     txn::Runner,

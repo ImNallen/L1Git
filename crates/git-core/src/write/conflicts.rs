@@ -1,6 +1,5 @@
 use super::{
-    Applied, Direction, Expect, Repo, Restored,
-    branches::Writing,
+    Applied, Direction, Expect, Repo, Restored, Writing,
     files::{self, Content, FileChange, Stat},
     index::{self, IndexChange, IndexEntry},
     resolution,

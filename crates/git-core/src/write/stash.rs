@@ -1,7 +1,5 @@
 use super::{
-    Applied, Change, Direction, EntryId, Expect, Repo, Restored,
-    branches::Writing,
-    checkout,
+    Applied, Change, Direction, EntryId, Expect, Repo, Restored, Writing, checkout,
     discard::refresh,
     files::{self, FileChange, STASH, STASH_WORDS},
     index::{self, IndexChange, Rows},

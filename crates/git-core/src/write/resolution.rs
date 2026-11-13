@@ -1,6 +1,5 @@
 use super::{
-    Applied, Change, Direction, Expect, Repo,
-    branches::Writing,
+    Applied, Change, Direction, Expect, Repo, Writing,
     files::{self, Content, FileChange, Stat},
     index,
     store::{self, EntryObjects},

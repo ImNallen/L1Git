@@ -1,7 +1,7 @@
 use super::{
-    Applied, Change, CommitTxn, EntryId, Expect, Operation, Repo,
+    Applied, Change, CommitTxn, EntryId, Expect, Repo, Writing,
     refs::{RefChange, capitalized, oid},
-    store::{LockedStore, Log, Recorded},
+    store::{LockedStore, Recorded},
     txn::Runner,
 };
 use crate::{
@@ -102,20 +102,19 @@ pub(super) struct Update {
     pub(super) new: Oid,
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the write's context and its operation's fields"
-)]
 pub(super) fn commit(
-    repo: &Repo,
-    store: &LockedStore,
-    log: &Log,
-    deadline: WriteDeadline,
+    writing: &Writing<'_>,
     expect: &Expect,
-    operation: &Operation,
     kind: Kind<'_>,
     message: &str,
 ) -> Result<Applied, RepositoryError> {
+    let &Writing {
+        repo,
+        store,
+        log,
+        deadline,
+        operation,
+    } = writing;
     let txn = CommitTxn::begin(repo, deadline)?;
     let reads = deadline.reads();
     if let Some(operation) = sync::in_progress(&repo.root, reads)?
