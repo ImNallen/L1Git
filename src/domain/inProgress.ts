@@ -1,4 +1,4 @@
-import { composeMessage, splitMessage } from "./commitMessage";
+import { composeMessage, hasText, splitMessage } from "./commitMessage";
 import { conflictRegions, hasLeftoverMarkers } from "./conflictRegions";
 import type { Draft } from "./commitMessage";
 import { replayNames } from "./merge";
@@ -196,7 +196,7 @@ export function operationMessage(
   running: Pick<Running, "suggestedMessage">,
   draft: Draft,
 ): { draft: Draft; message: string; edited: boolean } {
-  const edited = draft.summary !== "" || draft.description !== "";
+  const edited = hasText(draft);
   const shown = edited ? draft : splitMessage(running.suggestedMessage);
   return { draft: shown, message: composeMessage(shown), edited };
 }
