@@ -345,23 +345,17 @@ fn landed_change(
     )?)))
 }
 
-/// The undo log is the receipt for a repeated request, because Git leaves no
-/// trace that a rebase finished.
 fn already_landed(
     writing: &Writing<'_>,
     expect: &Expect,
 ) -> Result<Option<Applied>, RepositoryError> {
-    let Some(id) = writing.log.next_undo() else {
-        return Ok(None);
-    };
-    let (applied, change) = writing.store.record_of(id)?;
-    let Change::Rebase(RebaseChange::Landed(change)) = change else {
-        return Ok(None);
-    };
-    Ok((applied.operation == *writing.operation
-        && applied.root == writing.repo.root()
-        && change.moved(&expect.head, &writing.repo.head(writing.deadline)?))
-    .then_some(applied))
+    refs::already_landed(writing, expect, |change| {
+        if let Change::Rebase(RebaseChange::Landed(change)) = change {
+            Some(change)
+        } else {
+            None
+        }
+    })
 }
 
 /// Settles a pending entry from Git alone. A rebase still in progress, or a

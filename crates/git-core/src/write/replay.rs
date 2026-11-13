@@ -1012,23 +1012,18 @@ fn land(
     Ok((update.new, race))
 }
 
-/// The undo log is the receipt for a repeated request. Nothing else records that a
-/// replay finished, and Git's marker is gone by then.
+/// Git's marker is gone once a replay finished, so only the undo log knows.
 fn already_landed(
     writing: &Writing<'_>,
     expect: &Expect,
 ) -> Result<Option<Applied>, RepositoryError> {
-    let Some(id) = writing.log.next_undo() else {
-        return Ok(None);
-    };
-    let (applied, change) = writing.store.record_of(id)?;
-    let Change::Replay(ReplayChange::Landed(change)) = change else {
-        return Ok(None);
-    };
-    Ok((applied.operation == *writing.operation
-        && applied.root == writing.repo.root()
-        && change.moved(&expect.head, &writing.repo.head(writing.deadline)?))
-    .then_some(applied))
+    refs::already_landed(writing, expect, |change| {
+        if let Change::Replay(ReplayChange::Landed(change)) = change {
+            Some(change)
+        } else {
+            None
+        }
+    })
 }
 
 /// Settles a pending entry from Git alone. A commit whose parent, tree, or branch
