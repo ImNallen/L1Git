@@ -642,8 +642,6 @@
 }
 .settings-update-version .update-actions .button {
   min-height: 28px;
-  height: auto;
-  padding: 5px 8px;
   font-size: 12px;
 }
 .settings-search {

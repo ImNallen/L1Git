@@ -92,11 +92,6 @@
 .history-table td.message-cell {
   padding: 0 10px 0 0;
 }
-.history-table th.changes-header,
-.history-table td.changes-cell {
-  justify-content: flex-end;
-  padding-right: 14px;
-}
 .changes-cell {
   font-family: var(--mono);
   white-space: nowrap;

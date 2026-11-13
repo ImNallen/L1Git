@@ -53,31 +53,6 @@
   flex: 1;
   overflow: hidden;
 }
-.repository-name {
-  max-width: 180px;
-  color: var(--text-icon);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.breadcrumb-slash {
-  color: var(--text-faint);
-}
-.breadcrumb-head {
-  display: flex;
-  flex-shrink: 1000;
-  align-items: center;
-  gap: 10px;
-  min-width: 64px;
-  overflow: hidden;
-}
-.breadcrumb-branch {
-  min-width: 0;
-  color: var(--text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .toolbar-actions {
   display: flex;
   align-items: center;
@@ -276,26 +251,10 @@ kbd {
   }
 }
 @media (max-width: 800px) {
-  .breadcrumb-slash {
-    display: none;
-  }
   .toolbar {
     gap: 7px;
     padding-right: 9px;
     padding-left: 9px;
-  }
-  /* Hidden visually, not from the accessibility tree, so the button keeps its visible name. */
-  .toolbar-actions .button span:not(.workspace-action-icon) {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
-  }
-  .toolbar-actions .button {
-    width: 30px;
-    padding: 0;
   }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -478,9 +437,6 @@ kbd {
   padding-inline: 10px;
   color: var(--text-body);
 }
-.toolbar-separator {
-  margin-inline: 8px;
-}
 @media (max-width: 1200px) {
   .toolbar-actions .button {
     padding-inline: 6px;
@@ -526,6 +482,7 @@ kbd {
   flex: 0 1 300px;
 }
 @container (max-width: 1000px) {
+  /* Hidden visually, not from the accessibility tree, so the button keeps its visible name. */
   .toolbar-actions .button span:not(.workspace-action-icon) {
     position: absolute;
     width: 1px;
