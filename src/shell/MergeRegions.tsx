@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import { isPainted } from "../appearance";
 import type { AppearanceState } from "../appearance";
 import { resolutionKey } from "../resolutionDrafts";
 import type { WritesView } from "../useWrites";
@@ -47,7 +48,7 @@ export function RetainedResolutionHost({
         {...retained}
         refresh={changes.get(retained.root)}
         theme={appearance.variant.appearance}
-        painted={Object.keys(appearance.variant.palette).length > 0}
+        painted={isPainted(appearance.variant)}
         writes={writes}
         onClose={drafts.closeRetained}
         onResolved={drafts.closeRetained}

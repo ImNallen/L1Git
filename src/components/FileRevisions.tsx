@@ -16,7 +16,7 @@ import type {
   Problem,
   RepositoryRoot,
 } from "../domain/repository";
-import { diffTheme } from "../themes/diffTheme";
+import { pierreThemeOptions } from "../themes/diffTheme";
 import type { Appearance } from "../themes/palette";
 import { useRead } from "../useRead";
 import type { Read } from "../useRead";
@@ -187,9 +187,8 @@ export function FileBlame({
   );
   const options = useMemo(
     () => ({
-      theme: diffTheme(theme, painted),
+      ...pierreThemeOptions(theme, painted),
       unsafeCSS: focusStyles,
-      themeType: theme,
       disableFileHeader: true,
       onLineNumberClick: ({ lineNumber }: { lineNumber: number }) => {
         const range = ranges?.find(
