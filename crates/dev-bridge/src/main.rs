@@ -35,16 +35,8 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 }
 
 fn handle(mut request: Request, origins: &[String], coordinator: &Coordinator) {
-    let origin = request
-        .headers()
-        .iter()
-        .find(|h| h.field.equiv("Origin"))
-        .map(|h| h.value.as_str());
-    let content_type = request
-        .headers()
-        .iter()
-        .find(|h| h.field.equiv("Content-Type"))
-        .map(|h| h.value.as_str());
+    let origin = header(&request, "Origin");
+    let content_type = header(&request, "Content-Type");
     if request.method() != &Method::Post
         || !origin.is_some_and(|origin| origins.iter().any(|allowed| origin == allowed))
         || content_type != Some("application/json")
@@ -95,6 +87,14 @@ fn handle(mut request: Request, origins: &[String], coordinator: &Coordinator) {
         Ok(Err(error)) => respond(request, 200, json!({"ok": false, "error": error})),
         Err(error) => respond(request, 400, json!({"error": error.to_string()})),
     }
+}
+
+fn header<'a>(request: &'a Request, field: &'static str) -> Option<&'a str> {
+    request
+        .headers()
+        .iter()
+        .find(|h| h.field.equiv(field))
+        .map(|h| h.value.as_str())
 }
 
 fn respond(request: Request, status: u16, data: serde_json::Value) {
