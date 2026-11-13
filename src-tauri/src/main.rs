@@ -8,10 +8,10 @@ use std::sync::Arc;
 use tauri::Manager;
 use tauri::webview::PageLoadEvent;
 
-fn worker_error() -> RepositoryError {
+fn git_failed(message: &str) -> RepositoryError {
     RepositoryError {
         kind: ErrorKind::GitFailed,
-        message: "Git stopped unexpectedly. Try again.".into(),
+        message: message.into(),
     }
 }
 
@@ -21,17 +21,14 @@ async fn repository_run(
     activity: tauri::State<'_, Arc<activity::RepositoryActivity>>,
     request: Request,
 ) -> Result<Response, RepositoryError> {
-    let permit = activity.admit().map_err(|message| RepositoryError {
-        kind: ErrorKind::GitFailed,
-        message: message.into(),
-    })?;
+    let permit = activity.admit().map_err(git_failed)?;
     let coordinator = Arc::clone(&coordinator);
     tauri::async_runtime::spawn_blocking(move || {
         let _permit = permit;
         l1_git_core::run(&coordinator, request)
     })
     .await
-    .map_err(|_| worker_error())?
+    .map_err(|_| git_failed("Git stopped unexpectedly. Try again."))?
 }
 
 fn main() {
