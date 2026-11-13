@@ -69,13 +69,7 @@ pub(super) fn checkout(
     let deadline = writing.deadline;
     let reads = deadline.reads();
     refuse_unfinished(repo, "check out", reads)?;
-    let before = repo.head(deadline)?;
-    if before != expect.head {
-        return Err(RepositoryError::stale(
-            StaleReason::HeadMoved,
-            "HEAD moved since L1 Git read this worktree. Refresh and try again.",
-        ));
-    }
+    let before = repo.head_as_seen(expect, deadline)?;
     let from = leaving(&before)?;
     let planned = Switch::to_target(repo, &before, target, deadline)?;
     refuse_absorbing(repo, &from, &planned.goal, &planned.to_name, reads)?;
