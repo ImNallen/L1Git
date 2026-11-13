@@ -235,27 +235,15 @@ function CommitNode({
     <g className="graph-node">
       <title>{`${commit.author} <${commit.email}>`}</title>
       <RowRing lane={lane} radius={radius} ring={ring} />
-      {merge ? (
-        <circle
-          data-graph-key="node"
-          cx={x(lane)}
-          cy={ROW_CENTER}
-          r={radius}
-          fill="var(--canvas)"
-          stroke={color(lane)}
-          strokeWidth={2}
-        />
-      ) : (
-        <circle
-          data-graph-key="node"
-          cx={x(lane)}
-          cy={ROW_CENTER}
-          r={radius}
-          fill="var(--canvas)"
-          stroke={color(lane)}
-          strokeWidth={1.5}
-        />
-      )}
+      <circle
+        data-graph-key="node"
+        cx={x(lane)}
+        cy={ROW_CENTER}
+        r={radius}
+        fill="var(--canvas)"
+        stroke={color(lane)}
+        strokeWidth={merge ? 2 : 1.5}
+      />
     </g>
   );
 }
