@@ -741,13 +741,6 @@
   flex-shrink: 0;
   padding-inline: 20px;
 }
-.file-diff-toolbar > .button.secondary {
-  border-color: transparent;
-  background: transparent;
-  box-shadow: none;
-  padding-inline: 0;
-  color: var(--workspace-toolbar-text, var(--text-secondary));
-}
 .diff-style {
   background: transparent;
   border-color: transparent;
@@ -763,13 +756,14 @@
   gap: 16px;
   border-bottom: 0;
 }
-.file-diff-toolbar > .button.secondary {
-  width: 122px;
+.file-diff-toolbar > .button.ghost {
   height: 30px;
   flex-shrink: 0;
-  justify-content: flex-start;
+  padding-inline: 10px;
+  margin-inline-start: -10px;
   font-weight: 400;
   white-space: pre;
+  color: var(--workspace-toolbar-text, var(--text-secondary));
 }
 .file-diff-path {
   font-size: 12px;

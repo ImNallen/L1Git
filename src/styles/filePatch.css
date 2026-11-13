@@ -45,6 +45,12 @@
   overflow: visible;
 }
 
+/* The gutter box sits at its final place while its numbers slide in; paint
+   only the moving cells so it does not flash an empty column. */
+:host([data-layout-motion]) :is([data-gutter], [data-content]) {
+  background-color: transparent;
+}
+
 :host([data-layout-motion]) [data-content] {
   translate: var(--motion-scroll, 0px) 0;
 }
