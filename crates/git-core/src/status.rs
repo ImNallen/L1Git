@@ -1,9 +1,9 @@
 use crate::{
     ChangeStatus, ChangedFile, Conflict, ErrorKind, FilePatch, IndexObject, Mode, MoveSide, Moved,
-    Oid, PATCH_LIMIT, RepositoryError, Side, Sides, StagedStamp, Stages, StatusEntry,
-    SubmoduleState, WorktreePatch, WorktreeStatus,
+    Oid, RepositoryError, Side, Sides, StagedStamp, Stages, StatusEntry, SubmoduleState,
+    WorktreePatch, WorktreeStatus,
     git::{self, Deadline, LocalRead},
-    repository::{self, text_patch},
+    repository::{self, PATCH_LIMIT, text_patch},
     untracked::untracked,
 };
 use std::{

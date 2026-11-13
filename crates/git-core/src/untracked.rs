@@ -1,6 +1,7 @@
 use crate::{
-    ErrorKind, PATCH_LIMIT, RepositoryError,
+    ErrorKind, RepositoryError,
     git::{self, Deadline},
+    repository::PATCH_LIMIT,
     status::PatchBytes,
 };
 use std::{

@@ -14,7 +14,7 @@ use std::{
 };
 
 pub const HISTORY_LIMIT: usize = 50_000;
-pub const PATCH_LIMIT: usize = 1024 * 1024;
+pub(crate) const PATCH_LIMIT: usize = 1024 * 1024;
 pub const LINE_STATS_LIMIT: usize = 500;
 pub(crate) const COMMIT_FORMAT: &str = "--format=%H%x00%P%x00%s%x00%an%x00%ae%x00%at";
 const SQUASH_SCAN_LIMIT: usize = 2000;
