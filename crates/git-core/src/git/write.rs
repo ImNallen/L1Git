@@ -462,8 +462,6 @@ impl<'a> Write<'a> {
         Self::user(txn.root(), all).input(message.as_bytes().to_vec())
     }
 
-    /// With no `GIT_REFLOG_ACTION`, HEAD's reflog reads `checkout: moving from
-    /// A to B`, which `git switch -` reads.
     /// `git stash` runs as the user, on the real index, with hooks on. No
     /// `GIT_LITERAL_PATHSPECS`: a pathspec file uses `:(literal)` instead.
     pub(crate) fn stash(txn: &'a RefTxn<'_>, args: &[&'a str]) -> Self {
@@ -472,6 +470,8 @@ impl<'a> Write<'a> {
         Self::user(txn.root(), all)
     }
 
+    /// With no `GIT_REFLOG_ACTION`, HEAD's reflog reads `checkout: moving from
+    /// A to B`, which `git switch -` reads.
     pub(crate) fn switch(txn: &'a RefTxn<'_>, args: &[&'a str]) -> Self {
         let mut all = vec![
             "-c",

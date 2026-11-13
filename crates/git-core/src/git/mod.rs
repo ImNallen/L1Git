@@ -332,8 +332,9 @@ fn capped(pipe: &mut impl Read, cap: Option<usize>) -> io::Result<Capped> {
     })
 }
 
-/// The status and output of a Git command. Its stderr is never read, so a
-/// process that holds stderr open cannot delay it.
+/// The status and output of a Git command. Its stderr is read only on exit
+/// 129, to name a Git too old to run, so a process that holds stderr open
+/// cannot delay any other exit.
 pub(crate) struct Exit {
     pub(crate) status: ExitStatus,
     pub(crate) stdout: Vec<u8>,
@@ -776,12 +777,12 @@ pub(crate) fn capture_until(
     stop: &AtomicBool,
 ) -> Result<Stoppable, RepositoryError> {
     let merge = matches!(mutation, Mutation::MergeFastForward { .. });
-    let capture = matches!(mutation, Mutation::Push { .. });
+    let push = matches!(mutation, Mutation::Push { .. });
     let mut command = base(path, merge);
     if merge {
         command.env("GIT_REFLOG_ACTION", "l1git fast-forward");
     }
-    if capture {
+    if push {
         command
             .env("L1GIT_PUSH_MIRROR", "false")
             .env("GIT_ASKPASS", "/usr/bin/false");
@@ -789,11 +790,7 @@ pub(crate) fn capture_until(
     without_prompts(&mut command)
         .args(mutation.args())
         .stdin(Stdio::null())
-        .stdout(if capture {
-            Stdio::piped()
-        } else {
-            Stdio::null()
-        })
+        .stdout(if push { Stdio::piped() } else { Stdio::null() })
         .stderr(Stdio::piped());
     let started = Instant::now();
     let mut child = Group::spawn(command)?;
