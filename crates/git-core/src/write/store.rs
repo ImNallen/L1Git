@@ -317,32 +317,13 @@ impl LockedStore {
     where
         Change: From<C>,
     {
-        let id = EntryId::after(log.entries.last().copied());
-        let applied = Applied {
-            id,
-            root: repo.root(),
-            operation: operation.clone(),
-        };
-        let entry = NewEntry {
-            dir: self.entry_dir(id),
-            kept: false,
-        };
-        private_folder().create(&entry.dir).map_err(unwritable)?;
+        let (applied, entry) = self.begin_entry(repo, log, operation)?;
+        let id = applied.id;
         let change = fill(&self.entry(id))?;
         self.write(id, "applied.json", &applied)?;
         self.write(id, "change.json", &Change::from(change.clone()))?;
-        let log = log.with_pending(id);
-        self.save(&log)?;
-        Ok((
-            applied,
-            change,
-            Recorded {
-                store: self,
-                id,
-                log,
-                entry,
-            },
-        ))
+        let recorded = self.pending(log, id, entry)?;
+        Ok((applied, change, recorded))
     }
 
     pub(super) fn remove_traces(&self) -> Result<(), RepositoryError> {
@@ -366,6 +347,18 @@ impl LockedStore {
         log: &Log,
         operation: &Operation,
     ) -> Result<(Applied, Recorded<'_>), RepositoryError> {
+        let (applied, entry) = self.begin_entry(repo, log, operation)?;
+        self.write(applied.id, "applied.json", &applied)?;
+        let recorded = self.pending(log, applied.id, entry)?;
+        Ok((applied, recorded))
+    }
+
+    fn begin_entry(
+        &self,
+        repo: &Repo,
+        log: &Log,
+        operation: &Operation,
+    ) -> Result<(Applied, NewEntry), RepositoryError> {
         let id = EntryId::after(log.entries.last().copied());
         let applied = Applied {
             id,
@@ -377,18 +370,23 @@ impl LockedStore {
             kept: false,
         };
         private_folder().create(&entry.dir).map_err(unwritable)?;
-        self.write(id, "applied.json", &applied)?;
+        Ok((applied, entry))
+    }
+
+    fn pending(
+        &self,
+        log: &Log,
+        id: EntryId,
+        entry: NewEntry,
+    ) -> Result<Recorded<'_>, RepositoryError> {
         let log = log.with_pending(id);
         self.save(&log)?;
-        Ok((
-            applied,
-            Recorded {
-                store: self,
-                id,
-                log,
-                entry,
-            },
-        ))
+        Ok(Recorded {
+            store: self,
+            id,
+            log,
+            entry,
+        })
     }
 
     fn forget(&self, log: &Log) {
