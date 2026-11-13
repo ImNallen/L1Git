@@ -182,6 +182,8 @@ const onRepository = (context: ActionContext) =>
   context.screen === "repository";
 const keysFree = (context: ActionContext) =>
   onRepository(context) && !context.adding;
+const writable = (context: ActionContext) =>
+  onRepository(context) && !context.writing && !context.merging;
 const fileOpen = (context: ActionContext) =>
   onRepository(context) && context.file !== null;
 const withRevision = (context: ActionContext) =>
@@ -194,6 +196,11 @@ const linesAllow = (action: PartAction) => (context: ActionContext) =>
   onRepository(context) &&
   !context.writing &&
   context.file?.lineActions.includes(action) === true;
+const pullDetail =
+  (diverged: (upstream: string) => string) => (context: ActionContext) =>
+    context.pull.kind === "ready"
+      ? `Fetch ${context.pull.upstream}, then fast-forward ${context.pull.name}${diverged(context.pull.upstream)}`
+      : context.pull.reason;
 const branchName = (context: ActionContext) =>
   context.sidebarBranch?.name ?? "";
 
@@ -246,19 +253,14 @@ export const actions: readonly Action[] = [
     id: "discardAll",
     title: "Discard all changes…",
     available: (context) =>
-      onRepository(context) &&
-      !context.writing &&
-      !context.merging &&
-      (context.worktree?.discardable ?? 0) > 0,
+      writable(context) && (context.worktree?.discardable ?? 0) > 0,
     run: (commands) => commands.discardAll(),
   },
   {
     id: "stashChanges",
     title: "Stash changes…",
     available: (context) =>
-      onRepository(context) &&
-      !context.writing &&
-      !context.merging &&
+      writable(context) &&
       (context.worktree?.unstaged ?? 0) +
         (context.worktree?.staged ?? 0) +
         (context.worktree?.conflicts ?? 0) >
@@ -269,10 +271,7 @@ export const actions: readonly Action[] = [
     id: "focusCommit",
     title: "Commit…",
     available: (context) =>
-      onRepository(context) &&
-      !context.writing &&
-      !context.merging &&
-      (context.worktree?.staged ?? 0) > 0,
+      writable(context) && (context.worktree?.staged ?? 0) > 0,
     run: (commands) => commands.focusCommit(),
   },
   {
@@ -325,29 +324,20 @@ export const actions: readonly Action[] = [
   {
     id: "mergeBranch",
     title: "Merge selected branch into current branch…",
-    available: (context) =>
-      onRepository(context) &&
-      context.selectedMergeAvailable &&
-      !context.writing &&
-      !context.merging,
+    available: (context) => writable(context) && context.selectedMergeAvailable,
     run: (commands) => commands.mergeBranch(),
   },
   {
     id: "mergeUpstream",
     title: "Merge upstream…",
     available: (context) =>
-      onRepository(context) &&
-      !context.writing &&
-      context.mergeAvailable === true,
+      onRepository(context) && !context.writing && context.mergeAvailable,
     run: (commands) => commands.mergeUpstream(),
   },
   {
     id: "pullFastForwardIfPossible",
     title: "Pull (Fast-forward if possible)",
-    detail: (context) =>
-      context.pull.kind === "ready"
-        ? `Fetch ${context.pull.upstream}, then fast-forward ${context.pull.name}, or review a merge if it has diverged.`
-        : context.pull.reason,
+    detail: pullDetail(() => ", or review a merge if it has diverged."),
     available: (context) =>
       onRepository(context) && context.pull.kind === "ready",
     run: (commands) => commands.pullFastForwardIfPossible(),
@@ -355,10 +345,7 @@ export const actions: readonly Action[] = [
   {
     id: "pullFastForwardOnly",
     title: "Pull (Fast-forward only)",
-    detail: (context) =>
-      context.pull.kind === "ready"
-        ? `Fetch ${context.pull.upstream}, then fast-forward ${context.pull.name}. Nothing changes if it has diverged.`
-        : context.pull.reason,
+    detail: pullDetail(() => ". Nothing changes if it has diverged."),
     available: (context) =>
       onRepository(context) && context.pull.kind === "ready",
     run: (commands) => commands.pullFastForwardOnly(),
@@ -366,10 +353,9 @@ export const actions: readonly Action[] = [
   {
     id: "pullRebase",
     title: "Pull (Rebase)",
-    detail: (context) =>
-      context.pull.kind === "ready"
-        ? `Fetch ${context.pull.upstream}, then fast-forward ${context.pull.name}, or rebase it onto ${context.pull.upstream} if it has diverged.`
-        : context.pull.reason,
+    detail: pullDetail(
+      (upstream) => `, or rebase it onto ${upstream} if it has diverged.`,
+    ),
     available: (context) =>
       onRepository(context) && context.pull.kind === "ready",
     run: (commands) => commands.pullRebase(),
@@ -508,9 +494,7 @@ export const actions: readonly Action[] = [
     id: "checkout",
     title: (context) => `Check out ${branchName(context)}`,
     available: (context) =>
-      onRepository(context) &&
-      !context.writing &&
-      !context.merging &&
+      writable(context) &&
       context.sidebarBranch !== null &&
       !context.sidebarBranch.checkedOut,
     run: (commands) => commands.checkout(),
@@ -518,30 +502,21 @@ export const actions: readonly Action[] = [
   {
     id: "newBranch",
     title: (context) => `New branch from ${branchName(context)}…`,
-    available: (context) =>
-      onRepository(context) &&
-      !context.writing &&
-      !context.merging &&
-      context.sidebarBranch !== null,
+    available: (context) => writable(context) && context.sidebarBranch !== null,
     run: (commands) => commands.newBranch(),
   },
   {
     id: "renameBranch",
     title: (context) => `Rename ${branchName(context)}…`,
     available: (context) =>
-      onRepository(context) &&
-      !context.writing &&
-      !context.merging &&
-      context.sidebarBranch?.local === true,
+      writable(context) && context.sidebarBranch?.local === true,
     run: (commands) => commands.renameBranch(),
   },
   {
     id: "deleteBranch",
     title: (context) => `Delete ${branchName(context)}…`,
     available: (context) =>
-      onRepository(context) &&
-      !context.writing &&
-      !context.merging &&
+      writable(context) &&
       context.sidebarBranch?.local === true &&
       !context.sidebarBranch.checkedOut,
     run: (commands) => commands.deleteBranch(),
@@ -550,20 +525,13 @@ export const actions: readonly Action[] = [
     id: "createTag",
     title: "Create tag…",
     available: (context) =>
-      onRepository(context) &&
-      !context.writing &&
-      !context.merging &&
-      context.selection?.kind === "commit",
+      writable(context) && context.selection?.kind === "commit",
     run: (commands) => commands.createTag(),
   },
   {
     id: "deleteTag",
     title: (context) => `Delete tag ${context.sidebarTag?.name ?? ""}…`,
-    available: (context) =>
-      onRepository(context) &&
-      !context.writing &&
-      !context.merging &&
-      context.sidebarTag !== null,
+    available: (context) => writable(context) && context.sidebarTag !== null,
     run: (commands) => commands.deleteTag(),
   },
   {
