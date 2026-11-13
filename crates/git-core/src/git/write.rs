@@ -332,24 +332,30 @@ impl<'a> Write<'a> {
         }
     }
 
-    pub(crate) fn commit(txn: &'a CommitTxn<'_>, flags: &[&'a str], message: &str) -> Self {
-        let mut args = vec!["commit", "-F", "-"];
-        args.extend(flags);
+    fn user(dir: &'a Path, args: Vec<&'a str>) -> Self {
         Self {
-            dir: txn.root(),
+            dir,
             args,
             env: Vec::new(),
-            input: Some(message.as_bytes().to_vec()),
-            cap: None,
+            input: None,
+            cap: Some(WRITE_STDOUT_CAP),
             as_user: true,
             lazy_fetch: false,
         }
     }
 
+    pub(crate) fn commit(txn: &'a CommitTxn<'_>, flags: &[&'a str], message: &str) -> Self {
+        let mut args = vec!["commit", "-F", "-"];
+        args.extend(flags);
+        Self::user(txn.root(), args)
+            .uncapped()
+            .input(message.as_bytes().to_vec())
+    }
+
     pub(crate) fn fast_forward(txn: &'a MergeTxn<'_>, source: &'a crate::Oid) -> Self {
-        Self {
-            dir: txn.runner().root(),
-            args: vec![
+        Self::user(
+            txn.runner().root(),
+            vec![
                 "merge",
                 "--ff-only",
                 "--no-autostash",
@@ -357,12 +363,9 @@ impl<'a> Write<'a> {
                 "--no-edit",
                 source.as_str(),
             ],
-            env: Vec::new(),
-            input: None,
-            cap: None,
-            as_user: true,
-            lazy_fetch: true,
-        }
+        )
+        .uncapped()
+        .lazy_fetch_unprompted()
     }
 
     pub(crate) fn merge(txn: &'a MergeIndexTxn<'_>, source: Option<&'a crate::Oid>) -> Self {
@@ -403,47 +406,30 @@ impl<'a> Write<'a> {
                 of.commit.as_str(),
             ],
         };
-        Self {
-            dir: txn.root(),
-            args,
-            env: Vec::new(),
-            input: None,
-            cap: None,
-            as_user: true,
-            lazy_fetch: true,
-        }
+        Self::user(txn.root(), args)
+            .uncapped()
+            .lazy_fetch_unprompted()
     }
 
     pub(crate) fn replay_mark_revert(txn: &'a ReplayTxn<'_>, commit: &'a crate::Oid) -> Self {
-        Self {
-            dir: txn.root(),
-            args: vec!["update-ref", "--no-deref", "REVERT_HEAD", commit.as_str()],
-            env: Vec::new(),
-            input: None,
-            cap: Some(WRITE_STDOUT_CAP),
-            as_user: true,
-            lazy_fetch: false,
-        }
+        Self::user(
+            txn.root(),
+            vec!["update-ref", "--no-deref", "REVERT_HEAD", commit.as_str()],
+        )
     }
 
     pub(crate) fn replay_abort(txn: &'a ReplayTxn<'_>, kind: ReplayKind) -> Self {
-        Self {
-            dir: txn.root(),
-            args: vec![NO_REPLACE, kind.command(), "--abort"],
-            env: Vec::new(),
-            input: None,
-            cap: None,
-            as_user: true,
-            lazy_fetch: true,
-        }
+        Self::user(txn.root(), vec![NO_REPLACE, kind.command(), "--abort"])
+            .uncapped()
+            .lazy_fetch_unprompted()
     }
 
     /// The merge backend, with no autostash, autosquash, or fork point, and no
     /// other branch moved, so the only ref that moves is the checked-out branch.
     pub(crate) fn rebase(txn: &'a RebaseTxn<'_>, onto: &'a crate::Oid) -> Self {
-        Self {
-            dir: txn.root(),
-            args: vec![
+        Self::user(
+            txn.root(),
+            vec![
                 NO_REPLACE,
                 "rebase",
                 "--merge",
@@ -453,52 +439,27 @@ impl<'a> Write<'a> {
                 "--no-fork-point",
                 onto.as_str(),
             ],
-            env: Vec::new(),
-            input: None,
-            cap: None,
-            as_user: true,
-            lazy_fetch: true,
-        }
+        )
+        .uncapped()
+        .lazy_fetch_unprompted()
     }
 
     pub(crate) fn rebase_abort(txn: &'a RebaseTxn<'_>) -> Self {
-        Self {
-            dir: txn.root(),
-            args: vec![NO_REPLACE, "rebase", "--abort"],
-            env: Vec::new(),
-            input: None,
-            cap: None,
-            as_user: true,
-            lazy_fetch: true,
-        }
+        Self::user(txn.root(), vec![NO_REPLACE, "rebase", "--abort"])
+            .uncapped()
+            .lazy_fetch_unprompted()
     }
 
     pub(crate) fn branch(txn: &'a RefTxn<'_>, args: &[&'a str]) -> Self {
         let mut all = vec!["branch"];
         all.extend(args);
-        Self {
-            dir: txn.root(),
-            args: all,
-            env: Vec::new(),
-            input: None,
-            cap: Some(WRITE_STDOUT_CAP),
-            as_user: true,
-            lazy_fetch: false,
-        }
+        Self::user(txn.root(), all)
     }
 
     pub(crate) fn tag(txn: &'a RefTxn<'_>, args: &[&'a str], message: &str) -> Self {
         let mut all = vec!["tag"];
         all.extend(args);
-        Self {
-            dir: txn.root(),
-            args: all,
-            env: Vec::new(),
-            input: Some(message.as_bytes().to_vec()),
-            cap: Some(WRITE_STDOUT_CAP),
-            as_user: true,
-            lazy_fetch: false,
-        }
+        Self::user(txn.root(), all).input(message.as_bytes().to_vec())
     }
 
     /// With no `GIT_REFLOG_ACTION`, HEAD's reflog reads `checkout: moving from
@@ -508,15 +469,7 @@ impl<'a> Write<'a> {
     pub(crate) fn stash(txn: &'a RefTxn<'_>, args: &[&'a str]) -> Self {
         let mut all = vec!["stash"];
         all.extend(args);
-        Self {
-            dir: txn.root(),
-            args: all,
-            env: Vec::new(),
-            input: None,
-            cap: Some(WRITE_STDOUT_CAP),
-            as_user: true,
-            lazy_fetch: false,
-        }
+        Self::user(txn.root(), all)
     }
 
     pub(crate) fn switch(txn: &'a RefTxn<'_>, args: &[&'a str]) -> Self {
@@ -528,33 +481,19 @@ impl<'a> Write<'a> {
             "--no-overwrite-ignore",
         ];
         all.extend(args);
-        Self {
-            dir: txn.root(),
-            args: all,
-            env: Vec::new(),
-            input: None,
-            cap: None,
-            as_user: true,
-            lazy_fetch: true,
-        }
+        Self::user(txn.root(), all)
+            .uncapped()
+            .lazy_fetch_unprompted()
     }
 
     pub(crate) fn update_refs(txn: &'a RefTxn<'_>, reflog: &'a str, input: Vec<u8>) -> Self {
-        Self {
-            dir: txn.root(),
-            args: vec!["update-ref", "-m", reflog, "--stdin"],
-            env: Vec::new(),
-            input: Some(input),
-            cap: Some(WRITE_STDOUT_CAP),
-            as_user: true,
-            lazy_fetch: false,
-        }
+        Self::user(txn.root(), vec!["update-ref", "-m", reflog, "--stdin"]).input(input)
     }
 
     pub(crate) fn move_tree(txn: &'a RefTxn<'_>, from: &'a crate::Oid, to: &'a crate::Oid) -> Self {
-        Self {
-            dir: txn.root(),
-            args: vec![
+        Self::user(
+            txn.root(),
+            vec![
                 NO_REPLACE,
                 "read-tree",
                 "-m",
@@ -562,12 +501,9 @@ impl<'a> Write<'a> {
                 from.as_str(),
                 to.as_str(),
             ],
-            env: Vec::new(),
-            input: None,
-            cap: None,
-            as_user: true,
-            lazy_fetch: true,
-        }
+        )
+        .uncapped()
+        .lazy_fetch_unprompted()
     }
 
     pub(crate) fn post_index_change(published: &'a Published) -> Self {
