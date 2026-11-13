@@ -112,7 +112,7 @@ export function FileDiffPane({
   const back = (
     <button
       ref={backRef}
-      className={conflict ? "button ghost" : "button secondary"}
+      className="button ghost"
       aria-label="Back to history"
       onClick={onBack}
       title="Back to history (Esc)"
