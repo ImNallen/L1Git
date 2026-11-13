@@ -17,7 +17,7 @@ import { inProgress } from "../domain/inProgress";
 import type { MergeCommandOutcome } from "../useWrites";
 import { OperationStrip } from "./OperationStrip";
 
-export function MergePair({ review }: { review: MergeReview }) {
+function MergePair({ review }: { review: MergeReview }) {
   return (
     <dl className="merge-pair">
       <dt>Source</dt>

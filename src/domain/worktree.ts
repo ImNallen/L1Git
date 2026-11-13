@@ -95,7 +95,7 @@ export const listWrites: Record<
   staged: { kind: "unstageFiles", row: "Unstage", all: "Unstage all" },
 };
 
-export const treeStatus = {
+const treeStatus = {
   A: "added",
   D: "deleted",
   M: "modified",
@@ -164,7 +164,7 @@ export function firstWorktreeFile(
   return null;
 }
 
-export type DiffAfter =
+type DiffAfter =
   | { kind: "reread" }
   | { kind: "follow"; side: ListSide }
   | { kind: "close" };

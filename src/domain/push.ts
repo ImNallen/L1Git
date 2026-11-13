@@ -11,7 +11,7 @@ export const pushIntentSchema = z.strictObject({
   endpoint: z.string(),
   fingerprint: z.string().regex(/^[0-9a-f]{40}$/),
 });
-export const pushUnavailableSchema = z.enum([
+const pushUnavailableSchema = z.enum([
   "detached",
   "unborn",
   "noUpstream",
@@ -75,7 +75,7 @@ export const addRemoteReportSchema = z.strictObject({
 export type AddRemoteInput = z.infer<typeof addRemoteInputSchema>;
 export type AddRemoteReport = z.infer<typeof addRemoteReportSchema>;
 
-export const trackingOutcomeSchema = z.discriminatedUnion("kind", [
+const trackingOutcomeSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("set") }),
   z.strictObject({ kind: z.literal("failed"), message: z.string() }),
   z.strictObject({ kind: z.literal("skippedChanged"), message: z.string() }),
@@ -127,7 +127,7 @@ const unavailableText: Record<z.infer<typeof pushUnavailableSchema>, string> = {
     "This destination needs one unambiguous fetch mapping to a safe tracking ref and must not be excluded. Check the remote fetch refspecs in Git.",
 };
 
-export function pushDestination(intent: PushIntent): string {
+function pushDestination(intent: PushIntent): string {
   return `${intent.remote}/${intent.destination.replace(/^refs\/heads\//, "")}`;
 }
 

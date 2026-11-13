@@ -31,7 +31,7 @@ import type {
 } from "./domain/repository";
 import { oneReadPerKey } from "./oneReadPerKey";
 
-export type Writes = {
+type Writes = {
   history: History;
   running: { action: "write" | "merge" | Step; label: string } | null;
   notice: WriteNotice | null;

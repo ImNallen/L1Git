@@ -1,54 +1,13 @@
 import { Fragment, useLayoutEffect, useRef } from "react";
-import {
-  Info,
-  LoaderCircle,
-  Redo2,
-  TriangleAlert,
-  Undo2,
-  X,
-} from "lucide-react";
+import { Info, TriangleAlert, X } from "lucide-react";
 import {
   failureText,
   historyFailure,
   hookOutputTail,
   nextEntry,
-  stepButton,
   steppedText,
 } from "../domain/operations";
 import type { WritesView } from "../useWrites";
-
-export function UndoButtons({
-  writes,
-  shortcuts,
-}: {
-  writes: WritesView;
-  shortcuts: { undo: string; redo: string };
-}) {
-  const { history, running } = writes;
-  const buttons = [
-    { step: "undo", Icon: Undo2, run: writes.undo },
-    { step: "redo", Icon: Redo2, run: writes.redo },
-  ] as const;
-  return buttons.map(({ step, Icon, run }) => {
-    const { name, title } = stepButton(history, step, shortcuts[step]);
-    return (
-      <button
-        key={step}
-        className="icon-button"
-        aria-label={name}
-        title={title}
-        aria-disabled={nextEntry(history, step) === null || running !== null}
-        onClick={() => void run()}
-      >
-        {running?.action === step ? (
-          <LoaderCircle size={15} className="spin" />
-        ) : (
-          <Icon size={15} />
-        )}
-      </button>
-    );
-  });
-}
 
 export function WriteNoticeRow({ writes }: { writes: WritesView }) {
   const { history } = writes;

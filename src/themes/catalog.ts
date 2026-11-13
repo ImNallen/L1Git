@@ -180,7 +180,7 @@ export function draftOf(variant: ThemeVariant, name: string): ThemeDraft {
   return { name, appearance, colors: { ...colors, ...swatch } };
 }
 
-export function customFamily(theme: CustomTheme): ThemeFamily | null {
+function customFamily(theme: CustomTheme): ThemeFamily | null {
   const parsed = theme.variants.map(customVariant);
   const variants = APPEARANCES.flatMap((a) =>
     parsed.filter((v) => v.appearance === a),
@@ -211,7 +211,7 @@ export const FIXED_APPEARANCE: Record<ColorScheme, Appearance | null> = {
   dark: "dark",
 };
 
-export function schemeAppearance(
+function schemeAppearance(
   scheme: ColorScheme,
   systemPrefersDark: boolean,
 ): Appearance {

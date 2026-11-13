@@ -1,6 +1,6 @@
 type Change = { title: string; pullNumber: string | null };
 
-export type ReleaseNotes =
+type ReleaseNotes =
   | { kind: "changes"; changes: Change[] }
   | { kind: "text"; text: string };
 

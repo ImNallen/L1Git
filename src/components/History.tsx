@@ -76,7 +76,7 @@ import { HistorySearch } from "./HistorySearch";
 import { MotionBoundary } from "./MotionBoundary";
 import { useHistoryMotion } from "./historyMotion";
 
-export const ROW_HEIGHT = Math.round((838 / 22) * 64) / 64;
+const ROW_HEIGHT = Math.round((838 / 22) * 64) / 64;
 const ROW_CENTER = ROW_HEIGHT / 2;
 const OVERSCAN = 10;
 const HIGHLIGHT_DELAY = 400;

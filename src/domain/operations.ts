@@ -41,8 +41,8 @@ type CommitOperation = Extract<
 >;
 type PartOperation = Extract<Operation, { shown: unknown }>;
 export type FileWrite = FileOperation["kind"];
-export type CommitWrite = CommitOperation["kind"];
-export type PartWrite = PartOperation["kind"];
+type CommitWrite = CommitOperation["kind"];
+type PartWrite = PartOperation["kind"];
 
 export type Write = {
   operation: Operation;
@@ -136,9 +136,7 @@ export function partWrite(
   return { operation, expect: { head: status.head } };
 }
 
-export const isStashOperation = (
-  operation: Operation,
-): operation is StashOperation =>
+const isStashOperation = (operation: Operation): operation is StashOperation =>
   operation.kind === "stashPush" ||
   operation.kind === "stashApply" ||
   operation.kind === "stashPop" ||
@@ -179,7 +177,7 @@ export function branchAsks(branch: Branch): {
   };
 }
 
-export const isBranchOperation = (
+const isBranchOperation = (
   operation: Operation,
 ): operation is BranchOperation =>
   operation.kind === "createBranch" ||
@@ -194,7 +192,7 @@ export const localBranch = (name: string, oid: Oid): Branch => ({
   upstream: null,
 });
 
-export type BranchStep = { left: Branch | null; gone: FullRef | null };
+type BranchStep = { left: Branch | null; gone: FullRef | null };
 
 export function branchStep(operation: BranchOperation, step: Step): BranchStep {
   const named = (name: string) => `refs/heads/${name}` as FullRef;
@@ -241,9 +239,7 @@ export type TagAsk =
   | { kind: "create"; at: Oid; subject: string }
   | { kind: "delete"; tag: Tag };
 
-export const isTagOperation = (
-  operation: Operation,
-): operation is TagOperation =>
+const isTagOperation = (operation: Operation): operation is TagOperation =>
   operation.kind === "createTag" || operation.kind === "deleteTag";
 
 export const createTagWrite = (
@@ -369,7 +365,7 @@ export function notMergedInto(
   return `${name} is not merged into ${missing.join(" or ")}.`;
 }
 
-export function discardable(entry: StatusEntry): boolean {
+function discardable(entry: StatusEntry): boolean {
   switch (entry.kind) {
     case "ordinary": {
       const addedWithIntent = entry.index === null;
@@ -539,29 +535,6 @@ export const steppedText = ({
 
 export const historyFailure = (problem: Problem) =>
   `Undo and redo are unavailable. ${problem.message}`;
-
-const stepNames = { undo: "Undo", redo: "Redo" } as const;
-
-export function stepButton(
-  history: History,
-  step: Step,
-  shortcut: string,
-): { name: string; title: string } {
-  const name = stepNames[step];
-  if (history.kind === "unread")
-    return { name, title: "Reading the undo history" };
-  if (history.kind === "unreadable")
-    return {
-      name,
-      title: `${name} is unavailable. ${history.problem.message}`,
-    };
-  const entry = history[step];
-  if (entry === null) return { name, title: `Nothing to ${step}` };
-  return {
-    name: `${name} ${entry.label}`,
-    title: `${name} ${entry.label} (${shortcut})`,
-  };
-}
 
 export type WriteNotice =
   | { kind: "stepped"; step: Step; label: string }

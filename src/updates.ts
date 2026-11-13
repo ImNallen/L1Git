@@ -46,8 +46,8 @@ const snapshotSchema = z.object({
   state: updateStateSchema,
 });
 export type UpdateState = z.infer<typeof updateStateSchema>;
-export type UpdateSnapshot = z.infer<typeof snapshotSchema>;
-export type UpdateTrack = z.infer<typeof trackSchema>;
+type UpdateSnapshot = z.infer<typeof snapshotSchema>;
+type UpdateTrack = z.infer<typeof trackSchema>;
 export type CandidateId = z.infer<typeof candidateSchema>["id"];
 export const parseUpdateSnapshot = (value: unknown) =>
   snapshotSchema.parse(value);

@@ -89,7 +89,7 @@ export type DetailState =
   | ({ kind: "ready"; detail: CommitDetail } & DetailKey)
   | ({ kind: "error"; error: Problem } & DetailKey);
 /** `superseded` means another repository opened while this one was read. */
-export type Added =
+type Added =
   | { kind: "opened"; root: RepositoryRoot }
   | { kind: "superseded" }
   | { kind: "failed"; problem: Problem };

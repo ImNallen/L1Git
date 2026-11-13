@@ -1,6 +1,6 @@
 import type { PublishOptions, PushIntent } from "./push";
 
-export type PublishReview = {
+type PublishReview = {
   generation: number;
   step:
     | { kind: "editing" }

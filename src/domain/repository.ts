@@ -16,11 +16,11 @@ export const localRefSchema = z
   .string()
   .regex(/^refs\/heads\/.+$/)
   .brand<"FullRef">();
-export const tagRefSchema = z
+const tagRefSchema = z
   .string()
   .regex(/^refs\/tags\/.+$/)
   .brand<"FullRef">();
-export const remoteRefSchema = z
+const remoteRefSchema = z
   .string()
   .regex(/^refs\/remotes\/.+\/.+$/)
   .brand<"FullRef">();
@@ -28,7 +28,7 @@ export const branchTipSchema = z.strictObject({
   reference: localRefSchema,
   oid: oidSchema,
 });
-export const tagTipSchema = z.strictObject({
+const tagTipSchema = z.strictObject({
   reference: tagRefSchema,
   oid: oidSchema,
 });
@@ -83,11 +83,11 @@ export const stashSchema = z.object({
   message: z.string(),
   timestamp: z.number().int(),
 });
-export const stashTipSchema = z.strictObject({
+const stashTipSchema = z.strictObject({
   name: z.string(),
   oid: oidSchema,
 });
-export const submoduleSchema = z.object({
+const submoduleSchema = z.object({
   path: z.string(),
   oid: oidSchema,
 });
@@ -202,7 +202,7 @@ export const lineStatsSchema = z.array(
     deleted: z.number().int().nonnegative(),
   }),
 );
-export const sidesSchema = z.discriminatedUnion("kind", [
+const sidesSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("staged"), staged: changeStatusSchema }),
   z.strictObject({ kind: z.literal("unstaged"), unstaged: changeStatusSchema }),
   z.strictObject({
@@ -216,17 +216,17 @@ export const submoduleStateSchema = z.strictObject({
   modified: z.boolean(),
   untracked: z.boolean(),
 });
-export const modeSchema = z.enum(["100644", "100755", "120000", "160000"]);
+const modeSchema = z.enum(["100644", "100755", "120000", "160000"]);
 export const indexObjectSchema = z.strictObject({
   mode: modeSchema,
   oid: oidSchema,
 });
-export const stagesSchema = z.strictObject({
+const stagesSchema = z.strictObject({
   base: indexObjectSchema.nullable(),
   ours: indexObjectSchema.nullable(),
   theirs: indexObjectSchema.nullable(),
 });
-export const moveSideSchema = z.discriminatedUnion("kind", [
+const moveSideSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("staged"),
     unstaged: changeStatusSchema.nullable(),
@@ -329,7 +329,7 @@ export const conflictSnapshotSchema = z.strictObject({
   incoming: conflictTextSchema,
   working: conflictTextSchema,
 });
-export const conflictUnsupportedSchema = z.enum([
+const conflictUnsupportedSchema = z.enum([
   "structural",
   "binary",
   "encoding",
@@ -627,7 +627,6 @@ export type Head = z.infer<typeof headSchema>;
 export type Branch = z.infer<typeof branchSchema>;
 export type Tag = z.infer<typeof tagSchema>;
 export type Stash = z.infer<typeof stashSchema>;
-export type Submodule = z.infer<typeof submoduleSchema>;
 export type Worktree = z.infer<typeof worktreeSchema>;
 export type Commit = z.infer<typeof commitSchema>;
 export type Squash = z.infer<typeof squashSchema>;
@@ -639,13 +638,9 @@ export type ChangedFile = CommitDetail["files"][number];
 export type FilePatch = z.infer<typeof filePatchSchema>;
 export type FileRevision = z.infer<typeof fileHistorySchema>[number];
 export type BlameRange = z.infer<typeof blameRangeSchema>;
-export type Blame = z.infer<typeof blameSchema>;
 export type LineStats = z.infer<typeof lineStatsSchema>[number];
-export type Sides = z.infer<typeof sidesSchema>;
 export type SubmoduleState = z.infer<typeof submoduleStateSchema>;
 export type IndexObject = z.infer<typeof indexObjectSchema>;
-export type Stages = z.infer<typeof stagesSchema>;
-export type MoveSide = z.infer<typeof moveSideSchema>;
 export type Conflict = z.infer<typeof conflictSchema>;
 export type ReplayKind = z.infer<typeof replayKindSchema>;
 export type ReplayOf = z.infer<typeof replayOfSchema>;
@@ -653,7 +648,6 @@ export type ReplayPrediction = z.infer<typeof replayPredictionSchema>;
 export type ReplayReview = z.infer<typeof replayReviewSchema>;
 export type StatusEntry = z.infer<typeof statusEntrySchema>;
 export type WorktreeStatus = z.infer<typeof worktreeStatusSchema>;
-export type StagedStamp = z.infer<typeof stagedStampSchema>;
 export type Side = z.infer<typeof sideSchema>;
 export type WorktreePatch = z.infer<typeof worktreePatchSchema>;
 export type EntryId = z.infer<typeof entryIdSchema>;
@@ -664,7 +658,6 @@ export type Expect = z.infer<typeof expectSchema>;
 export type Applied = z.infer<typeof appliedSchema>;
 export type UndoHistory = z.infer<typeof undoHistorySchema>;
 export type BranchTip = z.infer<typeof branchTipSchema>;
-export type TagTip = z.infer<typeof tagTipSchema>;
 export type Start = z.infer<typeof startSchema>;
 export type BranchMerged = z.infer<typeof branchMergedSchema>;
 export type Problem =

@@ -32,7 +32,7 @@ export function matchCommits(
   return matches;
 }
 
-export type MatchPositions = ReadonlyMap<Oid, number>;
+type MatchPositions = ReadonlyMap<Oid, number>;
 
 export function matchPositions(matches: readonly Oid[]): MatchPositions {
   return new Map(matches.map((oid, index) => [oid, index]));

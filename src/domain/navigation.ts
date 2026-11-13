@@ -9,7 +9,7 @@ export type HistoryKey = Pick<
   "key" | "shiftKey" | "metaKey" | "ctrlKey" | "altKey"
 >;
 
-export type HistoryBinding = {
+type HistoryBinding = {
   key: string;
   shift: boolean;
   cmdOrCtrl: boolean;
@@ -27,7 +27,7 @@ const binding = (
   action,
 });
 
-export const historyBindings: readonly HistoryBinding[] = [
+const historyBindings: readonly HistoryBinding[] = [
   binding("ArrowDown", "down"),
   binding("j", "down"),
   binding("ArrowUp", "up"),

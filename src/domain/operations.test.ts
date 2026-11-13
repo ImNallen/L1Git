@@ -23,13 +23,12 @@ import {
   stashPopWrite,
   stashPushWrite,
   worktreeForStash,
-  stepButton,
   steppedText,
   notMergedInto,
   startAt,
   writeFor,
 } from "./operations";
-import type { History, HistoryEntry, StaleReason } from "./operations";
+import type { History, StaleReason } from "./operations";
 import {
   entryIdSchema,
   localRefSchema,
@@ -779,64 +778,6 @@ group("rereadsRepository", () => {
     expect(
       rereadsRepository({ kind: "lockHeld", message: "Another Git process." }),
     ).toBe(false);
-  });
-});
-
-group("stepButton", () => {
-  const entry = (label: string): HistoryEntry => ({
-    id: entryIdSchema.parse("18e1c91cc9cade98"),
-    root: status.root,
-    operation: { kind: "stageFiles", entries: [modified] },
-    label,
-  });
-
-  it("names the entry in the accessible name and the tooltip", () => {
-    const history: History = {
-      kind: "read",
-      undo: entry("Stage README.md"),
-      redo: null,
-    };
-    expect(stepButton(history, "undo", "⌘Z")).toEqual({
-      name: "Undo Stage README.md",
-      title: "Undo Stage README.md (⌘Z)",
-    });
-    expect(stepButton(history, "redo", "⇧⌘Z")).toEqual({
-      name: "Redo",
-      title: "Nothing to redo",
-    });
-  });
-
-  it("shows why the history cannot be read instead of an empty one", () => {
-    const history: History = {
-      kind: "unreadable",
-      problem: {
-        kind: "transport",
-        message:
-          "The development bridge is unavailable. Start pnpm dev and try again.",
-      },
-    };
-    expect(stepButton(history, "undo", "⌘Z")).toEqual({
-      name: "Undo",
-      title:
-        "Undo is unavailable. The development bridge is unavailable. Start pnpm dev and try again.",
-    });
-    expect(stepButton(history, "redo", "⇧⌘Z")).toEqual({
-      name: "Redo",
-      title:
-        "Redo is unavailable. The development bridge is unavailable. Start pnpm dev and try again.",
-    });
-  });
-
-  it("says the history is loading before the first read answers", () => {
-    const history: History = { kind: "unread" };
-    expect(stepButton(history, "undo", "⌘Z")).toEqual({
-      name: "Undo",
-      title: "Reading the undo history",
-    });
-    expect(stepButton(history, "redo", "⇧⌘Z")).toEqual({
-      name: "Redo",
-      title: "Reading the undo history",
-    });
   });
 });
 
