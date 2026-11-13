@@ -1,5 +1,6 @@
 use super::{
     discard::{self, After},
+    files::unsupported,
     index::{self, Rows},
     txn::Txn,
 };
@@ -347,10 +348,6 @@ fn changed() -> RepositoryError {
         StaleReason::PathChanged,
         "This file changed. Refresh to see its current diff.",
     )
-}
-
-fn unsupported(message: String) -> RepositoryError {
-    RepositoryError::new(ErrorKind::UnsupportedPath, message)
 }
 
 pub(super) fn partial_patch(

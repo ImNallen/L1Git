@@ -1,5 +1,5 @@
 use super::{
-    Change, Direction, Expect, Repo, Restored,
+    Change, Direction, Expect, Repo, Restored, files,
     partial::{Action, Part},
     store,
     txn::Txn,
@@ -451,10 +451,7 @@ pub(super) fn edit<'r>(
                     return Err(not_utf8(command, path));
                 }
                 if !seen.matches(at(before, path)) {
-                    return Err(RepositoryError::stale(
-                        StaleReason::PathChanged,
-                        format!("{path} changed since L1 Git read it. Refresh and try again."),
-                    ));
+                    return Err(files::changed(path));
                 }
             }
             txn.git(command.args())
@@ -811,10 +808,6 @@ pub(super) fn read_worktree(
     Ok((parse_debug(&raw)?, raw))
 }
 
-pub(super) fn parse_rows(output: &[u8]) -> Result<Rows, RepositoryError> {
-    parse_debug(output)
-}
-
 pub(super) fn stored_blobs(rows: &Rows) -> Vec<Oid> {
     let objects: BTreeSet<Oid> = rows
         .values()
@@ -972,7 +965,7 @@ fn placeholder(file: &Path, _mode: Mode) -> io::Result<()> {
 /// each starting with two spaces and ending in a newline, the last holding
 /// `flags: <hex>`. A path can hold a newline, so only lines that start with
 /// two spaces are debug lines.
-fn parse_debug(output: &[u8]) -> Result<Rows, RepositoryError> {
+pub(super) fn parse_debug(output: &[u8]) -> Result<Rows, RepositoryError> {
     let mut paths: Vec<(Vec<u8>, Vec<IndexEntry>)> = Vec::new();
     let mut open: Option<(&[u8], Mode, Oid, u8)> = None;
     for mut piece in output.split(|byte| *byte == 0) {

@@ -787,7 +787,7 @@ impl EntryObjects {
         runner: &impl Runner,
         tip: &Oid,
     ) -> Result<(), RepositoryError> {
-        self.keep_unique(runner, tip, &["--branches", "--tags"])
+        self.keep_unique(runner, tip, &LASTING_REFS)
     }
 
     pub(super) fn keep_tag(

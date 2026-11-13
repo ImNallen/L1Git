@@ -1250,7 +1250,7 @@ const STATUS_BEFORE: &str = "status-before";
 fn load_rows(files: &Path) -> Result<Rows, RepositoryError> {
     let raw = fs::read(files.join(INDEX_BEFORE))
         .map_err(|error| files::failed("the undo history", &error))?;
-    index::parse_rows(&raw)
+    index::parse_debug(&raw)
 }
 
 fn load_status(files: &Path) -> Result<Vec<StatusEntry>, RepositoryError> {
