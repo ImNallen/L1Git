@@ -677,7 +677,7 @@ function shortcutLabel(shortcut: Shortcut, mac: boolean): string {
   return `Ctrl+${shortcut.shift ? "Shift+" : ""}${key}`;
 }
 
-export type PaletteKind = "action" | "repository" | "branch" | "tag" | "stash";
+type PaletteKind = "action" | "repository" | "branch" | "tag" | "stash";
 
 export type PaletteItem = {
   id: string;

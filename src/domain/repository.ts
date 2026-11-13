@@ -32,7 +32,7 @@ const tagTipSchema = z.strictObject({
   reference: tagRefSchema,
   oid: oidSchema,
 });
-export const startSchema = z.discriminatedUnion("kind", [
+const startSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("commit"), oid: oidSchema }),
   z.strictObject({
     kind: z.literal("local"),
@@ -70,14 +70,14 @@ export const branchSchema = z.discriminatedUnion("kind", [
     remote: z.string(),
   }),
 ]);
-export const tagSchema = z.object({
+const tagSchema = z.object({
   reference: refSchema,
   name: z.string(),
   oid: oidSchema,
   object: oidSchema,
   annotated: z.boolean(),
 });
-export const stashSchema = z.object({
+const stashSchema = z.object({
   name: z.string(),
   oid: oidSchema,
   message: z.string(),
@@ -91,13 +91,13 @@ const submoduleSchema = z.object({
   path: z.string(),
   oid: oidSchema,
 });
-export const worktreeSchema = z.object({
+const worktreeSchema = z.object({
   root: rootSchema,
   name: z.string(),
   head: headSchema,
   current: z.boolean(),
 });
-export const commitSchema = z.object({
+const commitSchema = z.object({
   oid: oidSchema,
   parents: z.array(oidSchema),
   subject: z.string(),
@@ -106,7 +106,7 @@ export const commitSchema = z.object({
   timestamp: z.number().int(),
 });
 /** `commit` carries the combined changes of the branch that ends at `tip`. */
-export const squashSchema = z.object({ tip: oidSchema, commit: oidSchema });
+const squashSchema = z.object({ tip: oidSchema, commit: oidSchema });
 export const snapshotSchema = z.object({
   root: rootSchema,
   name: z.string(),
@@ -137,7 +137,7 @@ export const refsSchema = snapshotSchema.pick({
   stashes: true,
   submodules: true,
 });
-export const changeStatusSchema = z.enum(["A", "D", "M", "T"]);
+const changeStatusSchema = z.enum(["A", "D", "M", "T"]);
 export const detailSchema = z.object({
   base: z.discriminatedUnion("kind", [
     z.strictObject({ kind: z.literal("emptyTree") }),
@@ -173,7 +173,7 @@ export const filePatchSchema = z.discriminatedUnion("kind", [
 export const fileHistorySchema = z.array(
   z.strictObject({ commit: commitSchema, path: z.string() }),
 );
-export const blameRangeSchema = z.strictObject({
+const blameRangeSchema = z.strictObject({
   oid: oidSchema,
   start: z.number().int().positive(),
   lines: z.number().int().positive(),
@@ -211,13 +211,13 @@ const sidesSchema = z.discriminatedUnion("kind", [
     unstaged: changeStatusSchema,
   }),
 ]);
-export const submoduleStateSchema = z.strictObject({
+const submoduleStateSchema = z.strictObject({
   commitChanged: z.boolean(),
   modified: z.boolean(),
   untracked: z.boolean(),
 });
 const modeSchema = z.enum(["100644", "100755", "120000", "160000"]);
-export const indexObjectSchema = z.strictObject({
+const indexObjectSchema = z.strictObject({
   mode: modeSchema,
   oid: oidSchema,
 });
@@ -234,7 +234,7 @@ const moveSideSchema = z.discriminatedUnion("kind", [
   }),
   z.strictObject({ kind: z.literal("unstaged"), original: indexObjectSchema }),
 ]);
-export const conflictSchema = z.enum([
+const conflictSchema = z.enum([
   "bothDeleted",
   "addedByUs",
   "deletedByThem",
@@ -278,7 +278,7 @@ export const worktreeStatusSchema = z.strictObject({
   entries: z.array(statusEntrySchema),
   stagedStamp: stagedStampSchema,
 });
-export const sideSchema = z.enum(["staged", "unstaged"]);
+const sideSchema = z.enum(["staged", "unstaged"]);
 export const worktreePatchSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("diff"), diff: filePatchSchema }),
   z.strictObject({
@@ -405,7 +405,7 @@ export const wholeFileConflictSchema = z
     disk: wholeFileDiskSchema,
   })
   .nullable();
-export const conflictKeepSchema = z.enum(["current", "incoming"]);
+const conflictKeepSchema = z.enum(["current", "incoming"]);
 export type ConflictFile = z.infer<typeof conflictFileSchema>;
 export type ConflictSnapshot = z.infer<typeof conflictSnapshotSchema>;
 export type ConflictSummary = z.infer<typeof conflictSummarySchema>[number];
@@ -419,8 +419,8 @@ export const entryIdSchema = z
   .string()
   .regex(/^[0-9a-f]{16}$/)
   .brand<"EntryId">();
-export const lineSideSchema = z.enum(["deletions", "additions"]);
-export const linePickSchema = z.strictObject({
+const lineSideSchema = z.enum(["deletions", "additions"]);
+const linePickSchema = z.strictObject({
   side: lineSideSchema,
   line: z.number().int().positive(),
 });
@@ -429,7 +429,7 @@ export const replayOfSchema = z.strictObject({
   kind: replayKindSchema,
   commit: oidSchema,
 });
-export const replayPredictionSchema = z.discriminatedUnion("kind", [
+const replayPredictionSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("clean"), tree: oidSchema }),
   z.strictObject({ kind: z.literal("conflict"), paths: z.array(z.string()) }),
   z.strictObject({ kind: z.literal("empty") }),
@@ -543,7 +543,7 @@ const recordedOperationSchema = z.union([
   otherOperationSchema,
   saveConflictDescriptor.transform((operation) => ({ ...operation, text: "" })),
 ]);
-export const expectSchema = z.strictObject({ head: headSchema });
+const expectSchema = z.strictObject({ head: headSchema });
 export const appliedSchema = z.strictObject({
   id: entryIdSchema,
   root: rootSchema,

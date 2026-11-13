@@ -185,7 +185,7 @@ export type RecipeSpec =
   | readonly ["shadow", t: number, alpha: number]
   | readonly ["laneInk", minWhite: number, t: number];
 
-export const onAccent: Recipe = (s) => {
+const onAccent: Recipe = (s) => {
   const dark = mix(s.accent, BLACK, 0.85);
   return contrast(WHITE, s.accent) >= 3 ? WHITE : dark;
 };

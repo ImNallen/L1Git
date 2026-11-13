@@ -19,12 +19,12 @@ import type { ActionSlice } from "./actionSlices";
 import type { ActiveWorktree } from "./useActiveWorktree";
 import type { Focus } from "./useFocus";
 
-export type SelectedWorktree = {
+type SelectedWorktree = {
   worktree: Worktree;
   changes: WorktreeChanges | undefined;
 };
 
-export type Discarding = {
+type Discarding = {
   root: RepositoryRoot;
   write: Write;
   paths: string[];
@@ -32,7 +32,7 @@ export type Discarding = {
   returnFocus?: () => void;
 };
 
-export type Stashing = {
+type Stashing = {
   root: RepositoryRoot;
   paths: string[];
   untracked: boolean;

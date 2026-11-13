@@ -1,0 +1,12 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": [
+    "scripts/fit-theme-palette.mjs",
+    "scripts/graph-intro.ts",
+    "scripts/tree-geometry-browser.tsx",
+    "scripts/updater-harness.mjs",
+    "scripts/verify-graph-intro.mjs",
+    "scripts/verify-workspace-visual.mjs"
+  ],
+  "ignoreBinaries": ["agent-browser"]
+}

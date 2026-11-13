@@ -18,7 +18,7 @@ import { shortOid } from "./shortOid";
 
 export type OperationVerb = "merge" | ReplayKind;
 
-export type OperationSide = { name: string; oid: Oid | null };
+type OperationSide = { name: string; oid: Oid | null };
 
 export type ConflictProgress = {
   unresolved: readonly string[];

@@ -9,7 +9,7 @@ import type {
 import { worktreeHead } from "./worktree";
 import type { HistoryRow } from "./worktree";
 
-export type CommitSelection = { kind: "commit"; oid: Oid };
+type CommitSelection = { kind: "commit"; oid: Oid };
 export type Selection =
   | CommitSelection
   | { kind: "worktree"; root: RepositoryRoot };
