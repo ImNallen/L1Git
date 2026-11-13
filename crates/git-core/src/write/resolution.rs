@@ -340,7 +340,7 @@ pub(super) fn save(
             file.sync_all()
         })
         .map_err(|error| files::failed(path, &error))?;
-    let (applied, change, recorded) = store.record_with(repo, log, operation, |entry| {
+    let (applied, change, mut recorded) = store.record_with(repo, log, operation, |entry| {
         let copies = entry.files();
         store::private_folder()
             .create(&copies)
@@ -418,13 +418,7 @@ pub(super) fn save(
         }
         txn.publish_index(&Change::Resolution(change.clone()))
     })();
-    let published = match placed {
-        Ok(published) => published,
-        Err(error) => {
-            recorded.stay_pending();
-            return Err(recovery(error));
-        }
-    };
+    let published = recorded.pending_on_err(placed).map_err(recovery)?;
     recorded.confirm_checked().map_err(recovery)?;
     Ok((applied, Some(published)))
 }

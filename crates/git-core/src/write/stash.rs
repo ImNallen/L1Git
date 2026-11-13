@@ -341,7 +341,7 @@ fn record_and_finish(
     let deadline = writing.deadline;
     let operation = writing.operation;
     let txn = RefTxn::begin(repo, deadline)?;
-    let (applied, pending, recorded) = store.record_with(repo, log, operation, |entry| {
+    let (applied, pending, mut recorded) = store.record_with(repo, log, operation, |entry| {
         let files = entry.files();
         store::private_folder()
             .create(&files)
@@ -378,43 +378,23 @@ fn record_and_finish(
         return Err(git::malformed());
     };
     let txn = txn.renewed()?;
-    let ran = match run(&txn) {
-        Ok(wrote) => wrote,
-        Err(error) => {
-            recorded.stay_pending();
-            return Err(error);
-        }
-    };
+    let ran = recorded.pending_on_err(run(&txn))?;
     let said = ran.stderr().to_owned();
     let code = ran.code();
-    let now = match observe(repo, deadline.renewed()) {
-        Ok(now) => now,
-        Err(error) => {
-            recorded.stay_pending();
-            return Err(error);
-        }
-    };
+    let now = recorded.pending_on_err(observe(repo, deadline.renewed()))?;
     let files = store.entry(applied.id).files();
-    let verdict = match judge(&files, &before, &now, code, &said) {
-        Ok(verdict) => verdict,
-        Err(error) => {
-            recorded.stay_pending();
-            return Err(error);
-        }
-    };
+    let verdict = recorded.pending_on_err(judge(&files, &before, &now, code, &said))?;
     let (presence, trouble) = match verdict {
         Verdict::Leave(error) => return Err(error),
         Verdict::Keep { presence, trouble } => (presence, trouble),
     };
     let (presence, trouble) = match (&before.intent, code, trouble) {
         (Intent::Pop { listed }, Some(0), None) => {
-            if let Err(error) = store
-                .entry(applied.id)
-                .keep_stash(txn.runner(), &listed.oid)
-            {
-                recorded.stay_pending();
-                return Err(error);
-            }
+            recorded.pending_on_err(
+                store
+                    .entry(applied.id)
+                    .keep_stash(txn.runner(), &listed.oid),
+            )?;
             match finish_drop(&txn, listed) {
                 Ok(()) => (Presence::Removed(listed.clone()), None),
                 Err(error) if error.kind == ErrorKind::Raced || is_stash_changed(&error) => {
@@ -428,13 +408,7 @@ fn record_and_finish(
         }
         (_, _, trouble) => (presence, trouble),
     };
-    let change = match build_settled(repo, &files, &before, &now, presence) {
-        Ok(change) => change,
-        Err(error) => {
-            recorded.stay_pending();
-            return Err(error);
-        }
-    };
+    let change = recorded.pending_on_err(build_settled(repo, &files, &before, &now, presence))?;
     confirm(store, txn.runner(), applied.id, recorded, change)?;
     match trouble {
         Some(error) => Err(error),
@@ -465,18 +439,12 @@ fn confirm(
     store: &LockedStore,
     runner: &impl super::txn::Runner,
     id: EntryId,
-    recorded: store::Recorded<'_>,
+    mut recorded: store::Recorded<'_>,
     change: StashChange,
 ) -> Result<(), RepositoryError> {
     let wire = Change::Stash(change);
-    if let Err(error) = store.entry(id).keep(runner, &wire.objects()) {
-        recorded.stay_pending();
-        return Err(error);
-    }
-    if let Err(error) = recorded.replace(&wire) {
-        recorded.stay_pending();
-        return Err(store::unwritable(error));
-    }
+    recorded.pending_on_err(store.entry(id).keep(runner, &wire.objects()))?;
+    recorded.pending_on_err(recorded.replace(&wire).map_err(store::unwritable))?;
     recorded.confirm();
     Ok(())
 }

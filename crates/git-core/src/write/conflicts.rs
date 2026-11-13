@@ -872,7 +872,7 @@ pub(super) fn resolve(
     if staged.path_names().ne([path]) || index::at(&after, path) != resolved {
         return Err(files::changed(path));
     }
-    let (applied, change, recorded) = store.record_with(repo, log, operation, |entry| {
+    let (applied, change, mut recorded) = store.record_with(repo, log, operation, |entry| {
         let copies = entry.files();
         store::private_folder()
             .create(&copies)
@@ -930,13 +930,7 @@ pub(super) fn resolve(
         }
         txn.publish_index(&super::Change::Whole(change.clone()))
     })();
-    let published = match placed {
-        Ok(published) => published,
-        Err(error) => {
-            recorded.stay_pending();
-            return Err(recovery(error));
-        }
-    };
+    let published = recorded.pending_on_err(placed).map_err(recovery)?;
     recorded.confirm_checked().map_err(recovery)?;
     Ok((applied, Some(published)))
 }

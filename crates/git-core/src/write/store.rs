@@ -490,14 +490,27 @@ impl Recorded<'_> {
         self.entry.kept = true;
     }
 
+    pub(super) fn pending_on_err<T>(
+        &mut self,
+        result: Result<T, RepositoryError>,
+    ) -> Result<T, RepositoryError> {
+        if result.is_err() {
+            self.entry.kept = true;
+        }
+        result
+    }
+
     /// Marks the write done once the index holds it. If the log cannot be
     /// saved, it stays pending, and the next locked request keeps it,
     /// because the index holds what it wrote.
-    pub(super) fn confirm(mut self) {
-        self.entry.kept = true;
-        let done = self.log.pushed(self.id);
-        if self.store.save(&done).is_ok() {
-            self.store.forget(&done);
+    pub(super) fn confirm(self) {
+        let _ = self.confirm_checked();
+    }
+
+    pub(super) fn settle(self, change: &Change) {
+        match self.replace(change) {
+            Ok(()) => self.confirm(),
+            Err(_) => self.stay_pending(),
         }
     }
 }

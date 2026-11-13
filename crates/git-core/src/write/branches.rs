@@ -865,10 +865,7 @@ fn record_around(
             ),
         ));
     };
-    match recorded.replace(&Change::Branch(change)) {
-        Ok(()) => recorded.confirm(),
-        Err(_) => recorded.stay_pending(),
-    }
+    recorded.settle(&Change::Branch(change));
     acted.map(|()| applied)
 }
 

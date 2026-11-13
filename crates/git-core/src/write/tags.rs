@@ -281,10 +281,7 @@ fn record_around(
             ),
         ));
     };
-    match recorded.replace(&Change::Tag(change)) {
-        Ok(()) => recorded.confirm(),
-        Err(_) => recorded.stay_pending(),
-    }
+    recorded.settle(&Change::Tag(change));
     acted.map(|()| applied)
 }
 

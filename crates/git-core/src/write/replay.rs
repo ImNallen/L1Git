@@ -737,7 +737,7 @@ pub(super) fn apply(
         ReplayPrediction::Conflict { .. } => None,
         ReplayPrediction::Empty => return Err(nothing_to_apply(of.kind)),
     };
-    let (applied, _, recorded) = store.record_with(repo, log, operation, |_| {
+    let (applied, _, mut recorded) = store.record_with(repo, log, operation, |_| {
         Ok(ReplayChange::Pending {
             before: head.clone(),
             tree,
@@ -746,17 +746,11 @@ pub(super) fn apply(
     recorded.durable()?;
     let trace = Trace::create(store, applied.id)?;
     let txn = ReplayTxn::begin(repo, deadline)?;
-    let wrote = match txn
-        .apply(&of)
-        .traces(&trace.events, &trace.refs)
-        .run(deadline)
-    {
-        Ok(wrote) => wrote,
-        Err(error) => {
-            recorded.stay_pending();
-            return Err(error);
-        }
-    };
+    let wrote = recorded.pending_on_err(
+        txn.apply(&of)
+            .traces(&trace.events, &trace.refs)
+            .run(deadline),
+    )?;
     let txn = txn.renewed();
     match wrote.code() {
         Some(0) => {
@@ -957,7 +951,7 @@ pub(super) fn finish(
             edited.join(", ")
         )));
     }
-    let (applied, _, recorded) = store.record_with(repo, log, operation, |_| {
+    let (applied, _, mut recorded) = store.record_with(repo, log, operation, |_| {
         Ok(ReplayChange::Pending {
             before: head.clone(),
             tree: Some(tree.clone()),
@@ -966,18 +960,12 @@ pub(super) fn finish(
     recorded.durable()?;
     let trace = Trace::create(store, applied.id)?;
     let txn = CommitTxn::begin(repo, deadline)?;
-    let wrote = match txn
-        .commit(&[], message)
-        .without_replacements()
-        .traces(&trace.events, &trace.refs)
-        .run(deadline)
-    {
-        Ok(wrote) => wrote,
-        Err(error) => {
-            recorded.stay_pending();
-            return Err(error);
-        }
-    };
+    let wrote = recorded.pending_on_err(
+        txn.commit(&[], message)
+            .without_replacements()
+            .traces(&trace.events, &trace.refs)
+            .run(deadline),
+    )?;
     let txn = txn.renewed();
     let deadline = deadline.renewed();
     // A killed Git may have made the commit. The next request settles from Git's state.
