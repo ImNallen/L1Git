@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { RotateCw } from "lucide-react";
 import { draftImpact, useDraftImpact } from "../draftProtection";
 import type { DraftImpact } from "../draftProtection";
@@ -18,13 +18,7 @@ export function useUpdateRestart(updates: Updates) {
   const impact = useDraftImpact();
   const state = updates.snapshot.state;
   const candidate = state.kind === "downloaded" ? state.candidate.id : null;
-  const currentConsent = consent?.candidate === candidate ? consent : null;
-
-  useEffect(() => {
-    setConsent((current) =>
-      current?.candidate === candidate ? current : null,
-    );
-  }, [candidate]);
+  if (consent && consent.candidate !== candidate) setConsent(null);
 
   function cancel() {
     setConsent(null);
@@ -44,18 +38,18 @@ export function useUpdateRestart(updates: Updates) {
   }
 
   async function confirm() {
-    if (!currentConsent || pending.current) return;
+    if (!consent || pending.current) return;
     pending.current = true;
     try {
       const result = await updates.restart(
-        currentConsent.candidate,
-        currentConsent.impact.revision,
+        consent.candidate,
+        consent.impact.revision,
       );
       setConsent((current) => {
-        if (current !== currentConsent) return current;
+        if (current !== consent) return current;
         if (result.kind === "accepted") return null;
         return {
-          ...currentConsent,
+          ...consent,
           impact: draftImpact(),
           message:
             result.kind === "busy"
@@ -72,10 +66,10 @@ export function useUpdateRestart(updates: Updates) {
     request,
     cancel,
     problem,
-    dialog: currentConsent && (
+    dialog: consent && (
       <RestartDialog
-        impact={currentConsent.impact}
-        message={currentConsent.message}
+        impact={consent.impact}
+        message={consent.message}
         busy={impact.tasks > 0}
         pending={impact.frozen}
         onConfirm={() => void confirm()}
