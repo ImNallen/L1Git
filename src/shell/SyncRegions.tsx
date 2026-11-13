@@ -8,16 +8,14 @@ import type { WriteLoop } from "./useWriteLoop";
 export function PushNotice({ push }: { push: PushState | undefined }) {
   if (!push?.notice) return null;
   const { notice } = push;
+  const succeeded =
+    notice.outcome.kind === "published" ||
+    notice.outcome.kind === "pushed" ||
+    notice.outcome.kind === "upToDate";
   return (
     <div
-      className={`notice ${notice.outcome.kind === "published" || notice.outcome.kind === "pushed" || notice.outcome.kind === "upToDate" ? "info-notice" : "error-notice"}`}
-      role={
-        notice.outcome.kind === "published" ||
-        notice.outcome.kind === "pushed" ||
-        notice.outcome.kind === "upToDate"
-          ? "status"
-          : "alert"
-      }
+      className={`notice ${succeeded ? "info-notice" : "error-notice"}`}
+      role={succeeded ? "status" : "alert"}
     >
       <span className="workspace-action-icon push" aria-hidden="true" />
       <span>
