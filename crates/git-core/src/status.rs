@@ -552,10 +552,7 @@ fn lists(entry: &StatusEntry, file: &str, side: Side) -> bool {
 
 fn no_changes(file: &str, side: Side) -> RepositoryError {
     if file.contains(char::REPLACEMENT_CHARACTER) {
-        return RepositoryError::new(
-            ErrorKind::UnsupportedPath,
-            "L1 Git cannot open diffs for file names that are not valid UTF-8.",
-        );
+        return repository::non_utf8_path();
     }
     RepositoryError::new(
         ErrorKind::UnchangedPath,

@@ -47,13 +47,28 @@ pub(crate) fn root(path: &str, deadline: Deadline) -> Result<PathBuf, Repository
         ));
     }
     let top = git::read(&path, &["rev-parse", "--show-toplevel"], deadline)?;
-    let top = std::str::from_utf8(top.strip_suffix(b"\n").unwrap_or(&top)).map_err(|_| {
-        RepositoryError::new(
-            ErrorKind::UnsupportedPath,
-            "Repository paths must be valid UTF-8.",
-        )
-    })?;
+    let top = std::str::from_utf8(top.strip_suffix(b"\n").unwrap_or(&top))
+        .map_err(|_| non_utf8_repository())?;
     canonical(top)
+}
+
+pub(crate) fn utf8(path: &Path) -> Result<String, RepositoryError> {
+    path.to_str()
+        .map(str::to_owned)
+        .ok_or_else(non_utf8_repository)
+}
+
+fn non_utf8_repository() -> RepositoryError {
+    RepositoryError::new(
+        ErrorKind::UnsupportedPath,
+        "Repository paths must be valid UTF-8.",
+    )
+}
+
+pub(crate) fn display_name(root: &Path) -> String {
+    root.file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "Repository".into())
 }
 
 pub(crate) fn canonical(path: &str) -> Result<PathBuf, RepositoryError> {
@@ -326,19 +341,8 @@ fn read_refs(
     });
     let head = head?;
     let (remotes, branches) = branches?;
-    let name = root
-        .file_name()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "Repository".into());
-    let root = root
-        .to_str()
-        .ok_or_else(|| {
-            RepositoryError::new(
-                ErrorKind::UnsupportedPath,
-                "Repository paths must be valid UTF-8.",
-            )
-        })?
-        .to_owned();
+    let name = display_name(root);
+    let root = utf8(root)?;
     let refs = RepositoryRefs {
         root,
         name,
