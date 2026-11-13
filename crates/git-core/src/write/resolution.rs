@@ -12,7 +12,7 @@ use crate::{
     repository, status,
 };
 use serde::{Deserialize, Serialize};
-use std::{fs, path::Path};
+use std::fs;
 
 const SAVE: files::Verb = files::Verb {
     verb: "save",
@@ -26,7 +26,7 @@ pub(super) struct ResolutionChange {
     rows: Vec<index::IndexEntry>,
     scope: Vec<Option<(u64, u64)>>,
     transforms: Vec<u8>,
-    file: FileChange,
+    pub(super) file: FileChange,
 }
 
 struct Captured {
@@ -514,19 +514,12 @@ pub(super) fn step(
     checkpoint("stepped", repo)
 }
 
-pub(super) fn remove_copy_beside(applied: &Applied, change: &ResolutionChange) {
-    let _ = fs::remove_file(files::copy_beside(
-        applied.id,
-        &Path::new(&applied.root).join(&change.file.path),
-    ));
-}
-
 #[cfg(not(test))]
 fn checkpoint(_point: &str, _repo: &Repo) -> Result<(), RepositoryError> {
     Ok(())
 }
 #[cfg(test)]
-type PlacementHook = Box<dyn FnOnce(&Path)>;
+type PlacementHook = Box<dyn FnOnce(&std::path::Path)>;
 
 #[cfg(test)]
 thread_local! {

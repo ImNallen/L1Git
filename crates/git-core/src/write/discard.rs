@@ -1,11 +1,11 @@
 pub(super) use super::files::Stat;
 use super::files::{
-    Content, DISCARD, DISCARD_WORDS, FileChange, Scratch, capture, changed, check_files,
-    copy_beside, failed, guard, holds, place, place_checked, set_permissions, stopped, unchanged,
+    Content, DISCARD, DISCARD_WORDS, FileChange, Scratch, capture, changed, check_files, failed,
+    guard, holds, place, place_checked, remove_copy_beside, set_permissions, stopped, unchanged,
     unsupported,
 };
 use super::{
-    Applied, Change, Direction, EntryId, Expect, Operation, Restored, Writing, index,
+    Applied, Change, Direction, Expect, Operation, Restored, Writing, index,
     partial::{self, Part},
     store::{self, EntryObjects, LockedStore, Log},
     txn::{Published, Txn},
@@ -18,7 +18,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fs, io,
+    io,
     path::Path,
 };
 
@@ -538,9 +538,9 @@ fn before_placing(path: &str) {
 #[cfg(not(test))]
 const fn before_placing(_path: &str) {}
 
-pub(super) fn remove_copies_beside(root: &Path, id: EntryId, change: &DiscardChange) {
+pub(super) fn remove_copies_beside(applied: &Applied, change: &DiscardChange) {
     for discarded in &change.paths {
-        let _ = fs::remove_file(copy_beside(id, &root.join(&discarded.path)));
+        remove_copy_beside(applied, &discarded.path);
     }
 }
 
@@ -548,7 +548,7 @@ pub(super) fn remove_copies_beside(root: &Path, id: EntryId, change: &DiscardCha
 mod tests {
     use super::*;
     use crate::{Coordinator, Limits, StaleReason, git::LocalWrite, worktree_status};
-    use std::{path::PathBuf, process::Command};
+    use std::{fs, path::PathBuf, process::Command};
 
     struct Repo {
         _directory: tempfile::TempDir,

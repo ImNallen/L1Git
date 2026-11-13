@@ -1,4 +1,4 @@
-use super::{Direction, EntryId, index, txn::Txn};
+use super::{Applied, Direction, EntryId, index, txn::Txn};
 use crate::{ErrorKind, RepositoryError, StaleReason};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -472,6 +472,13 @@ fn rename_across(prepared: &Path, file: &Path, beside: &Path) -> io::Result<()> 
         let _ = fs::remove_file(beside);
     }
     renamed
+}
+
+pub(super) fn remove_copy_beside(applied: &Applied, path: &str) {
+    let _ = fs::remove_file(copy_beside(
+        applied.id,
+        &Path::new(&applied.root).join(path),
+    ));
 }
 
 pub(super) fn copy_beside(id: EntryId, file: &Path) -> PathBuf {

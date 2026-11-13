@@ -42,7 +42,7 @@ enum Parent {
 pub(super) struct WholeChange {
     index: IndexChange,
     scope: Vec<Parent>,
-    file: FileChange,
+    pub(super) file: FileChange,
 }
 
 impl WholeChange {
@@ -1040,13 +1040,6 @@ pub(super) fn step(
             Restored::Staged
         },
     )
-}
-
-pub(super) fn remove_copy_beside(applied: &Applied, change: &WholeChange) {
-    let _ = fs::remove_file(files::copy_beside(
-        applied.id,
-        &Path::new(&applied.root).join(&change.file.path),
-    ));
 }
 
 #[cfg(not(test))]

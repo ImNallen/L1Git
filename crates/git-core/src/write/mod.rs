@@ -44,7 +44,7 @@ use serde::{Deserialize, Serialize};
 pub use stash::StashTip;
 use std::{
     fmt,
-    path::{Path, PathBuf},
+    path::PathBuf,
     time::{SystemTime, UNIX_EPOCH},
 };
 use store::{EntryObjects, LockedStore, Log, Objects, Position, Step};
@@ -503,11 +503,9 @@ impl Change {
 
     fn remove_copies_beside(&self, applied: &Applied) {
         match self {
-            Self::Resolution(change) => resolution::remove_copy_beside(applied, change),
-            Self::Whole(change) => conflicts::remove_copy_beside(applied, change),
-            Self::Discard(change) => {
-                discard::remove_copies_beside(Path::new(&applied.root), applied.id, change);
-            }
+            Self::Resolution(change) => files::remove_copy_beside(applied, &change.file.path),
+            Self::Whole(change) => files::remove_copy_beside(applied, &change.file.path),
+            Self::Discard(change) => discard::remove_copies_beside(applied, change),
             Self::Index(_)
             | Self::Ref(_)
             | Self::Branch(_)
