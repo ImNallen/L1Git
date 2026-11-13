@@ -711,7 +711,7 @@ pub(super) fn step(
             names.extend(index.path_names());
             // Stat refresh must see the rows written by the restore, not the rows from before it.
             refresh(&txn, &rows, &names);
-            Some(txn.publish_index(&Change::Stash(change.clone()))?)
+            Some(txn.publish(&Change::Stash(change.clone()))?)
         } else {
             None
         }

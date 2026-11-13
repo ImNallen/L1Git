@@ -927,7 +927,7 @@ pub(super) fn resolve(
         {
             return Err(files::changed(path));
         }
-        txn.publish_index(&super::Change::Whole(change.clone()))
+        txn.publish(&super::Change::Whole(change.clone()))
     })();
     let published = recorded.pending_on_err(placed).map_err(recovery)?;
     recorded.confirm_checked().map_err(recovery)?;

@@ -246,7 +246,9 @@ impl<'r> Txn<'r> {
         Ok(published)
     }
 
-    fn publish(&mut self, change: &Change) -> Result<Published, RepositoryError> {
+    /// Replaces the index and returns the hook to run after the caller saves
+    /// the log. A stash step stores or drops the stash between those two.
+    pub(super) fn publish(&mut self, change: &Change) -> Result<Published, RepositoryError> {
         self.publish_flags(
             change.touches_skip_worktree(),
             matches!(
@@ -281,12 +283,6 @@ impl<'r> Txn<'r> {
             worktree_updated,
             hooks: self.hooks.any(),
         })
-    }
-
-    /// Replaces the index and returns the hook to run after the caller saves
-    /// the log. A stash step stores or drops the stash between those two.
-    pub(super) fn publish_index(&mut self, change: &Change) -> Result<Published, RepositoryError> {
-        self.publish(change)
     }
 }
 
@@ -354,6 +350,13 @@ impl<'r> Outside<'r> {
     pub(crate) fn root(&self) -> &Path {
         &self.repo.root
     }
+
+    fn renewed(self) -> Self {
+        Self {
+            deadline: self.deadline.renewed(),
+            ..self
+        }
+    }
 }
 
 impl Runner for Outside<'_> {
@@ -392,10 +395,7 @@ impl<'r> CommitTxn<'r> {
     }
 
     pub(super) fn renewed(self) -> Self {
-        Self(Outside {
-            deadline: self.0.deadline.renewed(),
-            ..self.0
-        })
+        Self(self.0.renewed())
     }
 }
 
@@ -530,10 +530,7 @@ impl<'r> ReplayTxn<'r> {
     }
 
     pub(super) fn renewed(self) -> Self {
-        Self(Outside {
-            deadline: self.0.deadline.renewed(),
-            ..self.0
-        })
+        Self(self.0.renewed())
     }
 }
 
@@ -562,10 +559,7 @@ impl<'r> RebaseTxn<'r> {
     }
 
     pub(super) fn renewed(self) -> Self {
-        Self(Outside {
-            deadline: self.0.deadline.renewed(),
-            ..self.0
-        })
+        Self(self.0.renewed())
     }
 }
 

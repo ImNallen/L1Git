@@ -415,7 +415,7 @@ pub(super) fn save(
         {
             return Err(files::changed(path));
         }
-        txn.publish_index(&Change::Resolution(change.clone()))
+        txn.publish(&Change::Resolution(change.clone()))
     })();
     let published = recorded.pending_on_err(placed).map_err(recovery)?;
     recorded.confirm_checked().map_err(recovery)?;
