@@ -699,3 +699,23 @@ it("counts unsaved conflict results in inactive worktrees in restart consent", a
   expect(container.textContent).toContain("Your drafts changed");
   expect(container.textContent).toContain("This affects 2 files");
 });
+
+it("drops restart consent when the downloaded candidate changes", async () => {
+  const restartDialog = () =>
+    container.querySelector('dialog[aria-labelledby="restart-title"]');
+  await state({ kind: "downloaded", candidate, message: null });
+  await render();
+  await restartFrom("settings");
+  expect(restartDialog()).not.toBeNull();
+  await state({
+    kind: "downloaded",
+    candidate: { ...candidate, id: "2", version: "0.3.0" },
+    message: null,
+  });
+  expect(restartDialog()).toBeNull();
+  await state({ kind: "downloaded", candidate, message: null });
+  expect(
+    restartDialog(),
+    "the consent does not return with the first candidate",
+  ).toBeNull();
+});
