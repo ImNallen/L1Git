@@ -368,13 +368,7 @@ impl Change {
         match self {
             Self::Index(change) => {
                 let txn = Txn::begin(repo, deadline)?;
-                match index::restore(&txn, entry, change, direction)? {
-                    Restored::AlreadyThere => {
-                        store.save(step.log())?;
-                        Ok(None)
-                    }
-                    Restored::Staged => Ok(Some(txn.commit_step(store, step, self)?)),
-                }
+                index::restore(&txn, entry, change, direction)?.finish(txn, store, step, self)
             }
             Self::Resolution(change) => {
                 let txn = Txn::begin(repo, deadline)?;
@@ -383,13 +377,7 @@ impl Change {
             }
             Self::Whole(change) => {
                 let txn = Txn::begin(repo, deadline)?;
-                match conflicts::step(&txn, entry, change, direction)? {
-                    Restored::AlreadyThere => {
-                        store.save(step.log())?;
-                        Ok(None)
-                    }
-                    Restored::Staged => Ok(Some(txn.commit_step(store, step, self)?)),
-                }
+                conflicts::step(&txn, entry, change, direction)?.finish(txn, store, step, self)
             }
             Self::Ref(change) => {
                 refs::restore(repo, entry, change, direction, deadline)?;
@@ -398,13 +386,7 @@ impl Change {
             }
             Self::Discard(change) => {
                 let txn = Txn::begin(repo, deadline)?;
-                match discard::step(&txn, entry, change, direction)? {
-                    Restored::AlreadyThere => {
-                        store.save(step.log())?;
-                        Ok(None)
-                    }
-                    Restored::Staged => Ok(Some(txn.commit_step(store, step, self)?)),
-                }
+                discard::step(&txn, entry, change, direction)?.finish(txn, store, step, self)
             }
             Self::Branch(change) => {
                 branches::step(repo, entry, change, direction, deadline)?;
@@ -558,6 +540,24 @@ impl Change {
 enum Restored {
     AlreadyThere,
     Staged,
+}
+
+impl Restored {
+    fn finish(
+        self,
+        txn: Txn<'_>,
+        store: &LockedStore,
+        step: Step,
+        change: &Change,
+    ) -> Result<Option<Published>, RepositoryError> {
+        match self {
+            Self::AlreadyThere => {
+                store.save(step.log())?;
+                Ok(None)
+            }
+            Self::Staged => Ok(Some(txn.commit_step(store, step, change)?)),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
