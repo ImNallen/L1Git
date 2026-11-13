@@ -19,10 +19,7 @@ impl Coordinator {
     /// existing folder keeps its files and starts being tracked.
     pub fn create_repository(&self, target: &Path) -> Result<NewRepository, RepositoryError> {
         if target.exists() && !target.is_dir() {
-            return Err(RepositoryError::new(
-                ErrorKind::UnsupportedPath,
-                "A file already exists at this location. Choose another location.",
-            ));
+            return Err(file_in_the_way());
         }
         if has_git(target) {
             return Err(RepositoryError::new(
@@ -57,14 +54,22 @@ impl Coordinator {
 /// Where Git can run for a `target` that may not exist yet, and the target as
 /// the text Git gets on its command line.
 pub(super) fn runnable(target: &Path) -> Result<(&Path, &str), RepositoryError> {
-    let unsupported = || {
-        RepositoryError::new(
-            ErrorKind::UnsupportedPath,
-            "L1 Git cannot use this location. Choose another location.",
-        )
-    };
     Ok((
-        nearest_directory(target).ok_or_else(unsupported)?,
-        target.to_str().ok_or_else(unsupported)?,
+        nearest_directory(target).ok_or_else(unusable_location)?,
+        target.to_str().ok_or_else(unusable_location)?,
     ))
+}
+
+pub(super) fn unusable_location() -> RepositoryError {
+    RepositoryError::new(
+        ErrorKind::UnsupportedPath,
+        "L1 Git cannot use this location. Choose another location.",
+    )
+}
+
+pub(super) fn file_in_the_way() -> RepositoryError {
+    RepositoryError::new(
+        ErrorKind::UnsupportedPath,
+        "A file already exists at this location. Choose another location.",
+    )
 }
