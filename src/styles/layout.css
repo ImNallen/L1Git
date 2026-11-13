@@ -256,19 +256,6 @@ kbd {
     padding-right: 9px;
     padding-left: 9px;
   }
-  /* Hidden visually, not from the accessibility tree, so the button keeps its visible name. */
-  .toolbar-actions .button span:not(.workspace-action-icon) {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
-  }
-  .toolbar-actions .button {
-    width: 30px;
-    padding: 0;
-  }
 }
 @media (prefers-reduced-motion: reduce) {
   .spin {
@@ -495,6 +482,7 @@ kbd {
   flex: 0 1 300px;
 }
 @container (max-width: 1000px) {
+  /* Hidden visually, not from the accessibility tree, so the button keeps its visible name. */
   .toolbar-actions .button span:not(.workspace-action-icon) {
     position: absolute;
     width: 1px;
