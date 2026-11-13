@@ -102,7 +102,7 @@ type Props = {
 
 export type WorktreeWrites = {
   busy: boolean;
-  merge?: MergeState | null;
+  merge: MergeState | null;
   write: (
     worktree: RepositoryRoot,
     kind: FileWrite,
@@ -245,7 +245,7 @@ export function CommitInspector({
   }
 
   if (selection?.kind === "worktree" && compare === null) {
-    const operation = worktree ? inProgress(writes.merge ?? null) : null;
+    const operation = worktree ? inProgress(writes.merge) : null;
     return (
       <InspectorFrame
         ref={motionRoot}
@@ -843,11 +843,12 @@ function WorktreeInspector({
   const resume = useRef<(RowFocus & { near?: string[] }) | null>(null);
   const writing = useRef(false);
   const lists = useRef<HTMLDivElement>(null);
-  const operation = inProgress(writes.merge ?? null);
+  const operation = inProgress(writes.merge);
   const running = operation.kind === "running" ? operation : null;
+  const idle = writes.merge === null || writes.merge.kind === "idle";
   const conflictLabels = useConflictLabels(
     worktree.root,
-    writes.merge ?? null,
+    writes.merge,
     running?.progress.unresolved.length ?? 0,
   );
   const [cleanShown, setCleanShown] = useState<string | null>(null);
@@ -980,7 +981,7 @@ function WorktreeInspector({
               <h2>Uncommitted changes</h2>
               {changes?.kind === "ready" &&
                 changes.status.entries.length > 0 &&
-                (!writes.merge || writes.merge.kind === "idle") && (
+                idle && (
                   <button
                     className="button secondary list-action"
                     aria-disabled={writes.busy}
@@ -1051,11 +1052,7 @@ function WorktreeInspector({
                 group={group}
                 labels={labelsOf(group)}
                 collapse={collapseOf(group)}
-                managed={
-                  writes.merge !== undefined &&
-                  writes.merge !== null &&
-                  writes.merge.kind !== "idle"
-                }
+                managed={!idle}
                 resolvable={
                   new Set(
                     group.files
@@ -1063,7 +1060,7 @@ function WorktreeInspector({
                         const draft = resolutionOf(
                           resolutionKey(worktree.root, path),
                         );
-                        const owned = mergeAllows(writes.merge ?? null, {
+                        const owned = mergeAllows(writes.merge, {
                           kind:
                             group.side === "staged"
                               ? "unstageFiles"
@@ -1111,18 +1108,17 @@ function WorktreeInspector({
         )}
       </div>
       {running && <p className="operation-footer">{undoNote(running)}</p>}
-      {changes?.kind === "ready" &&
-        (!writes.merge || writes.merge.kind === "idle") && (
-          <CommitBox
-            status={changes.status}
-            branch={headBranchName(changes.status.head, snapshot.branches)}
-            staged={
-              groups.find((group) => group.side === "staged")?.files.length ?? 0
-            }
-            busy={writes.busy}
-            onCommit={writes.commit}
-          />
-        )}
+      {changes?.kind === "ready" && idle && (
+        <CommitBox
+          status={changes.status}
+          branch={headBranchName(changes.status.head, snapshot.branches)}
+          staged={
+            groups.find((group) => group.side === "staged")?.files.length ?? 0
+          }
+          busy={writes.busy}
+          onCommit={writes.commit}
+        />
+      )}
     </div>
   );
 }

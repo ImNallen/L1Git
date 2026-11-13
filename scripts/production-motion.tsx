@@ -158,6 +158,7 @@ export function ProductionMotionRegression() {
           onRefreshChanges={() => {}}
           writes={{
             busy: false,
+            merge: null,
             write: async () => {},
             commit: async () => ({ kind: "busy" }),
             confirmDiscard: () => {},
