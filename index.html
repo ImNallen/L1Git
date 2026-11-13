@@ -6,6 +6,144 @@
     <meta name="theme-color" content="#0a0a0a" />
     <link rel="icon" type="image/x-icon" href="/favicon.ico" />
     <title>L1 Git</title>
+    <script src="/first-paint.js"></script>
+    <style>
+      #splash {
+        position: fixed;
+        inset: 0;
+        z-index: 2147483647;
+        display: flex;
+        background: var(--canvas, #121212);
+      }
+      @media (prefers-color-scheme: light) {
+        #splash {
+          background: var(--canvas, #ffffff);
+        }
+      }
+      #splash * {
+        pointer-events: none;
+      }
+      #splash i {
+        display: block;
+        height: 10px;
+        border-radius: 3px;
+        background: var(--control-hover);
+      }
+      .splash-sidebar,
+      .splash-inspector {
+        flex-shrink: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+      .splash-sidebar {
+        width: 280px;
+        padding: 64px 16px 0;
+        box-sizing: border-box;
+        background: var(--sidebar);
+        border-right: 1px solid var(--border);
+      }
+      #splash .splash-search {
+        height: 28px;
+        border-radius: 6px;
+        margin-bottom: 10px;
+      }
+      #splash .splash-group {
+        margin-top: 22px;
+      }
+      .splash-history {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+      }
+      .splash-toolbar {
+        height: 56px;
+        display: flex;
+        align-items: center;
+        gap: 24px;
+        padding-left: 24px;
+      }
+      .splash-stage {
+        flex: 1;
+        display: grid;
+        place-items: center;
+      }
+      .splash-stage img {
+        width: 72px;
+        height: 72px;
+      }
+      .splash-inspector {
+        width: 360px;
+        padding: 22px 20px 0;
+        box-sizing: border-box;
+        background: var(--panel);
+        border-left: 1px solid var(--border);
+      }
+      #splash .splash-heading {
+        height: 12px;
+        margin-bottom: 24px;
+      }
+      #splash .splash-files {
+        height: 160px;
+        border-radius: 6px;
+        margin-top: 10px;
+      }
+      @media (max-width: 1099px) {
+        .splash-inspector {
+          display: none;
+        }
+      }
+      @media (max-width: 939px) {
+        .splash-sidebar {
+          display: none;
+        }
+        .splash-toolbar {
+          padding-left: 140px;
+        }
+      }
+    </style>
   </head>
-  <body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body>
+  <body>
+    <div id="root"></div>
+    <div
+      id="splash"
+      role="status"
+      aria-label="Opening L1 Git"
+      data-tauri-drag-region
+    >
+      <div class="splash-sidebar">
+        <i class="splash-search"></i>
+        <i style="width: 116px"></i>
+        <i style="width: 132px"></i>
+        <i style="width: 104px"></i>
+        <i class="splash-group" style="width: 64px"></i>
+        <i style="width: 148px"></i>
+        <i style="width: 92px"></i>
+        <i style="width: 120px"></i>
+        <i style="width: 80px"></i>
+        <i style="width: 136px"></i>
+      </div>
+      <div class="splash-history">
+        <div class="splash-toolbar">
+          <i style="width: 44px"></i>
+          <i style="width: 40px"></i>
+          <i style="width: 44px"></i>
+          <i style="width: 52px"></i>
+          <i style="width: 44px"></i>
+        </div>
+        <div class="splash-stage">
+          <img src="/icon.png" alt="" width="72" height="72" />
+        </div>
+      </div>
+      <div class="splash-inspector">
+        <i class="splash-heading" style="width: 96px"></i>
+        <i style="width: 300px"></i>
+        <i style="width: 260px"></i>
+        <i style="width: 220px"></i>
+        <i class="splash-files"></i>
+      </div>
+    </div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
 </html>

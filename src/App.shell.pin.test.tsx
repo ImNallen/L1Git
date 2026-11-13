@@ -459,3 +459,40 @@ it("closing New branch and Create tag returns focus to History", async () => {
   expect(dialogs()).toEqual([]);
   expect(focused()).toBe("grid Commits");
 });
+
+function addSplash() {
+  const splash = document.createElement("div");
+  splash.id = "splash";
+  document.body.append(splash);
+}
+const REDUCED_MOTION = { "(prefers-reduced-motion: reduce)": true };
+
+it("the launch splash covers the last repository until it opens", async () => {
+  addSplash();
+  let snapshots: ReturnType<Harness["bridge"]["hold"]>[] = [];
+  const mounting = mountApp({
+    media: REDUCED_MOTION,
+    // StrictMode opens the last repository twice.
+    bridge: (bridge) =>
+      (snapshots = [
+        bridge.hold("snapshot", PIN),
+        bridge.hold("snapshot", PIN),
+      ]),
+  });
+  await Promise.all(snapshots.map((held) => held.arrived));
+  expect(document.getElementById("splash"), "shown while opening").not.toBe(
+    null,
+  );
+  for (const held of snapshots) held.release();
+  await mounting;
+  expect(document.getElementById("splash"), "gone once opened").toBe(null);
+});
+
+it("the launch splash leaves at once when no repository was open", async () => {
+  addSplash();
+  await mountApp({
+    media: REDUCED_MOTION,
+    saved: { entries: [], lastRoot: null },
+  });
+  expect(document.getElementById("splash")).toBe(null);
+});

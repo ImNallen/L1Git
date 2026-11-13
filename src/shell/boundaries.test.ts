@@ -96,6 +96,7 @@ describe("shell boundaries", () => {
       "useUndoSteps",
       "useShortcuts",
       "usePrefetchLazyViews",
+      "useLaunchSplash",
     ]);
   });
 
