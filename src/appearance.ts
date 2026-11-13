@@ -18,6 +18,7 @@ import { isHex } from "./themes/color";
 import { isToken, TOKEN_NAMES, TOKENS, type Palette } from "./themes/palette";
 
 const storageKey = "l1git.appearance";
+const firstPaintKey = "l1git.firstPaint";
 const systemQuery = "(prefers-color-scheme: dark)";
 let nativeWrites = Promise.resolve();
 
@@ -90,11 +91,38 @@ function paintTheme(variant: ThemeVariant) {
   return canvas;
 }
 
+/**
+ * Both resolved themes, for public/first-paint.js to apply before the app
+ * loads. The window is hidden until then and WebKit paints a hidden window
+ * only once, so that paint has to use the saved theme.
+ */
+function rememberFirstPaint(settings: ThemeSettings) {
+  const paint = (variant: ThemeVariant) => ({
+    appearance: variant.appearance,
+    properties: Object.fromEntries(
+      TOKEN_NAMES.flatMap((token) => {
+        const value = variant.palette[token];
+        return value ? [[TOKENS[token], value]] : [];
+      }),
+    ),
+  });
+  try {
+    localStorage.setItem(
+      firstPaintKey,
+      JSON.stringify({
+        light: paint(resolveTheme(settings, false)),
+        dark: paint(resolveTheme(settings, true)),
+      }),
+    );
+  } catch {}
+}
+
 export function initializeAppearance(): ThemeSettings {
   let settings = DEFAULT_THEME_SETTINGS;
   try {
     settings = parseAppearanceSettings(localStorage.getItem(storageKey));
   } catch {}
+  rememberFirstPaint(settings);
   paintTheme(resolveTheme(settings, window.matchMedia(systemQuery).matches));
   return settings;
 }
@@ -151,6 +179,7 @@ export function useAppearance(initial: ThemeSettings) {
 
   function save(next: ThemeSettings) {
     setSettings(next);
+    rememberFirstPaint(next);
     setSystemDark(window.matchMedia(systemQuery).matches);
     try {
       localStorage.setItem(storageKey, JSON.stringify(next));
