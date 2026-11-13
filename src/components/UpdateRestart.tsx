@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { RotateCw, X } from "lucide-react";
+import { RotateCw } from "lucide-react";
 import { draftImpact, useDraftImpact } from "../draftProtection";
 import type { DraftImpact } from "../draftProtection";
 import type { CandidateId, Updates } from "../updates";
+import { DialogHeader, useModalDialog } from "./Dialog";
 
 type RestartConsent = {
   candidate: CandidateId;
@@ -101,16 +102,10 @@ function RestartDialog({
   onConfirm: () => void;
   onClose: () => void;
 }) {
-  const dialog = useRef<HTMLDialogElement>(null);
   const cancel = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    dialog.current?.showModal();
-    cancel.current?.focus();
-  }, []);
-  const close = () => {
-    dialog.current?.close();
-    onClose();
-  };
+  const { ref, close, onCancel } = useModalDialog(onClose, () =>
+    cancel.current?.focus(),
+  );
   const hasDrafts = impact.drafts.length > 0 || impact.resolutions.length > 0;
   const count = impact.drafts.reduce(
     (total, draft) => total + draft.messages,
@@ -118,31 +113,21 @@ function RestartDialog({
   );
   return (
     <dialog
-      ref={dialog}
+      ref={ref}
       className="add-dialog"
       aria-labelledby="restart-title"
-      onCancel={(event) => {
-        event.preventDefault();
-        close();
-      }}
+      onCancel={onCancel}
       onClick={(event) => {
         if (event.target === event.currentTarget) close();
       }}
     >
-      <div className="dialog-title">
-        <div className="dialog-icon">
-          <RotateCw size={20} />
-        </div>
-        <button
-          type="button"
-          className="icon-button"
-          aria-label="Close restart confirmation"
-          onClick={close}
-        >
-          <X size={17} />
-        </button>
-      </div>
-      <h1 id="restart-title">Restart and install update?</h1>
+      <DialogHeader
+        icon={<RotateCw size={20} />}
+        titleId="restart-title"
+        title="Restart and install update?"
+        closeLabel="Close restart confirmation"
+        onClose={close}
+      />
       <p>
         L1 Git will close and restart. Files and commits on disk stay intact.
       </p>

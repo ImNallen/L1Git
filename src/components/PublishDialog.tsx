@@ -1,5 +1,5 @@
 import { useEffect, useId, useReducer, useRef, useState } from "react";
-import { CloudUpload, LoaderCircle, X } from "lucide-react";
+import { CloudUpload, LoaderCircle } from "lucide-react";
 import * as repositories from "../repositories";
 import { publishChoiceSchema, pushDisabledReason } from "../domain/push";
 import type { PublishOptions, PushIntent } from "../domain/push";
@@ -11,6 +11,7 @@ import {
 } from "../domain/publishReview";
 import { problemFrom } from "../domain/repository";
 import type { RepositoryRoot } from "../domain/repository";
+import { DialogHeader } from "./Dialog";
 
 type Options =
   | { kind: "loading" }
@@ -287,21 +288,14 @@ export function PublishDialog({
           } else void prepare();
         }}
       >
-        <div className="dialog-title">
-          <div className="dialog-icon">
-            <CloudUpload size={20} />
-          </div>
-          <button
-            type="button"
-            className="icon-button"
-            onClick={close}
-            disabled={editor.kind === "saving"}
-            aria-label="Close publish branch"
-          >
-            <X size={17} />
-          </button>
-        </div>
-        <h1 id={titleId}>Publish branch</h1>
+        <DialogHeader
+          icon={<CloudUpload size={20} />}
+          titleId={titleId}
+          title="Publish branch"
+          closeLabel="Close publish branch"
+          closeDisabled={editor.kind === "saving"}
+          onClose={close}
+        />
         <p>
           Choose a remote and destination. Review the commit before publishing.
         </p>

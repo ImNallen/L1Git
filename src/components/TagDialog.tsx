@@ -1,5 +1,5 @@
-import { useEffect, useId, useRef, useState } from "react";
-import { LoaderCircle, Tag as TagIcon, Trash2, X } from "lucide-react";
+import { useId, useRef, useState } from "react";
+import { LoaderCircle, Tag as TagIcon, Trash2 } from "lucide-react";
 import {
   answeredInTagDialog,
   createTagWrite,
@@ -11,6 +11,7 @@ import type { Outcome } from "../useWrites";
 import { commitOutput, messageKeys } from "./CommitBox";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { shortOid } from "../domain/shortOid";
+import { DialogHeader, useModalDialog } from "./Dialog";
 
 type Props = {
   ask: TagAsk;
@@ -33,7 +34,6 @@ function CreateTagDialog({
   onWrite,
   onClose,
 }: Props & { ask: Extract<TagAsk, { kind: "create" }> }) {
-  const dialog = useRef<HTMLDialogElement>(null);
   const input = useRef<HTMLInputElement>(null);
   const titleId = useId();
   const errorId = useId();
@@ -42,14 +42,9 @@ function CreateTagDialog({
   const [message, setMessage] = useState("");
   const [problem, setProblem] = useState<Problem | null>(null);
   const [saving, setSaving] = useState(false);
-  useEffect(() => {
-    dialog.current?.showModal();
-    input.current?.focus();
-  }, []);
-  const close = () => {
-    dialog.current?.close();
-    onClose();
-  };
+  const { ref, close, onCancel } = useModalDialog(onClose, () =>
+    input.current?.focus(),
+  );
   const ready = name.trim() !== "" && !saving;
   const badName = problem?.kind === "invalidRef";
 
@@ -76,13 +71,10 @@ function CreateTagDialog({
 
   return (
     <dialog
-      ref={dialog}
+      ref={ref}
       className="add-dialog branch-dialog tag-dialog"
       aria-labelledby={titleId}
-      onCancel={(event) => {
-        event.preventDefault();
-        close();
-      }}
+      onCancel={onCancel}
       onClick={(event) => {
         if (event.target === event.currentTarget) close();
       }}
@@ -93,20 +85,13 @@ function CreateTagDialog({
           void save();
         }}
       >
-        <div className="dialog-title">
-          <div className="dialog-icon">
-            <TagIcon size={20} />
-          </div>
-          <button
-            type="button"
-            className="icon-button"
-            onClick={close}
-            aria-label="Close create tag"
-          >
-            <X size={17} />
-          </button>
-        </div>
-        <h1 id={titleId}>Create tag</h1>
+        <DialogHeader
+          icon={<TagIcon size={20} />}
+          titleId={titleId}
+          title="Create tag"
+          closeLabel="Close create tag"
+          onClose={close}
+        />
         <p>
           The tag goes on commit <code>{shortOid(ask.at)}</code>
           {ask.subject === "" ? "" : ` “${ask.subject}”`}.

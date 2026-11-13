@@ -1,10 +1,11 @@
-import { useEffect, useId, useRef, useState } from "react";
-import { Archive, LoaderCircle, X } from "lucide-react";
+import { useId, useRef, useState } from "react";
+import { Archive, LoaderCircle } from "lucide-react";
 import { shownPaths, stashPushWrite } from "../domain/operations";
 import type { Write } from "../domain/operations";
 import type { Head, Problem } from "../domain/repository";
 import type { Outcome } from "../useWrites";
 import { messageKeys } from "./CommitBox";
+import { DialogHeader, useModalDialog } from "./Dialog";
 
 type Props = {
   paths: readonly string[];
@@ -21,21 +22,15 @@ export function StashDialog({
   onWrite,
   onClose,
 }: Props) {
-  const dialog = useRef<HTMLDialogElement>(null);
   const messageField = useRef<HTMLTextAreaElement>(null);
   const titleId = useId();
   const [message, setMessage] = useState("");
   const [untracked, setUntracked] = useState(includeUntracked);
   const [problem, setProblem] = useState<Problem | null>(null);
   const [saving, setSaving] = useState(false);
-  useEffect(() => {
-    dialog.current?.showModal();
-    messageField.current?.focus();
-  }, []);
-  const close = () => {
-    dialog.current?.close();
-    onClose();
-  };
+  const { ref, close, onCancel } = useModalDialog(onClose, () =>
+    messageField.current?.focus(),
+  );
   const { shown, more } = shownPaths(paths);
   const everyChange = paths.length === 0;
 
@@ -63,13 +58,10 @@ export function StashDialog({
 
   return (
     <dialog
-      ref={dialog}
+      ref={ref}
       className="add-dialog branch-dialog tag-dialog"
       aria-labelledby={titleId}
-      onCancel={(event) => {
-        event.preventDefault();
-        close();
-      }}
+      onCancel={onCancel}
       onClick={(event) => {
         if (event.target === event.currentTarget) close();
       }}
@@ -80,20 +72,13 @@ export function StashDialog({
           void save();
         }}
       >
-        <div className="dialog-title">
-          <div className="dialog-icon">
-            <Archive size={20} />
-          </div>
-          <button
-            type="button"
-            className="icon-button"
-            onClick={close}
-            aria-label="Close stash"
-          >
-            <X size={17} />
-          </button>
-        </div>
-        <h1 id={titleId}>Stash changes</h1>
+        <DialogHeader
+          icon={<Archive size={20} />}
+          titleId={titleId}
+          title="Stash changes"
+          closeLabel="Close stash"
+          onClose={close}
+        />
         <p>
           {everyChange
             ? "Stash every change in this worktree. You can undo this."
