@@ -1,4 +1,5 @@
 import type { PublishOptions, PushIntent } from "./push";
+import { shortBranch } from "./refs";
 
 type PublishReview = {
   generation: number;
@@ -52,7 +53,7 @@ export function publishDefaults(
     (remote) => remote.availability.kind === "eligible",
   );
   return {
-    destination: options.branch.replace(/^refs\/heads\//, ""),
+    destination: shortBranch(options.branch),
     remote: eligible.length === 1 ? (eligible[0]?.name ?? "") : "",
   };
 }

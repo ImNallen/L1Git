@@ -21,6 +21,7 @@ import type { MergeState, OperationProbe } from "./domain/merge";
 import { problemFrom } from "./domain/repository";
 import type { FullRef, Problem, RepositoryRoot } from "./domain/repository";
 import type { PushIntent, PushOutcome, PushPreparation } from "./domain/push";
+import { shortBranch } from "./domain/refs";
 import type { FetchInterval } from "./fetchSettings";
 
 export type RootState =
@@ -766,7 +767,7 @@ export function repositoryWarnings(
   const skipped = [...repo.outcomes.values()].flatMap((outcome) =>
     outcome.kind === "skipped"
       ? [
-          `Did not fast-forward ${outcome.reference.replace(/^refs\/heads\//, "")}. ${skipText(outcome.reason)}`,
+          `Did not fast-forward ${shortBranch(outcome.reference)}. ${skipText(outcome.reason)}`,
         ]
       : [],
   );

@@ -10,7 +10,7 @@ import type { MergeSelection } from "../domain/merge";
 import { pullTarget } from "../domain/overview";
 import type { PullMode } from "../domain/overview";
 import type { OverviewStore } from "../overview";
-import { branchName } from "../domain/operations";
+import { shortBranch } from "../domain/refs";
 import type { SidebarRefActions } from "./useRefWrites";
 import type {
   Branch,
@@ -117,7 +117,8 @@ export function useMergePanel({
     writes.running !== null || opened.repository?.activity.kind !== "idle";
   const idle = !busy && mergeState?.kind === "idle";
   const canMerge = head?.kind === "attached" && idle;
-  const replayBranch = head?.kind === "attached" ? branchName(head) : null;
+  const replayBranch =
+    head?.kind === "attached" ? shortBranch(head.reference) : null;
   const available = eligible && canMerge;
   const pullable = !opened.repository
     ? {

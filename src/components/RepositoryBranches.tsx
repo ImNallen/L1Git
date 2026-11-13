@@ -17,6 +17,7 @@ import type {
   Stash,
   Tag,
 } from "../domain/repository";
+import { shortBranch } from "../domain/refs";
 import { normalizeSearch } from "../domain/search";
 import { branchVisibility, toggleRule } from "../domain/visibility";
 import type { VisibilityRule } from "../domain/visibility";
@@ -355,9 +356,7 @@ export function RepositoryBranches({
         {head.kind === "unborn" && (
           <div className="branch-row unborn">
             <WorkspaceIcon name="Branch" />
-            <span className="branch-label">
-              {head.reference.replace(/^refs\/heads\//, "")}
-            </span>
+            <span className="branch-label">{shortBranch(head.reference)}</span>
             <small>unborn</small>
           </div>
         )}

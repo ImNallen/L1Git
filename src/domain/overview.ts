@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { oidSchema, refSchema, rootSchema } from "./repository";
 import type { Branch, FullRef, Oid, RepositoryRoot } from "./repository";
+import { shortRemote } from "./refs";
 
 export const branchRefSchema = z
   .string()
@@ -135,10 +136,6 @@ export function divergence(state: BranchState): Divergence | null {
   }
 }
 
-export function upstreamName(upstream: string): string {
-  return upstream.replace(/^refs\/remotes\//, "");
-}
-
 /** How Pull joins a branch that has diverged from its upstream. */
 export type PullMode = "ffIfPossible" | "ffOnly" | "rebase";
 
@@ -178,7 +175,7 @@ export function pullStep(
     case "gone":
       return {
         kind: "refuse",
-        reason: `Its upstream ${upstreamName(state.upstream)} is gone.`,
+        reason: `Its upstream ${shortRemote(state.upstream)} is gone.`,
       };
     case "upToDate":
     case "ahead":
@@ -225,14 +222,14 @@ export function pullTarget(
   if (state.kind === "gone")
     return {
       kind: "unavailable",
-      reason: `The upstream of ${branch.name}, ${upstreamName(state.upstream)}, is gone.`,
+      reason: `The upstream of ${branch.name}, ${shortRemote(state.upstream)}, is gone.`,
     };
   if (busy) return { kind: "unavailable", reason: busy };
   return {
     kind: "ready",
     branch: branch.reference,
     name: branch.name,
-    upstream: upstreamName(state.upstream),
+    upstream: shortRemote(state.upstream),
   };
 }
 
@@ -262,7 +259,7 @@ export function fetchTarget(
     return {
       kind: "ready",
       branch: branch.reference,
-      detail: `Fetch ${upstreamName(branch.upstream)}, the upstream of ${branch.name}.`,
+      detail: `Fetch ${shortRemote(branch.upstream)}, the upstream of ${branch.name}.`,
     };
   return {
     kind: "unavailable",

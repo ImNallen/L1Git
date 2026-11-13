@@ -3,6 +3,7 @@ import { CloudUpload, LoaderCircle, X } from "lucide-react";
 import * as repositories from "../repositories";
 import { publishChoiceSchema, pushDisabledReason } from "../domain/push";
 import type { PublishOptions, PushIntent } from "../domain/push";
+import { branchRef } from "../domain/refs";
 import {
   initialPublishReview,
   publishReview,
@@ -131,7 +132,7 @@ export function PublishDialog({
     try {
       const choice = publishChoiceSchema.parse({
         remote,
-        destination: `refs/heads/${destination}`,
+        destination: branchRef(destination),
       });
       const result = await repositories.preparePublish(root, choice);
       if (lifetime.current !== current) return;

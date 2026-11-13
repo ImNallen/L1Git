@@ -2,6 +2,7 @@ import { composeMessage, splitMessage } from "./commitMessage";
 import { conflictRegions, hasLeftoverMarkers } from "./conflictRegions";
 import type { Draft } from "./commitMessage";
 import { replayNames } from "./merge";
+import { shortRef } from "./refs";
 import type { MergeSession, MergeState, OperationProbe } from "./merge";
 import type {
   ConflictSummary,
@@ -50,15 +51,12 @@ export type InProgress =
     }
   | { kind: "external"; message: string };
 
-const localName = (reference: string) =>
-  reference.replace(/^refs\/(?:heads|remotes)\//, "");
-
 const headSide = (head: Head): OperationSide =>
   head.kind === "detached"
     ? { name: "Detached HEAD", oid: head.oid }
     : head.kind === "unborn"
-      ? { name: localName(head.reference), oid: null }
-      : { name: localName(head.reference), oid: head.oid };
+      ? { name: shortRef(head.reference), oid: null }
+      : { name: shortRef(head.reference), oid: head.oid };
 
 function progressOf(
   footprint: readonly string[],
@@ -95,11 +93,11 @@ export function inProgress(state: MergeState | null): InProgress {
         verb: "merge",
         key: session.id,
         current: {
-          name: localName(review.destination.reference),
+          name: shortRef(review.destination.reference),
           oid: review.destination.oid,
         },
         incoming: {
-          name: localName(review.source.reference),
+          name: shortRef(review.source.reference),
           oid: review.source.oid,
         },
         subject: null,

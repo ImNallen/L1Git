@@ -1,5 +1,5 @@
 import { ArrowDown, ArrowUp } from "lucide-react";
-import { upstreamName } from "../domain/overview";
+import { shortRemote } from "../domain/refs";
 import type { Divergence } from "../domain/overview";
 
 export function SyncCounts({
@@ -16,14 +16,14 @@ export function SyncCounts({
   const title: string[] = [];
   if (behind > 0) {
     label.push(`${behind} to pull`);
-    title.push(`${commits(behind)} to pull from ${upstreamName(upstream)}`);
+    title.push(`${commits(behind)} to pull from ${shortRemote(upstream)}`);
   }
   if (ahead > 0) {
     label.push(`${ahead} to push`);
     title.push(
       behind > 0
         ? `${commits(ahead)} to push`
-        : `${commits(ahead)} to push to ${upstreamName(upstream)}`,
+        : `${commits(ahead)} to push to ${shortRemote(upstream)}`,
     );
   }
   const prefix = branch === undefined ? "" : `${branch}: `;

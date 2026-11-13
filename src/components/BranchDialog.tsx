@@ -15,6 +15,7 @@ import {
   startAt,
 } from "../domain/operations";
 import type { BranchAsk, Write } from "../domain/operations";
+import { shortBranch } from "../domain/refs";
 import { problemFrom } from "../domain/repository";
 import type {
   Branch,
@@ -214,9 +215,7 @@ function DeleteBranchDialog({
     };
   }, [root, ask.branch]);
   const headName =
-    head.kind === "attached"
-      ? `HEAD (${head.reference.replace(/^refs\/heads\//, "")})`
-      : "HEAD";
+    head.kind === "attached" ? `HEAD (${shortBranch(head.reference)})` : "HEAD";
   const operation = { kind: "deleteBranch" as const, branch: ask.branch };
   return (
     <ConfirmDialog
