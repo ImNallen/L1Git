@@ -10,7 +10,8 @@ import { ResolutionDraftList } from "./MergeRegions";
 import { isBranch } from "./navigation";
 import type { SyncControls } from "./sync";
 import { PushNotice } from "./SyncRegions";
-import type { MergePanel, ResolutionDrafts } from "./useMergePanel";
+import type { MergePanel } from "./useMergePanel";
+import type { ResolutionDrafts } from "./useResolutionDrafts";
 import type { Navigation } from "./useNavigation";
 
 /** The rows above the panes, in this order. */

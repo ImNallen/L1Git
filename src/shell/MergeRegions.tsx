@@ -3,7 +3,7 @@ import type { AppearanceState } from "../appearance";
 import { resolutionKey } from "../resolutionDrafts";
 import type { WritesView } from "../useWrites";
 import { RetainedResolution } from "./lazyViews";
-import type { ResolutionDrafts } from "./useMergePanel";
+import type { ResolutionDrafts } from "./useResolutionDrafts";
 import type { WorkspaceApi } from "./workspaceView";
 
 export function ResolutionDraftList({ drafts }: { drafts: ResolutionDrafts }) {
