@@ -21,6 +21,7 @@ import type { MergeState, OperationProbe } from "./domain/merge";
 import { problemFrom } from "./domain/repository";
 import type { FullRef, Problem, RepositoryRoot } from "./domain/repository";
 import type { PushIntent, PushOutcome, PushPreparation } from "./domain/push";
+import { shortBranch } from "./domain/refs";
 import type { FetchInterval } from "./fetchSettings";
 
 export type RootState =
@@ -228,26 +229,29 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
     for (const listener of refListeners) listener(changed);
   }
 
+  function setAvailability(
+    root: RepositoryRoot,
+    availability: PushPreparation,
+  ) {
+    pushes.set(root, {
+      availability,
+      notice: pushes.get(root)?.notice ?? null,
+    });
+  }
+
   function invalidatePush(commonDir: RepositoryRoot) {
     for (const root of rootsOf(commonDir)) {
       preparations.set(root, Symbol());
-      pushes.set(root, {
-        availability: { kind: "loading" },
-        notice: pushes.get(root)?.notice ?? null,
-      });
+      setAvailability(root, { kind: "loading" });
     }
   }
 
   async function prepareRoot(root: RepositoryRoot) {
     const owner = roots.get(root);
     if (owner?.kind !== "open") return;
-    const pending: PushState = {
-      availability: { kind: "loading" },
-      notice: pushes.get(root)?.notice ?? null,
-    };
     const generation = Symbol();
     preparations.set(root, generation);
-    pushes.set(root, pending);
+    setAvailability(root, { kind: "loading" });
     emit();
     let availability: PushPreparation;
     try {
@@ -257,10 +261,7 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
     }
     if (roots.get(root) !== owner || preparations.get(root) !== generation)
       return;
-    pushes.set(root, {
-      availability,
-      notice: pushes.get(root)?.notice ?? null,
-    });
+    setAvailability(root, availability);
     emit();
   }
 
@@ -386,6 +387,53 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
     }
   }
 
+  async function runPush(
+    commonDir: RepositoryRoot,
+    repo: Repository,
+    request: Extract<Request, { kind: "push" }>,
+  ) {
+    const { root } = request;
+    repo.activity = { kind: "pushing", root };
+    const generation = preparations.get(root);
+    emit();
+    let outcome: PushOutcome;
+    let refreshProblem: string | null = null;
+    let availability: PushPreparation;
+    try {
+      const report = await deps.push(root, request.intent);
+      outcome = report.outcome;
+      if (report.refresh.kind === "refreshed") {
+        repo.overview = report.refresh.overview;
+        availability = report.refresh.availability;
+      } else {
+        refreshProblem = report.refresh.message;
+        availability = { kind: "failed", message: refreshProblem };
+      }
+    } catch {
+      outcome = {
+        kind: "uncertain",
+        message:
+          "Could not receive the push result. Check the remote before retrying.",
+      };
+      availability = {
+        kind: "failed",
+        message: "Refresh to check the current push destination.",
+      };
+    }
+    if (repos.get(commonDir) !== repo) return;
+    const current = pushes.get(root);
+    if (current && roots.get(root) === request.owner)
+      pushes.set(root, {
+        availability:
+          preparations.get(root) === generation
+            ? availability
+            : current.availability,
+        notice: { intent: request.intent, outcome, refreshProblem },
+      });
+    notifyRefsChanged(commonDir);
+    await prepareRoots(commonDir, root);
+  }
+
   async function run(
     commonDir: RepositoryRoot,
     repo: Repository,
@@ -395,48 +443,7 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
     if (root === undefined) return;
     if (request.kind === "push" && roots.get(root) !== request.owner) return;
     invalidatePush(commonDir);
-    if (request.kind === "push") {
-      repo.activity = { kind: "pushing", root };
-      const generation = preparations.get(root);
-      emit();
-      let outcome: PushOutcome;
-      let refreshProblem: string | null = null;
-      let availability: PushPreparation;
-      try {
-        const report = await deps.push(root, request.intent);
-        outcome = report.outcome;
-        if (report.refresh.kind === "refreshed") {
-          repo.overview = report.refresh.overview;
-          availability = report.refresh.availability;
-        } else {
-          refreshProblem = report.refresh.message;
-          availability = { kind: "failed", message: refreshProblem };
-        }
-      } catch {
-        outcome = {
-          kind: "uncertain",
-          message:
-            "Could not receive the push result. Check the remote before retrying.",
-        };
-        availability = {
-          kind: "failed",
-          message: "Refresh to check the current push destination.",
-        };
-      }
-      if (repos.get(commonDir) !== repo) return;
-      const current = pushes.get(root);
-      if (current && roots.get(root) === request.owner)
-        pushes.set(root, {
-          availability:
-            preparations.get(root) === generation
-              ? availability
-              : current.availability,
-          notice: { intent: request.intent, outcome, refreshProblem },
-        });
-      notifyRefsChanged(commonDir);
-      await prepareRoots(commonDir, root);
-      return;
-    }
+    if (request.kind === "push") return runPush(commonDir, repo, request);
     if (request.kind === "fetch") {
       await fetchInto(commonDir, repo, root, request.branch);
     } else if (request.kind === "fastForward") {
@@ -766,7 +773,7 @@ export function repositoryWarnings(
   const skipped = [...repo.outcomes.values()].flatMap((outcome) =>
     outcome.kind === "skipped"
       ? [
-          `Did not fast-forward ${outcome.reference.replace(/^refs\/heads\//, "")}. ${skipText(outcome.reason)}`,
+          `Did not fast-forward ${shortBranch(outcome.reference)}. ${skipText(outcome.reason)}`,
         ]
       : [],
   );

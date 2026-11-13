@@ -1,6 +1,7 @@
 import { GitCommitHorizontal } from "lucide-react";
 import type { Oid } from "../domain/repository";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { shortOid } from "../domain/shortOid";
 
 type Props = {
   oid: Oid;
@@ -9,7 +10,7 @@ type Props = {
 };
 
 export function CheckoutCommitDialog({ oid, onConfirm, onClose }: Props) {
-  const short = oid.slice(0, 7);
+  const short = shortOid(oid);
   return (
     <ConfirmDialog
       icon={GitCommitHorizontal}

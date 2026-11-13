@@ -2,6 +2,8 @@ import type { Oid } from "./repository";
 
 export const SHORT_OID_MIN_LENGTH = 7;
 
+export const shortOid = (oid: Oid) => oid.slice(0, SHORT_OID_MIN_LENGTH);
+
 function sharedLength(a: string | undefined, b: string | undefined): number {
   if (a === undefined || b === undefined) return 0;
   let length = 0;

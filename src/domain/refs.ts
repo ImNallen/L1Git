@@ -39,6 +39,20 @@ function rank(label: RefLabel): number {
   }
 }
 
+export const shortBranch = (reference: string) =>
+  reference.replace(/^refs\/heads\//, "");
+
+export const shortRemote = (reference: string) =>
+  reference.replace(/^refs\/remotes\//, "");
+
+export const shortRef = (reference: string) =>
+  reference.replace(/^refs\/(?:heads|remotes)\//, "");
+
+export const shortTag = (reference: string) =>
+  reference.replace(/^refs\/tags\//, "");
+
+export const branchRef = (name: string) => `refs/heads/${name}` as FullRef;
+
 const name = (label: RefLabel) => (label.kind === "head" ? "" : label.name);
 
 export function headBranchName(
@@ -48,7 +62,7 @@ export function headBranchName(
   if (head.kind === "detached") return null;
   return (
     branches.find((branch) => branch.reference === head.reference)?.name ??
-    head.reference.replace(/^refs\/heads\//, "")
+    shortBranch(head.reference)
   );
 }
 

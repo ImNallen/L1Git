@@ -7,7 +7,7 @@ import { FileDiff, Virtualizer } from "@pierre/diffs/react";
 import focusStyles from "../styles/focus.css?inline";
 import patchStyles from "../styles/filePatch.css?inline";
 import defaultPatchStyles from "../styles/defaultFilePatch.css?inline";
-import { diffTheme } from "../themes/diffTheme";
+import { pierreThemeOptions } from "../themes/diffTheme";
 import type { Appearance } from "../themes/palette";
 import { hunkAnchor, parsedFiles } from "../domain/lineSelection";
 import type { DiffStyle, HunkBar } from "../domain/lineSelection";
@@ -111,11 +111,10 @@ function Patch({
   const options = useMemo(
     () =>
       ({
-        theme: diffTheme(theme, painted),
+        ...pierreThemeOptions(theme, painted),
         unsafeCSS: `${focusStyles}
 ${patchStyles}
 ${theme === "dark" && !painted ? defaultPatchStyles : ""}`,
-        themeType: theme,
         diffStyle,
         diffIndicators: "classic",
         hunkSeparators: "metadata",

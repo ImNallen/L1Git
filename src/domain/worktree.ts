@@ -33,6 +33,11 @@ export type HistoryRow =
   | { kind: "commit"; id: Oid; parents: readonly Oid[]; commit: Commit }
   | WorktreeRow;
 
+export const worktreeHead = (
+  worktrees: readonly Worktree[] | undefined,
+  root: RepositoryRoot | null,
+) => worktrees?.find((worktree) => worktree.root === root)?.head;
+
 export function hasRow(changes: WorktreeChanges): boolean {
   return changes.kind === "error" || changes.status.entries.length > 0;
 }

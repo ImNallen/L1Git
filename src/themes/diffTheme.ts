@@ -43,6 +43,14 @@ export function diffTheme(appearance: Appearance, painted: boolean): string {
   return painted ? PALETTE_THEME[appearance] : `l1-muted-${appearance}`;
 }
 
+export const pierreThemeOptions = (
+  appearance: Appearance,
+  painted: boolean,
+) => ({
+  theme: diffTheme(appearance, painted),
+  themeType: appearance,
+});
+
 for (const type of ["light", "dark"] as const) {
   const name = `l1-muted-${type}`;
   const foreground = type === "dark" ? "#c4c4c4" : "#4b4b4b";

@@ -6,6 +6,7 @@ import type {
   RepositorySnapshot,
   Worktree,
 } from "./repository";
+import { worktreeHead } from "./worktree";
 import type { HistoryRow } from "./worktree";
 
 export type CommitSelection = { kind: "commit"; oid: Oid };
@@ -48,9 +49,7 @@ export function historyPlace(
 ): Oid | null {
   if (selection === null) return null;
   if (selection.kind === "commit") return selection.oid;
-  const head = worktrees.find(
-    (worktree) => worktree.root === selection.root,
-  )?.head;
+  const head = worktreeHead(worktrees, selection.root);
   return head === undefined || head.kind === "unborn" ? null : head.oid;
 }
 

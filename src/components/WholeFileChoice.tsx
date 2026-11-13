@@ -3,7 +3,7 @@ import type { KeyboardEvent, ReactNode, Ref } from "react";
 import { FileDiff, Virtualizer } from "@pierre/diffs/react";
 import { FileText, Trash2, TriangleAlert } from "lucide-react";
 import { typingIn } from "../actions";
-import { diffTheme } from "../themes/diffTheme";
+import { pierreThemeOptions } from "../themes/diffTheme";
 import type { Appearance } from "../themes/palette";
 import { wholeChoice } from "../domain/wholeFile";
 import type { SideNames, WholeCard, WholePreview } from "../domain/wholeFile";
@@ -53,8 +53,7 @@ export function WholeFileChoice({
   );
   const options = useMemo(
     () => ({
-      theme: diffTheme(theme, painted),
-      themeType: theme,
+      ...pierreThemeOptions(theme, painted),
       diffStyle: "unified" as const,
       diffIndicators: "classic" as const,
       hunkSeparators: "simple" as const,

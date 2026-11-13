@@ -16,7 +16,7 @@ import {
   RotateCcw,
 } from "lucide-react";
 import { typingIn } from "../actions";
-import { diffTheme } from "../themes/diffTheme";
+import { pierreThemeOptions } from "../themes/diffTheme";
 import type { Appearance } from "../themes/palette";
 import { conflictRegions, hasLeftoverMarkers } from "../domain/conflictRegions";
 import { inProgress, wholeFileLabels } from "../domain/inProgress";
@@ -823,9 +823,8 @@ function ResultEditor({
 }
 function editorOptions(theme: Appearance, painted: boolean) {
   return {
-    theme: diffTheme(theme, painted),
+    ...pierreThemeOptions(theme, painted),
     unsafeCSS: focusStyles,
-    themeType: theme,
     disableFileHeader: true,
   };
 }

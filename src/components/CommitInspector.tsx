@@ -83,6 +83,7 @@ import {
   useConflictLabels,
 } from "./OperationInspector";
 import { RefBadge } from "./History";
+import { shortOid } from "../domain/shortOid";
 
 type Props = {
   state: DetailState;
@@ -305,11 +306,11 @@ export function CommitInspector({
         ref={motionRoot}
         heading={
           <span className="compare-ends">
-            <code>{compare.base.slice(0, 7)}</code>
+            <code>{shortOid(compare.base)}</code>
             <ArrowRight size={12} aria-label="to" />
             <code>
               {compare.target.kind === "commit"
-                ? compare.target.oid.slice(0, 7)
+                ? shortOid(compare.target.oid)
                 : "Working copy"}
             </code>
             {compare.target.kind === "commit" && (
@@ -417,7 +418,7 @@ export function CommitInspector({
               aria-label={`Copy commit SHA ${target.commit.oid}`}
               title={copy === "copied" ? "Copied" : `Copy ${target.commit.oid}`}
             >
-              <code>{target.commit.oid.slice(0, 7)}</code>
+              <code>{shortOid(target.commit.oid)}</code>
               {copy === "copied" ? (
                 <Check size={16} />
               ) : (
@@ -512,7 +513,7 @@ export function CommitInspector({
                                 onSelect({ kind: "commit", oid: parent })
                               }
                             >
-                              <code>{parent.slice(0, 7)}</code>
+                              <code>{shortOid(parent)}</code>
                               <ArrowUpRight size={12} />
                             </button>
                           ))}
@@ -568,7 +569,7 @@ function CompareEnd({
               title={`Open ${commit.oid}`}
               onClick={() => onSelect({ kind: "commit", oid: commit.oid })}
             >
-              <code>{commit.oid.slice(0, 7)}</code>
+              <code>{shortOid(commit.oid)}</code>
               <ArrowUpRight size={12} />
             </button>
           </span>
@@ -1026,7 +1027,7 @@ function WorktreeInspector({
                             onSelect({ kind: "commit", oid: head.oid })
                           }
                         >
-                          <code>{head.oid.slice(0, 7)}</code>
+                          <code>{shortOid(head.oid)}</code>
                           <ArrowUpRight size={12} />
                         </button>
                       )}

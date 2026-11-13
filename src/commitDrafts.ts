@@ -1,6 +1,6 @@
 import { useCallback, useSyncExternalStore } from "react";
 import { draftImpact, publishCommitImpact } from "./draftProtection";
-import { emptyDraft, splitMessage } from "./domain/commitMessage";
+import { emptyDraft, hasText, splitMessage } from "./domain/commitMessage";
 import type { Draft, Loaded } from "./domain/commitMessage";
 import type { Head, Oid, RepositoryRoot } from "./domain/repository";
 
@@ -14,19 +14,15 @@ const drafts = new Map<RepositoryRoot, CommitDraft>();
 const listeners = new Set<() => void>();
 
 const isBlank = ({ draft, amend }: CommitDraft) =>
-  amend === null && draft.summary === "" && draft.description === "";
+  amend === null && !hasText(draft);
 
 function changed() {
   publishCommitImpact(
     [...drafts].map(([root, { draft, amend }]) => ({
       root,
       messages:
-        Number(draft.summary !== "" || draft.description !== "") +
-        Number(
-          amend !== null &&
-            (amend.draftAside.summary !== "" ||
-              amend.draftAside.description !== ""),
-        ),
+        Number(hasText(draft)) +
+        Number(amend !== null && hasText(amend.draftAside)),
       amending: amend !== null,
     })),
   );

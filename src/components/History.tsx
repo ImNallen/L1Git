@@ -52,7 +52,11 @@ import {
 import { historyPlace, rowSelection, selectedRowId } from "../domain/selection";
 import { changeSummary } from "../domain/worktree";
 import type { HistoryRow, WorktreeRow } from "../domain/worktree";
-import { SHORT_OID_MIN_LENGTH, uniqueShortOids } from "../domain/shortOid";
+import {
+  SHORT_OID_MIN_LENGTH,
+  shortOid,
+  uniqueShortOids,
+} from "../domain/shortOid";
 import { shortRelativeTime } from "../domain/time";
 import { branchVisibility } from "../domain/visibility";
 import type {
@@ -1142,7 +1146,7 @@ export function History({
                     <button
                       className="commit-cell"
                       tabIndex={-1}
-                      aria-label={`${commit.subject}, ${commit.author}, ${commit.oid.slice(0, 7)}`}
+                      aria-label={`${commit.subject}, ${commit.author}, ${shortOid(commit.oid)}`}
                     >
                       {isPick && (
                         <Pin
@@ -1222,7 +1226,7 @@ export function History({
                   }}
                 >
                   <GitCompareArrows size={14} />
-                  <span>Compare with {picked.oid.slice(0, 7)}</span>
+                  <span>Compare with {shortOid(picked.oid)}</span>
                 </button>
               )}
               <button

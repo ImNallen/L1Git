@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { GitCommitHorizontal, X } from "lucide-react";
 import { clearSubmitted } from "../commitDrafts";
 import { inProgress } from "../domain/inProgress";
-import type { InProgress } from "../domain/inProgress";
+import type { Running } from "../domain/inProgress";
 import { replayNames } from "../domain/merge";
 import type { MergeState, ReplayProgress } from "../domain/merge";
 import { problemFrom } from "../domain/repository";
@@ -159,7 +159,7 @@ function ReplayStrip({
   abort,
   onInspect,
 }: {
-  running: Extract<InProgress, { kind: "running" }>;
+  running: Running;
   progress: ReplayProgress;
   stopped: StoppedProblem | null;
   busy: boolean;

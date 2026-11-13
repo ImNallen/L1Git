@@ -2,6 +2,9 @@ export type Draft = { summary: string; description: string };
 
 export const emptyDraft: Draft = { summary: "", description: "" };
 
+export const hasText = ({ summary, description }: Draft) =>
+  summary !== "" || description !== "";
+
 export type Loaded = { message: string; draft: Draft };
 
 export function composeMessage({ summary, description }: Draft): string {

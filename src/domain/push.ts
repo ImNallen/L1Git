@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { branchRefSchema, overviewSchema } from "./overview";
 import { oidSchema } from "./repository";
+import { shortBranch } from "./refs";
 
 export const pushIntentSchema = z.strictObject({
   purpose: z.enum(["upstream", "publish"]),
@@ -128,7 +129,7 @@ const unavailableText: Record<z.infer<typeof pushUnavailableSchema>, string> = {
 };
 
 function pushDestination(intent: PushIntent): string {
-  return `${intent.remote}/${intent.destination.replace(/^refs\/heads\//, "")}`;
+  return `${intent.remote}/${shortBranch(intent.destination)}`;
 }
 
 export function pushDisabledReason(
@@ -157,9 +158,9 @@ export function pushOutcomeText(
   const target = pushDestination(intent);
   switch (outcome.kind) {
     case "published":
-      return `Published ${intent.branch.replace(/^refs\/heads\//, "")} to ${target}. ${outcome.tracking.kind === "set" ? "Upstream set." : outcome.tracking.message}`;
+      return `Published ${shortBranch(intent.branch)} to ${target}. ${outcome.tracking.kind === "set" ? "Upstream set." : outcome.tracking.message}`;
     case "pushed":
-      return `Pushed ${intent.branch.replace(/^refs\/heads\//, "")} to ${target}.`;
+      return `Pushed ${shortBranch(intent.branch)} to ${target}.`;
     case "upToDate":
       return `${target} is already up to date.`;
     case "stale":
@@ -212,6 +213,6 @@ export function pushControl(
     kind: "ready",
     intent: preparation.intent,
     label,
-    title: `Push ${preparation.intent.branch.replace(/^refs\/heads\//, "")} to ${pushDestination(preparation.intent)} (${preparation.intent.endpoint}).`,
+    title: `Push ${shortBranch(preparation.intent.branch)} to ${pushDestination(preparation.intent)} (${preparation.intent.endpoint}).`,
   };
 }

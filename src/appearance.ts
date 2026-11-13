@@ -74,6 +74,9 @@ export function parseAppearanceSettings(stored: string | null): ThemeSettings {
   }
 }
 
+export const isPainted = (variant: ThemeVariant) =>
+  Object.keys(variant.palette).length > 0;
+
 function paintTheme(variant: ThemeVariant) {
   const root = document.documentElement;
   root.dataset.theme = variant.appearance;
@@ -83,7 +86,7 @@ function paintTheme(variant: ThemeVariant) {
     if (value) root.style.setProperty(TOKENS[token], value);
     else root.style.removeProperty(TOKENS[token]);
   }
-  root.toggleAttribute("data-palette", Object.keys(variant.palette).length > 0);
+  root.toggleAttribute("data-palette", isPainted(variant));
   const canvas = getComputedStyle(root).getPropertyValue("--canvas").trim();
   document
     .querySelector('meta[name="theme-color"]')

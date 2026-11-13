@@ -1,6 +1,12 @@
 import { subjectOf } from "./commitMessage";
 import { replayNames } from "./merge";
-import { upstreamName } from "./overview";
+import {
+  branchRef,
+  shortBranch,
+  shortRef,
+  shortRemote,
+  shortTag,
+} from "./refs";
 import { shownText, splittable } from "./lineSelection";
 import type { ListSide } from "./worktree";
 import type {
@@ -24,6 +30,7 @@ import type {
   WorktreePatch,
   WorktreeStatus,
 } from "./repository";
+import { shortOid } from "./shortOid";
 
 type FileOperation = Extract<Operation, { entries: unknown }>;
 type BranchOperation = Extract<
@@ -186,7 +193,7 @@ const isBranchOperation = (
 
 export const localBranch = (name: string, oid: Oid): Branch => ({
   kind: "local",
-  reference: `refs/heads/${name}` as FullRef,
+  reference: branchRef(name),
   name,
   oid,
   upstream: null,
@@ -195,24 +202,28 @@ export const localBranch = (name: string, oid: Oid): Branch => ({
 type BranchStep = { left: Branch | null; gone: FullRef | null };
 
 export function branchStep(operation: BranchOperation, step: Step): BranchStep {
-  const named = (name: string) => `refs/heads/${name}` as FullRef;
   switch (operation.kind) {
     case "createBranch": {
       const { name, at } = operation;
       return step === "undo"
-        ? { left: null, gone: named(name) }
+        ? { left: null, gone: branchRef(name) }
         : { left: localBranch(name, at.oid), gone: null };
     }
     case "renameBranch": {
       const { branch, to } = operation;
       const [from, into] =
-        step === "undo" ? [to, branchName(branch)] : [branchName(branch), to];
-      return { left: localBranch(into, branch.oid), gone: named(from) };
+        step === "undo"
+          ? [to, shortBranch(branch.reference)]
+          : [shortBranch(branch.reference), to];
+      return { left: localBranch(into, branch.oid), gone: branchRef(from) };
     }
     case "deleteBranch": {
       const { branch } = operation;
       return step === "undo"
-        ? { left: localBranch(branchName(branch), branch.oid), gone: null }
+        ? {
+            left: localBranch(shortBranch(branch.reference), branch.oid),
+            gone: null,
+          }
         : { left: null, gone: branch.reference };
     }
   }
@@ -310,7 +321,7 @@ export function worktreeForStash(
   if (selected) return selected;
   const branch = stashBranch.exec(message)?.[1];
   if (branch && branch !== "(no branch)") {
-    const reference = `refs/heads/${branch}`;
+    const reference = branchRef(branch);
     const matches = repository.worktrees.filter(
       (worktree) =>
         worktree.head.kind === "attached" &&
@@ -340,13 +351,8 @@ export const checkoutWrite = (target: Start, head: Head): Write => ({
   expect: { head },
 });
 
-export const branchName = (branch: Pick<BranchTip, "reference">) =>
-  branch.reference.replace(/^refs\/heads\//, "");
-
 const startName = (start: Start) =>
-  start.kind === "commit"
-    ? start.oid.slice(0, 7)
-    : start.reference.replace(/^refs\/(?:heads|remotes)\//, "");
+  start.kind === "commit" ? shortOid(start.oid) : shortRef(start.reference);
 
 export function notMergedInto(
   name: string,
@@ -356,9 +362,7 @@ export function notMergedInto(
   const missing = [
     ...(merged.head ? [] : [head]),
     ...(merged.upstream && !merged.upstream.merged
-      ? [
-          `its upstream ${merged.upstream.reference.replace(/^refs\/remotes\//, "")}`,
-        ]
+      ? [`its upstream ${shortRemote(merged.upstream.reference)}`]
       : []),
   ];
   if (missing.length === 0) return null;
@@ -466,15 +470,15 @@ export function describe(operation: Operation): string {
     case "createBranch":
       return `Create branch ${operation.name}`;
     case "renameBranch":
-      return `Rename branch ${branchName(operation.branch)} to ${operation.to}`;
+      return `Rename branch ${shortBranch(operation.branch.reference)} to ${operation.to}`;
     case "deleteBranch":
-      return `Delete branch ${branchName(operation.branch)}`;
+      return `Delete branch ${shortBranch(operation.branch.reference)}`;
     case "checkout":
       return `Check out ${startName(operation.target)}`;
     case "createTag":
       return `Create tag ${operation.name}`;
     case "deleteTag":
-      return `Delete tag ${operation.tag.reference.replace(/^refs\/tags\//, "")}`;
+      return `Delete tag ${shortTag(operation.tag.reference)}`;
     case "stashPush":
       return operation.message.trim() === ""
         ? "Stash changes"
@@ -490,7 +494,7 @@ export function describe(operation: Operation): string {
     case "finishReplay":
       return `${replayNames[operation.of.kind].title} ${quoted(operation.message)}`;
     case "rebase":
-      return `Rebase ${operation.branch.replace(/^refs\/heads\//, "")} onto ${upstreamName(operation.onto)}`;
+      return `Rebase ${shortBranch(operation.branch)} onto ${shortRemote(operation.onto)}`;
   }
   if ("message" in operation)
     return `${commitVerbs[operation.kind]} ${quoted(operation.message)}`;

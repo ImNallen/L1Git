@@ -18,7 +18,7 @@ import type { Oid } from "../domain/repository";
 import { mac } from "../repositories";
 import { defineSlice } from "./actionSlices";
 import type { ActionSlice, ComposedActions } from "./actionSlices";
-import { focusedElement, shownElement } from "./dom";
+import { focusedElement, returnFocus } from "./dom";
 import type { Focus } from "./useFocus";
 
 export type Palette = {
@@ -45,9 +45,7 @@ export function usePalette({
   }, [historyRef]);
   const close = () => {
     flushSync(() => setPalette(null));
-    const back = paletteReturn.current;
-    if (shownElement(back)) back.focus({ preventScroll: true });
-    if (!shownElement(back) || focusedElement() !== back) fallback();
+    returnFocus(paletteReturn.current, fallback);
   };
   return {
     open: palette !== null,

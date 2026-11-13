@@ -56,6 +56,7 @@ export function Toolbar({
 }) {
   const { toolbarMenu: menu, setToolbarMenu: setMenu } = layout;
   const anchor = menu?.anchor.getBoundingClientRect();
+  const opened = menus.find((each) => each.kind === menu?.kind);
   const close = (returnFocus: boolean) => {
     setMenu(null);
     if (returnFocus) menu?.anchor.focus();
@@ -98,37 +99,31 @@ export function Toolbar({
           className="toolbar-menu"
           x={anchor.left}
           y={anchor.bottom + 6}
-          label={`${menus.find((each) => each.kind === menu.kind)?.label} actions`}
+          label={`${opened?.label} actions`}
           onClose={({ returnFocus }) => close(returnFocus)}
         >
-          {menus
-            .find((each) => each.kind === menu.kind)
-            ?.actions.map((id) =>
-              actionRegistry.find((action) => action.id === id),
-            )
-            .map(
-              (action) =>
-                action && (
-                  <button
-                    key={action.id}
-                    role="menuitem"
-                    title={
-                      action.detail?.(actions.context) ??
-                      titleOf(action, actions.context)
-                    }
-                    aria-disabled={!action.available(actions.context)}
-                    onClick={() => {
-                      if (!action.available(actions.context)) return;
-                      close(true);
-                      action.run(actions.commands);
-                    }}
-                  >
-                    <span className="toolbar-menu-label">
-                      {titleOf(action, actions.context)}
-                    </span>
-                  </button>
-                ),
-            )}
+          {opened?.actions
+            .map((id) => actionRegistry.find((action) => action.id === id))
+            .map((action) => {
+              if (!action) return null;
+              const available = action.available(actions.context);
+              const title = titleOf(action, actions.context);
+              return (
+                <button
+                  key={action.id}
+                  role="menuitem"
+                  title={action.detail?.(actions.context) ?? title}
+                  aria-disabled={!available}
+                  onClick={() => {
+                    if (!available) return;
+                    close(true);
+                    action.run(actions.commands);
+                  }}
+                >
+                  <span className="toolbar-menu-label">{title}</span>
+                </button>
+              );
+            })}
         </ContextMenu>
       )}
     </header>

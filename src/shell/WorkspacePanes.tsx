@@ -1,6 +1,7 @@
 import { FolderGit2, Plus, TriangleAlert } from "lucide-react";
 import { WorkspaceMotion } from "../components/WorkspaceMotion";
 import { Suspense } from "react";
+import { isPainted } from "../appearance";
 import type { AppearanceState } from "../appearance";
 import { History, HistoryPlaceholder } from "../components/History";
 import { FileDiffPane } from "./lazyViews";
@@ -75,7 +76,7 @@ export function WorkspacePanes({
                 state={fileDiff}
                 diffStyle={diff.diffStyle}
                 theme={appearance.variant.appearance}
-                painted={Object.keys(appearance.variant.palette).length > 0}
+                painted={isPainted(appearance.variant)}
                 onDiffStyle={diff.setDiffStyle}
                 onBack={app.closeFile}
                 onRetry={() => app.openFile(fileDiff.path, fileDiff.side)}

@@ -12,6 +12,7 @@ import type {
 } from "../domain/repository";
 import type { Outcome } from "../useWrites";
 import { commitMessage, commitOutput, messageKeys } from "./CommitBox";
+import { shortOid } from "../domain/shortOid";
 
 export function EditMessageDialog({
   status,
@@ -97,8 +98,9 @@ export function EditMessageDialog({
         </div>
         <h1 id="edit-message-title">Edit message</h1>
         <p>
-          L1 Git replaces commit <code>{oid?.slice(0, 7)}</code> with one that
-          has the same changes and parents. Staged changes stay staged.
+          L1 Git replaces commit <code>{oid !== null && shortOid(oid)}</code>{" "}
+          with one that has the same changes and parents. Staged changes stay
+          staged.
         </p>
         {draft === null ? (
           problem === null && (

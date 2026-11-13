@@ -16,7 +16,7 @@ import type { VisibilityRule } from "../domain/visibility";
 import type { RefsState } from "../useRepositoryRefs";
 import { defineSlice } from "./actionSlices";
 import type { ActionSlice } from "./actionSlices";
-import { focusedElement, shownElement } from "./dom";
+import { focusedElement, focusIsShown, returnFocus } from "./dom";
 import { isBranch, jumpView, listedRef } from "./navigation";
 import type { Jump, JumpTarget, JumpView, UserSelection } from "./navigation";
 import type { Focus } from "./useFocus";
@@ -242,7 +242,7 @@ export function useNavigation({
     const target = left === null ? null : listed(left);
     if ((left !== null && target === null) || (gone && listed(gone))) return;
     setSteppedRef(null);
-    if (shownElement(focusedElement())) return;
+    if (focusIsShown()) return;
     if (target === null) return fallback();
     focusJumpedRow.current = true;
     jumpToStepped(root, target);
@@ -339,9 +339,7 @@ export function useNavigation({
     adding,
     closeAdd: () => {
       flushSync(() => setAdding(false));
-      const back = addReturn.current;
-      if (shownElement(back)) back.focus({ preventScroll: true });
-      if (!shownElement(back) || focusedElement() !== back) fallback();
+      returnFocus(addReturn.current, fallback);
     },
     finishAdd: () => {
       flushSync(() => setAdding(false));
