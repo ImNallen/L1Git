@@ -11,7 +11,7 @@ import type { Outcome } from "../useWrites";
 import { commitOutput, messageKeys } from "./CommitBox";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { shortOid } from "../domain/shortOid";
-import { DialogHeader, useModalDialog } from "./Dialog";
+import { DialogHeader, busyProblem, useModalDialog } from "./Dialog";
 
 type Props = {
   ask: TagAsk;
@@ -55,10 +55,7 @@ function CreateTagDialog({
     const outcome = await onWrite(createTagWrite(name, ask.at, message, head));
     setSaving(false);
     if (outcome.kind === "busy") {
-      setProblem({
-        kind: "transport",
-        message: "Another change is still running. Try again when it ends.",
-      });
+      setProblem(busyProblem);
       return;
     }
     if (outcome.kind === "failed" && answeredInTagDialog(outcome.problem)) {

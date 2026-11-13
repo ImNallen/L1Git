@@ -20,7 +20,7 @@ import type {
 } from "../domain/repository";
 import type { Outcome } from "../useWrites";
 import { ConfirmDialog } from "./ConfirmDialog";
-import { DialogHeader, useModalDialog } from "./Dialog";
+import { DialogHeader, busyProblem, useModalDialog } from "./Dialog";
 
 type Props = {
   ask: BranchAsk;
@@ -76,10 +76,7 @@ function NameBranchDialog({
       await onWrite(checkoutWrite(startAt(named), head));
     setSaving(false);
     if (outcome.kind === "busy") {
-      setProblem({
-        kind: "transport",
-        message: "Another change is still running. Try again when it ends.",
-      });
+      setProblem(busyProblem);
       return;
     }
     if (outcome.kind === "failed") {

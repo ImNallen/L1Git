@@ -1,6 +1,12 @@
 import { useEffect, useEffectEvent, useRef } from "react";
 import type { ReactNode, SyntheticEvent } from "react";
 import { X } from "lucide-react";
+import type { Problem } from "../domain/repository";
+
+export const busyProblem: Problem = {
+  kind: "transport",
+  message: "Another change is still running. Try again when it ends.",
+};
 
 export function useModalDialog(onClose: () => void, onOpen?: () => void) {
   const ref = useRef<HTMLDialogElement>(null);

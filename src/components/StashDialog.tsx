@@ -5,7 +5,7 @@ import type { Write } from "../domain/operations";
 import type { Head, Problem } from "../domain/repository";
 import type { Outcome } from "../useWrites";
 import { messageKeys } from "./CommitBox";
-import { DialogHeader, useModalDialog } from "./Dialog";
+import { DialogHeader, busyProblem, useModalDialog } from "./Dialog";
 
 type Props = {
   paths: readonly string[];
@@ -43,10 +43,7 @@ export function StashDialog({
     );
     setSaving(false);
     if (outcome.kind === "busy") {
-      setProblem({
-        kind: "transport",
-        message: "Another change is still running. Try again when it ends.",
-      });
+      setProblem(busyProblem);
       return;
     }
     if (outcome.kind === "failed") {
@@ -59,7 +56,7 @@ export function StashDialog({
   return (
     <dialog
       ref={ref}
-      className="add-dialog branch-dialog tag-dialog"
+      className="add-dialog branch-dialog"
       aria-labelledby={titleId}
       onCancel={onCancel}
       onClick={(event) => {
