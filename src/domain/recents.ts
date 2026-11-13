@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { writeStored } from "../persisted";
 import { rootSchema } from "./repository";
 import type { RepositoryRoot, RepositorySnapshot } from "./repository";
 
@@ -84,10 +85,10 @@ export function persistCatalog(
   storage: StorageWriter,
   catalog: Catalog,
 ): string | null {
-  try {
-    storage.setItem(RECENTS_KEY, JSON.stringify(catalog));
-    return null;
-  } catch {
-    return "The repository list could not be saved. Allow local storage to restore repositories after restart.";
-  }
+  return writeStored(
+    storage,
+    RECENTS_KEY,
+    catalog,
+    "The repository list could not be saved. Allow local storage to restore repositories after restart.",
+  );
 }

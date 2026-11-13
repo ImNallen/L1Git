@@ -19,6 +19,7 @@ import {
 import type { Compare, Comparison } from "./domain/comparison";
 import { latestReader } from "./latestReader";
 import { oneReadPerKey } from "./oneReadPerKey";
+import { browserStorage } from "./persisted";
 import {
   emptyCatalog,
   forget,
@@ -128,17 +129,15 @@ function sameChanges(
   return left !== undefined && JSON.stringify(left) === JSON.stringify(right);
 }
 
+const storageUnavailable =
+  "Local storage is unavailable. Repositories will not be restored after restart.";
+
 export function useWorkspace() {
   const [saved] = useState(() => {
-    try {
-      return restoreCatalog(localStorage);
-    } catch {
-      return {
-        catalog: emptyCatalog,
-        error:
-          "Local storage is unavailable. Repositories will not be restored after restart.",
-      };
-    }
+    const storage = browserStorage();
+    return storage === null
+      ? { catalog: emptyCatalog, error: storageUnavailable }
+      : restoreCatalog(storage);
   });
   const [catalog, setCatalog] = useState(saved.catalog);
   const catalogRef = useRef(catalog);
@@ -193,13 +192,10 @@ export function useWorkspace() {
   const save = useCallback((next: Catalog) => {
     catalogRef.current = next;
     setCatalog(next);
-    try {
-      setPersistenceError(persistCatalog(localStorage, next));
-    } catch {
-      setPersistenceError(
-        "Local storage is unavailable. Repositories will not be restored after restart.",
-      );
-    }
+    const storage = browserStorage();
+    setPersistenceError(
+      storage === null ? storageUnavailable : persistCatalog(storage, next),
+    );
   }, []);
 
   const accept = useCallback(

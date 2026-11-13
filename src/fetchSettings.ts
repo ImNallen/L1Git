@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { z } from "zod";
+import { browserStorage, readStored, writeStored } from "./persisted";
 
 export const FETCH_SETTINGS_KEY = "l1git.fetch.v1";
 export const fetchIntervals = [0, 5, 15, 30, 60] as const;
@@ -15,49 +16,36 @@ const defaultFetchSettings: FetchSettings = {
 };
 
 export function restoreFetchSettings(
-  storage: Pick<Storage, "getItem">,
+  storage: Pick<Storage, "getItem"> | null,
 ): FetchSettings {
-  try {
-    const saved = storage.getItem(FETCH_SETTINGS_KEY);
-    if (saved === null) return defaultFetchSettings;
-    return fetchSettingsSchema.parse(JSON.parse(saved));
-  } catch {
-    return defaultFetchSettings;
-  }
+  return (
+    readStored(storage, FETCH_SETTINGS_KEY, fetchSettingsSchema) ??
+    defaultFetchSettings
+  );
 }
 
-const unsaved = "Fetch schedule changed for this session. Could not save it.";
-
 export function persistFetchSettings(
-  storage: Pick<Storage, "setItem">,
+  storage: Pick<Storage, "setItem"> | null,
   settings: FetchSettings,
 ): string | null {
-  try {
-    storage.setItem(FETCH_SETTINGS_KEY, JSON.stringify(settings));
-    return null;
-  } catch {
-    return unsaved;
-  }
+  return writeStored(
+    storage,
+    FETCH_SETTINGS_KEY,
+    settings,
+    "Fetch schedule changed for this session. Could not save it.",
+  );
 }
 
 export function useFetchSettings() {
-  const [settings, setSettings] = useState(() => {
-    try {
-      return restoreFetchSettings(localStorage);
-    } catch {
-      return defaultFetchSettings;
-    }
-  });
+  const [settings, setSettings] = useState(() =>
+    restoreFetchSettings(browserStorage()),
+  );
   const [persistenceError, setPersistenceError] = useState<string | null>(null);
 
   function setIntervalMinutes(intervalMinutes: FetchInterval) {
     const next: FetchSettings = { version: 1, intervalMinutes };
     setSettings(next);
-    try {
-      setPersistenceError(persistFetchSettings(localStorage, next));
-    } catch {
-      setPersistenceError(unsaved);
-    }
+    setPersistenceError(persistFetchSettings(browserStorage(), next));
   }
 
   return {
