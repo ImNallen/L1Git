@@ -1,7 +1,5 @@
 use super::{
-    Applied, Change, Direction, RefTxn, Repo,
-    branches::{self, Writing},
-    commit,
+    Applied, Change, Direction, RefTxn, Repo, Writing, branches, commit,
     refs::{self, Move},
     store::EntryObjects,
     txn::Runner,
@@ -281,10 +279,7 @@ fn record_around(
             ),
         ));
     };
-    match recorded.replace(&Change::Tag(change)) {
-        Ok(()) => recorded.confirm(),
-        Err(_) => recorded.stay_pending(),
-    }
+    recorded.settle(&Change::Tag(change));
     acted.map(|()| applied)
 }
 

@@ -1,13 +1,11 @@
 use super::{
-    Applied, Change, Direction, Expect, RebaseTxn, Repo,
-    branches::Writing,
-    merge,
+    Applied, Change, Direction, Expect, RebaseTxn, Repo, Writing, entry_path, merge,
     refs::{self, Files, RefChange},
     store::{self, EntryObjects, Objects, Recorded},
     txn::Runner,
 };
 use crate::{
-    BranchRef, ErrorKind, Head, Oid, RemoteRef, RepositoryError, StaleReason, StatusEntry,
+    BranchRef, ErrorKind, Head, Oid, RemoteRef, RepositoryError, StaleReason,
     git::{self, WriteDeadline, Wrote},
     status::{self, Untracked},
     stderr,
@@ -81,7 +79,11 @@ pub(super) fn apply(
     if !entries.is_empty() {
         return Err(merge::refused(format!(
             "Commit or stash these changes before you rebase: {}.",
-            entries.iter().map(path).collect::<Vec<_>>().join(", ")
+            entries
+                .iter()
+                .map(entry_path)
+                .collect::<Vec<_>>()
+                .join(", ")
         )));
     }
     let upstream = git::read(
@@ -121,7 +123,7 @@ pub(super) fn apply(
             collisions.join(", ")
         )));
     }
-    let (applied, _, recorded) = store.record_with(repo, log, operation, |_| {
+    let (applied, _, mut recorded) = store.record_with(repo, log, operation, |_| {
         Ok(RebaseChange::Pending {
             before: head.clone(),
             onto: target.clone(),
@@ -129,13 +131,7 @@ pub(super) fn apply(
     })?;
     recorded.durable()?;
     let txn = RebaseTxn::begin(repo, deadline)?;
-    let wrote = match txn.rebase(&target).run(deadline) {
-        Ok(wrote) => wrote,
-        Err(error) => {
-            recorded.stay_pending();
-            return Err(error);
-        }
-    };
+    let wrote = recorded.pending_on_err(txn.rebase(&target).run(deadline))?;
     let txn = txn.renewed();
     match wrote.code() {
         Some(0) => {
@@ -148,15 +144,6 @@ pub(super) fn apply(
             recorded.stay_pending();
             Err(stopped(repo, &txn, &head, &wrote).unwrap_or_else(|error| error))
         }
-    }
-}
-
-fn path(entry: &StatusEntry) -> &str {
-    match entry {
-        StatusEntry::Ordinary { path, .. }
-        | StatusEntry::Renamed { path, .. }
-        | StatusEntry::Unmerged { path, .. }
-        | StatusEntry::Untracked { path } => path,
     }
 }
 
@@ -353,23 +340,17 @@ fn landed_change(
     )?)))
 }
 
-/// The undo log is the receipt for a repeated request, because Git leaves no
-/// trace that a rebase finished.
 fn already_landed(
     writing: &Writing<'_>,
     expect: &Expect,
 ) -> Result<Option<Applied>, RepositoryError> {
-    let Some(id) = writing.log.next_undo() else {
-        return Ok(None);
-    };
-    let (applied, change) = writing.store.record_of(id)?;
-    let Change::Rebase(RebaseChange::Landed(change)) = change else {
-        return Ok(None);
-    };
-    Ok((applied.operation == *writing.operation
-        && applied.root == writing.repo.root()
-        && change.moved(&expect.head, &writing.repo.head(writing.deadline)?))
-    .then_some(applied))
+    refs::already_landed(writing, expect, |change| {
+        if let Change::Rebase(RebaseChange::Landed(change)) = change {
+            Some(change)
+        } else {
+            None
+        }
+    })
 }
 
 /// Settles a pending entry from Git alone. A rebase still in progress, or a

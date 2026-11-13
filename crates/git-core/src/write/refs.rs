@@ -1,5 +1,5 @@
 use super::{
-    Direction, RefTxn, Repo, merge,
+    Applied, Change, Direction, Expect, RefTxn, Repo, Writing, merge,
     store::{EntryObjects, Objects},
     txn::{RefreshTxn, Runner},
 };
@@ -43,6 +43,27 @@ impl RefChange {
             not: oid(&self.after).into_iter().collect(),
         }
     }
+}
+
+/// The undo log is the receipt for a repeated replay or rebase request,
+/// because Git leaves no trace that one finished. `landed` picks the entry's
+/// ref change when it is the kind the caller records.
+pub(super) fn already_landed(
+    writing: &Writing<'_>,
+    expect: &Expect,
+    landed: impl FnOnce(Change) -> Option<RefChange>,
+) -> Result<Option<Applied>, RepositoryError> {
+    let Some(id) = writing.log.next_undo() else {
+        return Ok(None);
+    };
+    let (applied, change) = writing.store.record_of(id)?;
+    let Some(change) = landed(change) else {
+        return Ok(None);
+    };
+    Ok((applied.operation == *writing.operation
+        && applied.root == writing.repo.root()
+        && change.moved(&expect.head, &writing.repo.head(writing.deadline)?))
+    .then_some(applied))
 }
 
 pub(super) struct Move {

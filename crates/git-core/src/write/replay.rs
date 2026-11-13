@@ -1,6 +1,5 @@
 use super::{
-    Applied, BranchTip, Change, CommitTxn, Direction, Expect, Operation, ReplayTxn, Repo,
-    branches::Writing,
+    Applied, BranchTip, Change, CommitTxn, Direction, Expect, Operation, ReplayTxn, Repo, Writing,
     commit::{self, Target, Trace},
     merge::{self, Edit},
     refs::{self, Files, RefChange},
@@ -737,7 +736,7 @@ pub(super) fn apply(
         ReplayPrediction::Conflict { .. } => None,
         ReplayPrediction::Empty => return Err(nothing_to_apply(of.kind)),
     };
-    let (applied, _, recorded) = store.record_with(repo, log, operation, |_| {
+    let (applied, _, mut recorded) = store.record_with(repo, log, operation, |_| {
         Ok(ReplayChange::Pending {
             before: head.clone(),
             tree,
@@ -746,17 +745,11 @@ pub(super) fn apply(
     recorded.durable()?;
     let trace = Trace::create(store, applied.id)?;
     let txn = ReplayTxn::begin(repo, deadline)?;
-    let wrote = match txn
-        .apply(&of)
-        .traces(&trace.events, &trace.refs)
-        .run(deadline)
-    {
-        Ok(wrote) => wrote,
-        Err(error) => {
-            recorded.stay_pending();
-            return Err(error);
-        }
-    };
+    let wrote = recorded.pending_on_err(
+        txn.apply(&of)
+            .traces(&trace.events, &trace.refs)
+            .run(deadline),
+    )?;
     let txn = txn.renewed();
     match wrote.code() {
         Some(0) => {
@@ -957,7 +950,7 @@ pub(super) fn finish(
             edited.join(", ")
         )));
     }
-    let (applied, _, recorded) = store.record_with(repo, log, operation, |_| {
+    let (applied, _, mut recorded) = store.record_with(repo, log, operation, |_| {
         Ok(ReplayChange::Pending {
             before: head.clone(),
             tree: Some(tree.clone()),
@@ -966,18 +959,12 @@ pub(super) fn finish(
     recorded.durable()?;
     let trace = Trace::create(store, applied.id)?;
     let txn = CommitTxn::begin(repo, deadline)?;
-    let wrote = match txn
-        .commit(&[], message)
-        .without_replacements()
-        .traces(&trace.events, &trace.refs)
-        .run(deadline)
-    {
-        Ok(wrote) => wrote,
-        Err(error) => {
-            recorded.stay_pending();
-            return Err(error);
-        }
-    };
+    let wrote = recorded.pending_on_err(
+        txn.commit(&[], message)
+            .without_replacements()
+            .traces(&trace.events, &trace.refs)
+            .run(deadline),
+    )?;
     let txn = txn.renewed();
     let deadline = deadline.renewed();
     // A killed Git may have made the commit. The next request settles from Git's state.
@@ -1025,23 +1012,18 @@ fn land(
     Ok((update.new, race))
 }
 
-/// The undo log is the receipt for a repeated request. Nothing else records that a
-/// replay finished, and Git's marker is gone by then.
+/// Git's marker is gone once a replay finished, so only the undo log knows.
 fn already_landed(
     writing: &Writing<'_>,
     expect: &Expect,
 ) -> Result<Option<Applied>, RepositoryError> {
-    let Some(id) = writing.log.next_undo() else {
-        return Ok(None);
-    };
-    let (applied, change) = writing.store.record_of(id)?;
-    let Change::Replay(ReplayChange::Landed(change)) = change else {
-        return Ok(None);
-    };
-    Ok((applied.operation == *writing.operation
-        && applied.root == writing.repo.root()
-        && change.moved(&expect.head, &writing.repo.head(writing.deadline)?))
-    .then_some(applied))
+    refs::already_landed(writing, expect, |change| {
+        if let Change::Replay(ReplayChange::Landed(change)) = change {
+            Some(change)
+        } else {
+            None
+        }
+    })
 }
 
 /// Settles a pending entry from Git alone. A commit whose parent, tree, or branch

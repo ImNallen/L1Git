@@ -1,6 +1,5 @@
 use super::{
-    Applied, Direction, Expect, Repo, Restored,
-    branches::Writing,
+    Applied, Direction, Expect, Repo, Restored, Writing,
     files::{self, Content, FileChange, Stat},
     index::{self, IndexChange, IndexEntry},
     resolution,
@@ -15,7 +14,7 @@ use crate::{
     repository,
 };
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, fs, io, path::Path};
+use std::{collections::BTreeMap, fs, io};
 
 const RESOLVE: files::Verb = files::Verb {
     verb: "resolve",
@@ -43,7 +42,7 @@ enum Parent {
 pub(super) struct WholeChange {
     index: IndexChange,
     scope: Vec<Parent>,
-    file: FileChange,
+    pub(super) file: FileChange,
 }
 
 impl WholeChange {
@@ -872,7 +871,7 @@ pub(super) fn resolve(
     if staged.path_names().ne([path]) || index::at(&after, path) != resolved {
         return Err(files::changed(path));
     }
-    let (applied, change, recorded) = store.record_with(repo, log, operation, |entry| {
+    let (applied, change, mut recorded) = store.record_with(repo, log, operation, |entry| {
         let copies = entry.files();
         store::private_folder()
             .create(&copies)
@@ -928,22 +927,16 @@ pub(super) fn resolve(
         {
             return Err(files::changed(path));
         }
-        txn.publish_index(&super::Change::Whole(change.clone()))
+        txn.publish(&super::Change::Whole(change.clone()))
     })();
-    let published = match placed {
-        Ok(published) => published,
-        Err(error) => {
-            recorded.stay_pending();
-            return Err(recovery(error));
-        }
-    };
+    let published = recorded.pending_on_err(placed).map_err(recovery)?;
     recorded.confirm_checked().map_err(recovery)?;
     Ok((applied, Some(published)))
 }
 
 /// The nearest folder that still exists holds the new name or the removal.
 #[cfg(unix)]
-fn sync_parent(root: &Path, path: &str) -> Result<(), RepositoryError> {
+fn sync_parent(root: &std::path::Path, path: &str) -> Result<(), RepositoryError> {
     let mut folder = root.join(path);
     while folder.pop() && folder.starts_with(root) {
         if folder.is_dir() {
@@ -1047,13 +1040,6 @@ pub(super) fn step(
             Restored::Staged
         },
     )
-}
-
-pub(super) fn remove_copy_beside(applied: &Applied, change: &WholeChange) {
-    let _ = fs::remove_file(files::copy_beside(
-        applied.id,
-        &Path::new(&applied.root).join(&change.file.path),
-    ));
 }
 
 #[cfg(not(test))]

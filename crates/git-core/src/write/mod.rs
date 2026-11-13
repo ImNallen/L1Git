@@ -44,7 +44,7 @@ use serde::{Deserialize, Serialize};
 pub use stash::StashTip;
 use std::{
     fmt,
-    path::{Path, PathBuf},
+    path::PathBuf,
     time::{SystemTime, UNIX_EPOCH},
 };
 use store::{EntryObjects, LockedStore, Log, Objects, Position, Step};
@@ -368,13 +368,7 @@ impl Change {
         match self {
             Self::Index(change) => {
                 let txn = Txn::begin(repo, deadline)?;
-                match index::restore(&txn, entry, change, direction)? {
-                    Restored::AlreadyThere => {
-                        store.save(step.log())?;
-                        Ok(None)
-                    }
-                    Restored::Staged => Ok(Some(txn.commit_step(store, step, self)?)),
-                }
+                index::restore(&txn, entry, change, direction)?.finish(txn, store, step, self)
             }
             Self::Resolution(change) => {
                 let txn = Txn::begin(repo, deadline)?;
@@ -383,13 +377,7 @@ impl Change {
             }
             Self::Whole(change) => {
                 let txn = Txn::begin(repo, deadline)?;
-                match conflicts::step(&txn, entry, change, direction)? {
-                    Restored::AlreadyThere => {
-                        store.save(step.log())?;
-                        Ok(None)
-                    }
-                    Restored::Staged => Ok(Some(txn.commit_step(store, step, self)?)),
-                }
+                conflicts::step(&txn, entry, change, direction)?.finish(txn, store, step, self)
             }
             Self::Ref(change) => {
                 refs::restore(repo, entry, change, direction, deadline)?;
@@ -398,13 +386,7 @@ impl Change {
             }
             Self::Discard(change) => {
                 let txn = Txn::begin(repo, deadline)?;
-                match discard::step(&txn, entry, change, direction)? {
-                    Restored::AlreadyThere => {
-                        store.save(step.log())?;
-                        Ok(None)
-                    }
-                    Restored::Staged => Ok(Some(txn.commit_step(store, step, self)?)),
-                }
+                discard::step(&txn, entry, change, direction)?.finish(txn, store, step, self)
             }
             Self::Branch(change) => {
                 branches::step(repo, entry, change, direction, deadline)?;
@@ -521,11 +503,9 @@ impl Change {
 
     fn remove_copies_beside(&self, applied: &Applied) {
         match self {
-            Self::Resolution(change) => resolution::remove_copy_beside(applied, change),
-            Self::Whole(change) => conflicts::remove_copy_beside(applied, change),
-            Self::Discard(change) => {
-                discard::remove_copies_beside(Path::new(&applied.root), applied.id, change);
-            }
+            Self::Resolution(change) => files::remove_copy_beside(applied, &change.file.path),
+            Self::Whole(change) => files::remove_copy_beside(applied, &change.file.path),
+            Self::Discard(change) => discard::remove_copies_beside(applied, change),
             Self::Index(_)
             | Self::Ref(_)
             | Self::Branch(_)
@@ -558,6 +538,24 @@ impl Change {
 enum Restored {
     AlreadyThere,
     Staged,
+}
+
+impl Restored {
+    fn finish(
+        self,
+        txn: Txn<'_>,
+        store: &LockedStore,
+        step: Step,
+        change: &Change,
+    ) -> Result<Option<Published>, RepositoryError> {
+        match self {
+            Self::AlreadyThere => {
+                store.save(step.log())?;
+                Ok(None)
+            }
+            Self::Staged => Ok(Some(txn.commit_step(store, step, change)?)),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -618,19 +616,16 @@ impl Operation {
             let (applied, published) = txn.commit_write(store, log, self, &change)?;
             Ok((applied, Some(published)))
         };
-        let writing = branches::Writing {
+        let writing = Writing {
             repo,
             store,
             log,
             deadline,
             operation: self,
         };
-        let branch =
+        let unpublished =
             |written: Result<Applied, RepositoryError>| written.map(|applied| (applied, None));
-        let commit = |kind, message| {
-            commit::commit(repo, store, log, deadline, expect, self, kind, message)
-                .map(|applied| (applied, None))
-        };
+        let commit = |kind, message| unpublished(commit::commit(&writing, expect, kind, message));
         let index_part = |action, path, picks, shown| {
             let part = Part::new(action, path, picks, shown)?;
             let (txn, change) = index::edit_part(repo, deadline, expect, &part)?;
@@ -639,7 +634,7 @@ impl Operation {
         };
         let discard_part = |path, picks, shown| {
             let part = Part::new(Action::Discard, path, picks, shown)?;
-            discard::discard_part(repo, store, log, deadline, expect, self, &part)
+            discard::discard_part(&writing, expect, &part)
         };
         match self {
             Self::SaveConflict {
@@ -664,9 +659,7 @@ impl Operation {
             Self::Commit { message, staged } => commit(commit::Kind::New(staged), message),
             Self::Amend { message, staged } => commit(commit::Kind::Amend(staged), message),
             Self::EditMessage { message } => commit(commit::Kind::EditMessage, message),
-            Self::Discard { entries } => {
-                discard::discard(repo, store, log, deadline, expect, self, entries)
-            }
+            Self::Discard { entries } => discard::discard(&writing, expect, entries),
             Self::StageHunk { path, hunk, shown } => {
                 index_part(Action::Stage, path, Picks::Hunk(*hunk), shown)
             }
@@ -685,14 +678,16 @@ impl Operation {
             Self::DiscardLines { path, lines, shown } => {
                 discard_part(path, Picks::Lines(lines), shown)
             }
-            Self::CreateBranch { name, at } => branch(branches::create(&writing, name, at)),
-            Self::RenameBranch { branch: tip, to } => branch(branches::rename(&writing, tip, to)),
-            Self::DeleteBranch { branch: tip } => branch(branches::delete(&writing, tip)),
-            Self::Checkout { target } => branch(checkout::checkout(&writing, expect, target)),
-            Self::CreateTag { name, at, message } => {
-                branch(tags::create(&writing, name, at, message.as_deref()))
+            Self::CreateBranch { name, at } => unpublished(branches::create(&writing, name, at)),
+            Self::RenameBranch { branch: tip, to } => {
+                unpublished(branches::rename(&writing, tip, to))
             }
-            Self::DeleteTag { tag } => branch(tags::delete(&writing, tag)),
+            Self::DeleteBranch { branch: tip } => unpublished(branches::delete(&writing, tip)),
+            Self::Checkout { target } => unpublished(checkout::checkout(&writing, expect, target)),
+            Self::CreateTag { name, at, message } => {
+                unpublished(tags::create(&writing, name, at, message.as_deref()))
+            }
+            Self::DeleteTag { tag } => unpublished(tags::delete(&writing, tag)),
             Self::StashPush {
                 message,
                 untracked,
@@ -700,24 +695,36 @@ impl Operation {
             } => stash::push(&writing, expect, message, *untracked, paths),
             Self::StashApply { stash } => stash::apply(&writing, expect, stash, false),
             Self::StashPop { stash } => stash::apply(&writing, expect, stash, true),
-            Self::StashDrop { stash } => {
-                stash::drop_stash(&writing, stash).map(|applied| (applied, None))
-            }
-            Self::Replay { review } => {
-                replay::apply(&writing, expect, review).map(|applied| (applied, None))
-            }
+            Self::StashDrop { stash } => unpublished(stash::drop_stash(&writing, stash)),
+            Self::Replay { review } => unpublished(replay::apply(&writing, expect, review)),
             Self::FinishReplay {
                 of,
                 staged,
                 tree,
                 message,
-            } => replay::finish(&writing, expect, of, staged, tree, message)
-                .map(|applied| (applied, None)),
+            } => unpublished(replay::finish(&writing, expect, of, staged, tree, message)),
             Self::Rebase { branch, onto } => {
-                rebase::apply(&writing, expect, branch, onto).map(|applied| (applied, None))
+                unpublished(rebase::apply(&writing, expect, branch, onto))
             }
         }
     }
+}
+
+fn entry_path(entry: &StatusEntry) -> &str {
+    match entry {
+        StatusEntry::Ordinary { path, .. }
+        | StatusEntry::Renamed { path, .. }
+        | StatusEntry::Unmerged { path, .. }
+        | StatusEntry::Untracked { path } => path,
+    }
+}
+
+struct Writing<'a> {
+    repo: &'a Repo,
+    store: &'a LockedStore,
+    log: &'a Log,
+    deadline: WriteDeadline,
+    operation: &'a Operation,
 }
 
 struct Repo {

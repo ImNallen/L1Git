@@ -1,7 +1,7 @@
 use super::{
-    Applied, Change, Direction, Operation, RefTxn, Repo,
+    Applied, Change, Direction, RefTxn, Repo, Writing,
     refs::{self, Move},
-    store::{EntryObjects, LockedStore, Log},
+    store::EntryObjects,
     txn::Runner,
 };
 use crate::{
@@ -409,14 +409,6 @@ pub(super) fn config(
             }
         })
         .collect())
-}
-
-pub(super) struct Writing<'a> {
-    pub(super) repo: &'a Repo,
-    pub(super) store: &'a LockedStore,
-    pub(super) log: &'a Log,
-    pub(super) deadline: WriteDeadline,
-    pub(super) operation: &'a Operation,
 }
 
 const NAME_OUTPUT_CAP: usize = 64 * 1024;
@@ -865,10 +857,7 @@ fn record_around(
             ),
         ));
     };
-    match recorded.replace(&Change::Branch(change)) {
-        Ok(()) => recorded.confirm(),
-        Err(_) => recorded.stay_pending(),
-    }
+    recorded.settle(&Change::Branch(change));
     acted.map(|()| applied)
 }
 
@@ -1044,7 +1033,7 @@ pub(crate) fn merged_within(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Coordinator, Expect, Limits, git::LocalWrite};
+    use crate::{Coordinator, Expect, Limits, Operation, git::LocalWrite};
     use std::process::Command;
 
     fn git(root: &Path, args: &[&str]) -> String {

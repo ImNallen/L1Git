@@ -1,6 +1,6 @@
 use super::{
-    Applied, Change, Direction, Expect, RefTxn, Repo, Start,
-    branches::{self, Listing, Setting, Writing},
+    Applied, Change, Direction, Expect, RefTxn, Repo, Start, Writing,
+    branches::{self, Listing, Setting},
     commit::{self, short},
     discard::Stat,
     refs::{capitalized, oid},
@@ -69,18 +69,12 @@ pub(super) fn checkout(
     let deadline = writing.deadline;
     let reads = deadline.reads();
     refuse_unfinished(repo, "check out", reads)?;
-    let before = repo.head(deadline)?;
-    if before != expect.head {
-        return Err(RepositoryError::stale(
-            StaleReason::HeadMoved,
-            "HEAD moved since L1 Git read this worktree. Refresh and try again.",
-        ));
-    }
+    let before = repo.head_as_seen(expect, deadline)?;
     let from = leaving(&before)?;
     let planned = Switch::to_target(repo, &before, target, deadline)?;
     refuse_absorbing(repo, &from, &planned.goal, &planned.to_name, reads)?;
     let txn = RefTxn::begin(repo, deadline)?;
-    let (applied, _, recorded) =
+    let (applied, _, mut recorded) =
         writing
             .store
             .record_with(repo, writing.log, writing.operation, |entry| {
@@ -109,27 +103,19 @@ pub(super) fn checkout(
             let deadline = deadline.renewed();
             let created = match &planned.created {
                 None => None,
-                Some(new) => match made(repo, new, &after, deadline) {
-                    Ok(Some(made)) => Some(made),
-                    Ok(None) => {
-                        recorded.stay_pending();
-                        return Err(raced(&planned));
-                    }
-                    Err(error) => {
-                        recorded.stay_pending();
-                        return Err(error);
-                    }
-                },
+                Some(new) => Some(
+                    recorded.pending_on_err(
+                        made(repo, new, &after, deadline)
+                            .and_then(|made| made.ok_or_else(|| raced(&planned))),
+                    )?,
+                ),
             };
             let change = CheckoutChange::Landed {
                 before,
                 after,
                 created,
             };
-            match recorded.replace(&Change::Checkout(change)) {
-                Ok(()) => recorded.confirm(),
-                Err(_) => recorded.stay_pending(),
-            }
+            recorded.settle(&Change::Checkout(change));
             trouble.map_or(Ok(applied), Err)
         }
     }
