@@ -51,6 +51,19 @@ describe.each(["light", "dark"] as const)("the %s recipes", (appearance) => {
     ).toEqual([]);
   });
 
+  it.each(["--primary-bg", "--primary-hover"])(
+    "keep primary-button text at AA 4.5:1 on %s",
+    (fill) => {
+      const [text, surface] = [
+        parseHex(css["--primary-text"] ?? ""),
+        parseHex(css[fill] ?? ""),
+      ];
+      expect(text && surface && contrast(text, surface)).toBeGreaterThanOrEqual(
+        4.5,
+      );
+    },
+  );
+
   it("start L1 from theme.css's background and accent", () => {
     expect(L1_VARIANTS[appearance].swatch).toEqual({
       background: css["--canvas"],
