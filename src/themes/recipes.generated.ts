@@ -76,7 +76,7 @@ export const RECIPES: Record<
     accent: ["seed", "accent"],
     primaryBorder: ["glow", 0.181],
     accentForeground: ["onAccent"],
-    primaryHover: ["glow", 0.137],
+    primaryHover: ["tint", 0.895],
     warning: ["status", 82, 0.698, 0.0857],
     success: ["status", 167.2, 0.698, 0.0989],
     successMuted: ["status", 171.6, 0.787, 0.078],
