@@ -11,12 +11,13 @@ A desktop Git client for macOS, Linux, and Windows. Browse your repositories, re
 - Commit, amend, and edit your last commit's message.
 - Manage branches, tags, and stashes. Browse multiple repositories and linked worktrees.
 - Fetch, fast-forward branches, and push or publish the current branch.
+- Pull the current branch from its upstream. When the branch has diverged, Pull (Fast-forward if possible) opens the merge review, Pull (Fast-forward only) leaves the branch as it is, and Pull (Rebase) rebases your local commits onto the upstream.
 - Merge a selected local or remote branch into the current working copy after reviewing both refs and commit IDs. Fast-forward when possible, or resolve text conflicts and finish or abort a merge commit.
 - Cherry-pick or revert one commit from the history menu or the command palette, after reviewing what it will do. A clean result commits straight away, and a conflict opens the resolver with Finish and Abort. Undo removes the new commit and its file changes.
 - Undo and redo local edits made through the app, including commits and discarded changes.
 - Choose light or dark themes, create your own, or import themes from VS Code and Open VSX.
 
-L1 Git does not rebase or force-push. Fetch, fast-forward, push, remote setup, and merge Start, Finish, and Abort have no Undo entry. Merge resolution edits have Undo and Redo until you finish or abort.
+L1 Git does not force-push, and it does not resolve rebase conflicts. A Pull (Rebase) that hits a conflict is aborted and changes nothing. Fetch, fast-forward, push, remote setup, and merge Start, Finish, and Abort have no Undo entry. The fetch and fast-forward that a pull runs have no Undo entry either. Pull (Rebase) has Undo and Redo. Merge resolution edits have Undo and Redo until you finish or abort.
 
 ## Get started
 
