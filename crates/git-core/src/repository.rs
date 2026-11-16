@@ -10,7 +10,6 @@ use std::{
     panic,
     path::{Path, PathBuf},
     thread,
-    time::{SystemTime, UNIX_EPOCH},
 };
 
 pub const HISTORY_LIMIT: usize = 50_000;
@@ -194,12 +193,6 @@ fn tags(path: &Path, deadline: Deadline) -> Result<Vec<Tag>, RepositoryError> {
         let reference = git::text(reference);
         let oid = match *kind {
             b"commit" => git::text(oid),
-            // Older Git dereferences `%(*objectname)` only once, so a tag of a
-            // tag can still name a tag object.
-            b"tag" => match peel_to_commit(path, &reference, deadline)? {
-                Some(oid) => oid,
-                None => continue,
-            },
             _ => continue,
         };
         let Some(name) = reference.strip_prefix("refs/tags/") else {
@@ -525,15 +518,7 @@ pub(crate) fn snapshot_within(
         commits,
         squashes,
         history_truncated,
-        observed_at: now(),
     })
-}
-
-pub(crate) fn now() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
 }
 
 /// Pairs each branch tip that no loaded commit builds on with a newer commit

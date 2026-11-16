@@ -25,7 +25,7 @@ const OPERATION_STATE: [(&str, InProgress); 7] = [
     ("BISECT_LOG", InProgress::Bisect),
 ];
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum InProgress {
     Merge,
@@ -234,7 +234,6 @@ pub(super) fn read(
         name: repository::display_name(main_worktree),
         branches,
         fetch,
-        observed_at: repository::now(),
     })
 }
 

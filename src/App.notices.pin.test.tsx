@@ -127,7 +127,6 @@ it("each repository warning renders one alert", async () => {
           fetch:
             request.mode === "remote" && request.path === PIN
               ? {
-                  at: 1_700_000_300,
                   changed: false,
                   coalesced: false,
                   remotes: [

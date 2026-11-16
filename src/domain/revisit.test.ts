@@ -18,12 +18,12 @@ const gone = oidSchema.parse("c".repeat(40));
 function snapshot(
   root: string,
   oids: string[] = [],
-  observedAt = 0,
+  version = 0,
   worktrees: string[] = [],
 ) {
   return snapshotSchema.parse({
     root,
-    name: root.slice(1),
+    name: String(version),
     head: { kind: "unborn", reference: "refs/heads/main" },
     branches: [],
     tags: [],
@@ -46,12 +46,11 @@ function snapshot(
     })),
     squashes: [],
     historyTruncated: false,
-    observedAt,
   });
 }
 
 const order = (cache: SnapshotCache) =>
-  [...cache.values()].map((cached) => `${cached.root}@${cached.observedAt}`);
+  [...cache.values()].map((cached) => `${cached.root}@${cached.name}`);
 
 describe("snapshot cache", () => {
   it("keeps the most recently opened snapshots and evicts the oldest", () => {

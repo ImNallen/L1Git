@@ -32,7 +32,6 @@ const cached: RepositorySnapshot = {
   commits: [],
   squashes: [],
   historyTruncated: false,
-  observedAt: 1,
 };
 
 describe("the open repository's branches", () => {
@@ -88,7 +87,6 @@ describe("branches reported for pruning", () => {
   const fresh: RepositorySnapshot = {
     ...cached,
     branches: [branch("main"), branch("zz-race")],
-    observedAt: 2,
   };
   const ready = (snapshot: RepositorySnapshot) => ({
     kind: "ready" as const,

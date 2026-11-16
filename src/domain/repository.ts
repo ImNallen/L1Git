@@ -126,7 +126,6 @@ export const snapshotSchema = z.object({
   commits: z.array(commitSchema),
   squashes: z.array(squashSchema),
   historyTruncated: z.boolean(),
-  observedAt: z.number().int().nonnegative(),
 });
 export const refsSchema = snapshotSchema.pick({
   root: true,
@@ -662,7 +661,7 @@ export type Start = z.infer<typeof startSchema>;
 export type BranchMerged = z.infer<typeof branchMergedSchema>;
 export type Problem =
   | z.infer<typeof repositoryErrorSchema>
-  | { kind: "transport" | "persistence"; message: string };
+  | { kind: "transport"; message: string };
 
 export function problemFrom(error: unknown): Problem {
   const repositoryError = repositoryErrorSchema.safeParse(error);

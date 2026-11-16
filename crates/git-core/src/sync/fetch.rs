@@ -1,9 +1,7 @@
 use crate::{
     ErrorKind, FetchBranch, FetchFailure, FetchOutcome, FetchSummary, RemoteFetch, RepositoryError,
     git::{self, Deadline, Finished, Mutation},
-    remotes,
-    repository::now,
-    stderr,
+    remotes, stderr,
 };
 use std::{collections::HashSet, path::Path, time::Duration};
 
@@ -36,7 +34,6 @@ fn summary(
     remotes: Vec<RemoteFetch>,
 ) -> Result<FetchSummary, RepositoryError> {
     Ok(FetchSummary {
-        at: now(),
         changed: tips(root, reads.renewed())? != before,
         coalesced: false,
         remotes,

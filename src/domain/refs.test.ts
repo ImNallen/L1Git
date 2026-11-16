@@ -89,7 +89,6 @@ function snapshot(head: Record<string, unknown>) {
     commits: [],
     squashes: [],
     historyTruncated: false,
-    observedAt: 0,
   });
 }
 

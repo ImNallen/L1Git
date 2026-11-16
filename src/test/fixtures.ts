@@ -122,7 +122,6 @@ export function pinSnapshot(): RepositorySnapshot {
     ],
     squashes: [],
     historyTruncated: false,
-    observedAt: 1_700_000_200,
   });
 }
 
@@ -154,7 +153,6 @@ export function otherSnapshot(): RepositorySnapshot {
     commits: [commit(OTHER_TIP, [], "Other tip", 8)],
     squashes: [],
     historyTruncated: false,
-    observedAt: 1_700_000_200,
   });
 }
 
@@ -291,7 +289,6 @@ export function pinOverview(): RepositoryOverview {
       },
     ],
     fetch: null,
-    observedAt: 1_700_000_200,
   });
 }
 
@@ -311,7 +308,6 @@ export function otherOverview(): RepositoryOverview {
       },
     ],
     fetch: null,
-    observedAt: 1_700_000_200,
   });
 }
 
@@ -342,7 +338,6 @@ export function addEmptyRepository(
       commits: [],
       squashes: [],
       historyTruncated: false,
-      observedAt: 1_700_000_200,
     }),
   );
   world.statuses.set(
@@ -357,7 +352,6 @@ export function addEmptyRepository(
       name,
       branches: [],
       fetch: null,
-      observedAt: 1_700_000_200,
     }),
   );
   world.pushes.set(root, noUpstream());

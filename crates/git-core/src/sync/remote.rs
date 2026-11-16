@@ -335,7 +335,6 @@ mod tests {
         lock_ignoring_poison(&locks.gate).last_fetch = Some((
             Instant::now(),
             FetchSummary {
-                at: 0,
                 changed: false,
                 coalesced: false,
                 remotes: vec![],

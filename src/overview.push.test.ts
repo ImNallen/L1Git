@@ -25,7 +25,6 @@ const overview = overviewSchema.parse({
   name: "main",
   branches: [],
   fetch: null,
-  observedAt: 1,
 });
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 function deferred<T>() {

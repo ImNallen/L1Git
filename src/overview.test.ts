@@ -64,7 +64,6 @@ function overview(
       fetch === null
         ? null
         : {
-            at: 1_780_000_000,
             changed: fetch.changed,
             coalesced: false,
             remotes: [
@@ -80,7 +79,6 @@ function overview(
               },
             ],
           },
-    observedAt: 1_780_000_000,
   });
 }
 
@@ -544,7 +542,7 @@ describe("overview store", () => {
     const withRemotes = (remotes: unknown[]) =>
       overviewSchema.parse({
         ...overview(app, dir, [upToDate("main")], { changed: false }),
-        fetch: { at: 0, changed: false, coalesced: false, remotes },
+        fetch: { changed: false, coalesced: false, remotes },
       });
     h.store.track([app]);
     await h.answerOne(overview(app, dir, [upToDate("main")]));
