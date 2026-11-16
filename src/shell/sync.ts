@@ -2,7 +2,7 @@ import { useState } from "react";
 import { fetchTarget, readyAdvances } from "../domain/overview";
 import { pushControl } from "../domain/push";
 import { worktreeHead } from "../domain/worktree";
-import type { PushControl, PushIntent } from "../domain/push";
+import type { PushIntent } from "../domain/push";
 import type {
   Branch,
   RepositoryRoot,
@@ -43,10 +43,6 @@ export function openedRepository(
 export type SyncControls = {
   opened: OpenedRepository;
   push: PushState | undefined;
-  publishControl: PushControl;
-  fetching: boolean;
-  /** Branches that can fast-forward. */
-  ready: number;
   publishingRoot: RepositoryRoot | null;
   publish: (root: RepositoryRoot, intent: PushIntent) => void;
   closePublish: () => void;
@@ -118,9 +114,6 @@ export function useSyncControls({
   return {
     opened,
     push,
-    publishControl,
-    fetching,
-    ready,
     publishingRoot,
     publish: (target, intent) => {
       void store.push(target, intent);

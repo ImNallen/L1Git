@@ -93,7 +93,6 @@ export type OverviewStore = {
   fetch(commonDir?: RepositoryRoot): Promise<void>;
   /** Fetches only `branch`'s remote counterpart. A pending fetch of every remote covers it. */
   fetchBranch(commonDir: RepositoryRoot, branch: FullRef): Promise<void>;
-  fastForward(commonDir: RepositoryRoot, branch: BranchRef): Promise<void>;
   /**
    * Fetches `branch`'s upstream, then fast-forwards it in `root`, a worktree of
    * `commonDir` that need not be tracked itself. Answers the step left to the
@@ -105,7 +104,7 @@ export type OverviewStore = {
     branch: BranchRef,
     mode: PullMode,
   ): Promise<PullHandOff | null>;
-  updateAll(commonDir?: RepositoryRoot): Promise<void>;
+  updateAll(commonDir: RepositoryRoot): Promise<void>;
   setInterval(minutes: FetchInterval): void;
   onRefsChanged(listener: (roots: RepositoryRoot[]) => void): () => void;
   refreshLocal(commonDir: RepositoryRoot): Promise<void>;
@@ -113,7 +112,6 @@ export type OverviewStore = {
   invalidatePush(commonDir: RepositoryRoot): void;
   probe(): void;
   observe(root: RepositoryRoot, state: MergeState): void;
-  dispose(): void;
 };
 
 type Request =
@@ -155,7 +153,7 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
   let stopTimer: (() => void) | null = null;
   let missedTick = false;
   let view = buildView();
-  const stopVisibility = deps.onVisibilityChange(() => {
+  deps.onVisibilityChange(() => {
     if (!missedTick || !deps.visible()) return;
     missedTick = false;
     void fetch();
@@ -601,19 +599,6 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
     }
   }
 
-  function fastForwardAll(
-    commonDir: RepositoryRoot,
-    advances: Advance[],
-  ): Promise<void> {
-    if (advances.length === 0) return Promise.resolve();
-    return enqueue(commonDir, {
-      kind: "fastForward",
-      advances: new Map(
-        advances.map((advance) => [advance.reference, advance]),
-      ),
-    });
-  }
-
   return {
     subscribe(listener) {
       listeners.add(listener);
@@ -662,24 +647,16 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
         handOff: (step) => (handedOff = step),
       }).then(() => handedOff);
     },
-    fastForward(commonDir, branch) {
-      const repo = repos.get(commonDir);
-      if (!repo) return Promise.resolve();
-      return fastForwardAll(
-        commonDir,
-        readyAdvances(repo.overview).filter(
-          ({ reference }) => reference === branch,
-        ),
-      );
-    },
     updateAll(commonDir) {
-      return Promise.all(
-        [...repos]
-          .filter(([dir]) => commonDir === undefined || dir === commonDir)
-          .map(([dir, repo]) =>
-            fastForwardAll(dir, readyAdvances(repo.overview)),
-          ),
-      ).then(() => {});
+      const repo = repos.get(commonDir);
+      const advances = repo ? readyAdvances(repo.overview) : [];
+      if (advances.length === 0) return Promise.resolve();
+      return enqueue(commonDir, {
+        kind: "fastForward",
+        advances: new Map(
+          advances.map((advance) => [advance.reference, advance]),
+        ),
+      });
     },
     setInterval(minutes) {
       if (minutes === intervalMinutes) return;
@@ -703,12 +680,6 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
     onRefsChanged(listener) {
       refListeners.add(listener);
       return () => refListeners.delete(listener);
-    },
-    dispose() {
-      stopTimer?.();
-      stopVisibility();
-      listeners.clear();
-      refListeners.clear();
     },
   };
 }

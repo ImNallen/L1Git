@@ -48,8 +48,6 @@ export const STYLESHEET_TOKENS = {
   selectionText: "--selection-text",
   navSelectedBg: "--nav-selected-bg",
   navSelectedText: "--nav-selected-text",
-  refOnLane: "--ref-on-lane",
-  onLane: "--on-lane",
   link: "--link",
   accentMuted: "--accent-muted",
   accent: "--primary-bg",
@@ -182,8 +180,7 @@ export type RecipeSpec =
   | readonly ["status", hue: number, t: number, chroma: number]
   | readonly ["tone", t: number, chromaScale: number]
   | readonly ["toward", token: Token, t: number]
-  | readonly ["shadow", t: number, alpha: number]
-  | readonly ["laneInk", minWhite: number, t: number];
+  | readonly ["shadow", t: number, alpha: number];
 
 const onAccent: Recipe = (s) => {
   const dark = mix(s.accent, BLACK, 0.85);
@@ -219,23 +216,6 @@ function lightnessAt(s: Seeds, t: number): number {
   const [bg, fg] = [toOklch(s.background).L, toOklch(s.foreground).L];
   return bg + (fg - bg) * t;
 }
-
-// `minWhite` is the contrast lane ink keeps on every lane, so ink only turns dark where white falls short of it.
-const laneInk =
-  (minWhite: number, t: number): Recipe =>
-  (s, get) => {
-    const lanes = LANES.map(get);
-    const worst = (ink: Rgba) =>
-      Math.min(...lanes.map((l) => contrast(ink, l)));
-    const white = worst(WHITE);
-    if (white >= minWhite) return WHITE;
-    const darker =
-      contrast(WHITE, s.background) > contrast(WHITE, s.foreground)
-        ? s.background
-        : s.foreground;
-    const dark = mix(darker, s.accent, t);
-    return worst(dark) > white ? dark : WHITE;
-  };
 
 export function recipe(spec: RecipeSpec, cycle: readonly LaneStop[]): Recipe {
   switch (spec[0]) {
@@ -275,8 +255,6 @@ export function recipe(spec: RecipeSpec, cycle: readonly LaneStop[]): Recipe {
       const [, t, alpha] = spec;
       return (s) => ({ ...mix(s.background, BLACK, t), a: alpha });
     }
-    case "laneInk":
-      return laneInk(spec[1], spec[2]);
     default:
       return RATIO_RECIPES[spec[0]](spec[1]);
   }

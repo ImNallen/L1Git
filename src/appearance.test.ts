@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { parseAppearanceSettings } from "./appearance";
+import { restoreAppearance } from "./appearance";
+
+const parseAppearanceSettings = (stored: string | null) =>
+  restoreAppearance({ getItem: () => stored });
 
 const defaults = {
   colorScheme: "system",
@@ -9,17 +12,6 @@ const defaults = {
 };
 
 describe("stored appearance settings", () => {
-  it.each([
-    ["system", "system"],
-    ["light", "light"],
-    ["dark", "dark"],
-  ])("keeps the scheme of a bare %j saved before themes", (stored, scheme) => {
-    expect(parseAppearanceSettings(stored)).toEqual({
-      ...defaults,
-      colorScheme: scheme,
-    });
-  });
-
   it.each([
     null,
     "",

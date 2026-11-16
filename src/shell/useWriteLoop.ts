@@ -27,7 +27,6 @@ export type WriteLoop = {
   writes: WritesView;
   /** Worktree statuses, undo history, and merge state; not the snapshot. */
   rereadChanges: () => void;
-  rereadAll: () => Promise<void>;
   /** refreshLocal for the open repository, then rereadAll. */
   refreshRepository: () => Promise<void>;
   remoteAdded: (root: RepositoryRoot) => void;
@@ -129,7 +128,6 @@ export function useWriteLoop({
   return {
     writes,
     rereadChanges,
-    rereadAll,
     refreshRepository,
     remoteAdded: (root) => void rereadRefs(root, root),
     actions: defineSlice({

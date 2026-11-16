@@ -6,7 +6,7 @@ import type {
   ReactNode,
   MouseEvent as ReactMouseEvent,
 } from "react";
-import { ChevronRight, Eye, EyeOff, Focus, Package } from "lucide-react";
+import { Eye, EyeOff, Focus, Package } from "lucide-react";
 import { branchTree } from "../domain/branchTree";
 import type { BranchTree } from "../domain/branchTree";
 import type {
@@ -145,7 +145,6 @@ export function RepositoryBranches({
     return (
       <>
         <button className="tree-section" aria-expanded={open} onClick={toggle}>
-          <ChevronRight className="motion-chevron" size={13} />
           {icon}
           <span>{label}</span>
           <span className="count">{total}</span>
@@ -228,7 +227,6 @@ export function RepositoryBranches({
                 title={folder.path}
                 onClick={() => onOverride(key, !open)}
               >
-                <ChevronRight className="motion-chevron" size={13} />
                 <WorkspaceIcon
                   name={kind === "remote" && depth === 0 ? "Cloud" : "Folder"}
                 />
@@ -346,7 +344,6 @@ export function RepositoryBranches({
         aria-expanded={localSection.open}
         onClick={localSection.toggle}
       >
-        <ChevronRight className="motion-chevron" size={13} />
         <WorkspaceIcon name="Branch" />
         <span>Local</span>
         <span className="count">{local.length}</span>
@@ -370,7 +367,6 @@ export function RepositoryBranches({
         aria-expanded={remoteSection.open}
         onClick={remoteSection.toggle}
       >
-        <ChevronRight className="motion-chevron" size={13} />
         <WorkspaceIcon name="Cloud" />
         <span>Remote</span>
         <span className="count">{remote.length}</span>

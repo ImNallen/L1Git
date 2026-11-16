@@ -4,7 +4,6 @@ type WorkspaceName =
   | "SelectedRepository"
   | "Repository"
   | "Settings"
-  | "Update"
   | "Branch"
   | "Cloud"
   | "Folder"
@@ -13,14 +12,12 @@ type WorkspaceName =
   | "Check"
   | "Search"
   | "Plus"
-  | "File"
   | "Copy";
 
 const sources = {
   SelectedRepository: ["workspace/SelectedRepository", 16, 16],
   Repository: ["workspace/Repository", 16, 16],
   Settings: ["workspace/Settings", 16, 16],
-  Update: ["workspace/Update", 16, 16],
   Branch: ["workspace/Branch", 16, 16],
   Cloud: ["workspace/Cloud", 16, 16],
   Folder: ["workspace/Folder", 16, 16],
@@ -29,9 +26,8 @@ const sources = {
   Check: ["workspace/Check", 16, 16],
   Search: ["workspace/Search", 16, 16],
   Plus: ["workspace/Plus", 16, 16],
-  File: ["workspace/File", 16, 16],
   Copy: ["workspace/Copy", 16, 16],
-  SettingsSearch: ["settings/Search", 14, 14],
+  SettingsSearch: ["workspace/Search", 14, 14],
   SettingsGeneral: ["settings/Settings", 16, 16],
   SettingsPalette: ["settings/Palette", 16, 16],
   SettingsReset: ["settings/Reset", 15, 15],
