@@ -126,7 +126,6 @@ export const snapshotSchema = z.object({
   commits: z.array(commitSchema),
   squashes: z.array(squashSchema),
   historyTruncated: z.boolean(),
-  observedAt: z.number().int().nonnegative(),
 });
 export const refsSchema = snapshotSchema.pick({
   root: true,

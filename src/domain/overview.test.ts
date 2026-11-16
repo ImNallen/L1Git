@@ -99,7 +99,6 @@ const overview = overviewSchema.parse({
     }),
   ],
   fetch: {
-    at: 1_780_000_000,
     changed: true,
     coalesced: false,
     remotes: [
@@ -114,7 +113,6 @@ const overview = overviewSchema.parse({
       },
     ],
   },
-  observedAt: 1_780_000_001,
 });
 
 describe("launch overview", () => {
@@ -238,7 +236,6 @@ describe("pull target", () => {
       name: "app",
       branches: [row("main", "default", state, "/code/app")],
       fetch: null,
-      observedAt: 0,
     }).branches[0];
   const reason = (target: ReturnType<typeof pullTarget>) =>
     target.kind === "unavailable" ? target.reason : null;

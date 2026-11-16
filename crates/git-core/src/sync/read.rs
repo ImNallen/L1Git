@@ -234,7 +234,6 @@ pub(super) fn read(
         name: repository::display_name(main_worktree),
         branches,
         fetch,
-        observed_at: repository::now(),
     })
 }
 

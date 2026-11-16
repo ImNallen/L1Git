@@ -132,7 +132,6 @@ pub struct RepositorySnapshot {
     pub commits: Vec<Commit>,
     pub squashes: Vec<Squash>,
     pub history_truncated: bool,
-    pub observed_at: u64,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -840,7 +839,6 @@ pub struct RepositoryOverview {
     pub branches: Vec<BranchStatus>,
     /// Present only when this call fetched or joined a fetch.
     pub fetch: Option<FetchSummary>,
-    pub observed_at: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -909,7 +907,6 @@ pub enum Blocker {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct FetchSummary {
-    pub at: u64,
     /// Whether any local or remote-tracking branch moved.
     pub changed: bool,
     /// This call waited for a fetch that finished after it started instead of

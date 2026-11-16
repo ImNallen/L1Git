@@ -49,7 +49,6 @@ const fetchFailureSchema = z.enum([
   "other",
 ]);
 const fetchSummarySchema = z.object({
-  at: z.number().int().nonnegative(),
   changed: z.boolean(),
   coalesced: z.boolean(),
   remotes: z.array(
@@ -73,7 +72,6 @@ export const overviewSchema = z.object({
   name: z.string(),
   branches: z.array(branchStatusSchema),
   fetch: fetchSummarySchema.nullable(),
-  observedAt: z.number().int().nonnegative(),
 });
 const skipReasonSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("changed") }),

@@ -10,7 +10,6 @@ use std::{
     panic,
     path::{Path, PathBuf},
     thread,
-    time::{SystemTime, UNIX_EPOCH},
 };
 
 pub const HISTORY_LIMIT: usize = 50_000;
@@ -519,15 +518,7 @@ pub(crate) fn snapshot_within(
         commits,
         squashes,
         history_truncated,
-        observed_at: now(),
     })
-}
-
-pub(crate) fn now() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
 }
 
 /// Pairs each branch tip that no loaded commit builds on with a newer commit
