@@ -222,7 +222,7 @@ pub struct Applied {
     pub operation: Operation,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UndoHistory {
     pub undo: Option<Applied>,

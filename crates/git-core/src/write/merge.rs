@@ -67,7 +67,7 @@ pub struct MergeReview {
     pub plan: MergePlan,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum MergeAttention {
     ExternalOperation,
@@ -110,12 +110,11 @@ pub struct MergeSession {
     pub suggested_message: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(
     tag = "kind",
     rename_all = "camelCase",
-    rename_all_fields = "camelCase",
-    deny_unknown_fields
+    rename_all_fields = "camelCase"
 )]
 pub enum MergeState {
     Idle,
@@ -138,12 +137,11 @@ pub enum MergeState {
 }
 
 /// What a list of repositories shows for one worktree, read without locks.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(
     tag = "kind",
     rename_all = "camelCase",
-    rename_all_fields = "camelCase",
-    deny_unknown_fields
+    rename_all_fields = "camelCase"
 )]
 pub enum OperationProbe {
     Idle,
@@ -189,8 +187,8 @@ pub enum MergeOutcome {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MergeReport {
     pub state: MergeState,
     pub outcome: MergeOutcome,

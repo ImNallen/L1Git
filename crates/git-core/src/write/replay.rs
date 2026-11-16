@@ -128,8 +128,8 @@ pub struct ReplayReview {
 }
 
 /// Derived on every read. L1 Git stores none of it as state.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ReplayProgress {
     pub root: String,
     pub kind: ReplayKind,

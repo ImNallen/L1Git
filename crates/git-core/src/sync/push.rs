@@ -48,8 +48,8 @@ pub enum PublishOptions {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
 pub enum TrackingOutcome {
     Set,
     Failed { message: String },
@@ -68,14 +68,14 @@ pub struct PushIntent {
     pub fingerprint: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
 pub enum PushAvailability {
     Ready { intent: PushIntent },
     Unavailable { reason: PushUnavailable },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum PushUnavailable {
     Detached,
@@ -88,8 +88,8 @@ pub enum PushUnavailable {
     UnusableFetchMapping,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
 pub enum PushOutcome {
     Published { tracking: TrackingOutcome },
     Pushed,

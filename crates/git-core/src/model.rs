@@ -8,7 +8,7 @@ pub enum Head {
     Detached { oid: String },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Branch {
     Local {
@@ -25,7 +25,7 @@ pub enum Branch {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Tag {
     pub reference: String,
@@ -41,7 +41,7 @@ pub struct Tag {
     pub annotated: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Stash {
     /// The reflog selector, such as `stash@{0}`.
@@ -52,14 +52,14 @@ pub struct Stash {
 }
 
 /// A submodule and the commit the superproject's index records for it.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Submodule {
     pub path: String,
     pub oid: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Worktree {
     pub root: String,
@@ -69,20 +69,20 @@ pub struct Worktree {
     pub current: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct GitHubRepository {
     pub owner: String,
     pub repo: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Remote {
     pub name: String,
     pub url: String,
     pub github: Option<GitHubRepository>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Commit {
     pub oid: String,
@@ -94,7 +94,7 @@ pub struct Commit {
 }
 
 /// `commit` carries the combined changes of the branch that ends at `tip`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Squash {
     pub tip: String,
@@ -102,7 +102,7 @@ pub struct Squash {
 }
 
 /// The refs of a repository without its history, for sidebar rows.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct RepositoryRefs {
     pub root: String,
@@ -116,7 +116,7 @@ pub struct RepositoryRefs {
     pub submodules: Vec<Submodule>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepositorySnapshot {
     pub root: String,
@@ -146,7 +146,7 @@ pub enum ChangeStatus {
     TypeChanged,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ChangedFile {
     pub path: String,
     pub status: ChangeStatus,
@@ -189,7 +189,7 @@ pub enum Target {
     Worktree { root: String },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CommitDetail {
     pub base: BaseDetail,
@@ -197,7 +197,7 @@ pub struct CommitDetail {
     pub files: Vec<ChangedFile>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum BaseDetail {
     EmptyTree,
@@ -205,14 +205,14 @@ pub enum BaseDetail {
     Commit { commit: Commit },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum TargetDetail {
     Commit { commit: Commit, message: String },
     Worktree { root: String, head: Head },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum FilePatch {
     Text { patch: String, lossy: bool },
@@ -221,14 +221,14 @@ pub enum FilePatch {
 }
 
 /// A commit in a file's history, with the file's path in that commit.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FileRevision {
     pub commit: Commit,
     pub path: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Blame {
     Text {
@@ -243,7 +243,7 @@ pub enum Blame {
 }
 
 /// `lines` lines from line `start`, counted from 1, last changed by `oid`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct BlameRange {
     pub oid: String,
@@ -255,7 +255,7 @@ pub struct BlameRange {
     pub summary: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct LineStats {
     pub oid: String,
@@ -265,7 +265,7 @@ pub struct LineStats {
 
 /// The uncommitted changes of one worktree, in the order Git lists them:
 /// changed paths, then unmerged paths, then untracked paths, each by path.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct WorktreeStatus {
     pub root: String,
@@ -436,7 +436,7 @@ pub struct Stages {
 
 pub const CONFLICT_TEXT_LIMIT: usize = 256 * 1024;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum ConflictFile {
     Editable {
@@ -449,7 +449,7 @@ pub enum ConflictFile {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ConflictSnapshot {
     pub root: String,
@@ -483,7 +483,7 @@ impl From<ConflictVersion> for String {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum ConflictUnsupported {
     Structural,
@@ -494,7 +494,7 @@ pub enum ConflictUnsupported {
     Attributes,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(
     tag = "kind",
     rename_all = "camelCase",
@@ -521,7 +521,7 @@ pub enum ConflictSummary {
     },
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum WholeFileShape {
     DeletedByThem,
@@ -536,7 +536,7 @@ pub enum WholeFileShape {
 /// the blob it hashes to and its mode, or a link's target. A side that is
 /// `None` matches when the path is absent. When both sides match, this is
 /// `MatchesCurrent`.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum WholeFileDisk {
     MatchesCurrent,
@@ -550,16 +550,16 @@ pub enum WholeFileDisk {
 }
 
 /// One side's blob. `size` is the blob's, before line-ending conversion.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct ConflictSide {
     pub mode: Mode,
     pub size: u64,
 }
 
 /// `head` is what `resolveWhole` expects, with `version`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct WholeFileConflict {
     pub head: Head,
     pub version: ConflictVersion,
@@ -573,8 +573,8 @@ pub struct WholeFileConflict {
 
 /// `text` is the blob as UTF-8 without NUL bytes, at most
 /// `CONFLICT_TEXT_LIMIT` bytes, or a link's target. Otherwise it is `None`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct WholeFileSide {
     pub mode: Mode,
     pub size: u64,
@@ -597,7 +597,7 @@ pub enum Side {
     Unstaged,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum WorktreePatch {
     Diff {
@@ -749,7 +749,7 @@ fn valid_ref_name(name: &str) -> bool {
 
 /// Whether a local branch's tip is in the history of HEAD and of the
 /// branch's upstream.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct BranchMerged {
     /// False when HEAD is unborn.
@@ -758,7 +758,7 @@ pub struct BranchMerged {
     pub upstream: Option<UpstreamMerged>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct UpstreamMerged {
     pub reference: String,
@@ -829,7 +829,7 @@ pub enum FetchBranch {
 
 /// One repository seen through one worktree root. Two worktrees of a repository
 /// share `common_dir` and `branches` and differ in `root`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepositoryOverview {
     pub root: String,
@@ -841,7 +841,7 @@ pub struct RepositoryOverview {
     pub fetch: Option<FetchSummary>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BranchStatus {
     pub reference: BranchRef,
@@ -852,7 +852,7 @@ pub struct BranchStatus {
     pub state: BranchState,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum BranchRole {
     /// The local branch tracking the remote HEAD, else `main` or `master`.
@@ -864,7 +864,7 @@ pub enum BranchRole {
 
 /// How a branch relates to its upstream. `Behind` has no `ahead` count because
 /// zero commits ahead is what makes it a fast-forward.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum BranchState {
     Untracked,
@@ -892,7 +892,7 @@ pub enum BranchState {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Blocker {
     /// Tracked files in the worktree have uncommitted changes.
@@ -904,7 +904,7 @@ pub enum Blocker {
     Unverified { message: String },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct FetchSummary {
     /// Whether any local or remote-tracking branch moved.
@@ -915,13 +915,13 @@ pub struct FetchSummary {
     pub remotes: Vec<RemoteFetch>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct RemoteFetch {
     pub remote: String,
     pub outcome: FetchOutcome,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum FetchOutcome {
     Fetched,
@@ -934,7 +934,7 @@ pub enum FetchOutcome {
     },
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum FetchFailure {
     Auth,
@@ -953,7 +953,7 @@ pub struct Advance {
     pub to: Oid,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FastForwardReport {
     /// In request order.
@@ -962,7 +962,7 @@ pub struct FastForwardReport {
     pub overview: RepositoryOverview,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum AdvanceOutcome {
     /// The branch is at `to`, including when it already was.
@@ -977,7 +977,7 @@ pub enum AdvanceOutcome {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum SkipReason {
     /// The branch or its upstream no longer matches the request.
@@ -994,7 +994,7 @@ pub enum SkipReason {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum ErrorKind {
     MissingPath,
@@ -1046,7 +1046,7 @@ pub enum ErrorKind {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(tag = "reason", rename_all = "camelCase")]
 pub enum StaleReason {
     /// HEAD is not the commit the request or the undo entry names.
@@ -1069,7 +1069,7 @@ pub enum StaleReason {
     StashChanged,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct RepositoryError {
     #[serde(flatten)]
     pub kind: ErrorKind,
