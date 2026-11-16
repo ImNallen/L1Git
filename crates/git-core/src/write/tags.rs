@@ -48,39 +48,8 @@ impl TagChange {
     }
 }
 
-struct Listed {
-    reference: String,
-    oid: Oid,
-    symref: String,
-}
-
-fn listed(repo: &Repo, pattern: &str, reads: Deadline) -> Result<Vec<Listed>, RepositoryError> {
-    git::read(
-        &repo.root,
-        &[
-            "for-each-ref",
-            "--format=%(refname)%00%(objectname)%00%(symref)",
-            pattern,
-        ],
-        reads,
-    )?
-    .split(|byte| *byte == b'\n')
-    .filter(|row| !row.is_empty())
-    .map(
-        |row| match row.split(|byte| *byte == 0).collect::<Vec<_>>()[..] {
-            [reference, oid, symref] => Ok(Listed {
-                reference: git::text(reference),
-                oid: Oid::try_from(git::text(oid)).map_err(|_| git::malformed())?,
-                symref: git::text(symref),
-            }),
-            _ => Err(git::malformed()),
-        },
-    )
-    .collect()
-}
-
 fn held(repo: &Repo, tag: &TagRef, reads: Deadline) -> Result<Option<Oid>, RepositoryError> {
-    let Some(found) = listed(repo, tag.as_str(), reads)?
+    let Some(found) = refs::listed(repo, tag.as_str(), reads)?
         .into_iter()
         .find(|listed| listed.reference == tag.as_str())
     else {
@@ -148,7 +117,7 @@ pub(super) fn create(
     let message = message.filter(|message| !message.trim().is_empty());
     let tag = new_name(repo, name, reads)?;
     commit::refuse_non_commit(repo, writing.deadline, at)?;
-    let tags = listed(repo, "refs/tags/", reads)?;
+    let tags = refs::listed(repo, "refs/tags/", reads)?;
     branches::refuse_clash(
         "tag",
         tags.iter()

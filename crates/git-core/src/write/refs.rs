@@ -5,10 +5,45 @@ use super::{
 };
 use crate::{
     ErrorKind, Head, Oid, RepositoryError, StaleReason,
-    git::{self, WriteDeadline},
+    git::{self, Deadline, WriteDeadline},
     stderr, sync,
 };
 use serde::{Deserialize, Serialize};
+
+pub(super) struct Listed {
+    pub(super) reference: String,
+    pub(super) oid: Oid,
+    pub(super) symref: String,
+}
+
+pub(super) fn listed(
+    repo: &Repo,
+    pattern: &str,
+    reads: Deadline,
+) -> Result<Vec<Listed>, RepositoryError> {
+    git::read(
+        &repo.root,
+        &[
+            "for-each-ref",
+            "--format=%(refname)%00%(objectname)%00%(symref)",
+            pattern,
+        ],
+        reads,
+    )?
+    .split(|byte| *byte == b'\n')
+    .filter(|row| !row.is_empty())
+    .map(
+        |row| match row.split(|byte| *byte == 0).collect::<Vec<_>>()[..] {
+            [reference, oid, symref] => Ok(Listed {
+                reference: git::text(reference),
+                oid: Oid::try_from(git::text(oid)).map_err(|_| git::malformed())?,
+                symref: git::text(symref),
+            }),
+            _ => Err(git::malformed()),
+        },
+    )
+    .collect()
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
