@@ -208,37 +208,12 @@ it.each(builtInLanes)(
 );
 
 it.each(derived.map((v) => [v.id, v.palette] as const))(
-  "keeps %s lanes at 3:1 on the canvas, with initials and ref names at 4.5:1 on each lane",
+  "keeps %s lanes at 3:1 on the canvas",
   (_, p) => {
-    for (const lane of LANES) {
+    for (const lane of LANES)
       expect(ratio(p[lane], p.background)).toBeGreaterThanOrEqual(3);
-      expect(ratio(p.onLane, p[lane])).toBeGreaterThanOrEqual(4.5);
-      expect(ratio(p.refOnLane, p[lane])).toBeGreaterThanOrEqual(4.5);
-    }
   },
 );
-
-it("puts dark initials on a dark theme's lanes and keeps white on a light theme's", () => {
-  expect(variantPalette("grove-dark").onLane).toBe("#0c1310");
-  expect(variantPalette("grove-light").onLane).toBe("#ffffff");
-});
-
-it("puts dark ink on pale lanes a theme brings, and keeps white on deep ones", () => {
-  const pale = Object.fromEntries(LANES.map((lane) => [lane, "#f1fa8c"]));
-  const light = completePalette("light", {
-    background: "#ffffff",
-    accent: "#346bf1",
-    ...pale,
-  });
-  expect([light.onLane, light.refOnLane]).toEqual(["#282828", "#282828"]);
-  const deep = Object.fromEntries(LANES.map((lane) => [lane, "#1d4ed8"]));
-  const dark = completePalette("dark", {
-    background: "#0a0a0a",
-    accent: "#346bf1",
-    ...deep,
-  });
-  expect([dark.onLane, dark.refOnLane]).toEqual(["#ffffff", "#ffffff"]);
-});
 
 const STATUS = [
   "success",

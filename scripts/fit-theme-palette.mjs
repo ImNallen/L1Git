@@ -150,20 +150,10 @@ const fits = Object.fromEntries(
   }),
 );
 
-// Ref names and initials keep 3:1 on every lane.
-const LANE_INK_MINIMUM = 4.5;
-const LANE_INKS = new Set(["refOnLane", "onLane"]);
-
 function fitToken(token, fitted, target) {
   const { seeds } = fitted;
   if (Object.hasOwn(SEEDS, token)) return { spec: ["seed", token] };
   if (token === "accentForeground") return { spec: ["onAccent"] };
-  if (LANE_INKS.has(token))
-    return nearest(
-      steps().map((t) => ["laneInk", LANE_INK_MINIMUM, t]),
-      fitted,
-      target,
-    );
   if (Object.hasOwn(WASHES, token))
     return nearest(
       WASHES[token].flatMap((status) =>

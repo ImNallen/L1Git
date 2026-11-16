@@ -16,6 +16,7 @@ import {
 } from "./themes/catalog";
 import { isHex } from "./themes/color";
 import { isToken, TOKEN_NAMES, TOKENS, type Palette } from "./themes/palette";
+import { browserStorage, readStored, writeStored } from "./persisted";
 
 const storageKey = "l1git.appearance";
 const firstPaintKey = "l1git.firstPaint";
@@ -60,18 +61,12 @@ const settingsSchema = z.object({
     ),
 }) satisfies z.ZodType<ThemeSettings>;
 
-/** Reads what `l1git.appearance` holds: these settings as JSON, or the bare scheme saved before themes existed. */
-export function parseAppearanceSettings(stored: string | null): ThemeSettings {
-  if (stored === null) return DEFAULT_THEME_SETTINGS;
-  const legacy = colorSchemeSchema.safeParse(stored);
-  if (legacy.success)
-    return { ...DEFAULT_THEME_SETTINGS, colorScheme: legacy.data };
-  try {
-    const parsed = settingsSchema.safeParse(JSON.parse(stored));
-    return parsed.success ? parsed.data : DEFAULT_THEME_SETTINGS;
-  } catch {
-    return DEFAULT_THEME_SETTINGS;
-  }
+export function restoreAppearance(
+  storage: Pick<Storage, "getItem"> | null,
+): ThemeSettings {
+  return (
+    readStored(storage, storageKey, settingsSchema) ?? DEFAULT_THEME_SETTINGS
+  );
 }
 
 export const isPainted = (variant: ThemeVariant) =>
@@ -121,10 +116,7 @@ function rememberFirstPaint(settings: ThemeSettings) {
 }
 
 export function initializeAppearance(): ThemeSettings {
-  let settings = DEFAULT_THEME_SETTINGS;
-  try {
-    settings = parseAppearanceSettings(localStorage.getItem(storageKey));
-  } catch {}
+  const settings = restoreAppearance(browserStorage());
   rememberFirstPaint(settings);
   paintTheme(resolveTheme(settings, window.matchMedia(systemQuery).matches));
   return settings;
@@ -184,12 +176,14 @@ export function useAppearance(initial: ThemeSettings) {
     setSettings(next);
     rememberFirstPaint(next);
     setSystemDark(window.matchMedia(systemQuery).matches);
-    try {
-      localStorage.setItem(storageKey, JSON.stringify(next));
-      setPersistenceError(null);
-    } catch {
-      setPersistenceError("Theme changed for this session. Could not save it.");
-    }
+    setPersistenceError(
+      writeStored(
+        browserStorage(),
+        storageKey,
+        next,
+        "Theme changed for this session. Could not save it.",
+      ),
+    );
   }
 
   return {

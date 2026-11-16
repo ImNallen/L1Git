@@ -14,16 +14,8 @@
   min-height: 0;
   overflow: hidden;
 }
-.motion-chevron {
-  transform: rotate(0deg);
-  transition: transform 220ms ease-out;
-}
-[aria-expanded="true"] .motion-chevron {
-  transform: rotate(90deg);
-}
 @media (prefers-reduced-motion: reduce) {
-  .motion-collapse,
-  .motion-chevron {
+  .motion-collapse {
     transition: none;
   }
 }

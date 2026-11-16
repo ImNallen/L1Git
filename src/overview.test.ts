@@ -224,17 +224,30 @@ describe("overview store", () => {
   it("joins a running fetch and merges fast-forwards queued behind it", async () => {
     const h = harness();
     const dir = root("/code/app/.git");
-    const local = overview(app, dir, [behind("main", b), behind("feat", c)]);
+    const mainBehind = overview(app, dir, [behind("main", b)]);
+    const bothBehind = overview(app, dir, [
+      behind("main", b),
+      behind("feat", c),
+    ]);
     h.store.track([app]);
-    await h.answerOne(local);
-    expect(h.pendingLabels()).toEqual(["remote /code/app"]);
+    await h.answerOne(mainBehind);
+    await h.answerOne(
+      overview(app, dir, mainBehind.branches, { changed: false }),
+    );
+    void h.store.refreshLocal(dir);
     void h.store.fetch();
     void h.store.fetch(dir);
-    void h.store.fastForward(dir, ref("main"));
-    void h.store.fastForward(dir, ref("feat"));
+    void h.store.updateAll(dir);
+    expect(h.pendingLabels()).toEqual(["local /code/app", "remote /code/app"]);
+    await h.answerOne(bothBehind);
+    void h.store.updateAll(dir);
     expect(h.pendingLabels()).toEqual(["remote /code/app"]);
-    await h.answerOne(overview(app, dir, local.branches, { changed: false }));
+    await h.answerOne(
+      overview(app, dir, bothBehind.branches, { changed: false }),
+    );
     expect(h.calls).toEqual([
+      "local /code/app",
+      "remote /code/app",
       "local /code/app",
       "remote /code/app",
       "fastForward /code/app",
@@ -301,7 +314,7 @@ describe("overview store", () => {
       overview(app, dir, [behind("main", c)], { changed: true }),
     );
     expect(changes).toEqual([[app, appWorktree]]);
-    void h.store.fastForward(dir, ref("main"));
+    void h.store.updateAll(dir);
     await h.answerOne(
       fastForwardReportSchema.parse({
         outcomes: [
@@ -315,7 +328,7 @@ describe("overview store", () => {
       }),
     );
     expect(changes).toEqual([[app, appWorktree]]);
-    void h.store.fastForward(dir, ref("main"));
+    void h.store.updateAll(dir);
     await h.answerOne(
       fastForwardReportSchema.parse({
         outcomes: [
@@ -363,7 +376,7 @@ describe("overview store", () => {
     ]);
   });
 
-  it("updates all with exactly the ready pairs of each repository", async () => {
+  it("updates each repository with exactly its ready pairs", async () => {
     const h = harness();
     h.store.track([app, api]);
     await h.answer((label) => {
@@ -379,7 +392,8 @@ describe("overview store", () => {
         mode === "remote" ? { changed: false } : null,
       );
     });
-    void h.store.updateAll();
+    void h.store.updateAll(root("/code/app/.git"));
+    void h.store.updateAll(root("/code/api/.git"));
     expect(h.pendingLabels()).toEqual([
       "fastForward /code/app",
       "fastForward /code/api",
