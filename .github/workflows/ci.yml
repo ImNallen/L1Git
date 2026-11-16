@@ -52,7 +52,7 @@ jobs:
           sparse-checkout: scripts
           persist-credentials: false
       - if: inputs.source_sha != ''
-        run: node --test .release-tools/scripts/release-plan.test.mjs .release-tools/scripts/release-assets.test.mjs .release-tools/scripts/updater-manifest.test.mjs
+        run: pnpm -C .release-tools test:release
       - run: pnpm build
 
   desktop:

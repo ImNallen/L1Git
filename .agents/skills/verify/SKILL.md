@@ -21,7 +21,7 @@ The browser preview uses the real Rust implementation. API checks prove the read
 
 Confirm that the Vite page title is `L1 Git` and that the terminal process belongs to this checkout. A read-only HTTP check is `curl --fail --silent http://127.0.0.1:1422/`. Confirm the expected app title in its response. Run `pnpm test` for a real bridge roundtrip if the repository reader looks wrong. Tests start an isolated bridge on an available loopback port and clean up their own fixtures.
 
-If the Add dialog says the reader is unavailable, check the bridge log and both ports. `pnpm dev:web` starts only Vite and is intended for Tauri, whose commands replace the browser bridge.
+If the **Add repository** palette says the reader is unavailable, check the bridge log and both ports. `pnpm dev:web` starts only Vite and is intended for Tauri, whose commands replace the browser bridge.
 
 ## Drive
 
@@ -29,7 +29,7 @@ Follow the mapped journeys with accessible names from live snapshots. Start with
 
 Use **Cmd/Ctrl+O** to add a repository, **Escape** to cancel, **Cmd+F** on macOS or **Ctrl+F** elsewhere to open loaded-history search, and **Cmd+P** on macOS or **Ctrl+P** elsewhere to open the command palette. **Cmd+Z** on macOS or **Ctrl+Z** elsewhere undoes the last write, and adding Shift redoes it. Escape also closes an open file diff. The native dialog traps focus. Pane separators support pointer dragging and arrow keys. The sidebar is one Tab stop: Up and Down step through its rows, Home and End jump to the ends, Right enters the selected repository’s refs or expands a ref folder, and Left collapses a ref folder or returns to the repository. Selecting a repository again keeps its refs open. At narrow widths the inspector starts hidden; **Toggle commit inspector** opens it as an overlay. Below 940px the sidebar also starts hidden; **Toggle sidebar** opens it.
 
-Run `cargo test --locked`, `cargo test --locked -p l1-git`, `pnpm test`, `pnpm build`, `pnpm format:check`, and `cargo fmt --all --check` after code changes. No network account is required.
+After code changes, run the checks that the README lists under [Check and build](../../../README.md#check-and-build), then `cargo test --locked -p l1-git`. No network account is required.
 
 ## Evidence
 

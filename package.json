@@ -15,7 +15,6 @@
     "knip": "knip",
     "build": "pnpm typecheck && vite build",
     "test": "pnpm test:release && pnpm test:tree-geometry && cargo build -p l1-git-dev-bridge && vitest run src",
-    "test:core": "cargo test -p l1-git-core",
     "perf:probe": "vitest run scripts/perf",
     "tauri": "tauri",
     "icon:macos": "node scripts/generate-macos-icon.mjs",
