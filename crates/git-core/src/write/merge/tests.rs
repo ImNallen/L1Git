@@ -1107,6 +1107,42 @@ fn nondefault_merge_strategy_configuration_refuses_before_mutation() {
 }
 
 #[test]
+fn sparse_checkout_reads_core_sparse_checkout_as_git_does() {
+    for (values, sparse) in [
+        (&["no"][..], false),
+        (&["off"], false),
+        (&[""], false),
+        (&["true", "false"], false),
+        (&["true"], true),
+        (&["yes"], true),
+        (&["false", "on"], true),
+    ] {
+        let f = Fixture::new(false);
+        let coordinator = f.coordinator();
+        for value in values {
+            f.git(&["config", "--add", "core.sparseCheckout", value]);
+        }
+        let review = coordinator
+            .review_merge(f.path(), &MergeSelection::Upstream)
+            .unwrap();
+        let started = coordinator.merge(f.path(), &MergeAction::Start { review });
+        if sparse {
+            let error = started.unwrap_err();
+            assert_eq!(
+                error.message, "Merge does not support sparse checkout.",
+                "{values:?}"
+            );
+        } else {
+            let report = started.unwrap();
+            assert!(
+                matches!(report.outcome, MergeOutcome::Started { problem: None }),
+                "{values:?}: {report:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn undo_from_another_worktree_still_names_an_active_merge() {
     let f = Fixture::new(true);
     let coordinator = f.coordinator();

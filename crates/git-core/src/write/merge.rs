@@ -977,8 +977,7 @@ pub(super) fn safe_index_for(
     }
     let (rows, _) = index::read_worktree(&repo.root, deadline.reads())?;
     ordinary_index(&rows, who)?;
-    let sparse = config(repo, "core.sparseCheckout", deadline)?;
-    if sparse.iter().any(|value| value != "false" && value != "0") {
+    if git::config_flag(&repo.root, "core.sparseCheckout", false, deadline.reads())? {
         return Err(refused(format!("{who} does not support sparse checkout.")));
     }
     Ok(())
