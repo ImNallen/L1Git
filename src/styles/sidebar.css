@@ -166,7 +166,6 @@ input::placeholder {
 .tree-section .count,
 .branch-folder .count {
   margin-left: auto;
-  color: var(--text-dim);
   font-size: 11px;
 }
 .tree-section .count {
@@ -227,12 +226,6 @@ input::placeholder {
 }
 .branch-row.selected > svg {
   color: var(--nav-selected-text);
-}
-.branch-row.head:not(.selected) {
-  background: var(--success-bg);
-}
-.branch-row.head:not(.selected):hover:not(:disabled) {
-  background: var(--success-bg-hover);
 }
 .branch-item {
   position: relative;

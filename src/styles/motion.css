@@ -78,10 +78,6 @@
   opacity: 1;
   visibility: visible;
 }
-.toolbar-search-slot .history-search:focus-within,
-.sidebar-search-field:focus-within {
-  background: var(--control-hover);
-}
 .file-diff .diff-style button {
   transition: background-color 200ms ease-out;
 }
