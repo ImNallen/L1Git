@@ -252,8 +252,6 @@ function useListing(path: string | null): Listing | null {
               },
         ),
       same: (left, right) => left === right,
-      stallMs: 1000,
-      maxReads: 2,
     }),
   );
   useEffect(() => {

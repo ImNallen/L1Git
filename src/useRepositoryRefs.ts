@@ -1,10 +1,4 @@
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import * as repositories from "./repositories";
 import { problemFrom } from "./domain/repository";
 import type {
@@ -121,15 +115,8 @@ export function useRepositoryRefs(
   store: OverviewStore,
   onFreshBranches: FreshBranches,
 ) {
-  const onFreshBranchesRef = useRef(onFreshBranches);
-  useEffect(() => {
-    onFreshBranchesRef.current = onFreshBranches;
-  });
   const [refsStore] = useState(
-    () =>
-      new RepositoryRefsStore(repositories.refs, (root, branches) =>
-        onFreshBranchesRef.current(root, branches),
-      ),
+    () => new RepositoryRefsStore(repositories.refs, onFreshBranches),
   );
   const states = useSyncExternalStore(refsStore.subscribe, refsStore.states);
   const activeRoot = shown?.root ?? null;

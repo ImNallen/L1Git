@@ -145,43 +145,15 @@ struct WorktreeHead {
     branch: Option<String>,
 }
 
-struct Listed {
-    reference: String,
-    oid: String,
-    symref: String,
-}
-
 pub(super) struct Listing {
-    branches: Vec<Listed>,
+    branches: Vec<refs::Listed>,
     config: Vec<(String, String)>,
     worktrees: Vec<WorktreeHead>,
 }
 
 impl Listing {
     pub(super) fn read(repo: &Repo, reads: Deadline) -> Result<Self, RepositoryError> {
-        let refs = git::read(
-            &repo.root,
-            &[
-                "for-each-ref",
-                "--format=%(refname)%00%(objectname)%00%(symref)",
-                "refs/heads/",
-            ],
-            reads,
-        )?;
-        let branches = refs
-            .split(|byte| *byte == b'\n')
-            .filter(|row| !row.is_empty())
-            .map(
-                |row| match row.split(|byte| *byte == 0).collect::<Vec<_>>()[..] {
-                    [reference, oid, symref] => Ok(Listed {
-                        reference: git::text(reference),
-                        oid: git::text(oid),
-                        symref: git::text(symref),
-                    }),
-                    _ => Err(git::malformed()),
-                },
-            )
-            .collect::<Result<_, _>>()?;
+        let branches = refs::listed(repo, "refs/heads/", reads)?;
         let config = config(repo, &["--local"], reads)?;
         let listed = git::read(
             &repo.root,
@@ -212,18 +184,14 @@ impl Listing {
         })
     }
 
-    fn listed(&self, branch: &BranchRef) -> Option<&Listed> {
+    fn listed(&self, branch: &BranchRef) -> Option<&refs::Listed> {
         self.branches
             .iter()
             .find(|listed| listed.reference == branch.as_str())
     }
 
     pub(super) fn slot(&self, branch: &BranchRef) -> Result<Slot, RepositoryError> {
-        let tip = self
-            .listed(branch)
-            .map(|listed| Oid::try_from(listed.oid.clone()))
-            .transpose()
-            .map_err(|_| git::malformed())?;
+        let tip = self.listed(branch).map(|listed| listed.oid.clone());
         let prefix = format!("branch.{}.", branch.name());
         Ok(Slot {
             branch: branch.clone(),
@@ -1003,20 +971,7 @@ pub(crate) fn merged_within(
         })
         .filter(|upstream| !upstream.is_empty());
     let upstream = match upstream {
-        Some(reference)
-            if git::run(
-                &root,
-                &[
-                    "rev-parse",
-                    "--quiet",
-                    "--verify",
-                    &format!("{reference}^{{commit}}"),
-                ],
-                reads,
-            )?
-            .status
-            .success() =>
-        {
+        Some(reference) if repository::peel_to_commit(&root, &reference, reads)?.is_some() => {
             Some(UpstreamMerged {
                 merged: ancestor(&reference)?,
                 reference,

@@ -7,6 +7,7 @@ use super::{
 use crate::{
     ErrorKind, Head, Oid, RepositoryError, StagedStamp, StaleReason, StatusEntry,
     git::{self, Deadline, WriteDeadline, Wrote},
+    repository,
     status::{self, Untracked},
     stderr, sync,
 };
@@ -293,16 +294,9 @@ pub(super) fn resolve_within(
     deadline: Deadline,
     name: &str,
 ) -> Result<Option<Oid>, RepositoryError> {
-    let ran = git::run(
-        &repo.root,
-        &["rev-parse", "-q", "--verify", &format!("{name}^{{commit}}")],
-        deadline,
-    )?;
-    if !ran.status.success() {
-        return Ok(None);
-    }
-    Oid::try_from(git::line(&ran.stdout))
-        .map(Some)
+    repository::peel_to_commit(&repo.root, name, deadline)?
+        .map(Oid::try_from)
+        .transpose()
         .map_err(|_| git::malformed())
 }
 

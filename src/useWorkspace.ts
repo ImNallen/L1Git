@@ -399,8 +399,6 @@ export function useWorkspace() {
         left.root === right.root &&
         left.targetStatusReads === right.targetStatusReads &&
         sameComparison(left.comparison, right.comparison),
-      stallMs: 1000,
-      maxReads: 2,
     }),
   );
 
