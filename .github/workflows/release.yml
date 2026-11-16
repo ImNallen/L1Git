@@ -215,17 +215,8 @@ jobs:
           export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=''
           read -r -a build_args <<< "$BUILD_ARGS"
           pnpm tauri build --ci "${build_args[@]}" --config release.conf.json -- --locked
-      - name: Sign Linux updater artifacts for publication
-        if: steps.restore.outputs.restored != 'true' && needs.plan.outputs.action == 'publish' && runner.os == 'Linux'
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          BUILD_ARGS: ${{ matrix.args }}
-        run: |
-          read -r -a build_args <<< "$BUILD_ARGS"
-          pnpm tauri build --ci "${build_args[@]}" --config release.conf.json -- --locked
-      - name: Sign Windows updater artifacts for publication
-        if: steps.restore.outputs.restored != 'true' && needs.plan.outputs.action == 'publish' && runner.os == 'Windows'
+      - name: Sign updater artifacts for publication
+        if: steps.restore.outputs.restored != 'true' && needs.plan.outputs.action == 'publish' && runner.os != 'macOS'
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
