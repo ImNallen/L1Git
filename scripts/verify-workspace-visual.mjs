@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, mkdirSync, writeFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { addRepository } from "./add-repository.mjs";
 
 const contract = JSON.parse(
   readFileSync(
@@ -50,13 +51,8 @@ const saved = evaluate(
     ),
   repository,
 );
-if (!saved) {
-  browser("click", ".repositories-heading button");
-  browser("wait", "#repository-path");
-  browser("fill", "#repository-path", repository);
-  browser("click", 'dialog button[type="submit"]');
-} else
-  browser("click", `.repository-open[title=${JSON.stringify(repository)}]`);
+if (!saved) addRepository(browser, repository);
+else browser("click", `.repository-open[title=${JSON.stringify(repository)}]`);
 browser("wait", ".history-table tbody tr[aria-rowindex]");
 browser("wait", ".commit-information h2");
 browser("wait", "file-tree-container");

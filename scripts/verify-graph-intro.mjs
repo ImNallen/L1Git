@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { basename } from "node:path";
+import { addRepository } from "./add-repository.mjs";
 
 const [first, second, url = "http://127.0.0.1:1423"] = process.argv.slice(2);
 if (!first || !second) {
@@ -47,10 +48,7 @@ for (const root of [first, second]) {
       ),
     )
   ) {
-    browser("click", ".repositories-heading button");
-    browser("wait", "#repository-path");
-    browser("fill", "#repository-path", root);
-    browser("click", 'dialog button[type="submit"]');
+    addRepository(browser, root);
     browser("wait", saved(root));
   }
 }
