@@ -661,7 +661,7 @@ export type Start = z.infer<typeof startSchema>;
 export type BranchMerged = z.infer<typeof branchMergedSchema>;
 export type Problem =
   | z.infer<typeof repositoryErrorSchema>
-  | { kind: "transport" | "persistence"; message: string };
+  | { kind: "transport"; message: string };
 
 export function problemFrom(error: unknown): Problem {
   const repositoryError = repositoryErrorSchema.safeParse(error);
