@@ -4,18 +4,17 @@ type ReadOutcome<Value> =
 
 type InFlight<Key> = { key: Key; stalled: boolean };
 
+const STALL_MS = 1000;
+const MAX_READS = 2;
+
 export function latestReader<Key, Value>({
   read,
   deliver,
   same,
-  stallMs,
-  maxReads,
 }: {
   read: (key: Key) => Promise<Value>;
   deliver: (key: Key, outcome: ReadOutcome<Value>) => void;
   same: (left: Key, right: Key) => boolean;
-  stallMs: number;
-  maxReads: number;
 }): { want: (key: Key | null) => void } {
   let newest: Key | null = null;
   // A stalled read keeps its slot because backend reads cannot be cancelled, and
@@ -31,7 +30,7 @@ export function latestReader<Key, Value>({
     const newestInFlight =
       latest !== null && running.has(latest) && same(latest.key, key);
     const oneStillWorking = [...running].some((current) => !current.stalled);
-    const atCap = running.size >= maxReads;
+    const atCap = running.size >= MAX_READS;
     if (newestInFlight || oneStillWorking || atCap) return;
     const current: InFlight<Key> = { key, stalled: false };
     latest = current;
@@ -39,7 +38,7 @@ export function latestReader<Key, Value>({
     const timer = setTimeout(() => {
       current.stalled = true;
       pump();
-    }, stallMs);
+    }, STALL_MS);
     const finish = (outcome: ReadOutcome<Value>) => {
       clearTimeout(timer);
       running.delete(current);

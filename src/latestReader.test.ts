@@ -14,8 +14,6 @@ function controlled() {
     deliver: (key, outcome) =>
       delivered.push(`${key}=${outcome.ok ? outcome.value : "error"}`),
     same: (left, right) => left === right,
-    stallMs: 1000,
-    maxReads: 2,
   });
   const flush = async () => {
     for (let tick = 0; tick < 4; tick++) await Promise.resolve();
@@ -138,8 +136,6 @@ describe("latest reader", () => {
       deliver: (key, outcome) =>
         delivered.push(`${key}=${outcome.ok ? outcome.value : "error"}`),
       same: (left, right) => left === right,
-      stallMs: 1000,
-      maxReads: 2,
     });
     reader.want("broken");
     for (let tick = 0; tick < 4; tick++) await Promise.resolve();
