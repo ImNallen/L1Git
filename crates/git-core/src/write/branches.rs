@@ -1003,20 +1003,7 @@ pub(crate) fn merged_within(
         })
         .filter(|upstream| !upstream.is_empty());
     let upstream = match upstream {
-        Some(reference)
-            if git::run(
-                &root,
-                &[
-                    "rev-parse",
-                    "--quiet",
-                    "--verify",
-                    &format!("{reference}^{{commit}}"),
-                ],
-                reads,
-            )?
-            .status
-            .success() =>
-        {
+        Some(reference) if repository::peel_to_commit(&root, &reference, reads)?.is_some() => {
             Some(UpstreamMerged {
                 merged: ancestor(&reference)?,
                 reference,
