@@ -8,7 +8,8 @@ use crate::{
     BranchMerged, BranchRef, ErrorKind, Oid, RemoteRef, RepositoryError, StaleReason,
     UpstreamMerged,
     git::{self, Capped, Deadline, WriteDeadline, Wrote},
-    repository, stderr, sync,
+    repository::{self, WorktreeRecord},
+    stderr, sync,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -140,43 +141,17 @@ impl<'a> Transition<'a> {
     }
 }
 
-struct WorktreeHead {
-    root: String,
-    branch: Option<String>,
-}
-
 pub(super) struct Listing {
     branches: Vec<refs::Listed>,
     config: Vec<(String, String)>,
-    worktrees: Vec<WorktreeHead>,
+    worktrees: Vec<WorktreeRecord>,
 }
 
 impl Listing {
     pub(super) fn read(repo: &Repo, reads: Deadline) -> Result<Self, RepositoryError> {
         let branches = refs::listed(repo, "refs/heads/", reads)?;
         let config = config(repo, &["--local"], reads)?;
-        let listed = git::read(
-            &repo.root,
-            &["worktree", "list", "--porcelain", "-z"],
-            reads,
-        )?;
-        let fields: Vec<_> = listed.split(|byte| *byte == 0).collect();
-        let worktrees = fields
-            .split(|field| field.is_empty())
-            .filter_map(|record| {
-                let root = record
-                    .iter()
-                    .find_map(|field| field.strip_prefix(b"worktree "))?;
-                let branch = record
-                    .iter()
-                    .find_map(|field| field.strip_prefix(b"branch "))
-                    .map(git::text);
-                Some(WorktreeHead {
-                    root: git::text(root),
-                    branch,
-                })
-            })
-            .collect();
+        let worktrees = repository::worktree_records(&repo.root, reads)?;
         Ok(Self {
             branches,
             config,
@@ -210,8 +185,8 @@ impl Listing {
             heads: self
                 .worktrees
                 .iter()
-                .filter(|head| head.branch.as_deref() == Some(branch.as_str()))
-                .map(|head| head.root.clone())
+                .filter(|record| record.branch() == Some(branch.as_str()))
+                .map(|record| record.listed.clone())
                 .collect(),
         })
     }
@@ -265,7 +240,7 @@ impl Listing {
         }
         if let Some(gitdir) = operation_on(repo, &slot.branch) {
             let root = if gitdir == repo.common_dir {
-                self.worktrees.first().map(|head| head.root.clone())
+                self.worktrees.first().map(|record| record.listed.clone())
             } else {
                 fs::read_to_string(gitdir.join("gitdir")).ok().map(|file| {
                     Path::new(file.trim_end())

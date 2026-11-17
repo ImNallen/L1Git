@@ -152,89 +152,51 @@ impl Switch {
                 })
             }
             Start::Local { reference, oid } => {
-                let listing = Listing::read(repo, reads)?;
-                if listing.slot(reference)?.tip.as_ref() != Some(oid) {
-                    return Err(branches::moved(reference.name()));
-                }
-                Self::existing(&listing, before, reference, oid.clone(), from)
+                Self::landing(Landing::local(repo, reference, oid, reads)?, before, from)
             }
             Start::Remote { reference, oid } => {
-                let remote = branches::short(reference.as_str());
-                if !sync::is_at(&repo.root, reference.as_str(), oid, reads)? {
-                    return Err(branches::moved(remote));
-                }
-                let name = local_name(repo, reference, reads)?;
-                let branch = branches::new_name(repo, &name, reads)?;
-                let listing = Listing::read(repo, reads)?;
-                let slot = listing.slot(&branch)?;
-                if let Some(tip) = slot.tip {
-                    return Self::existing(&listing, before, &branch, tip, from);
-                }
-                listing.refuse_clash(repo, &branch, None)?;
-                if let Some(root) = slot.heads.first() {
-                    return Err(RepositoryError::new(
-                        ErrorKind::Conflict,
-                        format!(
-                            "The worktree at {root} waits for its first commit on {name}, so a new {name} would move it."
-                        ),
-                    ));
-                }
-                Ok(Self {
-                    goal: Head::Attached {
-                        reference: branch.as_str().to_owned(),
-                        oid: oid.as_str().to_owned(),
-                    },
-                    to_name: remote.to_owned(),
-                    from_name: from,
-                    args: vec![
-                        "--no-guess".to_owned(),
-                        "-c".to_owned(),
-                        name,
-                        "--track".to_owned(),
-                        reference.as_str().to_owned(),
-                    ],
-                    created: Some(NewBranch {
-                        branch,
-                        before: slot.config,
-                    }),
-                    reverse: "Undo",
-                })
+                Self::landing(Landing::remote(repo, reference, oid, reads)?, before, from)
             }
         }
     }
 
-    fn existing(
-        listing: &Listing,
-        before: &Head,
-        branch: &BranchRef,
-        tip: Oid,
-        from: String,
-    ) -> Result<Self, RepositoryError> {
-        let name = branch.name();
-        if matches!(before, Head::Attached { reference, .. } if reference == branch.as_str()) {
+    fn landing(landing: Landing, before: &Head, from: String) -> Result<Self, RepositoryError> {
+        let name = landing.branch.name();
+        if matches!(before, Head::Attached { reference, .. } if reference == landing.branch.as_str())
+        {
             return Err(RepositoryError::new(
                 ErrorKind::UnchangedPath,
                 format!("{name} is already checked out."),
             ));
         }
-        listing.refuse_symbolic(branch)?;
-        if let Some(root) = listing.slot(branch)?.heads.first() {
-            return Err(RepositoryError::new(
-                ErrorKind::Conflict,
-                format!(
-                    "{name} is checked out in {root}, and Git checks out a branch in one worktree at a time. Switch that worktree to another branch first."
-                ),
-            ));
-        }
+        landing.refuse_checked_out()?;
+        let (to_name, args, created) = match landing.creates {
+            None => (
+                name.to_owned(),
+                vec!["--no-guess".to_owned(), "--".to_owned(), name.to_owned()],
+                None,
+            ),
+            Some(Creates { new, upstream }) => (
+                branches::short(upstream.as_str()).to_owned(),
+                vec![
+                    "--no-guess".to_owned(),
+                    "-c".to_owned(),
+                    name.to_owned(),
+                    "--track".to_owned(),
+                    upstream.as_str().to_owned(),
+                ],
+                Some(new),
+            ),
+        };
         Ok(Self {
             goal: Head::Attached {
-                reference: branch.as_str().to_owned(),
-                oid: tip.as_str().to_owned(),
+                reference: landing.branch.as_str().to_owned(),
+                oid: landing.tip.as_str().to_owned(),
             },
-            to_name: name.to_owned(),
+            to_name,
             from_name: from,
-            args: vec!["--no-guess".to_owned(), "--".to_owned(), name.to_owned()],
-            created: None,
+            args,
+            created,
             reverse: "Undo",
         })
     }
@@ -306,6 +268,132 @@ impl Switch {
             created,
             reverse,
         })
+    }
+}
+
+/// The local branch that checking out a branch lands on, by Check out's rules.
+pub(super) struct Landing {
+    pub(super) branch: BranchRef,
+    /// Where HEAD ends: the branch's own tip, or the source's tip for a new
+    /// branch.
+    pub(super) tip: Oid,
+    /// The worktrees whose HEAD names `branch`, as Git prints them.
+    heads: Vec<String>,
+    pub(super) creates: Option<Creates>,
+}
+
+/// `NewBranch` is part of `CheckoutChange`'s stored JSON, so the upstream
+/// rides beside it instead of inside it.
+pub(super) struct Creates {
+    pub(super) new: NewBranch,
+    pub(super) upstream: RemoteRef,
+}
+
+impl Landing {
+    /// A local branch lands as itself, at the tip the user saw.
+    pub(super) fn local(
+        repo: &Repo,
+        reference: &BranchRef,
+        oid: &Oid,
+        reads: Deadline,
+    ) -> Result<Self, RepositoryError> {
+        let listing = Listing::read(repo, reads)?;
+        let slot = listing.slot(reference)?;
+        if slot.tip.as_ref() != Some(oid) {
+            return Err(branches::moved(reference.name()));
+        }
+        listing.refuse_symbolic(reference)?;
+        Ok(Self {
+            branch: reference.clone(),
+            tip: oid.clone(),
+            heads: slot.heads,
+            creates: None,
+        })
+    }
+
+    /// A remote-tracking branch lands on the branch its fetch refspec maps it
+    /// to: that branch at its own tip, or else a new one at `oid` tracking
+    /// the remote branch.
+    pub(super) fn remote(
+        repo: &Repo,
+        reference: &RemoteRef,
+        oid: &Oid,
+        reads: Deadline,
+    ) -> Result<Self, RepositoryError> {
+        if !sync::is_at(&repo.root, reference.as_str(), oid, reads)? {
+            return Err(branches::moved(branches::short(reference.as_str())));
+        }
+        let name = local_name(repo, reference, reads)?;
+        let branch = branches::new_name(repo, &name, reads)?;
+        let listing = Listing::read(repo, reads)?;
+        let slot = listing.slot(&branch)?;
+        if let Some(tip) = slot.tip {
+            listing.refuse_symbolic(&branch)?;
+            return Ok(Self {
+                branch,
+                tip,
+                heads: slot.heads,
+                creates: None,
+            });
+        }
+        listing.refuse_clash(repo, &branch, None)?;
+        if let Some(root) = slot.heads.first() {
+            return Err(RepositoryError::new(
+                ErrorKind::Conflict,
+                format!(
+                    "The worktree at {root} waits for its first commit on {name}, so a new {name} would move it."
+                ),
+            ));
+        }
+        Ok(Self {
+            creates: Some(Creates {
+                new: NewBranch {
+                    branch: branch.clone(),
+                    before: slot.config,
+                },
+                upstream: reference.clone(),
+            }),
+            branch,
+            tip: oid.clone(),
+            heads: Vec::new(),
+        })
+    }
+
+    pub(super) fn refuse_checked_out(&self) -> Result<(), RepositoryError> {
+        match self.heads.first() {
+            Some(root) => Err(RepositoryError::new(
+                ErrorKind::Conflict,
+                format!(
+                    "{} is checked out in {root}, and Git checks out a branch in one worktree at a time. Switch that worktree to another branch first.",
+                    self.branch.name()
+                ),
+            )),
+            None => Ok(()),
+        }
+    }
+}
+
+impl NewBranch {
+    /// Deletes the branch a landing created when the checkout did not
+    /// happen, while it is still at `tip` and no worktree holds it, and puts
+    /// its `branch.<name>.*` config back.
+    pub(super) fn forget(
+        &self,
+        txn: &RefTxn<'_>,
+        repo: &Repo,
+        tip: &Oid,
+    ) -> Result<(), RepositoryError> {
+        let slot = Listing::read(repo, txn.runner().deadline().reads())?.slot(&self.branch)?;
+        if slot.tip.as_ref() == Some(tip) && slot.heads.is_empty() {
+            branches::run_delete(
+                txn,
+                &BranchTip {
+                    reference: self.branch.clone(),
+                    oid: tip.clone(),
+                },
+            )?;
+        }
+        branches::set_config(txn, &self.branch, &slot.config, &self.before)
     }
 }
 
@@ -762,20 +850,10 @@ fn put_back(
         .lazy_fetch_unprompted()
         .run(deadline)?
         .succeeded()?;
-    let Some(new) = &planned.created else {
-        return Ok(());
-    };
-    let slot = Listing::read(repo, deadline.reads())?.slot(&new.branch)?;
-    if slot.tip.as_ref() == Some(&goal) {
-        branches::run_delete(
-            &txn,
-            &BranchTip {
-                reference: new.branch.clone(),
-                oid: goal,
-            },
-        )?;
+    match &planned.created {
+        Some(new) => new.forget(&txn, repo, &goal),
+        None => Ok(()),
     }
-    branches::set_config(&txn, &new.branch, &slot.config, &new.before)
 }
 
 fn made(

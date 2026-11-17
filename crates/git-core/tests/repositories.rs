@@ -506,7 +506,7 @@ fn reads_a_conflicted_submodule_at_the_commit_head_records() {
 }
 
 #[test]
-fn reads_linked_and_detached_worktrees_and_marks_the_opened_root() {
+fn reads_linked_and_detached_worktrees_and_marks_the_opened_root_and_the_main_one() {
     let fixture = Fixture::new();
     let oid = fixture.commit("first", "one", "initial");
     let linked = fixture._directory.path().join("linked");
@@ -524,6 +524,7 @@ fn reads_linked_and_detached_worktrees_and_marks_the_opened_root() {
         name: name.into(),
         head,
         current,
+        main: path == fixture.repo,
     };
     let attached = |reference: &str| Head::Attached {
         reference: reference.into(),
