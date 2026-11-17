@@ -34,6 +34,7 @@ function snapshot(
       name: worktree.slice(1),
       head: { kind: "unborn", reference: "refs/heads/main" },
       current: false,
+      main: false,
     })),
     remotes: [],
     commits: oids.map((oid) => ({

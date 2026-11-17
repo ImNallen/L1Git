@@ -28,6 +28,7 @@ import type {
   Stash,
   Tag,
   WorktreePatch,
+  WorktreeSource,
   WorktreeStatus,
 } from "./repository";
 import { shortOid } from "./shortOid";
@@ -163,7 +164,8 @@ export type BranchAsk =
   | { kind: "rename"; branch: BranchTip; name: string }
   | { kind: "delete"; branch: BranchTip; name: string };
 
-export const startAt = ({ kind, reference, oid }: Branch): Start =>
+/** A sidebar branch as a Check out target or a Try it locally source. */
+export const startAt = ({ kind, reference, oid }: Branch): WorktreeSource =>
   kind === "local"
     ? { kind: "local", reference, oid }
     : { kind: "remote", reference, oid };

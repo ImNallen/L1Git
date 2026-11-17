@@ -1,4 +1,8 @@
-import { detailSchema, replayOfSchema } from "../domain/repository";
+import {
+  detailSchema,
+  replayOfSchema,
+  worktreeSourceSchema,
+} from "../domain/repository";
 import type {
   Applied,
   Problem,
@@ -16,6 +20,7 @@ import type { Comparison } from "../domain/comparison";
 import type { DirectoryEntry } from "../domain/addRepository";
 import {
   addEmptyRepository,
+  addLinkedWorktree,
   applied,
   deleteGoneBranch,
   editableConflict,
@@ -34,6 +39,7 @@ import {
   pinSnapshot,
   pinStatus,
   readyPush,
+  removeLinkedWorktree,
   replayReviewFor,
 } from "./fixtures";
 
@@ -160,6 +166,34 @@ function step(request: BridgeRequest, world: World, from: "undo" | "redo") {
   return entry;
 }
 
+/** What Try it locally would do, by Check out's rules for an origin-style refspec. */
+function worktreeReview(request: BridgeRequest, world: World) {
+  const snapshot = known(world.snapshots, request.path);
+  const source = worktreeSourceSchema.parse(request.source);
+  const name =
+    source.kind === "local"
+      ? source.reference.replace(/^refs\/heads\//, "")
+      : source.reference.replace(/^refs\/remotes\/[^/]+\//, "");
+  const reference = `refs/heads/${name}`;
+  const holder = snapshot.worktrees.find(
+    ({ head }) => head.kind === "attached" && head.reference === reference,
+  );
+  if (holder)
+    throw new Refusal({
+      kind: "conflict",
+      message: `${name} is checked out in ${holder.root}, and Git checks out a branch in one worktree at a time. Switch that worktree to another branch first.`,
+    });
+  const main = snapshot.worktrees.find((worktree) => worktree.main) ?? snapshot;
+  const parent = main.root.split("/").slice(0, -1).join("/");
+  return {
+    folder: `${parent}/.worktrees/${main.name}-${name.replaceAll("/", "-")}`,
+    branch: snapshot.branches.some((branch) => branch.reference === reference)
+      ? { kind: "existing", reference }
+      : { kind: "new", reference, upstream: source.reference },
+    name,
+  };
+}
+
 const handlers: Record<string, Handler> = {
   snapshot: (request, world) => known(world.snapshots, request.path),
   refs: (request, world) => {
@@ -250,6 +284,20 @@ const handlers: Record<string, Handler> = {
     const path = fromHome(request.path);
     addEmptyRepository(world, path as RepositoryRoot);
     return { path };
+  },
+  worktreeReview: (request, world) => {
+    const { folder, branch } = worktreeReview(request, world);
+    return { folder, branch };
+  },
+  createWorktree: (request, world) => {
+    const { name } = worktreeReview(request, world);
+    const root = fromHome(String(request.folder)) as RepositoryRoot;
+    addLinkedWorktree(world, request.path as RepositoryRoot, root, name);
+    return { root, name: root.split("/").at(-1), trouble: null };
+  },
+  removeWorktree: (request, world) => {
+    removeLinkedWorktree(world, request.worktree as RepositoryRoot);
+    return undefined;
   },
   undo: (request, world) => step(request, world, "undo"),
   redo: (request, world) => step(request, world, "redo"),

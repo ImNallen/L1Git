@@ -40,8 +40,11 @@ import {
   replayReviewSchema,
   repositoryErrorSchema,
   snapshotSchema,
+  newWorktreeSchema,
   undoHistorySchema,
   worktreePatchSchema,
+  worktreeReviewSchema,
+  worktreeSourceSchema,
   worktreeStatusSchema,
 } from "./domain/repository";
 import type {
@@ -54,6 +57,7 @@ import type {
   ReplayOf,
   RepositoryRoot,
   Side,
+  WorktreeSource,
 } from "./domain/repository";
 
 export const native = isTauri();
@@ -94,7 +98,15 @@ type RepositoryRequest =
   | { op: "listDirectories"; path: string }
   | { op: "createRepository"; path: string }
   | { op: "cloneRepository"; url: string; path: string }
-  | { op: "cancelClone"; path: string };
+  | { op: "cancelClone"; path: string }
+  | { op: "worktreeReview"; path: RepositoryRoot; source: WorktreeSource }
+  | {
+      op: "createWorktree";
+      path: RepositoryRoot;
+      source: WorktreeSource;
+      folder: string;
+    }
+  | { op: "removeWorktree"; path: RepositoryRoot; worktree: RepositoryRoot };
 
 const responseSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("mergeReview"), data: mergeReviewSchema }),
@@ -134,6 +146,9 @@ const responseSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("createRepository"), data: newRepositorySchema }),
   z.object({ op: z.literal("cloneRepository"), data: newRepositorySchema }),
   z.object({ op: z.literal("cancelClone") }),
+  z.object({ op: z.literal("worktreeReview"), data: worktreeReviewSchema }),
+  z.object({ op: z.literal("createWorktree"), data: newWorktreeSchema }),
+  z.object({ op: z.literal("removeWorktree") }),
 ]);
 export const requestOps = responseSchema.options.map(
   (option) => option.shape.op.value,
@@ -326,6 +341,42 @@ export async function cloneRepository(
   } finally {
     signal.removeEventListener("abort", cancel);
   }
+}
+
+export async function worktreeReview(
+  path: RepositoryRoot,
+  source: WorktreeSource,
+) {
+  return (
+    await run({
+      op: "worktreeReview",
+      path,
+      source: worktreeSourceSchema.parse(source),
+    })
+  ).data;
+}
+
+/** `folder` as typed. The core expands `~`. */
+export async function createWorktree(
+  path: RepositoryRoot,
+  source: WorktreeSource,
+  folder: string,
+) {
+  return (
+    await run({
+      op: "createWorktree",
+      path,
+      source: worktreeSourceSchema.parse(source),
+      folder,
+    })
+  ).data;
+}
+
+export async function removeWorktree(
+  path: RepositoryRoot,
+  worktree: RepositoryRoot,
+) {
+  await run({ op: "removeWorktree", path, worktree });
 }
 
 export async function preparePush(path: RepositoryRoot) {

@@ -114,6 +114,7 @@ describe("worktree rows in the graph", () => {
     name: path.slice(1),
     head: { kind: "detached", oid },
     current: false,
+    main: false,
   });
   const dirty = (worktrees: Worktree[]): ChangesByWorktree =>
     new Map(

@@ -32,19 +32,37 @@ const tagTipSchema = z.strictObject({
   reference: tagRefSchema,
   oid: oidSchema,
 });
+const localStartSchema = z.strictObject({
+  kind: z.literal("local"),
+  reference: localRefSchema,
+  oid: oidSchema,
+});
+const remoteStartSchema = z.strictObject({
+  kind: z.literal("remote"),
+  reference: remoteRefSchema,
+  oid: oidSchema,
+});
 const startSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("commit"), oid: oidSchema }),
-  z.strictObject({
-    kind: z.literal("local"),
-    reference: localRefSchema,
-    oid: oidSchema,
-  }),
-  z.strictObject({
-    kind: z.literal("remote"),
-    reference: remoteRefSchema,
-    oid: oidSchema,
-  }),
+  localStartSchema,
+  remoteStartSchema,
 ]);
+/** What Try it locally checks out: a branch, never a bare commit. */
+export const worktreeSourceSchema = z.discriminatedUnion("kind", [
+  localStartSchema,
+  remoteStartSchema,
+]);
+export const worktreeReviewSchema = z.strictObject({
+  folder: z.string().min(1),
+  branch: z.discriminatedUnion("kind", [
+    z.strictObject({ kind: z.literal("existing"), reference: localRefSchema }),
+    z.strictObject({
+      kind: z.literal("new"),
+      reference: localRefSchema,
+      upstream: remoteRefSchema.nullable(),
+    }),
+  ]),
+});
 export const headSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("attached"),
@@ -96,6 +114,8 @@ const worktreeSchema = z.object({
   name: z.string(),
   head: headSchema,
   current: z.boolean(),
+  /** The repository's main worktree, which Git never removes. */
+  main: z.boolean(),
 });
 const commitSchema = z.object({
   oid: oidSchema,
@@ -619,6 +639,13 @@ export const repositoryErrorSchema = z.union([
   }),
 ]);
 
+export const newWorktreeSchema = z.strictObject({
+  root: rootSchema,
+  name: z.string().min(1),
+  /** Git made the worktree, but its post-checkout hook failed or was stopped. */
+  trouble: repositoryErrorSchema.nullable(),
+});
+
 export type RepositoryRoot = z.infer<typeof rootSchema>;
 export type Oid = z.infer<typeof oidSchema>;
 export type FullRef = z.infer<typeof refSchema>;
@@ -658,6 +685,7 @@ export type Applied = z.infer<typeof appliedSchema>;
 export type UndoHistory = z.infer<typeof undoHistorySchema>;
 export type BranchTip = z.infer<typeof branchTipSchema>;
 export type Start = z.infer<typeof startSchema>;
+export type WorktreeSource = z.infer<typeof worktreeSourceSchema>;
 export type BranchMerged = z.infer<typeof branchMergedSchema>;
 export type Problem =
   | z.infer<typeof repositoryErrorSchema>
