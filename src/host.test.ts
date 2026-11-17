@@ -1,10 +1,12 @@
-import { expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import type { HostRequest } from "./domain/host";
 import { createHostClient } from "./host";
 
 const notConnected = (revision: number, ended: unknown = null) => ({
   revision,
   github: { kind: "notConnected", ended },
+  deviceSignIn: false,
+  deviceCode: null,
 });
 const connected = (revision: number) => ({
   revision,
@@ -15,6 +17,19 @@ const connected = (revision: number) => ({
     method: "gh",
     access: "private",
     connectedAt: 1_700_000_000,
+  },
+  deviceSignIn: false,
+  deviceCode: null,
+});
+const waiting = (revision: number, pollAfterMs: number) => ({
+  ...notConnected(revision),
+  deviceSignIn: true,
+  deviceCode: {
+    session: "s1",
+    userCode: "WDJB-MJHT",
+    verificationUri: "https://github.com/login/device",
+    expiresInMs: 899_000,
+    pollAfterMs,
   },
 });
 
@@ -137,4 +152,84 @@ it("keeps the probe until the dialog dismisses it", async () => {
   expect(host.read().probe).toEqual({ kind: "signedOut" });
   host.dismiss();
   expect(host.read().probe).toBeNull();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+it("polls a browser sign-in when Rust says to, and stops once it connects", async () => {
+  vi.useFakeTimers();
+  const { host, transport, replies } = client();
+  const start = host.startDevice();
+  await Promise.resolve();
+  replies[0]?.resolve({ op: "deviceStart", status: waiting(2, 5_000) });
+  await start;
+  await vi.advanceTimersByTimeAsync(4_999);
+  expect(transport).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(transport).toHaveBeenLastCalledWith({
+    op: "devicePoll",
+    session: "s1",
+  });
+  expect(host.read().busy).toBeNull();
+
+  replies[1]?.resolve({ op: "devicePoll", status: waiting(3, 10_000) });
+  await vi.advanceTimersByTimeAsync(9_999);
+  expect(transport).toHaveBeenCalledTimes(2);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(transport).toHaveBeenCalledTimes(3);
+
+  replies[2]?.resolve({ op: "devicePoll", status: connected(4) });
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(transport).toHaveBeenCalledTimes(3);
+  expect(host.read().status).toEqual(connected(4));
+});
+
+it("stops polling when a browser sign-in ends in an error or the client is disposed", async () => {
+  vi.useFakeTimers();
+  const { host, transport, replies } = client();
+  void host.refresh();
+  await Promise.resolve();
+  replies[0]?.resolve({ op: "status", status: waiting(2, 0) });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(transport).toHaveBeenCalledTimes(2);
+  replies[1]?.reject({
+    kind: "deviceExpired",
+    message: "The sign-in code expired.",
+    status: notConnected(3),
+  });
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(transport).toHaveBeenCalledTimes(2);
+  expect(host.read().problem).toBe("The sign-in code expired.");
+
+  void host.startDevice();
+  await Promise.resolve();
+  replies[2]?.resolve({ op: "deviceStart", status: waiting(4, 5_000) });
+  await vi.advanceTimersByTimeAsync(0);
+  host.dispose();
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(transport).toHaveBeenCalledTimes(3);
+});
+
+it("cancels only a running browser sign-in, and stops its timer", async () => {
+  vi.useFakeTimers();
+  const { host, transport, replies } = client();
+  expect(await host.cancelDevice()).toBe(true);
+  expect(transport).not.toHaveBeenCalled();
+  const start = host.startDevice();
+  await Promise.resolve();
+  replies[0]?.resolve({ op: "deviceStart", status: waiting(2, 5_000) });
+  await start;
+  const cancel = host.cancelDevice();
+  await Promise.resolve();
+  expect(transport).toHaveBeenLastCalledWith({
+    op: "deviceCancel",
+    session: "s1",
+  });
+  replies[1]?.resolve({ op: "deviceCancel", status: notConnected(3) });
+  expect(await cancel).toBe(true);
+  expect(host.read().status?.deviceCode).toBeNull();
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(transport).toHaveBeenCalledTimes(2);
 });

@@ -3976,4 +3976,19 @@ describe("real Rust host contract", () => {
     const extra = await hostPost({ op: "status", token });
     expect(extra.status).toBe(400);
   });
+
+  it.skipIf(Boolean(process.env.L1GIT_GITHUB_CLIENT_ID))(
+    "hides browser sign-in in a bridge built without a client ID",
+    async () => {
+      const response = await hostPost({ op: "deviceStart" });
+      const { error } = z
+        .object({ ok: z.literal(false), error: hostErrorSchema })
+        .parse(await response.json());
+      expect(error.kind).toBe("deviceUnavailable");
+      expect(error.status).toMatchObject({
+        deviceSignIn: false,
+        deviceCode: null,
+      });
+    },
+  );
 });

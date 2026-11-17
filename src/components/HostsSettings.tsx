@@ -133,10 +133,17 @@ export function HostsSettings({ host }: { host: Host }) {
           onConfirm={() => void host.disconnect()}
           onClose={() => setDisconnecting(false)}
         >
-          <p>
-            L1 Git will delete its copy of the sign-in for @{github.login} from
-            the system keychain. The GitHub CLI stays signed in.
-          </p>
+          {github.method === "gh" ? (
+            <p>
+              L1 Git will delete its copy of the sign-in for @{github.login}{" "}
+              from the system keychain. The GitHub CLI stays signed in.
+            </p>
+          ) : (
+            <p>
+              L1 Git will delete its sign-in for @{github.login} from the system
+              keychain.
+            </p>
+          )}
         </ConfirmDialog>
       )}
     </section>

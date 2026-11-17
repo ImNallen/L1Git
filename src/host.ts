@@ -4,10 +4,11 @@ import type { GhProbe, HostRequest, HostStatus } from "./domain/host";
 import { send } from "./transport";
 
 type Op = HostRequest["op"];
+type Busy = Exclude<Op, "status" | "devicePoll">;
 type HostView = {
   status: HostStatus | null;
   probe: GhProbe | null;
-  busy: Exclude<Op, "status"> | null;
+  busy: Busy | null;
   problem: string | null;
 };
 type HostTransport = (request: HostRequest) => Promise<unknown>;
@@ -28,6 +29,7 @@ export function createHostClient(transport: HostTransport) {
   };
   const running = new Map<Op, Promise<boolean>>();
   const listeners = new Set<() => void>();
+  let poll: ReturnType<typeof setTimeout> | undefined;
   function update(next: Partial<HostView>) {
     view = { ...view, ...next };
     listeners.forEach((listener) => listener());
@@ -35,11 +37,18 @@ export function createHostClient(transport: HostTransport) {
   function accept(status: HostStatus) {
     if (view.status && status.revision < view.status.revision) return;
     view = { ...view, status };
+    clearTimeout(poll);
+    const prompt = status.deviceCode;
+    if (prompt)
+      poll = setTimeout(
+        () => void runOnce({ op: "devicePoll", session: prompt.session }),
+        prompt.pollAfterMs,
+      );
   }
   function busy() {
     return (
       [...running.keys()].findLast(
-        (op): op is Exclude<Op, "status"> => op !== "status",
+        (op): op is Busy => op !== "status" && op !== "devicePoll",
       ) ?? null
     );
   }
@@ -93,7 +102,15 @@ export function createHostClient(transport: HostTransport) {
     connectGh: (login: string) => runOnce({ op: "connectGh", login }),
     verify: () => runOnce({ op: "verify" }),
     disconnect: () => runOnce({ op: "disconnect" }),
+    startDevice: () => runOnce({ op: "deviceStart" }),
+    cancelDevice() {
+      const prompt = view.status?.deviceCode;
+      return prompt
+        ? runOnce({ op: "deviceCancel", session: prompt.session })
+        : Promise.resolve(true);
+    },
     dismiss: () => update({ probe: null, problem: null }),
+    dispose: () => clearTimeout(poll),
   };
 }
 
@@ -104,6 +121,7 @@ export function useHost() {
   const view = useSyncExternalStore(client.subscribe, client.read, client.read);
   useEffect(() => {
     void client.refresh();
+    return client.dispose;
   }, [client]);
   return { ...view, ...client };
 }

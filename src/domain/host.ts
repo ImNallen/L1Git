@@ -19,11 +19,21 @@ const hostStatusSchema = z.object({
       kind: z.literal("connected"),
       login: z.string(),
       api: z.string(),
-      method: z.literal("gh"),
+      method: z.enum(["gh", "device"]),
       access: accessSchema,
       connectedAt: z.number().int().nonnegative(),
     }),
   ]),
+  deviceSignIn: z.boolean(),
+  deviceCode: z
+    .object({
+      session: z.string(),
+      userCode: z.string(),
+      verificationUri: z.string(),
+      expiresInMs: z.number().int().nonnegative(),
+      pollAfterMs: z.number().int().nonnegative(),
+    })
+    .nullable(),
 });
 
 const ghProbeSchema = z.discriminatedUnion("kind", [
@@ -73,6 +83,9 @@ export const hostErrorSchema = z.discriminatedUnion("kind", [
   }),
   z.object({ kind: z.literal("storage"), ...failure }),
   z.object({ kind: z.literal("interrupted"), ...failure }),
+  z.object({ kind: z.literal("deviceUnavailable"), ...failure }),
+  z.object({ kind: z.literal("deviceExpired"), ...failure }),
+  z.object({ kind: z.literal("deviceDenied"), ...failure }),
 ]);
 
 export const hostResponseSchema = z.discriminatedUnion("op", [
@@ -85,11 +98,15 @@ export const hostResponseSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("connectGh"), status: hostStatusSchema }),
   z.object({ op: z.literal("disconnect"), status: hostStatusSchema }),
   z.object({ op: z.literal("verify"), status: hostStatusSchema }),
+  z.object({ op: z.literal("deviceStart"), status: hostStatusSchema }),
+  z.object({ op: z.literal("devicePoll"), status: hostStatusSchema }),
+  z.object({ op: z.literal("deviceCancel"), status: hostStatusSchema }),
 ]);
 
 export type HostRequest =
-  | { op: "status" | "probeGh" | "disconnect" | "verify" }
-  | { op: "connectGh"; login: string };
+  | { op: "status" | "probeGh" | "disconnect" | "verify" | "deviceStart" }
+  | { op: "connectGh"; login: string }
+  | { op: "devicePoll" | "deviceCancel"; session: string };
 
 export const hostRequestOps = hostResponseSchema.options.map(
   (option) => option.shape.op.value,

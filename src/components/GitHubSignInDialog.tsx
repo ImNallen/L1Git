@@ -1,6 +1,6 @@
-import { useId } from "react";
+import { useEffect, useEffectEvent, useId, useState } from "react";
 import { GitPullRequest, LoaderCircle } from "lucide-react";
-import type { GhProbe } from "../domain/host";
+import type { GhProbe, HostStatus } from "../domain/host";
 import type { Host } from "../host";
 import { DialogHeader, PathList, useModalDialog } from "./Dialog";
 
@@ -49,6 +49,50 @@ function Guidance({ probe }: { probe: Exclude<GhProbe, { kind: "ready" }> }) {
   }
 }
 
+type Prompt = NonNullable<HostStatus["deviceCode"]>;
+
+function expiresIn(ms: number) {
+  const minutes = Math.ceil(ms / 60_000);
+  return minutes > 1
+    ? `The code expires in ${minutes} minutes.`
+    : "The code expires in less than a minute.";
+}
+
+function DeviceCode({ prompt }: { prompt: Prompt }) {
+  const [copied, setCopied] = useState<"copied" | "failed" | null>(null);
+  return (
+    <>
+      <p>
+        Enter this code on GitHub to let L1 Git read your repositories. L1 Git
+        keeps the sign-in in the system keychain and only reads from GitHub.
+      </p>
+      <div className="device-code">
+        <output aria-label="Sign-in code">{prompt.userCode}</output>
+        <button
+          type="button"
+          className="button secondary"
+          onClick={() =>
+            navigator.clipboard.writeText(prompt.userCode).then(
+              () => setCopied("copied"),
+              () => setCopied("failed"),
+            )
+          }
+        >
+          {copied === "copied"
+            ? "Copied"
+            : copied === "failed"
+              ? "Could not copy"
+              : "Copy code"}
+        </button>
+      </div>
+      <p role="status">
+        <LoaderCircle size={14} className="spin" /> Waiting for GitHub.{" "}
+        {expiresIn(prompt.expiresInMs)}
+      </p>
+    </>
+  );
+}
+
 export function GitHubSignInDialog({
   host,
   onClose,
@@ -64,9 +108,33 @@ export function GitHubSignInDialog({
     },
     () => void host.probeGh(),
   );
+  const connected = host.status?.github.kind === "connected";
+  const closeConnected = useEffectEvent(close);
+  useEffect(() => {
+    if (connected) closeConnected();
+  }, [connected]);
+  const { cancelDevice } = host;
+  useEffect(() => () => void cancelDevice(), [cancelDevice]);
   const looking = host.busy === "probeGh";
   const probe = looking ? null : host.probe;
   const connecting = host.busy === "connectGh";
+  const prompt = host.status?.deviceCode ?? null;
+  const browser =
+    host.status?.deviceSignIn === true &&
+    (probe !== null || host.problem !== null);
+  const startBrowser = (className: string, label: string) => (
+    <button
+      type="button"
+      className={className}
+      disabled={host.busy === "deviceStart"}
+      onClick={() => void host.startDevice()}
+    >
+      {host.busy === "deviceStart" && (
+        <LoaderCircle size={14} className="spin" />
+      )}
+      {label}
+    </button>
+  );
 
   return (
     <dialog
@@ -85,7 +153,9 @@ export function GitHubSignInDialog({
         closeLabel="Close GitHub sign-in"
         onClose={close}
       />
-      {probe === null ? (
+      {prompt ? (
+        <DeviceCode prompt={prompt} />
+      ) : probe === null ? (
         !host.problem && (
           <p role="status">
             <LoaderCircle size={14} className="spin" /> Looking for the GitHub
@@ -117,30 +187,48 @@ export function GitHubSignInDialog({
         </p>
       )}
       <div className="dialog-actions">
+        {browser &&
+          !prompt &&
+          probe?.kind === "ready" &&
+          startBrowser(
+            "button ghost dialog-aside",
+            "Sign in with a browser instead",
+          )}
         <button type="button" className="button secondary" onClick={close}>
           Cancel
         </button>
-        {probe?.kind === "ready" ? (
+        {prompt ? (
+          <a
+            className="button primary"
+            href={prompt.verificationUri}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Open GitHub
+          </a>
+        ) : probe?.kind === "ready" ? (
           <button
             type="button"
             className="button primary"
             disabled={connecting}
-            onClick={async () => {
-              if (await host.connectGh(probe.login)) close();
-            }}
+            onClick={() => void host.connectGh(probe.login)}
           >
             {connecting && <LoaderCircle size={14} className="spin" />}
             Sign in as @{probe.login}
           </button>
         ) : (
-          <button
-            type="button"
-            className="button primary"
-            disabled={looking}
-            onClick={() => void host.probeGh()}
-          >
-            Check again
-          </button>
+          <>
+            <button
+              type="button"
+              className={`button ${browser ? "secondary" : "primary"}`}
+              disabled={looking}
+              onClick={() => void host.probeGh()}
+            >
+              Check again
+            </button>
+            {browser &&
+              startBrowser("button primary", "Sign in with a browser")}
+          </>
         )}
       </div>
     </dialog>
