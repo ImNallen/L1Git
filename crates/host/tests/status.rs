@@ -6,13 +6,14 @@ mod support;
 use std::fs;
 use std::path::Path;
 
-use l1_git_host::{Endpoints, GhChoice, Host, HostConfig, Request, run};
+use l1_git_host::{Endpoints, GhChoice, Host, HostConfig, Request, VaultChoice, run};
 use serde_json::{Value, json};
 use support::FakeGh;
 
 fn host(dir: &Path, gh: GhChoice) -> Host {
     Host::new(HostConfig {
         dir: dir.to_owned(),
+        vault: VaultChoice::Memory,
         gh,
         github: Endpoints::loopback("http://127.0.0.1:9/").unwrap(),
     })

@@ -11,6 +11,13 @@ pub enum Request {
     Status {},
     /// Runs `gh auth status`. Reads no token.
     ProbeGh {},
+    /// Copies gh's token for the account the consent dialog named.
+    ConnectGh {
+        login: Login,
+    },
+    Disconnect {},
+    /// Reads the token and asks GitHub who it belongs to.
+    Verify {},
 }
 
 /// `{op, data?, status}`.
@@ -26,6 +33,9 @@ pub struct Response {
 pub enum Answer {
     Status,
     ProbeGh(GhProbe),
+    ConnectGh,
+    Disconnect,
+    Verify,
 }
 
 /// Everything the webview knows about the host side. No field can hold a
@@ -261,11 +271,11 @@ mod tests {
         );
         assert_eq!(
             json(Response {
-                answer: Answer::Status,
+                answer: Answer::Disconnect,
                 status: connected,
             }),
             json!({
-                "op": "status",
+                "op": "disconnect",
                 "status": {"revision": 8, "github": {
                     "kind": "connected", "login": "octo", "api": "https://api.github.com/",
                     "method": "gh", "access": "publicOnly", "connectedAt": 1,
@@ -322,9 +332,16 @@ mod tests {
             parse(json!({"op": "status"})),
             Ok(Request::Status {})
         ));
+        assert!(matches!(
+            parse(json!({"op": "connectGh", "login": "octo"})),
+            Ok(Request::ConnectGh { login }) if login.as_str() == "octo"
+        ));
         for refused in [
             json!({"op": "status", "extra": 1}),
-            json!({"op": "connectGh", "login": "octo"}),
+            json!({"op": "connectGh", "login": "-x"}),
+            json!({"op": "connectGh"}),
+            json!({"op": "connectGh", "login": "octo", "token": "gho_x"}),
+            json!({"op": "verify", "extra": 1}),
             json!({"op": "deviceStart"}),
         ] {
             assert!(parse(refused.clone()).is_err(), "{refused}");

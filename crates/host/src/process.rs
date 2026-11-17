@@ -1,5 +1,5 @@
 use std::io::{self, Read};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 const STDERR_TAIL: usize = 8 * 1024;
 
 pub(crate) struct Ran {
+    pub(crate) status: ExitStatus,
     pub(crate) stdout: Vec<u8>,
     pub(crate) stderr_tail: String,
 }
@@ -74,8 +75,9 @@ pub(crate) fn run(mut command: Command, deadline: Duration, cap: usize) -> Resul
     }
     loop {
         match child.try_wait() {
-            Ok(Some(_)) => {
+            Ok(Some(status)) => {
                 return Ok(Ran {
+                    status,
                     stdout: stdout.unwrap_or_default(),
                     stderr_tail: stderr.unwrap_or_default(),
                 });
@@ -172,6 +174,7 @@ mod tests {
     #[test]
     fn stdin_is_null() {
         let ran = run(sh("cat"), Duration::from_secs(5), 1024).unwrap();
+        assert!(ran.status.success());
         assert!(ran.stdout.is_empty());
     }
 
@@ -207,6 +210,7 @@ mod tests {
             1024,
         )
         .unwrap();
+        assert_eq!(ran.status.code(), Some(3));
         assert_eq!(ran.stdout, b"out\n");
         assert!(ran.stderr_tail.len() <= STDERR_TAIL);
         assert!(ran.stderr_tail.ends_with("err1999\n"));

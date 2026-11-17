@@ -10,11 +10,14 @@ use serde::Deserialize;
 use crate::GhChoice;
 use crate::github::Login;
 use crate::process::{self, RunError};
-use crate::wire::{Access, GhProbe};
+use crate::vault::Token;
+use crate::wire::{Access, ErrorKind, Failure, GhProbe};
 
 const HOSTNAME: &str = "github.com";
 /// `auth status` checks each token with GitHub, so it gets network time.
 const PROBE_DEADLINE: Duration = Duration::from_secs(20);
+/// `auth token` is local, but gh's keyring read may wait on a system prompt.
+const TOKEN_DEADLINE: Duration = Duration::from_secs(30);
 const OUTPUT_CAP: usize = 64 * 1024;
 const EXE: &str = if cfg!(windows) { "gh.exe" } else { "gh" };
 
@@ -54,6 +57,72 @@ impl Gh {
                 failed(format!("L1 Git could not run the GitHub CLI: {error}."))
             }
         }
+    }
+
+    /// `--user` pins the copy to the consented account. Without it, gh hands
+    /// over whichever keyring token it finds, even while it reports no account.
+    pub(crate) fn token(&self, login: &Login) -> Result<Token, Failure> {
+        let missing = || {
+            Failure::new(
+                ErrorKind::GhMissing,
+                "L1 Git can no longer find the GitHub CLI. Check again in Settings › Hosts.",
+            )
+        };
+        let not_a_token = || {
+            Failure::new(
+                ErrorKind::GhFailed,
+                "The GitHub CLI printed something that is not a sign-in token. Update gh, then try again.",
+            )
+        };
+        let path = self.locate().ok_or_else(missing)?;
+        let mut command = command(&path);
+        command.args([
+            "auth",
+            "token",
+            "--hostname",
+            HOSTNAME,
+            "--user",
+            login.as_str(),
+        ]);
+        let ran = process::run(command, TOKEN_DEADLINE, OUTPUT_CAP).map_err(|error| match error {
+            RunError::NotFound => missing(),
+            RunError::TimedOut => Failure::new(
+                ErrorKind::GhFailed,
+                "The GitHub CLI did not hand over its sign-in within 30 seconds. If your system asks to allow access, allow it, then try again.",
+            ),
+            RunError::TooLarge => not_a_token(),
+            RunError::Io(error) => Failure::new(
+                ErrorKind::GhFailed,
+                format!("L1 Git could not run the GitHub CLI: {error}."),
+            ),
+        })?;
+        if !ran.status.success() {
+            return Err(if ran.stderr_tail.contains("unknown flag") {
+                Failure::new(
+                    ErrorKind::GhOutdated,
+                    "This GitHub CLI is too old for L1 Git. Update gh, then try again.",
+                )
+            } else if ran.stderr_tail.contains("no oauth token")
+                || ran.stderr_tail.contains("not logged in")
+            {
+                Failure::new(
+                    ErrorKind::GhSignedOut,
+                    format!(
+                        "The GitHub CLI is no longer signed in to github.com as {}. Run gh auth login, then try again.",
+                        login
+                    ),
+                )
+            } else {
+                Failure::new(
+                    ErrorKind::GhFailed,
+                    format!(
+                        "The GitHub CLI could not hand over its sign-in. {}",
+                        described(&ran.stderr_tail)
+                    ),
+                )
+            });
+        }
+        Token::parse(&String::from_utf8_lossy(&ran.stdout)).ok_or_else(not_a_token)
     }
 }
 
