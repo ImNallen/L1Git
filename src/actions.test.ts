@@ -81,6 +81,8 @@ function commands(): Commands {
     newBranch: vi.fn(),
     renameBranch: vi.fn(),
     deleteBranch: vi.fn(),
+    tryLocally: vi.fn(),
+    removeWorktree: vi.fn(),
     createTag: vi.fn(),
     deleteTag: vi.fn(),
     openRepository: vi.fn(),
@@ -271,6 +273,7 @@ describe("command palette", () => {
         outOfView: false,
         local: true,
         checkedOut: false,
+        removableWorktree: null,
       },
       rule: "hide",
     };
@@ -289,6 +292,7 @@ describe("command palette", () => {
       "New branch from feature/fetch-retry…",
       "Rename feature/fetch-retry…",
       "Delete feature/fetch-retry…",
+      "Try feature/fetch-retry locally…",
       "Create tag…",
       "Add repository",
       "Toggle sidebar",
@@ -312,6 +316,7 @@ describe("command palette", () => {
         outOfView: false,
         local: true,
         checkedOut: true,
+        removableWorktree: null,
       },
       rule: "solo",
     };
@@ -338,6 +343,7 @@ describe("command palette", () => {
         outOfView: true,
         local: false,
         checkedOut: false,
+        removableWorktree: null,
       },
       rule,
     });
@@ -347,16 +353,18 @@ describe("command palette", () => {
       "Solo feature/fetch-retry",
       "Check out feature/fetch-retry",
       "New branch from feature/fetch-retry…",
+      "Try feature/fetch-retry locally…",
     ]);
     expect(titles(notice("solo"), "feature/fetch-retry")).toEqual([
       "feature/fetch-retry",
       "Show feature/fetch-retry",
       "Check out feature/fetch-retry",
       "New branch from feature/fetch-retry…",
+      "Try feature/fetch-retry locally…",
     ]);
   });
 
-  it("offers branch writes for the sidebar branch as Git allows them", () => {
+  it("offers branch and worktree writes for the sidebar branch as Git allows them", () => {
     const sidebar = (
       local: boolean,
       checkedOut: boolean,
@@ -370,6 +378,7 @@ describe("command palette", () => {
         outOfView: false,
         local,
         checkedOut,
+        removableWorktree: null,
       },
     });
     const branchWrites = (context: ActionContext) =>
@@ -378,6 +387,7 @@ describe("command palette", () => {
       "New branch from topic…",
       "Rename topic…",
       "Delete topic…",
+      "Try topic locally…",
     ]);
     expect(branchWrites(sidebar(true, true))).toEqual([
       "New branch from topic…",
@@ -385,6 +395,21 @@ describe("command palette", () => {
     ]);
     expect(branchWrites(sidebar(false, false))).toEqual([
       "New branch from topic…",
+      "Try topic locally…",
+    ]);
+    const held = sidebar(true, true);
+    expect(
+      branchWrites({
+        ...held,
+        sidebarBranch: held.sidebarBranch && {
+          ...held.sidebarBranch,
+          removableWorktree: "app-topic",
+        },
+      }),
+    ).toEqual([
+      "New branch from topic…",
+      "Rename topic…",
+      "Remove worktree app-topic…",
     ]);
     expect(branchWrites(sidebar(true, false, true))).toEqual([]);
     expect(branchWrites({ ...repositoryScreen })).toEqual([]);
@@ -404,6 +429,7 @@ describe("command palette", () => {
         outOfView: false,
         local,
         checkedOut,
+        removableWorktree: null,
       },
     });
     const checkouts = (context: ActionContext) =>

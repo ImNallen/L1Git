@@ -1,11 +1,13 @@
-import { Trash2 } from "lucide-react";
+import { FolderMinus, Trash2 } from "lucide-react";
 import { flushSync } from "react-dom";
 import { BranchDialog } from "../components/BranchDialog";
 import { CheckoutCommitDialog } from "../components/CheckoutCommitDialog";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { EditMessageDialog } from "../components/EditMessageDialog";
 import { TagDialog } from "../components/TagDialog";
+import { TryLocallyDialog } from "../components/TryLocallyDialog";
 import { answeredInTagDialog, stashDropWrite } from "../domain/operations";
+import { shortBranch } from "../domain/refs";
 import type { RepositorySnapshot } from "../domain/repository";
 import type { WritesView } from "../useWrites";
 import { focusIsShown } from "./dom";
@@ -169,6 +171,56 @@ export function DropStashHost({
     >
       <p>
         {droppingStash.message} Undo puts this entry back at stash@{"{0}"}.
+      </p>
+    </ConfirmDialog>
+  );
+}
+
+export function TryLocallyHost({
+  refWrites,
+  snapshot,
+  focus,
+}: {
+  refWrites: RefWrites;
+  snapshot: RepositorySnapshot | null;
+  focus: Pick<Focus, "refocusIfLost">;
+}) {
+  const { tryAsk } = refWrites;
+  if (!tryAsk || !snapshot) return null;
+  return (
+    <TryLocallyDialog
+      root={snapshot.root}
+      ask={tryAsk}
+      onCreate={refWrites.createWorktree}
+      onClose={() => {
+        refWrites.closeTry();
+        focus.refocusIfLost();
+      }}
+    />
+  );
+}
+
+export function RemoveWorktreeHost({ refWrites }: { refWrites: RefWrites }) {
+  const { removing } = refWrites;
+  if (!removing) return null;
+  const branch =
+    removing.head.kind === "detached"
+      ? "Its commits"
+      : `${shortBranch(removing.head.reference)} and its commits`;
+  return (
+    <ConfirmDialog
+      icon={FolderMinus}
+      title={`Remove worktree ${removing.name}?`}
+      closeLabel="Close remove worktree"
+      confirm="Remove worktree"
+      onConfirm={() => void refWrites.confirmRemove()}
+      onClose={refWrites.closeRemove}
+    >
+      <p>
+        Git deletes {removing.root}, including ignored files such as
+        dependencies and build output, and refuses if it has uncommitted or
+        untracked files. {branch} stay. This has no Undo, and Undo entries made
+        in that worktree are dropped.
       </p>
     </ConfirmDialog>
   );

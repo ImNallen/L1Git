@@ -4,6 +4,7 @@ import {
   checkoutWrite,
   nextEntry,
   refStep,
+  worktreeRemoval,
   stashApplyWrite,
   stashPopWrite,
   startAt,
@@ -13,21 +14,27 @@ import type { BranchAsk, Step, TagAsk } from "../domain/operations";
 import type {
   Branch,
   FullRef,
+  NewWorktree,
   Oid,
+  Problem,
   RepositoryRoot,
   RepositorySnapshot,
   Start,
   Stash,
+  Worktree,
+  WorktreeSource,
   WorktreeStatus,
 } from "../domain/repository";
 import type { Selection } from "../domain/selection";
 import type { ChangesByWorktree } from "../domain/worktree";
-import type { WritesView } from "../useWrites";
+import { busyProblem } from "../components/Dialog";
+import type { CreateWorktreeOutcome, WritesView } from "../useWrites";
 import { defineSlice } from "./actionSlices";
 import type { ActionSlice } from "./actionSlices";
 import type { Focus } from "./useFocus";
 import type { Navigation } from "./useNavigation";
 import type { Staging } from "./useStaging";
+import type { WorkspaceApi } from "./workspaceView";
 import { shortOid } from "../domain/shortOid";
 
 /** History's commit-row write actions. */
@@ -48,13 +55,37 @@ export type SidebarRefActions = {
   };
   writable: {
     root: RepositoryRoot;
-    checkedOutIn: ReadonlyMap<FullRef, string>;
+    checkedOutIn: ReadonlyMap<FullRef, Worktree>;
   } | null;
   onBranchAsk: (ask: BranchAsk) => void;
   onTagAsk: (ask: TagAsk) => void;
   onStashAction: (action: "apply" | "pop" | "drop", stash: Stash) => void;
   onCheckout: (branch: Branch) => void;
+  onTryLocally: (branch: Branch) => void;
+  onRemoveWorktree: (worktree: Worktree) => void;
 };
+
+/** Try it locally's dialog: the branch the user picked, as the core takes it. */
+export type TryAsk = { source: WorktreeSource; name: string };
+
+/**
+ * What a worktree write tells the user once its dialog has closed. It shows
+ * only while the repository that made it is open, which is derived, so
+ * nothing has to clear it.
+ */
+export type WorktreeNotice =
+  | {
+      kind: "created";
+      from: RepositoryRoot;
+      branch: string;
+      created: NewWorktree;
+    }
+  | {
+      kind: "removeFailed";
+      from: RepositoryRoot;
+      name: string;
+      problem: Problem;
+    };
 
 /**
  * Branch, tag, checkout, edit-message, and stash writes, and the dialogs that
@@ -77,12 +108,24 @@ export type RefWrites = {
   droppingStash: Stash | null;
   closeDrop: () => void;
   checkout: (target: Start) => Promise<void>;
+  tryAsk: TryAsk | null;
+  closeTry: () => void;
+  /** The dialog's Create. On success it saves the worktree to the sidebar and asks whether to open it. */
+  createWorktree: (folder: string) => Promise<CreateWorktreeOutcome>;
+  removing: Worktree | null;
+  closeRemove: () => void;
+  /** The confirm's action. On success it drops the worktree from the sidebar. */
+  confirmRemove: () => Promise<void>;
+  worktreeNotice: WorktreeNotice | null;
+  dismissWorktreeNotice: () => void;
   actions: ActionSlice<
     never,
     | "checkout"
     | "newBranch"
     | "renameBranch"
     | "deleteBranch"
+    | "tryLocally"
+    | "removeWorktree"
     | "createTag"
     | "deleteTag"
   >;
@@ -96,20 +139,25 @@ export function useRefWrites({
   nav,
   staging: { selectedWorktree },
   focus,
+  saved,
 }: {
   snapshot: RepositorySnapshot | null;
   selection: Selection | null;
   changes: ChangesByWorktree;
-  writes: Pick<WritesView, "write">;
-  nav: Pick<Navigation, "jump" | "checkedOut">;
+  writes: Pick<WritesView, "write" | "createWorktree" | "removeWorktree">;
+  nav: Pick<Navigation, "jump" | "checkedOut" | "sidebar">;
   staging: Pick<Staging, "selectedWorktree">;
   focus: Pick<Focus, "refocusIfLost">;
+  saved: Pick<WorkspaceApi, "keepRepository">;
 }): RefWrites {
   const [editingMessage, setEditingMessage] = useState(false);
   const [branchAsk, setBranchAsk] = useState<BranchAsk | null>(null);
   const [detaching, setDetaching] = useState<Oid | null>(null);
   const [tagAsk, setTagAsk] = useState<TagAsk | null>(null);
   const [droppingStash, setDroppingStash] = useState<Stash | null>(null);
+  const [tryAsk, setTryAsk] = useState<TryAsk | null>(null);
+  const [removing, setRemoving] = useState<Worktree | null>(null);
+  const [notice, setNotice] = useState<WorktreeNotice | null>(null);
   const { ruledBranch, sidebarTag } = nav.jump;
   function stashAction(action: "apply" | "pop" | "drop", stash: Stash) {
     if (!snapshot) return;
@@ -153,6 +201,42 @@ export function useRefWrites({
     await writes.write(snapshot.root, checkoutWrite(target, snapshot.head));
     focus.refocusIfLost();
   }
+  const tryLocally = (branch: Branch) =>
+    setTryAsk({ source: startAt(branch), name: branch.name });
+  async function createWorktree(
+    folder: string,
+  ): Promise<CreateWorktreeOutcome> {
+    if (!snapshot || !tryAsk) return { kind: "busy" };
+    const outcome = await writes.createWorktree(tryAsk.source, folder);
+    if (outcome.kind === "created") {
+      saved.keepRepository(outcome.created);
+      setNotice({
+        kind: "created",
+        from: snapshot.root,
+        branch: tryAsk.name,
+        created: outcome.created,
+      });
+    }
+    return outcome;
+  }
+  async function confirmRemove() {
+    if (!snapshot || !removing) return;
+    const from = snapshot.root;
+    const outcome = await writes.removeWorktree(removing.root);
+    if (outcome.kind === "removed") {
+      nav.sidebar.onRemove(removing.root);
+      return;
+    }
+    setNotice({
+      kind: "removeFailed",
+      from,
+      name: removing.name,
+      problem: outcome.kind === "busy" ? busyProblem : outcome.problem,
+    });
+  }
+  const ruledRemoval = worktreeRemoval(
+    ruledBranch ? nav.checkedOut.get(ruledBranch.reference) : undefined,
+  );
   return {
     commitActions: {
       editableHead,
@@ -175,6 +259,8 @@ export function useRefWrites({
       onTagAsk: setTagAsk,
       onStashAction: stashAction,
       onCheckout: (branch) => void checkout(startAt(branch)),
+      onTryLocally: tryLocally,
+      onRemoveWorktree: setRemoving,
     },
     headStatus,
     editingMessage,
@@ -188,6 +274,14 @@ export function useRefWrites({
     droppingStash,
     closeDrop: () => setDroppingStash(null),
     checkout,
+    tryAsk,
+    closeTry: () => setTryAsk(null),
+    createWorktree,
+    removing,
+    closeRemove: () => setRemoving(null),
+    confirmRemove,
+    worktreeNotice: notice?.from === snapshot?.root ? notice : null,
+    dismissWorktreeNotice: () => setNotice(null),
     actions: defineSlice({
       context: {},
       commands: {
@@ -197,6 +291,13 @@ export function useRefWrites({
         newBranch: askFor("create"),
         renameBranch: askFor("rename"),
         deleteBranch: askFor("delete"),
+        tryLocally: () => {
+          if (ruledBranch) tryLocally(ruledBranch);
+        },
+        removeWorktree: () => {
+          if (ruledRemoval.kind === "linked")
+            setRemoving(ruledRemoval.worktree);
+        },
         createTag: () => {
           if (selection?.kind === "commit") askTag(selection.oid);
         },

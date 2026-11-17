@@ -63,6 +63,8 @@ const idleWrites: WritesView = {
   redo: async () => ({ kind: "busy" }),
   merge: async () => ({ kind: "busy" }),
   abortReplay: async () => ({ kind: "busy" }),
+  createWorktree: async () => ({ kind: "busy" }),
+  removeWorktree: async () => ({ kind: "busy" }),
   dismiss: () => {},
   rereadHistory: () => {},
 };

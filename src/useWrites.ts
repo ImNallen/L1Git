@@ -24,10 +24,12 @@ import type {
   Applied,
   EntryId,
   Head,
+  NewWorktree,
   Operation,
   Problem,
   ReplayOf,
   RepositoryRoot,
+  WorktreeSource,
 } from "./domain/repository";
 import { oneReadPerKey } from "./oneReadPerKey";
 
@@ -261,6 +263,37 @@ export function useWrites(
     );
   }
 
+  /** Try it locally: neither write has an undo entry or sets a notice. */
+  function createWorktree(
+    source: WorktreeSource,
+    folder: string,
+  ): Promise<CreateWorktreeOutcome> {
+    return task("write", "Create worktree", async (repository) => {
+      const outcome = await attempt(async () => ({
+        kind: "created" as const,
+        created: await repositories.createWorktree(repository, source, folder),
+      }));
+      await reread.refs(repository, repository);
+      await rereadAfter(repository);
+      return outcome;
+    });
+  }
+
+  function removeWorktree(
+    worktree: RepositoryRoot,
+  ): Promise<RemoveWorktreeOutcome> {
+    return task("write", "Remove worktree", async (repository) => {
+      const outcome = await attempt(async () => {
+        await repositories.removeWorktree(repository, worktree);
+        return { kind: "removed" as const };
+      });
+      // The core drops undo entries that only the removed worktree could run.
+      await reread.refs(repository, repository);
+      await rereadAfter(repository);
+      return outcome;
+    });
+  }
+
   const current = (root === null ? undefined : byRoot.get(root)) ?? idle;
   const writes = {
     ...current,
@@ -287,6 +320,8 @@ export function useWrites(
     ...writes,
     merge,
     abortReplay,
+    createWorktree,
+    removeWorktree,
     write: (worktree: RepositoryRoot, { operation, expect, label }: Write) =>
       run(
         { action: "write" },
@@ -312,6 +347,16 @@ export type WritesView = ReturnType<typeof useWrites>;
 
 export type ReplayAbortOutcome =
   | { kind: "aborted" }
+  | { kind: "failed"; problem: Problem }
+  | { kind: "busy" };
+
+export type CreateWorktreeOutcome =
+  | { kind: "created"; created: NewWorktree }
+  | { kind: "failed"; problem: Problem }
+  | { kind: "busy" };
+
+export type RemoveWorktreeOutcome =
+  | { kind: "removed" }
   | { kind: "failed"; problem: Problem }
   | { kind: "busy" };
 

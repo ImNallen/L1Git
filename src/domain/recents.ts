@@ -73,6 +73,26 @@ export function remember(
   };
 }
 
+/**
+ * Saves `entry` at the end of the list unless it is there already. It neither
+ * opens the repository nor moves `lastRoot`, so the app never switches on its
+ * own.
+ */
+export function keep(
+  catalog: Catalog,
+  entry: Pick<RecentRepository, "root" | "name">,
+  now = Date.now(),
+): Catalog {
+  if (catalog.entries.some(({ root }) => root === entry.root)) return catalog;
+  return {
+    ...catalog,
+    entries: [
+      ...catalog.entries,
+      { root: entry.root, name: entry.name, openedAt: now },
+    ].slice(-50),
+  };
+}
+
 export function forget(catalog: Catalog, root: RepositoryRoot): Catalog {
   return {
     ...catalog,

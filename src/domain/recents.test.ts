@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   emptyCatalog,
   forget,
+  keep,
   persistCatalog,
   remember,
   restoreCatalog,
@@ -40,6 +41,20 @@ describe("saved repositories", () => {
       { root: linked, name: "linked", openedAt: 2 },
     ]);
     expect(removed.lastRoot).toBeNull();
+  });
+
+  it("keeps a new worktree at the end without opening it or touching a known entry", () => {
+    const opened = remember(emptyCatalog, { root, name: "repo" }, 1);
+    const kept = keep(opened, { root: linked, name: "linked" }, 2);
+    expect(kept).toEqual({
+      version: 1,
+      entries: [
+        { root, name: "repo", openedAt: 1 },
+        { root: linked, name: "linked", openedAt: 2 },
+      ],
+      lastRoot: root,
+    });
+    expect(keep(kept, { root, name: "renamed" }, 3)).toBe(kept);
   });
 
   it("keeps every repository in place when one is reopened and appends new ones", () => {

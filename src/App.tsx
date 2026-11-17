@@ -30,7 +30,9 @@ import {
   CheckoutCommitHost,
   DropStashHost,
   EditMessageHost,
+  RemoveWorktreeHost,
   TagHost,
+  TryLocallyHost,
 } from "./shell/RefWriteHosts";
 import { Sidebar } from "./shell/Sidebar";
 import { openedRepository, useSyncControls } from "./shell/sync";
@@ -141,6 +143,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     nav,
     staging,
     focus,
+    saved: app,
   });
   const merge = useMergePanel({
     selectedBranch: nav.jump.ruledBranch,
@@ -230,6 +233,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
               onRetry={() => void loop.refreshRepository()}
               rule={history.rule}
               nav={nav}
+              worktree={{ refWrites, open: commands.openRepository }}
             />
             <WorkspacePanes
               searchSlot={layout.searchSlot}
@@ -305,6 +309,12 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
         focus={focus}
       />
       <CheckoutCommitHost refWrites={refWrites} />
+      <TryLocallyHost
+        refWrites={refWrites}
+        snapshot={view.snapshot}
+        focus={focus}
+      />
+      <RemoveWorktreeHost refWrites={refWrites} />
       <StashHost staging={staging} writes={writes} />
       <DropStashHost
         refWrites={refWrites}

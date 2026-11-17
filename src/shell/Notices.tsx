@@ -2,7 +2,12 @@ import { EyeOff, Info, TriangleAlert } from "lucide-react";
 import { MergeControls } from "../components/MergeControls";
 import { ReplayPanel } from "../components/ReplayPanel";
 import { WriteNoticeRow } from "../components/UndoControls";
-import type { Problem, RepositorySnapshot } from "../domain/repository";
+import { WorktreeNoticeRow } from "../components/WorktreeNotice";
+import type {
+  Problem,
+  RepositoryRoot,
+  RepositorySnapshot,
+} from "../domain/repository";
 import type { VisibilityRule } from "../domain/visibility";
 import { repositoryWarnings } from "../overview";
 import type { WritesView } from "../useWrites";
@@ -13,6 +18,7 @@ import { PushNotice } from "./SyncRegions";
 import type { MergePanel } from "./useMergePanel";
 import type { ResolutionDrafts } from "./useResolutionDrafts";
 import type { Navigation } from "./useNavigation";
+import type { RefWrites } from "./useRefWrites";
 
 /** The rows above the panes, in this order. */
 export function Notices({
@@ -26,6 +32,7 @@ export function Notices({
   onRetry,
   rule,
   nav,
+  worktree,
 }: {
   snapshot: RepositorySnapshot | null;
   writes: WritesView;
@@ -37,7 +44,12 @@ export function Notices({
   onRetry: () => void;
   rule: VisibilityRule;
   nav: Pick<Navigation, "jump" | "showInGraph">;
+  worktree: {
+    refWrites: Pick<RefWrites, "worktreeNotice" | "dismissWorktreeNotice">;
+    open: (root: RepositoryRoot) => void;
+  };
 }) {
+  const { worktreeNotice, dismissWorktreeNotice } = worktree.refWrites;
   const { repository } = sync.opened;
   const { jumped, jumpedUnloaded, hiddenJump } = nav.jump;
   return (
@@ -49,6 +61,16 @@ export function Notices({
         <ReplayPanel key={`replay:${merge.replay.root}`} {...merge.replay} />
       )}
       <WriteNoticeRow writes={writes} />
+      {worktreeNotice && (
+        <WorktreeNoticeRow
+          notice={worktreeNotice}
+          onOpen={(root) => {
+            dismissWorktreeNotice();
+            worktree.open(root);
+          }}
+          onDismiss={dismissWorktreeNotice}
+        />
+      )}
       <ResolutionDraftList drafts={drafts} />
       <PushNotice push={sync.push} />
       {persistenceError && (
