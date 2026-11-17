@@ -18,9 +18,7 @@ export function WorktreeNoticeRow({
     return (
       <div className="notice error-notice" role="alert">
         <TriangleAlert size={14} />
-        <span>
-          {notice.name} was not removed. {notice.problem.message}
-        </span>
+        <span>Could not remove the worktree. {notice.problem.message}</span>
         <button
           className="notice-dismiss"
           aria-label="Dismiss"

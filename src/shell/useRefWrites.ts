@@ -83,7 +83,6 @@ export type WorktreeNotice =
   | {
       kind: "removeFailed";
       from: RepositoryRoot;
-      name: string;
       problem: Problem;
     };
 
@@ -230,7 +229,6 @@ export function useRefWrites({
     setNotice({
       kind: "removeFailed",
       from,
-      name: removing.name,
       problem: outcome.kind === "busy" ? busyProblem : outcome.problem,
     });
   }

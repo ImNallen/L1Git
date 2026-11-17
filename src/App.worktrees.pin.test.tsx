@@ -287,7 +287,7 @@ it("a refused remove shows in a notice and the sidebar keeps the worktree", asyn
   await app.click(get("button", "Remove worktree"));
 
   expect(get("alert").textContent).toBe(
-    "pin-feature was not removed. pin-feature has uncommitted or untracked files. Commit, stash, or discard them there, then remove the worktree.",
+    "Could not remove the worktree. pin-feature has uncommitted or untracked files. Commit, stash, or discard them there, then remove the worktree.",
   );
   expect(sidebarRoots()).toEqual([PIN, PIN_FEATURE, OTHER]);
   await app.click(get("button", "Dismiss"));
