@@ -26,12 +26,21 @@ try {
     $env:APPDATA = Join-Path $scratch 'roaming'
     $env:LOCALAPPDATA = Join-Path $scratch 'local'
     $app = Start-Process -FilePath $executable -WorkingDirectory $install -PassThru
-    if ($app.WaitForExit(15000)) { throw "Installed app exited during startup with $($app.ExitCode)" }
+    $startup = [Diagnostics.Stopwatch]::StartNew()
+    $opened = $false
+    while (!$opened -and $startup.Elapsed.TotalSeconds -lt 60) {
+        if ($app.WaitForExit(250)) { throw "Installed app exited during startup with $($app.ExitCode)" }
+        $app.Refresh()
+        $opened = $app.MainWindowHandle -ne 0 -and $app.MainWindowTitle -eq 'L1 Git'
+    }
+    if (!$opened) { throw 'Installed app did not open the L1 Git window within 60 seconds' }
+    $openedAfter = [math]::Round($startup.Elapsed.TotalSeconds, 1)
+    if ($app.WaitForExit(15000)) { throw "Installed app exited after opening its window with $($app.ExitCode)" }
     $app.Refresh()
     if ($app.MainWindowHandle -eq 0 -or $app.MainWindowTitle -ne 'L1 Git') {
-        throw 'Installed app did not open the L1 Git window'
+        throw 'Installed app lost the L1 Git window after opening it'
     }
-    Write-Output "Installed Windows x64 $Version and observed the L1 Git window for 15 seconds."
+    Write-Output "Installed Windows x64 $Version, saw the L1 Git window after $openedAfter seconds, and kept it open for 15 more."
 } finally {
     if ($null -ne $app -and !$app.HasExited) { Stop-Process -Id $app.Id -Force }
     $env:APPDATA = $previousAppData
