@@ -224,6 +224,7 @@ export function useRefWrites({
     const outcome = await writes.removeWorktree(removing.root);
     if (outcome.kind === "removed") {
       nav.sidebar.onRemove(removing.root);
+      setNotice((shown) => (shown?.kind === "removeFailed" ? null : shown));
       return;
     }
     setNotice({

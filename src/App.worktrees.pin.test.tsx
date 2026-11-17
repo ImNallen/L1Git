@@ -271,20 +271,24 @@ it("Remove worktree asks first, removes the linked worktree, drops it from the s
   expect(query("menuitem", /^Remove worktree/)).toBeNull();
 });
 
-it("a refused remove shows in a notice and the sidebar keeps the worktree", async () => {
+it("a refused remove shows in a notice until it is dismissed or a retry removes the worktree", async () => {
   const app = await mountApp({
     world: featureOpen,
     saved: { entries: [PIN, PIN_FEATURE, OTHER], lastRoot: PIN },
-    bridge: (bridge) =>
-      bridge.fail("removeWorktree", {
-        kind: "conflict",
-        message:
-          "pin-feature has uncommitted or untracked files. Commit, stash, or discard them there, then remove the worktree.",
-      }),
   });
-  await app.contextMenu(refRow("refs/heads/feature")!);
-  await app.click(menuItem("Remove worktree…"));
-  await app.click(get("button", "Remove worktree"));
+  const refuse = () =>
+    app.bridge.fail("removeWorktree", {
+      kind: "conflict",
+      message:
+        "pin-feature has uncommitted or untracked files. Commit, stash, or discard them there, then remove the worktree.",
+    });
+  const remove = async () => {
+    await app.contextMenu(refRow("refs/heads/feature")!);
+    await app.click(menuItem("Remove worktree…"));
+    await app.click(get("button", "Remove worktree"));
+  };
+  const restore = refuse();
+  await remove();
 
   expect(get("alert").textContent).toBe(
     "Could not remove the worktree. pin-feature has uncommitted or untracked files. Commit, stash, or discard them there, then remove the worktree.",
@@ -292,6 +296,14 @@ it("a refused remove shows in a notice and the sidebar keeps the worktree", asyn
   expect(sidebarRoots()).toEqual([PIN, PIN_FEATURE, OTHER]);
   await app.click(get("button", "Dismiss"));
   expect(query("alert")).toBeNull();
+
+  await remove();
+  expect(query("alert")).not.toBeNull();
+  restore();
+  await remove();
+
+  expect(query("alert")).toBeNull();
+  expect(sidebarRoots()).toEqual([PIN, OTHER]);
 });
 
 it("the palette offers Try it locally and Remove worktree for the sidebar branch only when each can run", async () => {
