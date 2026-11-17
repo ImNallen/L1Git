@@ -389,6 +389,29 @@ impl LockedStore {
         })
     }
 
+    /// Drops the entries recorded in the worktree at `root` that only it
+    /// could run, undone or not, once Git no longer lists that worktree.
+    /// Strict order would otherwise let one of them block every older entry.
+    /// Branch and tag entries run from any worktree, so they stay.
+    pub(super) fn forget_worktree(&self, log: &Log, root: &str) -> Result<(), RepositoryError> {
+        let gone: BTreeSet<EntryId> = log
+            .entries
+            .iter()
+            .copied()
+            .filter(|id| {
+                matches!(self.record_of(*id), Ok((applied, change))
+                    if applied.root == root && !change.repository_wide())
+            })
+            .collect();
+        if gone.is_empty() {
+            return Ok(());
+        }
+        let kept = log.without(&gone);
+        self.save(&kept)?;
+        self.forget(&kept);
+        Ok(())
+    }
+
     fn forget(&self, log: &Log) {
         let Ok(names) = fs::read_dir(self.dir.join("entries")) else {
             return;
@@ -613,6 +636,23 @@ impl Log {
     fn without_pending(&self) -> Self {
         Self {
             pending: None,
+            ..self.clone()
+        }
+    }
+
+    /// Keeps the order, and keeps the cursor among the survivors: the redo
+    /// side holds the survivors that were on it.
+    fn without(&self, gone: &BTreeSet<EntryId>) -> Self {
+        let kept = |ids: &[EntryId]| -> Vec<EntryId> {
+            ids.iter()
+                .copied()
+                .filter(|id| !gone.contains(id))
+                .collect()
+        };
+        let split = self.entries.len() - self.undone;
+        Self {
+            entries: kept(&self.entries),
+            undone: kept(&self.entries[split..]).len(),
             ..self.clone()
         }
     }
@@ -988,6 +1028,20 @@ mod tests {
         assert_eq!(full.len(), MAX_ENTRIES);
         assert_eq!(full.first(), Some(&EntryId(2)));
         assert_eq!(full.last(), Some(&EntryId(200)));
+    }
+
+    #[test]
+    fn dropping_entries_keeps_the_order_and_the_cursor_among_the_rest() {
+        let gone = |ids: &[u64]| ids.iter().copied().map(EntryId).collect();
+        let history = log(5, 2);
+        let dropped = history.without(&gone(&[2, 4]));
+        assert_eq!(dropped.entries, [1, 3, 5].map(EntryId));
+        assert_eq!(dropped.next_undo(), Some(EntryId(3)));
+        assert_eq!(dropped.next_redo(), Some(EntryId(5)));
+        let undone = history.without(&gone(&[4, 5]));
+        assert_eq!(undone.next_undo(), Some(EntryId(3)));
+        assert_eq!(undone.next_redo(), None);
+        assert_eq!(log(3, 0).without(&gone(&[3])).next_undo(), Some(EntryId(2)));
     }
 
     #[test]

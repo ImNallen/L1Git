@@ -21,6 +21,7 @@ mod stash;
 mod store;
 mod tags;
 mod txn;
+mod worktrees;
 
 use crate::{
     BranchRef, Coordinator, ErrorKind, Head, Oid, RemoteRef, RepositoryError, StagedStamp,
@@ -53,6 +54,7 @@ pub(crate) use txn::{
     CommitTxn, HOOK_OFF, MergeIndexTxn, MergeTxn, Outside, Published, RebaseTxn, RefTxn, ReplayTxn,
     ScratchIndex, Txn,
 };
+pub use worktrees::{NewWorktree, WorktreeBranch, WorktreeReview, WorktreeSource};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(
@@ -874,22 +876,48 @@ impl Coordinator {
         write: LocalWrite,
         work: impl FnOnce(Repo, &LockedStore, Log, WriteDeadline) -> Result<T, RepositoryError>,
     ) -> Result<T, RepositoryError> {
+        self.with_store(path, write, |repo, store, deadline| {
+            if let Some(dir) = merge::journal(&repo, deadline)?
+                && write != LocalWrite::ReplayFinish
+            {
+                let session = LockedStore::lock(&dir, &repo.common_dir, deadline.reads())?;
+                let log = session.settled_log(&repo, deadline)?;
+                work(repo, &session, log, deadline)
+            } else {
+                let log = store.settled_log(&repo, deadline)?;
+                work(repo, store, log, deadline)
+            }
+        })
+    }
+
+    /// `locked` for a write that records no entry: it always hands over the
+    /// repository's own history, never a merge session's, so it can drop
+    /// entries from the history that holds them.
+    fn unrecorded<T>(
+        &self,
+        path: &str,
+        write: LocalWrite,
+        work: impl FnOnce(Repo, &LockedStore, Log, WriteDeadline) -> Result<T, RepositoryError>,
+    ) -> Result<T, RepositoryError> {
+        self.with_store(path, write, |repo, store, deadline| {
+            let log = store.settled_log(&repo, deadline)?;
+            work(repo, store, log, deadline)
+        })
+    }
+
+    /// The write mutex, then the cross-process undo-store lock.
+    fn with_store<T>(
+        &self,
+        path: &str,
+        write: LocalWrite,
+        work: impl FnOnce(Repo, &LockedStore, WriteDeadline) -> Result<T, RepositoryError>,
+    ) -> Result<T, RepositoryError> {
         let deadline = self.write_deadline(write);
         let repo = Repo::open(path, deadline.reads())?;
         let common_dir = repo.common_dir.clone();
         self.writing(&common_dir, || {
             let store = LockedStore::lock(self.undo_dir(), &common_dir, deadline.reads())?;
-            let deadline = deadline.renewed();
-            if let Some(dir) = merge::journal(&repo, deadline)?
-                && write != LocalWrite::ReplayFinish
-            {
-                let session = LockedStore::lock(&dir, &common_dir, deadline.reads())?;
-                let log = session.settled_log(&repo, deadline)?;
-                work(repo, &session, log, deadline)
-            } else {
-                let log = store.settled_log(&repo, deadline)?;
-                work(repo, &store, log, deadline)
-            }
+            work(repo, &store, deadline.renewed())
         })
     }
 

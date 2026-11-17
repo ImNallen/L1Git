@@ -40,6 +40,7 @@ describe("a selection's place in the history", () => {
     name: root.slice(1),
     head,
     current: false,
+    main: false,
   });
   const hiddenHead = commit("b");
   const worktrees = [

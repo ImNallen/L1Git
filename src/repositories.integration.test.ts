@@ -33,11 +33,13 @@ import {
   fileHistorySchema,
   filePatchSchema,
   lineStatsSchema,
+  newWorktreeSchema,
   refsSchema,
   repositoryErrorSchema,
   snapshotSchema,
   undoHistorySchema,
   worktreePatchSchema,
+  worktreeReviewSchema,
   worktreeStatusSchema,
 } from "./domain/repository";
 import type { WorktreeStatus } from "./domain/repository";
@@ -2023,6 +2025,86 @@ describe("real Rust writes, undo, and redo", () => {
         .status,
     ).toBe(400);
     expect(headName()).toBe("refs/heads/feat/history");
+  });
+
+  it("reviews, creates, and removes a worktree for a remote branch, keeping the branch it made", async () => {
+    const path = clone();
+    const history = git(path, "rev-parse", "origin/feat/history").trim();
+    const source = {
+      kind: "remote",
+      reference: "refs/remotes/origin/feat/history",
+      oid: history,
+    };
+    const review = answer("worktreeReview", worktreeReviewSchema)
+      .strict()
+      .parse(
+        await (await post({ op: "worktreeReview", path, source })).json(),
+      ).data;
+    const folder = join(
+      path,
+      "..",
+      ".worktrees",
+      `${path.split("/").at(-1)}-feat-history`,
+    );
+    expect(review).toEqual({
+      folder,
+      branch: {
+        kind: "new",
+        reference: "refs/heads/feat/history",
+        upstream: "refs/remotes/origin/feat/history",
+      },
+    });
+
+    const created = answer("createWorktree", newWorktreeSchema)
+      .strict()
+      .parse(
+        await (
+          await post({ op: "createWorktree", path, source, folder })
+        ).json(),
+      ).data;
+    expect(created).toEqual({
+      root: folder,
+      name: folder.split("/").at(-1),
+      trouble: null,
+    });
+    expect(git(folder, "symbolic-ref", "HEAD").trim()).toBe(
+      "refs/heads/feat/history",
+    );
+    const listed = snapshotEnvelope.parse(
+      await (await post({ op: "snapshot", path })).json(),
+    ).data.worktrees;
+    expect(
+      listed.map(({ root, current, main }) => ({ root, current, main })),
+    ).toEqual([
+      { root: path, current: true, main: true },
+      { root: folder, current: false, main: false },
+    ]);
+    expect(
+      await historyEnvelope.parse(
+        await (await post({ op: "undoHistory", path })).json(),
+      ).data.undo,
+    ).toBeNull();
+
+    const busy = join(fixture.root, `${path.split("/").at(-1)} busy`);
+    mkdirSync(busy);
+    writeFileSync(join(busy, "notes.txt"), "mine\n");
+    expect(
+      failure.parse(
+        await (
+          await post({ op: "createWorktree", path, source, folder: busy })
+        ).json(),
+      ).error.kind,
+    ).toBe("unsupportedPath");
+
+    expect(
+      await (
+        await post({ op: "removeWorktree", path, worktree: folder })
+      ).json(),
+    ).toEqual({ ok: true, op: "removeWorktree" });
+    expect(existsSync(folder)).toBe(false);
+    expect(git(path, "rev-parse", "refs/heads/feat/history").trim()).toBe(
+      history,
+    );
   });
 
   it("discards a tracked and an untracked file, undoes them byte for byte, and redoes them", async () => {

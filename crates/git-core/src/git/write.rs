@@ -54,6 +54,8 @@ pub(crate) enum LocalWrite {
     UndoRebase,
     RedoRebase,
     RefreshIndex,
+    CreateWorktree,
+    RemoveWorktree,
 }
 
 impl LocalWrite {
@@ -97,7 +99,9 @@ impl LocalWrite {
             | Self::RedoReplay
             | Self::Rebase
             | Self::UndoRebase
-            | Self::RedoRebase => 600,
+            | Self::RedoRebase
+            | Self::CreateWorktree
+            | Self::RemoveWorktree => 600,
         })
     }
 
@@ -142,6 +146,8 @@ impl LocalWrite {
             Self::UndoRebase => "Undoing the rebase",
             Self::RedoRebase => "Redoing the rebase",
             Self::RefreshIndex => "Refreshing the index",
+            Self::CreateWorktree => "Creating the worktree",
+            Self::RemoveWorktree => "Removing the worktree",
         }
     }
 
@@ -186,6 +192,8 @@ impl LocalWrite {
             | Self::RedoReplay
             | Self::RedoRebase => "l1git redo",
             Self::RefreshIndex => "l1git refresh",
+            Self::CreateWorktree => "l1git worktree add",
+            Self::RemoveWorktree => "l1git worktree remove",
         }
     }
 
@@ -228,6 +236,9 @@ impl LocalWrite {
             | Self::UndoStash
             | Self::RedoStash => {
                 "L1 Git rereads the worktree and the stash list to see what changed."
+            }
+            Self::CreateWorktree | Self::RemoveWorktree => {
+                "L1 Git rereads the worktrees to see what changed."
             }
         }
     }
@@ -480,6 +491,15 @@ impl<'a> Write<'a> {
             "--quiet",
             "--no-overwrite-ignore",
         ];
+        all.extend(args);
+        Self::user(txn.root(), all)
+            .uncapped()
+            .lazy_fetch_unprompted()
+    }
+
+    /// Never `--force`, so Git keeps its own refusals.
+    pub(crate) fn worktree(txn: &'a RefTxn<'_>, args: &[&'a str]) -> Self {
+        let mut all = vec!["-c", "core.quotePath=false", "worktree"];
         all.extend(args);
         Self::user(txn.root(), all)
             .uncapped()

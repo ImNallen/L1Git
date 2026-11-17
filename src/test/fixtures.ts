@@ -7,6 +7,7 @@ import type { PushAvailability } from "../domain/push";
 import {
   appliedSchema,
   conflictFileSchema,
+  headSchema,
   oidSchema,
   replayReviewSchema,
   snapshotSchema,
@@ -101,12 +102,19 @@ export function pinSnapshot(): RepositorySnapshot {
     ],
     submodules: [],
     worktrees: [
-      { root: PIN, name: "pin", head: attached("main", C4), current: true },
+      {
+        root: PIN,
+        name: "pin",
+        head: attached("main", C4),
+        current: true,
+        main: true,
+      },
       {
         root: PIN_FEATURE,
         name: "pin-feature",
         head: attached("feature", C5),
         current: false,
+        main: false,
       },
     ],
     remotes: [
@@ -147,6 +155,7 @@ export function otherSnapshot(): RepositorySnapshot {
         name: "other",
         head: attached("trunk", OTHER_TIP),
         current: true,
+        main: true,
       },
     ],
     remotes: [],
@@ -333,7 +342,7 @@ export function addEmptyRepository(
       tags: [],
       stashes: [],
       submodules: [],
-      worktrees: [{ root, name, head, current: true }],
+      worktrees: [{ root, name, head, current: true, main: true }],
       remotes: [],
       commits: [],
       squashes: [],
@@ -355,6 +364,81 @@ export function addEmptyRepository(
     }),
   );
   world.pushes.set(root, noUpstream());
+}
+
+/** A linked worktree of `from` on `branch`, as git worktree add leaves it. */
+export function addLinkedWorktree(
+  world: {
+    snapshots: Map<RepositoryRoot, RepositorySnapshot>;
+    statuses: Map<RepositoryRoot, WorktreeStatus>;
+    overviews: Map<RepositoryRoot, RepositoryOverview>;
+    pushes: Map<RepositoryRoot, PushAvailability>;
+  },
+  from: RepositoryRoot,
+  root: RepositoryRoot,
+  branch: string,
+) {
+  const opened = world.snapshots.get(from);
+  const overview = world.overviews.get(from);
+  if (!opened || !overview) throw new Error(`${from} is not in the world.`);
+  const name = root.split("/").at(-1) ?? root;
+  const oid =
+    opened.branches.find((listed) => listed.name === branch)?.oid ??
+    opened.branches.find((listed) => listed.name.endsWith(`/${branch}`))?.oid;
+  if (!oid) throw new Error(`${from} has no ${branch}.`);
+  const head = headSchema.parse(attached(branch, oid));
+  const worktrees = [
+    ...opened.worktrees,
+    { root, name, head, current: false, main: false },
+  ];
+  for (const [shown, snapshot] of world.snapshots)
+    if (snapshot.worktrees.some((worktree) => worktree.root === from))
+      world.snapshots.set(shown, { ...snapshot, worktrees });
+  world.snapshots.set(
+    root,
+    snapshotSchema.parse({
+      ...opened,
+      root,
+      name,
+      head,
+      worktrees: worktrees.map((worktree) => ({
+        ...worktree,
+        current: worktree.root === root,
+      })),
+    }),
+  );
+  world.statuses.set(
+    root,
+    worktreeStatusSchema.parse({ root, head, entries: [], stagedStamp: STAMP }),
+  );
+  world.overviews.set(root, { ...overview, root, name });
+  world.pushes.set(root, noUpstream());
+}
+
+/** What git worktree remove leaves: the linked worktree is gone everywhere. */
+export function removeLinkedWorktree(
+  world: {
+    snapshots: Map<RepositoryRoot, RepositorySnapshot>;
+    statuses: Map<RepositoryRoot, WorktreeStatus>;
+    overviews: Map<RepositoryRoot, RepositoryOverview>;
+    pushes: Map<RepositoryRoot, PushAvailability>;
+  },
+  root: RepositoryRoot,
+) {
+  for (const map of [
+    world.snapshots,
+    world.statuses,
+    world.overviews,
+    world.pushes,
+  ])
+    map.delete(root);
+  for (const [shown, snapshot] of world.snapshots)
+    world.snapshots.set(shown, {
+      ...snapshot,
+      worktrees: snapshot.worktrees.filter(
+        (worktree) => worktree.root !== root,
+      ),
+    });
 }
 
 export const PIN_COMMON_DIR = "/fixture/pin/.git" as RepositoryRoot;

@@ -15,7 +15,7 @@ use crate::{
     stderr, sync,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, path::Path};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(
@@ -360,16 +360,20 @@ impl Landing {
     }
 
     pub(super) fn refuse_checked_out(&self) -> Result<(), RepositoryError> {
-        match self.heads.first() {
-            Some(root) => Err(RepositoryError::new(
-                ErrorKind::Conflict,
-                format!(
-                    "{} is checked out in {root}, and Git checks out a branch in one worktree at a time. Switch that worktree to another branch first.",
-                    self.branch.name()
-                ),
-            )),
-            None => Ok(()),
-        }
+        let Some(root) = self.heads.first() else {
+            return Ok(());
+        };
+        let name = self.branch.name();
+        let message = if Path::new(root).exists() {
+            format!(
+                "{name} is checked out in {root}, and Git checks out a branch in one worktree at a time. Switch that worktree to another branch first."
+            )
+        } else {
+            format!(
+                "{name} is checked out in {root}, whose folder is missing, and Git checks out a branch in one worktree at a time. If you deleted that folder, run git worktree prune, then try again."
+            )
+        };
+        Err(RepositoryError::new(ErrorKind::Conflict, message))
     }
 }
 
@@ -654,7 +658,11 @@ fn switch(
     };
     if now == planned.goal {
         return Outcome::Reached {
-            trouble: after_trouble(planned, ran),
+            trouble: hook_trouble(
+                ran,
+                &format!("Git checked out {}", planned.to_name),
+                &format!("{} puts back {}.", planned.reverse, planned.from_name),
+            ),
             after: now,
         };
     }
@@ -733,17 +741,20 @@ fn raced(planned: &Switch) -> RepositoryError {
     )
 }
 
-fn after_trouble(planned: &Switch, ran: Result<Wrote, RepositoryError>) -> Option<RepositoryError> {
+/// What went wrong after Git did what `did` says, so the change stands and
+/// `then` says how to take it back.
+pub(super) fn hook_trouble(
+    ran: Result<Wrote, RepositoryError>,
+    did: &str,
+    then: &str,
+) -> Option<RepositoryError> {
     match ran {
         Ok(wrote) if wrote.code() == Some(0) => None,
         Ok(wrote) => Some(RepositoryError::new(
             ErrorKind::AfterHookFailed {
                 output: wrote.stderr().to_owned(),
             },
-            format!(
-                "Git checked out {}, but the post-checkout hook failed. {} puts back {}.",
-                planned.to_name, planned.reverse, planned.from_name
-            ),
+            format!("{did}, but the post-checkout hook failed. {then}"),
         )),
         Err(error) => {
             let stopped = if matches!(error.kind, ErrorKind::TimedOut) {
@@ -753,16 +764,13 @@ fn after_trouble(planned: &Switch, ran: Result<Wrote, RepositoryError>) -> Optio
             };
             Some(RepositoryError::new(
                 error.kind,
-                format!(
-                    "Git checked out {}, but it {stopped} {} puts back {}.",
-                    planned.to_name, planned.reverse, planned.from_name
-                ),
+                format!("{did}, but it {stopped} {then}"),
             ))
         }
     }
 }
 
-fn refusal(ran: Result<Wrote, RepositoryError>) -> RepositoryError {
+pub(super) fn refusal(ran: Result<Wrote, RepositoryError>) -> RepositoryError {
     let wrote = match ran {
         Ok(wrote) => wrote,
         Err(error) => return error,

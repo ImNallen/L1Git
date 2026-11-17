@@ -605,6 +605,10 @@ impl<'r> RefTxn<'r> {
     pub(super) fn move_tree<'a>(&'a self, from: &'a Oid, to: &'a Oid) -> Write<'a> {
         Write::move_tree(self, from, to)
     }
+
+    pub(super) fn worktree<'a>(&'a self, args: &[&'a str]) -> Write<'a> {
+        Write::worktree(self, args)
+    }
 }
 
 pub(crate) struct Published {

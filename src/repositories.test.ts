@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { singleCommit } from "./domain/comparison";
-import { oidSchema, problemFrom, rootSchema } from "./domain/repository";
+import {
+  oidSchema,
+  problemFrom,
+  refSchema,
+  rootSchema,
+} from "./domain/repository";
 import type { Head } from "./domain/repository";
 
 const invoke = vi.fn();
@@ -395,3 +400,50 @@ it.each([true, false])(
     await expect(api.operationProbe(root)).rejects.toThrow();
   },
 );
+
+it("sends Try it locally's review, create, and remove and validates their answers", async () => {
+  const { createWorktree, removeWorktree, worktreeReview } = await load(true);
+  const source = {
+    kind: "remote" as const,
+    reference: refSchema.parse("refs/remotes/origin/feat/x"),
+    oid,
+  };
+  const review = {
+    folder: "/work/.worktrees/l1-demo-feat-x",
+    branch: {
+      kind: "new",
+      reference: "refs/heads/feat/x",
+      upstream: source.reference,
+    },
+  };
+  invoke.mockResolvedValueOnce({ op: "worktreeReview", data: review });
+  expect(await worktreeReview(root, source)).toEqual(review);
+  const created = {
+    root: review.folder,
+    name: "l1-demo-feat-x",
+    trouble: {
+      kind: "afterHookFailed",
+      message:
+        "Git made the worktree l1-demo-feat-x, but the post-checkout hook failed.",
+      output: "npm ERR!",
+    },
+  };
+  invoke.mockResolvedValueOnce({ op: "createWorktree", data: created });
+  expect(await createWorktree(root, source, "~/elsewhere")).toEqual(created);
+  expect(invoke).toHaveBeenLastCalledWith("repository_run", {
+    request: {
+      op: "createWorktree",
+      path: root,
+      source,
+      folder: "~/elsewhere",
+    },
+  });
+  invoke.mockResolvedValueOnce({ op: "removeWorktree" });
+  await removeWorktree(root, rootSchema.parse(review.folder));
+  expect(invoke).toHaveBeenLastCalledWith("repository_run", {
+    request: { op: "removeWorktree", path: root, worktree: review.folder },
+  });
+  await expect(
+    createWorktree(root, { ...source, kind: "commit" } as never, "/x"),
+  ).rejects.toHaveProperty("issues");
+});
