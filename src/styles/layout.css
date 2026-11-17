@@ -69,6 +69,7 @@
   font-size: 12px;
   font-weight: 500;
   white-space: nowrap;
+  text-decoration: none;
 }
 .button.secondary {
   background: var(--control);

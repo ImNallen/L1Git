@@ -4,10 +4,11 @@ import type { GhProbe, HostRequest, HostStatus } from "./domain/host";
 import { send } from "./transport";
 
 type Op = HostRequest["op"];
+type Busy = Exclude<Op, "status" | "devicePoll">;
 type HostView = {
   status: HostStatus | null;
   probe: GhProbe | null;
-  busy: Exclude<Op, "status"> | null;
+  busy: Busy | null;
   problem: string | null;
 };
 type HostTransport = (request: HostRequest) => Promise<unknown>;
@@ -19,6 +20,8 @@ const transportProblem = (error: unknown) =>
       ? error
       : "L1 Git could not reach its GitHub connection. Try again.";
 
+const unreachableRetryMs = 5_000;
+
 export function createHostClient(transport: HostTransport) {
   let view: HostView = {
     status: null,
@@ -28,18 +31,29 @@ export function createHostClient(transport: HostTransport) {
   };
   const running = new Map<Op, Promise<boolean>>();
   const listeners = new Set<() => void>();
+  let poll: ReturnType<typeof setTimeout> | undefined;
   function update(next: Partial<HostView>) {
     view = { ...view, ...next };
     listeners.forEach((listener) => listener());
   }
+  function schedulePoll(minimumMs = 0) {
+    clearTimeout(poll);
+    const prompt = view.status?.deviceCode;
+    if (prompt)
+      poll = setTimeout(
+        () => void runOnce({ op: "devicePoll", session: prompt.session }),
+        Math.max(prompt.pollAfterMs, minimumMs),
+      );
+  }
   function accept(status: HostStatus) {
     if (view.status && status.revision < view.status.revision) return;
     view = { ...view, status };
+    schedulePoll();
   }
   function busy() {
     return (
       [...running.keys()].findLast(
-        (op): op is Exclude<Op, "status"> => op !== "status",
+        (op): op is Busy => op !== "status" && op !== "devicePoll",
       ) ?? null
     );
   }
@@ -63,6 +77,7 @@ export function createHostClient(transport: HostTransport) {
         const failure = hostErrorSchema.safeParse(error);
         if (!failure.success) {
           view = { ...view, problem: transportProblem(error) };
+          if (body.op === "devicePoll") schedulePoll(unreachableRetryMs);
           return false;
         }
         accept(failure.data.status);
@@ -80,6 +95,15 @@ export function createHostClient(transport: HostTransport) {
     return call;
   }
 
+  function cancelDevice(): Promise<boolean> {
+    const starting = running.get("deviceStart");
+    if (starting) return starting.then(cancelDevice);
+    const prompt = view.status?.deviceCode;
+    return prompt
+      ? runOnce({ op: "deviceCancel", session: prompt.session })
+      : Promise.resolve(true);
+  }
+
   return {
     read: () => view,
     subscribe(listener: () => void) {
@@ -93,7 +117,10 @@ export function createHostClient(transport: HostTransport) {
     connectGh: (login: string) => runOnce({ op: "connectGh", login }),
     verify: () => runOnce({ op: "verify" }),
     disconnect: () => runOnce({ op: "disconnect" }),
+    startDevice: () => runOnce({ op: "deviceStart" }),
+    cancelDevice,
     dismiss: () => update({ probe: null, problem: null }),
+    dispose: () => clearTimeout(poll),
   };
 }
 
@@ -104,6 +131,7 @@ export function useHost() {
   const view = useSyncExternalStore(client.subscribe, client.read, client.read);
   useEffect(() => {
     void client.refresh();
+    return client.dispose;
   }, [client]);
   return { ...view, ...client };
 }

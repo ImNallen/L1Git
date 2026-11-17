@@ -18,6 +18,17 @@ pub enum Request {
     Disconnect {},
     /// Reads the token and asks GitHub who it belongs to.
     Verify {},
+    /// Asks GitHub for a code to enter in the browser, replacing any running
+    /// browser sign-in.
+    DeviceStart {},
+    /// Asks GitHub at most once whether the code was entered, and not before
+    /// `pollAfterMs`.
+    DevicePoll {
+        session: String,
+    },
+    DeviceCancel {
+        session: String,
+    },
 }
 
 /// `{op, data?, status}`.
@@ -36,16 +47,36 @@ pub enum Answer {
     ConnectGh,
     Disconnect,
     Verify,
+    DeviceStart,
+    DevicePoll,
+    DeviceCancel,
 }
 
 /// Everything the webview knows about the host side. No field can hold a
-/// token.
+/// token or a device code.
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Status {
     /// Grows with every change. A client keeps the status with the highest
     /// revision it has seen.
     pub revision: u64,
     pub github: GitHubStatus,
+    /// Whether this build can sign in through a browser.
+    pub device_sign_in: bool,
+    /// Present while a browser sign-in waits for the user.
+    pub device_code: Option<DevicePrompt>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DevicePrompt {
+    pub session: String,
+    pub user_code: String,
+    pub verification_uri: String,
+    pub expires_in_ms: u64,
+    /// Rust asks GitHub no sooner, so an earlier `devicePoll` only answers
+    /// with the status.
+    pub poll_after_ms: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -74,6 +105,7 @@ pub struct ConnectionView {
 #[serde(rename_all = "camelCase")]
 pub enum Method {
     Gh,
+    Device,
 }
 
 /// What the token can read.
@@ -190,6 +222,12 @@ pub enum ErrorKind {
     Storage,
     /// The task running the request died before it answered.
     Interrupted,
+    /// This build has no OAuth client ID, so it cannot sign in through a
+    /// browser.
+    DeviceUnavailable,
+    DeviceExpired,
+    /// The user declined the sign-in on GitHub.
+    DeviceDenied,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -243,16 +281,26 @@ mod tests {
         let signed_out = Status {
             revision: 7,
             github: GitHubStatus::NotConnected { ended: None },
+            device_sign_in: true,
+            device_code: Some(DevicePrompt {
+                session: "1".to_owned(),
+                user_code: "WDJB-MJHT".to_owned(),
+                verification_uri: "https://github.com/login/device".to_owned(),
+                expires_in_ms: 899_000,
+                poll_after_ms: 5_000,
+            }),
         };
         let connected = Status {
             revision: 8,
             github: GitHubStatus::Connected(ConnectionView {
                 login: "octo".to_owned(),
                 api: "https://api.github.com/".to_owned(),
-                method: Method::Gh,
+                method: Method::Device,
                 access: Access::PublicOnly,
                 connected_at: 1,
             }),
+            device_sign_in: false,
+            device_code: None,
         };
         assert_eq!(
             json(Response {
@@ -266,7 +314,10 @@ mod tests {
             json!({
                 "op": "probeGh",
                 "data": {"kind": "ready", "login": "octo", "access": "private", "path": "/opt/homebrew/bin/gh"},
-                "status": {"revision": 7, "github": {"kind": "notConnected", "ended": null}},
+                "status": {"revision": 7, "github": {"kind": "notConnected", "ended": null}, "deviceSignIn": true, "deviceCode": {
+                    "session": "1", "userCode": "WDJB-MJHT", "verificationUri": "https://github.com/login/device",
+                    "expiresInMs": 899_000, "pollAfterMs": 5_000,
+                }},
             })
         );
         assert_eq!(
@@ -278,8 +329,8 @@ mod tests {
                 "op": "disconnect",
                 "status": {"revision": 8, "github": {
                     "kind": "connected", "login": "octo", "api": "https://api.github.com/",
-                    "method": "gh", "access": "publicOnly", "connectedAt": 1,
-                }},
+                    "method": "device", "access": "publicOnly", "connectedAt": 1,
+                }, "deviceSignIn": false, "deviceCode": null},
             })
         );
         let error = |kind: ErrorKind| {
@@ -294,10 +345,12 @@ mod tests {
                             reason: EndReason::TokenMissing,
                         }),
                     },
+                    device_sign_in: false,
+                    device_code: None,
                 },
             })
         };
-        let status = json!({"revision": 9, "github": {"kind": "notConnected", "ended": {"login": "octo", "reason": "tokenMissing"}}});
+        let status = json!({"revision": 9, "github": {"kind": "notConnected", "ended": {"login": "octo", "reason": "tokenMissing"}}, "deviceSignIn": false, "deviceCode": null});
         assert_eq!(
             error(ErrorKind::GhAccountChanged {
                 expected: "octo".to_owned(),
@@ -323,6 +376,10 @@ mod tests {
             error(ErrorKind::SignedOut),
             json!({"kind": "signedOut", "message": "Sentence.", "status": status})
         );
+        assert_eq!(
+            error(ErrorKind::DeviceExpired),
+            json!({"kind": "deviceExpired", "message": "Sentence.", "status": status})
+        );
     }
 
     #[test]
@@ -336,13 +393,19 @@ mod tests {
             parse(json!({"op": "connectGh", "login": "octo"})),
             Ok(Request::ConnectGh { login }) if login.as_str() == "octo"
         ));
+        assert!(matches!(
+            parse(json!({"op": "devicePoll", "session": "1"})),
+            Ok(Request::DevicePoll { session }) if session == "1"
+        ));
         for refused in [
             json!({"op": "status", "extra": 1}),
             json!({"op": "connectGh", "login": "-x"}),
             json!({"op": "connectGh"}),
             json!({"op": "connectGh", "login": "octo", "token": "gho_x"}),
             json!({"op": "verify", "extra": 1}),
-            json!({"op": "deviceStart"}),
+            json!({"op": "deviceStart", "clientId": "x"}),
+            json!({"op": "devicePoll"}),
+            json!({"op": "deviceCancel", "session": 1}),
         ] {
             assert!(parse(refused.clone()).is_err(), "{refused}");
         }

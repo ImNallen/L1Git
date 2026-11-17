@@ -395,6 +395,28 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.device-code {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: -13px 0 25px;
+  padding: 12px 12px 12px 16px;
+  background: var(--control-inset);
+  border: 1px solid var(--border-control);
+  border-radius: 6px;
+}
+.device-code output {
+  color: var(--text-heading);
+  font-family: var(--mono);
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  user-select: all;
+}
+.dialog-actions .dialog-aside {
+  margin-right: auto;
+}
 .branch-name-input {
   display: block;
   width: 100%;

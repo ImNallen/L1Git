@@ -106,6 +106,8 @@ export function createWorld(): World {
       status: {
         revision: 1,
         github: { kind: "notConnected", ended: null },
+        deviceSignIn: false,
+        deviceCode: null,
       },
       probe: {
         kind: "ready",
@@ -326,6 +328,7 @@ const hostHandlers: Record<
   probeGh: (_, host) => host.probe,
   connectGh: (request, host) => {
     host.status = {
+      ...host.status,
       revision: host.status.revision + 1,
       github: {
         kind: "connected",
@@ -340,6 +343,7 @@ const hostHandlers: Record<
   },
   disconnect: (_, host) => {
     host.status = {
+      ...host.status,
       revision: host.status.revision + 1,
       github: { kind: "notConnected", ended: null },
     };

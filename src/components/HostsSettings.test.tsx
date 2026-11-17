@@ -14,14 +14,24 @@ let client: ReturnType<typeof createHostClient>;
 let container: HTMLDivElement;
 let root: ReturnType<typeof createRoot>;
 
-const connected = (access: Access = "private"): HostStatus["github"] => ({
+const connected = (
+  access: Access = "private",
+  method: "gh" | "device" = "gh",
+): HostStatus["github"] => ({
   kind: "connected",
   login: "octo",
   api: "https://api.github.com/",
-  method: "gh",
+  method,
   access,
   connectedAt: 1_700_000_000,
 });
+const prompt = {
+  session: "s1",
+  userCode: "WDJB-MJHT",
+  verificationUri: "https://github.com/login/device",
+  expiresInMs: 899_000,
+  pollAfterMs: 5_000,
+};
 const row = () =>
   container.querySelector(".settings-row")?.textContent?.replace(/\s+/g, " ");
 
@@ -35,7 +45,13 @@ async function answer(request: HostRequest) {
       : request.op === "disconnect"
         ? ({ kind: "notConnected", ended: null } as const)
         : null;
-  if (github) status = { revision: status.revision + 1, github };
+  if (github) status = { ...status, revision: status.revision + 1, github };
+  if (request.op === "deviceStart" || request.op === "deviceCancel")
+    status = {
+      ...status,
+      revision: status.revision + 1,
+      deviceCode: request.op === "deviceStart" ? prompt : null,
+    };
   return {
     op: request.op,
     ...(request.op === "probeGh" ? { data: probe } : {}),
@@ -50,7 +66,7 @@ function View() {
 
 async function show(github?: HostStatus["github"]) {
   if (github) {
-    status = { revision: 1, github };
+    status = { ...status, revision: 1, github };
     await client.refresh();
   }
   await act(async () => root.render(<View />));
@@ -73,7 +89,12 @@ async function click(label: string) {
 
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  status = { revision: 0, github: { kind: "notConnected", ended: null } };
+  status = {
+    revision: 0,
+    github: { kind: "notConnected", ended: null },
+    deviceSignIn: false,
+    deviceCode: null,
+  };
   probe = {
     kind: "ready",
     login: "octo",
@@ -221,4 +242,82 @@ it("checks the connection, and disconnects only after confirming", async () => {
   );
   expect(ops()).toEqual(["status", "verify", "disconnect"]);
   expect(text()).toContain("Connect a host to see pull requests");
+});
+
+it.each<GhProbe>([
+  {
+    kind: "ready",
+    login: "octo",
+    access: "private",
+    path: "/opt/homebrew/bin/gh",
+  },
+  { kind: "missing" },
+])(
+  "offers no browser sign-in in a build without a client ID",
+  async (state) => {
+    probe = state;
+    await show({ kind: "notConnected", ended: null });
+    await click("Sign in to GitHub");
+    expect(dialog()?.textContent).not.toMatch(/browser/i);
+    expect(dialog()?.textContent).not.toContain("Open GitHub");
+  },
+);
+
+it("signs in through a browser when the GitHub CLI is missing", async () => {
+  const writeText = vi.fn(async () => {});
+  vi.stubGlobal("navigator", { clipboard: { writeText } });
+  status.deviceSignIn = true;
+  probe = { kind: "missing" };
+  await show({ kind: "notConnected", ended: null });
+  await click("Sign in to GitHub");
+  expect(button("Sign in with a browser").className).toBe("button primary");
+  expect(button("Check again").className).toBe("button secondary");
+
+  await click("Sign in with a browser");
+  expect(sent.at(-1)).toEqual({ op: "deviceStart" });
+  expect(dialog()?.querySelector("output")?.textContent).toBe("WDJB-MJHT");
+  const open = [...(dialog()?.querySelectorAll("a") ?? [])].find(
+    (link) => link.textContent === "Open GitHub",
+  );
+  expect(open?.getAttribute("href")).toBe("https://github.com/login/device");
+  expect(open?.target).toBe("_blank");
+  expect(dialog()?.textContent).toContain("The code expires in 15 minutes.");
+  await click("Copy code");
+  expect(writeText).toHaveBeenCalledWith("WDJB-MJHT");
+  expect(button("Copied")).toBeTruthy();
+
+  status = {
+    ...status,
+    revision: status.revision + 1,
+    github: connected("private", "device"),
+    deviceCode: null,
+  };
+  await act(async () => void (await client.refresh()));
+  expect(dialog()).toBeNull();
+  expect(row()).toContain("@octogithub.com");
+  expect(ops()).not.toContain("deviceCancel");
+});
+
+it("offers the browser as a second way when the GitHub CLI is ready, and cancels it on close", async () => {
+  status.deviceSignIn = true;
+  await show({ kind: "notConnected", ended: null });
+  await click("Sign in to GitHub");
+  expect(button("Sign in as @octo").className).toBe("button primary");
+  await click("Sign in with a browser instead");
+  expect(text()).not.toContain("Sign in as @octo");
+  await click("Cancel");
+  expect(dialog()).toBeNull();
+  expect(sent.slice(-2)).toEqual([
+    { op: "deviceStart" },
+    { op: "deviceCancel", session: "s1" },
+  ]);
+});
+
+it("does not mention the GitHub CLI when disconnecting a browser sign-in", async () => {
+  await show(connected("private", "device"));
+  await click("Disconnect");
+  expect(dialog()?.textContent).toContain(
+    "L1 Git will delete its sign-in for @octo from the system keychain.",
+  );
+  expect(dialog()?.textContent).not.toContain("GitHub CLI");
 });

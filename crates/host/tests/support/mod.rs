@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -133,7 +133,36 @@ impl Reply {
             body: String::new(),
         }
     }
+
+    fn json(body: String) -> Reply {
+        Reply {
+            status: 200,
+            headers: vec![("Content-Type", "application/json; charset=utf-8".to_owned())],
+            body,
+        }
+    }
+
+    pub fn device_code(verification_uri: &str, interval_secs: u64) -> Reply {
+        Reply::json(format!(
+            r#"{{"device_code":"{DEVICE_CODE}","user_code":"{USER_CODE}","verification_uri":"{verification_uri}","expires_in":899,"interval":{interval_secs}}}"#
+        ))
+    }
+
+    pub fn oauth_error(error: &str) -> Reply {
+        Reply::json(format!(
+            r#"{{"error":"{error}","error_description":"The fixture answers {error}.","error_uri":"https://docs.github.com/developers/apps/authorizing-oauth-apps"}}"#
+        ))
+    }
+
+    pub fn access_token(token: &str) -> Reply {
+        Reply::json(format!(
+            r#"{{"access_token":"{token}","token_type":"bearer","scope":"repo"}}"#
+        ))
+    }
 }
+
+pub const DEVICE_CODE: &str = "3584d83530557fdd1f46af8289938c8ef79f9dc5";
+pub const USER_CODE: &str = "WDJB-MJHT";
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Seen {
@@ -141,10 +170,19 @@ pub struct Seen {
     pub authorization: Option<String>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct Form {
+    pub path: String,
+    pub body: String,
+}
+
 #[derive(Default)]
 struct World {
     replies: HashMap<String, Reply>,
     seen: Vec<Seen>,
+    device_code: Option<Reply>,
+    polls: VecDeque<Reply>,
+    forms: Vec<Form>,
 }
 
 pub struct FakeGitHub {
@@ -186,6 +224,18 @@ impl FakeGitHub {
     pub fn seen(&self) -> Vec<Seen> {
         lock(&self.world).seen.clone()
     }
+
+    pub fn device_code(&self, reply: Reply) {
+        lock(&self.world).device_code = Some(reply);
+    }
+
+    pub fn polls_then_pending(&self, replies: impl IntoIterator<Item = Reply>) {
+        lock(&self.world).polls.extend(replies);
+    }
+
+    pub fn forms(&self) -> Vec<Form> {
+        lock(&self.world).forms.clone()
+    }
 }
 
 impl Drop for FakeGitHub {
@@ -201,7 +251,30 @@ fn lock(world: &Mutex<World>) -> MutexGuard<'_, World> {
     world.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-fn answer(request: tiny_http::Request, world: &Mutex<World>) {
+fn answer(mut request: tiny_http::Request, world: &Mutex<World>) {
+    let path = request.url().to_owned();
+    if path.starts_with("/login/") {
+        let mut body = String::new();
+        let _ = request.as_reader().read_to_string(&mut body);
+        let reply = {
+            let mut world = lock(world);
+            world.forms.push(Form {
+                path: path.clone(),
+                body,
+            });
+            match path.as_str() {
+                "/login/device/code" => world.device_code.clone(),
+                "/login/oauth/access_token" => Some(
+                    world
+                        .polls
+                        .pop_front()
+                        .unwrap_or_else(|| Reply::oauth_error("authorization_pending")),
+                ),
+                _ => None,
+            }
+        };
+        return respond(request, reply.unwrap_or_else(Reply::bad_credentials));
+    }
     let authorization = request
         .headers()
         .iter()
@@ -210,13 +283,17 @@ fn answer(request: tiny_http::Request, world: &Mutex<World>) {
     let reply = {
         let mut world = lock(world);
         world.seen.push(Seen {
-            path: request.url().to_owned(),
+            path,
             authorization: authorization.clone(),
         });
         authorization
             .and_then(|authorization| world.replies.get(&authorization).cloned())
             .unwrap_or_else(Reply::bad_credentials)
     };
+    respond(request, reply);
+}
+
+fn respond(request: tiny_http::Request, reply: Reply) {
     let mut response = tiny_http::Response::from_string(reply.body)
         .with_status_code(tiny_http::StatusCode(reply.status));
     for (name, value) in reply.headers {
