@@ -11,6 +11,7 @@ import type {
   UndoHistory,
   WorktreeStatus,
 } from "../domain/repository";
+import type { GhProbe, HostStatus } from "../domain/host";
 import { mergeSelectionSchema } from "../domain/merge";
 import { probeOf } from "../domain/inProgress";
 import type { MergeState } from "../domain/merge";
@@ -57,6 +58,7 @@ export type World = {
   pushes: Map<RepositoryRoot, PushAvailability>;
   /** What each typed path lists. An open repository lists itself. */
   directories: Map<string, DirectoryEntry[]>;
+  host: { status: HostStatus; probe: GhProbe };
 };
 
 export const FAKE_HOME = "/fixture/home";
@@ -100,6 +102,18 @@ export function createWorld(): World {
         ],
       ],
     ]),
+    host: {
+      status: {
+        revision: 1,
+        github: { kind: "notConnected", ended: null },
+      },
+      probe: {
+        kind: "ready",
+        login: "octo",
+        access: "private",
+        path: "/opt/homebrew/bin/gh",
+      },
+    },
   };
 }
 
@@ -303,6 +317,36 @@ const handlers: Record<string, Handler> = {
   redo: (request, world) => step(request, world, "redo"),
 };
 
+const hostHandlers: Record<
+  string,
+  (request: BridgeRequest, host: World["host"]) => GhProbe | undefined
+> = {
+  status: () => undefined,
+  verify: () => undefined,
+  probeGh: (_, host) => host.probe,
+  connectGh: (request, host) => {
+    host.status = {
+      revision: host.status.revision + 1,
+      github: {
+        kind: "connected",
+        login: String(request.login),
+        api: "https://api.github.com/",
+        method: "gh",
+        access: host.probe.kind === "ready" ? host.probe.access : "private",
+        connectedAt: 1_700_000_000,
+      },
+    };
+    return undefined;
+  },
+  disconnect: (_, host) => {
+    host.status = {
+      revision: host.status.revision + 1,
+      github: { kind: "notConnected", ended: null },
+    };
+    return undefined;
+  },
+};
+
 type Deferred = { promise: Promise<void>; resolve: () => void };
 function deferred(): Deferred {
   let resolve = () => {};
@@ -338,6 +382,7 @@ function line(request: BridgeRequest): string {
 
 export function createBridge(world: World = createWorld()) {
   const log: BridgeRequest[] = [];
+  const hostLog: BridgeRequest[] = [];
   const unexpected: string[] = [];
   const holds: Hold[] = [];
   const overrides = new Map<string, Handler>();
@@ -358,12 +403,44 @@ export function createBridge(world: World = createWorld()) {
     }
   }
 
+  function answerHost(request: BridgeRequest): unknown {
+    const handler = hostHandlers[request.op];
+    if (handler === undefined) {
+      unexpected.push(`host ${request.op}`);
+      throw new Error(`The fake bridge has no host answer for ${request.op}.`);
+    }
+    const data = handler(request, world.host);
+    return { ok: true, op: request.op, data, status: world.host.status };
+  }
+
+  async function reply(answer: () => unknown): Promise<Response> {
+    active += 1;
+    try {
+      await Promise.resolve();
+      const body = JSON.stringify(answer());
+      return {
+        ok: true,
+        status: 200,
+        json: async () => JSON.parse(body) as unknown,
+      } as Response;
+    } finally {
+      active -= 1;
+    }
+  }
+
   async function fetch(input: unknown, init?: RequestInit): Promise<Response> {
-    if (input !== "/api/run" || typeof init?.body !== "string") {
+    if (
+      (input !== "/api/run" && input !== "/api/host") ||
+      typeof init?.body !== "string"
+    ) {
       unexpected.push(String(input));
       throw new Error(`The fake bridge does not serve ${String(input)}.`);
     }
     const request = JSON.parse(init.body) as BridgeRequest;
+    if (input === "/api/host") {
+      hostLog.push(request);
+      return reply(() => answerHost(request));
+    }
     log.push(request);
     const hold = holds.find(
       (candidate) =>
@@ -376,24 +453,14 @@ export function createBridge(world: World = createWorld()) {
       hold.arrived.resolve();
       await hold.gate.promise;
     }
-    active += 1;
-    try {
-      await Promise.resolve();
-      const body = JSON.stringify(answer(request));
-      return {
-        ok: true,
-        status: 200,
-        json: async () => JSON.parse(body) as unknown,
-      } as Response;
-    } finally {
-      active -= 1;
-    }
+    return reply(() => answer(request));
   }
 
   return {
     world,
     fetch,
     log,
+    hostLog,
     unexpected,
     active: () => active,
     lines: (filter?: (request: BridgeRequest) => boolean) =>

@@ -1,9 +1,11 @@
 #![cfg_attr(all(not(debug_assertions), windows), windows_subsystem = "windows")]
 
 mod activity;
+mod host;
 mod updater;
 
 use l1_git_core::{Coordinator, ErrorKind, Limits, RepositoryError, Request, Response};
+use l1_git_host::{Endpoints, GhChoice, Host, HostConfig, VaultChoice};
 use std::sync::Arc;
 use tauri::Manager;
 use tauri::webview::PageLoadEvent;
@@ -40,6 +42,14 @@ fn main() {
         .setup(|app| {
             let undo_dir = app.path().app_data_dir()?.join("undo");
             app.manage(Arc::new(Coordinator::new(Limits::default(), undo_dir)));
+            app.manage(Arc::new(Host::new(HostConfig {
+                dir: app.path().app_config_dir()?,
+                vault: VaultChoice::System {
+                    service: app.config().identifier.clone(),
+                },
+                gh: GhChoice::Search,
+                github: Endpoints::github_com(),
+            })));
             let activity = Arc::new(activity::RepositoryActivity::default());
             let updater = Arc::new(updater::Updater::new(
                 app.handle().clone(),
@@ -57,6 +67,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             repository_run,
+            host::host_run,
             updater::updater_snapshot,
             updater::updater_check,
             updater::updater_select_track,

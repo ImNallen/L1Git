@@ -1,6 +1,8 @@
 use l1_git_core::{Coordinator, Limits, run};
+use l1_git_host::{Endpoints, GhChoice, Host, HostConfig, VaultChoice};
+use serde::{Serialize, de::DeserializeOwned};
 use serde_json::json;
-use std::{io::Read, path::PathBuf, sync::Arc, thread, time::Duration};
+use std::{env, io::Read, path::PathBuf, sync::Arc, thread, time::Duration};
 use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
 
 const BODY_LIMIT: u64 = 4 * 1024 * 1024;
@@ -25,16 +27,40 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Err(_) => coordinator,
     };
     let coordinator = Arc::new(coordinator);
+    let host = Arc::new(Host::new(host_config()?));
     let server = Server::http((std::net::Ipv4Addr::LOCALHOST, port))?;
     eprintln!("L1 Git development bridge on http://127.0.0.1:{port}");
     for request in server.incoming_requests() {
-        let (origins, coordinator) = (Arc::clone(&origins), Arc::clone(&coordinator));
-        thread::spawn(move || handle(request, &origins, &coordinator));
+        let (origins, coordinator, host) = (
+            Arc::clone(&origins),
+            Arc::clone(&coordinator),
+            Arc::clone(&host),
+        );
+        thread::spawn(move || handle(request, &origins, &coordinator, &host));
     }
     Ok(())
 }
 
-fn handle(mut request: Request, origins: &[String], coordinator: &Coordinator) {
+fn host_config() -> Result<HostConfig, String> {
+    Ok(HostConfig {
+        dir: env::var_os("L1GIT_HOST_DIR")
+            .map_or_else(|| env::temp_dir().join("l1git-host"), PathBuf::from),
+        vault: match env::var("L1GIT_HOST_VAULT").as_deref() {
+            Ok("memory") => VaultChoice::Memory,
+            Ok(other) => return Err(format!("L1GIT_HOST_VAULT must be memory, not {other}.")),
+            Err(_) => VaultChoice::System {
+                service: "dev.l1.git.dev-bridge".into(),
+            },
+        },
+        gh: env::var_os("L1GIT_GH").map_or(GhChoice::Search, |path| GhChoice::At(path.into())),
+        github: match env::var("L1GIT_GITHUB_API") {
+            Ok(api) => Endpoints::loopback(&api)?,
+            Err(_) => Endpoints::github_com(),
+        },
+    })
+}
+
+fn handle(mut request: Request, origins: &[String], coordinator: &Coordinator, host: &Host) {
     let origin = header(&request, "Origin");
     let content_type = header(&request, "Content-Type");
     if request.method() != &Method::Post
@@ -72,13 +98,19 @@ fn handle(mut request: Request, origins: &[String], coordinator: &Coordinator) {
         respond(request, 400, json!({ "error": error }));
         return;
     }
-    if request.url() != "/api/run" {
-        respond(request, 404, json!({"error": "Unknown route."}));
-        return;
+    match request.url() {
+        "/api/run" => serve(request, &bytes, |input| run(coordinator, input)),
+        "/api/host" => serve(request, &bytes, |input| l1_git_host::run(host, input)),
+        _ => respond(request, 404, json!({"error": "Unknown route."})),
     }
-    match serde_json::from_slice::<l1_git_core::Request>(&bytes)
-        .map(|input| run(coordinator, input))
-    {
+}
+
+fn serve<Q: DeserializeOwned, A: Serialize, E: Serialize>(
+    request: Request,
+    bytes: &[u8],
+    answer: impl FnOnce(Q) -> Result<A, E>,
+) {
+    match serde_json::from_slice::<Q>(bytes).map(answer) {
         Ok(Ok(response)) => {
             let mut body = json!(response);
             body["ok"] = json!(true);

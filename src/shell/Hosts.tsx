@@ -5,6 +5,7 @@ import { AddRepositoryPalette } from "../components/AddRepositoryPalette";
 import { CommandPalette } from "../components/CommandPalette";
 import { DiscardDialog, DiscardPartDialog } from "../components/DiscardDialog";
 import { GeneralSettings } from "../components/GeneralSettings";
+import { HostsSettings } from "../components/HostsSettings";
 import { SettingsDialog } from "../components/SettingsDialog";
 import { StashDialog } from "../components/StashDialog";
 import type { UpdateRestart } from "../components/UpdateRestart";
@@ -13,6 +14,7 @@ import type { RecentRepository } from "../domain/recents";
 import type { RepositorySnapshot } from "../domain/repository";
 import { mac } from "../repositories";
 import type { useFetchSettings } from "../fetchSettings";
+import type { Host } from "../host";
 import type { Updates } from "../updates";
 import type { WritesView } from "../useWrites";
 import type { ComposedActions } from "./actionSlices";
@@ -131,12 +133,14 @@ export function SettingsHost({
   fetching,
   updates,
   restart,
+  host,
 }: {
   settings: SettingsScreen;
   appearance: AppearanceState;
   fetching: ReturnType<typeof useFetchSettings>;
   updates: Updates;
   restart: UpdateRestart;
+  host: Host;
 }) {
   return (
     <>
@@ -182,6 +186,7 @@ export function SettingsHost({
                 />
               ),
               appearance: <AppearanceSettings appearance={appearance} />,
+              hosts: <HostsSettings host={host} />,
             }[settings.section]
           }
         </SettingsDialog>

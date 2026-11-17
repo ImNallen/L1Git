@@ -30,6 +30,8 @@ Select a branch to browse its history. Double-click a branch to check it out. Se
 
 L1 Git fetches saved repositories at startup and every 15 minutes by default. Change the interval in **Settings > Fetching**. Remote operations use your existing Git credentials and SSH agent, with interactive prompts disabled.
 
+To connect GitHub, open **Settings > Hosts** and click **Sign in to GitHub**. With your consent, L1 Git copies the [GitHub CLI](https://cli.github.com)'s sign-in into your system keychain and uses it only to read from GitHub. **Disconnect** deletes that copy and leaves the GitHub CLI signed in.
+
 Press **Cmd+P** on macOS or **Ctrl+P** elsewhere to open the command palette.
 
 ## Develop locally

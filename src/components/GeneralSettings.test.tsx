@@ -186,7 +186,7 @@ it("keeps navigation visible, reports no matches, and clears search", async () =
     container.querySelector(".settings-search-results [role='status']")
       ?.textContent,
   ).toBe("No settings found");
-  expect(container.querySelectorAll(".settings-nav-item")).toHaveLength(2);
+  expect(container.querySelectorAll(".settings-nav-item")).toHaveLength(3);
   await click("Clear settings search");
   expect(input.value).toBe("");
   expect(document.activeElement).toBe(input);

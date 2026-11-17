@@ -58,6 +58,13 @@ export const settingsDestinations = {
     keywords: "extension file vscode marketplace",
     targetId: "settings-add-theme",
   },
+  github: {
+    section: "hosts",
+    label: "GitHub",
+    description: "Sign in to read pull requests.",
+    keywords: "host account gh cli connect disconnect keychain",
+    targetId: "settings-github",
+  },
 } satisfies Record<string, SettingsDestination>;
 
 export function searchSettings(query: string) {

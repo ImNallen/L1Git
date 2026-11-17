@@ -99,7 +99,7 @@ it("does not dismiss after a drag from inside onto the backdrop", async () => {
   expect(closed).toHaveBeenCalledExactlyOnceWith(false);
 });
 
-it("lists General before Appearance and navigates to General", async () => {
+it("lists General, Appearance, then Hosts and navigates to General", async () => {
   const changed = vi.fn();
   await act(async () =>
     root.render(
@@ -118,6 +118,7 @@ it("lists General before Appearance and navigates to General", async () => {
   expect(navigation.map((button) => button.textContent)).toEqual([
     "General",
     "Appearance",
+    "Hosts",
   ]);
   expect(navigation[1]?.getAttribute("aria-current")).toBe("page");
   await act(async () => navigation[0]?.click());

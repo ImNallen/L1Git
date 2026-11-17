@@ -9,6 +9,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 l1-git-core = { path = "../crates/git-core" }
+l1-git-host = { path = "../crates/host" }
 serde_json.workspace = true
 serde.workspace = true
 tauri = { version = "2", features = [] }

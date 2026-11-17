@@ -18,6 +18,7 @@ export type Screen = "repository" | "settings";
 export const settingsSections = [
   { id: "general", label: "General", icon: "SettingsGeneral" },
   { id: "appearance", label: "Appearance", icon: "SettingsPalette" },
+  { id: "hosts", label: "Hosts", icon: "SettingsHosts" },
 ] as const;
 export type SettingsSection = (typeof settingsSections)[number]["id"];
 export type FileView = "unified" | "split" | "history" | "blame";

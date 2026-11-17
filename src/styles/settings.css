@@ -929,3 +929,46 @@
     height: auto;
   }
 }
+
+.no-host-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 32px 24px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-raised);
+  text-align: center;
+}
+.no-host-glyph {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  margin-bottom: 6px;
+  border: 1px solid var(--empty-icon-border);
+  border-radius: 50%;
+  background: var(--empty-icon-bg);
+  color: var(--empty-icon-text);
+}
+.no-host-card h3 {
+  margin: 0;
+  color: var(--text-heading);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 21px;
+}
+.no-host-card p {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+.hosts-ended {
+  margin: 0 0 10px;
+}
+.general-settings-group .settings-row .hosts-login {
+  font-family: var(--mono);
+  font-size: 12px;
+}

@@ -234,6 +234,7 @@ describe("command palette", () => {
       "Open Settings",
       "Open General settings",
       "Open Appearance settings",
+      "Open Hosts settings",
       "l1-demo",
       "sync",
       "main",
@@ -247,11 +248,13 @@ describe("command palette", () => {
     expect(titles(settings, "")).toEqual([
       "Toggle sidebar",
       "Open General settings",
+      "Open Hosts settings",
       "Back to repository",
     ]);
     expect(titles(settings, "general")).toEqual(["Open General settings"]);
     expect(titles({ ...settings, section: "general" }, "settings")).toEqual([
       "Open Appearance settings",
+      "Open Hosts settings",
     ]);
   });
 
@@ -300,6 +303,7 @@ describe("command palette", () => {
       "Open Settings",
       "Open General settings",
       "Open Appearance settings",
+      "Open Hosts settings",
       "l1-demo",
       "sync",
       "main",

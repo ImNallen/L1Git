@@ -3,6 +3,7 @@ import { useBranchVisibility } from "./branchVisibility";
 import { useUpdateRestart } from "./components/UpdateRestart";
 import { useExpandedRepositories } from "./expandedRepositories";
 import { useFetchSettings } from "./fetchSettings";
+import { useHost } from "./host";
 import { useLaunchSplash } from "./launchSplash";
 import { useHistoryColumns } from "./historyColumns";
 import { useOverview } from "./overview";
@@ -65,6 +66,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   const fetchSettings = useFetchSettings();
   const updates = useUpdates();
   const restart = useUpdateRestart(updates);
+  const host = useHost();
   const overview = useOverview(
     app.catalog.entries.map((entry) => entry.root),
     fetchSettings.intervalMinutes,
@@ -280,6 +282,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
         fetching={fetchSettings}
         updates={updates}
         restart={restart}
+        host={host}
       />
       <PaletteHost
         palette={palette}
