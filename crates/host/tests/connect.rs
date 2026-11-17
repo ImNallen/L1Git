@@ -56,6 +56,7 @@ fn host(dir: &Path, gh: GhChoice, github: &FakeGitHub) -> Host {
         vault: VaultChoice::Memory,
         gh,
         github: Endpoints::loopback(&github.url()).unwrap(),
+        client_id: None,
     })
 }
 

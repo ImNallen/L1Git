@@ -5,7 +5,7 @@ mod host;
 mod updater;
 
 use l1_git_core::{Coordinator, ErrorKind, Limits, RepositoryError, Request, Response};
-use l1_git_host::{Endpoints, GhChoice, Host, HostConfig, VaultChoice};
+use l1_git_host::{ClientId, Endpoints, GhChoice, Host, HostConfig, VaultChoice};
 use std::sync::Arc;
 use tauri::Manager;
 use tauri::webview::PageLoadEvent;
@@ -49,6 +49,7 @@ fn main() {
                 },
                 gh: GhChoice::Search,
                 github: Endpoints::github_com(),
+                client_id: ClientId::compiled(),
             })));
             let activity = Arc::new(activity::RepositoryActivity::default());
             let updater = Arc::new(updater::Updater::new(

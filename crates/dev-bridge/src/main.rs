@@ -1,5 +1,5 @@
 use l1_git_core::{Coordinator, Limits, run};
-use l1_git_host::{Endpoints, GhChoice, Host, HostConfig, VaultChoice};
+use l1_git_host::{ClientId, Endpoints, GhChoice, Host, HostConfig, VaultChoice};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::json;
 use std::{env, io::Read, path::PathBuf, sync::Arc, thread, time::Duration};
@@ -57,6 +57,7 @@ fn host_config() -> Result<HostConfig, String> {
             Ok(api) => Endpoints::loopback(&api)?,
             Err(_) => Endpoints::github_com(),
         },
+        client_id: ClientId::compiled(),
     })
 }
 

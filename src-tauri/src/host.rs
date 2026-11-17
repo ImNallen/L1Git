@@ -64,6 +64,7 @@ mod tests {
             vault: VaultChoice::Memory,
             gh,
             github: Endpoints::loopback("http://127.0.0.1:9/").unwrap(),
+            client_id: None,
         }))
     }
 

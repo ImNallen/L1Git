@@ -1,11 +1,12 @@
 use std::path::Path;
 use std::sync::{MutexGuard, PoisonError};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use std::{fs, io};
 
 use serde::{Deserialize, Serialize};
 
 use crate::Host;
+use crate::device::Session;
 use crate::github::{Account, ApiBase, Login, Verified};
 use crate::vault::keychain;
 use crate::wire::{
@@ -17,6 +18,7 @@ pub(crate) struct State {
     pub(crate) revision: u64,
     pub(crate) saved: Saved,
     pub(crate) ended: Option<Ended>,
+    pub(crate) device: Option<Session>,
 }
 
 #[derive(Clone, Default)]
@@ -131,6 +133,11 @@ impl Host {
         Status {
             revision: state.revision,
             github,
+            device_sign_in: self.client_id.is_some(),
+            device_code: state
+                .device
+                .as_ref()
+                .map(|session| session.prompt(Instant::now())),
         }
     }
 
@@ -251,6 +258,6 @@ pub(crate) fn unix_millis() -> u64 {
     since_epoch().as_millis() as u64
 }
 
-fn unix_nanos() -> u64 {
+pub(crate) fn unix_nanos() -> u64 {
     since_epoch().as_nanos() as u64
 }

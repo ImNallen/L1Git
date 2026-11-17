@@ -26,6 +26,7 @@ fn environment_tokens_never_reach_gh() {
         vault: VaultChoice::Memory,
         gh: GhChoice::At(gh.path()),
         github: Endpoints::loopback(&github.url()).unwrap(),
+        client_id: None,
     });
 
     let probe = run(&host, serde_json::from_str(r#"{"op":"probeGh"}"#).unwrap()).unwrap();

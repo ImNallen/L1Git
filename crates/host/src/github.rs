@@ -14,7 +14,7 @@ use crate::state::{CommitId, unix_secs};
 use crate::vault::{Token, keychain};
 use crate::wire::{Access, EndReason, ErrorKind, Failure, Method};
 
-const BODY_CAP: u64 = 1024 * 1024;
+pub(crate) const BODY_CAP: u64 = 1024 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
@@ -77,20 +77,24 @@ impl From<ApiBase> for String {
     }
 }
 
-/// Where a host sends tokens: GitHub itself, or a loopback fixture.
+/// Where a host sends tokens: GitHub itself, or a loopback fixture. `web`
+/// serves the browser sign-in.
 #[derive(Clone, Debug)]
 pub struct Endpoints {
     api: ApiBase,
+    web: Url,
 }
 
 impl Endpoints {
     pub fn github_com() -> Endpoints {
         Endpoints {
             api: ApiBase::parse("https://api.github.com/").expect("a fixed https address"),
+            web: Url::parse("https://github.com/").expect("a fixed https address"),
         }
     }
 
-    /// For fixture servers. Refuses every address that is not loopback.
+    /// For fixture servers, which serve the API and the browser sign-in from
+    /// one address. Refuses every address that is not loopback.
     pub fn loopback(api: &str) -> Result<Endpoints, String> {
         let api = ApiBase::parse(api)?;
         if !api.is_loopback() {
@@ -99,11 +103,18 @@ impl Endpoints {
                 api.as_str()
             ));
         }
-        Ok(Endpoints { api })
+        Ok(Endpoints {
+            web: api.0.clone(),
+            api,
+        })
     }
 
     pub(crate) fn api(&self) -> &ApiBase {
         &self.api
+    }
+
+    pub(crate) fn web(&self) -> &Url {
+        &self.web
     }
 }
 

@@ -3,6 +3,7 @@
 //! that mirrors it is always current. Tokens never leave this crate.
 
 mod connect;
+mod device;
 mod gh;
 mod github;
 mod process;
@@ -26,10 +27,11 @@ use state::{Saved, State, Unreadable, unix_millis};
 use vault::{MemoryVault, SystemVault, Vault};
 use wire::Failure;
 
+pub use device::ClientId;
 pub use github::{Endpoints, Login};
 pub use wire::{
-    Access, Answer, ConnectionView, EndReason, Ended, ErrorKind, GhProbe, GitHubStatus, HostError,
-    KeychainProblem, Method, Request, Response, Status,
+    Access, Answer, ConnectionView, DevicePrompt, EndReason, Ended, ErrorKind, GhProbe,
+    GitHubStatus, HostError, KeychainProblem, Method, Request, Response, Status,
 };
 
 pub struct HostConfig {
@@ -38,6 +40,9 @@ pub struct HostConfig {
     pub vault: VaultChoice,
     pub gh: GhChoice,
     pub github: Endpoints,
+    /// `ClientId::compiled()` in the app and the bridge. `None` hides browser
+    /// sign-in.
+    pub client_id: Option<ClientId>,
 }
 
 pub enum VaultChoice {
@@ -63,6 +68,7 @@ pub struct Host {
     gh: Gh,
     vault: Box<dyn Vault>,
     http: Http,
+    client_id: Option<ClientId>,
     writer: Mutex<()>,
     state: Mutex<State>,
 }
@@ -75,7 +81,10 @@ impl Host {
             VaultChoice::System { service } => Box::new(SystemVault::new(service)),
             VaultChoice::Memory => Box::<MemoryVault>::default(),
         };
-        Host::with_vault(config.dir, config.github, config.gh, vault)
+        Host {
+            client_id: config.client_id,
+            ..Host::with_vault(config.dir, config.github, config.gh, vault)
+        }
     }
 
     fn with_vault(dir: PathBuf, endpoints: Endpoints, gh: GhChoice, vault: Box<dyn Vault>) -> Host {
@@ -96,11 +105,13 @@ impl Host {
             endpoints,
             gh: Gh::new(gh),
             vault,
+            client_id: None,
             writer: Mutex::new(()),
             state: Mutex::new(State {
                 revision: unix_millis(),
                 saved,
                 ended,
+                device: None,
             }),
         }
     }
@@ -131,6 +142,11 @@ pub fn run(host: &Host, request: Request) -> Result<Response, HostError> {
         Request::ConnectGh { login } => host.connect_gh(login).map(|()| Answer::ConnectGh),
         Request::Disconnect {} => host.disconnect().map(|()| Answer::Disconnect),
         Request::Verify {} => host.verify().map(|()| Answer::Verify),
+        Request::DeviceStart {} => host.device_start().map(|()| Answer::DeviceStart),
+        Request::DevicePoll { session } => host.device_poll(&session).map(|()| Answer::DevicePoll),
+        Request::DeviceCancel { session } => {
+            host.device_cancel(&session).map(|()| Answer::DeviceCancel)
+        }
     };
     let status = host.status();
     match outcome {
