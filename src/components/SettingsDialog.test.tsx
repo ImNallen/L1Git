@@ -2,6 +2,8 @@
 import { act, StrictMode, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { settingsSections } from "../actions";
+import { settingsDestinations } from "../settingsSearch";
 import { SettingsDialog } from "./SettingsDialog";
 
 let container: HTMLDivElement;
@@ -147,4 +149,30 @@ it("leaves slash typing and nested dialog focus alone", async () => {
     expect(shortcut.defaultPrevented).toBe(false);
     expect(document.activeElement).toBe(button);
   });
+});
+
+it("labels every search result with its own section", async () => {
+  const search = container.querySelector<HTMLInputElement>(
+    'input[aria-label="Search settings"]',
+  );
+  if (!search) throw new Error("Missing settings search");
+  const setValue = Object.getOwnPropertyDescriptor(
+    HTMLInputElement.prototype,
+    "value",
+  )?.set;
+  for (const destination of Object.values(settingsDestinations)) {
+    await act(async () => {
+      setValue?.call(search, destination.label);
+      search.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const result = [
+      ...container.querySelectorAll(".settings-search-result"),
+    ].find((button) => button.firstChild?.textContent === destination.label);
+    const section = settingsSections.find(
+      (entry) => entry.id === destination.section,
+    );
+    expect(result?.querySelector("small")?.textContent).toBe(
+      `${section?.label} · ${destination.description}`,
+    );
+  }
 });

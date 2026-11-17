@@ -168,19 +168,22 @@ export function SettingsHost({
               : undefined
           }
         >
-          {settings.section === "appearance" ? (
-            <AppearanceSettings appearance={appearance} />
-          ) : (
-            <GeneralSettings
-              fetching={{
-                intervalMinutes: fetching.intervalMinutes,
-                onIntervalChange: fetching.setIntervalMinutes,
-                persistenceError: fetching.persistenceError,
-              }}
-              updates={updates}
-              restart={restart}
-            />
-          )}
+          {
+            {
+              general: (
+                <GeneralSettings
+                  fetching={{
+                    intervalMinutes: fetching.intervalMinutes,
+                    onIntervalChange: fetching.setIntervalMinutes,
+                    persistenceError: fetching.persistenceError,
+                  }}
+                  updates={updates}
+                  restart={restart}
+                />
+              ),
+              appearance: <AppearanceSettings appearance={appearance} />,
+            }[settings.section]
+          }
         </SettingsDialog>
       )}
       {restart.dialog}

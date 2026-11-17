@@ -15,7 +15,11 @@ import type { BranchVisibility, VisibilityRule } from "./domain/visibility";
 import { shortOid } from "./domain/shortOid";
 
 export type Screen = "repository" | "settings";
-export type SettingsSection = "general" | "appearance";
+export const settingsSections = [
+  { id: "general", label: "General", icon: "SettingsGeneral" },
+  { id: "appearance", label: "Appearance", icon: "SettingsPalette" },
+] as const;
+export type SettingsSection = (typeof settingsSections)[number]["id"];
 export type FileView = "unified" | "split" | "history" | "blame";
 
 export type ActionContext = {
@@ -170,8 +174,7 @@ export type ActionId =
   | "toggleSidebar"
   | "toggleInspector"
   | "openSettings"
-  | "appearanceSettings"
-  | "generalSettings"
+  | `${SettingsSection}Settings`
   | "leaveSettings";
 
 type Action = {
@@ -595,20 +598,14 @@ export const actions: readonly Action[] = [
     available: onRepository,
     run: (commands) => commands.openSettings(),
   },
-  {
-    id: "appearanceSettings",
-    title: "Open Appearance settings",
-    available: (context) =>
-      onRepository(context) || context.section !== "appearance",
-    run: (commands) => commands.openSettings("appearance"),
-  },
-  {
-    id: "generalSettings",
-    title: "Open General settings",
-    available: (context) =>
-      onRepository(context) || context.section !== "general",
-    run: (commands) => commands.openSettings("general"),
-  },
+  ...settingsSections.map(
+    ({ id, label }): Action => ({
+      id: `${id}Settings`,
+      title: `Open ${label} settings`,
+      available: (context) => onRepository(context) || context.section !== id,
+      run: (commands) => commands.openSettings(id),
+    }),
+  ),
   {
     id: "leaveSettings",
     title: "Back to repository",

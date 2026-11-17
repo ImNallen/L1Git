@@ -7,7 +7,8 @@ import {
   operationProbeSchema,
 } from "./domain/merge";
 import type { MergeAction } from "./domain/merge";
-import { invoke, isTauri } from "@tauri-apps/api/core";
+import { native, send } from "./transport";
+import type { Route } from "./transport";
 import { z } from "zod";
 import {
   directoryListingSchema,
@@ -60,7 +61,6 @@ import type {
   WorktreeSource,
 } from "./domain/repository";
 
-export const native = isTauri();
 export const mac = navigator.userAgent.includes("Mac");
 export const macNative = native && mac;
 
@@ -153,53 +153,17 @@ const responseSchema = z.discriminatedUnion("op", [
 export const requestOps = responseSchema.options.map(
   (option) => option.shape.op.value,
 );
-const envelopeSchema = z.discriminatedUnion("ok", [
-  z.object({ ok: z.literal(true) }),
-  z.object({ ok: z.literal(false), error: repositoryErrorSchema }),
-]);
-const rejectionSchema = z.object({ error: z.string() });
-
 type RepositoryResponse = z.infer<typeof responseSchema>;
 type Answer<R extends RepositoryRequest> = Extract<
   RepositoryResponse,
   { op: R["op"] }
 >;
 
-async function send(request: RepositoryRequest): Promise<unknown> {
-  const serialized = JSON.stringify(request);
-  if (new TextEncoder().encode(serialized).length > 4 * 1024 * 1024)
-    throw new Error("This request exceeds the 4 MiB transport limit.");
-  if (native) return invoke<unknown>("repository_run", { request });
-  let response: Response;
-  try {
-    response = await fetch("/api/run", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: serialized,
-    });
-  } catch {
-    throw new Error(
-      "The development bridge is unavailable. Start pnpm dev and try again.",
-    );
-  }
-  if (response.status === 400) {
-    const rejection = rejectionSchema.safeParse(
-      await response.json().catch(() => null),
-    );
-    if (rejection.success)
-      throw new Error(
-        `The development bridge rejected the request. ${rejection.data.error}`,
-      );
-  }
-  if (!response.ok)
-    throw new Error(
-      "The development bridge rejected the request. Check that pnpm dev is running on this port.",
-    );
-  const body: unknown = await response.json();
-  const envelope = envelopeSchema.parse(body);
-  if (!envelope.ok) throw envelope.error;
-  return body;
-}
+const repositoryRoute: Route = {
+  command: "repository_run",
+  path: "/api/run",
+  error: repositoryErrorSchema,
+};
 
 function answers<R extends RepositoryRequest>(
   request: R,
@@ -211,7 +175,7 @@ function answers<R extends RepositoryRequest>(
 async function run<R extends RepositoryRequest>(
   request: R,
 ): Promise<Answer<R>> {
-  const response = responseSchema.parse(await send(request));
+  const response = responseSchema.parse(await send(repositoryRoute, request));
   if (!answers(request, response))
     throw new Error(
       `L1 Git's core answered ${response.op} to a ${request.op} request.`,
