@@ -233,3 +233,43 @@ it("cancels only a running browser sign-in, and stops its timer", async () => {
   await vi.advanceTimersByTimeAsync(60_000);
   expect(transport).toHaveBeenCalledTimes(2);
 });
+
+it("cancels a browser sign-in that is still starting once its session exists", async () => {
+  vi.useFakeTimers();
+  const { host, transport, replies } = client();
+  void host.startDevice();
+  await Promise.resolve();
+  const cancel = host.cancelDevice();
+  replies[0]?.resolve({ op: "deviceStart", status: waiting(2, 5_000) });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(transport).toHaveBeenLastCalledWith({
+    op: "deviceCancel",
+    session: "s1",
+  });
+  replies[1]?.resolve({ op: "deviceCancel", status: notConnected(3) });
+  expect(await cancel).toBe(true);
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(transport).toHaveBeenCalledTimes(2);
+});
+
+it("keeps polling a browser sign-in after a poll fails to reach Rust", async () => {
+  vi.useFakeTimers();
+  const { host, transport, replies } = client();
+  void host.startDevice();
+  await Promise.resolve();
+  replies[0]?.resolve({ op: "deviceStart", status: waiting(2, 0) });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(transport).toHaveBeenCalledTimes(2);
+  replies[1]?.reject(new Error("The development bridge is unavailable."));
+  await vi.advanceTimersByTimeAsync(4_999);
+  expect(transport).toHaveBeenCalledTimes(2);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(transport).toHaveBeenLastCalledWith({
+    op: "devicePoll",
+    session: "s1",
+  });
+  replies[2]?.resolve({ op: "devicePoll", status: connected(3) });
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(transport).toHaveBeenCalledTimes(3);
+  expect(host.read().problem).toBeNull();
+});

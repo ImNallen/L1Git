@@ -20,6 +20,8 @@ const transportProblem = (error: unknown) =>
       ? error
       : "L1 Git could not reach its GitHub connection. Try again.";
 
+const unreachableRetryMs = 5_000;
+
 export function createHostClient(transport: HostTransport) {
   let view: HostView = {
     status: null,
@@ -34,16 +36,19 @@ export function createHostClient(transport: HostTransport) {
     view = { ...view, ...next };
     listeners.forEach((listener) => listener());
   }
-  function accept(status: HostStatus) {
-    if (view.status && status.revision < view.status.revision) return;
-    view = { ...view, status };
+  function schedulePoll(minimumMs = 0) {
     clearTimeout(poll);
-    const prompt = status.deviceCode;
+    const prompt = view.status?.deviceCode;
     if (prompt)
       poll = setTimeout(
         () => void runOnce({ op: "devicePoll", session: prompt.session }),
-        prompt.pollAfterMs,
+        Math.max(prompt.pollAfterMs, minimumMs),
       );
+  }
+  function accept(status: HostStatus) {
+    if (view.status && status.revision < view.status.revision) return;
+    view = { ...view, status };
+    schedulePoll();
   }
   function busy() {
     return (
@@ -72,6 +77,7 @@ export function createHostClient(transport: HostTransport) {
         const failure = hostErrorSchema.safeParse(error);
         if (!failure.success) {
           view = { ...view, problem: transportProblem(error) };
+          if (body.op === "devicePoll") schedulePoll(unreachableRetryMs);
           return false;
         }
         accept(failure.data.status);
@@ -89,6 +95,15 @@ export function createHostClient(transport: HostTransport) {
     return call;
   }
 
+  function cancelDevice(): Promise<boolean> {
+    const starting = running.get("deviceStart");
+    if (starting) return starting.then(cancelDevice);
+    const prompt = view.status?.deviceCode;
+    return prompt
+      ? runOnce({ op: "deviceCancel", session: prompt.session })
+      : Promise.resolve(true);
+  }
+
   return {
     read: () => view,
     subscribe(listener: () => void) {
@@ -103,12 +118,7 @@ export function createHostClient(transport: HostTransport) {
     verify: () => runOnce({ op: "verify" }),
     disconnect: () => runOnce({ op: "disconnect" }),
     startDevice: () => runOnce({ op: "deviceStart" }),
-    cancelDevice() {
-      const prompt = view.status?.deviceCode;
-      return prompt
-        ? runOnce({ op: "deviceCancel", session: prompt.session })
-        : Promise.resolve(true);
-    },
+    cancelDevice,
     dismiss: () => update({ probe: null, problem: null }),
     dispose: () => clearTimeout(poll),
   };
