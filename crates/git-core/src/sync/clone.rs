@@ -1,12 +1,7 @@
-use super::{
-    Coordinator,
-    create::{file_in_the_way, runnable, unusable_location},
-    lock_ignoring_poison,
-    remote::validate_endpoint,
-};
+use super::{Coordinator, create::runnable, lock_ignoring_poison, remote::validate_endpoint};
 use crate::{
     ErrorKind, NewRepository, RepositoryError,
-    directories::resolved_target,
+    directories::{Vacancy, resolved_target, vacant},
     git::{self, Captured, Mutation, Stoppable},
     stderr,
 };
@@ -68,39 +63,14 @@ impl Drop for RunningClone<'_> {
     }
 }
 
-/// What a clone may replace at its target, so that stopping it removes only
-/// what it created.
-enum Before {
-    Missing,
-    EmptyFolder,
-}
-
-fn before_clone(target: &Path) -> Result<Before, RepositoryError> {
-    let refused = |message: &str| RepositoryError::new(ErrorKind::UnsupportedPath, message);
-    match target.metadata() {
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Before::Missing),
-        Err(_) => Err(unusable_location()),
-        Ok(found) if !found.is_dir() => Err(file_in_the_way()),
-        Ok(_) => {
-            let unreadable = |_| refused("L1 Git cannot read this folder. Check its permissions.");
-            if fs::read_dir(target).map_err(unreadable)?.next().is_some() {
-                return Err(refused(
-                    "This folder already exists and is not empty. Choose another location.",
-                ));
-            }
-            Ok(Before::EmptyFolder)
-        }
-    }
-}
-
 fn cancelled() -> RepositoryError {
     RepositoryError::new(ErrorKind::GitFailed, "The clone was cancelled.")
 }
 
-fn remove_partial(target: &Path, before: &Before) -> io::Result<()> {
+fn remove_partial(target: &Path, before: &Vacancy) -> io::Result<()> {
     let removed = match before {
-        Before::Missing => fs::remove_dir_all(target),
-        Before::EmptyFolder => fs::read_dir(target).and_then(|entries| {
+        Vacancy::Missing => fs::remove_dir_all(target),
+        Vacancy::EmptyFolder => fs::read_dir(target).and_then(|entries| {
             entries.into_iter().try_for_each(|entry| {
                 let entry = entry?;
                 if entry.file_type()?.is_dir() {
@@ -131,7 +101,7 @@ impl Coordinator {
         let Some(_slot) = self.slots.acquire_unless(&running.stop) else {
             return Err(cancelled());
         };
-        let before = before_clone(target)?;
+        let before = vacant(target)?;
         let (nearest, path) = runnable(target)?;
         let deadline = self.limits.clone_deadline;
         let stopped = |kind: ErrorKind, reason: String| {

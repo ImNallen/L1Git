@@ -1,7 +1,7 @@
 use super::Coordinator;
 use crate::{
     ErrorKind, RepositoryError,
-    directories::{has_git, nearest_directory},
+    directories::{file_in_the_way, has_git, nearest_directory, unusable_location},
     git::{self, Finished, Mutation},
     stderr,
 };
@@ -58,18 +58,4 @@ pub(super) fn runnable(target: &Path) -> Result<(&Path, &str), RepositoryError> 
         nearest_directory(target).ok_or_else(unusable_location)?,
         target.to_str().ok_or_else(unusable_location)?,
     ))
-}
-
-pub(super) fn unusable_location() -> RepositoryError {
-    RepositoryError::new(
-        ErrorKind::UnsupportedPath,
-        "L1 Git cannot use this location. Choose another location.",
-    )
-}
-
-pub(super) fn file_in_the_way() -> RepositoryError {
-    RepositoryError::new(
-        ErrorKind::UnsupportedPath,
-        "A file already exists at this location. Choose another location.",
-    )
 }

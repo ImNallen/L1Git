@@ -2,10 +2,11 @@ use crate::{
     AddRemote, AddRemoteReport, Advance, Applied, Blame, BranchMerged, BranchTip, CloneUrl,
     CommitDetail, Comparison, ConflictFile, ConflictSummary, Coordinator, EntryId, Expect,
     FastForwardReport, FetchMode, FilePatch, FileRevision, Head, LineStats, MergeAction,
-    MergeReport, MergeReview, MergeSelection, MergeState, NewRepository, Operation, OperationProbe,
-    PublishChoice, PublishOptions, PushAvailability, PushIntent, PushReport, ReplayOf,
-    ReplayReview, RepositoryError, RepositoryOverview, RepositoryRefs, RepositorySnapshot, Side,
-    UndoHistory, WholeFileConflict, WorktreePatch, WorktreeStatus,
+    MergeReport, MergeReview, MergeSelection, MergeState, NewRepository, NewWorktree, Operation,
+    OperationProbe, PublishChoice, PublishOptions, PushAvailability, PushIntent, PushReport,
+    ReplayOf, ReplayReview, RepositoryError, RepositoryOverview, RepositoryRefs,
+    RepositorySnapshot, Side, UndoHistory, WholeFileConflict, WorktreePatch, WorktreeReview,
+    WorktreeSource, WorktreeStatus,
     directories::{DirectoryListing, expand_home, home_dir, list_directories},
     file_history::{blame_within, file_history_within},
     git::LocalRead,
@@ -150,6 +151,21 @@ pub enum Request {
     CancelClone {
         path: String,
     },
+    WorktreeReview {
+        path: String,
+        source: WorktreeSource,
+    },
+    CreateWorktree {
+        path: String,
+        source: WorktreeSource,
+        /// As typed. `~` expands as for CreateRepository.
+        folder: String,
+    },
+    RemoveWorktree {
+        path: String,
+        /// A root from `snapshot.worktrees`.
+        worktree: String,
+    },
 }
 
 #[derive(Debug, Serialize)]
@@ -189,6 +205,9 @@ pub enum Response {
     CreateRepository(NewRepository),
     CloneRepository(NewRepository),
     CancelClone,
+    WorktreeReview(WorktreeReview),
+    CreateWorktree(NewWorktree),
+    RemoveWorktree,
 }
 
 pub fn run(coordinator: &Coordinator, request: Request) -> Result<Response, RepositoryError> {
@@ -300,6 +319,22 @@ pub fn run(coordinator: &Coordinator, request: Request) -> Result<Response, Repo
         Request::CancelClone { path } => {
             coordinator.cancel_clone(&typed(&path)?);
             Response::CancelClone
+        }
+        Request::WorktreeReview { path, source } => {
+            Response::WorktreeReview(coordinator.review_worktree(&path, &source)?)
+        }
+        Request::CreateWorktree {
+            path,
+            source,
+            folder,
+        } => Response::CreateWorktree(coordinator.create_worktree(
+            &path,
+            &source,
+            &typed(&folder)?,
+        )?),
+        Request::RemoveWorktree { path, worktree } => {
+            coordinator.remove_worktree(&path, &worktree)?;
+            Response::RemoveWorktree
         }
     })
 }

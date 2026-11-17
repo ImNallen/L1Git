@@ -239,6 +239,8 @@ pub(crate) struct WorktreeRecord {
     pub(crate) head: Option<Head>,
     /// Git lists the main worktree first.
     pub(crate) main: bool,
+    /// The lock reason, empty for a lock with none.
+    pub(crate) locked: Option<String>,
     pub(crate) prunable: bool,
 }
 
@@ -268,7 +270,7 @@ pub(crate) fn worktree_records(
         .enumerate()
         .map(|(index, record)| {
             let (mut listed, mut oid, mut reference) = (None, None, None);
-            let (mut bare, mut prunable) = (false, false);
+            let (mut bare, mut locked, mut prunable) = (false, None, false);
             for field in record {
                 if let Some(value) = field.strip_prefix(b"worktree ") {
                     listed = Some(git::text(value));
@@ -278,6 +280,10 @@ pub(crate) fn worktree_records(
                     reference = Some(git::text(value));
                 } else if *field == b"bare" {
                     bare = true;
+                } else if *field == b"locked" {
+                    locked = Some(String::new());
+                } else if let Some(reason) = field.strip_prefix(b"locked ") {
+                    locked = Some(git::text(reason));
                 } else if field.starts_with(b"prunable") {
                     prunable = true;
                 }
@@ -297,6 +303,7 @@ pub(crate) fn worktree_records(
                 listed,
                 head,
                 main: index == 0,
+                locked,
                 prunable,
             })
         })

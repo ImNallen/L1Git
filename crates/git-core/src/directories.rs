@@ -1,7 +1,7 @@
 use crate::{ErrorKind, RepositoryError};
 use serde::Serialize;
 use std::{
-    fs,
+    fs, io,
     path::{Component, Path, PathBuf},
 };
 
@@ -189,4 +189,43 @@ pub(crate) fn resolved_target(path: &Path) -> PathBuf {
     nearest
         .canonicalize()
         .map_or_else(|_| path.to_owned(), |nearest| nearest.join(rest))
+}
+
+/// What a new repository or worktree may take over at its folder: nothing,
+/// or an empty folder.
+pub(crate) enum Vacancy {
+    Missing,
+    EmptyFolder,
+}
+
+pub(crate) fn vacant(target: &Path) -> Result<Vacancy, RepositoryError> {
+    let refused = |message: &str| RepositoryError::new(ErrorKind::UnsupportedPath, message);
+    match target.metadata() {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Vacancy::Missing),
+        Err(_) => Err(unusable_location()),
+        Ok(found) if !found.is_dir() => Err(file_in_the_way()),
+        Ok(_) => {
+            let unreadable = |_| refused("L1 Git cannot read this folder. Check its permissions.");
+            if fs::read_dir(target).map_err(unreadable)?.next().is_some() {
+                return Err(refused(
+                    "This folder already exists and is not empty. Choose another location.",
+                ));
+            }
+            Ok(Vacancy::EmptyFolder)
+        }
+    }
+}
+
+pub(crate) fn unusable_location() -> RepositoryError {
+    RepositoryError::new(
+        ErrorKind::UnsupportedPath,
+        "L1 Git cannot use this location. Choose another location.",
+    )
+}
+
+pub(crate) fn file_in_the_way() -> RepositoryError {
+    RepositoryError::new(
+        ErrorKind::UnsupportedPath,
+        "A file already exists at this location. Choose another location.",
+    )
 }
