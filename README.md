@@ -10,6 +10,7 @@ A desktop Git client for macOS, Linux, and Windows. Browse your repositories, re
 - Review unified or split diffs. Stage, unstage, or discard files, hunks, and individual lines.
 - Commit, amend, and edit your last commit's message.
 - Manage branches, tags, and stashes. Browse multiple repositories and linked worktrees.
+- Try any branch locally in its own linked worktree, so you can run and test it without stashing or leaving the branch you are on. Remove the worktree from the same branch menu when you are done.
 - Fetch, fast-forward branches, and push or publish the current branch.
 - Pull the current branch from its upstream. When the branch has diverged, Pull (Fast-forward if possible) opens the merge review, Pull (Fast-forward only) leaves the branch as it is, and Pull (Rebase) rebases your local commits onto the upstream.
 - Merge a selected local or remote branch into the current working copy after reviewing both refs and commit IDs. Fast-forward when possible, or resolve text conflicts and finish or abort a merge commit.
@@ -17,7 +18,7 @@ A desktop Git client for macOS, Linux, and Windows. Browse your repositories, re
 - Undo and redo local edits made through the app, including commits and discarded changes.
 - Choose light or dark themes, create your own, or import themes from VS Code and Open VSX.
 
-L1 Git does not force-push, and it does not resolve rebase conflicts. A Pull (Rebase) that hits a conflict is aborted and changes nothing. Fetch, fast-forward, push, remote setup, and merge Start, Finish, and Abort have no Undo entry. The fetch and fast-forward that a pull runs have no Undo entry either. Pull (Rebase) has Undo and Redo. Merge resolution edits have Undo and Redo until you finish or abort.
+L1 Git does not force-push, and it does not resolve rebase conflicts. A Pull (Rebase) that hits a conflict is aborted and changes nothing. Fetch, fast-forward, push, remote setup, and merge Start, Finish, and Abort have no Undo entry. Creating and removing a worktree have no Undo entry either, and removing one drops the Undo entries made in it. The fetch and fast-forward that a pull runs have no Undo entry either. Pull (Rebase) has Undo and Redo. Merge resolution edits have Undo and Redo until you finish or abort.
 
 ## Get started
 

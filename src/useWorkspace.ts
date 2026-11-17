@@ -23,11 +23,12 @@ import { browserStorage } from "./persisted";
 import {
   emptyCatalog,
   forget,
+  keep,
   persistCatalog,
   remember,
   restoreCatalog,
 } from "./domain/recents";
-import type { Catalog } from "./domain/recents";
+import type { Catalog, RecentRepository } from "./domain/recents";
 import { shownText } from "./domain/lineSelection";
 import { problemFrom } from "./domain/repository";
 import {
@@ -315,6 +316,9 @@ export function useWorkspace() {
   const rereadOpenRepository = useCallback(async (path: RepositoryRoot) => {
     if (latest.current.activeRoot === path) await latest.current.refresh();
   }, []);
+
+  const keepRepository = (entry: Pick<RecentRepository, "root" | "name">) =>
+    save(keep(catalogRef.current, entry));
 
   const removeRepository = (removed: RepositoryRoot) => {
     save(forget(catalogRef.current, removed));
@@ -622,6 +626,7 @@ export function useWorkspace() {
     selectRange,
     selectRepository,
     addRepository,
+    keepRepository,
     removeRepository,
     refresh,
     rereadOpenRepository,

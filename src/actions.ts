@@ -42,6 +42,8 @@ export type ActionContext = {
     outOfView: boolean;
     local: boolean;
     checkedOut: boolean;
+    /** The linked worktree that holds this branch, when Remove worktree can take it away. */
+    removableWorktree: string | null;
   } | null;
   sidebarTag: { name: string } | null;
   rule: VisibilityRule["kind"];
@@ -95,6 +97,8 @@ export type Commands = {
   newBranch: () => void;
   renameBranch: () => void;
   deleteBranch: () => void;
+  tryLocally: () => void;
+  removeWorktree: () => void;
   createTag: () => void;
   deleteTag: () => void;
   openRepository: (root: RepositoryRoot) => void;
@@ -156,6 +160,8 @@ export type ActionId =
   | "newBranch"
   | "renameBranch"
   | "deleteBranch"
+  | "tryLocally"
+  | "removeWorktree"
   | "createTag"
   | "deleteTag"
   | "cherryPick"
@@ -520,6 +526,23 @@ export const actions: readonly Action[] = [
       context.sidebarBranch?.local === true &&
       !context.sidebarBranch.checkedOut,
     run: (commands) => commands.deleteBranch(),
+  },
+  {
+    id: "tryLocally",
+    title: (context) => `Try ${branchName(context)} locally…`,
+    available: (context) =>
+      writable(context) &&
+      context.sidebarBranch !== null &&
+      !(context.sidebarBranch.local && context.sidebarBranch.checkedOut),
+    run: (commands) => commands.tryLocally(),
+  },
+  {
+    id: "removeWorktree",
+    title: (context) =>
+      `Remove worktree ${context.sidebarBranch?.removableWorktree ?? ""}…`,
+    available: (context) =>
+      writable(context) && context.sidebarBranch?.removableWorktree != null,
+    run: (commands) => commands.removeWorktree(),
   },
   {
     id: "createTag",

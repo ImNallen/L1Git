@@ -15,6 +15,7 @@ import {
   EyeOff,
   Focus,
   FolderGit2,
+  FolderMinus,
   GitBranchPlus,
   PencilLine,
   Plus,
@@ -23,7 +24,11 @@ import {
 } from "lucide-react";
 import { operationBadge } from "../domain/inProgress";
 import type { OperationProbe } from "../domain/merge";
-import { branchAsks } from "../domain/operations";
+import {
+  OPEN_WORKTREE_REMOVAL,
+  branchAsks,
+  worktreeRemoval,
+} from "../domain/operations";
 import type { BranchAsk } from "../domain/operations";
 import type { RecentRepository } from "../domain/recents";
 import { normalizeSearch } from "../domain/search";
@@ -79,8 +84,16 @@ export function RepositoryTree({
     onRemove,
     onAdd,
   } = navigation;
-  const { merge, writable, onBranchAsk, onTagAsk, onStashAction, onCheckout } =
-    refActions;
+  const {
+    merge,
+    writable,
+    onBranchAsk,
+    onTagAsk,
+    onStashAction,
+    onCheckout,
+    onTryLocally,
+    onRemoveWorktree,
+  } = refActions;
   const [query, setQuery] = useState("");
   const closeSearch = () => {
     flushSync(() => setQuery(""));
@@ -256,14 +269,15 @@ export function RepositoryTree({
       writable?.root === root
         ? null
         : "Open this repository to change its branches.";
-    const checkedOutIn = writable?.checkedOutIn.get(branch.reference);
+    const holder = writable?.checkedOutIn.get(branch.reference);
     const head = loaded(root)?.head;
     const checkedOut =
       head?.kind === "attached" && head.reference === branch.reference
         ? "Checked out"
-        : checkedOutIn === undefined
+        : holder === undefined
           ? null
-          : `Checked out in ${checkedOutIn}`;
+          : `Checked out in ${holder.name}`;
+    const removal = worktreeRemoval(holder);
     const asking = (ask: BranchAsk | null) => ask && (() => onBranchAsk(ask));
     const state = branchVisibility(rule, branch.reference);
     const apply = (next: VisibilityRule) => () => {
@@ -315,10 +329,23 @@ export function RepositoryTree({
           "Delete…",
           asking(asks.delete),
           elsewhere ??
-            (checkedOutIn === undefined
-              ? null
-              : `Checked out in ${checkedOutIn}`),
+            (holder === undefined ? null : `Checked out in ${holder.name}`),
         )}
+        <div className="menu-separator" role="separator" />
+        {write(
+          FolderGit2,
+          "Try it locally…",
+          () => onTryLocally(branch),
+          elsewhere ?? checkedOut,
+        )}
+        {removal.kind !== "none" &&
+          write(
+            FolderMinus,
+            "Remove worktree…",
+            () => onRemoveWorktree(removal.worktree),
+            elsewhere ??
+              (removal.kind === "open" ? OPEN_WORKTREE_REMOVAL : null),
+          )}
       </>
     );
   }

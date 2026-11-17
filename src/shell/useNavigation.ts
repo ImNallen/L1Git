@@ -2,6 +2,7 @@ import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import type { Compare } from "../domain/comparison";
 import { swapEnds } from "../domain/comparison";
+import { removableWorktree } from "../domain/operations";
 import type { RefStep } from "../domain/operations";
 import type {
   FullRef,
@@ -9,6 +10,7 @@ import type {
   Problem,
   RepositoryRoot,
   Stash,
+  Worktree,
 } from "../domain/repository";
 import type { Selection } from "../domain/selection";
 import { branchVisibility, NO_RULE, toggleRule } from "../domain/visibility";
@@ -50,8 +52,8 @@ export type Navigation = {
   /** Bumped after a jump's select, so History reveals the row on the next render. */
   revealSeq: number;
   jump: JumpView;
-  /** Checked-out branch references, by worktree name. */
-  checkedOut: ReadonlyMap<FullRef, string>;
+  /** Checked-out branch references, and the worktree that holds each. */
+  checkedOut: ReadonlyMap<FullRef, Worktree>;
   sidebar: SidebarNavigation;
   adding: boolean;
   /** Closes, then returns focus to the element focused before it opened, else `focus.fallback()`. */
@@ -150,8 +152,10 @@ export function useNavigation({
   const checkedOut = useMemo(
     () =>
       new Map(
-        snapshot?.worktrees.flatMap(({ head, name }) =>
-          head.kind === "attached" ? [[head.reference, name] as const] : [],
+        snapshot?.worktrees.flatMap((worktree) =>
+          worktree.head.kind === "attached"
+            ? [[worktree.head.reference, worktree] as const]
+            : [],
         ),
       ),
     [snapshot],
@@ -361,6 +365,9 @@ export function useNavigation({
           outOfView: hiddenJump !== null,
           local: ruledBranch.kind === "local",
           checkedOut: checkedOut.has(ruledBranch.reference),
+          removableWorktree: removableWorktree(
+            checkedOut.get(ruledBranch.reference),
+          ),
         },
         sidebarTag: sidebarTag && { name: sidebarTag.name },
         rule: rule.kind,

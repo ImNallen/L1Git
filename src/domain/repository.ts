@@ -686,6 +686,8 @@ export type UndoHistory = z.infer<typeof undoHistorySchema>;
 export type BranchTip = z.infer<typeof branchTipSchema>;
 export type Start = z.infer<typeof startSchema>;
 export type WorktreeSource = z.infer<typeof worktreeSourceSchema>;
+export type WorktreeReview = z.infer<typeof worktreeReviewSchema>;
+export type NewWorktree = z.infer<typeof newWorktreeSchema>;
 export type BranchMerged = z.infer<typeof branchMergedSchema>;
 export type Problem =
   | z.infer<typeof repositoryErrorSchema>

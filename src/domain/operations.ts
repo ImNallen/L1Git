@@ -27,6 +27,7 @@ import type {
   StatusEntry,
   Stash,
   Tag,
+  Worktree,
   WorktreePatch,
   WorktreeSource,
   WorktreeStatus,
@@ -169,6 +170,29 @@ export const startAt = ({ kind, reference, oid }: Branch): WorktreeSource =>
   kind === "local"
     ? { kind: "local", reference, oid }
     : { kind: "remote", reference, oid };
+
+/**
+ * What Remove worktree can do for the worktree that holds a branch: nothing
+ * for the main worktree, which Git never removes, and only from another
+ * worktree for the open one.
+ */
+export type WorktreeRemoval =
+  | { kind: "none" }
+  | { kind: "open"; worktree: Worktree }
+  | { kind: "linked"; worktree: Worktree };
+
+export function worktreeRemoval(holder: Worktree | undefined): WorktreeRemoval {
+  if (holder === undefined || holder.main) return { kind: "none" };
+  return { kind: holder.current ? "open" : "linked", worktree: holder };
+}
+
+export const removableWorktree = (holder: Worktree | undefined) => {
+  const removal = worktreeRemoval(holder);
+  return removal.kind === "linked" ? removal.worktree.name : null;
+};
+
+export const OPEN_WORKTREE_REMOVAL =
+  "Open another worktree of this repository to remove this one.";
 
 export function branchAsks(branch: Branch): {
   create: BranchAsk;
