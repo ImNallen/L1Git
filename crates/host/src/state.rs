@@ -233,7 +233,7 @@ impl Host {
 fn left_in_keychain(problem: KeychainProblem) -> Failure {
     Failure::new(
         ErrorKind::Keychain { problem },
-        "L1 Git disconnected from GitHub, but could not remove its copy of the sign-in from the system keychain. Unlock the keychain, then disconnect again.",
+        "L1 Git disconnected from GitHub, but could not remove its copy of the sign-in from the system keychain. The next sign-in replaces it.",
     )
 }
 
