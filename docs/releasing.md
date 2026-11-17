@@ -73,7 +73,7 @@ Download the `bundles-macos-universal`, `bundles-linux-x86_64`, and `bundles-win
 
 The macOS check inspects both the DMG and updater app archive. It requires arm64 and x86_64 executable slices, the planned app version, and identical app metadata and executable inside the mounted DMG. Linux checks deb version and architecture, extracts both packages, checks their ELF architecture, and starts each under Xvfb for 15 seconds. A successful smoke check means the process stays running without known loader or panic errors. It does not exercise every Git operation or prove behavior on every Linux distribution.
 
-The Windows check silently installs the NSIS package into a temporary directory, verifies its version and x64 GUI executable, and requires the installed L1 Git window to stay open for 15 seconds. It then stops and uninstalls that disposable app. This proves installation and startup. Windows core CI separately tests repository reads and writes, junction refusal, and process-tree cancellation. A full installed Windows update cycle is not covered by the macOS and Linux updater driver.
+The Windows check silently installs the NSIS package into a temporary directory, verifies its version and x64 GUI executable, waits up to 60 seconds for the installed L1 Git window, because a cold WebView2 start on a fresh runner can take more than 15 seconds. The window must then stay open for 15 more seconds. It then stops and uninstalls that disposable app. This proves installation and startup. Windows core CI separately tests repository reads and writes, junction refusal, and process-tree cancellation. A full installed Windows update cycle is not covered by the macOS and Linux updater driver.
 
 Run the policy and publication tests locally:
 
