@@ -88,12 +88,12 @@ jobs:
         run: |
           git config --global core.autocrlf false
           cargo test --locked -p l1-git-core --lib --test platform --test add_remote --no-fail-fast
-      - name: Check Windows core and bridge
+      - name: Check Windows core, bridge and host
         if: runner.os == 'Windows'
-        run: cargo clippy --locked -p l1-git-core -p l1-git-dev-bridge --lib --bins -- -D warnings
-      - name: Test core and bridge on macOS
+        run: cargo clippy --locked -p l1-git-core -p l1-git-dev-bridge -p l1-git-host --lib --bins -- -D warnings
+      - name: Test core, bridge and host on macOS
         if: runner.os == 'macOS'
-        run: cargo test --locked -p l1-git-core -p l1-git-dev-bridge --no-fail-fast
+        run: cargo test --locked -p l1-git-core -p l1-git-dev-bridge -p l1-git-host --no-fail-fast
       - run: cargo clippy --locked -p l1-git --all-targets -- -D warnings
       - run: cargo test --locked -p l1-git
       - run: pnpm tauri build --debug

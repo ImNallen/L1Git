@@ -1,0 +1,1 @@
+{"hosts":{"github.com":[{"state":"error","error":"HTTP 401: Bad credentials (https://api.github.com/)","active":true,"host":"github.com","login":"octo","tokenSource":"/home/octo/.config/gh/hosts.yml","gitProtocol":"https"}]}}

@@ -1,0 +1,45 @@
+#!/bin/sh
+here=$(dirname "$0")
+printf '%s\n' "$*" >> "$here/calls"
+
+if [ "$1 $2" = "auth status" ]; then
+  if [ -n "$GH_TOKEN" ]; then
+    cat "$here/env-token.stdout"
+    exit 0
+  fi
+  [ -f "$here/status.stdout" ] && cat "$here/status.stdout"
+  [ -f "$here/status.stderr" ] && cat "$here/status.stderr" >&2
+  if [ -f "$here/status.exit" ]; then exit "$(cat "$here/status.exit")"; fi
+  exit 0
+fi
+
+if [ "$1 $2" = "auth token" ]; then
+  if [ -n "$GH_TOKEN" ]; then
+    printf '%s\n' "$GH_TOKEN"
+    exit 0
+  fi
+  user=
+  previous=
+  for argument in "$@"; do
+    if [ "$previous" = --user ]; then user=$argument; fi
+    previous=$argument
+  done
+  if [ -z "$user" ]; then
+    echo "fake gh refuses auth token without --user" >&2
+    exit 2
+  fi
+  if [ -f "$here/slow" ]; then
+    mkdir "$here/busy" 2>/dev/null || { echo "two gh auth token calls overlapped" >&2; exit 3; }
+    sleep 0.3
+    rmdir "$here/busy"
+  fi
+  if [ -f "$here/token-$user" ]; then
+    cat "$here/token-$user"
+    exit 0
+  fi
+  echo "no oauth token found for github.com account $user" >&2
+  exit 1
+fi
+
+echo "unknown command \"$1\" for \"gh\"" >&2
+exit 1
