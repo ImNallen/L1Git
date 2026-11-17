@@ -227,52 +227,100 @@ pub(crate) fn peel_to_commit(
     Ok(output.status.success().then(|| git::line(&output.stdout)))
 }
 
-fn worktrees(root: &Path, deadline: Deadline) -> Result<Vec<Worktree>, RepositoryError> {
+/// One record of `git worktree list --porcelain -z`, the only parser of
+/// that output.
+pub(crate) struct WorktreeRecord {
+    /// The path as Git prints it.
+    pub(crate) listed: String,
+    /// `listed` canonicalized, or `None` when the folder is missing.
+    pub(crate) root: Option<PathBuf>,
+    /// `None` for a bare repository, or a missing folder whose HEAD Git
+    /// could not read.
+    pub(crate) head: Option<Head>,
+    /// Git lists the main worktree first.
+    pub(crate) main: bool,
+    pub(crate) prunable: bool,
+}
+
+impl WorktreeRecord {
+    /// The branch HEAD names, born or not.
+    pub(crate) fn branch(&self) -> Option<&str> {
+        match self.head.as_ref()? {
+            Head::Attached { reference, .. } | Head::Unborn { reference } => Some(reference),
+            Head::Detached { .. } => None,
+        }
+    }
+
+    pub(crate) fn name(&self) -> String {
+        display_name(self.root.as_deref().unwrap_or(Path::new(&self.listed)))
+    }
+}
+
+pub(crate) fn worktree_records(
+    root: &Path,
+    deadline: Deadline,
+) -> Result<Vec<WorktreeRecord>, RepositoryError> {
     let output = git::read(root, &["worktree", "list", "--porcelain", "-z"], deadline)?;
     let fields: Vec<_> = output.split(|byte| *byte == 0).collect();
-    let mut worktrees = Vec::new();
-    for record in fields
+    fields
         .split(|field| field.is_empty())
         .filter(|record| !record.is_empty())
-    {
-        let (mut path, mut oid, mut reference) = (None, None, None);
-        let mut listed = true;
-        for field in record {
-            if let Some(value) = field.strip_prefix(b"worktree ") {
-                path = Some(git::text(value));
-            } else if let Some(value) = field.strip_prefix(b"HEAD ") {
-                oid = Some(git::text(value));
-            } else if let Some(value) = field.strip_prefix(b"branch ") {
-                reference = Some(git::text(value));
-            } else if *field == b"bare" || field.starts_with(b"prunable") {
-                listed = false;
+        .enumerate()
+        .map(|(index, record)| {
+            let (mut listed, mut oid, mut reference) = (None, None, None);
+            let (mut bare, mut prunable) = (false, false);
+            for field in record {
+                if let Some(value) = field.strip_prefix(b"worktree ") {
+                    listed = Some(git::text(value));
+                } else if let Some(value) = field.strip_prefix(b"HEAD ") {
+                    oid = Some(git::text(value));
+                } else if let Some(value) = field.strip_prefix(b"branch ") {
+                    reference = Some(git::text(value));
+                } else if *field == b"bare" {
+                    bare = true;
+                } else if field.starts_with(b"prunable") {
+                    prunable = true;
+                }
             }
-        }
-        if !listed {
-            continue;
-        }
-        let (Some(path), Some(oid)) = (path, oid) else {
-            return Err(git::malformed());
-        };
-        let Ok(path) = Path::new(&path).canonicalize() else {
-            continue;
-        };
-        let head = match reference {
-            Some(reference) if oid.bytes().all(|byte| byte == b'0') => Head::Unborn { reference },
-            Some(reference) => Head::Attached { reference, oid },
-            None => Head::Detached { oid },
-        };
-        worktrees.push(Worktree {
-            name: path
-                .file_name()
-                .map(|name| name.to_string_lossy().into_owned())
-                .unwrap_or_default(),
-            current: path == root,
-            root: path.to_string_lossy().into_owned(),
-            head,
-        });
-    }
-    Ok(worktrees)
+            let listed = listed.ok_or_else(git::malformed)?;
+            let head = match (oid, reference) {
+                (None, _) if bare || prunable => None,
+                (None, _) => return Err(git::malformed()),
+                (Some(oid), Some(reference)) if oid.bytes().all(|byte| byte == b'0') => {
+                    Some(Head::Unborn { reference })
+                }
+                (Some(oid), Some(reference)) => Some(Head::Attached { reference, oid }),
+                (Some(oid), None) => Some(Head::Detached { oid }),
+            };
+            Ok(WorktreeRecord {
+                root: Path::new(&listed).canonicalize().ok(),
+                listed,
+                head,
+                main: index == 0,
+                prunable,
+            })
+        })
+        .collect()
+}
+
+fn worktrees(root: &Path, deadline: Deadline) -> Result<Vec<Worktree>, RepositoryError> {
+    Ok(worktree_records(root, deadline)?
+        .into_iter()
+        .filter(|record| !record.prunable)
+        .filter_map(|record| {
+            let name = record.name();
+            let (Some(path), Some(head)) = (record.root, record.head) else {
+                return None;
+            };
+            Some(Worktree {
+                name,
+                current: path == root,
+                root: path.to_string_lossy().into_owned(),
+                head,
+                main: record.main,
+            })
+        })
+        .collect())
 }
 
 pub(crate) fn parse_commits(output: &[u8]) -> Result<Vec<Commit>, RepositoryError> {

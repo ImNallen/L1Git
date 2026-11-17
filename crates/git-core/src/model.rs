@@ -67,6 +67,8 @@ pub struct Worktree {
     pub head: Head,
     /// This worktree is the snapshot's root.
     pub current: bool,
+    /// The repository's main worktree, which Git never removes.
+    pub main: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]

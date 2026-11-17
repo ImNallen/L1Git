@@ -1838,47 +1838,35 @@ pub(super) fn guard_refs(
     names: &[String],
     deadline: WriteDeadline,
 ) -> Result<(), RepositoryError> {
-    let output = git::read(
-        &repo.root,
-        &["worktree", "list", "--porcelain", "-z"],
-        deadline.reads(),
-    )?;
-    let fields: Vec<_> = output.split(|byte| *byte == 0).collect();
-    for record in fields.split(|field| field.is_empty()) {
-        if let Some(path) = record
-            .iter()
-            .find_map(|field| field.strip_prefix(b"worktree "))
-        {
-            let path = std::str::from_utf8(path).map_err(|_| git::malformed())?;
-            let related = record
+    for listed in repository::worktree_records(&repo.root, deadline.reads())? {
+        let path = &listed.listed;
+        let related = listed
+            .branch()
+            .is_some_and(|branch| names.iter().any(|name| name == branch));
+        let target = match repo.worktree(path, deadline.reads()) {
+            Err(error) if error.kind == ErrorKind::MissingPath && !related => continue,
+            result => result?,
+        };
+        if let Some(record) = reconcile(&target, deadline)?
+            && !matches!(record.phase, SessionPhase::Closed { .. })
+            && names
                 .iter()
-                .filter_map(|field| field.strip_prefix(b"branch "))
-                .any(|branch| names.iter().any(|name| name.as_bytes() == branch));
-            let target = match repo.worktree(path, deadline.reads()) {
-                Err(error) if error.kind == ErrorKind::MissingPath && !related => continue,
-                result => result?,
-            };
-            if let Some(record) = reconcile(&target, deadline)?
-                && !matches!(record.phase, SessionPhase::Closed { .. })
-                && names
-                    .iter()
-                    .any(|name| name == record.session.review.destination.reference.as_str())
-            {
-                return Err(refused(format!(
-                    "{} is the destination of an unfinished merge in {}. Finish or abort it before changing that branch.",
-                    record.session.review.destination.reference.as_str(),
-                    path
-                )));
-            }
-            if let Some(of) = replay::in_flight(&target, deadline.reads())?
-                && let Head::Attached { reference, .. } = target.head(deadline)?
-                && names.contains(&reference)
-            {
-                return Err(refused(format!(
-                    "{} in {path} has {reference} as its destination. Finish or abort it before changing that branch.",
-                    refs::capitalized(of.kind.operation().name()),
-                )));
-            }
+                .any(|name| name == record.session.review.destination.reference.as_str())
+        {
+            return Err(refused(format!(
+                "{} is the destination of an unfinished merge in {}. Finish or abort it before changing that branch.",
+                record.session.review.destination.reference.as_str(),
+                path
+            )));
+        }
+        if let Some(of) = replay::in_flight(&target, deadline.reads())?
+            && let Head::Attached { reference, .. } = target.head(deadline)?
+            && names.contains(&reference)
+        {
+            return Err(refused(format!(
+                "{} in {path} has {reference} as its destination. Finish or abort it before changing that branch.",
+                refs::capitalized(of.kind.operation().name()),
+            )));
         }
     }
     Ok(())
