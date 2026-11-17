@@ -3,6 +3,7 @@ import type { ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import {
   chmodSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -10,10 +11,13 @@ import {
   realpathSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { createServer as createHttpServer } from "node:http";
+import type { Server } from "node:http";
 import { createServer } from "node:net";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { setTimeout } from "node:timers/promises";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -53,6 +57,11 @@ import {
   directoryListingSchema,
   newRepositorySchema,
 } from "./domain/addRepository";
+import {
+  hostErrorSchema,
+  hostRequestOps,
+  hostResponseSchema,
+} from "./domain/host";
 import { requestOps } from "./repositories";
 
 const fixtureSchema = z.object({
@@ -3831,4 +3840,140 @@ describe("a cherry-pick or revert", () => {
     expect(git("rev-parse", "HEAD")).toBe(before);
     expect(git("status", "--porcelain")).toBe("");
   }, 30_000);
+});
+
+describe("real Rust host contract", () => {
+  const token = "gho_integration";
+  const seen: string[] = [];
+  let github: Server;
+  let hostBridge: Awaited<ReturnType<typeof startBridge>>;
+  let gh: string;
+  let api: string;
+
+  beforeAll(async () => {
+    const fake = join(fixture.root, "fake-gh");
+    mkdirSync(fake);
+    gh = join(fake, "gh");
+    symlinkSync(resolve("crates/host/tests/fixtures/fake-gh"), gh);
+    copyFileSync(
+      "crates/host/tests/fixtures/gh/signed-in.stdout",
+      join(fake, "status.stdout"),
+    );
+    writeFileSync(join(fake, "token-octo"), `${token}\n`);
+    github = createHttpServer((request, response) => {
+      seen.push(`${request.url} ${request.headers.authorization}`);
+      const known =
+        request.url === "/user" &&
+        request.headers.authorization === `Bearer ${token}`;
+      response.writeHead(known ? 200 : 401, {
+        "Content-Type": "application/json",
+        ...(known ? { "X-OAuth-Scopes": "gist, read:org, repo" } : {}),
+      });
+      response.end(
+        JSON.stringify(
+          known ? { login: "octo", id: 1 } : { message: "Bad credentials" },
+        ),
+      );
+    });
+    github.listen(0, "127.0.0.1");
+    await once(github, "listening");
+    const address = github.address();
+    if (address === null || typeof address === "string")
+      throw new Error("No GitHub fixture port");
+    api = `http://127.0.0.1:${address.port}/`;
+    hostBridge = await startBridge({
+      L1GIT_HOST_DIR: join(fixture.root, "host"),
+      L1GIT_HOST_VAULT: "memory",
+      L1GIT_GH: gh,
+      L1GIT_GITHUB_API: api,
+    });
+  });
+
+  afterAll(async () => {
+    if (hostBridge && hostBridge.bridge.exitCode === null) {
+      hostBridge.bridge.kill();
+      await once(hostBridge.bridge, "exit");
+    }
+    github?.close();
+  });
+
+  const hostPost = (body: unknown, requestOrigin = origin) =>
+    fetch(`${hostBridge.endpoint}/api/host`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: requestOrigin },
+      body: JSON.stringify(body),
+    });
+
+  it("connects through gh, checks, and disconnects without ever answering with the token", async () => {
+    const replies: string[] = [];
+    const send = async (body: unknown) => {
+      const response = await hostPost(body);
+      expect(response.status).toBe(200);
+      const text = await response.text();
+      replies.push(text);
+      return JSON.parse(text) as unknown;
+    };
+    const ok = (body: unknown) =>
+      hostResponseSchema.and(z.object({ ok: z.literal(true) })).parse(body);
+    const failed = (body: unknown) =>
+      z.object({ ok: z.literal(false), error: hostErrorSchema }).parse(body)
+        .error;
+
+    const fresh = ok(await send({ op: "status" }));
+    expect(fresh.status.github).toEqual({ kind: "notConnected", ended: null });
+    expect(ok(await send({ op: "probeGh" }))).toMatchObject({
+      op: "probeGh",
+      data: { kind: "ready", login: "octo", access: "private", path: gh },
+    });
+
+    const refused = failed(await send({ op: "connectGh", login: "hubot" }));
+    expect(refused).toMatchObject({
+      kind: "ghSignedOut",
+      status: { github: { kind: "notConnected" } },
+    });
+
+    const connected = ok(await send({ op: "connectGh", login: "octo" }));
+    expect(connected.status.github).toMatchObject({
+      kind: "connected",
+      login: "octo",
+      api,
+      method: "gh",
+      access: "private",
+    });
+    expect(connected.status.revision).toBeGreaterThan(fresh.status.revision);
+    expect(seen).toEqual([`/user Bearer ${token}`]);
+    expect(ok(await send({ op: "status" })).status).toEqual(connected.status);
+    expect(ok(await send({ op: "verify" })).status.github).toEqual(
+      connected.status.github,
+    );
+    expect(seen).toHaveLength(2);
+
+    const disconnected = ok(await send({ op: "disconnect" }));
+    expect(disconnected.status.github).toEqual({
+      kind: "notConnected",
+      ended: null,
+    });
+    expect(disconnected.status.revision).toBeGreaterThan(
+      connected.status.revision,
+    );
+    expect(failed(await send({ op: "verify" })).kind).toBe("notConnected");
+
+    expect(replies.filter((reply) => reply.includes(token))).toEqual([]);
+    expect(
+      readFileSync(join(fixture.root, "host", "host.json"), "utf8"),
+    ).not.toContain(token);
+  });
+
+  it("checks host requests like repository requests and names every host operation", async () => {
+    expect((await hostPost({ op: "status" }, "http://evil.test")).status).toBe(
+      403,
+    );
+    const unknown = await hostPost({ op: "notAnOperation" });
+    expect(unknown.status).toBe(400);
+    expect(await unknown.json()).toEqual({
+      error: `unknown variant \`notAnOperation\`, expected one of ${hostRequestOps.map((op) => `\`${op}\``).join(", ")} at line 1 column 22`,
+    });
+    const extra = await hostPost({ op: "status", token });
+    expect(extra.status).toBe(400);
+  });
 });
