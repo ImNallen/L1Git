@@ -2,17 +2,12 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { X } from "lucide-react";
 import { WorkspaceIcon } from "./WorkspaceIcon";
+import { settingsSections } from "../actions";
 import type { SettingsSection } from "../actions";
 import { searchSettings } from "../settingsSearch";
 
-const settingsSections = [
-  { section: "general", label: "General", icon: "SettingsGeneral" },
-  { section: "appearance", label: "Appearance", icon: "SettingsPalette" },
-] as const satisfies readonly {
-  section: SettingsSection;
-  label: string;
-  icon: string;
-}[];
+const sectionLabel = (section: SettingsSection) =>
+  settingsSections.find((entry) => entry.id === section)?.label;
 
 type Props = {
   section: SettingsSection;
@@ -132,7 +127,7 @@ export function SettingsDialog({
           ) : null}
         </div>
         <nav aria-label="Settings sections">
-          {settingsSections.map(({ section: value, label, icon }) => (
+          {settingsSections.map(({ id: value, label, icon }) => (
             <button
               key={value}
               className="settings-nav-item"
@@ -194,8 +189,7 @@ export function SettingsDialog({
               >
                 <span>{entry.label}</span>
                 <small>
-                  {entry.section === "general" ? "General" : "Appearance"} ·{" "}
-                  {entry.description}
+                  {sectionLabel(entry.section)} · {entry.description}
                 </small>
               </button>
             ))}
@@ -209,12 +203,7 @@ export function SettingsDialog({
             <span className="settings-breadcrumb-slash" aria-hidden="true">
               /
             </span>
-            <span aria-current="page">
-              {
-                settingsSections.find((entry) => entry.section === section)
-                  ?.label
-              }
-            </span>
+            <span aria-current="page">{sectionLabel(section)}</span>
           </nav>
           {restore && (
             <button
