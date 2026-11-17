@@ -142,16 +142,12 @@ impl Reply {
         }
     }
 
-    /// GitHub's answer to `POST /login/device/code`, with `DEVICE_CODE` and
-    /// `USER_CODE`.
     pub fn device_code(verification_uri: &str, interval_secs: u64) -> Reply {
         Reply::json(format!(
             r#"{{"device_code":"{DEVICE_CODE}","user_code":"{USER_CODE}","verification_uri":"{verification_uri}","expires_in":899,"interval":{interval_secs}}}"#
         ))
     }
 
-    /// Such as `authorization_pending`, `slow_down`, `expired_token` or
-    /// `access_denied`.
     pub fn oauth_error(error: &str) -> Reply {
         Reply::json(format!(
             r#"{{"error":"{error}","error_description":"The fixture answers {error}.","error_uri":"https://docs.github.com/developers/apps/authorizing-oauth-apps"}}"#
@@ -174,7 +170,6 @@ pub struct Seen {
     pub authorization: Option<String>,
 }
 
-/// A form post to `/login/...`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Form {
     pub path: String,
@@ -234,9 +229,7 @@ impl FakeGitHub {
         lock(&self.world).device_code = Some(reply);
     }
 
-    /// Queues answers to `POST /login/oauth/access_token`. Once they run out,
-    /// it answers `authorization_pending`.
-    pub fn polls(&self, replies: impl IntoIterator<Item = Reply>) {
+    pub fn polls_then_pending(&self, replies: impl IntoIterator<Item = Reply>) {
         lock(&self.world).polls.extend(replies);
     }
 

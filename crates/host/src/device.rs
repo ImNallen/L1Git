@@ -31,7 +31,6 @@ impl ClientId {
     }
 }
 
-/// In memory only: a quit drops it, and GitHub expires its code anyway.
 #[derive(Clone)]
 pub(crate) struct Session {
     id: String,
@@ -49,14 +48,13 @@ impl Session {
             session: self.id.clone(),
             user_code: self.user_code.clone(),
             verification_uri: self.verification_uri.clone(),
-            expires_in_ms: millis(self.expires_at.saturating_duration_since(now)),
-            poll_after_ms: millis(self.next_poll.saturating_duration_since(now)),
+            expires_in_ms: ceil_millis(self.expires_at.saturating_duration_since(now)),
+            poll_after_ms: ceil_millis(self.next_poll.saturating_duration_since(now)),
         }
     }
 }
 
-/// Rounds up, so a client that waits `pollAfterMs` is never early.
-fn millis(duration: Duration) -> u64 {
+fn ceil_millis(duration: Duration) -> u64 {
     duration.as_nanos().div_ceil(1_000_000) as u64
 }
 
@@ -65,7 +63,6 @@ pub(crate) enum PollAnswer {
     SlowDown,
     Expired,
     Denied,
-    /// An error GitHub does not expect a client to retry.
     Refused(Failure),
     Token(Token),
 }
@@ -106,7 +103,6 @@ pub(crate) fn step(session: Session, answer: PollAnswer, now: Instant) -> Step {
     })
 }
 
-/// GitHub's OAuth endpoints refuse with `{"error": ..., "error_description": ...}`.
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum Reply<T> {
@@ -224,8 +220,6 @@ impl Host {
         Ok(())
     }
 
-    /// A poll for another session, or one before `next_poll`, answers with
-    /// the status alone.
     pub(crate) fn device_poll(&self, id: &str) -> Result<(), Failure> {
         let client_id = self.client_id()?;
         let writer = self.lock_writes();

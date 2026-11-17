@@ -40,8 +40,6 @@ pub struct HostConfig {
     pub vault: VaultChoice,
     pub gh: GhChoice,
     pub github: Endpoints,
-    /// `ClientId::compiled()` in the app and the bridge. `None` hides browser
-    /// sign-in.
     pub client_id: Option<ClientId>,
 }
 

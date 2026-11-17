@@ -77,8 +77,7 @@ impl From<ApiBase> for String {
     }
 }
 
-/// Where a host sends tokens: GitHub itself, or a loopback fixture. `web`
-/// serves the browser sign-in.
+/// Where a host sends tokens: GitHub itself, or a loopback fixture.
 #[derive(Clone, Debug)]
 pub struct Endpoints {
     api: ApiBase,

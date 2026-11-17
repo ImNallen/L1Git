@@ -76,7 +76,7 @@ impl World {
 #[test]
 fn browser_sign_in_end_to_end() {
     let world = World::new(0);
-    world.github.polls([
+    world.github.polls_then_pending([
         Reply::oauth_error("authorization_pending"),
         Reply::access_token("gho_device"),
     ]);
@@ -145,7 +145,9 @@ fn browser_sign_in_end_to_end() {
 #[test]
 fn slow_down_grows_the_interval_and_an_early_poll_stays_home() {
     let world = World::new(0);
-    world.github.polls([Reply::oauth_error("slow_down")]);
+    world
+        .github
+        .polls_then_pending([Reply::oauth_error("slow_down")]);
     let prompt = world.start();
     assert_eq!(prompt["pollAfterMs"], 0);
 
@@ -167,7 +169,9 @@ fn expired_and_denied_codes_end_the_session() {
         ("access_denied", "deviceDenied"),
     ] {
         let world = World::new(0);
-        world.github.polls([Reply::oauth_error(answer)]);
+        world
+            .github
+            .polls_then_pending([Reply::oauth_error(answer)]);
         let prompt = world.start();
         let error = world.poll(&prompt).unwrap_err();
         assert_eq!(error["kind"], kind);
