@@ -218,12 +218,14 @@ fn at<'r>(records: &'r [WorktreeRecord], target: &Path) -> Option<&'r WorktreeRe
 /// The record as a finished worktree on `branch`.
 fn finished(record: &WorktreeRecord, branch: &BranchRef) -> Option<NewWorktree> {
     let root = record.root.as_ref()?;
-    (record.branch() == Some(branch.as_str()) && record.locked.as_deref() != Some(INITIALIZING))
-        .then(|| NewWorktree {
-            root: root.to_string_lossy().into_owned(),
-            name: record.name(),
-            trouble: None,
-        })
+    (record.branch() == Some(branch.as_str())
+        && !record.prunable
+        && record.locked.as_deref() != Some(INITIALIZING))
+    .then(|| NewWorktree {
+        root: root.to_string_lossy().into_owned(),
+        name: record.name(),
+        trouble: None,
+    })
 }
 
 /// What a create answers when Git already registers its folder: the same
@@ -244,9 +246,9 @@ fn answered(
             record.listed
         ));
     }
-    if record.root.is_none() {
+    if record.root.is_none() || record.prunable {
         return refused(format!(
-            "Git still lists a worktree at {folder}, but its folder is missing. Run git worktree prune in a terminal, or choose another folder."
+            "Git still lists a worktree at {folder}, but its folder is missing or no longer a worktree. Run git worktree prune in a terminal, or choose another folder."
         ));
     }
     let on = record.branch().map_or("a detached HEAD", branches::short);

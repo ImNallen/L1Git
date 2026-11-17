@@ -457,6 +457,22 @@ fn a_folder_git_still_registers_is_refused_with_the_command_that_clears_it() {
 }
 
 #[test]
+fn a_recreated_empty_folder_of_a_registered_worktree_is_refused_not_answered() {
+    let repo = Repo::new();
+    let folder = repo.tried(&repo.remote("feature"));
+    fs::remove_dir_all(&folder).unwrap();
+    fs::create_dir(&folder).unwrap();
+
+    let error = repo.create(&repo.remote("feature"), &folder).unwrap_err();
+
+    assert!(
+        error.message.contains("git worktree prune"),
+        "{}",
+        error.message
+    );
+}
+
+#[test]
 fn removing_a_clean_worktree_deletes_its_folder_and_ignored_files_and_keeps_its_branch() {
     let repo = Repo::new();
     let folder = repo.tried(&repo.remote("feature"));
