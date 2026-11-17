@@ -7,6 +7,10 @@
     "core:window:allow-start-dragging",
     "core:window:allow-set-theme",
     "core:window:allow-set-background-color",
-    "core:webview:allow-set-webview-background-color"
+    "core:webview:allow-set-webview-background-color",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [{ "url": "https://*" }]
+    }
   ]
 }
