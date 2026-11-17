@@ -5,7 +5,6 @@ import { send } from "./transport";
 
 type Op = HostRequest["op"];
 type HostView = {
-  /** Null until the first status arrives. */
   status: HostStatus | null;
   probe: GhProbe | null;
   busy: Exclude<Op, "status"> | null;
@@ -20,12 +19,6 @@ const transportProblem = (error: unknown) =>
       ? error
       : "L1 Git could not reach its GitHub connection. Try again.";
 
-/**
- * Mirrors the host status that Rust attaches to every reply, errors
- * included, and keeps the newest revision. Each action runs once at a time:
- * calling it again while it runs returns the running call, which resolves to
- * whether the request succeeded.
- */
 export function createHostClient(transport: HostTransport) {
   let view: HostView = {
     status: null,
@@ -51,7 +44,7 @@ export function createHostClient(transport: HostTransport) {
     );
   }
 
-  function request(body: HostRequest): Promise<boolean> {
+  function runOnce(body: HostRequest): Promise<boolean> {
     const current = running.get(body.op);
     if (current) return current;
     const call = Promise.resolve(body)
@@ -74,7 +67,6 @@ export function createHostClient(transport: HostTransport) {
         }
         accept(failure.data.status);
         const { kind, message } = failure.data;
-        // The status already says the connection ended, and why.
         const explained = kind === "signedOut" || kind === "notConnected";
         view = { ...view, problem: explained ? null : message };
         return false;
@@ -96,13 +88,11 @@ export function createHostClient(transport: HostTransport) {
         listeners.delete(listener);
       };
     },
-    /** Reads Rust's memory only: no gh, keychain or network. */
-    refresh: () => request({ op: "status" }),
-    probeGh: () => request({ op: "probeGh" }),
-    connectGh: (login: string) => request({ op: "connectGh", login }),
-    verify: () => request({ op: "verify" }),
-    disconnect: () => request({ op: "disconnect" }),
-    /** Forgets the sign-in dialog's probe and problem when it closes. */
+    refresh: () => runOnce({ op: "status" }),
+    probeGh: () => runOnce({ op: "probeGh" }),
+    connectGh: (login: string) => runOnce({ op: "connectGh", login }),
+    verify: () => runOnce({ op: "verify" }),
+    disconnect: () => runOnce({ op: "disconnect" }),
     dismiss: () => update({ probe: null, problem: null }),
   };
 }

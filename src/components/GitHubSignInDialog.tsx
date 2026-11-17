@@ -49,7 +49,6 @@ function Guidance({ probe }: { probe: Exclude<GhProbe, { kind: "ready" }> }) {
   }
 }
 
-/** Asks gh who is signed in, then copies that sign-in only after consent. */
 export function GitHubSignInDialog({
   host,
   onClose,

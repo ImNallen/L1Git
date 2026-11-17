@@ -58,7 +58,6 @@ export type World = {
   pushes: Map<RepositoryRoot, PushAvailability>;
   /** What each typed path lists. An open repository lists itself. */
   directories: Map<string, DirectoryEntry[]>;
-  /** What `/api/host` answers. Connecting copies `probe`'s access. */
   host: { status: HostStatus; probe: GhProbe };
 };
 
@@ -318,7 +317,6 @@ const handlers: Record<string, Handler> = {
   redo: (request, world) => step(request, world, "redo"),
 };
 
-/** Each returns the reply's `data`, after changing `host.status` if it connects or disconnects. */
 const hostHandlers: Record<
   string,
   (request: BridgeRequest, host: World["host"]) => GhProbe | undefined
@@ -462,7 +460,6 @@ export function createBridge(world: World = createWorld()) {
     world,
     fetch,
     log,
-    /** `/api/host` requests, apart from `log` so repository assertions ignore them. */
     hostLog,
     unexpected,
     active: () => active,

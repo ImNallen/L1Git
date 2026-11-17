@@ -2,8 +2,7 @@ use l1_git_host::{Host, HostError, Request, Response};
 use std::sync::Arc;
 
 /// Runs in the blocking pool, because `run` uses a blocking HTTP client that
-/// panics when it sends from an async thread. Takes no activity permit:
-/// GitHub work neither waits behind nor blocks an update install.
+/// panics when it sends from an async thread.
 #[tauri::command]
 pub async fn host_run(
     host: tauri::State<'_, Arc<Host>>,
