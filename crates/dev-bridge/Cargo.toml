@@ -6,6 +6,8 @@ publish.workspace = true
 
 [dependencies]
 l1-git-core = { path = "../git-core" }
+l1-git-host = { path = "../host" }
+serde.workspace = true
 serde_json.workspace = true
 tiny_http = "0.12"
 

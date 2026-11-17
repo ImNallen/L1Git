@@ -2159,6 +2159,7 @@ name = "l1-git"
 version = "0.1.0"
 dependencies = [
  "l1-git-core",
+ "l1-git-host",
  "serde",
  "serde_json",
  "tauri",
@@ -2188,6 +2189,8 @@ name = "l1-git-dev-bridge"
 version = "0.1.0"
 dependencies = [
  "l1-git-core",
+ "l1-git-host",
+ "serde",
  "serde_json",
  "tiny_http",
 ]
