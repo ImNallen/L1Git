@@ -180,6 +180,20 @@ it("the notice shows only while the repository that made the worktree is open", 
   expect(query("button", "Open worktree")).toBeNull();
 });
 
+it("removing a worktree takes away the notice that offered to open it", async () => {
+  const app = await mountApp();
+  await tryTopic(app);
+  await app.click(get("button", "Create worktree"));
+  expect(get("button", "Open worktree")).toBeTruthy();
+
+  await app.contextMenu(refRow("refs/heads/topic")!);
+  await app.click(menuItem("Remove worktree…"));
+  await app.click(get("button", "Remove worktree"));
+
+  expect(sidebarRoots()).toEqual([PIN, OTHER]);
+  expect(query("button", "Open worktree")).toBeNull();
+});
+
 it("a refused create shows under the fields and keeps the dialog open with the edited folder", async () => {
   const app = await mountApp({
     bridge: (bridge) =>
