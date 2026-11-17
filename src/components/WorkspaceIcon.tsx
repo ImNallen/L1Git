@@ -30,6 +30,7 @@ const sources = {
   SettingsSearch: ["workspace/Search", 14, 14],
   SettingsGeneral: ["settings/Settings", 16, 16],
   SettingsPalette: ["settings/Palette", 16, 16],
+  SettingsHosts: ["settings/Hosts", 16, 16],
   SettingsReset: ["settings/Reset", 15, 15],
   SettingsResetSmall: ["settings/ResetSmall", 10, 10],
   SettingsClose: ["settings/Close", 16, 16],

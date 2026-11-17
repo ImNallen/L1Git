@@ -41,6 +41,7 @@ it("palette titles with no repository open", async () => {
       "Open Settings",
       "Open General settings",
       "Open Appearance settings",
+      "Open Hosts settings",
     ]
   `);
 });
@@ -70,6 +71,7 @@ it("palette titles with a commit selected", async () => {
       "Open Settings",
       "Open General settings",
       "Open Appearance settings",
+      "Open Hosts settings",
       "pin (Repository)",
       "other (Repository)",
       "feature (Branch)",
@@ -108,6 +110,7 @@ it("palette titles with a worktree that has staged and unstaged entries", async 
       "Open Settings",
       "Open General settings",
       "Open Appearance settings",
+      "Open Hosts settings",
       "pin (Repository)",
       "other (Repository)",
       "feature (Branch)",
@@ -138,6 +141,7 @@ it("palette titles while a write runs", async () => {
       "Open Settings",
       "Open General settings",
       "Open Appearance settings",
+      "Open Hosts settings",
       "Push [disabled]",
       "pin (Repository)",
       "other (Repository)",
@@ -173,6 +177,7 @@ it("palette titles while the active worktree merges", async () => {
       "Open Settings",
       "Open General settings",
       "Open Appearance settings",
+      "Open Hosts settings",
       "pin (Repository)",
       "other (Repository)",
       "feature (Branch)",
@@ -217,6 +222,7 @@ it("palette titles with a file open, and none on the settings screen", async () 
       "Open Settings",
       "Open General settings",
       "Open Appearance settings",
+      "Open Hosts settings",
       "pin (Repository)",
       "other (Repository)",
       "feature (Branch)",

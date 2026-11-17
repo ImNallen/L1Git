@@ -73,6 +73,7 @@ describe("shell boundaries", () => {
       "useFetchSettings",
       "useUpdates",
       "useUpdateRestart",
+      "useHost",
       "useOverview",
       "useLayout",
       "useSettingsScreen",
