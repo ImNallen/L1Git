@@ -57,21 +57,14 @@ type Props = {
   labels?: ReadonlyMap<string, RowLabel>;
 };
 
-const DIRECTORY_HEIGHT = 32;
-const FILE_HEIGHT = 34;
+const ROW_HEIGHT = 34;
 
 function fittedTreeHeight(
   model: ReturnType<typeof useFileTree>["model"],
   maxRows: number | undefined,
 ) {
   if (maxRows === undefined) return 0;
-  return model
-    .getVisibleRows(0, Math.min(model.getVisibleCount(), maxRows) - 1)
-    .reduce(
-      (height, row) =>
-        height + (row.kind === "directory" ? DIRECTORY_HEIGHT : FILE_HEIGHT),
-      8,
-    );
+  return Math.min(model.getVisibleCount(), maxRows) * ROW_HEIGHT + 8;
 }
 
 export function ChangedFileTree({
@@ -108,8 +101,7 @@ export function ChangedFileTree({
     initialExpansion,
     flattenEmptyDirectories,
     density: "default",
-    itemHeight: DIRECTORY_HEIGHT,
-    fileItemHeight: FILE_HEIGHT,
+    itemHeight: ROW_HEIGHT,
     icons: { set: "minimal", colored: false },
     renderRowDecoration: ({ item }) => {
       if (item.kind === "directory")
