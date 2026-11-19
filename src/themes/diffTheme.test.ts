@@ -13,12 +13,13 @@ it.each(["light", "dark"] as const)(
   "highlights a painted %s theme with its palette's syntax tokens",
   async (appearance) => {
     const theme = await resolveTheme(diffTheme(appearance, true));
+    const textmate = theme.textmate!;
     // Shiki stands a placeholder in for each CSS variable and restores it when it paints.
     const color = (scope: string) => {
-      const placeholder = theme.settings.find((rule) =>
+      const placeholder = textmate.settings.find((rule) =>
         [rule.scope].flat().includes(scope),
       )?.settings.foreground;
-      return placeholder && theme.colorReplacements?.[placeholder];
+      return placeholder && textmate.colorReplacements?.[placeholder];
     };
     expect(theme.type).toBe(appearance);
     expect([
