@@ -27,7 +27,7 @@ const PALETTE_THEME: Record<Appearance, string> = {
   dark: "l1-palette-dark",
 };
 
-// Shiki's factory always says dark; Pierre picks its light or dark mixes from the theme's type.
+// The factory always says dark; Pierre picks its light or dark mixes from the theme's type.
 for (const type of ["light", "dark"] as const) {
   const name = PALETTE_THEME[type];
   const theme = createCSSVariablesTheme({
@@ -36,7 +36,7 @@ for (const type of ["light", "dark"] as const) {
     variableDefaults,
     fontStyle: false,
   });
-  registerCustomTheme(name, async () => ({ ...theme, type }));
+  registerCustomTheme(name, async () => ({ ...theme, type }), "diffs");
 }
 
 export function diffTheme(appearance: Appearance, painted: boolean): string {
