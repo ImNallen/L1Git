@@ -17,6 +17,7 @@ import type {
   Stash,
   Tag,
 } from "../domain/repository";
+import { stashTitle } from "../domain/operations";
 import { shortBranch } from "../domain/refs";
 import { normalizeSearch } from "../domain/search";
 import { branchVisibility, toggleRule } from "../domain/visibility";
@@ -33,8 +34,6 @@ declare module "react" {
 }
 
 const tagOrder = new Intl.Collator(undefined, { numeric: true });
-/** Git starts each stash message with the branch it was made on, which the title keeps. */
-const stashPrefix = /^(?:WIP on|On) [^:]*: /;
 
 type Props = {
   refs: RepositoryRefs;
@@ -194,9 +193,7 @@ export function RepositoryBranches({
         aria-current={selected ? "true" : undefined}
       >
         <WorkspaceIcon name="Stash" />
-        <span className="branch-label">
-          {stash.message.replace(stashPrefix, "")}
-        </span>
+        <span className="branch-label">{stashTitle(stash.message)}</span>
         <small className="ref-detail">{stash.name}</small>
       </button>
     );

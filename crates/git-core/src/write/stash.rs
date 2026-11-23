@@ -25,6 +25,9 @@ use std::{
 pub struct StashTip {
     pub name: String,
     pub oid: Oid,
+    /// Empty in undo journals written before stash writes carried it.
+    #[serde(default)]
+    pub message: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

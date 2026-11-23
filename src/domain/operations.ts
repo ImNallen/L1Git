@@ -307,7 +307,7 @@ export const deleteTagWrite = (tag: Tag, head: Head): Write => ({
   expect: { head },
 });
 
-const stashTip = (stash: Stash) => ({ name: stash.name, oid: stash.oid });
+const stashTip = ({ name, oid, message }: Stash) => ({ name, oid, message });
 
 export const stashPushWrite = (
   message: string,
@@ -335,6 +335,11 @@ export const stashDropWrite = (stash: Stash, head: Head): Write => ({
 });
 
 const stashBranch = /^(?:WIP on|On) ([^:]*): /;
+
+export const stashTitle = (message: string) => message.replace(stashBranch, "");
+
+const stashLabel = ({ name, message }: { name: string; message: string }) =>
+  message === "" ? name : `stash ${quoted(stashTitle(message))}`;
 
 /** The worktree apply and pop change. A selected worktree wins. Otherwise the one worktree checked out on the branch Git names in the stash message, then the repository that was added. */
 export function worktreeForStash(
@@ -516,11 +521,11 @@ export function describe(operation: Operation): string {
         ? "Stash changes"
         : `Stash ${quoted(operation.message)}`;
     case "stashApply":
-      return `Apply ${operation.stash.name}`;
+      return `Apply ${stashLabel(operation.stash)}`;
     case "stashPop":
-      return `Pop ${operation.stash.name}`;
+      return `Pop ${stashLabel(operation.stash)}`;
     case "stashDrop":
-      return `Drop ${operation.stash.name}`;
+      return `Drop ${stashLabel(operation.stash)}`;
     case "replay":
       return `${replayNames[operation.review.kind].title} ${quoted(operation.review.subject)}`;
     case "finishReplay":
