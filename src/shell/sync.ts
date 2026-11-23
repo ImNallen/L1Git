@@ -1,5 +1,10 @@
 import { useState } from "react";
-import { fetchTarget, readyAdvances } from "../domain/overview";
+import {
+  branchRefSchema,
+  fastForwardOffer,
+  fetchTarget,
+  readyAdvances,
+} from "../domain/overview";
 import { pushControl } from "../domain/push";
 import { worktreeHead } from "../domain/worktree";
 import type { PushIntent } from "../domain/push";
@@ -17,6 +22,7 @@ import type {
 } from "../overview";
 import { defineSlice } from "./actionSlices";
 import type { ActionSlice } from "./actionSlices";
+import type { SidebarRefActions } from "./useRefWrites";
 
 /** The overview entry of the repository on screen. */
 export type OpenedRepository = {
@@ -47,6 +53,7 @@ export type SyncControls = {
   publish: (root: RepositoryRoot, intent: PushIntent) => void;
   closePublish: () => void;
   actions: ActionSlice<"push" | "repository", SyncCommand>;
+  sidebar: SidebarRefActions["fastForward"];
 };
 
 type SyncCommand = "fetch" | "fetchAll" | "push" | "fastForward";
@@ -111,8 +118,30 @@ export function useSyncControls({
   const fetching = repository?.activity.kind === "fetching";
   const ready = repository ? readyAdvances(repository.overview).length : 0;
   const fetch = fetchTarget(selectedBranch, checkedOut(snapshot, activeRoot));
+  const busy = localBusyReason(writing, repository);
   return {
     opened,
+    sidebar:
+      root && repository
+        ? {
+            root,
+            offer(reference) {
+              const local = branchRefSchema.safeParse(reference);
+              const branch =
+                local.success &&
+                repository.overview.branches.find(
+                  (status) => status.reference === local.data,
+                );
+              const offer = branch && fastForwardOffer(branch, root);
+              if (!offer) return null;
+              return offer.reason === null && busy
+                ? { ...offer, reason: busy }
+                : offer;
+            },
+            onSelect: (branch) =>
+              void store.updateAll(repository.commonDir, branch),
+          }
+        : undefined,
     push,
     publishingRoot,
     publish: (target, intent) => {

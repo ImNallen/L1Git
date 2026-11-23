@@ -13,6 +13,7 @@ import {
   CornerDownLeft,
   Eye,
   EyeOff,
+  FastForward,
   Focus,
   FolderGit2,
   FolderMinus,
@@ -86,6 +87,7 @@ export function RepositoryTree({
   } = navigation;
   const {
     merge,
+    fastForward,
     writable,
     onBranchAsk,
     onTagAsk,
@@ -192,12 +194,13 @@ export function RepositoryTree({
     label: string,
     run: (() => void) | null,
     off: string | null,
+    hint?: string,
   ) =>
     run && (
       <button
         role="menuitem"
         aria-disabled={off !== null}
-        title={off ?? undefined}
+        title={off ?? hint}
         onClick={() => {
           if (off !== null) return;
           closeMenu();
@@ -278,6 +281,8 @@ export function RepositoryTree({
           ? null
           : `Checked out in ${holder.name}`;
     const removal = worktreeRemoval(holder);
+    const advance =
+      fastForward?.root === root ? fastForward.offer(branch.reference) : null;
     const asking = (ask: BranchAsk | null) => ask && (() => onBranchAsk(ask));
     const state = branchVisibility(rule, branch.reference);
     const apply = (next: VisibilityRule) => () => {
@@ -313,6 +318,14 @@ export function RepositoryTree({
           () => onCheckout(branch),
           elsewhere ?? checkedOut,
         )}
+        {advance &&
+          write(
+            FastForward,
+            `Fast-forward to ${advance.upstream}`,
+            () => fastForward?.onSelect(advance.branch),
+            elsewhere ?? advance.reason,
+            `Moves ${branch.name} to ${advance.upstream}. A fast-forward has no Undo entry.`,
+          )}
         {merge?.root === root &&
           write(
             GitBranchPlus,

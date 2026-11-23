@@ -100,6 +100,7 @@ export const fastForwardReportSchema = z.object({
 
 export type BranchRef = z.infer<typeof branchRefSchema>;
 type BranchState = z.infer<typeof branchStateSchema>;
+type Blocker = z.infer<typeof blockerSchema>;
 export type BranchStatus = z.infer<typeof branchStatusSchema>;
 export type FetchSummary = z.infer<typeof fetchSummarySchema>;
 export type RepositoryOverview = z.infer<typeof overviewSchema>;
@@ -277,6 +278,66 @@ export function readyAdvances(overview: RepositoryOverview): Advance[] {
         ]
       : [],
   );
+}
+
+/** Why a behind branch cannot move, in the words its skipped fast-forward reports. */
+export function blockerReason(blocker: Blocker): string {
+  switch (blocker.kind) {
+    case "dirty":
+      return `Uncommitted changes in ${baseName(blocker.worktree)}. Commit or stash first.`;
+    case "inUse":
+      return `${baseName(blocker.worktree)} is in the middle of a merge, rebase, or other operation.`;
+    case "unverified":
+      return blocker.message;
+    default: {
+      const exhaustive: never = blocker;
+      return exhaustive;
+    }
+  }
+}
+
+function baseName(path: string): string {
+  return path.split("/").filter(Boolean).at(-1) ?? path;
+}
+
+/** The branch menu's Fast-forward item. A null `reason` means it can run. */
+export type FastForwardOffer = {
+  branch: BranchRef;
+  upstream: string;
+  reason: string | null;
+};
+
+/** `root` is the worktree whose sidebar asks. Null when the branch tracks no live upstream. */
+export function fastForwardOffer(
+  branch: BranchStatus,
+  root: RepositoryRoot,
+): FastForwardOffer | null {
+  const { state } = branch;
+  if (state.kind === "untracked" || state.kind === "gone") return null;
+  const upstream = shortRemote(state.upstream);
+  const offer = (reason: string | null) => ({
+    branch: branch.reference,
+    upstream,
+    reason,
+  });
+  switch (state.kind) {
+    case "upToDate":
+      return offer(`Up to date with ${upstream}.`);
+    case "ahead":
+      return offer(`Nothing to pull. It is only ahead of ${upstream}.`);
+    case "diverged":
+      return offer(
+        `It has diverged from ${upstream}, so it cannot fast-forward.`,
+      );
+    case "behind":
+      if (branch.checkedOutAt === root)
+        return offer("It is checked out here. Use Pull to update it.");
+      return offer(state.blocker && blockerReason(state.blocker));
+    default: {
+      const exhaustive: never = state;
+      return exhaustive;
+    }
+  }
 }
 
 const attentionOrder: Record<BranchState["kind"], number> = {
