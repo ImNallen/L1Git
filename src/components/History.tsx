@@ -30,7 +30,6 @@ import { mac } from "../repositories";
 import { compareRows, comparedRowId } from "../domain/comparison";
 import { replayEntry } from "../domain/merge";
 import type { Compare } from "../domain/comparison";
-import { diffstatBlocks } from "../domain/diffstat";
 import type { GraphRow, RowId } from "../domain/graph";
 import { highlightBranch } from "../domain/highlight";
 import type { RowHighlight } from "../domain/highlight";
@@ -285,11 +284,6 @@ function ChangesCell({ stats }: { stats: LineStats | undefined }) {
       <span className={`change-stat deleted${deleted === 0 ? " zero" : ""}`}>
         {"\u2212"}
         {deleted.toLocaleString()}
-      </span>
-      <span className="diffstat" aria-hidden="true">
-        {diffstatBlocks(added, deleted).map((block, index) => (
-          <span key={index} className={block} />
-        ))}
       </span>
     </td>
   );

@@ -42,8 +42,6 @@
   --workspace-diff-path: #dfdfdf;
   --workspace-diff-comparison: #8b8b8b;
   --workspace-history-heading: #a2a2a2;
-  --workspace-diffstat-added: #51cba0;
-  --workspace-diffstat-neutral: #478c75;
   --workspace-folder-icon: #909090;
   --workspace-file-icon: #909090;
 }
