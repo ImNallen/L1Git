@@ -975,14 +975,18 @@ fn forecast(
     // `merge-tree` labels a path it moves aside with the commit it was given, and
     // `git merge` labels it `HEAD`.
     let ours = format!("~{}", destination.as_str());
-    let paths: BTreeSet<String> = simulated
-        .conflicted
-        .into_iter()
-        .map(|path| match path.strip_suffix(&ours) {
-            Some(stem) => format!("{stem}~HEAD"),
-            None => path,
-        })
-        .collect();
+    let mut paths = BTreeSet::new();
+    for path in simulated.conflicted {
+        let Some(stem) = path.strip_suffix(&ours) else {
+            paths.insert(path);
+            continue;
+        };
+        let name = format!("{stem}~HEAD");
+        if taken(repo, destination, source, &name, deadline)? {
+            return Ok(None);
+        }
+        paths.insert(name);
+    }
     Ok(Some(if paths.is_empty() {
         MergePrediction::Clean
     } else {
@@ -990,6 +994,45 @@ fn forecast(
             paths: paths.into_iter().collect(),
         }
     }))
+}
+
+/// `git merge` appends a numeric suffix to a moved-aside name that any side or merge
+/// base tracks, and `merge-tree` checked a different name.
+fn taken(
+    repo: &Repo,
+    destination: &Oid,
+    source: &Oid,
+    name: &str,
+    deadline: WriteDeadline,
+) -> Result<bool, RepositoryError> {
+    let bases = git::read(
+        &repo.root,
+        &["merge-base", "--all", destination.as_str(), source.as_str()],
+        deadline.reads(),
+    )?;
+    let bases = git::text(&bases);
+    for commit in [destination.as_str(), source.as_str()]
+        .into_iter()
+        .chain(bases.lines())
+    {
+        let tracked = git::read(
+            &repo.root,
+            &[
+                "--literal-pathspecs",
+                "ls-tree",
+                "--name-only",
+                "-z",
+                commit,
+                "--",
+                name,
+            ],
+            deadline.reads(),
+        )?;
+        if !tracked.is_empty() {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 pub(super) fn ancestor(
