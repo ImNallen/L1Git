@@ -585,10 +585,9 @@ fn a_session_without_a_forecast_saves_no_prediction_key() {
     let (repo, mut record, _) = f.record();
     record.session.review.prediction = None;
     record.save(&repo).unwrap();
-    let saved: serde_json::Value = serde_json::from_slice(
-        &fs::read(directory(&repo, session.id).join("state.json")).unwrap(),
-    )
-    .unwrap();
+    let saved: serde_json::Value =
+        serde_json::from_slice(&fs::read(directory(&repo, session.id).join("state.json")).unwrap())
+            .unwrap();
     assert!(
         !saved["session"]["review"]
             .as_object()

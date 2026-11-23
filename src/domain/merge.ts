@@ -36,7 +36,7 @@ export const mergeReviewSchema = z.strictObject({
     }),
   ]),
   plan: z.enum(["upToDate", "fastForward", "mergeCommit"]),
-  prediction: mergePredictionSchema.nullable(),
+  prediction: mergePredictionSchema.nullable().default(null),
 });
 const mergeSessionSchema = z.strictObject({
   id: entryIdSchema,
