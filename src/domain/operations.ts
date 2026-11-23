@@ -338,8 +338,8 @@ const stashBranch = /^(?:WIP on|On) ([^:]*): /;
 
 export const stashTitle = (message: string) => message.replace(stashBranch, "");
 
-const stashLabel = ({ name, message }: { name: string; message: string }) =>
-  message === "" ? name : `stash ${quoted(stashTitle(message))}`;
+const stashLabel = ({ name, message }: { name: string; message?: string }) =>
+  message === undefined ? name : `stash ${quoted(stashTitle(message))}`;
 
 /** The worktree apply and pop change. A selected worktree wins. Otherwise the one worktree checked out on the branch Git names in the stash message, then the repository that was added. */
 export function worktreeForStash(

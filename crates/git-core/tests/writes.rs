@@ -2112,7 +2112,7 @@ fn stash_tip(repo: &Repo, index: usize) -> l1_git_core::StashTip {
     l1_git_core::StashTip {
         name: format!("stash@{{{index}}}"),
         oid: oid.to_owned().try_into().unwrap(),
-        message: message.to_owned(),
+        message: Some(message.to_owned()),
     }
 }
 
@@ -2550,7 +2550,11 @@ fn stash_drop_journaled_before_stash_messages_still_reads_and_undoes() {
     let Operation::StashDrop { stash } = undo.operation else {
         panic!("expected the stash drop, got {:?}", undo.operation);
     };
-    assert_eq!(stash.message, "");
+    assert_eq!(stash.message, None);
+    assert_eq!(
+        serde_json::to_value(&stash).unwrap(),
+        serde_json::json!({ "name": "stash@{0}", "oid": stash.oid.as_str() })
+    );
     coordinator.undo(repo.path(), dropped.id).unwrap();
     assert_eq!(stash_list(&repo), listed);
 }

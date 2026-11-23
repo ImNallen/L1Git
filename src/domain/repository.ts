@@ -104,7 +104,7 @@ const stashSchema = z.object({
 const stashTipSchema = z.strictObject({
   name: z.string(),
   oid: oidSchema,
-  message: z.string().default(""),
+  message: z.string().optional(),
 });
 const submoduleSchema = z.object({
   path: z.string(),
