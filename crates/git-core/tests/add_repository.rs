@@ -102,7 +102,13 @@ fn a_child_lists_as_a_repository_a_bare_repository_or_a_folder() {
     git(&base, &["init", "--quiet", "--bare", "bare.git"]);
     fs::write(base.join("head-only/HEAD"), "ref: refs/heads/main\n").unwrap();
     let entries = listed(&base);
-    let kind = |name: &str| entries.iter().find(|entry| entry.name == name).unwrap().kind;
+    let kind = |name: &str| {
+        entries
+            .iter()
+            .find(|entry| entry.name == name)
+            .unwrap()
+            .kind
+    };
     assert_eq!(kind("repo"), DirectoryKind::Repository);
     assert_eq!(kind("linked"), DirectoryKind::Repository);
     assert_eq!(kind("bare.git"), DirectoryKind::Bare);
@@ -121,11 +127,14 @@ fn a_path_at_or_inside_a_bare_repository_offers_that_one_directory() {
         kind: DirectoryKind::Bare,
     }];
     assert_eq!(listed(&bare), expected);
-    assert_eq!(listed(&bare.join("refs")), [DirectoryEntry {
-        name: "refs".to_owned(),
-        path: bare.join("refs").to_str().unwrap().to_owned(),
-        kind: DirectoryKind::Bare,
-    }]);
+    assert_eq!(
+        listed(&bare.join("refs")),
+        [DirectoryEntry {
+            name: "refs".to_owned(),
+            path: bare.join("refs").to_str().unwrap().to_owned(),
+            kind: DirectoryKind::Bare,
+        }]
+    );
 }
 
 #[test]

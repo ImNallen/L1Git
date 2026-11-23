@@ -23,7 +23,15 @@ const PRIVACY_FOLDERS: [&str; 6] = [
 pub struct DirectoryEntry {
     pub name: String,
     pub path: String,
-    pub repository: bool,
+    pub kind: DirectoryKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DirectoryKind {
+    Repository,
+    Bare,
+    Folder,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -87,15 +95,32 @@ pub(crate) fn has_git(directory: &Path) -> bool {
         .is_ok_and(|git| git.is_dir() || git.is_file())
 }
 
+/// The layout Git requires of a repository directory.
+fn is_bare(directory: &Path) -> bool {
+    directory.join("HEAD").is_file()
+        && directory.join("objects").is_dir()
+        && directory.join("refs").is_dir()
+}
+
+fn kind_of(directory: &Path) -> DirectoryKind {
+    if has_git(directory) {
+        DirectoryKind::Repository
+    } else if is_bare(directory) {
+        DirectoryKind::Bare
+    } else {
+        DirectoryKind::Folder
+    }
+}
+
 /// The deepest ancestor of `path`, or `path` itself, that is a directory.
 pub(crate) fn nearest_directory(path: &Path) -> Option<&Path> {
     path.ancestors().find(|ancestor| ancestor.is_dir())
 }
 
-/// What a typed path offers the Local folder step. Inside a repository that is
-/// the one directory. Otherwise it is the children of a directory, or the
-/// children of the parent whose names start with the last segment. A missing
-/// parent offers nothing.
+/// What a typed path offers the Local folder step. Inside a repository, bare
+/// or not, that is the one directory. Otherwise it is the children of a
+/// directory, or the children of the parent whose names start with the last
+/// segment. A missing parent offers nothing.
 pub fn list_directories(
     typed: &str,
     home: Option<&Path>,
@@ -106,7 +131,14 @@ pub fn list_directories(
     };
     let resolved = nearest.canonicalize();
     let resolved = resolved.as_deref().unwrap_or(nearest);
-    if resolved.ancestors().any(has_git) {
+    let kind = if resolved.ancestors().any(has_git) {
+        Some(DirectoryKind::Repository)
+    } else if resolved.ancestors().any(is_bare) {
+        Some(DirectoryKind::Bare)
+    } else {
+        None
+    };
+    if let Some(kind) = kind {
         return Ok(DirectoryListing {
             entries: vec![DirectoryEntry {
                 name: nearest.file_name().map_or_else(
@@ -114,7 +146,7 @@ pub fn list_directories(
                     |name| name.to_string_lossy().into_owned(),
                 ),
                 path: nearest.to_string_lossy().into_owned(),
-                repository: true,
+                kind,
             }],
         });
     }
@@ -160,8 +192,11 @@ fn children(
             .map(|name| {
                 let path = directory.join(&name);
                 DirectoryEntry {
-                    repository: !(private && PRIVACY_FOLDERS.contains(&name.as_str()))
-                        && has_git(&path),
+                    kind: if private && PRIVACY_FOLDERS.contains(&name.as_str()) {
+                        DirectoryKind::Folder
+                    } else {
+                        kind_of(&path)
+                    },
                     path: path.to_string_lossy().into_owned(),
                     name,
                 }
