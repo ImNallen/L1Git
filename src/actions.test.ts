@@ -243,6 +243,28 @@ describe("command palette", () => {
     ]);
   });
 
+  it("names the parent folder of repositories that share a name", () => {
+    const items = paletteItems(
+      repositoryScreen,
+      commands(),
+      true,
+      [
+        ...repositories,
+        { root: "/old/l1-demo" as RepositoryRoot, name: "l1-demo" },
+      ],
+      null,
+    );
+    expect(
+      filterPalette(items, "l1-demo").map(({ title, detail }) => ({
+        title,
+        detail,
+      })),
+    ).toEqual([
+      { title: "l1-demo (work)", detail: "/work/l1-demo" },
+      { title: "l1-demo (old)", detail: "/old/l1-demo" },
+    ]);
+  });
+
   it("leaves repository actions, repositories, and branches off Settings", () => {
     const settings: ActionContext = { ...repositoryScreen, screen: "settings" };
     expect(titles(settings, "")).toEqual([

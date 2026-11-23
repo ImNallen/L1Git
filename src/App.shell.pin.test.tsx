@@ -24,7 +24,7 @@ import {
   pinStatus,
 } from "./test/fixtures";
 import { overviewSchema } from "./domain/overview";
-import { headSchema } from "./domain/repository";
+import { headSchema, rootSchema } from "./domain/repository";
 import { publishOptionsSchema } from "./domain/push";
 
 installHarness();
@@ -496,6 +496,16 @@ it("keeps repository identity while detached", async () => {
     document.querySelector(".repository-open[aria-current='true']")
       ?.textContent,
   ).toBe("pin");
+});
+
+it("tells same-named repositories apart by their parent folders", async () => {
+  const elsewhere = rootSchema.parse("/elsewhere/pin");
+  await mountApp({
+    saved: { entries: [PIN, elsewhere, OTHER], lastRoot: PIN },
+  });
+  expect(query("button", "pin fixture")).toBe(repositoryRow(PIN));
+  expect(query("button", "pin elsewhere")).toBe(repositoryRow(elsewhere));
+  expect(query("button", "other")).toBe(repositoryRow(OTHER));
 });
 
 it("updates the selected repository without hiding its refs on repeat clicks", async () => {
