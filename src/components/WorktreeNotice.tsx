@@ -14,18 +14,25 @@ export function WorktreeNoticeRow({
   onOpen: (root: RepositoryRoot) => void;
   onDismiss: () => void;
 }) {
+  const dismiss = (
+    <button className="notice-dismiss" aria-label="Dismiss" onClick={onDismiss}>
+      <X size={13} />
+    </button>
+  );
+  if (notice.kind === "removed")
+    return (
+      <div className="notice info-notice" role="status">
+        <FolderGit2 size={14} />
+        <span>Removed worktree {notice.name}. Removal cannot be undone.</span>
+        {dismiss}
+      </div>
+    );
   if (notice.kind === "removeFailed")
     return (
       <div className="notice error-notice" role="alert">
         <TriangleAlert size={14} />
         <span>Could not remove the worktree. {notice.problem.message}</span>
-        <button
-          className="notice-dismiss"
-          aria-label="Dismiss"
-          onClick={onDismiss}
-        >
-          <X size={13} />
-        </button>
+        {dismiss}
       </div>
     );
   const { created, branch } = notice;

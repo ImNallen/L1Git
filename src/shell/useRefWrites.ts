@@ -86,6 +86,7 @@ export type WorktreeNotice =
       branch: string;
       created: NewWorktree;
     }
+  | { kind: "removed"; from: RepositoryRoot; name: string }
   | {
       kind: "removeFailed";
       from: RepositoryRoot;
@@ -230,13 +231,7 @@ export function useRefWrites({
     const outcome = await writes.removeWorktree(removing.root);
     if (outcome.kind === "removed") {
       nav.sidebar.onRemove(removing.root);
-      const removed = removing.root;
-      setNotice((shown) =>
-        shown?.kind === "removeFailed" ||
-        (shown?.kind === "created" && shown.created.root === removed)
-          ? null
-          : shown,
-      );
+      setNotice({ kind: "removed", from, name: removing.name });
       return;
     }
     setNotice({

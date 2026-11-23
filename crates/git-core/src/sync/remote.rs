@@ -336,6 +336,7 @@ mod tests {
             Instant::now(),
             FetchSummary {
                 changed: false,
+                moved: 0,
                 coalesced: false,
                 remotes: vec![],
             },

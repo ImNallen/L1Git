@@ -101,11 +101,12 @@ function answerFastForward(
   app: Harness,
   name: string,
   advance: { from: string; to: string; behind: number },
+  base = pinOverview(),
 ) {
   app.bridge.respond("overview", () =>
     overviewSchema.parse({
-      ...pinOverview(),
-      branches: pinOverview().branches.map((branch) =>
+      ...base,
+      branches: base.branches.map((branch) =>
         branch.name === name
           ? {
               ...branch,
@@ -130,7 +131,7 @@ function answerFastForward(
         to: advance.to,
       },
     ],
-    overview: pinOverview(),
+    overview: base,
   }));
 }
 
@@ -178,17 +179,14 @@ const behindTopic = {
 };
 
 it("the sidebar fast-forward replaces a pull notice with its own", async () => {
-  const app = await mountApp({
-    world: (world) =>
-      world.overviews.set(
-        PIN,
-        overviewSchema.parse({
-          ...pinOverview(),
-          branches: [...pinOverview().branches, behindTopic],
-        }),
-      ),
+  const withTopic = overviewSchema.parse({
+    ...pinOverview(),
+    branches: [...pinOverview().branches, behindTopic],
   });
-  answerFastForward(app, "main", { from: C4, to: C6, behind: 2 });
+  const app = await mountApp({
+    world: (world) => world.overviews.set(PIN, withTopic),
+  });
+  answerFastForward(app, "main", { from: C4, to: C6, behind: 2 }, withTopic);
   await app.click(
     await toolbarItem(app, "Pull", "Pull (Fast-forward if possible)"),
   );
@@ -327,6 +325,7 @@ it("each repository warning renders one alert", async () => {
             request.mode === "remote" && request.path === PIN
               ? {
                   changed: false,
+                  moved: 0,
                   coalesced: false,
                   remotes: [
                     {

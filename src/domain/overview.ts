@@ -50,6 +50,7 @@ const fetchFailureSchema = z.enum([
 ]);
 const fetchSummarySchema = z.object({
   changed: z.boolean(),
+  moved: z.number().int().nonnegative(),
   coalesced: z.boolean(),
   remotes: z.array(
     z.object({

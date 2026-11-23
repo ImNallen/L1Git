@@ -197,6 +197,32 @@ group("describe", () => {
     expect(describe(start("cherryPick"))).toBe("Cherry-pick “Fix the thing”");
     expect(describe(start("revert"))).toBe("Revert “Fix the thing”");
     expect(movesRefs(start("revert"))).toBe(true);
+    expect(describe(start("cherryPick"), "past")).toBe(
+      "Cherry-picked aaaaaaa onto main",
+    );
+    expect(describe(start("revert"), "past")).toBe("Reverted aaaaaaa on main");
+  });
+
+  it("names a write that has run in the past tense", () => {
+    expect(
+      describe(
+        {
+          kind: "rebase",
+          branch: localRefSchema.parse("refs/heads/main"),
+          onto: refSchema.parse("refs/remotes/origin/main"),
+        } as Operation,
+        "past",
+      ),
+    ).toBe("Rebased main onto origin/main");
+    expect(describe({ kind: "stageFiles", entries: [unmerged] }, "past")).toBe(
+      "Marked clash.txt resolved",
+    );
+    expect(describe({ kind: "discard", entries: [modified] }, "past")).toBe(
+      "Discarded README.md",
+    );
+    expect(
+      describe({ kind: "editMessage", message: "Better words\n" }, "past"),
+    ).toBe("Edited message to “Better words”");
   });
 
   const stage = (...paths: string[]) =>

@@ -102,6 +102,7 @@ const overview = overviewSchema.parse({
   ],
   fetch: {
     changed: true,
+    moved: 1,
     coalesced: false,
     remotes: [
       { remote: "origin", outcome: { kind: "fetched" } },

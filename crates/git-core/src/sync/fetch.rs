@@ -3,7 +3,11 @@ use crate::{
     git::{self, Deadline, Finished, Mutation},
     remotes, stderr,
 };
-use std::{collections::HashSet, path::Path, time::Duration};
+use std::{
+    collections::{BTreeMap, HashSet},
+    path::Path,
+    time::Duration,
+};
 
 pub(super) fn fetch_all(
     root: &Path,
@@ -33,11 +37,39 @@ fn summary(
     reads: Deadline,
     remotes: Vec<RemoteFetch>,
 ) -> Result<FetchSummary, RepositoryError> {
+    let after = tips(root, reads.renewed())?;
     Ok(FetchSummary {
-        changed: tips(root, reads.renewed())? != before,
+        changed: after != before,
+        moved: moved(before, &after),
         coalesced: false,
         remotes,
     })
+}
+
+/// How many branches the fetch created, moved, or deleted. A symbolic ref such
+/// as `origin/HEAD` follows its target, so it does not count again.
+fn moved(before: &[u8], after: &[u8]) -> u32 {
+    let branches = |tips: &[u8]| -> BTreeMap<Vec<u8>, Vec<u8>> {
+        tips.split(|byte| *byte == b'\n')
+            .filter_map(|line| {
+                let mut fields = line.splitn(3, |byte| *byte == b' ');
+                match (fields.next(), fields.next(), fields.next()) {
+                    (Some(name), Some(oid), Some(b"")) => Some((name.to_vec(), oid.to_vec())),
+                    _ => None,
+                }
+            })
+            .collect()
+    };
+    let (before, after) = (branches(before), branches(after));
+    let count = after
+        .iter()
+        .filter(|(name, oid)| before.get(*name) != Some(oid))
+        .count()
+        + before
+            .keys()
+            .filter(|name| !after.contains_key(*name))
+            .count();
+    u32::try_from(count).unwrap_or(u32::MAX)
 }
 
 /// Where a branch's commits come from.
@@ -202,7 +234,7 @@ fn tips(root: &Path, reads: Deadline) -> Result<Vec<u8>, RepositoryError> {
         root,
         &[
             "for-each-ref",
-            "--format=%(refname) %(objectname)",
+            "--format=%(refname) %(objectname) %(symref)",
             "refs/heads/",
             "refs/remotes/",
         ],

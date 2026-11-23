@@ -171,7 +171,7 @@ it("a clean cherry-pick shows a notice whose Undo takes it back", async () => {
   const app = await mountApp({ bridge: journal });
   await cherryPickRelease(app);
   const notice = get("status", /Cherry-picked/);
-  expect(notice.textContent).toBe("Cherry-picked 3333333 onto main.");
+  expect(notice.textContent).toBe("Cherry-picked 3333333 onto main.Undo");
   expect(get("button", "Dismiss", notice)).toBeTruthy();
   await app.click(get("button", "Undo", notice));
   expect(app.bridge.lines((request) => request.op === "undo")).toEqual([

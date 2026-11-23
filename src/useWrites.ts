@@ -152,18 +152,20 @@ export function useWrites(
         changed === worktree ? null : reread.worktree(changed),
       ]);
       const notice: WriteNotice | null =
-        outcome.kind === "failed" && outcome.problem.kind !== "replayStopped"
-          ? job.action === "write"
-            ? {
-                kind: "failed",
-                ...job,
-                label,
-                problem: outcome.problem,
-                operation,
-              }
-            : { kind: "failed", ...job, label, problem: outcome.problem }
-          : action === "write"
+        outcome.kind === "failed"
+          ? outcome.problem.kind === "replayStopped"
             ? null
+            : job.action === "write"
+              ? {
+                  kind: "failed",
+                  ...job,
+                  label,
+                  problem: outcome.problem,
+                  operation,
+                }
+              : { kind: "failed", ...job, label, problem: outcome.problem }
+          : action === "write"
+            ? { kind: "wrote", operation, entry: outcome.applied.id }
             : {
                 kind: "stepped",
                 step: action,
