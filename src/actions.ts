@@ -1,5 +1,6 @@
 import type { PullTarget, SyncTarget } from "./domain/overview";
 import type { PushControl } from "./domain/push";
+import { distinctNames } from "./domain/repositoryNames";
 import { normalizeSearch } from "./domain/search";
 import { replayEntry } from "./domain/merge";
 import type {
@@ -743,13 +744,16 @@ export function paletteItems(
       disabled: true,
       run: () => {},
     });
+  const suffixes = distinctNames(repositories);
   return [
     ...listed,
     ...repositories.map(
       (repository): PaletteItem => ({
         id: `repository:${repository.root}`,
         kind: "repository",
-        title: repository.name,
+        title: suffixes.has(repository.root)
+          ? `${repository.name} (${suffixes.get(repository.root)})`
+          : repository.name,
         detail: repository.root,
         run: () => commands.openRepository(repository.root),
       }),
