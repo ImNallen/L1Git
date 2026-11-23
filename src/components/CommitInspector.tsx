@@ -887,13 +887,19 @@ function WorktreeInspector({
   const conflictSummaries = useConflictSummaries(
     worktree.root,
     writes.merge,
-    groups.find((group) => group.side === "conflict")?.files.length ?? 0,
+    groups
+      .find((group) => group.side === "conflict")
+      ?.files.map(({ path }) => path) ?? [],
   );
+  const summaryOf = (path: string) =>
+    conflictSummaries.kind === "ready"
+      ? conflictSummaries.value.get(path)
+      : undefined;
   const unresolvedLabel = (path: string) => {
     const draft = resolutionOf(resolutionKey(worktree.root, path));
     if (draft && isDirty(draft)) return draftConflictLabel(draft.text);
     if (draft && markBlock(draft) === "markers") return "Leftover markers";
-    const summary = conflictSummaries?.get(path);
+    const summary = summaryOf(path);
     return summary ? conflictLabel(summary) : "Conflicted";
   };
   const markReason = (path: string) => {
@@ -902,7 +908,8 @@ function WorktreeInspector({
       const block = markBlock(draft);
       return block === null ? null : markReasons[block];
     }
-    const summary = conflictSummaries?.get(path);
+    if (conflictSummaries.kind === "error") return markReasons.unreadable;
+    const summary = summaryOf(path);
     if (summary === undefined) return markReasons.reading;
     return summary.kind === "text" && summary.conflicts > 0
       ? markReasons.conflicts

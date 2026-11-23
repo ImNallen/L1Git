@@ -62,7 +62,7 @@ export function markBlock(draft: ResolutionDraft): MarkBlock | null {
     return "reading";
   return null;
 }
-export const markReasons: Record<MarkBlock | "busy", string> = {
+export const markReasons: Record<MarkBlock | "busy" | "unreadable", string> = {
   conflicts: "Resolve every conflict first.",
   markers: "Remove the leftover conflict markers first.",
   unsaved: "Save the result first.",
@@ -71,6 +71,8 @@ export const markReasons: Record<MarkBlock | "busy", string> = {
   problem: "Refresh the conflict first.",
   reading: "Wait for L1 Git to read the file.",
   busy: "Wait for the current operation to finish.",
+  unreadable:
+    "L1 Git could not read this file's conflicts. Open it in the resolver.",
 };
 export const canMark = (draft: ResolutionDraft) => markBlock(draft) === null;
 function publish(key: string, draft: ResolutionDraft | null) {
