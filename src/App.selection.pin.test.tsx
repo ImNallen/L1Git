@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import {
   dialogs,
   get,
@@ -13,7 +13,7 @@ import {
   repositoryRow,
   selectedRow,
 } from "./test/appHarness";
-import { C3, OTHER, OTHER_TIP, PIN } from "./test/fixtures";
+import { C3, C4, OTHER, OTHER_TIP, PIN } from "./test/fixtures";
 import { oidSchema, snapshotSchema } from "./domain/repository";
 
 installHarness();
@@ -162,6 +162,45 @@ it("a committed file offers History and Blame beside the diff styles", async () 
       (option) => option.querySelector(".file-revision-subject")?.textContent,
     ),
   ).toEqual(["Main tip", "Release"]);
+});
+
+it("a reread under an open blame keeps its file, so scrolling it logs no error", async () => {
+  const lines = Array.from({ length: 400 }, (_, index) => `line ${index + 1}`);
+  const app = await mountApp({
+    bridge: (bridge) =>
+      bridge.respond("blame", () => ({
+        kind: "text",
+        contents: `${lines.join("\n")}\n`,
+        lossy: false,
+        ranges: [
+          {
+            oid: C4,
+            start: 1,
+            lines: lines.length,
+            author: "Pin Author",
+            email: "pin@example.test",
+            timestamp: 1_700_000_004,
+            summary: "Main tip",
+          },
+        ],
+      })),
+  });
+  await openFirstFile(app);
+  await app.runPaletteItem("Show blame");
+  const errors = vi.spyOn(console, "error");
+  try {
+    await app.refocusWindow();
+    const scroller = document.querySelector<HTMLElement>(".file-blame")!;
+    await app.act(() => {
+      scroller.scrollTop = 2400;
+      scroller.dispatchEvent(new Event("scroll"));
+    });
+    await app.flushFrames();
+    expect(app.bridge.count("snapshot", PIN)).toBeGreaterThan(1);
+    expect(errors.mock.calls).toEqual([]);
+  } finally {
+    errors.mockRestore();
+  }
 });
 
 it("a pending jump resolves against a reread that failed, which keeps the cached view", async () => {
