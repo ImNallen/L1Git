@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { branchSchema } from "./repository";
+import { branchSchema, rootSchema } from "./repository";
 import {
   branchStateSchema,
+  branchStatusSchema,
   divergence,
+  fastForwardOffer,
   fetchTarget,
   overviewSchema,
   pullTarget,
@@ -149,6 +151,84 @@ describe("launch overview", () => {
     expect(
       repositoryRank(only("trunk", "feat/done", "feat/local"), false),
     ).toBe(3);
+  });
+});
+
+describe("fast-forward offer", () => {
+  const offers = (root: string) =>
+    Object.fromEntries(
+      overview.branches.map((branch) => [
+        branch.name,
+        fastForwardOffer(branch, rootSchema.parse(root)),
+      ]),
+    );
+
+  it("offers a clean behind branch and explains every other state", () => {
+    expect(offers("/code/app")).toEqual({
+      develop: {
+        branch: "refs/heads/develop",
+        upstream: "origin/develop",
+        reason: "Uncommitted changes in app-develop. Commit or stash first.",
+      },
+      "feat/ahead": {
+        branch: "refs/heads/feat/ahead",
+        upstream: "origin/feat/ahead",
+        reason: "Nothing to pull. It is only ahead of origin/feat/ahead.",
+      },
+      "feat/done": {
+        branch: "refs/heads/feat/done",
+        upstream: "origin/feat/done",
+        reason: "Up to date with origin/feat/done.",
+      },
+      "feat/gone": null,
+      "feat/hidden": {
+        branch: "refs/heads/feat/hidden",
+        upstream: "origin/feat/hidden",
+        reason:
+          "Git did not finish checking whether this branch is checked out.",
+      },
+      "feat/local": null,
+      "feat/split": {
+        branch: "refs/heads/feat/split",
+        upstream: "origin/feat/split",
+        reason:
+          "It has diverged from origin/feat/split, so it cannot fast-forward.",
+      },
+      "feat/stale": {
+        branch: "refs/heads/feat/stale",
+        upstream: "origin/feat/stale",
+        reason: null,
+      },
+      main: {
+        branch: "refs/heads/main",
+        upstream: "origin/main",
+        reason: "It is checked out here. Use Pull to update it.",
+      },
+      trunk: {
+        branch: "refs/heads/trunk",
+        upstream: "origin/trunk",
+        reason: "Up to date with origin/trunk.",
+      },
+    });
+  });
+
+  it("offers a clean branch checked out in another worktree", () => {
+    expect(offers("/code/app-develop").main?.reason).toBeNull();
+  });
+
+  it("names the worktree whose operation holds the branch", () => {
+    const held = branchStatusSchema.parse(
+      row("feat/held", "other", {
+        kind: "behind",
+        upstream: "refs/remotes/origin/feat/held",
+        target: b,
+        behind: 1,
+        blocker: { kind: "inUse", worktree: "/code/app-held" },
+      }),
+    );
+    expect(fastForwardOffer(held, rootSchema.parse("/code/app"))?.reason).toBe(
+      "app-held is in the middle of a merge, rebase, or other operation.",
+    );
   });
 });
 
