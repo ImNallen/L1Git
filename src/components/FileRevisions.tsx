@@ -186,6 +186,15 @@ export function FileBlame({
   );
   const ready = blame.kind === "ready" ? blame.value : null;
   const ranges = ready?.kind === "text" ? ready.ranges : null;
+  const contents = ready?.kind === "text" ? ready.contents : "";
+  const file = useMemo(
+    () => ({
+      name: path,
+      contents: contents.replace(/\n$/, ""),
+      cacheKey: oid + path,
+    }),
+    [path, oid, contents],
+  );
   const annotations = useMemo(
     () =>
       ranges?.map(
@@ -244,11 +253,7 @@ export function FileBlame({
       )}
       <Virtualizer className="file-diff-scroll file-blame">
         <File
-          file={{
-            name: path,
-            contents: value.contents.replace(/\n$/, ""),
-            cacheKey: oid + path,
-          }}
+          file={file}
           options={options}
           lineAnnotations={annotations}
           renderAnnotation={({ metadata: range }) => (
