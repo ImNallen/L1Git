@@ -63,7 +63,7 @@ it("the push notice is role=status on success and role=alert on failure", async 
   expect(query("status", /origin\/main/)).toBeNull();
   expect(alerts()).toMatchInlineSnapshot(`
     [
-      "Push rejected. The remote said no. ",
+      "Push rejected. main has diverged from origin/main (1 ahead, 1 behind). Pull, then push again. ",
     ]
   `);
 });
