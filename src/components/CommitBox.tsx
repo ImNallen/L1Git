@@ -58,7 +58,7 @@ export function CommitBox({
   const amending = amend !== null;
   const stale = amend !== null && !amendsHead(current, head);
   useEffect(() => {
-    if (!stale || frozen) return;
+    if (!stale || frozen || submitting) return;
     setDraft({ draft: amend.draftAside, amend: null });
     setProblem({
       kind: "staleView",
@@ -66,7 +66,7 @@ export function CommitBox({
       message:
         "HEAD moved since L1 Git loaded its message, so Amend is off again and your draft is back.",
     });
-  }, [stale, amend, setDraft, frozen]);
+  }, [stale, amend, setDraft, frozen, submitting]);
   const ready =
     draft.summary.trim() !== "" &&
     (staged > 0 || amending) &&
