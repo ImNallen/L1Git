@@ -432,7 +432,7 @@
   border: 1px solid var(--border-control);
   background: var(--control);
 }
-.conflict-menu {
+.context-menu.conflict-menu {
   width: 200px;
 }
 .conflict-hint {
