@@ -280,6 +280,23 @@ fn resolves_upstream_name_custom_fetch_mapping_and_separate_pushurl() {
 }
 
 #[test]
+fn intent_tracks_the_endpoint_only_when_push_and_fetch_urls_match() {
+    let world = World::new();
+    let core = coordinator(&world);
+    commit(&world.work, "f", "two\n", "two");
+    assert!(intent(&core, world.path()).tracks_endpoint);
+    let remote = world.remote.to_str().unwrap();
+    git(&world.work, &["config", "remote.origin.pushurl", remote]);
+    assert!(intent(&core, world.path()).tracks_endpoint);
+    let other = world.file("push.git");
+    git(
+        &world.work,
+        &["config", "remote.origin.pushurl", other.to_str().unwrap()],
+    );
+    assert!(!intent(&core, world.path()).tracks_endpoint);
+}
+
+#[test]
 fn refuses_unsupported_targets_without_publication() {
     let world = World::new();
     let core = coordinator(&world);

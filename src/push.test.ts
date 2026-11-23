@@ -16,6 +16,7 @@ const intent = pushIntentSchema.parse({
   remote: "origin",
   destination: "refs/heads/published",
   endpoint: "Local or unrecognized remote",
+  tracksEndpoint: true,
   fingerprint: "b".repeat(40),
 });
 
@@ -143,6 +144,22 @@ describe("push readiness", () => {
     expect(pushControl(ready, null, moved).kind).toBe("ready");
     expect(pushControl(ready, null, local({ kind: "untracked" })).kind).toBe(
       "ready",
+    );
+  });
+  it("keeps Push enabled when the push URL is a different repository than the fetch URL", () => {
+    const separate = pushIntentSchema.parse({
+      ...intent,
+      tracksEndpoint: false,
+    });
+    expect(
+      pushControl({ kind: "ready", intent: separate }, null, behind).kind,
+    ).toBe("ready");
+    const result = explainBehindRejection(
+      { ...rejected, intent: separate },
+      diverged,
+    );
+    expect(pushOutcomeText(result.outcome, result.intent)).toBe(
+      "Push rejected. The remote rejected this push.",
     );
   });
   it("names a diverged or behind branch in the rejection", () => {
