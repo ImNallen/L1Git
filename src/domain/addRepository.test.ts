@@ -13,10 +13,10 @@ import {
   targetLocation,
 } from "./addRepository";
 
-const entry = (path: string, repository = false) => ({
+const entry = (path: string) => ({
   name: path.split("/").at(-1) ?? path,
   path,
-  repository,
+  kind: "folder" as const,
 });
 
 describe("filterSources", () => {

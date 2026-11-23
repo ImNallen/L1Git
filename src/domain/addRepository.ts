@@ -3,9 +3,18 @@ import { z } from "zod";
 const directoryEntrySchema = z.object({
   name: z.string(),
   path: z.string(),
-  repository: z.boolean(),
+  kind: z.enum(["repository", "bare", "folder"]),
 });
 export type DirectoryEntry = z.infer<typeof directoryEntrySchema>;
+
+export const DIRECTORY_LABELS: Record<DirectoryEntry["kind"], string> = {
+  repository: "Git repository",
+  bare: "Bare repository, not supported",
+  folder: "No Git repository",
+};
+
+export const BARE_REASON =
+  "Bare repositories are not supported yet. Choose a working copy of this repository.";
 
 export const directoryListingSchema = z.object({
   entries: z.array(directoryEntrySchema),

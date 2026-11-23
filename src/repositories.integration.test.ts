@@ -629,8 +629,8 @@ describe("real Rust transport contract", () => {
       await run({ op: "listDirectories", path: scratch }),
     ).data;
     expect(listed.entries).toEqual([
-      { name: "cloned", path: cloned.path, repository: true },
-      { name: "created", path: created.path, repository: true },
+      { name: "cloned", path: cloned.path, kind: "repository" },
+      { name: "created", path: created.path, kind: "repository" },
     ]);
     expect(
       z

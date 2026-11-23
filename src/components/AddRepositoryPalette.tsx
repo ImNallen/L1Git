@@ -3,9 +3,11 @@ import type { FormEvent, KeyboardEvent, ReactNode, RefObject } from "react";
 import { flushSync } from "react-dom";
 import { LoaderCircle } from "lucide-react";
 import {
+  BARE_REASON,
   baseFromHome,
   DEFAULT_BASE,
   descendInto,
+  DIRECTORY_LABELS,
   filterSources,
   headerValue,
   HOME_BASE,
@@ -292,7 +294,8 @@ function SubStep({
   const highlighted = entries[current];
   // A listing for an older path may still show, but it is not what Add would add.
   const fresh = listing?.path === typedPath;
-  const addable = fresh && highlighted?.repository === true;
+  const addable = fresh && highlighted?.kind === "repository";
+  const bare = highlighted?.kind === "bare";
   const canSubmit =
     !busy && (step.kind === "local" ? addable : namesTarget(step, base));
   const text = STEP_TEXT[step.kind];
@@ -418,6 +421,7 @@ function SubStep({
               entries.length > 0 ? "add-palette-directories" : undefined,
             "aria-activedescendant":
               current >= 0 ? `add-palette-directory-${current}` : undefined,
+            "aria-describedby": bare ? "add-palette-bare-reason" : undefined,
           })}
         />
         <button
@@ -467,7 +471,8 @@ function SubStep({
                     onClick={() => setActivePath(entry.path)}
                     onDoubleClick={() => {
                       if (busy || !fresh) return;
-                      if (entry.repository) void open(async () => entry.path);
+                      if (entry.kind === "repository")
+                        void open(async () => entry.path);
                       else
                         edit({
                           ...step,
@@ -482,15 +487,9 @@ function SubStep({
                       {entry.name}
                     </span>
                     <span
-                      className={
-                        entry.repository
-                          ? "add-palette-directory-kind repository"
-                          : "add-palette-directory-kind"
-                      }
+                      className={`add-palette-directory-kind ${entry.kind}`}
                     >
-                      {entry.repository
-                        ? "Git repository"
-                        : "No Git repository"}
+                      {DIRECTORY_LABELS[entry.kind]}
                     </span>
                   </li>
                 ))}
@@ -502,6 +501,11 @@ function SubStep({
                   No directories here.
                 </p>
               )
+            )}
+            {bare && (
+              <p id="add-palette-bare-reason" className="add-palette-reason">
+                {BARE_REASON}
+              </p>
             )}
             {listing?.path === typedPath && listing.problem !== null && (
               <div className="error-message" role="alert">

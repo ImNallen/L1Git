@@ -1,6 +1,6 @@
 use l1_git_core::{
-    Coordinator, DirectoryEntry, ErrorKind, Head, Limits, Request, Response, expand_home,
-    list_directories, run,
+    Coordinator, DirectoryEntry, DirectoryKind, ErrorKind, Head, Limits, Request, Response,
+    expand_home, list_directories, run,
 };
 use std::{
     fs,
@@ -60,7 +60,11 @@ fn a_directory_lists_its_child_directories_sorted_ignoring_case() {
     let entries = listed(&base);
     assert_eq!(names(&entries), ["Alpha", "beta", "gamma"]);
     assert_eq!(entries[0].path, base.join("Alpha").to_str().unwrap());
-    assert!(entries.iter().all(|entry| !entry.repository));
+    assert!(
+        entries
+            .iter()
+            .all(|entry| entry.kind == DirectoryKind::Folder)
+    );
 }
 
 #[test]
@@ -90,24 +94,57 @@ fn dot_directories_appear_only_for_a_prefix_that_starts_with_a_dot() {
 }
 
 #[test]
-fn a_child_with_git_metadata_is_a_repository_but_a_bare_one_is_not() {
+fn a_child_lists_as_a_repository_a_bare_repository_or_a_folder() {
     let (_directory, base) = base();
-    folders(&base, &["plain", "repo", "linked"]);
+    folders(&base, &["plain", "repo", "linked", "head-only"]);
     git(&base.join("repo"), &["init", "--quiet"]);
     fs::write(base.join("linked/.git"), "gitdir: elsewhere\n").unwrap();
     git(&base, &["init", "--quiet", "--bare", "bare.git"]);
+    fs::write(base.join("head-only/HEAD"), "ref: refs/heads/main\n").unwrap();
     let entries = listed(&base);
-    let repository = |name: &str| {
+    let kind = |name: &str| {
         entries
             .iter()
             .find(|entry| entry.name == name)
             .unwrap()
-            .repository
+            .kind
     };
-    assert!(repository("repo"));
-    assert!(repository("linked"));
-    assert!(!repository("plain"));
-    assert!(!repository("bare.git"));
+    assert_eq!(kind("repo"), DirectoryKind::Repository);
+    assert_eq!(kind("linked"), DirectoryKind::Repository);
+    assert_eq!(kind("bare.git"), DirectoryKind::Bare);
+    assert_eq!(kind("plain"), DirectoryKind::Folder);
+    assert_eq!(kind("head-only"), DirectoryKind::Folder);
+}
+
+#[test]
+fn a_path_at_or_inside_a_bare_repository_offers_that_one_directory() {
+    let (_directory, base) = base();
+    git(&base, &["init", "--quiet", "--bare", "remote.git"]);
+    let bare = base.join("remote.git");
+    let expected = [DirectoryEntry {
+        name: "remote.git".to_owned(),
+        path: bare.to_str().unwrap().to_owned(),
+        kind: DirectoryKind::Bare,
+    }];
+    assert_eq!(listed(&bare), expected);
+    assert_eq!(
+        listed(&bare.join("refs")),
+        [DirectoryEntry {
+            name: "refs".to_owned(),
+            path: bare.join("refs").to_str().unwrap().to_owned(),
+            kind: DirectoryKind::Bare,
+        }]
+    );
+}
+
+#[test]
+fn a_working_copys_git_directory_still_offers_the_repository() {
+    let (_directory, base) = base();
+    folders(&base, &["repo"]);
+    git(&base.join("repo"), &["init", "--quiet"]);
+    let entries = listed(&base.join("repo/.git"));
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].kind, DirectoryKind::Repository);
 }
 
 #[cfg(unix)]
@@ -135,7 +172,7 @@ fn a_symlink_follows_its_target_into_and_out_of_a_repository() {
         [DirectoryEntry {
             name: "shortcut".to_owned(),
             path: into.to_str().unwrap().to_owned(),
-            repository: true,
+            kind: DirectoryKind::Repository,
         }]
     );
     assert!(l1_git_core::snapshot(into.to_str().unwrap()).is_ok());
@@ -156,7 +193,7 @@ fn a_path_inside_a_repository_offers_that_one_directory() {
             [DirectoryEntry {
                 name: expected.file_name().unwrap().to_str().unwrap().to_owned(),
                 path: expected.to_str().unwrap().to_owned(),
-                repository: true,
+                kind: DirectoryKind::Repository,
             }]
         );
     };
@@ -189,8 +226,12 @@ fn listing_home_does_not_probe_privacy_protected_folders() {
     folders(&base, &["Documents/.git", "Projects/.git"]);
     let entries = list_directories("~", Some(&base)).unwrap().entries;
     assert_eq!(names(&entries), ["Documents", "Projects"]);
-    assert!(!entries[0].repository, "Documents is not probed");
-    assert!(entries[1].repository);
+    assert_eq!(
+        entries[0].kind,
+        DirectoryKind::Folder,
+        "Documents is not probed"
+    );
+    assert_eq!(entries[1].kind, DirectoryKind::Repository);
 }
 
 #[test]

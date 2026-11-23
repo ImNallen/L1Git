@@ -174,6 +174,35 @@ it("a non-Git row disables Open and its footer hint", async () => {
   expect(submit("Open").disabled).toBe(false);
 });
 
+it("a bare repository row says why it cannot open, and Enter opens nothing", async () => {
+  const BARE = `${FAKE_HOME}/Projects/remote.git`;
+  const app = await mountApp({
+    world: (world) => {
+      opensDocs(world);
+      world.directories.set("~/Projects", [
+        folder(DOCS, "repository"),
+        folder(BARE, "bare"),
+      ]);
+    },
+  });
+  await openSource(app, /^Local folder/);
+  const reason =
+    "Bare repositories are not supported yet. Choose a working copy of this repository.";
+  expect(palette().textContent).not.toContain(reason);
+  await app.press("ArrowDown");
+  expect(options()).toEqual(["docs-site", "remote.git *"]);
+  expect(get("option", /^remote\.git/).textContent).toContain(
+    "Bare repository, not supported",
+  );
+  expect(palette().textContent).toContain(reason);
+  expect(submit("Open").disabled).toBe(true);
+  app.bridge.reset();
+  await app.press("Enter");
+  expect(dialogs()).toEqual(["Add repository"]);
+  expect(app.bridge.count("snapshot", BARE)).toBe(0);
+  expect(palette().textContent).toContain(reason);
+});
+
 it("highlighting a non-Git row from Add moves focus to the path, so keys keep working", async () => {
   const app = await mountApp({ world: opensDocs });
   await openSource(app, /^Local folder/);
@@ -190,7 +219,7 @@ it("a double-click adds a repository and enters any other folder", async () => {
     world: (world) => {
       opensDocs(world);
       world.directories.set("~/Projects/screenshots", [
-        folder(`${SHOTS}/march`, false),
+        folder(`${SHOTS}/march`, "folder"),
       ]);
     },
   });
@@ -317,7 +346,7 @@ it("the derived location follows the name until it is edited", async () => {
 it("the base falls back to home when home has no Projects", async () => {
   const app = await mountApp({
     world: (world) => {
-      world.directories.set("~", [folder(`${FAKE_HOME}/Music`, false)]);
+      world.directories.set("~", [folder(`${FAKE_HOME}/Music`, "folder")]);
       world.directories.set("~/Music", []);
     },
   });
@@ -393,7 +422,7 @@ it("a repository that fails to open keeps its error in the step", async () => {
   });
   await openSource(app, /^Local folder/);
   app.bridge.respond("listDirectories", () => ({
-    entries: [folder(OTHER, true)],
+    entries: [folder(OTHER, "repository")],
   }));
   await app.type(get("combobox", "Path"), "/fixture");
   await app.click(submit("Open"));
@@ -445,8 +474,8 @@ it("Escape during a clone closes, cancels it, and opens nothing", async () => {
 it("a slow listing does not overwrite a newer one", async () => {
   const app = await mountApp({
     world: (world) => {
-      world.directories.set("/old", [folder("/old/stale", false)]);
-      world.directories.set("/new", [folder("/new/fresh", false)]);
+      world.directories.set("/old", [folder("/old/stale", "folder")]);
+      world.directories.set("/new", [folder("/new/fresh", "folder")]);
     },
   });
   await openSource(app, /^Local folder/);
@@ -464,7 +493,7 @@ it("Add waits for the listing of the path it would add from", async () => {
   const app = await mountApp({
     world: (world) => {
       opensDocs(world);
-      world.directories.set("/slow", [folder("/slow/x", true)]);
+      world.directories.set("/slow", [folder("/slow/x", "repository")]);
     },
   });
   await openSource(app, /^Local folder/);
@@ -483,7 +512,7 @@ it("a double-click and ArrowRight wait for the listing of the typed path", async
   const app = await mountApp({
     world: (world) => {
       opensDocs(world);
-      world.directories.set("/slow", [folder("/slow/x", true)]);
+      world.directories.set("/slow", [folder("/slow/x", "repository")]);
     },
   });
   await openSource(app, /^Local folder/);
