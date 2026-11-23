@@ -16,6 +16,7 @@ import type {
   RepositoryRoot,
   RepositorySnapshot,
 } from "../domain/repository";
+import type { Compare } from "../domain/comparison";
 import type { Selection } from "../domain/selection";
 import type { WritesView } from "../useWrites";
 import { defineSlice } from "./actionSlices";
@@ -71,6 +72,7 @@ export function useMergePanel({
   rereadChanges,
   selecting,
   openInspector,
+  openFirstFile,
   pull,
 }: {
   snapshot: RepositorySnapshot | null;
@@ -87,6 +89,7 @@ export function useMergePanel({
   /** The user selects the worktree, which clears the sidebar jump. */
   selecting: UserSelection;
   openInspector: () => void;
+  openFirstFile: (target: Selection, compare: Compare | null) => void;
 }): MergePanel {
   const [review, setReview] = useState<{
     root: RepositoryRoot;
@@ -176,6 +179,10 @@ export function useMergePanel({
     if (root) selecting.select({ kind: "worktree", root });
     openInspector();
   };
+  const resolve = () => {
+    inspect();
+    if (root) openFirstFile({ kind: "worktree", root }, null);
+  };
   return {
     sidebar: snapshot
       ? {
@@ -203,6 +210,7 @@ export function useMergePanel({
             onCloseReview: () => setReview(null),
             run: (action) => writes.merge(root, action),
             onInspect: inspect,
+            onConflicts: resolve,
           }
         : null,
     replay:

@@ -627,9 +627,8 @@ export function useWorkspace() {
     fileDiff,
     openFile,
     cancelOpenFirstFile: () => setPendingOpen(null),
-    openFirstFile: () => {
-      if (root !== null && selection !== null)
-        setPendingOpen({ root, selection, compare: activeCompare });
+    openFirstFile: (target: Selection, compare: Compare | null) => {
+      if (root !== null) setPendingOpen({ root, selection: target, compare });
     },
     closeFile,
     selectRange,

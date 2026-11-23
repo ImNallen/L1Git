@@ -445,6 +445,27 @@ fn stale_reviews_dirty_start_hidden_index_and_foreign_operations_refuse() {
 }
 
 #[test]
+fn dirty_start_names_each_dirty_tracked_path() {
+    let f = Fixture::new(false);
+    let coordinator = f.coordinator();
+    let review = coordinator
+        .review_merge(f.path(), &MergeSelection::Upstream)
+        .unwrap();
+    f.put("other.txt", "unstaged\n");
+    f.put("conflict.txt", "staged\n");
+    f.git(&["add", "conflict.txt"]);
+    f.put("untracked.txt", "new\n");
+    let error = coordinator
+        .merge(f.path(), &MergeAction::Start { review })
+        .unwrap_err();
+    assert!(
+        error.message.contains("conflict.txt, other.txt"),
+        "{error:?}"
+    );
+    assert!(!error.message.contains("untracked.txt"), "{error:?}");
+}
+
+#[test]
 fn stale_staged_result_and_ordinary_commit_cannot_finish() {
     let f = Fixture::new(false);
     let coordinator = f.coordinator();

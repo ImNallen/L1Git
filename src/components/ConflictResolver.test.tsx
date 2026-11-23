@@ -3,7 +3,11 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import * as repositories from "../repositories";
-import { conflictSnapshotSchema, appliedSchema } from "../domain/repository";
+import {
+  conflictSnapshotSchema,
+  appliedSchema,
+  worktreeStatusSchema,
+} from "../domain/repository";
 import { ConflictResolver } from "./ConflictResolver";
 import { mergeStateSchema } from "../domain/merge";
 import { draftImpact } from "../draftProtection";
@@ -19,6 +23,7 @@ vi.mock("../repositories", () => ({
   conflictFile: vi.fn(),
   mergeState: vi.fn(),
   wholeFileConflict: vi.fn(async () => null),
+  worktreeStatus: vi.fn(),
   mac: true,
 }));
 Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
@@ -629,6 +634,9 @@ it("keeps Copy result, Reload from disk and Refresh conflict in the More menu", 
       (item) => item.getAttribute("role") + ":" + item.textContent,
     ),
   ).toEqual([
+    "menuitem:Take all Current",
+    "menuitem:Take all Incoming",
+    "separator:",
     "menuitem:Copy result",
     "menuitem:Reload from disk…",
     "separator:",
@@ -667,4 +675,87 @@ it("keeps Copy result, Reload from disk and Refresh conflict in the More menu", 
   await vi.waitFor(() =>
     expect(resolutionOf(key)?.text).toBe(snapshot.working),
   );
+});
+
+it("takes the whole Current or Incoming file from the More menu, and Undo returns the draft to its earlier state", async () => {
+  const take = async (side: "Current" | "Incoming") => {
+    await act(async () => button("").click());
+    await act(async () => menuItem(`Take all ${side}`).click());
+  };
+  const status = () =>
+    host.querySelector(".conflict-save-status")?.textContent ?? null;
+  await take("Incoming");
+  expect(resolutionOf(key)?.text).toBe(snapshot.incoming);
+  expect(counter()).toBe("No conflicts left");
+  expect(status()).toBe("Unsaved changes");
+
+  await act(async () => button("Undo").click());
+  expect(resolutionOf(key)?.text).toBe(snapshot.working);
+  expect(counter()).toBe("Conflict 1 of 1");
+  expect(status(), "the draft is unchanged again").toBeNull();
+  expect(() => button("Undo")).toThrow();
+
+  await take("Current");
+  expect(resolutionOf(key)?.text).toBe(snapshot.current);
+  write.mockImplementationOnce(async (_root, request) => {
+    expect(request.operation).toMatchObject({
+      kind: "saveConflict",
+      text: snapshot.current,
+    });
+    vi.mocked(repositories.conflictFile).mockResolvedValue({
+      kind: "editable",
+      snapshot: conflictSnapshotSchema.parse({
+        ...snapshot,
+        version: "c".repeat(40),
+        working: snapshot.current,
+      }),
+    });
+    return { kind: "applied", applied };
+  });
+  await act(async () => button("Save result").click());
+  expect(status()).toBe("Saved");
+  expect(
+    () => button("Undo"),
+    "a saved choice is undone from the app's Undo, not the draft",
+  ).toThrow();
+});
+
+it("a structural conflict offers Mark resolved, which stages the file as it is on disk", async () => {
+  const entry = {
+    kind: "unmerged",
+    path: snapshot.path,
+    conflict: "bothAdded",
+    submodule: null,
+    stages: {
+      base: null,
+      ours: { mode: "100644", oid: "1".repeat(40) },
+      theirs: { mode: "100644", oid: "2".repeat(40) },
+    },
+  };
+  vi.mocked(repositories.worktreeStatus).mockResolvedValue(
+    worktreeStatusSchema.parse({
+      root: snapshot.root,
+      head: snapshot.head,
+      entries: [entry, { kind: "untracked", path: "other.txt" }],
+      stagedStamp: "e".repeat(40),
+    }),
+  );
+  vi.mocked(repositories.conflictFile).mockResolvedValue({
+    kind: "external",
+    root: snapshot.root,
+    path: snapshot.path,
+    reason: "structural",
+  });
+  await render(1);
+  await vi.waitFor(() =>
+    expect(host.textContent).toContain("This is a structural conflict."),
+  );
+  expect(button("Mark resolved").disabled).toBe(false);
+  write.mockResolvedValueOnce({ kind: "applied", applied });
+  await act(async () => button("Mark resolved").click());
+  expect(write).toHaveBeenCalledWith(snapshot.root, {
+    expect: { head: snapshot.head },
+    operation: { kind: "stageFiles", entries: [entry] },
+  });
+  expect(resolved).toHaveBeenCalledOnce();
 });

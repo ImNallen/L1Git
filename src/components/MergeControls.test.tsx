@@ -58,6 +58,7 @@ const props: Parameters<typeof MergeControls>[0] = {
   onCloseReview: close,
   run,
   onInspect: () => {},
+  onConflicts: () => {},
 };
 function button(name: string) {
   const button = [...host.querySelectorAll("button")].find(
@@ -181,6 +182,36 @@ it("reviews exact refs and OIDs and starts only after explicit Start", async () 
   await act(async () => button("Start merge").click());
   expect(run).toHaveBeenCalledWith({ kind: "start", review });
 });
+it.each([
+  ["stops on conflicts", ["conflict.txt"], 1],
+  ["stops with no conflicts", [], 0],
+])(
+  "a start that %s closes the review and leads to the resolver only with conflicts",
+  async (_, unresolved, leads) => {
+    const onConflicts = vi.fn();
+    run.mockResolvedValue({
+      kind: "merged",
+      report: {
+        state: mergeStateSchema.parse({ ...active, unresolved, tree: null }),
+        outcome: { kind: "started", problem: null },
+      },
+    });
+    await act(async () =>
+      root.render(
+        <MergeControls
+          {...props}
+          review={{ kind: "upstream" }}
+          read={{ kind: "ready", value: { kind: "idle" } }}
+          eligible
+          onConflicts={onConflicts}
+        />,
+      ),
+    );
+    await act(async () => button("Start merge").click());
+    expect(close).toHaveBeenCalled();
+    expect(onConflicts).toHaveBeenCalledTimes(leads);
+  },
+);
 it("finishes with the suggested message unless edited, and binds the reviewed staged result", async () => {
   setDraft(review.root, {
     draft: { summary: " ", description: "" },
