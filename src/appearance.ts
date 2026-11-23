@@ -9,7 +9,9 @@ import {
   DEFAULT_THEME_SETTINGS,
   deleteCustomTheme,
   resolveTheme,
+  updateCustomTheme,
   type ColorScheme,
+  type ThemeDraft,
   type ThemeFamilyDraft,
   type ThemeSettings,
   type ThemeVariant,
@@ -195,6 +197,8 @@ export function useAppearance(initial: ThemeSettings) {
       save(chooseThemes(settings, variants)),
     addThemes: (drafts: readonly ThemeFamilyDraft[]) =>
       save(addCustomThemes(settings, drafts, () => crypto.randomUUID())),
+    updateTheme: (variantId: string, draft: ThemeDraft) =>
+      save(updateCustomTheme(settings, variantId, draft)),
     deleteTheme: (familyId: string) =>
       save(deleteCustomTheme(settings, familyId)),
     preview: setPreview,
