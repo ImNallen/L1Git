@@ -191,7 +191,7 @@ it("palette titles while the active worktree merges", async () => {
   `);
 });
 
-it("palette titles with a file open, and none on the settings screen", async () => {
+it("palette titles with a file open, then over Settings", async () => {
   const app = await mountApp();
   get("grid", "Commits").focus();
   await app.press("Enter");
@@ -236,10 +236,48 @@ it("palette titles with a file open, and none on the settings screen", async () 
   `);
   await app.press("Escape");
   await app.click(get("button", "Settings"));
+  expect(await openPalette(app)).toMatchInlineSnapshot(`
+    [
+      "Toggle sidebar",
+      "Open Appearance settings",
+      "Open Hosts settings",
+      "Back to repository",
+    ]
+  `);
+});
+
+it("Escape closes the palette over Settings first, then Settings", async () => {
+  const app = await mountApp();
+  await app.runPaletteItem("Open Settings");
+  const heading = focused();
+  await app.press("p", { ctrlKey: true });
+  expect(dialogs()).toEqual(["Settings", "Command palette"]);
+  await app.press("Escape");
+  expect(dialogs()).toEqual(["Settings"]);
+  expect(focused()).toBe(heading);
+  await app.press("Escape");
+  expect(dialogs()).toEqual([]);
+});
+
+it("the palette over Settings switches pages and leaves Settings", async () => {
+  const app = await mountApp();
+  await app.runPaletteItem("Open Settings");
+  await app.runPaletteItem("Open Appearance settings");
+  expect(dialogs()).toEqual(["Settings"]);
+  expect(focused()).toBe("h1 Appearance");
+  await app.runPaletteItem("Back to repository");
+  expect(dialogs()).toEqual([]);
+  expect(focused()).toBe("button Settings");
+});
+
+it("a confirm dialog inside Settings still blocks the palette", async () => {
+  const app = await mountApp();
+  await app.runPaletteItem("Open Hosts settings");
+  await app.click(get("button", "Sign in to GitHub"));
+  await app.click(get("button", "Sign in as @octo"));
+  await app.click(get("button", "Disconnect"));
   await openPalette(app);
-  expect(dialogs(), "the settings dialog blocks the palette").toEqual([
-    "Settings",
-  ]);
+  expect(dialogs()).toEqual(["Settings", "Disconnect GitHub?"]);
 });
 
 it("opening a repository from the palette focuses the history grid once it loads", async () => {

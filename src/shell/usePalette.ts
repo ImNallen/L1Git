@@ -88,7 +88,9 @@ export function useShortcuts(
         event.preventDefault();
         const target =
           event.target instanceof HTMLElement ? event.target : null;
-        if (!dialogOpen && !typingIn(target)) show();
+        const blocked =
+          document.querySelector("dialog[open]:not(.settings-dialog)") !== null;
+        if (!blocked && !typingIn(target)) show();
         return;
       }
       if (palette) {
