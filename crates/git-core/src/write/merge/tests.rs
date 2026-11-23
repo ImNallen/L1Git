@@ -495,6 +495,53 @@ fn the_review_forecasts_the_paths_start_leaves_unmerged() {
 }
 
 #[test]
+fn a_moved_aside_name_git_must_suffix_leaves_the_forecast_unknown() {
+    for holder in ["main", "upstream", "merge base"] {
+        let f = Fixture::new(true);
+        if holder == "merge base" {
+            f.git(&["switch", "-c", "aside", "main~1"]);
+            f.put("moved~HEAD", "taken\n");
+            f.git(&["add", "."]);
+            f.git(&["commit", "-m", "aside"]);
+            for branch in ["upstream", "main"] {
+                f.git(&["switch", branch]);
+                f.git(&["merge", "--no-edit", "aside"]);
+                f.git(&["rm", "moved~HEAD"]);
+                f.git(&["commit", "-m", "drop aside"]);
+            }
+        }
+        f.git(&["switch", "upstream"]);
+        fs::create_dir(f.root.join("moved")).unwrap();
+        f.put("moved/inside.txt", "incoming\n");
+        if holder == "upstream" {
+            f.put("moved~HEAD", "taken\n");
+        }
+        f.git(&["add", "."]);
+        f.git(&["commit", "-m", "directory"]);
+        f.git(&["switch", "main"]);
+        f.put("moved", "current\n");
+        if holder == "main" {
+            f.put("moved~HEAD", "taken\n");
+        }
+        f.git(&["add", "."]);
+        f.git(&["commit", "-m", "file"]);
+        let coordinator = f.coordinator();
+        let review = coordinator
+            .review_merge(f.path(), &MergeSelection::Upstream)
+            .unwrap();
+        assert_eq!(review.prediction, None, "{holder}");
+        let report = coordinator
+            .merge(f.path(), &MergeAction::Start { review })
+            .unwrap();
+        assert_eq!(
+            active(report.state).conflicted,
+            Some(vec!["conflict.txt".to_owned(), "moved~HEAD_0".to_owned()]),
+            "{holder}"
+        );
+    }
+}
+
+#[test]
 fn a_clean_review_forecasts_no_conflict() {
     let f = Fixture::new(false);
     let review = f
