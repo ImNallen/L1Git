@@ -483,6 +483,11 @@
 .conflict-body > .notice {
   margin: 12px 20px 0;
 }
+.conflict-external-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
 .conflict-help {
   margin: 0;
   padding: 10px 20px 0;

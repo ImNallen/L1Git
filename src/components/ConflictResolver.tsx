@@ -6,6 +6,8 @@ import type { MergeConflictResolution } from "@pierre/diffs";
 import { Editor, type EditorFactory } from "@pierre/diffs/edit";
 import focusStyles from "../styles/focus.css?inline";
 import {
+  ArrowDownToLine,
+  ArrowUpToLine,
   ChevronDown,
   ChevronUp,
   Copy,
@@ -32,7 +34,8 @@ import { useMergeState } from "../useMergeState";
 import type { Read } from "../useRead";
 import { mergeAllows, replayNames } from "../domain/merge";
 import type { MergeState } from "../domain/merge";
-import { mac, wholeFileConflict } from "../repositories";
+import { writeFor } from "../domain/operations";
+import { mac, wholeFileConflict, worktreeStatus } from "../repositories";
 import {
   attachEditor,
   chooseResolution,
@@ -101,6 +104,16 @@ const shortcuts: Record<string, Command> = {
 
 type Sides = { current: string; incoming: string } | null;
 
+const wholeSides = [
+  { side: "current", label: "Current", icon: ArrowUpToLine },
+  { side: "incoming", label: "Incoming", icon: ArrowDownToLine },
+] as const;
+type Taken = {
+  label: string;
+  earlier: Pick<ResolutionDraft, "text" | "revision">;
+  chosen: Pick<ResolutionDraft, "editorEpoch" | "revision">;
+};
+
 function notAllowedBy(
   mergeRead: Read<MergeState>,
   operation: Operation,
@@ -167,6 +180,8 @@ export function ConflictResolver({
   const [menu, setMenu] = useState<HTMLElement | null>(null);
   const [discardRevision, setDiscardRevision] = useState<number | null>(null);
   const [copyProblem, setCopyProblem] = useState<string | null>(null);
+  const [taken, setTaken] = useState<Taken | null>(null);
+  const [markProblem, setMarkProblem] = useState<string | null>(null);
   const resolver = useRef<HTMLDivElement>(null);
   const wholeChoice = useRef<HTMLDivElement>(null);
   const choicesRef = useRef<ConflictChoicesHandle>(null);
@@ -355,7 +370,36 @@ export function ConflictResolver({
       </>
     );
   }
-  if (!draft)
+  if (!draft) {
+    const external = read.kind === "ready" && read.source.kind === "external";
+    const markBlocked =
+      frozen || writes.running !== null ? markReasons.busy : null;
+    const markExternal = async () => {
+      setMarkProblem(null);
+      try {
+        const write = writeFor("stageFiles", await worktreeStatus(root), [
+          path,
+        ]);
+        const refused =
+          write === null
+            ? markReasons.problem
+            : notAllowedBy(mergeRead, write.operation);
+        if (write === null || refused !== null) {
+          setMarkProblem(refused);
+          return;
+        }
+        const outcome = await writes.write(root, write);
+        if (outcome.kind === "applied") onResolved();
+        else
+          setMarkProblem(
+            outcome.kind === "failed"
+              ? outcome.problem.message
+              : markReasons.busy,
+          );
+      } catch (error) {
+        setMarkProblem(problemFrom(error).message);
+      }
+    };
     return (
       <div className="conflict-resolver">
         {header()}
@@ -369,14 +413,28 @@ export function ConflictResolver({
                   ? `${reasons[read.source.reason]} Resolve it outside L1 Git, then refresh and mark it resolved.`
                   : "Reading result…"}
           </p>
+          {markProblem && <p role="alert">{markProblem}</p>}
           {read.kind !== "loading" && (
-            <button className="button secondary" onClick={refreshConflict}>
-              Refresh conflict
-            </button>
+            <div className="conflict-external-actions">
+              <button className="button secondary" onClick={refreshConflict}>
+                Refresh conflict
+              </button>
+              {external && (
+                <button
+                  className="button primary"
+                  disabled={markBlocked !== null}
+                  title={markBlocked ?? "Stage the file as it is on disk"}
+                  onClick={() => void markExternal()}
+                >
+                  Mark resolved
+                </button>
+              )}
+            </div>
           )}
         </div>
       </div>
     );
+  }
   const dirty = isDirty(draft);
   const stale = isStale(draft);
   const regions = conflictRegions(draft.text);
@@ -458,8 +516,40 @@ export function ConflictResolver({
           "Could not copy the result. Select the text in Edit and copy it.",
         ),
     );
+  const take = ({ side, label }: (typeof wholeSides)[number]) => {
+    const chosen = chooseResolution(
+      key,
+      draft.editorEpoch,
+      draft.snapshot[side],
+    );
+    if (chosen)
+      setTaken({
+        label,
+        earlier: { text: draft.text, revision: draft.revision },
+        chosen: { editorEpoch: chosen.editorEpoch, revision: chosen.revision },
+      });
+  };
+  const undoable =
+    taken !== null &&
+    dirty &&
+    taken.chosen.editorEpoch === draft.editorEpoch &&
+    taken.chosen.revision === draft.revision
+      ? taken
+      : null;
   const menuItems: MenuItem[] = [
-    { label: "Copy result", icon: Copy, disabled: false, run: copy },
+    ...wholeSides.map((whole) => ({
+      label: `Take all ${whole.label}`,
+      icon: whole.icon,
+      disabled: busy,
+      run: () => take(whole),
+    })),
+    {
+      label: "Copy result",
+      icon: Copy,
+      disabled: false,
+      run: copy,
+      separated: true,
+    },
     {
       label: "Reload from disk…",
       icon: HardDriveDownload,
@@ -581,6 +671,25 @@ export function ConflictResolver({
           </div>
         </div>
         <div className="conflict-body">
+          {undoable && (
+            <div className="notice info-notice" role="status">
+              <span>Took all of {undoable.label}.</span>
+              <button
+                disabled={busy}
+                onClick={() => {
+                  chooseResolution(
+                    key,
+                    draft.editorEpoch,
+                    undoable.earlier.text,
+                    undoable.earlier.revision,
+                  );
+                  setTaken(null);
+                }}
+              >
+                Undo
+              </button>
+            </div>
+          )}
           {revertHelp}
           {notAllowed && (
             <p className="conflict-help" role="status">

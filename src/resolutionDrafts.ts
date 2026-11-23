@@ -204,7 +204,8 @@ export function chooseResolution(
   key: string,
   editorEpoch: number,
   text: string,
-) {
+  revision?: number,
+): ResolutionDraft | null {
   const draft = resolutionOf(key);
   if (
     !draft ||
@@ -212,14 +213,16 @@ export function chooseResolution(
     draftImpact().frozen ||
     draft.phase.kind !== "editing"
   )
-    return;
+    return null;
   editors.delete(key);
-  publish(key, {
+  const chosen = {
     ...draft,
     text,
-    revision: draft.revision + 1,
+    revision: revision ?? draft.revision + 1,
     editorEpoch: ++epoch,
-  });
+  };
+  publish(key, chosen);
+  return chosen;
 }
 
 export async function reloadResolution(key: string, revision: number) {
