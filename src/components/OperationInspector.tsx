@@ -1,14 +1,10 @@
 import { useEffect, useState } from "react";
 import { useCommitDraft } from "../commitDrafts";
 import { splitMessage } from "../domain/commitMessage";
-import {
-  conflictLabel,
-  operationMessage,
-  operationWords,
-} from "../domain/inProgress";
+import { operationMessage, operationWords } from "../domain/inProgress";
 import type { Running } from "../domain/inProgress";
 import type { MergeState } from "../domain/merge";
-import type { RepositoryRoot } from "../domain/repository";
+import type { ConflictSummary, RepositoryRoot } from "../domain/repository";
 import { useDraftImpact } from "../draftProtection";
 import * as repositories from "../repositories";
 import { IncomingChip, SideChip } from "./OperationStrip";
@@ -57,14 +53,14 @@ export function OperationOverview({ running }: { running: Running }) {
   );
 }
 
-export function useConflictLabels(
+export function useConflictSummaries(
   root: RepositoryRoot,
   state: MergeState | null,
   unresolved: number,
-): ReadonlyMap<string, string> | null {
-  const [labels, setLabels] = useState<{
+): ReadonlyMap<string, ConflictSummary> | null {
+  const [summaries, setSummaries] = useState<{
     root: RepositoryRoot;
-    labels: ReadonlyMap<string, string>;
+    summaries: ReadonlyMap<string, ConflictSummary>;
   } | null>(null);
   useEffect(() => {
     if (unresolved === 0) return;
@@ -72,22 +68,20 @@ export function useConflictLabels(
     repositories.conflictSummary(root).then(
       (summary) => {
         if (current)
-          setLabels({
+          setSummaries({
             root,
-            labels: new Map(
-              summary.map((entry) => [entry.path, conflictLabel(entry)]),
-            ),
+            summaries: new Map(summary.map((entry) => [entry.path, entry])),
           });
       },
       () => {
-        if (current) setLabels(null);
+        if (current) setSummaries(null);
       },
     );
     return () => {
       current = false;
     };
   }, [root, state, unresolved]);
-  return labels?.root === root ? labels.labels : null;
+  return summaries?.root === root ? summaries.summaries : null;
 }
 
 export function OperationMessage({ running }: { running: Running }) {
