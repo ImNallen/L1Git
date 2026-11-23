@@ -1703,6 +1703,7 @@ fn legacy_active_session_decodes_pins_without_resolving_tracking_and_writes_v2()
     let review = value["session"]["review"].as_object_mut().unwrap();
     let tracking = review.remove("context").unwrap()["tracking"].clone();
     review.remove("plan");
+    review.remove("prediction");
     review.insert("tracking".into(), tracking);
     fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
     f.git(&["branch", "--unset-upstream"]);
@@ -1712,7 +1713,13 @@ fn legacy_active_session_decodes_pins_without_resolving_tracking_and_writes_v2()
         session.review.destination.oid.as_str(),
     ]);
     let state = active(f.coordinator().merge_state(f.path()).unwrap());
-    assert_eq!(state.review, session.review);
+    assert_eq!(
+        state.review,
+        MergeReview {
+            prediction: None,
+            ..session.review.clone()
+        }
+    );
     assert_eq!(state.conflicted, None);
     f.coordinator()
         .merge(

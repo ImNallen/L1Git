@@ -5,6 +5,7 @@ import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import { MergeControls } from "./MergeControls";
 import * as repositories from "../repositories";
 import { mergeStateSchema, mergeReviewSchema } from "../domain/merge";
+import type { MergeReview } from "../domain/merge";
 import { clearSubmitted, draftOf, setDraft } from "../commitDrafts";
 import {
   draftImpact,
@@ -19,6 +20,7 @@ const review = mergeReviewSchema.parse({
   destination: { reference: "refs/heads/main", oid: "a".repeat(40) },
   source: { reference: "refs/remotes/origin/main", oid: "b".repeat(40) },
   plan: "mergeCommit",
+  prediction: { kind: "conflict", paths: ["conflict.txt"] },
   context: {
     kind: "upstream",
     tracking: {
@@ -182,14 +184,14 @@ it("reviews exact refs and OIDs and starts only after explicit Start", async () 
   await act(async () => button("Start merge").click());
   expect(run).toHaveBeenCalledWith({ kind: "start", review });
 });
-it.each([
+it.each<[MergeReview["prediction"], string]>([
   [
     { kind: "conflict", paths: ["conflict.txt", "notes.txt"] },
     "Will conflict in: conflict.txt, notes.txt.",
   ],
   [{ kind: "clean" }, "Applies cleanly."],
   [null, "L1 Git cannot predict which paths will conflict."],
-] as const)(
+])(
   "forecasts the merge commit's conflicts in the review (%j)",
   async (prediction, forecast) => {
     vi.mocked(repositories.mergeReview).mockResolvedValue({

@@ -34,6 +34,18 @@ function MergePair({ review }: { review: MergeReview }) {
   );
 }
 
+function forecast({ plan, prediction }: MergeReview): string | null {
+  if (plan !== "mergeCommit") return null;
+  if (prediction === null)
+    return "L1 Git cannot predict which paths will conflict.";
+  switch (prediction.kind) {
+    case "clean":
+      return "Applies cleanly.";
+    case "conflict":
+      return `Will conflict in: ${prediction.paths.join(", ")}. You resolve it in the app, then finish or abort.`;
+  }
+}
+
 export function MergeControls({
   root,
   read,
@@ -223,6 +235,7 @@ function MergeReviewDialog({
   const { frozen } = useDraftImpact();
   const [draft] = useCommitDraft(root);
   const amending = draft.amend !== null;
+  const predicted = review.kind === "ready" ? forecast(review.value) : null;
   const dialog = useRef<HTMLDialogElement>(null);
   const cancel = useRef<HTMLButtonElement>(null);
   const title = useId();
@@ -305,6 +318,7 @@ function MergeReviewDialog({
             ? "Fast-forward. Move the current branch to the source commit without creating a merge commit. This cannot be undone here."
             : "Merge commit. Start requires clean tracked files and an ordinary index. Git stops before committing so you can review and Finish or Abort."}
       </p>
+      {predicted && <p>{predicted}</p>}
       <p>
         Merge lifecycle actions cannot be undone. Abort cancels an active merge.
         Resolution edits retain Undo until Finish or Abort.

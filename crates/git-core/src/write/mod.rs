@@ -34,8 +34,9 @@ pub use branches::{BranchTip, Start};
 pub(crate) use conflicts::{conflict_summary_within, whole_file_within};
 pub(crate) use merge::operation_within;
 pub use merge::{
-    MergeAction, MergeAttention, MergeContext, MergeOutcome, MergePlan, MergeReport, MergeReview,
-    MergeSelection, MergeSession, MergeSource, MergeState, MergeTracking, OperationProbe,
+    MergeAction, MergeAttention, MergeContext, MergeOutcome, MergePlan, MergePrediction,
+    MergeReport, MergeReview, MergeSelection, MergeSession, MergeSource, MergeState, MergeTracking,
+    OperationProbe,
 };
 use partial::{Action, Part, Picks};
 pub use partial::{LinePick, LineSide};

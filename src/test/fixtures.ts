@@ -244,6 +244,7 @@ export function activeMerge(
         destination: { reference: "refs/heads/feature", oid: C5 },
         source: { reference: "refs/remotes/origin/feature", oid: C6 },
         plan: "mergeCommit",
+        prediction: null,
         context: {
           kind: "upstream",
           tracking: {
@@ -500,6 +501,7 @@ export function mergeReviewFor(root: RepositoryRoot): MergeReview {
     },
     source: { reference: `refs/remotes/origin/${branch}`, oid: C3 },
     plan: "mergeCommit",
+    prediction: { kind: "clean" },
     context: {
       kind: "upstream",
       tracking: {

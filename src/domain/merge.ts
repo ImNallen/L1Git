@@ -20,6 +20,10 @@ const mergeTrackingSchema = z.strictObject({
   merge: z.string(),
   fetch: z.array(z.string()),
 });
+const mergePredictionSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("clean") }),
+  z.strictObject({ kind: z.literal("conflict"), paths: z.array(z.string()) }),
+]);
 export const mergeReviewSchema = z.strictObject({
   root: rootSchema,
   destination: branchTipSchema,
@@ -32,6 +36,7 @@ export const mergeReviewSchema = z.strictObject({
     }),
   ]),
   plan: z.enum(["upToDate", "fastForward", "mergeCommit"]),
+  prediction: mergePredictionSchema.nullable(),
 });
 const mergeSessionSchema = z.strictObject({
   id: entryIdSchema,
