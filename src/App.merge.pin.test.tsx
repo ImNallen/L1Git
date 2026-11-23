@@ -427,3 +427,91 @@ it("opening a conflict from the inspector moves focus into the resolver, so its 
     "Undid Delete gone.txt",
   );
 });
+
+const conflictRow = (path: string) => {
+  const found = get(
+    "region",
+    "Needs resolution",
+    get("complementary", "Commit inspector"),
+  )
+    .querySelector("file-tree-container")
+    ?.shadowRoot?.querySelector<HTMLElement>(
+      `[data-item-type="file"][data-item-path="${path}"]`,
+    );
+  if (!found) throw new Error(`Missing inspector row ${path}`);
+  return found;
+};
+
+const conflictMenu = async (
+  app: Awaited<ReturnType<typeof mountApp>>,
+  path: string,
+) => {
+  await app.contextMenu(conflictRow(path));
+  return queryAll("menuitem").map(
+    (item) =>
+      `${item.querySelector("span")?.textContent ?? item.textContent}${
+        item.getAttribute("aria-disabled") === "true"
+          ? ` [${item.querySelector(".menu-reason")?.textContent}]`
+          : ""
+      }`,
+  );
+};
+
+const mergingNotes = (world: World) => {
+  const state = activeMerge(PIN, ["notes.txt"]);
+  if (state.kind !== "active") throw new Error("expected an active merge");
+  state.unresolved = ["notes.txt"];
+  world.merges.set(PIN, state);
+};
+
+it("a conflict row's menu opens the resolver and refuses Mark resolved while the file has conflicts", async () => {
+  const app = await mountApp({ world: mergingNotes });
+  await app.click(historyRow("Uncommitted changes in pin,"));
+  const menu = () => conflictMenu(app, "notes.txt");
+
+  expect(await menu(), "before the resolver reads the file").toEqual([
+    "Open in resolver",
+    "Mark resolved [Resolve every conflict first.]",
+  ]);
+  app.bridge.reset();
+  await app.click(get("menuitem", /^Mark resolved/));
+  expect(
+    app.bridge.count("write"),
+    "a file that still has conflict markers is not staged",
+  ).toBe(0);
+  await app.press("Escape");
+
+  await app.act(async () => {
+    await app.modules.resolutionDrafts.readResolution(PIN, "notes.txt");
+  });
+  expect(await menu(), "with a draft that still has markers").toEqual([
+    "Open in resolver",
+    "Mark resolved [Resolve every conflict first.]",
+  ]);
+  await app.press("Escape");
+
+  await dirtyResolution(app, PIN, "notes.txt");
+  expect(await menu(), "with an unsaved result").toEqual([
+    "Open in resolver",
+    "Mark resolved [Save the result first.]",
+  ]);
+  await app.click(get("menuitem", "Open in resolver"));
+  expect(document.querySelector(".conflict-resolver")).not.toBeNull();
+});
+
+it("a conflict row whose file has no conflicts left marks it resolved from the menu", async () => {
+  const app = await mountApp({ world: mergingNotes });
+  app.bridge.respond("conflictSummary", () => [
+    { kind: "text", path: "notes.txt", conflicts: 0 },
+  ]);
+  await app.click(historyRow("Uncommitted changes in pin,"));
+  expect(await conflictMenu(app, "notes.txt")).toEqual([
+    "Open in resolver",
+    "Mark resolved",
+  ]);
+  app.bridge.reset();
+  await app.click(get("menuitem", "Mark resolved"));
+  expect(app.bridge.lines((request) => request.op === "write")).toEqual([
+    `write ${PIN} stageFiles`,
+  ]);
+});
