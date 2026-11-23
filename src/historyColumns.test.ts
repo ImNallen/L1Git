@@ -9,18 +9,16 @@ import {
 import type { ColumnId } from "./historyColumns";
 
 describe("history column layout", () => {
-  it("shows every metadata column for new preferences", () => {
+  it("shows Age and Changes for new preferences", () => {
     const layout = columnLayout(58, restoreColumns({ getItem: () => null }), 7);
-    expect(layout.template).toBe(
-      "58px minmax(160px, 1fr) 140px 60px 100px 202px",
-    );
-    expect(layout.minWidth).toBe(720);
+    expect(layout.template).toBe("58px minmax(160px, 1fr) 60px 96px");
+    expect(layout.minWidth).toBe(374);
   });
 
   it("keeps the wider message minimum when only Changes is on", () => {
     const layout = columnLayout(58, new Set<ColumnId>(["changes"]), 7);
-    expect(layout.template).toBe("58px minmax(260px, 1fr) 202px");
-    expect(layout.minWidth).toBe(520);
+    expect(layout.template).toBe("58px minmax(260px, 1fr) 96px");
+    expect(layout.minWidth).toBe(414);
   });
 
   it("lays out every column in table order whatever order they were checked", () => {
@@ -30,9 +28,9 @@ describe("history column layout", () => {
       7,
     );
     expect(layout.template).toBe(
-      "106px minmax(160px, 1fr) 140px 60px 100px 202px",
+      "106px minmax(160px, 1fr) 140px 60px 100px 96px",
     );
-    expect(layout.minWidth).toBe(768);
+    expect(layout.minWidth).toBe(662);
     expect(layout.columns.map((column) => column.label)).toEqual([
       "Author",
       "Age",
@@ -66,14 +64,11 @@ describe("history column layout", () => {
 
 describe("stored history columns", () => {
   it.each([
-    [null, ["author", "date", "sha", "changes"]],
-    ["not json", ["author", "date", "sha", "changes"]],
-    ['{"version":2,"visible":["date"]}', ["author", "date", "sha", "changes"]],
-    [
-      '{"version":1,"visible":["date","subject"]}',
-      ["author", "date", "sha", "changes"],
-    ],
-    ['{"version":1,"visible":"date"}', ["author", "date", "sha", "changes"]],
+    [null, ["date", "changes"]],
+    ["not json", ["date", "changes"]],
+    ['{"version":2,"visible":["date"]}', ["date", "changes"]],
+    ['{"version":1,"visible":["date","subject"]}', ["date", "changes"]],
+    ['{"version":1,"visible":"date"}', ["date", "changes"]],
     ['{"version":1,"visible":[]}', []],
     ['{"version":1,"visible":["changes"]}', ["changes"]],
     ['{"version":1,"visible":["sha","date"]}', ["sha", "date"]],
