@@ -205,25 +205,43 @@ it("the sidebar fast-forward replaces a pull notice with its own", async () => {
   expect(get("button", "Dismiss", advanced)).toBeTruthy();
 });
 
-it("Fetch all names the fetched remotes and how many branches moved", async () => {
-  const app = await mountApp();
+function answerFetch(app: Harness, remotes: unknown[], moved = 0) {
   app.bridge.respond("overview", (request) =>
     overviewSchema.parse({
       ...pinOverview(),
       fetch:
         request.mode === "remote"
-          ? {
-              changed: true,
-              moved: 2,
-              coalesced: false,
-              remotes: [
-                { remote: "origin", outcome: { kind: "fetched" } },
-                { remote: "mirror", outcome: { kind: "fetched" } },
-                { remote: "archive", outcome: { kind: "skipped" } },
-              ],
-            }
+          ? { changed: moved > 0, moved, coalesced: false, remotes }
           : null,
     }),
+  );
+}
+
+const missing = (remote: string) => ({
+  remote,
+  outcome: {
+    kind: "failed",
+    failure: "other",
+    message: "No such remote path.",
+  },
+});
+
+async function checkOutTopic(app: Harness) {
+  await app.click(refRow("refs/heads/topic")!);
+  await app.runPaletteItem("Check out topic");
+  return get("status", /^Checked out topic/);
+}
+
+it("Fetch all names the fetched remotes and how many branches moved", async () => {
+  const app = await mountApp();
+  answerFetch(
+    app,
+    [
+      { remote: "origin", outcome: { kind: "fetched" } },
+      { remote: "mirror", outcome: { kind: "fetched" } },
+      { remote: "archive", outcome: { kind: "skipped" } },
+    ],
+    2,
   );
   await app.runPaletteItem("Fetch all");
   const fetched = get("status", /Fetched/);
@@ -233,34 +251,67 @@ it("Fetch all names the fetched remotes and how many branches moved", async () =
   expect(get("button", "Dismiss", fetched)).toBeTruthy();
 });
 
-it("a failed fetch shows its warning and no success notice", async () => {
+it("a failed fetch shows its warning, posts no success notice, and keeps the write notice", async () => {
   const app = await mountApp();
-  app.bridge.respond("overview", (request) =>
-    overviewSchema.parse({
-      ...pinOverview(),
-      fetch:
-        request.mode === "remote"
-          ? {
-              changed: false,
-              moved: 0,
-              coalesced: false,
-              remotes: [
-                {
-                  remote: "origin",
-                  outcome: {
-                    kind: "failed",
-                    failure: "other",
-                    message: "No such remote path.",
-                  },
-                },
-              ],
-            }
-          : null,
-    }),
-  );
+  await checkOutTopic(app);
+  answerFetch(app, [missing("origin")]);
   await app.runPaletteItem("Fetch all");
   expect(alerts()).toEqual(["origin: Fetch failed. No such remote path."]);
   expect(query("status", /Fetched/)).toBeNull();
+  expect(get("status", /^Checked out topic/)).toBeTruthy();
+});
+
+it("a fetch that reaches only some remotes posts no success notice and keeps the write notice", async () => {
+  const app = await mountApp();
+  await checkOutTopic(app);
+  answerFetch(app, [
+    { remote: "origin", outcome: { kind: "fetched" } },
+    missing("mirror"),
+  ]);
+  await app.runPaletteItem("Fetch all");
+  expect(alerts()).toEqual(["mirror: Fetch failed. No such remote path."]);
+  expect(query("status", /Fetched/)).toBeNull();
+  expect(get("status", /^Checked out topic/)).toBeTruthy();
+});
+
+it("a fetch that fails outright keeps the write notice", async () => {
+  const app = await mountApp();
+  await checkOutTopic(app);
+  app.bridge.respond("overview", (request) => {
+    if (request.mode === "remote") throw new Error("The network is down.");
+    return pinOverview();
+  });
+  await app.runPaletteItem("Fetch all");
+  expect(query("status", /Fetched/)).toBeNull();
+  expect(get("status", /^Checked out topic/)).toBeTruthy();
+});
+
+it("a fast-forward that moves nothing keeps the notice already shown", async () => {
+  const withTopic = overviewSchema.parse({
+    ...pinOverview(),
+    branches: [...pinOverview().branches, behindTopic],
+  });
+  const app = await mountApp({
+    world: (world) => world.overviews.set(PIN, withTopic),
+  });
+  answerFastForward(app, "main", { from: C4, to: C6, behind: 2 }, withTopic);
+  await app.click(
+    await toolbarItem(app, "Pull", "Pull (Fast-forward if possible)"),
+  );
+  app.bridge.respond("fastForward", () => ({
+    outcomes: [
+      {
+        kind: "skipped",
+        reference: "refs/heads/topic",
+        reason: { kind: "changed" },
+      },
+    ],
+    overview: withTopic,
+  }));
+  await app.contextMenu(refRow("refs/heads/topic")!);
+  await app.click(get("menuitem", "Fast-forward to origin/topic"));
+  expect(query("status", /Fast-forwarded/)).toBeNull();
+  expect(get("status", /Pulled/)).toBeTruthy();
 });
 
 it("the first persistence error among the four sources is shown", async () => {

@@ -202,6 +202,38 @@ it("a write notice offers Undo only while its write is the next to undo", async 
   ).toBe("true");
 });
 
+it("Stage all posts no notice and leaves the write notice shown", async () => {
+  const app = await mountApp({ bridge: journal });
+  await cherryPickRelease(app);
+  await app.click(historyRow("Uncommitted changes in pin,"));
+  await app.runPaletteItem("Stage all");
+  expect(app.bridge.lines((request) => request.op === "write")).toEqual([
+    "write /fixture/pin replay",
+    "write /fixture/pin stageFiles",
+  ]);
+  expect(query("status", /Staged/)).toBeNull();
+  expect(
+    get("button", "Undo", get("status", /Cherry-picked/)).getAttribute(
+      "aria-disabled",
+    ),
+    "the stage is now the next write to undo",
+  ).toBe("true");
+});
+
+it("Discard all replaces the write notice with its own Undo", async () => {
+  const app = await mountApp({ bridge: journal });
+  await cherryPickRelease(app);
+  await app.click(historyRow("Uncommitted changes in pin,"));
+  await app.runPaletteItem("Discard all changes…");
+  await app.click(get("button", "Discard changes"));
+  expect(query("status", /Cherry-picked/)).toBeNull();
+  const discarded = get("status", /Discarded/);
+  expect(discarded.textContent).toBe("Discarded notes.txt.Undo");
+  expect(get("button", "Undo", discarded).getAttribute("aria-disabled")).toBe(
+    "false",
+  );
+});
+
 it.todo(
   "a lost-focus check and a step reveal in one commit keep today's winner: the write's idle update and the step's steppedRef never share a commit under act(), so the fixture cannot race them",
 );

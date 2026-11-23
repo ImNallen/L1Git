@@ -292,6 +292,23 @@ it("Remove worktree asks first, removes the linked worktree, drops it from the s
   expect(query("menuitem", /^Remove worktree/)).toBeNull();
 });
 
+it("a removed worktree's notice replaces the write notice", async () => {
+  const app = await mountApp({
+    world: featureOpen,
+    saved: { entries: [PIN, PIN_FEATURE, OTHER], lastRoot: PIN },
+  });
+  await app.click(refRow("refs/heads/topic")!);
+  await app.runPaletteItem("Check out topic");
+  expect(get("status", /^Checked out topic/)).toBeTruthy();
+  await app.contextMenu(refRow("refs/heads/feature")!);
+  await app.click(menuItem("Remove worktree…"));
+  await app.click(get("button", "Remove worktree"));
+  expect(query("status", /^Checked out topic/)).toBeNull();
+  expect(get("status", /^Removed worktree/).textContent).toBe(
+    "Removed worktree pin-feature. Removal cannot be undone.",
+  );
+});
+
 it("a refused remove shows in a notice until it is dismissed or a retry removes the worktree", async () => {
   const app = await mountApp({
     world: featureOpen,
