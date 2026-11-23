@@ -25,6 +25,13 @@ const columnsSchema = z.object({
   visible: z.array(columnId),
 });
 
+const exactCount = new Intl.NumberFormat("en");
+const compactCount = new Intl.NumberFormat("en", { notation: "compact" });
+
+export function formatChangeCount(count: number) {
+  return (count < 10_000 ? exactCount : compactCount).format(count);
+}
+
 const MESSAGE_MIN_WIDTH = 260;
 const CROWDED_MESSAGE_MIN_WIDTH = 160;
 const SHA_CHAR_WIDTH = 7.2;

@@ -64,7 +64,11 @@ import type {
   Oid,
   RepositoryRoot,
 } from "../domain/repository";
-import { columnLayout, historyColumns } from "../historyColumns";
+import {
+  columnLayout,
+  formatChangeCount,
+  historyColumns,
+} from "../historyColumns";
 import type { ColumnId } from "../historyColumns";
 import type { UserSelection } from "../shell/navigation";
 import type {
@@ -271,7 +275,8 @@ function WorktreeDescription({ row }: { row: WorktreeRow }) {
 function ChangesCell({ stats }: { stats: LineStats | undefined }) {
   if (!stats) return <td role="gridcell" className="changes-cell" />;
   const { added, deleted } = stats;
-  const lines = (count: number) => `${count} line${count === 1 ? "" : "s"}`;
+  const lines = (count: number) =>
+    `${count.toLocaleString()} line${count === 1 ? "" : "s"}`;
   const label = `${lines(added)} added, ${lines(deleted)} deleted`;
   return (
     <td
@@ -280,10 +285,10 @@ function ChangesCell({ stats }: { stats: LineStats | undefined }) {
       aria-label={label}
       title={label}
     >
-      <span className="change-stat added">+{added.toLocaleString()}</span>
+      <span className="change-stat added">+{formatChangeCount(added)}</span>
       <span className={`change-stat deleted${deleted === 0 ? " zero" : ""}`}>
         {"\u2212"}
-        {deleted.toLocaleString()}
+        {formatChangeCount(deleted)}
       </span>
     </td>
   );
