@@ -494,9 +494,18 @@ input::placeholder {
   flex-shrink: 0;
   color: var(--muted);
 }
-.repository-open > .repository-suffix {
+.repository-open > .repository-label {
+  display: flex;
+  min-width: 0;
+}
+.repository-label > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.repository-label > .repository-suffix {
   flex: 1 1 0;
   min-width: 0;
+  white-space: pre;
   color: var(--text-dim);
   font-weight: 400;
 }

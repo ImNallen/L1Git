@@ -477,7 +477,6 @@ export function RepositoryTree({
           const probe = operations.get(entry.root);
           const badge = probe === undefined ? null : operationBadge(probe);
           const suffix = suffixes.get(entry.root);
-          const label = labelOf(entry);
           return (
             <div
               className="repository-group"
@@ -495,7 +494,7 @@ export function RepositoryTree({
                   className="repository-open"
                   title={entry.root}
                   aria-label={
-                    badge ? `${label}, ${badge.label}` : suffix && label
+                    badge ? `${labelOf(entry)}, ${badge.label}` : undefined
                   }
                   aria-current={active ? "true" : undefined}
                   onClick={() => {
@@ -504,10 +503,12 @@ export function RepositoryTree({
                   }}
                 >
                   <WorkspaceIcon name="Repository" />
-                  <span>{entry.name}</span>
-                  {suffix && (
-                    <span className="repository-suffix">{suffix}</span>
-                  )}
+                  <span className="repository-label">
+                    <span>{entry.name}</span>
+                    {suffix && (
+                      <span className="repository-suffix"> {suffix}</span>
+                    )}
+                  </span>
                   {badge && (
                     <span className="repository-operation" title={badge.title}>
                       {badge.label}
