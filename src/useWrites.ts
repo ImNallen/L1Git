@@ -5,6 +5,7 @@ import * as repositories from "./repositories";
 import { beginDraftTask } from "./draftProtection";
 import { restoreUndone } from "./commitDrafts";
 import {
+  announcesResult,
   attemptLabel,
   describe,
   movesRefs,
@@ -152,24 +153,38 @@ export function useWrites(
         changed === worktree ? null : reread.worktree(changed),
       ]);
       const notice: WriteNotice | null =
-        outcome.kind === "failed" && outcome.problem.kind !== "replayStopped"
-          ? job.action === "write"
-            ? {
-                kind: "failed",
-                ...job,
-                label,
-                problem: outcome.problem,
-                operation,
-              }
-            : { kind: "failed", ...job, label, problem: outcome.problem }
-          : action === "write"
+        outcome.kind === "failed"
+          ? outcome.problem.kind === "replayStopped"
             ? null
+            : job.action === "write"
+              ? {
+                  kind: "failed",
+                  ...job,
+                  label,
+                  problem: outcome.problem,
+                  operation,
+                }
+              : { kind: "failed", ...job, label, problem: outcome.problem }
+          : action === "write"
+            ? { kind: "wrote", operation, entry: outcome.applied.id }
             : {
                 kind: "stepped",
                 step: action,
                 label: noticeLabel(action, operation, label),
               };
-      update(repository, (writes) => ({ ...writes, running: null, notice }));
+      const quiet =
+        outcome.kind === "applied" &&
+        action === "write" &&
+        !announcesResult[operation.kind];
+      update(repository, (writes) => ({
+        ...writes,
+        running: null,
+        notice: !quiet
+          ? notice
+          : writes.notice?.kind === "failed"
+            ? null
+            : writes.notice,
+      }));
       return outcome;
     });
   }

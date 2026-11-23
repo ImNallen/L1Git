@@ -5,14 +5,17 @@ import {
   dialogs,
   focused,
   get,
+  historyRow,
   installHarness,
   mountApp,
+  query,
   refRow,
   selectedRow,
 } from "./test/appHarness";
 import type { Bridge } from "./test/fakeBridge";
 import { applied, C2, C6, history, PIN } from "./test/fixtures";
 import { snapshotSchema } from "./domain/repository";
+import type { Applied, RepositoryRoot } from "./domain/repository";
 
 installHarness();
 
@@ -145,6 +148,90 @@ it("after a tag delete, a lost focus waits until a later reread drops the tag fr
   await app.refocusWindow();
   expect(refRow("refs/tags/v1")).toBeNull();
   expect(focused()).toBe("grid Commits");
+});
+
+/** Answers each write as the core does: the new entry tops the undo history. */
+function journal(bridge: Bridge) {
+  bridge.respond("write", (request, world, fallback) => {
+    const entry = fallback() as Applied;
+    world.histories.set(request.path as RepositoryRoot, history(entry));
+    return entry;
+  });
+}
+
+async function cherryPickRelease(app: Awaited<ReturnType<typeof mountApp>>) {
+  await app.click(historyRow("Release,"));
+  await app.runPaletteItem("Cherry-pick onto main…");
+  await app.click(
+    get("button", "Cherry-pick", get("dialog", "Cherry-pick this commit")),
+  );
+}
+
+it("a clean cherry-pick shows a notice whose Undo takes it back", async () => {
+  const app = await mountApp({ bridge: journal });
+  await cherryPickRelease(app);
+  const notice = get("status", /Cherry-picked/);
+  expect(notice.textContent).toBe("Cherry-picked 3333333 onto main.Undo");
+  expect(get("button", "Dismiss", notice)).toBeTruthy();
+  await app.click(get("button", "Undo", notice));
+  expect(app.bridge.lines((request) => request.op === "undo")).toEqual([
+    "undo /fixture/pin",
+  ]);
+  expect(query("status", /Cherry-picked/)).toBeNull();
+  expect(get("status", /Undid/).textContent).toBe(
+    "Undid Cherry-pick “Picked subject”Redo",
+  );
+});
+
+it("Dismiss closes a write notice and keyboard undo still takes the write back", async () => {
+  const app = await mountApp({ bridge: journal });
+  await cherryPickRelease(app);
+  await app.click(get("button", "Dismiss", get("status", /Cherry-picked/)));
+  expect(query("status", /Cherry-picked/)).toBeNull();
+  await app.press("z", { ctrlKey: true });
+  expect(app.bridge.count("undo")).toBe(1);
+});
+
+it("a write notice offers Undo only while its write is the next to undo", async () => {
+  const app = await mountApp();
+  await cherryPickRelease(app);
+  const notice = get("status", /Cherry-picked/);
+  expect(
+    get("button", "Undo", notice).getAttribute("aria-disabled"),
+    "the history still tops with an older entry",
+  ).toBe("true");
+});
+
+it("Stage all posts no notice and leaves the write notice shown", async () => {
+  const app = await mountApp({ bridge: journal });
+  await cherryPickRelease(app);
+  await app.click(historyRow("Uncommitted changes in pin,"));
+  await app.runPaletteItem("Stage all");
+  expect(app.bridge.lines((request) => request.op === "write")).toEqual([
+    "write /fixture/pin replay",
+    "write /fixture/pin stageFiles",
+  ]);
+  expect(query("status", /Staged/)).toBeNull();
+  expect(
+    get("button", "Undo", get("status", /Cherry-picked/)).getAttribute(
+      "aria-disabled",
+    ),
+    "the stage is now the next write to undo",
+  ).toBe("true");
+});
+
+it("Discard all replaces the write notice with its own Undo", async () => {
+  const app = await mountApp({ bridge: journal });
+  await cherryPickRelease(app);
+  await app.click(historyRow("Uncommitted changes in pin,"));
+  await app.runPaletteItem("Discard all changes…");
+  await app.click(get("button", "Discard changes"));
+  expect(query("status", /Cherry-picked/)).toBeNull();
+  const discarded = get("status", /Discarded/);
+  expect(discarded.textContent).toBe("Discarded notes.txt.Undo");
+  expect(get("button", "Undo", discarded).getAttribute("aria-disabled")).toBe(
+    "false",
+  );
 });
 
 it.todo(

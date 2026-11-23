@@ -931,6 +931,8 @@ pub enum Blocker {
 pub struct FetchSummary {
     /// Whether any local or remote-tracking branch moved.
     pub changed: bool,
+    /// How many local or remote-tracking branches appeared, moved, or went away.
+    pub moved: u32,
     /// This call waited for a fetch that finished after it started instead of
     /// fetching again.
     pub coalesced: bool,

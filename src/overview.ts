@@ -91,9 +91,16 @@ export type OverviewStore = {
   subscribe(listener: () => void): () => void;
   getSnapshot(): OverviewView;
   track(roots: readonly RepositoryRoot[]): void;
-  fetch(commonDir?: RepositoryRoot): Promise<void>;
+  /**
+   * Fetches every repository, or only `commonDir`. Answers what the fetch of
+   * `commonDir` found, else null, as it is when the fetch failed outright.
+   */
+  fetch(commonDir?: RepositoryRoot): Promise<FetchSummary | null>;
   /** Fetches only `branch`'s remote counterpart. A pending fetch of every remote covers it. */
-  fetchBranch(commonDir: RepositoryRoot, branch: FullRef): Promise<void>;
+  fetchBranch(
+    commonDir: RepositoryRoot,
+    branch: FullRef,
+  ): Promise<FetchSummary | null>;
   /**
    * Fetches `branch`'s upstream, then fast-forwards it in `root`, a worktree of
    * `commonDir` that need not be tracked itself. Answers the fast-forward, or
@@ -105,8 +112,11 @@ export type OverviewStore = {
     branch: BranchRef,
     mode: PullMode,
   ): Promise<PullResult | null>;
-  /** Fast-forwards every ready branch of `commonDir`, or only `branch`. */
-  updateAll(commonDir: RepositoryRoot, branch?: BranchRef): Promise<void>;
+  /** Fast-forwards every ready branch of `commonDir`, or only `branch`, and answers each outcome. */
+  updateAll(
+    commonDir: RepositoryRoot,
+    branch?: BranchRef,
+  ): Promise<readonly AdvanceOutcome[]>;
   setInterval(minutes: FetchInterval): void;
   onRefsChanged(listener: (roots: RepositoryRoot[]) => void): () => void;
   refreshLocal(commonDir: RepositoryRoot): Promise<void>;
@@ -134,13 +144,29 @@ type Request =
       owner: Extract<RootState, { kind: "open" }>;
       report: (result: PushResult) => void;
     };
-type Job = { request: Request; done: Promise<void>; finish: () => void };
+/** What a fetch or fast-forward job found, shared by every caller it covered. */
+type Settled = {
+  fetched: FetchSummary | null;
+  advanced: readonly AdvanceOutcome[];
+};
+const nothingSettled: Settled = { fetched: null, advanced: [] };
+type Job = {
+  request: Request;
+  done: Promise<Settled>;
+  finish: (settled: Settled) => void;
+};
 type Repository = Omit<RepositoryState, "commonDir" | "roots"> & {
   running: Job | null;
   queue: Job[];
 };
 
 const idle: Activity = { kind: "idle" };
+
+/** Whether the fetch reached every remote it tried. */
+export const reached = (
+  summary: FetchSummary | null,
+): summary is FetchSummary =>
+  summary?.remotes.every(({ outcome }) => outcome.kind !== "failed") ?? false;
 
 export function createOverviewStore(deps: OverviewDeps): OverviewStore {
   const listeners = new Set<() => void>();
@@ -325,9 +351,12 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
     emit();
   }
 
-  function enqueue(commonDir: RepositoryRoot, request: Request): Promise<void> {
+  function enqueue(
+    commonDir: RepositoryRoot,
+    request: Request,
+  ): Promise<Settled> {
     const repo = repos.get(commonDir);
-    if (!repo) return Promise.resolve();
+    if (!repo) return Promise.resolve(nothingSettled);
     const pending = [...(repo.running ? [repo.running] : []), ...repo.queue];
     if (request.kind === "fetch") {
       const covers = (job: Job) =>
@@ -352,8 +381,8 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
         return queued.done;
       }
     }
-    let finish = () => {};
-    const done = new Promise<void>((resolve) => (finish = resolve));
+    let finish: (settled: Settled) => void = () => {};
+    const done = new Promise<Settled>((resolve) => (finish = resolve));
     repo.queue.push({ request, done, finish });
     void pump(commonDir, repo);
     return done;
@@ -364,12 +393,13 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
     const job = repo.queue.shift();
     if (!job) return;
     repo.running = job;
+    let settled = nothingSettled;
     try {
-      await run(commonDir, repo, job.request);
+      settled = await run(commonDir, repo, job.request);
     } finally {
       repo.running = null;
       repo.activity = idle;
-      job.finish();
+      job.finish(settled);
       if (repos.get(commonDir) === repo) {
         probeRoots(commonDir);
         emit();
@@ -424,18 +454,28 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
     commonDir: RepositoryRoot,
     repo: Repository,
     request: Request,
-  ) {
+  ): Promise<Settled> {
     const root = request.kind === "push" ? request.root : rootsOf(commonDir)[0];
-    if (root === undefined) return;
-    if (request.kind === "push" && roots.get(root) !== request.owner) return;
+    if (root === undefined) return nothingSettled;
+    if (request.kind === "push" && roots.get(root) !== request.owner)
+      return nothingSettled;
     invalidatePush(commonDir);
-    if (request.kind === "push") return runPush(commonDir, repo, request);
+    if (request.kind === "push") {
+      await runPush(commonDir, repo, request);
+      return nothingSettled;
+    }
+    let settled = nothingSettled;
     if (request.kind === "fetch") {
-      await fetchInto(commonDir, repo, root, request.branch);
+      const fetched = await fetchInto(commonDir, repo, root, request.branch);
+      settled = { fetched, advanced: [] };
     } else if (request.kind === "fastForward") {
-      await advance(commonDir, repo, root, [...request.advances.values()]);
+      const advances = [...request.advances.values()];
+      settled = {
+        fetched: null,
+        advanced: await advance(commonDir, repo, root, advances),
+      };
     } else if (
-      (await fetchInto(commonDir, repo, root, request.branch)) &&
+      reached(await fetchInto(commonDir, repo, root, request.branch)) &&
       repos.get(commonDir) === repo
     ) {
       const step = pullStep(
@@ -482,15 +522,16 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
       }
     }
     if (repos.get(commonDir) === repo) await prepareRoots(commonDir);
+    return settled;
   }
 
-  /** False when the fetch, or a remote it contacted, failed. */
+  /** Null when the fetch failed before it reached a remote. */
   async function fetchInto(
     commonDir: RepositoryRoot,
     repo: Repository,
     root: RepositoryRoot,
     branch: FullRef | BranchRef | null,
-  ): Promise<boolean> {
+  ): Promise<FetchSummary | null> {
     repo.activity = { kind: "fetching" };
     emit();
     try {
@@ -514,14 +555,21 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
       repo.outcomes = new Map();
       if (overview.fetch?.changed && repos.get(commonDir) === repo)
         notifyRefsChanged(commonDir);
-      return remotes.every(({ outcome }) => outcome.kind !== "failed");
+      return (
+        overview.fetch ?? {
+          changed: false,
+          moved: 0,
+          coalesced: false,
+          remotes,
+        }
+      );
     } catch (error) {
       repo.fetch = {
         kind: "failed",
         at: deps.now(),
         problem: problemFrom(error),
       };
-      return false;
+      return null;
     }
   }
 
@@ -561,9 +609,11 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
     return outcomes;
   }
 
-  function fetch(commonDir?: RepositoryRoot): Promise<void> {
+  function fetch(commonDir?: RepositoryRoot): Promise<FetchSummary | null> {
     if (commonDir !== undefined)
-      return enqueue(commonDir, { kind: "fetch", branch: null });
+      return enqueue(commonDir, { kind: "fetch", branch: null }).then(
+        ({ fetched }) => fetched,
+      );
     for (const [root, state] of roots)
       if (state.kind === "unavailable") void open(root);
     emit();
@@ -571,7 +621,7 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
       [...repos.keys()].map((dir) =>
         enqueue(dir, { kind: "fetch", branch: null }),
       ),
-    ).then(() => {});
+    ).then(() => null);
   }
 
   async function refreshLocal(commonDir: RepositoryRoot) {
@@ -622,7 +672,9 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
     },
     fetch,
     fetchBranch: (commonDir, branch) =>
-      enqueue(commonDir, { kind: "fetch", branch }),
+      enqueue(commonDir, { kind: "fetch", branch }).then(
+        ({ fetched }) => fetched,
+      ),
     invalidatePush(commonDir) {
       invalidatePush(commonDir);
       emit();
@@ -655,13 +707,16 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
       const advances = (repo ? readyAdvances(repo.overview) : []).filter(
         (advance) => branch === undefined || advance.reference === branch,
       );
-      if (advances.length === 0) return Promise.resolve();
+      if (advances.length === 0) return Promise.resolve([]);
+      const asked = new Set(advances.map(({ reference }) => reference));
       return enqueue(commonDir, {
         kind: "fastForward",
         advances: new Map(
           advances.map((advance) => [advance.reference, advance]),
         ),
-      });
+      }).then(({ advanced }) =>
+        advanced.filter(({ reference }) => asked.has(reference)),
+      );
     },
     setInterval(minutes) {
       if (minutes === intervalMinutes) return;

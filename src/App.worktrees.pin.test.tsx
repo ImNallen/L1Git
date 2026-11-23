@@ -278,11 +278,35 @@ it("Remove worktree asks first, removes the linked worktree, drops it from the s
   expect(app.bridge.count("snapshot", PIN)).toBeGreaterThan(0);
   expect(app.bridge.count("undoHistory", PIN)).toBeGreaterThan(0);
   expect(sidebarRoots()).toEqual([PIN, OTHER]);
+  const removed = get("status", /Removed worktree/);
+  expect(removed.textContent).toBe(
+    "Removed worktree pin-feature. Removal cannot be undone.",
+  );
+  expect(query("button", "Undo", removed)).toBeNull();
+  await app.click(get("button", "Dismiss", removed));
+  expect(query("status", /Removed worktree/)).toBeNull();
   await app.contextMenu(refRow("refs/heads/feature")!);
   expect(menuItem("Try it locally…").getAttribute("aria-disabled")).toBe(
     "false",
   );
   expect(query("menuitem", /^Remove worktree/)).toBeNull();
+});
+
+it("a removed worktree's notice replaces the write notice", async () => {
+  const app = await mountApp({
+    world: featureOpen,
+    saved: { entries: [PIN, PIN_FEATURE, OTHER], lastRoot: PIN },
+  });
+  await app.click(refRow("refs/heads/topic")!);
+  await app.runPaletteItem("Check out topic");
+  expect(get("status", /^Checked out topic/)).toBeTruthy();
+  await app.contextMenu(refRow("refs/heads/feature")!);
+  await app.click(menuItem("Remove worktree…"));
+  await app.click(get("button", "Remove worktree"));
+  expect(query("status", /^Checked out topic/)).toBeNull();
+  expect(get("status", /^Removed worktree/).textContent).toBe(
+    "Removed worktree pin-feature. Removal cannot be undone.",
+  );
 });
 
 it("a refused remove shows in a notice until it is dismissed or a retry removes the worktree", async () => {

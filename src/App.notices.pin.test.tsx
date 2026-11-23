@@ -101,11 +101,12 @@ function answerFastForward(
   app: Harness,
   name: string,
   advance: { from: string; to: string; behind: number },
+  base = pinOverview(),
 ) {
   app.bridge.respond("overview", () =>
     overviewSchema.parse({
-      ...pinOverview(),
-      branches: pinOverview().branches.map((branch) =>
+      ...base,
+      branches: base.branches.map((branch) =>
         branch.name === name
           ? {
               ...branch,
@@ -130,7 +131,7 @@ function answerFastForward(
         to: advance.to,
       },
     ],
-    overview: pinOverview(),
+    overview: base,
   }));
 }
 
@@ -160,6 +161,157 @@ it("a pull in a selected linked worktree shows its notice in the open repository
   expect(get("status", /Pulled/).textContent).toBe(
     "Pulled 1 commit into feature.",
   );
+});
+
+const behindTopic = {
+  reference: "refs/heads/topic",
+  name: "topic",
+  oid: C6,
+  role: "other",
+  checkedOutAt: null,
+  state: {
+    kind: "behind",
+    upstream: "refs/remotes/origin/topic",
+    target: C5,
+    behind: 1,
+    blocker: null,
+  },
+};
+
+it("the sidebar fast-forward replaces a pull notice with its own", async () => {
+  const withTopic = overviewSchema.parse({
+    ...pinOverview(),
+    branches: [...pinOverview().branches, behindTopic],
+  });
+  const app = await mountApp({
+    world: (world) => world.overviews.set(PIN, withTopic),
+  });
+  answerFastForward(app, "main", { from: C4, to: C6, behind: 2 }, withTopic);
+  await app.click(
+    await toolbarItem(app, "Pull", "Pull (Fast-forward if possible)"),
+  );
+  expect(get("status", /Pulled/)).toBeTruthy();
+  app.bridge.respond("fastForward", () => ({
+    outcomes: [
+      { kind: "advanced", reference: "refs/heads/topic", from: C6, to: C5 },
+    ],
+    overview: pinOverview(),
+  }));
+  await app.contextMenu(refRow("refs/heads/topic")!);
+  await app.click(get("menuitem", "Fast-forward to origin/topic"));
+  expect(query("status", /Pulled/)).toBeNull();
+  const advanced = get("status", /Fast-forwarded/);
+  expect(advanced.textContent).toBe("Fast-forwarded topic.");
+  expect(get("button", "Dismiss", advanced)).toBeTruthy();
+});
+
+function answerFetch(app: Harness, remotes: unknown[], moved = 0) {
+  app.bridge.respond("overview", (request) =>
+    overviewSchema.parse({
+      ...pinOverview(),
+      fetch:
+        request.mode === "remote"
+          ? { changed: moved > 0, moved, coalesced: false, remotes }
+          : null,
+    }),
+  );
+}
+
+const missing = (remote: string) => ({
+  remote,
+  outcome: {
+    kind: "failed",
+    failure: "other",
+    message: "No such remote path.",
+  },
+});
+
+async function checkOutTopic(app: Harness) {
+  await app.click(refRow("refs/heads/topic")!);
+  await app.runPaletteItem("Check out topic");
+  return get("status", /^Checked out topic/);
+}
+
+it("Fetch all names the fetched remotes and how many branches moved", async () => {
+  const app = await mountApp();
+  answerFetch(
+    app,
+    [
+      { remote: "origin", outcome: { kind: "fetched" } },
+      { remote: "mirror", outcome: { kind: "fetched" } },
+      { remote: "archive", outcome: { kind: "skipped" } },
+    ],
+    2,
+  );
+  await app.runPaletteItem("Fetch all");
+  const fetched = get("status", /Fetched/);
+  expect(fetched.textContent).toBe(
+    "Fetched origin and mirror. 2 branches moved.",
+  );
+  expect(get("button", "Dismiss", fetched)).toBeTruthy();
+});
+
+it("a failed fetch shows its warning, posts no success notice, and keeps the write notice", async () => {
+  const app = await mountApp();
+  await checkOutTopic(app);
+  answerFetch(app, [missing("origin")]);
+  await app.runPaletteItem("Fetch all");
+  expect(alerts()).toEqual(["origin: Fetch failed. No such remote path."]);
+  expect(query("status", /Fetched/)).toBeNull();
+  expect(get("status", /^Checked out topic/)).toBeTruthy();
+});
+
+it("a fetch that reaches only some remotes posts no success notice and keeps the write notice", async () => {
+  const app = await mountApp();
+  await checkOutTopic(app);
+  answerFetch(app, [
+    { remote: "origin", outcome: { kind: "fetched" } },
+    missing("mirror"),
+  ]);
+  await app.runPaletteItem("Fetch all");
+  expect(alerts()).toEqual(["mirror: Fetch failed. No such remote path."]);
+  expect(query("status", /Fetched/)).toBeNull();
+  expect(get("status", /^Checked out topic/)).toBeTruthy();
+});
+
+it("a fetch that fails outright keeps the write notice", async () => {
+  const app = await mountApp();
+  await checkOutTopic(app);
+  app.bridge.respond("overview", (request) => {
+    if (request.mode === "remote") throw new Error("The network is down.");
+    return pinOverview();
+  });
+  await app.runPaletteItem("Fetch all");
+  expect(query("status", /Fetched/)).toBeNull();
+  expect(get("status", /^Checked out topic/)).toBeTruthy();
+});
+
+it("a fast-forward that moves nothing keeps the notice already shown", async () => {
+  const withTopic = overviewSchema.parse({
+    ...pinOverview(),
+    branches: [...pinOverview().branches, behindTopic],
+  });
+  const app = await mountApp({
+    world: (world) => world.overviews.set(PIN, withTopic),
+  });
+  answerFastForward(app, "main", { from: C4, to: C6, behind: 2 }, withTopic);
+  await app.click(
+    await toolbarItem(app, "Pull", "Pull (Fast-forward if possible)"),
+  );
+  app.bridge.respond("fastForward", () => ({
+    outcomes: [
+      {
+        kind: "skipped",
+        reference: "refs/heads/topic",
+        reason: { kind: "changed" },
+      },
+    ],
+    overview: withTopic,
+  }));
+  await app.contextMenu(refRow("refs/heads/topic")!);
+  await app.click(get("menuitem", "Fast-forward to origin/topic"));
+  expect(query("status", /Fast-forwarded/)).toBeNull();
+  expect(get("status", /Pulled/)).toBeTruthy();
 });
 
 it("the first persistence error among the four sources is shown", async () => {
@@ -224,6 +376,7 @@ it("each repository warning renders one alert", async () => {
             request.mode === "remote" && request.path === PIN
               ? {
                   changed: false,
+                  moved: 0,
                   coalesced: false,
                   remotes: [
                     {
@@ -401,4 +554,40 @@ it("notices keep their order above the panes", async () => {
       "topic is hidden in the graph.Show topic",
     ]
   `);
+});
+
+const indexLocked = {
+  kind: "gitFailed",
+  message: "Unable to create '/fixture/pin/.git/index.lock': File exists.",
+} as const;
+
+it("a successful stage clears the notice a failed stage left", async () => {
+  const app = await mountApp();
+  await app.click(historyRow("Uncommitted changes in pin,"));
+  const unlock = app.bridge.fail("write", indexLocked);
+  await app.runPaletteItem("Stage all");
+  expect(alerts()).toEqual([
+    `Could not stage notes.txt. ${indexLocked.message}`,
+  ]);
+  unlock();
+  await app.runPaletteItem("Stage all");
+  expect(app.bridge.lines((request) => request.op === "write")).toEqual([
+    "write /fixture/pin stageFiles",
+    "write /fixture/pin stageFiles",
+  ]);
+  expect(alerts()).toEqual([]);
+});
+
+it("a successful stage keeps a commit notice shown", async () => {
+  const app = await mountApp();
+  await app.click(historyRow("Uncommitted changes in pin,"));
+  await app.type(get("textbox", "Summary"), "Ship it");
+  await app.click(get("button", "Commit to main"));
+  const committed = get("status", /Committed/).textContent;
+  await app.runPaletteItem("Stage all");
+  expect(app.bridge.lines((request) => request.op === "write")).toEqual([
+    "write /fixture/pin commit",
+    "write /fixture/pin stageFiles",
+  ]);
+  expect(get("status", /Committed/).textContent).toBe(committed);
 });

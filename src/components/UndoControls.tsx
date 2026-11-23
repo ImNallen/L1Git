@@ -1,13 +1,17 @@
 import { Fragment, useLayoutEffect, useRef } from "react";
-import { Info, TriangleAlert, X } from "lucide-react";
+import { FolderGit2, Info, TriangleAlert, X } from "lucide-react";
 import {
+  advancedText,
+  describe,
   failureText,
+  fetchedText,
   historyFailure,
   hookOutputTail,
   nextEntry,
   pulledText,
   steppedText,
 } from "../domain/operations";
+import type { Step } from "../domain/operations";
 import { pushOutcomeText } from "../domain/push";
 import type { WritesView } from "../useWrites";
 
@@ -92,33 +96,56 @@ function StepNotice({ writes }: { writes: WritesView }) {
           {dismiss}
         </div>
       );
+    case "fetched":
+      return (
+        <div ref={row} className="notice info-notice" role="status">
+          <span className="workspace-action-icon fetch" aria-hidden="true" />
+          <span>{fetchedText(notice)}</span>
+          {dismiss}
+        </div>
+      );
+    case "advanced":
+      return (
+        <div ref={row} className="notice info-notice" role="status">
+          <span className="workspace-action-icon pull" aria-hidden="true" />
+          <span>{advancedText(notice)}</span>
+          {dismiss}
+        </div>
+      );
+    case "removedWorktree":
+      return (
+        <div ref={row} className="notice info-notice" role="status">
+          <FolderGit2 size={14} />
+          <span>Removed worktree {notice.name}. Removal cannot be undone.</span>
+          {dismiss}
+        </div>
+      );
+    case "wrote":
     case "stepped": {
-      const again =
-        notice.step === "undo"
-          ? {
-              label: "Redo",
-              entry: nextEntry(history, "redo"),
-              run: writes.redo,
-            }
-          : {
-              label: "Undo",
-              entry: nextEntry(history, "undo"),
-              run: writes.undo,
-            };
-      const unavailable = again.entry === null || running !== null;
+      const step: Step =
+        notice.kind === "stepped" && notice.step === "undo" ? "redo" : "undo";
+      const entry = nextEntry(history, step);
+      const unavailable =
+        entry === null ||
+        (notice.kind === "wrote" && entry.id !== notice.entry) ||
+        running !== null;
       return (
         <div ref={row} className="notice info-notice" role="status">
           <Info size={14} />
-          <span>{steppedText(notice)}</span>
+          <span>
+            {notice.kind === "wrote"
+              ? `${describe(notice.operation, "past")}.`
+              : steppedText(notice)}
+          </span>
           <button
             aria-disabled={unavailable}
             onClick={() => {
               if (unavailable) return;
               handsOff.current = true;
-              void again.run();
+              void writes[step]();
             }}
           >
-            {again.label}
+            {step === "undo" ? "Undo" : "Redo"}
           </button>
           {dismiss}
         </div>

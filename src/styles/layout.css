@@ -92,7 +92,7 @@
   color: var(--primary-text);
 }
 .notice {
-  min-height: 35px;
+  min-height: 38px;
   padding: 9px 18px;
   display: flex;
   align-items: center;

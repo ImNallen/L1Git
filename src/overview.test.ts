@@ -65,6 +65,7 @@ function overview(
         ? null
         : {
             changed: fetch.changed,
+            moved: fetch.changed ? 1 : 0,
             coalesced: false,
             remotes: [
               {
@@ -563,7 +564,7 @@ describe("overview store", () => {
     const withRemotes = (remotes: unknown[]) =>
       overviewSchema.parse({
         ...overview(app, dir, [upToDate("main")], { changed: false }),
-        fetch: { changed: false, coalesced: false, remotes },
+        fetch: { changed: false, moved: 0, coalesced: false, remotes },
       });
     h.store.track([app]);
     await h.answerOne(overview(app, dir, [upToDate("main")]));

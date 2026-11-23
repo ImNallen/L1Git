@@ -462,25 +462,64 @@ function quoted(message: string): string {
   return `“${subject.length > SUBJECT_LIMIT ? `${subject.slice(0, SUBJECT_LIMIT - 1)}…` : subject}”`;
 }
 
-const commitVerbs: Record<CommitWrite, string> = {
-  commit: "Commit",
-  amend: "Amend",
-  editMessage: "Edit message to",
+/** A write is named as a command before it runs, and as a result once it has. */
+type Tense = "now" | "past";
+type Verb = Record<Tense, string>;
+
+const commitVerbs: Record<CommitWrite, Verb> = {
+  commit: { now: "Commit", past: "Committed" },
+  amend: { now: "Amend", past: "Amended" },
+  editMessage: { now: "Edit message to", past: "Edited message to" },
 };
 
-const fileVerbs: Record<FileWrite, string> = {
-  stageFiles: "Stage",
-  unstageFiles: "Unstage",
-  discard: "Discard",
+const fileVerbs: Record<FileWrite, Verb> = {
+  stageFiles: { now: "Stage", past: "Staged" },
+  unstageFiles: { now: "Unstage", past: "Unstaged" },
+  discard: { now: "Discard", past: "Discarded" },
 };
 
-const partVerbs: Record<PartWrite, string> = {
-  stageHunk: "Stage a hunk of",
-  unstageHunk: "Unstage a hunk of",
-  discardHunk: "Discard a hunk of",
-  stageLines: "Stage lines of",
-  unstageLines: "Unstage lines of",
-  discardLines: "Discard lines of",
+const partVerbs: Record<PartWrite, Verb> = {
+  stageHunk: { now: "Stage a hunk of", past: "Staged a hunk of" },
+  unstageHunk: { now: "Unstage a hunk of", past: "Unstaged a hunk of" },
+  discardHunk: { now: "Discard a hunk of", past: "Discarded a hunk of" },
+  stageLines: { now: "Stage lines of", past: "Staged lines of" },
+  unstageLines: { now: "Unstage lines of", past: "Unstaged lines of" },
+  discardLines: { now: "Discard lines of", past: "Discarded lines of" },
+};
+
+/**
+ * Whether a landed write posts its result with Undo. Staging and resolving run
+ * often and show their result in place, so a notice for each would replace the
+ * one worth reading.
+ */
+export const announcesResult: Record<Operation["kind"], boolean> = {
+  stageFiles: false,
+  unstageFiles: false,
+  stageHunk: false,
+  unstageHunk: false,
+  stageLines: false,
+  unstageLines: false,
+  saveConflict: false,
+  resolveWhole: false,
+  discard: true,
+  discardHunk: true,
+  discardLines: true,
+  commit: true,
+  amend: true,
+  editMessage: true,
+  createBranch: true,
+  renameBranch: true,
+  deleteBranch: true,
+  checkout: true,
+  createTag: true,
+  deleteTag: true,
+  stashPush: true,
+  stashApply: true,
+  stashPop: true,
+  stashDrop: true,
+  replay: true,
+  finishReplay: true,
+  rebase: true,
 };
 
 function folderOf(path: string): string[] {
@@ -498,45 +537,53 @@ function sharedFolder(paths: readonly string[]): string {
   return first.slice(0, length).join("/");
 }
 
-export function describe(operation: Operation): string {
+export function describe(operation: Operation, tense: Tense = "now"): string {
+  const say = (now: string, past: string) => (tense === "now" ? now : past);
   switch (operation.kind) {
     case "saveConflict":
-      return `Save conflict result for ${operation.path}`;
+      return `${say("Save", "Saved")} conflict result for ${operation.path}`;
     case "resolveWhole":
-      return `Keep the ${operation.keep} side of ${operation.path}`;
+      return `${say("Keep", "Kept")} the ${operation.keep} side of ${operation.path}`;
     case "createBranch":
-      return `Create branch ${operation.name}`;
+      return `${say("Create", "Created")} branch ${operation.name}`;
     case "renameBranch":
-      return `Rename branch ${shortBranch(operation.branch.reference)} to ${operation.to}`;
+      return `${say("Rename", "Renamed")} branch ${shortBranch(operation.branch.reference)} to ${operation.to}`;
     case "deleteBranch":
-      return `Delete branch ${shortBranch(operation.branch.reference)}`;
+      return `${say("Delete", "Deleted")} branch ${shortBranch(operation.branch.reference)}`;
     case "checkout":
-      return `Check out ${startName(operation.target)}`;
+      return `${say("Check out", "Checked out")} ${startName(operation.target)}`;
     case "createTag":
-      return `Create tag ${operation.name}`;
+      return `${say("Create", "Created")} tag ${operation.name}`;
     case "deleteTag":
-      return `Delete tag ${shortTag(operation.tag.reference)}`;
+      return `${say("Delete", "Deleted")} tag ${shortTag(operation.tag.reference)}`;
     case "stashPush":
       return operation.message.trim() === ""
-        ? "Stash changes"
-        : `Stash ${quoted(operation.message)}`;
+        ? `${say("Stash", "Stashed")} changes`
+        : `${say("Stash", "Stashed")} ${quoted(operation.message)}`;
     case "stashApply":
-      return `Apply ${stashLabel(operation.stash)}`;
+      return `${say("Apply", "Applied")} ${stashLabel(operation.stash)}`;
     case "stashPop":
-      return `Pop ${stashLabel(operation.stash)}`;
+      return `${say("Pop", "Popped")} ${stashLabel(operation.stash)}`;
     case "stashDrop":
-      return `Drop ${stashLabel(operation.stash)}`;
-    case "replay":
-      return `${replayNames[operation.review.kind].title} ${quoted(operation.review.subject)}`;
-    case "finishReplay":
-      return `${replayNames[operation.of.kind].title} ${quoted(operation.message)}`;
+      return `${say("Drop", "Dropped")} ${stashLabel(operation.stash)}`;
+    case "replay": {
+      const { kind, commit, subject, destination } = operation.review;
+      const { title, past } = replayNames[kind];
+      return tense === "now"
+        ? `${title} ${quoted(subject)}`
+        : `${past} ${shortOid(commit)} ${kind === "cherryPick" ? "onto" : "on"} ${shortBranch(destination.reference)}`;
+    }
+    case "finishReplay": {
+      const { title, past } = replayNames[operation.of.kind];
+      return `${say(title, past)} ${quoted(operation.message)}`;
+    }
     case "rebase":
-      return `Rebase ${shortBranch(operation.branch)} onto ${shortRemote(operation.onto)}`;
+      return `${say("Rebase", "Rebased")} ${shortBranch(operation.branch)} onto ${shortRemote(operation.onto)}`;
   }
   if ("message" in operation)
-    return `${commitVerbs[operation.kind]} ${quoted(operation.message)}`;
+    return `${commitVerbs[operation.kind][tense]} ${quoted(operation.message)}`;
   if ("shown" in operation)
-    return `${partVerbs[operation.kind]} ${operation.path}`;
+    return `${partVerbs[operation.kind][tense]} ${operation.path}`;
   const paths = operation.entries.map((entry) => entry.path);
   const resolving =
     operation.kind === "stageFiles" &&
@@ -546,8 +593,8 @@ export function describe(operation: Operation): string {
     paths.length === 1
       ? paths[0]
       : `${paths.length.toLocaleString()} files${folder === "" ? "" : ` in ${folder}`}`;
-  if (resolving) return `Mark ${files} resolved`;
-  return `${fileVerbs[operation.kind]} ${files}`;
+  if (resolving) return `${say("Mark", "Marked")} ${files} resolved`;
+  return `${fileVerbs[operation.kind][tense]} ${files}`;
 }
 
 /** What a write is called while it runs or if it fails. A refused Finish must not read as a refused start. */
@@ -580,6 +627,25 @@ export const pulledText = ({
 }: Extract<WriteNotice, { kind: "pulled" }>) =>
   `Pulled ${commits.toLocaleString()} ${commits === 1 ? "commit" : "commits"} into ${shortBranch(branch)}.`;
 
+export const fetchedText = ({
+  remotes,
+  moved,
+}: Extract<WriteNotice, { kind: "fetched" }>) =>
+  `Fetched ${new Intl.ListFormat("en").format(remotes)}. ${
+    moved === 0
+      ? "No branches moved."
+      : `${moved.toLocaleString()} ${moved === 1 ? "branch" : "branches"} moved.`
+  }`;
+
+export const advancedText = ({
+  branches,
+}: Extract<WriteNotice, { kind: "advanced" }>) =>
+  `Fast-forwarded ${
+    branches.length <= 3
+      ? new Intl.ListFormat("en").format(branches.map(shortBranch))
+      : `${branches.length.toLocaleString()} branches`
+  }.`;
+
 export const historyFailure = (problem: Problem) =>
   `Undo and redo are unavailable. ${problem.message}`;
 
@@ -587,6 +653,10 @@ export type WriteNotice =
   | { kind: "stepped"; step: Step; label: string }
   | ({ kind: "pushed" } & PushResult)
   | { kind: "pulled"; branch: BranchRef; commits: number }
+  | { kind: "wrote"; operation: Operation; entry: EntryId }
+  | { kind: "fetched"; remotes: readonly string[]; moved: number }
+  | { kind: "advanced"; branches: readonly BranchRef[] }
+  | { kind: "removedWorktree"; name: string }
   | {
       kind: "failed";
       action: "write";

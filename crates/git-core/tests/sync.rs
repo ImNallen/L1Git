@@ -244,6 +244,7 @@ fn fast_forwards_the_checked_out_default_branch_after_a_fetch() {
         .unwrap();
     let summary = fetched.fetch.clone().unwrap();
     assert!(summary.changed);
+    assert_eq!(summary.moved, 1);
     assert!(!summary.coalesced);
     assert_eq!(
         summary.remotes,
@@ -284,6 +285,25 @@ fn fast_forwards_the_checked_out_default_branch_after_a_fetch() {
         .fetch
         .unwrap();
     assert!(!unchanged.changed);
+    assert_eq!(unchanged.moved, 0);
+}
+
+#[test]
+fn a_fetch_counts_each_moved_branch_once_and_skips_symbolic_refs() {
+    let world = World::new();
+    let coordinator = coordinator(&world);
+    git(&world.work, &["branch", "feat"]);
+    world.publish("feat");
+    git(&world.work, &["remote", "set-head", "origin", "main"]);
+    world.colleague_pushes("main", "f", "one\ntwo\n");
+    world.colleague_pushes("feat", "g", "colleague\n");
+
+    let summary = coordinator
+        .overview(world.path(), FetchMode::Remote)
+        .unwrap()
+        .fetch
+        .unwrap();
+    assert_eq!(summary.moved, 2);
 }
 
 #[test]
@@ -1500,6 +1520,7 @@ fn a_branch_fetch_moves_only_that_branch_tracking_ref() {
         .unwrap();
     let summary = fetched.fetch.clone().unwrap();
     assert!(summary.changed);
+    assert_eq!(summary.moved, 1);
     assert!(!summary.coalesced);
     assert_eq!(
         summary.remotes,

@@ -134,11 +134,17 @@ export type MergeSession = z.infer<typeof mergeSessionSchema>;
 export type ReplayProgress = z.infer<typeof replayProgressSchema>;
 export type OperationProbe = z.infer<typeof operationProbeSchema>;
 
-export const replayNames: Record<ReplayKind, { noun: string; title: string }> =
-  {
-    cherryPick: { noun: "cherry-pick", title: "Cherry-pick" },
-    revert: { noun: "revert", title: "Revert" },
-  };
+export const replayNames: Record<
+  ReplayKind,
+  { noun: string; title: string; past: string }
+> = {
+  cherryPick: {
+    noun: "cherry-pick",
+    title: "Cherry-pick",
+    past: "Cherry-picked",
+  },
+  revert: { noun: "revert", title: "Revert", past: "Reverted" },
+};
 
 /** The menu and palette entry. `branch` is null when the active worktree is on no branch. */
 export const replayEntry = (kind: ReplayKind, branch: string | null) =>
