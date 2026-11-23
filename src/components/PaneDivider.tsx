@@ -22,7 +22,11 @@ export function PaneDivider({
   const origin = useRef({ x: 0, width });
   const clamp = (value: number) => Math.min(max, Math.max(min, value));
   const dragged = (clientX: number) =>
-    clamp(origin.current.width + direction * (clientX - origin.current.x));
+    clamp(
+      Math.round(
+        origin.current.width + direction * (clientX - origin.current.x),
+      ),
+    );
   return (
     <div
       className="pane-divider"
