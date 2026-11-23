@@ -1,6 +1,6 @@
 import { toolbarItem } from "./test/appHarness";
 // @vitest-environment happy-dom
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import {
   dialogs,
   dirtyResolution,
@@ -255,6 +255,80 @@ it("a narrow window starts with the sidebar and the inspector closed", async () 
   await mountApp({ media: { [NARROW_SIDEBAR]: true }, innerWidth: 1000 });
   expect(sidebar()).toBeNull();
   expect(inspector()).toBeNull();
+});
+
+const PANE_WIDTHS_KEY = "l1git.paneWidths.v1";
+const paneWidth = (label: string) =>
+  get("separator", label).getAttribute("aria-valuenow");
+const savedPaneWidths = () =>
+  JSON.parse(localStorage.getItem(PANE_WIDTHS_KEY) ?? "null");
+
+it("resizing the sidebar and the inspector saves both widths", async () => {
+  const app = await mountApp();
+  const writes = vi.spyOn(localStorage, "setItem");
+  const paneWrites = () =>
+    writes.mock.calls.filter(([key]) => key === PANE_WIDTHS_KEY).length;
+  const divider = get("separator", "Resize repository sidebar");
+  const pointer = (type: string, clientX: number) =>
+    app.act(() => {
+      divider.dispatchEvent(
+        new PointerEvent(type, { bubbles: true, pointerId: 1, clientX }),
+      );
+    });
+  try {
+    await pointer("pointerdown", 280);
+    for (const clientX of [290, 300, 310, 320, 330, 340]) {
+      await pointer("pointermove", clientX);
+    }
+    expect(paneWidth("Resize repository sidebar")).toBe("340");
+    expect(paneWrites(), "while dragging").toBe(0);
+    await pointer("pointerup", 340);
+    expect(paneWrites(), "after the pointer-up").toBe(1);
+    expect(savedPaneWidths()).toEqual({
+      version: 1,
+      sidebar: 340,
+      inspector: 360,
+    });
+    await app.press("ArrowRight", {
+      target: get("separator", "Resize commit inspector"),
+    });
+    expect(paneWrites(), "after one keyboard step").toBe(2);
+    expect(savedPaneWidths()).toEqual({
+      version: 1,
+      sidebar: 340,
+      inspector: 344,
+    });
+  } finally {
+    writes.mockRestore();
+  }
+});
+
+it("saved pane widths come back on launch", async () => {
+  await mountApp({
+    stored: {
+      [PANE_WIDTHS_KEY]: JSON.stringify({
+        version: 1,
+        sidebar: 264,
+        inspector: 344,
+      }),
+    },
+  });
+  expect(paneWidth("Resize repository sidebar")).toBe("264");
+  expect(paneWidth("Resize commit inspector")).toBe("344");
+});
+
+it("a saved pane width out of range restores the default widths", async () => {
+  await mountApp({
+    stored: {
+      [PANE_WIDTHS_KEY]: JSON.stringify({
+        version: 1,
+        sidebar: 9000,
+        inspector: 344,
+      }),
+    },
+  });
+  expect(paneWidth("Resize repository sidebar")).toBe("280");
+  expect(paneWidth("Resize commit inspector")).toBe("360");
 });
 
 it("leaving settings focuses Settings, or the sidebar toggle when the sidebar is closed", async () => {

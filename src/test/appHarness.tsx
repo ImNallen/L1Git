@@ -218,6 +218,7 @@ type MountOptions = {
   media?: Record<string, boolean>;
   innerWidth?: number;
   saved?: SavedRepositories;
+  stored?: Record<string, string>;
 };
 
 function seedStorage(saved: SavedRepositories) {
@@ -508,6 +509,8 @@ export async function mountApp(options: MountOptions = {}): Promise<Harness> {
   const bridge = createBridge(world);
   options.bridge?.(bridge);
   seedStorage(options.saved ?? { entries: [PIN, OTHER], lastRoot: PIN });
+  for (const [key, value] of Object.entries(options.stored ?? {}))
+    localStorage.setItem(key, value);
   vi.stubGlobal("fetch", bridge.fetch);
   const dom = installDom(options.media ?? {}, options.innerWidth ?? 1400);
   const modules = await loadModules();
