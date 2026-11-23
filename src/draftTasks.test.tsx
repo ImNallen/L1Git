@@ -222,6 +222,44 @@ it("defers a stale amend restoration during freeze and applies it when the freez
   expect(draftOf(status.root).draft.summary).toBe("Aside");
 });
 
+it("clears an applied amend without reporting its own new HEAD as an external move", async () => {
+  const result = deferred<Outcome>();
+  commit.mockReturnValue(result.promise);
+  setDraft(status.root, {
+    draft: { summary: "Amended", description: "" },
+    amend: {
+      draftAside: { summary: "Aside", description: "" },
+      loaded: {
+        draft: { summary: "Amending", description: "" },
+        message: "Amending",
+      },
+      head: oidSchema.parse("a".repeat(40)),
+    },
+  });
+  const box = (current: typeof status) => (
+    <CommitBox
+      branch="main"
+      status={current}
+      staged={0}
+      busy={false}
+      onCommit={commit}
+    />
+  );
+  await act(async () => reactRoot.render(box(status)));
+  await act(async () => container.querySelector("button")?.click());
+  const amended = worktreeStatusSchema.parse({
+    ...status,
+    head: { ...status.head, oid: "c".repeat(40) },
+  });
+  await act(async () => reactRoot.render(box(amended)));
+  await act(async () => result.resolve({ kind: "applied", applied }));
+  expect(container.querySelector('[role="alert"]')).toBeNull();
+  expect(draftOf(status.root)).toEqual({
+    draft: { summary: "", description: "" },
+    amend: null,
+  });
+});
+
 it("keeps merge in the shared write task through landed-error refreshes and excludes Undo", async () => {
   const { mergeActionSchema } = await import("./domain/merge");
   const refreshing = deferred<void>();
