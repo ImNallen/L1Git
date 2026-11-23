@@ -25,8 +25,8 @@ import {
   PIN_FEATURE,
   STAMP,
 } from "./test/fixtures";
-import type { World } from "./test/fakeBridge";
-import type { Applied } from "./domain/repository";
+import type { BridgeRequest, World } from "./test/fakeBridge";
+import type { Applied, RepositoryRoot } from "./domain/repository";
 
 installHarness();
 
@@ -565,4 +565,54 @@ it("a conflict row whose summary read failed says so and still refuses Mark reso
   app.bridge.reset();
   await app.click(get("menuitem", /^Mark resolved/));
   expect(app.bridge.count("write")).toBe(0);
+});
+
+const startStopsOn =
+  (conflicts: string[]) => (request: BridgeRequest, world: World) => {
+    const root = request.path as RepositoryRoot;
+    const state = activeMerge(root, conflicts);
+    if (state.kind !== "active") throw new Error("expected an active merge");
+    state.unresolved = conflicts;
+    world.merges.set(root, state);
+    world.statuses.set(root, {
+      ...world.statuses.get(root)!,
+      entries: conflicts.map((path) => conflictEntry(root, path)),
+    });
+    return { state, outcome: { kind: "started", problem: null } };
+  };
+
+it.each([
+  ["the repository's worktree", null, "Uncommitted changes in pin,"],
+  [
+    "a linked worktree",
+    "Uncommitted changes in pin-feature,",
+    "Uncommitted changes in pin-feature,",
+  ],
+])(
+  "a conflicting merge start in %s opens the resolver on its first conflicted file",
+  async (_, select, selected) => {
+    const app = await mountApp();
+    app.bridge.respond("merge", startStopsOn(["b.txt", "a.txt"]));
+    if (select) await app.click(historyRow(select));
+    await app.click(get("button", "Merge upstream…"));
+    await app.click(get("button", "Start merge"));
+    expect(dialogs()).toEqual([]);
+    expect(selectedRow()?.startsWith(selected)).toBe(true);
+    expect(
+      get("region", "Changes to a.txt").querySelector(".conflict-resolver"),
+    ).not.toBeNull();
+    expect(query("complementary", "Commit inspector")).toBeTruthy();
+  },
+);
+
+it("a merge start with no conflicts stays on history", async () => {
+  const app = await mountApp();
+  app.bridge.respond("merge", startStopsOn([]));
+  const before = selectedRow();
+  await app.click(get("button", "Merge upstream…"));
+  await app.click(get("button", "Start merge"));
+  expect(dialogs()).toEqual([]);
+  expect(app.bridge.count("merge")).toBe(1);
+  expect(selectedRow()).toBe(before);
+  expect(query("region", /^Changes to /)).toBeNull();
 });
