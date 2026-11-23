@@ -60,6 +60,7 @@ export function DiscardHost({
   return (
     <DiscardDialog
       paths={discarding.paths}
+      untracked={discarding.untracked}
       skipped={discarding.skipped}
       onDiscard={() => void writes.write(discarding.root, discarding.write)}
       onClose={() => {

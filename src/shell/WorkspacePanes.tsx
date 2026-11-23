@@ -139,11 +139,6 @@ export function WorkspacePanes({
           <span className="empty-shortcut">
             or press <kbd>⌘ / Ctrl</kbd> <kbd>O</kbd>
           </span>
-          <div className="empty-scope">
-            <span className="status-dot" />
-            Fetches remotes and fast-forwards only clean branches that are
-            behind.
-          </div>
         </div>
       )}
     </WorkspaceMotion>

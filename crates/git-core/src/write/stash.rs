@@ -563,7 +563,7 @@ fn judge_apply(
     }
     let unmerged = unmerged_paths(&now.status);
     if !unmerged.is_empty() {
-        let mut message = format!("{} have conflicts.", join_paths(&unmerged));
+        let mut message = have_conflicts(&unmerged);
         if pop {
             message.push_str(" The stash entry is kept.");
         }
@@ -1115,10 +1115,7 @@ fn refuse_unmerged(status: &[StatusEntry]) -> Result<(), RepositoryError> {
     }
     Err(RepositoryError::new(
         ErrorKind::Conflict,
-        format!(
-            "{} have conflicts. Resolve them, then try again.",
-            join_paths(&paths)
-        ),
+        format!("{} Resolve them, then try again.", have_conflicts(&paths)),
     ))
 }
 
@@ -1563,6 +1560,11 @@ fn parse_dropped(output: &str) -> Option<Oid> {
     let open = rest.find('(')?;
     let close = rest[open + 1..].find(')')?;
     Oid::try_from(rest[open + 1..open + 1 + close].to_owned()).ok()
+}
+
+fn have_conflicts(paths: &[&str]) -> String {
+    let verb = if paths.len() == 1 { "has" } else { "have" };
+    format!("{} {verb} conflicts.", join_paths(paths))
 }
 
 fn join_paths(paths: &[&str]) -> String {
