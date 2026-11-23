@@ -555,3 +555,39 @@ it("notices keep their order above the panes", async () => {
     ]
   `);
 });
+
+const indexLocked = {
+  kind: "gitFailed",
+  message: "Unable to create '/fixture/pin/.git/index.lock': File exists.",
+} as const;
+
+it("a successful stage clears the notice a failed stage left", async () => {
+  const app = await mountApp();
+  await app.click(historyRow("Uncommitted changes in pin,"));
+  const unlock = app.bridge.fail("write", indexLocked);
+  await app.runPaletteItem("Stage all");
+  expect(alerts()).toEqual([
+    `Could not stage notes.txt. ${indexLocked.message}`,
+  ]);
+  unlock();
+  await app.runPaletteItem("Stage all");
+  expect(app.bridge.lines((request) => request.op === "write")).toEqual([
+    "write /fixture/pin stageFiles",
+    "write /fixture/pin stageFiles",
+  ]);
+  expect(alerts()).toEqual([]);
+});
+
+it("a successful stage keeps a commit notice shown", async () => {
+  const app = await mountApp();
+  await app.click(historyRow("Uncommitted changes in pin,"));
+  await app.type(get("textbox", "Summary"), "Ship it");
+  await app.click(get("button", "Commit to main"));
+  const committed = get("status", /Committed/).textContent;
+  await app.runPaletteItem("Stage all");
+  expect(app.bridge.lines((request) => request.op === "write")).toEqual([
+    "write /fixture/pin commit",
+    "write /fixture/pin stageFiles",
+  ]);
+  expect(get("status", /Committed/).textContent).toBe(committed);
+});
