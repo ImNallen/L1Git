@@ -336,6 +336,8 @@ export function useWrites(
       ),
     undo: () => step("undo"),
     redo: () => step("redo"),
+    post: (repository: RepositoryRoot, notice: WriteNotice | null) =>
+      update(repository, (writes) => ({ ...writes, notice })),
     dismiss: () => {
       if (root !== null) update(root, (shown) => ({ ...shown, notice: null }));
     },

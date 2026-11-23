@@ -8,6 +8,8 @@ import {
   shortTag,
 } from "./refs";
 import { shownText, splittable } from "./lineSelection";
+import type { BranchRef } from "./overview";
+import type { PushResult } from "./push";
 import type { ListSide } from "./worktree";
 import type {
   Applied,
@@ -563,11 +565,19 @@ export const steppedText = ({
 }: Extract<WriteNotice, { kind: "stepped" }>) =>
   `${step === "undo" ? "Undid" : "Redid"} ${label}`;
 
+export const pulledText = ({
+  branch,
+  commits,
+}: Extract<WriteNotice, { kind: "pulled" }>) =>
+  `Pulled ${commits.toLocaleString()} ${commits === 1 ? "commit" : "commits"} into ${shortBranch(branch)}.`;
+
 export const historyFailure = (problem: Problem) =>
   `Undo and redo are unavailable. ${problem.message}`;
 
 export type WriteNotice =
   | { kind: "stepped"; step: Step; label: string }
+  | ({ kind: "pushed" } & PushResult)
+  | { kind: "pulled"; branch: BranchRef; commits: number }
   | {
       kind: "failed";
       action: "write";

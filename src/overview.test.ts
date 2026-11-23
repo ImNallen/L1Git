@@ -622,11 +622,41 @@ describe("overview store", () => {
           overview: overview(app, dir, [at(upToDate("main"))]),
         }),
       );
-      await expect(pulled).resolves.toBeNull();
+      await expect(pulled).resolves.toEqual({
+        kind: "fastForwarded",
+        branch: main,
+        commits: 1,
+      });
       expect(h.advances).toEqual([
         [{ reference: "refs/heads/main", from: a, to: b }],
       ]);
       expect(h.pendingLabels()).toEqual(["remote /code/app"]);
+    });
+
+    it("reports no fast-forward when the core skips the advance", async () => {
+      const h = await opened();
+      const pulled = h.store.pull(dir, app, main, "ffOnly");
+      await h.answerOne(
+        overview(app, dir, [at(behind("main", b))], { changed: true }),
+      );
+      await h.answerOne(
+        fastForwardReportSchema.parse({
+          outcomes: [
+            {
+              kind: "skipped",
+              reference: "refs/heads/main",
+              reason: { kind: "changed" },
+            },
+          ],
+          overview: overview(app, dir, [at(behind("main", b))]),
+        }),
+      );
+      await expect(pulled).resolves.toBeNull();
+      expect(
+        repositoryWarnings(h.store.getSnapshot().repositories[0]!),
+      ).toEqual([
+        "Did not fast-forward main. It moved since the last fetch. Fetch again.",
+      ]);
     });
 
     it("leaves an up-to-date branch alone", async () => {
@@ -686,7 +716,11 @@ describe("overview store", () => {
           ]),
         }),
       );
-      await expect(pulled).resolves.toBeNull();
+      await expect(pulled).resolves.toEqual({
+        kind: "fastForwarded",
+        branch: main,
+        commits: 1,
+      });
       expect(h.advances).toEqual([
         [{ reference: "refs/heads/main", from: a, to: b }],
       ]);

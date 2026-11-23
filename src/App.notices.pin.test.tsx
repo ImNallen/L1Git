@@ -17,6 +17,8 @@ import {
 } from "./test/appHarness";
 import type { Harness } from "./test/appHarness";
 import {
+  C4,
+  C5,
   C6,
   OTHER,
   PIN,
@@ -64,6 +66,100 @@ it("the push notice is role=status on success and role=alert on failure", async 
       "Push rejected. The remote said no. ",
     ]
   `);
+});
+
+async function rejectPush(app: Harness) {
+  answerPush(app, { kind: "rejected", message: "The remote said no." });
+  await app.click(await toolbarItem(app, "Push", "Push to origin/main"));
+  return get("alert", /Push rejected/);
+}
+
+it("Dismiss closes a rejected push notice", async () => {
+  const app = await mountApp();
+  const notice = await rejectPush(app);
+  await app.click(get("button", "Dismiss", notice));
+  expect(query("alert", /Push rejected/)).toBeNull();
+  await app.refocusWindow();
+  expect(
+    query("alert", /Push rejected/),
+    "a refocus keeps it closed",
+  ).toBeNull();
+});
+
+it("a checkout replaces a rejected push notice", async () => {
+  const app = await mountApp();
+  await rejectPush(app);
+  await app.click(refRow("refs/heads/topic")!);
+  await app.runPaletteItem("Check out topic");
+  expect(app.bridge.lines((request) => request.op === "write")).toEqual([
+    "write /fixture/pin checkout",
+  ]);
+  expect(query("alert", /Push rejected/)).toBeNull();
+});
+
+function answerFastForward(
+  app: Harness,
+  name: string,
+  advance: { from: string; to: string; behind: number },
+) {
+  app.bridge.respond("overview", () =>
+    overviewSchema.parse({
+      ...pinOverview(),
+      branches: pinOverview().branches.map((branch) =>
+        branch.name === name
+          ? {
+              ...branch,
+              state: {
+                kind: "behind",
+                upstream: `refs/remotes/origin/${name}`,
+                target: advance.to,
+                behind: advance.behind,
+                blocker: null,
+              },
+            }
+          : branch,
+      ),
+    }),
+  );
+  app.bridge.respond("fastForward", () => ({
+    outcomes: [
+      {
+        kind: "advanced",
+        reference: `refs/heads/${name}`,
+        from: advance.from,
+        to: advance.to,
+      },
+    ],
+    overview: pinOverview(),
+  }));
+}
+
+it("a fast-forward pull names the commits it brought and replaces the push notice", async () => {
+  const app = await mountApp();
+  await rejectPush(app);
+  answerFastForward(app, "main", { from: C4, to: C6, behind: 2 });
+  await app.click(
+    await toolbarItem(app, "Pull", "Pull (Fast-forward if possible)"),
+  );
+  const pulled = get("status", /Pulled/);
+  expect(pulled.textContent).toBe("Pulled 2 commits into main.");
+  expect(get("button", "Dismiss", pulled)).toBeTruthy();
+  expect(query("alert", /Push rejected/)).toBeNull();
+});
+
+it("a pull in a selected linked worktree shows its notice in the open repository", async () => {
+  const app = await mountApp();
+  await app.click(historyRow("Uncommitted changes in pin-feature,"));
+  answerFastForward(app, "feature", { from: C5, to: C6, behind: 1 });
+  await app.click(
+    await toolbarItem(app, "Pull", "Pull (Fast-forward if possible)"),
+  );
+  expect(app.bridge.lines((request) => request.op === "fastForward")).toEqual([
+    "fastForward /fixture/pin",
+  ]);
+  expect(get("status", /Pulled/).textContent).toBe(
+    "Pulled 1 commit into feature.",
+  );
 });
 
 it("the first persistence error among the four sources is shown", async () => {

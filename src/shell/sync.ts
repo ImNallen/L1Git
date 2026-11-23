@@ -5,6 +5,7 @@ import {
   fetchTarget,
   readyAdvances,
 } from "../domain/overview";
+import type { WriteNotice } from "../domain/operations";
 import { pushControl } from "../domain/push";
 import { worktreeHead } from "../domain/worktree";
 import type { PushIntent } from "../domain/push";
@@ -16,7 +17,6 @@ import type {
 import type {
   OverviewStore,
   OverviewView,
-  PushState,
   RepositoryState,
   RootState,
 } from "../overview";
@@ -48,7 +48,6 @@ export function openedRepository(
 /** Fetch, push or publish, and fast-forward for the repository on screen. */
 export type SyncControls = {
   opened: OpenedRepository;
-  push: PushState | undefined;
   publishingRoot: RepositoryRoot | null;
   publish: (root: RepositoryRoot, intent: PushIntent) => void;
   closePublish: () => void;
@@ -91,6 +90,7 @@ export function useSyncControls({
   snapshot,
   activeRoot,
   selectedBranch,
+  post,
 }: {
   store: OverviewStore;
   view: OverviewView;
@@ -100,14 +100,14 @@ export function useSyncControls({
   /** The worktree whose checked-out branch Fetch falls back to. */
   activeRoot: RepositoryRoot | null;
   selectedBranch: Branch | null;
+  post: (root: RepositoryRoot, notice: WriteNotice) => void;
 }): SyncControls {
   const [publishingRoot, setPublishingRoot] = useState<RepositoryRoot | null>(
     null,
   );
   const { root, state, repository } = opened;
-  const push = root === null ? undefined : view.pushByRoot.get(root);
   const publishControl = pushControl(
-    push?.availability,
+    root === null ? undefined : view.pushByRoot.get(root),
     localBusyReason(writing, repository) ??
       (repository
         ? null
@@ -119,6 +119,10 @@ export function useSyncControls({
   const ready = repository ? readyAdvances(repository.overview).length : 0;
   const fetch = fetchTarget(selectedBranch, checkedOut(snapshot, activeRoot));
   const busy = localBusyReason(writing, repository);
+  const pushFrom = (target: RepositoryRoot, intent: PushIntent) =>
+    void store.push(target, intent).then((result) => {
+      if (result) post(target, { kind: "pushed", ...result });
+    });
   return {
     opened,
     sidebar:
@@ -142,11 +146,8 @@ export function useSyncControls({
               void store.updateAll(repository.commonDir, branch),
           }
         : undefined,
-    push,
     publishingRoot,
-    publish: (target, intent) => {
-      void store.push(target, intent);
-    },
+    publish: pushFrom,
     closePublish: () => setPublishingRoot(null),
     actions: defineSlice({
       context: {
@@ -168,7 +169,7 @@ export function useSyncControls({
         },
         push: () => {
           if (root && publishControl.kind === "ready")
-            void store.push(root, publishControl.intent);
+            pushFrom(root, publishControl.intent);
           else if (root && publishControl.kind === "publish")
             setPublishingRoot(root);
         },

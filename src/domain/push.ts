@@ -112,6 +112,11 @@ export type PushPreparation =
   | PushAvailability
   | { kind: "loading" }
   | { kind: "failed"; message: string };
+export type PushResult = {
+  intent: PushIntent;
+  outcome: PushOutcome;
+  refreshProblem: string | null;
+};
 
 const unavailableText: Record<z.infer<typeof pushUnavailableSchema>, string> = {
   detached: "Check out a branch to push.",

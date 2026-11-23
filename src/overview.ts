@@ -21,7 +21,12 @@ import { probeOf } from "./domain/inProgress";
 import type { MergeState, OperationProbe } from "./domain/merge";
 import { problemFrom } from "./domain/repository";
 import type { FullRef, Problem, RepositoryRoot } from "./domain/repository";
-import type { PushIntent, PushOutcome, PushPreparation } from "./domain/push";
+import type {
+  PushIntent,
+  PushOutcome,
+  PushPreparation,
+  PushResult,
+} from "./domain/push";
 import { shortBranch } from "./domain/refs";
 import type { FetchInterval } from "./fetchSettings";
 
@@ -55,20 +60,15 @@ export type RootSync = {
   branches: ReadonlyMap<string, Divergence>;
 };
 
-export type PushState = {
-  availability: PushPreparation;
-  notice: {
-    intent: PushIntent;
-    outcome: PushOutcome;
-    refreshProblem: string | null;
-  } | null;
-};
-
 /** The pull steps that need the shell: a merge to review or a rebase to write. */
 type PullHandOff = Extract<PullStep, { kind: "merge" | "rebase" }>;
 
+type PullResult =
+  | { kind: "fastForwarded"; branch: BranchRef; commits: number }
+  | PullHandOff;
+
 export type OverviewView = {
-  pushByRoot: ReadonlyMap<RepositoryRoot, PushState>;
+  pushByRoot: ReadonlyMap<RepositoryRoot, PushPreparation>;
   roots: ReadonlyMap<RepositoryRoot, RootState>;
   repositories: readonly RepositoryState[];
   syncByRoot: ReadonlyMap<RepositoryRoot, RootSync>;
@@ -96,21 +96,21 @@ export type OverviewStore = {
   fetchBranch(commonDir: RepositoryRoot, branch: FullRef): Promise<void>;
   /**
    * Fetches `branch`'s upstream, then fast-forwards it in `root`, a worktree of
-   * `commonDir` that need not be tracked itself. Answers the step left to the
-   * caller when the branch has diverged, else null.
+   * `commonDir` that need not be tracked itself. Answers the fast-forward, or
+   * the step left to the caller when the branch has diverged, else null.
    */
   pull(
     commonDir: RepositoryRoot,
     root: RepositoryRoot,
     branch: BranchRef,
     mode: PullMode,
-  ): Promise<PullHandOff | null>;
+  ): Promise<PullResult | null>;
   /** Fast-forwards every ready branch of `commonDir`, or only `branch`. */
   updateAll(commonDir: RepositoryRoot, branch?: BranchRef): Promise<void>;
   setInterval(minutes: FetchInterval): void;
   onRefsChanged(listener: (roots: RepositoryRoot[]) => void): () => void;
   refreshLocal(commonDir: RepositoryRoot): Promise<void>;
-  push(root: RepositoryRoot, intent: PushIntent): Promise<void>;
+  push(root: RepositoryRoot, intent: PushIntent): Promise<PushResult | null>;
   invalidatePush(commonDir: RepositoryRoot): void;
   probe(): void;
   observe(root: RepositoryRoot, state: MergeState): void;
@@ -125,13 +125,14 @@ type Request =
       root: RepositoryRoot;
       branch: BranchRef;
       mode: PullMode;
-      handOff: (step: PullHandOff) => void;
+      report: (result: PullResult) => void;
     }
   | {
       kind: "push";
       root: RepositoryRoot;
       intent: PushIntent;
       owner: Extract<RootState, { kind: "open" }>;
+      report: (result: PushResult) => void;
     };
 type Job = { request: Request; done: Promise<void>; finish: () => void };
 type Repository = Omit<RepositoryState, "commonDir" | "roots"> & {
@@ -147,7 +148,7 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
   let tracked: readonly RepositoryRoot[] = [];
   const roots = new Map<RepositoryRoot, RootState>();
   const repos = new Map<RepositoryRoot, Repository>();
-  const pushes = new Map<RepositoryRoot, PushState>();
+  const pushes = new Map<RepositoryRoot, PushPreparation>();
   const preparations = new Map<RepositoryRoot, symbol>();
   const operations = new Map<RepositoryRoot, OperationProbe>();
   const probes = new Map<RepositoryRoot, symbol>();
@@ -229,20 +230,10 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
     for (const listener of refListeners) listener(changed);
   }
 
-  function setAvailability(
-    root: RepositoryRoot,
-    availability: PushPreparation,
-  ) {
-    pushes.set(root, {
-      availability,
-      notice: pushes.get(root)?.notice ?? null,
-    });
-  }
-
   function invalidatePush(commonDir: RepositoryRoot) {
     for (const root of rootsOf(commonDir)) {
       preparations.set(root, Symbol());
-      setAvailability(root, { kind: "loading" });
+      pushes.set(root, { kind: "loading" });
     }
   }
 
@@ -251,7 +242,7 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
     if (owner?.kind !== "open") return;
     const generation = Symbol();
     preparations.set(root, generation);
-    setAvailability(root, { kind: "loading" });
+    pushes.set(root, { kind: "loading" });
     emit();
     let availability: PushPreparation;
     try {
@@ -261,7 +252,7 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
     }
     if (roots.get(root) !== owner || preparations.get(root) !== generation)
       return;
-    setAvailability(root, availability);
+    pushes.set(root, availability);
     emit();
   }
 
@@ -421,15 +412,10 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
       };
     }
     if (repos.get(commonDir) !== repo) return;
-    const current = pushes.get(root);
-    if (current && roots.get(root) === request.owner)
-      pushes.set(root, {
-        availability:
-          preparations.get(root) === generation
-            ? availability
-            : current.availability,
-        notice: { intent: request.intent, outcome, refreshProblem },
-      });
+    if (pushes.has(root) && roots.get(root) === request.owner) {
+      if (preparations.get(root) === generation) pushes.set(root, availability);
+      request.report({ intent: request.intent, outcome, refreshProblem });
+    }
     notifyRefsChanged(commonDir);
     await prepareRoots(commonDir, root);
   }
@@ -462,9 +448,16 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
       switch (step.kind) {
         case "nothing":
           break;
-        case "fastForward":
-          await advance(commonDir, repo, root, [step.advance]);
+        case "fastForward": {
+          const outcomes = await advance(commonDir, repo, root, [step.advance]);
+          if (outcomes.some(({ kind }) => kind === "advanced"))
+            request.report({
+              kind: "fastForwarded",
+              branch: request.branch,
+              commits: step.commits,
+            });
           break;
+        }
         case "refuse":
           repo.outcomes = new Map([
             ...repo.outcomes,
@@ -480,7 +473,7 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
           break;
         case "merge":
         case "rebase":
-          request.handOff(step);
+          request.report(step);
           break;
         default: {
           const exhaustive: never = step;
@@ -565,6 +558,7 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
       repos.get(commonDir) === repo
     )
       notifyRefsChanged(commonDir);
+    return outcomes;
   }
 
   function fetch(commonDir?: RepositoryRoot): Promise<void> {
@@ -635,19 +629,26 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
     },
     push(root, intent) {
       const owner = roots.get(root);
-      if (owner?.kind !== "open") return Promise.resolve();
-      return enqueue(owner.commonDir, { kind: "push", root, intent, owner });
+      if (owner?.kind !== "open") return Promise.resolve(null);
+      let result: PushResult | null = null;
+      return enqueue(owner.commonDir, {
+        kind: "push",
+        root,
+        intent,
+        owner,
+        report: (pushed) => (result = pushed),
+      }).then(() => result);
     },
     refreshLocal: (commonDir) => refreshLocal(commonDir).catch(() => {}),
     pull(commonDir, root, branch, mode) {
-      let handedOff: PullHandOff | null = null;
+      let result: PullResult | null = null;
       return enqueue(commonDir, {
         kind: "pull",
         root,
         branch,
         mode,
-        handOff: (step) => (handedOff = step),
-      }).then(() => handedOff);
+        report: (pulled) => (result = pulled),
+      }).then(() => result);
     },
     updateAll(commonDir, branch) {
       const repo = repos.get(commonDir);

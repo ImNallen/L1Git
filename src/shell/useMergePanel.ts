@@ -81,7 +81,7 @@ export function useMergePanel({
   pull: OverviewStore["pull"];
   writes: Pick<
     WritesView,
-    "running" | "merge" | "write" | "abortReplay" | "dismiss"
+    "running" | "merge" | "write" | "abortReplay" | "dismiss" | "post"
   >;
   rereadChanges: () => void;
   /** The user selects the worktree, which clears the sidebar jump. */
@@ -145,20 +145,28 @@ export function useMergePanel({
     const commonDir = opened.repository?.commonDir;
     if (
       root === null ||
+      snapshot === null ||
       !commonDir ||
       head?.kind !== "attached" ||
       pullable.kind !== "ready"
     )
       return;
-    void pull(commonDir, root, pullable.branch, mode).then((handOff) => {
+    const shown = snapshot.root;
+    void pull(commonDir, root, pullable.branch, mode).then((result) => {
+      writes.post(
+        shown,
+        result?.kind === "fastForwarded"
+          ? { kind: "pulled", branch: result.branch, commits: result.commits }
+          : null,
+      );
       // `open` checks `canMerge` from this render, which a ready pull implies.
-      if (handOff?.kind === "merge") open({ kind: "upstream" });
-      if (handOff?.kind === "rebase")
+      if (result?.kind === "merge") open({ kind: "upstream" });
+      if (result?.kind === "rebase")
         void writes.write(root, {
           operation: {
             kind: "rebase",
             branch: head.reference,
-            onto: handOff.onto,
+            onto: result.onto,
           },
           expect: { head },
         });

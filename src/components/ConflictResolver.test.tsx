@@ -83,6 +83,7 @@ const writes: WritesView = {
   createWorktree: async () => ({ kind: "busy" }),
   removeWorktree: async () => ({ kind: "busy" }),
   dismiss: () => {},
+  post: () => {},
   rereadHistory: () => {},
 };
 function button(name: string) {

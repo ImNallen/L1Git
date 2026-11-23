@@ -141,7 +141,7 @@ export type PullMode = "ffIfPossible" | "ffOnly" | "rebase";
 /** What Pull does once it has fetched the branch's upstream. */
 export type PullStep =
   | { kind: "nothing" }
-  | { kind: "fastForward"; advance: Advance }
+  | { kind: "fastForward"; advance: Advance; commits: number }
   | { kind: "refuse"; reason: string }
   | { kind: "merge" }
   | { kind: "rebase"; onto: FullRef };
@@ -187,6 +187,7 @@ export function pullStep(
           from: branch.oid,
           to: state.target,
         },
+        commits: state.behind,
       };
     case "diverged":
       return onDiverged[mode](state.upstream);
