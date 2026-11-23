@@ -578,6 +578,34 @@ fn start_refuses_a_forecast_that_no_longer_holds() {
 }
 
 #[test]
+fn a_session_without_a_forecast_saves_no_prediction_key() {
+    let f = Fixture::new(true);
+    let coordinator = f.coordinator();
+    let session = f.start(&coordinator);
+    let (repo, mut record, _) = f.record();
+    record.session.review.prediction = None;
+    record.save(&repo).unwrap();
+    let saved: serde_json::Value = serde_json::from_slice(
+        &fs::read(directory(&repo, session.id).join("state.json")).unwrap(),
+    )
+    .unwrap();
+    assert!(
+        !saved["session"]["review"]
+            .as_object()
+            .unwrap()
+            .contains_key("prediction"),
+        "{saved}"
+    );
+    assert_eq!(
+        active(coordinator.merge_state(f.path()).unwrap()).review,
+        MergeReview {
+            prediction: None,
+            ..session.review
+        }
+    );
+}
+
+#[test]
 fn a_session_saved_before_forecasts_still_reads() {
     let f = Fixture::new(true);
     let coordinator = f.coordinator();

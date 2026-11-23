@@ -244,7 +244,6 @@ export function activeMerge(
         destination: { reference: "refs/heads/feature", oid: C5 },
         source: { reference: "refs/remotes/origin/feature", oid: C6 },
         plan: "mergeCommit",
-        prediction: null,
         context: {
           kind: "upstream",
           tracking: {
