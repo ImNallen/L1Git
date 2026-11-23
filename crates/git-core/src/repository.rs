@@ -1,7 +1,8 @@
 use crate::{
     Base, BaseDetail, Branch, ChangeStatus, ChangedFile, Commit, CommitDetail, Comparison,
-    ErrorKind, FilePatch, Head, LineStats, Oid, Remote, RepositoryError, RepositoryRefs,
-    RepositorySnapshot, Squash, Stash, Submodule, Tag, Target, TargetDetail, Worktree,
+    ErrorKind, FilePatch, Head, LineStats, Oid, PatchContext, Remote, RepositoryError,
+    RepositoryRefs, RepositorySnapshot, Squash, Stash, Submodule, Tag, Target, TargetDetail,
+    Worktree,
     git::{self, Deadline, LocalRead},
     remotes, status,
 };
@@ -979,13 +980,20 @@ pub fn file_patch(
     comparison: &Comparison,
     file: &str,
 ) -> Result<FilePatch, RepositoryError> {
-    file_patch_within(path, comparison, file, Deadline::of(LocalRead::FilePatch))
+    file_patch_within(
+        path,
+        comparison,
+        file,
+        PatchContext::Hunks,
+        Deadline::of(LocalRead::FilePatch),
+    )
 }
 
 pub(crate) fn file_patch_within(
     path: &str,
     comparison: &Comparison,
     file: &str,
+    context: PatchContext,
     deadline: Deadline,
 ) -> Result<FilePatch, RepositoryError> {
     let root = root(path, deadline)?;
@@ -996,7 +1004,7 @@ pub(crate) fn file_patch_within(
     let (base, target) = match ends {
         Ends::Trees { base, target } => (base, target),
         Ends::Worktree { base, root } => {
-            return status::worktree_file_patch(&root, &base.oid, file, deadline)?
+            return status::worktree_file_patch(&root, &base.oid, file, context, deadline)?
                 .ok_or_else(|| unchanged_path(comparison));
         }
     };
@@ -1040,7 +1048,7 @@ pub(crate) fn file_patch_within(
         return Ok(FilePatch::Binary);
     }
     Ok(
-        match git::read_capped(&root, &args("--patch"), PATCH_LIMIT, deadline)? {
+        match git::read_capped(&root, &args(context.patch_format()), PATCH_LIMIT, deadline)? {
             git::Capped::Within(patch) => text_patch(&patch),
             git::Capped::Over(bytes) => FilePatch::TooLarge { bytes },
         },

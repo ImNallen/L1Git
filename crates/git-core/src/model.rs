@@ -599,6 +599,26 @@ pub enum Side {
     Unstaged,
 }
 
+/// `Hunks` keeps three lines around each change. `Whole` keeps every line, so
+/// its one hunk holds both sides of the file.
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum PatchContext {
+    #[default]
+    Hunks,
+    Whole,
+}
+
+impl PatchContext {
+    /// `--unified` implies `--patch`, so this is the whole patch format.
+    pub(crate) const fn patch_format(self) -> &'static str {
+        match self {
+            Self::Hunks => "--unified=3",
+            Self::Whole => "--unified=2147483647",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum WorktreePatch {
