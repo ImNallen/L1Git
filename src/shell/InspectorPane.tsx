@@ -2,6 +2,7 @@ import { CommitInspector, InspectorFrame } from "../components/CommitInspector";
 import { PaneDivider } from "../components/PaneDivider";
 import type { RepositorySnapshot } from "../domain/repository";
 import type { HistoryPane } from "./useHistoryPane";
+import { INSPECTOR_WIDTH } from "./useLayout";
 import type { Layout } from "./useLayout";
 import type { Navigation } from "./useNavigation";
 import type { Staging } from "./useStaging";
@@ -18,7 +19,7 @@ export function InspectorPane({
 }: {
   layout: Pick<
     Layout,
-    "inspectorVisible" | "inspectorWidth" | "setInspectorWidth"
+    "inspectorVisible" | "paneWidths" | "resizePane" | "savePaneWidth"
   >;
   app: WorkspaceApi;
   snapshot: RepositorySnapshot | null;
@@ -33,15 +34,16 @@ export function InspectorPane({
     <>
       <PaneDivider
         label="Resize commit inspector"
-        width={layout.inspectorWidth}
-        min={280}
-        max={500}
+        width={layout.paneWidths.inspector}
+        min={INSPECTOR_WIDTH.min}
+        max={INSPECTOR_WIDTH.max}
         direction={-1}
-        onResize={layout.setInspectorWidth}
+        onResize={(width) => layout.resizePane("inspector", width)}
+        onResizeEnd={(width) => layout.savePaneWidth("inspector", width)}
       />
       <div
         className="inspector-container"
-        style={{ width: layout.inspectorWidth }}
+        style={{ width: layout.paneWidths.inspector }}
       >
         {snapshot ? (
           <CommitInspector

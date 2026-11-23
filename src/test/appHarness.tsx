@@ -218,6 +218,7 @@ type MountOptions = {
   media?: Record<string, boolean>;
   innerWidth?: number;
   saved?: SavedRepositories;
+  stored?: Record<string, string>;
 };
 
 function seedStorage(saved: SavedRepositories) {
@@ -482,20 +483,23 @@ export type Harness = {
 let mounted: { unmount(): Promise<void>; dom: Dom; bridge: Bridge } | null =
   null;
 
+async function unmountApp() {
+  if (!mounted) return;
+  const { bridge } = mounted;
+  await mounted.unmount();
+  mounted = null;
+  expect(bridge.unexpected, "requests the fake bridge cannot answer").toEqual(
+    [],
+  );
+  document.body.replaceChildren();
+}
+
 export function installHarness() {
   beforeEach(() => {
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   });
   afterEach(async () => {
-    if (mounted) {
-      const { bridge } = mounted;
-      await mounted.unmount();
-      mounted = null;
-      expect(
-        bridge.unexpected,
-        "requests the fake bridge cannot answer",
-      ).toEqual([]);
-    }
+    await unmountApp();
     vi.unstubAllGlobals();
     localStorage.clear();
     document.body.replaceChildren();
@@ -503,11 +507,14 @@ export function installHarness() {
 }
 
 export async function mountApp(options: MountOptions = {}): Promise<Harness> {
+  await unmountApp();
   const world = createWorld();
   options.world?.(world);
   const bridge = createBridge(world);
   options.bridge?.(bridge);
   seedStorage(options.saved ?? { entries: [PIN, OTHER], lastRoot: PIN });
+  for (const [key, value] of Object.entries(options.stored ?? {}))
+    localStorage.setItem(key, value);
   vi.stubGlobal("fetch", bridge.fetch);
   const dom = installDom(options.media ?? {}, options.innerWidth ?? 1400);
   const modules = await loadModules();

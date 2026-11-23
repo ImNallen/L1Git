@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 import { flushSync } from "react-dom";
+import { z } from "zod";
+import { browserStorage, readStored, writeStored } from "../persisted";
 import { COMMIT_SUMMARY_ID } from "../components/CommitBox";
 import { defineSlice } from "./actionSlices";
 import type { ActionSlice } from "./actionSlices";
@@ -8,6 +10,26 @@ import type { WorkspaceView } from "./workspaceView";
 
 // Below this the default sidebar leaves the history too narrow for its columns.
 const NARROW_SIDEBAR = "(max-width: 939px)";
+
+const PANE_WIDTHS_KEY = "l1git.paneWidths.v1";
+export const SIDEBAR_WIDTH = { min: 210, max: 400, initial: 280 } as const;
+export const INSPECTOR_WIDTH = { min: 280, max: 500, initial: 360 } as const;
+const paneWidthsSchema = z.object({
+  version: z.literal(1),
+  sidebar: z.number().int().min(SIDEBAR_WIDTH.min).max(SIDEBAR_WIDTH.max),
+  inspector: z.number().int().min(INSPECTOR_WIDTH.min).max(INSPECTOR_WIDTH.max),
+});
+type PaneWidths = { sidebar: number; inspector: number };
+type Pane = keyof PaneWidths;
+
+function restorePaneWidths(
+  storage: Pick<Storage, "getItem"> | null,
+): PaneWidths {
+  const saved = readStored(storage, PANE_WIDTHS_KEY, paneWidthsSchema);
+  return saved
+    ? { sidebar: saved.sidebar, inspector: saved.inspector }
+    : { sidebar: SIDEBAR_WIDTH.initial, inspector: INSPECTOR_WIDTH.initial };
+}
 
 export type ToolbarMenuKind =
   | "fetch"
@@ -30,10 +52,10 @@ export type Layout = {
   setToolbarMenu: (menu: ToolbarMenu | null) => void;
   sidebarOpen: boolean;
   inspectorVisible: boolean;
-  sidebarWidth: number;
-  setSidebarWidth: (width: number) => void;
-  inspectorWidth: number;
-  setInspectorWidth: (width: number) => void;
+  paneWidths: PaneWidths;
+  resizePane: (pane: Pane, width: number) => void;
+  savePaneWidth: (pane: Pane, width: number) => void;
+  persistenceError: string | null;
   sidebarToggleRef: RefObject<HTMLButtonElement | null>;
   inspectorToggleRef: RefObject<HTMLButtonElement | null>;
   openInspector: () => void;
@@ -52,8 +74,10 @@ export function useLayout(shown: WorkspaceView["shown"]): Layout {
   const [inspectorOpen, setInspectorOpen] = useState(
     () => window.innerWidth >= 1100,
   );
-  const [sidebarWidth, setSidebarWidth] = useState(280);
-  const [inspectorWidth, setInspectorWidth] = useState(360);
+  const [paneWidths, setPaneWidths] = useState(() =>
+    restorePaneWidths(browserStorage()),
+  );
+  const [persistenceError, setPersistenceError] = useState<string | null>(null);
   const sidebarToggleRef = useRef<HTMLButtonElement>(null);
   const inspectorToggleRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -79,10 +103,22 @@ export function useLayout(shown: WorkspaceView["shown"]): Layout {
     setToolbarMenu,
     sidebarOpen,
     inspectorVisible: Boolean(shown && inspectorOpen),
-    sidebarWidth,
-    setSidebarWidth,
-    inspectorWidth,
-    setInspectorWidth,
+    paneWidths,
+    resizePane: (pane, width) =>
+      setPaneWidths((widths) => ({ ...widths, [pane]: width })),
+    savePaneWidth: (pane, width) => {
+      const next = { ...paneWidths, [pane]: width };
+      setPaneWidths(next);
+      setPersistenceError(
+        writeStored(
+          browserStorage(),
+          PANE_WIDTHS_KEY,
+          { version: 1, ...next },
+          "Pane widths changed for this session. Could not save them.",
+        ),
+      );
+    },
+    persistenceError,
     sidebarToggleRef,
     inspectorToggleRef,
     openInspector: () => setInspectorOpen(true),
