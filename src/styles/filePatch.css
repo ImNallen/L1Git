@@ -22,13 +22,17 @@
 [data-indicators="classic"] [data-line-type="context"][data-line] {
   padding-inline-start: 16px;
 }
-[data-separator="metadata"] {
+[data-separator="line-info-basic"] {
   font-family: var(--diffs-font-family);
   font-size: 11px;
 }
-[data-separator="metadata"] [data-separator-wrapper] {
+[data-separator="line-info-basic"] [data-separator-wrapper] {
   inset-inline-start: 0;
   padding-inline: 24px;
+  background-color: var(--diffs-bg-separator);
+}
+[data-separator="line-info-basic"] [data-separator-content] {
+  padding: 0;
   color: var(--hunk-text, var(--muted));
 }
 [data-line-type="change-addition"] {

@@ -117,7 +117,7 @@ ${patchStyles}
 ${theme === "dark" && !painted ? defaultPatchStyles : ""}`,
         diffStyle,
         diffIndicators: "classic",
-        hunkSeparators: "metadata",
+        hunkSeparators: "line-info-basic",
         disableFileHeader: !barOnTop,
         ...(writable && {
           enableLineSelection: true,
