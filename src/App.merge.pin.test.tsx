@@ -18,6 +18,7 @@ import {
 import {
   activeMerge,
   applied,
+  editableConflict,
   history,
   OTHER,
   PIN,
@@ -457,6 +458,13 @@ const conflictMenu = async (
   );
 };
 
+const conflictEntry = (root: string, path: string) => {
+  const conflict = editableConflict(root, path);
+  if (conflict.kind !== "editable")
+    throw new Error("expected an editable conflict");
+  return conflict.snapshot.entry;
+};
+
 const mergingNotes = (world: World) => {
   const state = activeMerge(PIN, ["notes.txt"]);
   if (state.kind !== "active") throw new Error("expected an active merge");
@@ -514,4 +522,31 @@ it("a conflict row whose file has no conflicts left marks it resolved from the m
   expect(app.bridge.lines((request) => request.op === "write")).toEqual([
     `write ${PIN} stageFiles`,
   ]);
+});
+
+it("a repository switch back to a merge reads its conflict summary once", async () => {
+  const app = await mountApp({
+    world: (world) => {
+      mergingNotes(world);
+      const status = world.statuses.get(PIN)!;
+      world.statuses.set(PIN, {
+        ...status,
+        entries: [
+          ...status.entries.filter((entry) => entry.path !== "notes.txt"),
+          conflictEntry(PIN, "notes.txt"),
+        ],
+      });
+    },
+  });
+  await app.click(historyRow("Uncommitted changes in pin,"));
+  await app.click(repositoryRow(OTHER));
+  app.bridge.reset();
+  await app.click(repositoryRow(PIN));
+  expect(selectedRow()).toBe(
+    "Uncommitted changes in pin, 1 conflicted, 1 modified",
+  );
+  expect(conflictRow("notes.txt")).toBeTruthy();
+  expect(
+    app.bridge.lines((request) => request.op === "conflictSummary"),
+  ).toEqual([`conflictSummary ${PIN}`]);
 });
