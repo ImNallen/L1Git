@@ -494,6 +494,11 @@ input::placeholder {
   flex-shrink: 0;
   color: var(--muted);
 }
+.repository-open > .repository-suffix {
+  flex-shrink: 1000;
+  color: var(--text-dim);
+  font-weight: 400;
+}
 
 .native-mac .repositories-heading {
   padding-left: 100px;

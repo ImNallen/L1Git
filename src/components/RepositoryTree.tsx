@@ -32,6 +32,7 @@ import {
 } from "../domain/operations";
 import type { BranchAsk } from "../domain/operations";
 import type { RecentRepository } from "../domain/recents";
+import { distinctNames } from "../domain/repositoryNames";
 import { normalizeSearch } from "../domain/search";
 import type {
   Branch,
@@ -153,6 +154,11 @@ export function RepositoryTree({
       (refs !== null && refMatches(refs))
     );
   });
+  const suffixes = distinctNames(entries);
+  const labelOf = (entry: RecentRepository) => {
+    const suffix = suffixes.get(entry.root);
+    return suffix ? `${entry.name} ${suffix}` : entry.name;
+  };
   const expandedEntries = entriesShown.filter(
     (entry) => entry.root === activePath,
   );
@@ -470,6 +476,8 @@ export function RepositoryTree({
           const head = sync.get(entry.root)?.head;
           const probe = operations.get(entry.root);
           const badge = probe === undefined ? null : operationBadge(probe);
+          const suffix = suffixes.get(entry.root);
+          const label = labelOf(entry);
           return (
             <div
               className="repository-group"
@@ -487,7 +495,7 @@ export function RepositoryTree({
                   className="repository-open"
                   title={entry.root}
                   aria-label={
-                    badge ? `${entry.name}, ${badge.label}` : undefined
+                    badge ? `${label}, ${badge.label}` : suffix && label
                   }
                   aria-current={active ? "true" : undefined}
                   onClick={() => {
@@ -497,6 +505,9 @@ export function RepositoryTree({
                 >
                   <WorkspaceIcon name="Repository" />
                   <span>{entry.name}</span>
+                  {suffix && (
+                    <span className="repository-suffix">{suffix}</span>
+                  )}
                   {badge && (
                     <span className="repository-operation" title={badge.title}>
                       {badge.label}
@@ -524,7 +535,7 @@ export function RepositoryTree({
             key={entry.root}
           >
             {expandedEntries.length > 1 && (
-              <div className="repository-refs-heading">{entry.name}</div>
+              <div className="repository-refs-heading">{labelOf(entry)}</div>
             )}
             {branches(entry)}
           </div>
