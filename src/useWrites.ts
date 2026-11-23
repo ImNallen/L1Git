@@ -176,8 +176,15 @@ export function useWrites(
         outcome.kind === "applied" &&
         action === "write" &&
         !announcesResult[operation.kind];
-      if (!quiet)
-        update(repository, (writes) => ({ ...writes, running: null, notice }));
+      update(repository, (writes) => ({
+        ...writes,
+        running: null,
+        notice: !quiet
+          ? notice
+          : writes.notice?.kind === "failed"
+            ? null
+            : writes.notice,
+      }));
       return outcome;
     });
   }
