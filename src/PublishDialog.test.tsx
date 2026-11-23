@@ -294,7 +294,51 @@ it("requires reloading after lost transport and never echoes its diagnostics", a
   expect(button("Add remote…").disabled).toBe(false);
 });
 
-it("shows a precommit refusal, clears its URL, and permits correction", async () => {
+it("prefills origin selected when the repository has no origin", async () => {
+  await render();
+  await click("Add remote…");
+  const name = input("Remote name");
+  expect(document.activeElement).toBe(name);
+  expect(name.value).toBe("origin");
+  expect([name.selectionStart, name.selectionEnd]).toEqual([0, 6]);
+});
+
+it("leaves the name empty when origin exists, so typing a name does not append to origin", async () => {
+  vi.mocked(repositories.publishOptions).mockResolvedValue(loaded);
+  await render();
+  await click("Add remote…");
+  expect(document.activeElement).toBe(input("Remote name"));
+  expect(input("Remote name").value).toBe("");
+  await fill("Remote name", "backup");
+  await fill("URL or filesystem path", "../backup.git");
+  await submit();
+  expect(repositories.addRemote).toHaveBeenCalledExactlyOnceWith(root, {
+    name: "backup",
+    url: "../backup.git",
+  });
+});
+
+it("shows a precommit refusal, keeps its URL, and permits correction", async () => {
+  vi.mocked(repositories.addRemote).mockRejectedValueOnce({
+    kind: "gitFailed",
+    message: "A remote with this name is already configured.",
+  });
+  await render();
+  await click("Add remote…");
+  await fill("URL or filesystem path", "../endpoint");
+  await submit();
+  expect(container.textContent).toContain("already configured");
+  expect(input("URL or filesystem path").value).toBe("../endpoint");
+  await fill("Remote name", "upstream");
+  await submit();
+  expect(repositories.addRemote).toHaveBeenLastCalledWith(root, {
+    name: "upstream",
+    url: "../endpoint",
+  });
+  expect(onRemoteAdded).toHaveBeenCalledOnce();
+});
+
+it("clears a URL that holds credentials after a precommit refusal", async () => {
   vi.mocked(repositories.addRemote).mockRejectedValueOnce({
     kind: "gitFailed",
     message: "A remote with this name is already configured.",
@@ -304,11 +348,7 @@ it("shows a precommit refusal, clears its URL, and permits correction", async ()
   await submit();
   expect(container.textContent).toContain("already configured");
   expect(input("URL or filesystem path").value).toBe("");
-  await fill("Remote name", "upstream");
-  await fill("URL or filesystem path", "../endpoint");
-  await submit();
-  expect(repositories.addRemote).toHaveBeenCalledTimes(2);
-  expect(onRemoteAdded).toHaveBeenCalledOnce();
+  expect(container.innerHTML).not.toContain("secret");
 });
 
 it.each(["unavailable", "ineligible"])(
