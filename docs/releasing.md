@@ -85,7 +85,7 @@ These tests also run in ordinary `pnpm test` and CI. CI accepts an optional `sou
 
 ## Read the updater feeds
 
-In the command palette, choose **Open Updates settings** to check for updates or select Stable or Nightly. The saved channel survives restart. Without a saved preference, the channel follows the installed build. The app checks at startup and hourly. Download and restart each require an explicit action. Switching channels never offers an older version.
+Open **Settings**, then **General**, or choose **Open General settings** in the command palette. Under **About**, click **Check for updates**, or choose **Stable** or **Nightly** under **Release channel**. The saved channel survives restart. Without a saved preference, the channel follows the installed build. The app checks at startup and hourly. Download and restart each require an explicit action. Switching channels never offers an older version.
 
 Before restart, the app asks for confirmation if any repository has an unsaved commit message or amend-aside message. Cancel preserves those messages. Installation refuses while repository work or draft tasks are running. The deb, browser preview, and development builds offer a manual download link.
 
