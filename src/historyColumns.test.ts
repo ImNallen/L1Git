@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   COLUMNS_KEY,
   columnLayout,
+  formatChangeCount,
   historyColumns,
   persistColumns,
   restoreColumns,
@@ -59,6 +60,19 @@ describe("history column layout", () => {
     expect(columnLayout(48, new Set(), 7).template).toBe(
       "48px minmax(260px, 1fr)",
     );
+  });
+});
+
+describe("change counts", () => {
+  it.each([
+    [0, "0"],
+    [9_999, "9,999"],
+    [10_000, "10K"],
+    [12_345, "12K"],
+    [999_499, "999K"],
+    [1_234_567, "1.2M"],
+  ])("shows %i as %s", (count, shown) => {
+    expect(formatChangeCount(count)).toBe(shown);
   });
 });
 
