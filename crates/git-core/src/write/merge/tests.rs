@@ -466,6 +466,178 @@ fn dirty_start_names_each_dirty_tracked_path() {
 }
 
 #[test]
+fn the_review_forecasts_the_paths_start_leaves_unmerged() {
+    let f = Fixture::new(true);
+    f.git(&["switch", "upstream"]);
+    fs::create_dir(f.root.join("moved")).unwrap();
+    f.put("moved/inside.txt", "incoming\n");
+    f.git(&["add", "."]);
+    f.git(&["commit", "-m", "directory"]);
+    f.git(&["switch", "main"]);
+    f.put("moved", "current\n");
+    f.git(&["add", "."]);
+    f.git(&["commit", "-m", "file"]);
+    let coordinator = f.coordinator();
+    let review = coordinator
+        .review_merge(f.path(), &MergeSelection::Upstream)
+        .unwrap();
+    let forecast = vec!["conflict.txt".to_owned(), "moved~HEAD".to_owned()];
+    assert_eq!(
+        review.prediction,
+        Some(MergePrediction::Conflict {
+            paths: forecast.clone()
+        })
+    );
+    let report = coordinator
+        .merge(f.path(), &MergeAction::Start { review })
+        .unwrap();
+    assert_eq!(active(report.state).conflicted, Some(forecast));
+}
+
+#[test]
+fn a_moved_aside_name_git_must_suffix_leaves_the_forecast_unknown() {
+    for holder in ["main", "upstream", "merge base"] {
+        let f = Fixture::new(true);
+        if holder == "merge base" {
+            f.git(&["switch", "-c", "aside", "main~1"]);
+            f.put("moved~HEAD", "taken\n");
+            f.git(&["add", "."]);
+            f.git(&["commit", "-m", "aside"]);
+            for branch in ["upstream", "main"] {
+                f.git(&["switch", branch]);
+                f.git(&["merge", "--no-edit", "aside"]);
+                f.git(&["rm", "moved~HEAD"]);
+                f.git(&["commit", "-m", "drop aside"]);
+            }
+        }
+        f.git(&["switch", "upstream"]);
+        fs::create_dir(f.root.join("moved")).unwrap();
+        f.put("moved/inside.txt", "incoming\n");
+        if holder == "upstream" {
+            f.put("moved~HEAD", "taken\n");
+        }
+        f.git(&["add", "."]);
+        f.git(&["commit", "-m", "directory"]);
+        f.git(&["switch", "main"]);
+        f.put("moved", "current\n");
+        if holder == "main" {
+            f.put("moved~HEAD", "taken\n");
+        }
+        f.git(&["add", "."]);
+        f.git(&["commit", "-m", "file"]);
+        let coordinator = f.coordinator();
+        let review = coordinator
+            .review_merge(f.path(), &MergeSelection::Upstream)
+            .unwrap();
+        assert_eq!(review.prediction, None, "{holder}");
+        let report = coordinator
+            .merge(f.path(), &MergeAction::Start { review })
+            .unwrap();
+        assert_eq!(
+            active(report.state).conflicted,
+            Some(vec!["conflict.txt".to_owned(), "moved~HEAD_0".to_owned()]),
+            "{holder}"
+        );
+    }
+}
+
+#[test]
+fn a_clean_review_forecasts_no_conflict() {
+    let f = Fixture::new(false);
+    let review = f
+        .coordinator()
+        .review_merge(f.path(), &MergeSelection::Upstream)
+        .unwrap();
+    assert_eq!(review.prediction, Some(MergePrediction::Clean));
+}
+
+#[test]
+fn start_refuses_a_forecast_that_no_longer_holds() {
+    let f = Fixture::new(true);
+    let attributes = f.root.join(".git/info/attributes");
+    fs::create_dir_all(attributes.parent().unwrap()).unwrap();
+    fs::write(&attributes, "conflict.txt merge=union\n").unwrap();
+    let coordinator = f.coordinator();
+    let review = coordinator
+        .review_merge(f.path(), &MergeSelection::Upstream)
+        .unwrap();
+    assert_eq!(review.prediction, Some(MergePrediction::Clean));
+    fs::remove_file(&attributes).unwrap();
+    let error = coordinator
+        .merge(f.path(), &MergeAction::Start { review })
+        .unwrap_err();
+    assert_eq!(
+        error.kind,
+        ErrorKind::StaleView {
+            reason: StaleReason::HeadMoved
+        },
+        "{error:?}"
+    );
+    assert!(!f.root.join(".git/MERGE_HEAD").exists());
+    assert_eq!(f.git(&["status", "--porcelain"]), "");
+}
+
+#[test]
+fn a_session_without_a_forecast_saves_no_prediction_key() {
+    let f = Fixture::new(true);
+    let coordinator = f.coordinator();
+    let session = f.start(&coordinator);
+    let (repo, mut record, _) = f.record();
+    record.session.review.prediction = None;
+    record.save(&repo).unwrap();
+    let saved: serde_json::Value =
+        serde_json::from_slice(&fs::read(directory(&repo, session.id).join("state.json")).unwrap())
+            .unwrap();
+    assert!(
+        !saved["session"]["review"]
+            .as_object()
+            .unwrap()
+            .contains_key("prediction"),
+        "{saved}"
+    );
+    assert_eq!(
+        active(coordinator.merge_state(f.path()).unwrap()).review,
+        MergeReview {
+            prediction: None,
+            ..session.review
+        }
+    );
+}
+
+#[test]
+fn a_session_saved_before_forecasts_still_reads() {
+    let f = Fixture::new(true);
+    let coordinator = f.coordinator();
+    let session = f.start(&coordinator);
+    let (repo, record, _) = f.record();
+    let path = directory(&repo, session.id).join("state.json");
+    let mut value = serde_json::to_value(record).unwrap();
+    value["session"]["review"]
+        .as_object_mut()
+        .unwrap()
+        .remove("prediction")
+        .unwrap();
+    fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+    let older = active(coordinator.merge_state(f.path()).unwrap());
+    assert_eq!(
+        older.review,
+        MergeReview {
+            prediction: None,
+            ..session.review
+        }
+    );
+    coordinator
+        .merge(
+            f.path(),
+            &MergeAction::Abort {
+                session: session.id,
+            },
+        )
+        .unwrap();
+    assert!(!f.root.join(".git/MERGE_HEAD").exists());
+}
+
+#[test]
 fn stale_staged_result_and_ordinary_commit_cannot_finish() {
     let f = Fixture::new(false);
     let coordinator = f.coordinator();
@@ -1368,6 +1540,7 @@ fn equal_contained_and_fast_forward_are_terminal_and_move_only_destination() {
         }
         let review = f.selected(reference);
         assert_eq!(review.plan, MergePlan::UpToDate);
+        assert_eq!(review.prediction, None);
         let report = f
             .coordinator()
             .merge(f.path(), &MergeAction::Start { review })
@@ -1378,6 +1551,7 @@ fn equal_contained_and_fast_forward_are_terminal_and_move_only_destination() {
     f.git(&["update-ref", "refs/remotes/origin/topic", "upstream"]);
     let review = f.selected("refs/remotes/origin/topic");
     assert_eq!(review.plan, MergePlan::FastForward);
+    assert_eq!(review.prediction, None);
     let source = review.source.oid.clone();
     let report = f
         .coordinator()
@@ -1603,6 +1777,7 @@ fn legacy_active_session_decodes_pins_without_resolving_tracking_and_writes_v2()
     let review = value["session"]["review"].as_object_mut().unwrap();
     let tracking = review.remove("context").unwrap()["tracking"].clone();
     review.remove("plan");
+    review.remove("prediction");
     review.insert("tracking".into(), tracking);
     fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
     f.git(&["branch", "--unset-upstream"]);
@@ -1612,7 +1787,13 @@ fn legacy_active_session_decodes_pins_without_resolving_tracking_and_writes_v2()
         session.review.destination.oid.as_str(),
     ]);
     let state = active(f.coordinator().merge_state(f.path()).unwrap());
-    assert_eq!(state.review, session.review);
+    assert_eq!(
+        state.review,
+        MergeReview {
+            prediction: None,
+            ..session.review.clone()
+        }
+    );
     assert_eq!(state.conflicted, None);
     f.coordinator()
         .merge(

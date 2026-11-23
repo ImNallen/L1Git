@@ -500,6 +500,7 @@ export function mergeReviewFor(root: RepositoryRoot): MergeReview {
     },
     source: { reference: `refs/remotes/origin/${branch}`, oid: C3 },
     plan: "mergeCommit",
+    prediction: { kind: "clean" },
     context: {
       kind: "upstream",
       tracking: {

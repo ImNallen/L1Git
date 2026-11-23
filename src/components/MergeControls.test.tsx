@@ -5,6 +5,7 @@ import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import { MergeControls } from "./MergeControls";
 import * as repositories from "../repositories";
 import { mergeStateSchema, mergeReviewSchema } from "../domain/merge";
+import type { MergeReview } from "../domain/merge";
 import { clearSubmitted, draftOf, setDraft } from "../commitDrafts";
 import {
   draftImpact,
@@ -19,6 +20,7 @@ const review = mergeReviewSchema.parse({
   destination: { reference: "refs/heads/main", oid: "a".repeat(40) },
   source: { reference: "refs/remotes/origin/main", oid: "b".repeat(40) },
   plan: "mergeCommit",
+  prediction: { kind: "conflict", paths: ["conflict.txt"] },
   context: {
     kind: "upstream",
     tracking: {
@@ -182,6 +184,33 @@ it("reviews exact refs and OIDs and starts only after explicit Start", async () 
   await act(async () => button("Start merge").click());
   expect(run).toHaveBeenCalledWith({ kind: "start", review });
 });
+it.each<[MergeReview["prediction"], string]>([
+  [
+    { kind: "conflict", paths: ["conflict.txt", "notes.txt"] },
+    "Will conflict in: conflict.txt, notes.txt.",
+  ],
+  [{ kind: "clean" }, "Applies cleanly."],
+  [null, "L1 Git cannot predict which paths will conflict."],
+])(
+  "forecasts the merge commit's conflicts in the review (%j)",
+  async (prediction, forecast) => {
+    vi.mocked(repositories.mergeReview).mockResolvedValue({
+      ...review,
+      prediction,
+    });
+    await act(async () =>
+      root.render(
+        <MergeControls
+          {...props}
+          review={{ kind: "upstream" }}
+          read={{ kind: "ready", value: { kind: "idle" } }}
+          eligible
+        />,
+      ),
+    );
+    expect(host.textContent).toContain(forecast);
+  },
+);
 it.each([
   ["stops on conflicts", ["conflict.txt"], 1],
   ["stops with no conflicts", [], 0],
@@ -295,7 +324,12 @@ it("keeps a readable failure and refreshes state after a rejected Finish", async
 it.each(["fastForward", "upToDate"] as const)(
   "explains the %s plan and keeps terminal outcomes out of the active panel",
   async (plan) => {
-    const shown = { ...review, context: { kind: "branch" as const }, plan };
+    const shown = {
+      ...review,
+      context: { kind: "branch" as const },
+      plan,
+      prediction: null,
+    };
     vi.mocked(repositories.mergeReview).mockResolvedValue(shown);
     run.mockResolvedValue({
       kind: "merged",
@@ -325,6 +359,7 @@ it.each(["fastForward", "upToDate"] as const)(
     expect(host.textContent).toContain(shown.destination.oid);
     expect(host.textContent).not.toContain("Finish merge");
     expect(host.textContent).not.toContain("Abort merge…");
+    expect(host.textContent).not.toContain("conflict");
     if (plan === "upToDate") {
       expect(host.textContent).toContain("No write is needed");
       expect(button("Start merge").disabled).toBe(true);

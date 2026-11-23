@@ -386,6 +386,7 @@ it("blocks Save and Mark outside a managed merge's footprint without losing draf
         destination: { reference: "refs/heads/main", oid: "a".repeat(40) },
         source: { reference: "refs/remotes/origin/main", oid: "b".repeat(40) },
         plan: "mergeCommit",
+        prediction: null,
         context: {
           kind: "upstream",
           tracking: { remote: "origin", merge: "refs/heads/main", fetch: [] },
@@ -439,6 +440,7 @@ const merging = (footprint: string[]) =>
         destination: { reference: "refs/heads/main", oid: "a".repeat(40) },
         source: { reference: "refs/remotes/origin/main", oid: "b".repeat(40) },
         plan: "mergeCommit",
+        prediction: null,
         context: {
           kind: "upstream",
           tracking: { remote: "origin", merge: "refs/heads/main", fetch: [] },

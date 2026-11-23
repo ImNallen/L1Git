@@ -58,6 +58,18 @@ pub enum MergePlan {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum MergePrediction {
+    Clean,
+    Conflict { paths: Vec<String> },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MergeReview {
     pub root: String,
@@ -65,6 +77,8 @@ pub struct MergeReview {
     pub source: MergeSource,
     pub context: MergeContext,
     pub plan: MergePlan,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prediction: Option<MergePrediction>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -316,6 +330,7 @@ fn decode_record(value: StoredRecord) -> Result<Record, RepositoryError> {
                             tracking: old.session.review.tracking,
                         },
                         plan: MergePlan::MergeCommit,
+                        prediction: None,
                     },
                 },
             })
@@ -906,10 +921,10 @@ fn review(
         refused("The upstream commit is missing. Fetch explicitly, then review again.")
     })?;
     let destination = Oid::try_from(oid).map_err(|_| git::malformed())?;
-    let plan = if ancestor(repo, &source, &destination, deadline)? {
-        MergePlan::UpToDate
+    let (plan, prediction) = if ancestor(repo, &source, &destination, deadline)? {
+        (MergePlan::UpToDate, None)
     } else if ancestor(repo, &destination, &source, deadline)? {
-        MergePlan::FastForward
+        (MergePlan::FastForward, None)
     } else {
         let common = git::run(
             &repo.root,
@@ -917,7 +932,10 @@ fn review(
             deadline.reads(),
         )?;
         match common.status.code() {
-            Some(0) => MergePlan::MergeCommit,
+            Some(0) => (
+                MergePlan::MergeCommit,
+                forecast(repo, &destination, &source, deadline)?,
+            ),
             Some(1) => {
                 return Err(refused(
                     "The selected branch and destination have unrelated histories. No merge was started.",
@@ -938,7 +956,83 @@ fn review(
         },
         context,
         plan,
+        prediction,
     })
+}
+
+fn forecast(
+    repo: &Repo,
+    destination: &Oid,
+    source: &Oid,
+    deadline: WriteDeadline,
+) -> Result<Option<MergePrediction>, RepositoryError> {
+    // No merge base, so `merge-tree` picks the bases as `git merge` does, even for a
+    // criss-cross history.
+    let Some(simulated) = replay::simulate(repo, None, destination, source.as_str(), deadline)?
+    else {
+        return Ok(None);
+    };
+    // `merge-tree` labels a path it moves aside with the commit it was given, and
+    // `git merge` labels it `HEAD`.
+    let ours = format!("~{}", destination.as_str());
+    let mut paths = BTreeSet::new();
+    for path in simulated.conflicted {
+        let Some(stem) = path.strip_suffix(&ours) else {
+            paths.insert(path);
+            continue;
+        };
+        let name = format!("{stem}~HEAD");
+        if taken(repo, destination, source, &name, deadline)? {
+            return Ok(None);
+        }
+        paths.insert(name);
+    }
+    Ok(Some(if paths.is_empty() {
+        MergePrediction::Clean
+    } else {
+        MergePrediction::Conflict {
+            paths: paths.into_iter().collect(),
+        }
+    }))
+}
+
+/// `git merge` appends a numeric suffix to a moved-aside name that any side or merge
+/// base tracks, and `merge-tree` checked a different name.
+fn taken(
+    repo: &Repo,
+    destination: &Oid,
+    source: &Oid,
+    name: &str,
+    deadline: WriteDeadline,
+) -> Result<bool, RepositoryError> {
+    let bases = git::read(
+        &repo.root,
+        &["merge-base", "--all", destination.as_str(), source.as_str()],
+        deadline.reads(),
+    )?;
+    let bases = git::text(&bases);
+    for commit in [destination.as_str(), source.as_str()]
+        .into_iter()
+        .chain(bases.lines())
+    {
+        let tracked = git::read(
+            &repo.root,
+            &[
+                "--literal-pathspecs",
+                "ls-tree",
+                "--name-only",
+                "-z",
+                commit,
+                "--",
+                name,
+            ],
+            deadline.reads(),
+        )?;
+        if !tracked.is_empty() {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 pub(super) fn ancestor(
@@ -1337,7 +1431,7 @@ fn start(
     if review(repo, &selection, deadline)? != *shown {
         return Err(RepositoryError::stale(
             StaleReason::HeadMoved,
-            "The reviewed destination, source, or tracking configuration changed. Review the merge again.",
+            "The reviewed destination, source, tracking configuration, or conflict forecast changed. Review the merge again.",
         ));
     }
     guard_refs(

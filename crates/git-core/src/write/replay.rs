@@ -242,9 +242,9 @@ fn listed_paths(bytes: &[u8]) -> Option<BTreeSet<String>> {
         .collect()
 }
 
-struct Simulated {
+pub(super) struct Simulated {
     tree: Oid,
-    conflicted: BTreeSet<String>,
+    pub(super) conflicted: BTreeSet<String>,
 }
 
 impl Simulated {
@@ -303,27 +303,24 @@ impl Simulated {
 
 /// Touches neither the index nor the worktree. `None` when `merge-tree` cannot
 /// answer, as when a partial clone lacks a blob.
-fn simulate(
+pub(super) fn simulate(
     repo: &Repo,
-    of: &ReplayOf,
+    merge_base: Option<&str>,
     head: &Oid,
+    theirs: &str,
     deadline: WriteDeadline,
 ) -> Result<Option<Simulated>, RepositoryError> {
-    let (merge_base, theirs) = of.sides(repo, deadline)?;
-    let ran = git::run(
-        &repo.root,
-        &[
-            "merge-tree",
-            "--write-tree",
-            "-z",
-            "--name-only",
-            "--no-messages",
-            &format!("--merge-base={merge_base}"),
-            head.as_str(),
-            &theirs,
-        ],
-        deadline.reads(),
-    )?;
+    let merge_base = merge_base.map(|base| format!("--merge-base={base}"));
+    let mut args = vec![
+        "merge-tree",
+        "--write-tree",
+        "-z",
+        "--name-only",
+        "--no-messages",
+    ];
+    args.extend(merge_base.as_deref());
+    args.extend([head.as_str(), theirs]);
+    let ran = git::run(&repo.root, &args, deadline.reads())?;
     if !matches!(ran.status.code(), Some(0 | 1)) {
         return Ok(None);
     }
@@ -364,7 +361,8 @@ fn paths(
             conflicted,
         }));
     }
-    let Some(simulated) = simulate(repo, of, head, deadline)? else {
+    let (base, theirs) = of.sides(repo, deadline)?;
+    let Some(simulated) = simulate(repo, Some(&base), head, &theirs, deadline)? else {
         return Ok(None);
     };
     let Some(footprint) = simulated.footprint(repo, head, deadline)? else {
@@ -584,7 +582,8 @@ pub(super) fn review(
             "L1 Git cannot work out what {name} would change. Run it with Git instead."
         ))
     };
-    let simulated = simulate(repo, of, &head, deadline)?.ok_or_else(unknown)?;
+    let (base, theirs) = of.sides(repo, deadline)?;
+    let simulated = simulate(repo, Some(&base), &head, &theirs, deadline)?.ok_or_else(unknown)?;
     let prediction = if !simulated.conflicted.is_empty() {
         ReplayPrediction::Conflict {
             paths: real_names(repo, of, &head, simulated.conflicted.clone(), deadline)?
