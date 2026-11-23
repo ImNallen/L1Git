@@ -5,8 +5,10 @@ import {
   historyFailure,
   hookOutputTail,
   nextEntry,
+  pulledText,
   steppedText,
 } from "../domain/operations";
+import { pushOutcomeText } from "../domain/push";
 import type { WritesView } from "../useWrites";
 
 export function WriteNoticeRow({ writes }: { writes: WritesView }) {
@@ -45,42 +47,86 @@ function StepNotice({ writes }: { writes: WritesView }) {
       <X size={13} />
     </button>
   );
-  if (notice.kind === "failed")
-    return (
-      <div ref={row} className="notice error-notice" role="alert">
-        <TriangleAlert size={14} />
-        <span>
-          {failureText(notice, history)}
-          {hookOutputTail(notice.problem).map((line, index) => (
-            <Fragment key={index}>
-              <br />
-              <code>{line}</code>
-            </Fragment>
-          ))}
-        </span>
-        {dismiss}
-      </div>
-    );
-  const again =
-    notice.step === "undo"
-      ? { label: "Redo", entry: nextEntry(history, "redo"), run: writes.redo }
-      : { label: "Undo", entry: nextEntry(history, "undo"), run: writes.undo };
-  const unavailable = again.entry === null || running !== null;
-  return (
-    <div ref={row} className="notice info-notice" role="status">
-      <Info size={14} />
-      <span>{steppedText(notice)}</span>
-      <button
-        aria-disabled={unavailable}
-        onClick={() => {
-          if (unavailable) return;
-          handsOff.current = true;
-          void again.run();
-        }}
-      >
-        {again.label}
-      </button>
-      {dismiss}
-    </div>
-  );
+  switch (notice.kind) {
+    case "failed":
+      return (
+        <div ref={row} className="notice error-notice" role="alert">
+          <TriangleAlert size={14} />
+          <span>
+            {failureText(notice, history)}
+            {hookOutputTail(notice.problem).map((line, index) => (
+              <Fragment key={index}>
+                <br />
+                <code>{line}</code>
+              </Fragment>
+            ))}
+          </span>
+          {dismiss}
+        </div>
+      );
+    case "pushed": {
+      const succeeded =
+        notice.outcome.kind === "published" ||
+        notice.outcome.kind === "pushed" ||
+        notice.outcome.kind === "upToDate";
+      return (
+        <div
+          ref={row}
+          className={`notice ${succeeded ? "info-notice" : "error-notice"}`}
+          role={succeeded ? "status" : "alert"}
+        >
+          <span className="workspace-action-icon push" aria-hidden="true" />
+          <span>
+            {pushOutcomeText(notice.outcome, notice.intent)}{" "}
+            {notice.refreshProblem}
+          </span>
+          {dismiss}
+        </div>
+      );
+    }
+    case "pulled":
+      return (
+        <div ref={row} className="notice info-notice" role="status">
+          <span className="workspace-action-icon pull" aria-hidden="true" />
+          <span>{pulledText(notice)}</span>
+          {dismiss}
+        </div>
+      );
+    case "stepped": {
+      const again =
+        notice.step === "undo"
+          ? {
+              label: "Redo",
+              entry: nextEntry(history, "redo"),
+              run: writes.redo,
+            }
+          : {
+              label: "Undo",
+              entry: nextEntry(history, "undo"),
+              run: writes.undo,
+            };
+      const unavailable = again.entry === null || running !== null;
+      return (
+        <div ref={row} className="notice info-notice" role="status">
+          <Info size={14} />
+          <span>{steppedText(notice)}</span>
+          <button
+            aria-disabled={unavailable}
+            onClick={() => {
+              if (unavailable) return;
+              handsOff.current = true;
+              void again.run();
+            }}
+          >
+            {again.label}
+          </button>
+          {dismiss}
+        </div>
+      );
+    }
+    default: {
+      const exhaustive: never = notice;
+      return exhaustive;
+    }
+  }
 }

@@ -14,7 +14,6 @@ import type { WritesView } from "../useWrites";
 import { ResolutionDraftList } from "./MergeRegions";
 import { isBranch } from "./navigation";
 import type { SyncControls } from "./sync";
-import { PushNotice } from "./SyncRegions";
 import type { MergePanel } from "./useMergePanel";
 import type { ResolutionDrafts } from "./useResolutionDrafts";
 import type { Navigation } from "./useNavigation";
@@ -38,7 +37,7 @@ export function Notices({
   writes: WritesView;
   merge: Pick<MergePanel, "controls" | "replay">;
   drafts: ResolutionDrafts;
-  sync: Pick<SyncControls, "push" | "opened">;
+  sync: Pick<SyncControls, "opened">;
   persistenceError: string | null;
   error: Problem | null | undefined;
   onRetry: () => void;
@@ -72,7 +71,6 @@ export function Notices({
         />
       )}
       <ResolutionDraftList drafts={drafts} />
-      <PushNotice push={sync.push} />
       {persistenceError && (
         <div className="notice error-notice" role="alert">
           <TriangleAlert size={14} />

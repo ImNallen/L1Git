@@ -126,6 +126,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     snapshot: view.snapshot,
     activeRoot: active.root,
     selectedBranch: nav.jump.ruledBranch,
+    post: writes.post,
   });
   const diff = useDiffPane({ app, writes, active, focus });
   const staging = useStaging({

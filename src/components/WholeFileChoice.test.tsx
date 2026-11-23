@@ -66,6 +66,7 @@ const idleWrites: WritesView = {
   createWorktree: async () => ({ kind: "busy" }),
   removeWorktree: async () => ({ kind: "busy" }),
   dismiss: () => {},
+  post: () => {},
   rereadHistory: () => {},
 };
 

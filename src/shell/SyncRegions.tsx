@@ -1,29 +1,7 @@
 import { PublishDialog } from "../components/PublishDialog";
-import { pushOutcomeText } from "../domain/push";
-import type { PushState } from "../overview";
 import type { SyncControls } from "./sync";
 import type { Focus } from "./useFocus";
 import type { WriteLoop } from "./useWriteLoop";
-
-export function PushNotice({ push }: { push: PushState | undefined }) {
-  if (!push?.notice) return null;
-  const { notice } = push;
-  const succeeded =
-    notice.outcome.kind === "published" ||
-    notice.outcome.kind === "pushed" ||
-    notice.outcome.kind === "upToDate";
-  return (
-    <div
-      className={`notice ${succeeded ? "info-notice" : "error-notice"}`}
-      role={succeeded ? "status" : "alert"}
-    >
-      <span className="workspace-action-icon push" aria-hidden="true" />
-      <span>
-        {pushOutcomeText(notice.outcome, notice.intent)} {notice.refreshProblem}
-      </span>
-    </div>
-  );
-}
 
 export function PublishHost({
   sync,
