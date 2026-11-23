@@ -125,6 +125,36 @@ describe("picksFor", () => {
     };
     expect(keys(picksFor(file, "unified", range))).toEqual(["d:49"]);
   });
+
+  it("takes the changes a range reaches from an expanded line", () => {
+    const range = { start: 15, side: "additions" as const, end: 32 };
+    expect(keys(picksFor(file, "unified", range))).toEqual(["a:31", "a:32"]);
+  });
+
+  it("takes every change between two expanded lines, from the bottom up", () => {
+    const range = {
+      start: 40,
+      side: "additions" as const,
+      end: 20,
+      endSide: "deletions" as const,
+    };
+    expect(keys(picksFor(file, "unified", range))).toEqual(["a:31", "a:32"]);
+  });
+
+  it("takes the changes after an expanded line above the first hunk", () => {
+    const range = { start: 1, side: "additions" as const, end: 5 };
+    expect(keys(picksFor(file, "unified", range))).toEqual([
+      "d:5",
+      "d:6",
+      "d:7",
+      "a:5",
+    ]);
+  });
+
+  it("takes nothing from a range of expanded lines", () => {
+    const range = { start: 15, side: "additions" as const, end: 20 };
+    expect(picksFor(file, "split", range)).toEqual([]);
+  });
 });
 
 describe("hunkAnchor", () => {

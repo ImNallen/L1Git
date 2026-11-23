@@ -97,12 +97,20 @@ function rowsAsPierreDraws(file: FileDiffMetadata, style: DiffStyle): Row[] {
   return rows;
 }
 
-function rowAt(rows: Row[], side: LineSide, line: number): number {
-  return rows.findIndex((row) =>
+/**
+ * The rows from the first at or after `line` to the last at or before it. An
+ * expanded line between hunks has no row, so the two ends cross.
+ */
+function reach(rows: Row[], side: LineSide, line: number) {
+  const lineOf = (row: Row) =>
     side === "deletions"
-      ? row.deletion === line || row.context?.old === line
-      : row.addition === line || row.context?.new === line,
-  );
+      ? (row.deletion ?? row.context?.old)
+      : (row.addition ?? row.context?.new);
+  const first = rows.findIndex((row) => (lineOf(row) ?? -Infinity) >= line);
+  return {
+    first: first < 0 ? rows.length : first,
+    last: rows.findLastIndex((row) => (lineOf(row) ?? Infinity) <= line),
+  };
 }
 
 export function picksFor(
@@ -111,18 +119,18 @@ export function picksFor(
   range: SelectedLineRange,
 ): LinePick[] {
   const rows = rowsAsPierreDraws(file, style);
-  const start = rowAt(rows, range.side ?? "additions", range.start);
-  const end = rowAt(
+  const start = reach(rows, range.side ?? "additions", range.start);
+  const end = reach(
     rows,
     range.endSide ?? range.side ?? "additions",
     range.end,
   );
-  if (start < 0 || end < 0) return [];
+  const [top, bottom] =
+    start.first + start.last <= end.first + end.last
+      ? [start, end]
+      : [end, start];
   const picks: LinePick[] = [];
-  for (const row of rows.slice(
-    Math.min(start, end),
-    Math.max(start, end) + 1,
-  )) {
+  for (const row of rows.slice(top.first, bottom.last + 1)) {
     if (row.deletion !== undefined)
       picks.push({ side: "deletions", line: row.deletion });
     if (row.addition !== undefined)
