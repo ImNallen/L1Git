@@ -2107,15 +2107,12 @@ fn seen(repo: &Repo) -> Expect {
 }
 
 fn stash_tip(repo: &Repo, index: usize) -> l1_git_core::StashTip {
-    let oid = repo
-        .git(&["stash", "list", "--format=%H"])
-        .lines()
-        .nth(index)
-        .unwrap()
-        .to_owned();
+    let list = stash_list(repo);
+    let (oid, message) = list.lines().nth(index).unwrap().split_once(' ').unwrap();
     l1_git_core::StashTip {
         name: format!("stash@{{{index}}}"),
-        oid: oid.try_into().unwrap(),
+        oid: oid.to_owned().try_into().unwrap(),
+        message: Some(message.to_owned()),
     }
 }
 
@@ -2524,6 +2521,45 @@ fn stash_drop_undo_returns_that_commit_at_stash_zero() {
 }
 
 #[test]
+fn stash_drop_journaled_before_stash_messages_still_reads_and_undoes() {
+    let repo = Repo::committed(&[("a", "a\n")]);
+    repo.put("a", "changed\n");
+    stash_push(&repo.coordinator(), &repo, "wip readme tweak", false, &[]).unwrap();
+    let listed = stash_list(&repo);
+    let dropped = stash_drop(&repo.coordinator(), &repo, 0).unwrap();
+    let store = fs::read_dir(repo.undo_dir())
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let applied = store
+        .join("entries")
+        .join(dropped.id.to_string())
+        .join("applied.json");
+    let mut entry: serde_json::Value =
+        serde_json::from_slice(&fs::read(&applied).unwrap()).unwrap();
+    let stash = entry["operation"]["stash"].as_object_mut().unwrap();
+    assert_eq!(
+        stash.remove("message"),
+        Some("On main: wip readme tweak".into())
+    );
+    fs::write(&applied, serde_json::to_vec(&entry).unwrap()).unwrap();
+    let coordinator = repo.coordinator();
+    let undo = coordinator.undo_history(repo.path()).unwrap().undo.unwrap();
+    let Operation::StashDrop { stash } = undo.operation else {
+        panic!("expected the stash drop, got {:?}", undo.operation);
+    };
+    assert_eq!(stash.message, None);
+    assert_eq!(
+        serde_json::to_value(&stash).unwrap(),
+        serde_json::json!({ "name": "stash@{0}", "oid": stash.oid.as_str() })
+    );
+    coordinator.undo(repo.path(), dropped.id).unwrap();
+    assert_eq!(stash_list(&repo), listed);
+}
+
+#[test]
 fn stash_drop_refuses_an_oid_and_a_stale_index() {
     let repo = Repo::committed(&[("a", "a\n")]);
     let coordinator = repo.coordinator();
@@ -2538,7 +2574,7 @@ fn stash_drop_refuses_an_oid_and_a_stale_index() {
             &Operation::StashDrop {
                 stash: l1_git_core::StashTip {
                     name: older.oid.as_str().to_owned(),
-                    oid: older.oid.clone(),
+                    ..older.clone()
                 },
             },
             &seen(&repo),

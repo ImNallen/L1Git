@@ -33,6 +33,7 @@ import {
   entryIdSchema,
   localRefSchema,
   oidSchema,
+  operationSchema,
   problemFrom,
   refSchema,
   rootSchema,
@@ -1196,21 +1197,16 @@ group("stash writes", () => {
   });
 
   it("applies, pops, and drops the stash entry the user saw", () => {
+    const tip = { name: "stash@{1}", oid, message: "On main: only-a" };
     expect(stashApplyWrite(stash, head).operation).toEqual({
       kind: "stashApply",
-      stash: { name: "stash@{1}", oid },
+      stash: tip,
     });
-    expect(popped).toEqual({
-      kind: "stashPop",
-      stash: { name: "stash@{1}", oid },
-    });
-    expect(dropped).toEqual({
-      kind: "stashDrop",
-      stash: { name: "stash@{1}", oid },
-    });
+    expect(popped).toEqual({ kind: "stashPop", stash: tip });
+    expect(dropped).toEqual({ kind: "stashDrop", stash: tip });
   });
 
-  it("names each stash write, and undo of a pop or a drop says the entry returns at stash@{0}", () => {
+  it("names each stash write by its message, and undo of a pop or a drop says the entry returns at stash@{0}", () => {
     expect(describe(stashPushWrite("", false, [], head).operation)).toBe(
       "Stash changes",
     );
@@ -1218,10 +1214,18 @@ group("stash writes", () => {
       describe(stashPushWrite("only-a", false, ["a"], head).operation),
     ).toBe("Stash “only-a”");
     expect(describe(stashApplyWrite(stash, head).operation)).toBe(
-      "Apply stash@{1}",
+      "Apply stash “only-a”",
     );
-    expect(describe(popped)).toBe("Pop stash@{1}");
-    expect(describe(dropped)).toBe("Drop stash@{1}");
+    expect(describe(popped)).toBe("Pop stash “only-a”");
+    expect(describe(dropped)).toBe("Drop stash “only-a”");
+    expect(
+      describe(
+        stashApplyWrite(
+          { ...stash, message: "WIP on main: 1a2b3c4 Initial commit" },
+          head,
+        ).operation,
+      ),
+    ).toBe("Apply stash “1a2b3c4 Initial commit”");
     const undone = (operation: typeof dropped) =>
       steppedText({
         kind: "stepped",
@@ -1229,10 +1233,10 @@ group("stash writes", () => {
         label: noticeLabel("undo", operation, describe(operation)),
       });
     expect(undone(dropped)).toBe(
-      "Undid Drop stash@{1}. The entry returns at stash@{0}",
+      "Undid Drop stash “only-a”. The entry returns at stash@{0}",
     );
     expect(undone(popped)).toBe(
-      "Undid Pop stash@{1}. The entry returns at stash@{0}",
+      "Undid Pop stash “only-a”. The entry returns at stash@{0}",
     );
     expect(
       steppedText({
@@ -1240,7 +1244,15 @@ group("stash writes", () => {
         step: "redo",
         label: noticeLabel("redo", dropped, describe(dropped)),
       }),
-    ).toBe("Redid Drop stash@{1}");
+    ).toBe("Redid Drop stash “only-a”");
+  });
+
+  it("reads a stash write from an undo journal written before stash messages, and names it by index", () => {
+    const old = operationSchema.parse({
+      kind: "stashDrop",
+      stash: { name: "stash@{1}", oid },
+    });
+    expect(describe(old)).toBe("Drop stash@{1}");
   });
 
   it("applies and pops in the open worktree, or the one on the stash's branch", () => {

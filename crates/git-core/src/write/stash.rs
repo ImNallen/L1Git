@@ -25,6 +25,8 @@ use std::{
 pub struct StashTip {
     pub name: String,
     pub oid: Oid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
