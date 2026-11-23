@@ -35,6 +35,8 @@ export type FileDiffHandle = {
 const VIEWS: { view: View; label: string }[] = [
   { view: "unified", label: "Unified" },
   { view: "split", label: "Split" },
+  { view: "history", label: "History" },
+  { view: "blame", label: "Blame" },
 ];
 
 type Props = {

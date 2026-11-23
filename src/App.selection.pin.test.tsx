@@ -8,6 +8,7 @@ import {
   mountApp,
   openFirstFile,
   query,
+  queryAll,
   refRow,
   repositoryRow,
   selectedRow,
@@ -126,6 +127,41 @@ it("a reread keeps the selection, so an open file stays open", async () => {
   await app.refocusWindow();
   expect(app.bridge.count("snapshot", PIN)).toBeGreaterThan(1);
   expect(get("region", "Changes to notes.txt")).toBeTruthy();
+});
+
+it("a committed file offers History and Blame beside the diff styles", async () => {
+  const app = await mountApp({
+    bridge: (bridge) =>
+      bridge.respond("fileHistory", (_request, world) =>
+        world.snapshots
+          .get(PIN)!
+          .commits.filter(({ subject }) =>
+            ["Main tip", "Release"].includes(subject),
+          )
+          .map((commit) => ({ commit, path: "notes.txt" })),
+      ),
+  });
+  await openFirstFile(app);
+  const views = get("group", "File view");
+  expect(
+    queryAll("button", undefined, views).map((b) => b.textContent),
+  ).toEqual(["Unified", "Split", "History", "Blame"]);
+  await app.click(get("button", "History", views));
+  expect(get("button", "History", views).getAttribute("aria-pressed")).toBe(
+    "true",
+  );
+  expect(get("button", "Unified", views).getAttribute("aria-pressed")).toBe(
+    "false",
+  );
+  expect(
+    queryAll(
+      "option",
+      undefined,
+      get("listbox", "Commits that changed this file"),
+    ).map(
+      (option) => option.querySelector(".file-revision-subject")?.textContent,
+    ),
+  ).toEqual(["Main tip", "Release"]);
 });
 
 it("a pending jump resolves against a reread that failed, which keeps the cached view", async () => {
