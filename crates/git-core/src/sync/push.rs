@@ -65,6 +65,7 @@ pub struct PushIntent {
     pub remote: String,
     pub destination: BranchRef,
     pub endpoint: String,
+    pub tracks_endpoint: bool,
     pub fingerprint: String,
 }
 
@@ -524,6 +525,9 @@ fn prepare_target(
     )
     .digest()
     .to_string();
+    let fetched = git::run(root, &["remote", "get-url", remote], reads)?;
+    let tracks_endpoint =
+        fetched.status.success() && git::text(&fetched.stdout).trim_end() == endpoint;
     Ok(PushAvailability::Ready {
         intent: PushIntent {
             purpose,
@@ -532,6 +536,7 @@ fn prepare_target(
             remote: remote.into(),
             destination,
             endpoint: display_endpoint(purpose, &endpoint),
+            tracks_endpoint,
             fingerprint,
         },
     })

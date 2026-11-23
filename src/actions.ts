@@ -385,6 +385,7 @@ export const actions: readonly Action[] = [
   {
     id: "push",
     title: (context) => context.push?.label ?? "Push",
+    detail: (context) => context.push?.title ?? "Push",
     available: (context) =>
       onRepository(context) &&
       !context.writing &&

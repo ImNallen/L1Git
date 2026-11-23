@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { branchRefSchema, overviewSchema } from "./overview";
+import { branchRefSchema, divergence, overviewSchema } from "./overview";
+import type { BranchStatus, Divergence } from "./overview";
 import { oidSchema } from "./repository";
 import { shortBranch } from "./refs";
 
@@ -10,6 +11,7 @@ export const pushIntentSchema = z.strictObject({
   remote: z.string().min(1),
   destination: branchRefSchema,
   endpoint: z.string(),
+  tracksEndpoint: z.boolean(),
   fingerprint: z.string().regex(/^[0-9a-f]{40}$/),
 });
 const pushUnavailableSchema = z.enum([
@@ -137,6 +139,43 @@ function pushDestination(intent: PushIntent): string {
   return `${intent.remote}/${shortBranch(intent.destination)}`;
 }
 
+function countsAgainstDestination(
+  intent: PushIntent,
+  branches: readonly BranchStatus[],
+): Divergence | null {
+  if (!intent.tracksEndpoint) return null;
+  const branch = branches.find(
+    (status) =>
+      status.reference === intent.branch && status.oid === intent.source,
+  );
+  const counts = branch && divergence(branch.state);
+  return counts?.upstream === `refs/remotes/${pushDestination(intent)}`
+    ? counts
+    : null;
+}
+
+function standing(intent: PushIntent, counts: Divergence): string {
+  const branch = shortBranch(intent.branch);
+  const target = pushDestination(intent);
+  if (counts.behind === 0) return `${branch} is up to date with ${target}.`;
+  return counts.ahead === 0
+    ? `${branch} is ${counts.behind} behind ${target}. Pull first.`
+    : `${branch} has diverged from ${target} (${counts.ahead} ahead, ${counts.behind} behind). Pull, then push again.`;
+}
+
+export function explainBehindRejection(
+  result: PushResult,
+  branches: readonly BranchStatus[],
+): PushResult {
+  if (result.outcome.kind !== "rejected") return result;
+  const counts = countsAgainstDestination(result.intent, branches);
+  if (!counts || counts.behind === 0) return result;
+  return {
+    ...result,
+    outcome: { kind: "rejected", message: standing(result.intent, counts) },
+  };
+}
+
 export function pushDisabledReason(
   preparation: PushPreparation | undefined,
 ): string | null {
@@ -191,6 +230,7 @@ export type PushControl =
 export function pushControl(
   preparation: PushPreparation | undefined,
   busy: string | null,
+  branches: readonly BranchStatus[],
 ): PushControl {
   if (
     !busy &&
@@ -213,6 +253,13 @@ export function pushControl(
       kind: "disabled",
       label,
       title: reason ?? "Check the current push destination.",
+    };
+  const counts = countsAgainstDestination(preparation.intent, branches);
+  if (counts?.ahead === 0)
+    return {
+      kind: "disabled",
+      label,
+      title: `Nothing to push. ${standing(preparation.intent, counts)}`,
     };
   return {
     kind: "ready",

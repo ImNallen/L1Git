@@ -18,6 +18,7 @@ const intent = pushIntentSchema.parse({
   remote: "origin",
   destination: "refs/heads/release",
   endpoint: "/private/remote.git",
+  tracksEndpoint: true,
   fingerprint: "b".repeat(40),
 });
 
