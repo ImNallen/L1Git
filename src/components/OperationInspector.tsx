@@ -1,16 +1,14 @@
 import { useEffect, useState } from "react";
 import { useCommitDraft } from "../commitDrafts";
 import { splitMessage } from "../domain/commitMessage";
-import {
-  conflictLabel,
-  operationMessage,
-  operationWords,
-} from "../domain/inProgress";
+import { operationMessage, operationWords } from "../domain/inProgress";
 import type { Running } from "../domain/inProgress";
 import type { MergeState } from "../domain/merge";
-import type { RepositoryRoot } from "../domain/repository";
+import { problemFrom } from "../domain/repository";
+import type { ConflictSummary, RepositoryRoot } from "../domain/repository";
 import { useDraftImpact } from "../draftProtection";
 import * as repositories from "../repositories";
+import type { Read } from "../useRead";
 import { IncomingChip, SideChip } from "./OperationStrip";
 import { shortOid } from "../domain/shortOid";
 
@@ -57,37 +55,43 @@ export function OperationOverview({ running }: { running: Running }) {
   );
 }
 
-export function useConflictLabels(
+export function useConflictSummaries(
   root: RepositoryRoot,
   state: MergeState | null,
-  unresolved: number,
-): ReadonlyMap<string, string> | null {
-  const [labels, setLabels] = useState<{
+  unresolved: readonly string[],
+): Read<ReadonlyMap<string, ConflictSummary>> {
+  const [summaries, setSummaries] = useState<{
     root: RepositoryRoot;
-    labels: ReadonlyMap<string, string>;
+    read: Read<ReadonlyMap<string, ConflictSummary>>;
   } | null>(null);
+  const paths = JSON.stringify(unresolved.toSorted());
   useEffect(() => {
-    if (unresolved === 0) return;
+    if (state === null || paths === "[]") return;
     let current = true;
     repositories.conflictSummary(root).then(
       (summary) => {
         if (current)
-          setLabels({
+          setSummaries({
             root,
-            labels: new Map(
-              summary.map((entry) => [entry.path, conflictLabel(entry)]),
-            ),
+            read: {
+              kind: "ready",
+              value: new Map(summary.map((entry) => [entry.path, entry])),
+            },
           });
       },
-      () => {
-        if (current) setLabels(null);
+      (error: unknown) => {
+        if (current)
+          setSummaries({
+            root,
+            read: { kind: "error", error: problemFrom(error) },
+          });
       },
     );
     return () => {
       current = false;
     };
-  }, [root, state, unresolved]);
-  return labels?.root === root ? labels.labels : null;
+  }, [root, state, paths]);
+  return summaries?.root === root ? summaries.read : { kind: "loading" };
 }
 
 export function OperationMessage({ running }: { running: Running }) {

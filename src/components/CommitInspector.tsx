@@ -7,9 +7,9 @@ import type { MergeState } from "../domain/merge";
 import { mergeAllows } from "../domain/merge";
 import { useDraftImpact } from "../draftProtection";
 import {
-  canMark,
   isDirty,
   markBlock,
+  markReasons,
   resolutionKey,
   resolutionOf,
 } from "../resolutionDrafts";
@@ -69,6 +69,7 @@ import { ChangedFileTree, changeStatuses } from "./ChangedFileTree";
 import { CommitBox } from "./CommitBox";
 import type { RowAction, RowLabel } from "./ChangedFileTree";
 import {
+  conflictLabel,
   draftConflictLabel,
   inProgress,
   operationGroups,
@@ -80,7 +81,7 @@ import {
   OperationMessage,
   OperationOverview,
   undoNote,
-  useConflictLabels,
+  useConflictSummaries,
 } from "./OperationInspector";
 import { RefBadge } from "./History";
 import { shortOid } from "../domain/shortOid";
@@ -675,6 +676,7 @@ type RowFocus = { row: string; side: ListSide };
 function WorktreeFiles({
   managed,
   resolvable,
+  blocked,
   group,
   labels,
   collapse,
@@ -694,6 +696,7 @@ function WorktreeFiles({
   collapse?: { open: boolean; onToggle: () => void };
   managed: boolean;
   resolvable: ReadonlySet<string>;
+  blocked: ReadonlyMap<string, string>;
   selectedFile: OpenedFile | null;
   onSelectFile: (path: string, side: ListSide) => void;
   busy: boolean;
@@ -719,9 +722,18 @@ function WorktreeFiles({
       label: row,
       disabled: busy,
       appliesTo: resolvable,
+      blockedBy: blocked,
       run: (paths, target) => onWrite(kind, side, paths, target),
     },
   ];
+  if (side === "conflict")
+    actions.unshift({
+      label: "Open in resolver",
+      disabled: false,
+      run: ([path]) => {
+        if (path !== undefined) onSelectFile(path, side);
+      },
+    });
   const discarding = side === "unstaged";
   if (discarding && !managed)
     actions.push({
@@ -817,6 +829,23 @@ function WorktreeFiles({
   );
 }
 
+function rowPermissions(
+  group: WorktreeGroup | OperationGroup,
+  reasonFor: (path: string) => string | null,
+) {
+  const blocked = new Map<string, string>();
+  for (const { path } of group.files) {
+    const reason = reasonFor(path);
+    if (reason !== null) blocked.set(path, reason);
+  }
+  return {
+    blocked,
+    resolvable: new Set(
+      group.files.map(({ path }) => path).filter((path) => !blocked.has(path)),
+    ),
+  };
+}
+
 function WorktreeInspector({
   worktree,
   changes,
@@ -846,11 +875,6 @@ function WorktreeInspector({
   const operation = inProgress(writes.merge);
   const running = operation.kind === "running" ? operation : null;
   const idle = writes.merge === null || writes.merge.kind === "idle";
-  const conflictLabels = useConflictLabels(
-    worktree.root,
-    writes.merge,
-    running?.progress.unresolved.length ?? 0,
-  );
   const [cleanShown, setCleanShown] = useState<string | null>(null);
   const groups: (WorktreeGroup | OperationGroup)[] =
     changes?.kind !== "ready"
@@ -860,11 +884,47 @@ function WorktreeInspector({
         : worktreeGroups(changes.status.entries).filter(
             (group) => group.files.length > 0,
           );
+  const conflictSummaries = useConflictSummaries(
+    worktree.root,
+    writes.merge,
+    groups
+      .find((group) => group.side === "conflict")
+      ?.files.map(({ path }) => path) ?? [],
+  );
+  const summaryOf = (path: string) =>
+    conflictSummaries.kind === "ready"
+      ? conflictSummaries.value.get(path)
+      : undefined;
   const unresolvedLabel = (path: string) => {
     const draft = resolutionOf(resolutionKey(worktree.root, path));
     if (draft && isDirty(draft)) return draftConflictLabel(draft.text);
     if (draft && markBlock(draft) === "markers") return "Leftover markers";
-    return conflictLabels?.get(path) ?? "Conflicted";
+    const summary = summaryOf(path);
+    return summary ? conflictLabel(summary) : "Conflicted";
+  };
+  const markReason = (path: string) => {
+    const draft = resolutionOf(resolutionKey(worktree.root, path));
+    if (draft !== null) {
+      const block = markBlock(draft);
+      return block === null ? null : markReasons[block];
+    }
+    if (conflictSummaries.kind === "error") return markReasons.unreadable;
+    const summary = summaryOf(path);
+    if (summary === undefined) return markReasons.reading;
+    return summary.kind === "text" && summary.conflicts > 0
+      ? markReasons.conflicts
+      : null;
+  };
+  const rowReason = (side: ListSide, path: string) => {
+    const owned = mergeAllows(writes.merge, {
+      kind: side === "staged" ? "unstageFiles" : "stageFiles",
+      entries:
+        changes?.kind === "ready"
+          ? changes.status.entries.filter((entry) => entry.path === path)
+          : [],
+    });
+    if (!owned) return "This file is outside the operation's affected paths.";
+    return side === "conflict" ? markReason(path) : null;
   };
   const labelsOf = (group: WorktreeGroup | OperationGroup) =>
     !("kind" in group) ||
@@ -1053,32 +1113,9 @@ function WorktreeInspector({
                 labels={labelsOf(group)}
                 collapse={collapseOf(group)}
                 managed={!idle}
-                resolvable={
-                  new Set(
-                    group.files
-                      .filter(({ path }) => {
-                        const draft = resolutionOf(
-                          resolutionKey(worktree.root, path),
-                        );
-                        const owned = mergeAllows(writes.merge, {
-                          kind:
-                            group.side === "staged"
-                              ? "unstageFiles"
-                              : "stageFiles",
-                          entries: changes.status.entries.filter(
-                            (entry) => entry.path === path,
-                          ),
-                        });
-                        return (
-                          owned &&
-                          (group.side !== "conflict" ||
-                            draft === null ||
-                            canMark(draft))
-                        );
-                      })
-                      .map(({ path }) => path),
-                  )
-                }
+                {...rowPermissions(group, (path) =>
+                  rowReason(group.side, path),
+                )}
                 selectedFile={selectedFile}
                 onSelectFile={onSelectFile}
                 busy={writes.busy}

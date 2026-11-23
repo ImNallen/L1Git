@@ -41,6 +41,7 @@ import {
   isDirty,
   isStale,
   markBlock,
+  markReasons,
   markResolution,
   readResolution,
   reloadResolution,
@@ -48,7 +49,7 @@ import {
   saveResolution,
   useResolutionDraft,
 } from "../resolutionDrafts";
-import type { MarkBlock, ResolutionDraft } from "../resolutionDrafts";
+import type { ResolutionDraft } from "../resolutionDrafts";
 import type { WritesView } from "../useWrites";
 import { ConflictChoices } from "./ConflictChoices";
 import type { ConflictCard, ConflictChoicesHandle } from "./ConflictChoices";
@@ -74,16 +75,6 @@ const reasons: Record<
   specialFile: "Links, submodules and special files need external resolution.",
   attributes:
     "This file uses a Git filter, ident expansion or a working-tree encoding.",
-};
-const markReasons: Record<MarkBlock | "busy", string> = {
-  conflicts: "Resolve every conflict first.",
-  markers: "Remove the leftover conflict markers first.",
-  unsaved: "Save the result first.",
-  stale: "The file changed on disk. Reload it first.",
-  working: "Wait for the save to finish.",
-  problem: "Refresh the conflict first.",
-  reading: "Wait for L1 Git to read the file.",
-  busy: "Wait for the current operation to finish.",
 };
 
 const choices: {

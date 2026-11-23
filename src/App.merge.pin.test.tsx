@@ -18,6 +18,7 @@ import {
 import {
   activeMerge,
   applied,
+  editableConflict,
   history,
   OTHER,
   PIN,
@@ -426,4 +427,142 @@ it("opening a conflict from the inspector moves focus into the resolver, so its 
   expect(get("status", /^Undid /).querySelector("span")?.textContent).toBe(
     "Undid Delete gone.txt",
   );
+});
+
+const conflictRow = (path: string) => {
+  const found = get(
+    "region",
+    "Needs resolution",
+    get("complementary", "Commit inspector"),
+  )
+    .querySelector("file-tree-container")
+    ?.shadowRoot?.querySelector<HTMLElement>(
+      `[data-item-type="file"][data-item-path="${path}"]`,
+    );
+  if (!found) throw new Error(`Missing inspector row ${path}`);
+  return found;
+};
+
+const conflictMenu = async (
+  app: Awaited<ReturnType<typeof mountApp>>,
+  path: string,
+) => {
+  await app.contextMenu(conflictRow(path));
+  return queryAll("menuitem").map(
+    (item) =>
+      `${item.querySelector("span")?.textContent ?? item.textContent}${
+        item.getAttribute("aria-disabled") === "true"
+          ? ` [${item.querySelector(".menu-reason")?.textContent}]`
+          : ""
+      }`,
+  );
+};
+
+const conflictEntry = (root: string, path: string) => {
+  const conflict = editableConflict(root, path);
+  if (conflict.kind !== "editable")
+    throw new Error("expected an editable conflict");
+  return conflict.snapshot.entry;
+};
+
+const mergingNotes = (world: World) => {
+  const state = activeMerge(PIN, ["notes.txt"]);
+  if (state.kind !== "active") throw new Error("expected an active merge");
+  state.unresolved = ["notes.txt"];
+  world.merges.set(PIN, state);
+};
+
+it("a conflict row's menu opens the resolver and refuses Mark resolved while the file has conflicts", async () => {
+  const app = await mountApp({ world: mergingNotes });
+  await app.click(historyRow("Uncommitted changes in pin,"));
+  const menu = () => conflictMenu(app, "notes.txt");
+
+  expect(await menu(), "before the resolver reads the file").toEqual([
+    "Open in resolver",
+    "Mark resolved [Resolve every conflict first.]",
+  ]);
+  app.bridge.reset();
+  await app.click(get("menuitem", /^Mark resolved/));
+  expect(
+    app.bridge.count("write"),
+    "a file that still has conflict markers is not staged",
+  ).toBe(0);
+  await app.press("Escape");
+
+  await app.act(async () => {
+    await app.modules.resolutionDrafts.readResolution(PIN, "notes.txt");
+  });
+  expect(await menu(), "with a draft that still has markers").toEqual([
+    "Open in resolver",
+    "Mark resolved [Resolve every conflict first.]",
+  ]);
+  await app.press("Escape");
+
+  await dirtyResolution(app, PIN, "notes.txt");
+  expect(await menu(), "with an unsaved result").toEqual([
+    "Open in resolver",
+    "Mark resolved [Save the result first.]",
+  ]);
+  await app.click(get("menuitem", "Open in resolver"));
+  expect(document.querySelector(".conflict-resolver")).not.toBeNull();
+});
+
+it("a conflict row whose file has no conflicts left marks it resolved from the menu", async () => {
+  const app = await mountApp({ world: mergingNotes });
+  app.bridge.respond("conflictSummary", () => [
+    { kind: "text", path: "notes.txt", conflicts: 0 },
+  ]);
+  await app.click(historyRow("Uncommitted changes in pin,"));
+  expect(await conflictMenu(app, "notes.txt")).toEqual([
+    "Open in resolver",
+    "Mark resolved",
+  ]);
+  app.bridge.reset();
+  await app.click(get("menuitem", "Mark resolved"));
+  expect(app.bridge.lines((request) => request.op === "write")).toEqual([
+    `write ${PIN} stageFiles`,
+  ]);
+});
+
+it("a repository switch back to a merge reads its conflict summary once", async () => {
+  const app = await mountApp({
+    world: (world) => {
+      mergingNotes(world);
+      const status = world.statuses.get(PIN)!;
+      world.statuses.set(PIN, {
+        ...status,
+        entries: [
+          ...status.entries.filter((entry) => entry.path !== "notes.txt"),
+          conflictEntry(PIN, "notes.txt"),
+        ],
+      });
+    },
+  });
+  await app.click(historyRow("Uncommitted changes in pin,"));
+  await app.click(repositoryRow(OTHER));
+  app.bridge.reset();
+  await app.click(repositoryRow(PIN));
+  expect(selectedRow()).toBe(
+    "Uncommitted changes in pin, 1 conflicted, 1 modified",
+  );
+  expect(conflictRow("notes.txt")).toBeTruthy();
+  expect(
+    app.bridge.lines((request) => request.op === "conflictSummary"),
+  ).toEqual([`conflictSummary ${PIN}`]);
+});
+
+it("a conflict row whose summary read failed says so and still refuses Mark resolved", async () => {
+  const app = await mountApp({ world: mergingNotes });
+  app.bridge.fail("conflictSummary", {
+    kind: "timedOut",
+    message: "Reading the conflicts took too long.",
+  });
+  await app.click(historyRow("Uncommitted changes in pin,"));
+  expect(await conflictMenu(app, "notes.txt")).toEqual([
+    "Open in resolver",
+    "Mark resolved [L1 Git could not read this file's conflicts. Open it in the resolver.]",
+  ]);
+  app.bridge.reset();
+  await app.click(get("menuitem", /^Mark resolved/));
+  expect(app.bridge.count("write")).toBe(0);
 });

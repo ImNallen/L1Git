@@ -31,6 +31,7 @@ export type RowAction = {
   disabled: boolean;
   run: (paths: string[], row: string) => void;
   appliesTo?: ReadonlySet<string>;
+  blockedBy?: ReadonlyMap<string, string>;
 };
 
 export type RowLabel = { text: string; tone: "warning" | "success" };
@@ -58,6 +59,22 @@ type Props = {
 };
 
 const ROW_HEIGHT = 34;
+
+type RowItem = { action: RowAction; paths: string[]; blocked: string | null };
+
+export function rowItems(
+  actions: readonly RowAction[],
+  under: readonly string[],
+): RowItem[] {
+  return actions.flatMap((action): RowItem[] => {
+    const paths = under.filter((path) => action.appliesTo?.has(path) ?? true);
+    if (paths.length > 0) return [{ action, paths, blocked: null }];
+    const blocked = under
+      .map((path) => action.blockedBy?.get(path))
+      .find((reason) => reason !== undefined);
+    return blocked === undefined ? [] : [{ action, paths, blocked }];
+  });
+}
 
 function fittedTreeHeight(
   model: ReturnType<typeof useFileTree>["model"],
@@ -193,27 +210,26 @@ ${treeStyles}`,
                   context.close({ restoreFocus: returnFocus })
                 }
               >
-                {actions.map((action) => {
-                  const paths = pathsUnder(files, item).filter(
-                    (path) => action.appliesTo?.has(path) ?? true,
-                  );
-                  return (
-                    paths.length > 0 && (
-                      <button
-                        key={action.label}
-                        role="menuitem"
-                        aria-disabled={action.disabled}
-                        onClick={() => {
-                          if (action.disabled) return;
-                          context.close();
-                          action.run(paths, item.path);
-                        }}
-                      >
-                        {action.label}
-                      </button>
-                    )
-                  );
-                })}
+                {rowItems(actions, pathsUnder(files, item)).map(
+                  ({ action, paths, blocked }) => (
+                    <button
+                      key={action.label}
+                      role="menuitem"
+                      aria-disabled={action.disabled || blocked !== null}
+                      title={blocked ?? undefined}
+                      onClick={() => {
+                        if (action.disabled || blocked !== null) return;
+                        context.close();
+                        action.run(paths, item.path);
+                      }}
+                    >
+                      <span>{action.label}</span>
+                      {blocked !== null && (
+                        <small className="menu-reason">{blocked}</small>
+                      )}
+                    </button>
+                  ),
+                )}
               </ContextMenu>
             )
           : undefined
