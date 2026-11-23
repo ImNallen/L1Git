@@ -8,21 +8,29 @@ export const historyColumns = [
   { id: "author", label: "Author", width: 140 },
   { id: "date", label: "Age", width: 60 },
   { id: "sha", label: "Commit ID" },
-  { id: "changes", label: "Changes", width: 202 },
+  { id: "changes", label: "Changes", width: 94 },
 ] as const;
 export type ColumnId = (typeof historyColumns)[number]["id"];
 
 const columnId = z.custom<ColumnId>((value) =>
   historyColumns.some((column) => column.id === value),
 );
-const DEFAULT_COLUMNS: ReadonlySet<ColumnId> = new Set(
-  historyColumns.map((column) => column.id),
-);
+const DEFAULT_COLUMNS: ReadonlySet<ColumnId> = new Set<ColumnId>([
+  "date",
+  "changes",
+]);
 
 const columnsSchema = z.object({
   version: z.literal(1),
   visible: z.array(columnId),
 });
+
+const exactCount = new Intl.NumberFormat("en");
+const compactCount = new Intl.NumberFormat("en", { notation: "compact" });
+
+export function formatChangeCount(count: number) {
+  return (count < 10_000 ? exactCount : compactCount).format(count);
+}
 
 const MESSAGE_MIN_WIDTH = 260;
 const CROWDED_MESSAGE_MIN_WIDTH = 160;

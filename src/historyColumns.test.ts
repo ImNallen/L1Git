@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   COLUMNS_KEY,
   columnLayout,
+  formatChangeCount,
   historyColumns,
   persistColumns,
   restoreColumns,
@@ -9,18 +10,16 @@ import {
 import type { ColumnId } from "./historyColumns";
 
 describe("history column layout", () => {
-  it("shows every metadata column for new preferences", () => {
+  it("shows Age and Changes for new preferences", () => {
     const layout = columnLayout(58, restoreColumns({ getItem: () => null }), 7);
-    expect(layout.template).toBe(
-      "58px minmax(160px, 1fr) 140px 60px 100px 202px",
-    );
-    expect(layout.minWidth).toBe(720);
+    expect(layout.template).toBe("58px minmax(160px, 1fr) 60px 94px");
+    expect(layout.minWidth).toBe(372);
   });
 
   it("keeps the wider message minimum when only Changes is on", () => {
     const layout = columnLayout(58, new Set<ColumnId>(["changes"]), 7);
-    expect(layout.template).toBe("58px minmax(260px, 1fr) 202px");
-    expect(layout.minWidth).toBe(520);
+    expect(layout.template).toBe("58px minmax(260px, 1fr) 94px");
+    expect(layout.minWidth).toBe(412);
   });
 
   it("lays out every column in table order whatever order they were checked", () => {
@@ -30,9 +29,9 @@ describe("history column layout", () => {
       7,
     );
     expect(layout.template).toBe(
-      "106px minmax(160px, 1fr) 140px 60px 100px 202px",
+      "106px minmax(160px, 1fr) 140px 60px 100px 94px",
     );
-    expect(layout.minWidth).toBe(768);
+    expect(layout.minWidth).toBe(660);
     expect(layout.columns.map((column) => column.label)).toEqual([
       "Author",
       "Age",
@@ -64,16 +63,26 @@ describe("history column layout", () => {
   });
 });
 
+describe("change counts", () => {
+  it.each([
+    [0, "0"],
+    [9_999, "9,999"],
+    [10_000, "10K"],
+    [12_345, "12K"],
+    [999_499, "999K"],
+    [1_234_567, "1.2M"],
+  ])("shows %i as %s", (count, shown) => {
+    expect(formatChangeCount(count)).toBe(shown);
+  });
+});
+
 describe("stored history columns", () => {
   it.each([
-    [null, ["author", "date", "sha", "changes"]],
-    ["not json", ["author", "date", "sha", "changes"]],
-    ['{"version":2,"visible":["date"]}', ["author", "date", "sha", "changes"]],
-    [
-      '{"version":1,"visible":["date","subject"]}',
-      ["author", "date", "sha", "changes"],
-    ],
-    ['{"version":1,"visible":"date"}', ["author", "date", "sha", "changes"]],
+    [null, ["date", "changes"]],
+    ["not json", ["date", "changes"]],
+    ['{"version":2,"visible":["date"]}', ["date", "changes"]],
+    ['{"version":1,"visible":["date","subject"]}', ["date", "changes"]],
+    ['{"version":1,"visible":"date"}', ["date", "changes"]],
     ['{"version":1,"visible":[]}', []],
     ['{"version":1,"visible":["changes"]}', ["changes"]],
     ['{"version":1,"visible":["sha","date"]}', ["sha", "date"]],

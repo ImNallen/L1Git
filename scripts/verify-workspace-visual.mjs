@@ -59,7 +59,7 @@ browser("wait", "file-tree-container");
 browser(
   "wait",
   "--fn",
-  "document.fonts.status === 'loaded' && document.querySelector('.changes-cell .diffstat') !== null",
+  "document.fonts.status === 'loaded' && document.querySelector('.changes-cell .change-stat') !== null",
 );
 const report = evaluate((expected) => {
   const failures = [];

@@ -107,21 +107,6 @@
   padding: 0 8px 0 0;
   font-family: var(--mono);
 }
-.diffstat {
-  display: flex;
-  gap: 2px;
-}
-.diffstat span {
-  height: 3px;
-  border-radius: 1px;
-  background: var(--workspace-diffstat-neutral, var(--border-strong));
-}
-.diffstat .added {
-  background: var(--workspace-diffstat-added, var(--success));
-}
-.diffstat .deleted {
-  background: var(--deleted);
-}
 .history-table tbody tr {
   cursor: pointer;
 }
@@ -275,11 +260,12 @@
   opacity: 0.6;
 }
 .worktree-subject {
-  flex: 0 1 auto;
+  flex: 0 1000 auto;
+  min-width: 0;
   font-style: italic;
 }
 .worktree-summary {
-  flex: 1 1 0;
+  flex: 0 1 auto;
   min-width: 0;
   margin-left: 10px;
   overflow: hidden;
@@ -370,29 +356,17 @@
   padding-right: 0;
 }
 .changes-cell {
-  gap: 8px;
+  gap: 6px;
   font-size: 12px;
   font-weight: 400;
 }
-.changes-cell > .added {
-  width: 55px;
-  flex-shrink: 0;
-  text-align: right;
-}
+.changes-cell > .added,
 .changes-cell > .deleted {
-  width: 40px;
+  width: auto;
   flex-shrink: 0;
-  text-align: right;
 }
 .change-stat.deleted.zero {
   color: var(--text-dim);
-}
-.diffstat {
-  margin-left: 0;
-  opacity: 0.5;
-}
-.diffstat span {
-  width: 7px;
 }
 .sha-cell {
   font-size: 12px;

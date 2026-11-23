@@ -27,7 +27,7 @@
     ".sidebar": { "backgroundColor": "rgb(12, 14, 17)" },
     ".inspector": { "backgroundColor": "rgb(16, 18, 22)" },
     ".commit-subject": { "fontSize": "13px" },
-    ".sha-cell": {
+    ".changes-cell": {
       "fontSize": "12px",
       "fontFamily": "\"IBM Plex Mono\", monospace"
     },
@@ -50,7 +50,6 @@
     },
     ".history-table th": { "fontWeight": "500", "color": "rgb(152, 163, 178)" },
     ".history-table tr.selected .commit-subject": { "fontWeight": "500" },
-    ".diffstat .added": { "backgroundColor": "rgb(81, 203, 160)" },
     ".repository-check": { "maskImage": "none" }
   },
   "absent": [
