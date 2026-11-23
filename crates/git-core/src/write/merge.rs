@@ -995,13 +995,12 @@ fn ordinary_index(rows: &index::Rows, who: &str) -> Result<(), RepositoryError> 
 }
 
 fn clean_tracked(repo: &Repo, deadline: WriteDeadline) -> Result<(), RepositoryError> {
-    if !status::entries(&repo.root, Untracked::No, deadline.reads())?
-        .0
-        .is_empty()
-    {
-        return Err(refused(
-            "Merge needs a clean tracked worktree and index. Commit or stash your changes first.",
-        ));
+    let (entries, _) = status::entries(&repo.root, Untracked::No, deadline.reads())?;
+    if !entries.is_empty() {
+        return Err(refused(format!(
+            "Merge needs a clean tracked worktree and index. Commit or stash your changes to these paths first: {}.",
+            paths(&entries).into_iter().collect::<Vec<_>>().join(", ")
+        )));
     }
     Ok(())
 }
