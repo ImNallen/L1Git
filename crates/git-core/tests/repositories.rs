@@ -1,9 +1,10 @@
 use l1_git_core::{
-    Base, BaseDetail, Blame, BlameRange, Branch, ChangeStatus, Comparison, Conflict, ErrorKind,
-    FilePatch, HISTORY_LIMIT, Head, IndexObject, LINE_STATS_LIMIT, LineStats, MoveSide, Moved, Oid,
-    RepositoryRefs, Side, Sides, Squash, Stages, Stash, StatusEntry, Submodule, SubmoduleState,
-    Tag, Target, TargetDetail, Worktree, WorktreePatch, WorktreeStatus, blame, commit_detail,
-    file_history, file_patch, line_stats, refs, snapshot, worktree_patch, worktree_status,
+    Base, BaseDetail, Blame, BlameRange, Branch, ChangeStatus, Comparison, Conflict, Coordinator,
+    ErrorKind, FilePatch, HISTORY_LIMIT, Head, IndexObject, LINE_STATS_LIMIT, Limits, LineStats,
+    MoveSide, Moved, Oid, RepositoryRefs, Request, Response, Side, Sides, Squash, Stages, Stash,
+    StatusEntry, Submodule, SubmoduleState, Tag, Target, TargetDetail, Worktree, WorktreePatch,
+    WorktreeStatus, blame, commit_detail, file_history, file_patch, line_stats, refs, run,
+    snapshot, worktree_patch, worktree_status,
 };
 use std::{
     fs,
@@ -2732,4 +2733,89 @@ fn worktree_patch_names_a_read_failure() {
         error.message,
         "L1 Git could not read this file (Permission denied (os error 13)). Check its permissions, then refresh."
     );
+}
+
+fn requested_patch(request: serde_json::Value) -> String {
+    let undo = tempfile::tempdir().unwrap();
+    let coordinator = Coordinator::new(Limits::default(), undo.path().join("undo"));
+    let request: Request = serde_json::from_value(request).unwrap();
+    let (Response::FilePatch(FilePatch::Text { patch, .. })
+    | Response::WorktreePatch(WorktreePatch::Diff {
+        diff: FilePatch::Text { patch, .. },
+    })) = run(&coordinator, request).unwrap()
+    else {
+        panic!("a text patch");
+    };
+    patch
+}
+
+fn hunk_headers(patch: &str) -> Vec<&str> {
+    patch
+        .lines()
+        .filter(|line| line.starts_with("@@"))
+        .collect()
+}
+
+#[test]
+fn whole_context_reads_every_line_and_hunks_stay_the_plumbing_default() {
+    let fixture = Fixture::new();
+    git(&fixture.repo, &["config", "diff.context", "10"]);
+    let lines: Vec<String> = (1..=40).map(|line| format!("line {line}\n")).collect();
+    fixture.commit("notes.txt", &lines.concat(), "initial");
+    let mut edited = lines.clone();
+    edited[1] = "second\n".into();
+    edited[37] = "thirty-eighth\n".into();
+    fs::write(fixture.repo.join("notes.txt"), edited.concat()).unwrap();
+    let worktree = |context: Option<&str>| {
+        let mut request = serde_json::json!({
+            "op": "worktreePatch",
+            "path": fixture.path(),
+            "file": "notes.txt",
+            "side": "unstaged",
+        });
+        if let Some(context) = context {
+            request["context"] = context.into();
+        }
+        requested_patch(request)
+    };
+    let plumbing = git(
+        &fixture.repo,
+        &[
+            "diff-files",
+            "--patch",
+            "--full-index",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--",
+            "notes.txt",
+        ],
+    );
+    assert_eq!(worktree(None), format!("{plumbing}\n"));
+    assert_eq!(worktree(Some("hunks")), worktree(None));
+    assert_eq!(
+        hunk_headers(&worktree(None)),
+        ["@@ -1,5 +1,5 @@", "@@ -35,6 +35,6 @@ line 34"]
+    );
+    let whole = worktree(Some("whole"));
+    assert_eq!(hunk_headers(&whole), ["@@ -1,40 +1,40 @@"]);
+    assert!(whole.contains(" line 20\n"), "{whole}");
+
+    let oid = fixture.commit("notes.txt", &edited.concat(), "edit");
+    let committed = |context: &str| {
+        requested_patch(serde_json::json!({
+            "op": "filePatch",
+            "path": fixture.path(),
+            "comparison": Comparison::commit(&oid),
+            "file": "notes.txt",
+            "context": context,
+        }))
+    };
+    assert_eq!(
+        committed("hunks"),
+        match file_patch(fixture.path(), &Comparison::commit(&oid), "notes.txt").unwrap() {
+            FilePatch::Text { patch, .. } => patch,
+            other => panic!("a text patch, got {other:?}"),
+        }
+    );
+    assert_eq!(hunk_headers(&committed("whole")), ["@@ -1,40 +1,40 @@"]);
 }

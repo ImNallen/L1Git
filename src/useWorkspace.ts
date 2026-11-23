@@ -53,6 +53,7 @@ import type {
 } from "./domain/worktree";
 import type {
   CommitDetail,
+  PatchContext,
   Problem,
   RepositoryRoot,
   RepositorySnapshot,
@@ -109,6 +110,22 @@ export type FileDiffState =
       range: SelectedLineRange | null;
     } & FileKey)
   | ({ kind: "error"; error: Problem } & FileKey);
+
+export function readPatch(
+  key: FileKey,
+  context?: PatchContext,
+): Promise<WorktreePatch> {
+  return key.side === null
+    ? repositories
+        .filePatch(key.root, key.comparison, key.path, context)
+        .then((diff) => ({ kind: "diff", diff }))
+    : repositories.worktreePatch(
+        key.selection.root,
+        key.path,
+        patchSide(key.side),
+        context,
+      );
+}
 
 /** Line numbers move when the patch text changes, so a range outlives a reread only when the text is the same. */
 function rangeAfterReread(
@@ -482,15 +499,7 @@ export function useWorkspace() {
             conflict: conflict.conflict,
             diff: null,
           })
-        : key.side === null
-          ? repositories
-              .filePatch(key.root, key.comparison, key.path)
-              .then((diff) => ({ kind: "diff", diff }))
-          : repositories.worktreePatch(
-              key.selection.root,
-              key.path,
-              patchSide(key.side),
-            );
+        : readPatch(key);
     void reading.then(
       (patch) =>
         setFileDiff((state) =>

@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import type { MouseEvent, RefObject } from "react";
 import { DIFFS_TAG_NAME } from "@pierre/diffs";
-import type { SelectedLineRange } from "@pierre/diffs";
+import type { FileDiffMetadata, SelectedLineRange } from "@pierre/diffs";
 import { FileX2, TriangleAlert } from "lucide-react";
 import { FileDiff, Virtualizer } from "@pierre/diffs/react";
 import focusStyles from "../styles/focus.css?inline";
@@ -9,6 +9,7 @@ import patchStyles from "../styles/filePatch.css?inline";
 import defaultPatchStyles from "../styles/defaultFilePatch.css?inline";
 import { pierreThemeOptions } from "../themes/diffTheme";
 import type { Appearance } from "../themes/palette";
+import { sidesFor } from "../domain/fileSides";
 import { hunkAnchor, parsedFiles } from "../domain/lineSelection";
 import type { DiffStyle, HunkBar } from "../domain/lineSelection";
 import type { PartAction } from "../domain/operations";
@@ -28,14 +29,18 @@ export type Parts = {
   onLostFocus: () => void;
 };
 
+type WholeRead = () => Promise<string>;
+
 export function Diff({
   diff,
+  whole,
   diffStyle,
   theme,
   painted,
   parts = null,
 }: {
   diff: FilePatch;
+  whole: WholeRead;
   diffStyle: DiffStyle;
   theme: Appearance;
   painted: boolean;
@@ -65,6 +70,7 @@ export function Diff({
       )}
       <Patch
         patch={diff.patch}
+        whole={whole}
         diffStyle={diffStyle}
         theme={theme}
         painted={painted}
@@ -89,12 +95,14 @@ const lineLabels: Record<PartAction, string> = {
 
 function Patch({
   patch,
+  whole,
   diffStyle,
   theme,
   painted,
   parts,
 }: {
   patch: string;
+  whole: WholeRead;
   diffStyle: DiffStyle;
   theme: Appearance;
   painted: boolean;
@@ -103,6 +111,8 @@ function Patch({
   const files = useMemo(() => parsedFiles(patch), [patch]);
   const latest = useRef(parts);
   latest.current = parts;
+  const latestWhole = useRef(whole);
+  latestWhole.current = whole;
   const firstLineAction = useRef<HTMLButtonElement>(null);
   const writable = parts !== null;
   const firstHunk = files[0]?.hunks[0];
@@ -119,6 +129,8 @@ ${theme === "dark" && !painted ? defaultPatchStyles : ""}`,
         diffIndicators: "classic",
         hunkSeparators: "line-info-basic",
         disableFileHeader: !barOnTop,
+        loadDiffFiles: async (fileDiff: FileDiffMetadata) =>
+          sidesFor(fileDiff, await latestWhole.current()),
         ...(writable && {
           enableLineSelection: true,
           enableGutterUtility: true,

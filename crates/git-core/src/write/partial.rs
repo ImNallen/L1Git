@@ -5,7 +5,7 @@ use super::{
     txn::Txn,
 };
 use crate::{
-    ErrorKind, Mode, MoveSide, RepositoryError, Side, StaleReason, StatusEntry, git,
+    ErrorKind, Mode, MoveSide, PatchContext, RepositoryError, Side, StaleReason, StatusEntry, git,
     status::{self, PatchBytes, SidePatch, SideRead},
 };
 use serde::{Deserialize, Serialize};
@@ -170,6 +170,7 @@ impl<'o> Part<'o> {
             &txn.repo().root,
             self.path,
             self.action.side(),
+            PatchContext::Hunks,
             txn.deadline().reads(),
         )?;
         self.prepare(fresh)

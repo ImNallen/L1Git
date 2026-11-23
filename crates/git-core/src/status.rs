@@ -1,7 +1,7 @@
 use crate::{
     ChangeStatus, ChangedFile, Conflict, ErrorKind, FilePatch, IndexObject, Mode, MoveSide, Moved,
-    Oid, RepositoryError, Side, Sides, StagedStamp, Stages, StatusEntry, SubmoduleState,
-    WorktreePatch, WorktreeStatus,
+    Oid, PatchContext, RepositoryError, Side, Sides, StagedStamp, Stages, StatusEntry,
+    SubmoduleState, WorktreePatch, WorktreeStatus,
     git::{self, Deadline, LocalRead},
     repository::{self, PATCH_LIMIT, text_patch},
     untracked::untracked,
@@ -245,17 +245,24 @@ pub fn worktree_patch(
     file: &str,
     side: Side,
 ) -> Result<WorktreePatch, RepositoryError> {
-    worktree_patch_within(path, file, side, Deadline::of(LocalRead::WorktreePatch))
+    worktree_patch_within(
+        path,
+        file,
+        side,
+        PatchContext::Hunks,
+        Deadline::of(LocalRead::WorktreePatch),
+    )
 }
 
 pub(crate) fn worktree_patch_within(
     path: &str,
     file: &str,
     side: Side,
+    context: PatchContext,
     deadline: Deadline,
 ) -> Result<WorktreePatch, RepositoryError> {
     let root = repository::root(path, deadline)?;
-    read_side(&root, file, side, deadline)?
+    read_side(&root, file, side, context, deadline)?
         .map(|read| read.patch.into())
         .ok_or_else(|| no_changes(file, side))
 }
@@ -307,6 +314,7 @@ pub(crate) fn read_side(
     root: &Path,
     file: &str,
     side: Side,
+    context: PatchContext,
     deadline: Deadline,
 ) -> Result<Option<SideRead>, RepositoryError> {
     check(file)?;
@@ -321,6 +329,7 @@ pub(crate) fn read_side(
             &["diff-index", "--cached", detect, &head],
             paths,
             file,
+            context,
             deadline,
         )
     };
@@ -341,6 +350,7 @@ pub(crate) fn read_side(
                     &["diff-index", "--no-renames", &head],
                     &[file],
                     file,
+                    context,
                     deadline,
                 )?
             } else {
@@ -373,6 +383,7 @@ pub(crate) fn read_side(
             &["diff-files", "--no-renames"],
             &[file],
             file,
+            context,
             deadline,
         )?
         .map(SidePatch::Diff),
@@ -388,6 +399,7 @@ pub(crate) fn read_side(
                     &["diff-files", detect],
                     &[original, file],
                     file,
+                    context,
                     deadline,
                 )?,
             }
@@ -468,6 +480,7 @@ pub(crate) fn worktree_file_patch(
     root: &Path,
     base: &str,
     file: &str,
+    context: PatchContext,
     deadline: Deadline,
 ) -> Result<Option<FilePatch>, RepositoryError> {
     check(file)?;
@@ -479,6 +492,7 @@ pub(crate) fn worktree_file_patch(
         &["diff-index", "--no-renames", base],
         &[file],
         file,
+        context,
         deadline,
     )? {
         return Ok(Some(diff.into()));
@@ -584,6 +598,7 @@ fn tracked(
     command: &[&str],
     paths: &[&str],
     destination: &str,
+    context: PatchContext,
     deadline: Deadline,
 ) -> Result<Option<PatchBytes>, RepositoryError> {
     let args = |format| {
@@ -608,7 +623,7 @@ fn tracked(
         return Ok(Some(PatchBytes::Binary));
     }
     Ok(Some(
-        match git::read_capped(root, &args("--patch"), PATCH_LIMIT, deadline)? {
+        match git::read_capped(root, &args(context.patch_format()), PATCH_LIMIT, deadline)? {
             git::Capped::Within(patch) if paths.len() == 1 => PatchBytes::Text(patch),
             git::Capped::Within(patch) => {
                 let kept: Vec<u8> = sections(&patch)

@@ -14,7 +14,9 @@ import type { Appearance } from "../themes/palette";
 import type { Oid, SubmoduleState } from "../domain/repository";
 import { clampMessage, conflictLabels } from "../domain/worktree";
 import type { ListSide } from "../domain/worktree";
+import { readPatch } from "../useWorkspace";
 import type { FileDiffState } from "../useWorkspace";
+import { patchText } from "../domain/fileSides";
 import { Diff } from "./FilePatchView";
 import type { DiffStyle, Parts } from "./FilePatchView";
 import { FileBlame, FileHistory } from "./FileRevisions";
@@ -110,6 +112,10 @@ export function FileDiffPane({
     focus: () => backRef.current?.focus(),
   }));
   const look = { diffStyle, theme, painted };
+  const whole = () =>
+    readPatch(state, "whole").then((patch) =>
+      patchText(patch.kind === "submodule" ? null : patch.diff),
+    );
   const back = (
     <button
       ref={backRef}
@@ -270,7 +276,7 @@ export function FileDiffPane({
             </span>
           </div>
           {state.patch.diff ? (
-            <Diff diff={state.patch.diff} {...look} />
+            <Diff diff={state.patch.diff} whole={whole} {...look} />
           ) : (
             <div className="file-diff-empty">
               <p>
@@ -281,7 +287,7 @@ export function FileDiffPane({
           )}
         </>
       ) : (
-        <Diff diff={state.patch.diff} {...look} parts={parts} />
+        <Diff diff={state.patch.diff} whole={whole} {...look} parts={parts} />
       )}
     </section>
   );

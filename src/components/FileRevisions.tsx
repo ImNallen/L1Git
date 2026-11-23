@@ -20,6 +20,7 @@ import { pierreThemeOptions } from "../themes/diffTheme";
 import type { Appearance } from "../themes/palette";
 import { useRead } from "../useRead";
 import type { Read } from "../useRead";
+import { patchText } from "../domain/fileSides";
 import { Diff } from "./FilePatchView";
 import type { DiffStyle } from "./FilePatchView";
 
@@ -153,7 +154,17 @@ function RevisionDiff({ revision, ...look }: { revision: Revision } & Look) {
   );
   if (patch.kind !== "ready")
     return <Pending read={patch} what="changes" onRetry={retry} />;
-  return <Diff diff={patch.value} {...look} />;
+  return (
+    <Diff
+      diff={patch.value}
+      whole={() =>
+        repositories
+          .filePatch(root, singleCommit(oid), path, "whole")
+          .then(patchText)
+      }
+      {...look}
+    />
+  );
 }
 
 export function FileBlame({

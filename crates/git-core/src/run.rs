@@ -3,8 +3,8 @@ use crate::{
     CommitDetail, Comparison, ConflictFile, ConflictSummary, Coordinator, EntryId, Expect,
     FastForwardReport, FetchMode, FilePatch, FileRevision, Head, LineStats, MergeAction,
     MergeReport, MergeReview, MergeSelection, MergeState, NewRepository, NewWorktree, Operation,
-    OperationProbe, PublishChoice, PublishOptions, PushAvailability, PushIntent, PushReport,
-    ReplayOf, ReplayReview, RepositoryError, RepositoryOverview, RepositoryRefs,
+    OperationProbe, PatchContext, PublishChoice, PublishOptions, PushAvailability, PushIntent,
+    PushReport, ReplayOf, ReplayReview, RepositoryError, RepositoryOverview, RepositoryRefs,
     RepositorySnapshot, Side, UndoHistory, WholeFileConflict, WorktreePatch, WorktreeReview,
     WorktreeSource, WorktreeStatus,
     directories::{DirectoryListing, expand_home, home_dir, list_directories},
@@ -62,6 +62,8 @@ pub enum Request {
         path: String,
         comparison: Comparison,
         file: String,
+        #[serde(default)]
+        context: PatchContext,
     },
     FileHistory {
         path: String,
@@ -117,6 +119,8 @@ pub enum Request {
         path: String,
         file: String,
         side: Side,
+        #[serde(default)]
+        context: PatchContext,
     },
     Write {
         path: String,
@@ -246,10 +250,12 @@ pub fn run(coordinator: &Coordinator, request: Request) -> Result<Response, Repo
             path,
             comparison,
             file,
+            context,
         } => Response::FilePatch(file_patch_within(
             &path,
             &comparison,
             &file,
+            context,
             deadline(LocalRead::FilePatch),
         )?),
         Request::FileHistory { path, oid, file } => Response::FileHistory(file_history_within(
@@ -291,9 +297,18 @@ pub fn run(coordinator: &Coordinator, request: Request) -> Result<Response, Repo
         Request::WholeFileConflict { path, file } => Response::WholeFileConflict(
             crate::write::whole_file_within(&path, &file, deadline(LocalRead::ConflictFile))?,
         ),
-        Request::WorktreePatch { path, file, side } => Response::WorktreePatch(
-            worktree_patch_within(&path, &file, side, deadline(LocalRead::WorktreePatch))?,
-        ),
+        Request::WorktreePatch {
+            path,
+            file,
+            side,
+            context,
+        } => Response::WorktreePatch(worktree_patch_within(
+            &path,
+            &file,
+            side,
+            context,
+            deadline(LocalRead::WorktreePatch),
+        )?),
         Request::Write {
             path,
             operation,

@@ -2,7 +2,7 @@
 
 use l1_git_core::{
     ChangeStatus, Coordinator, ErrorKind, Expect, FilePatch, Head, IndexObject, Limits, Mode, Oid,
-    Operation, Request, Side, Sides, StatusEntry, WorktreePatch, run, worktree_patch,
+    Operation, PatchContext, Request, Side, Sides, StatusEntry, WorktreePatch, run, worktree_patch,
     worktree_status,
 };
 use std::{
@@ -157,6 +157,7 @@ fn a_filter_that_never_finishes_times_out_an_untracked_patch_and_leaves_no_proce
             path: repository.path(),
             file: "new.filtered".into(),
             side: Side::Unstaged,
+            context: PatchContext::Hunks,
         }),
         "Reading this file's changes took longer than 1 s, so L1 Git stopped Git. Retry. If it happens again, check for a slow disk or a Git filter that does not finish."
     );

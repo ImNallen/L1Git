@@ -55,6 +55,7 @@ import type {
   Head,
   Oid,
   Operation,
+  PatchContext,
   ReplayOf,
   RepositoryRoot,
   Side,
@@ -75,7 +76,13 @@ type RepositoryRequest =
   | { op: "refs"; path: RepositoryRoot }
   | { op: "commitDetail"; path: string; comparison: Comparison }
   | { op: "lineStats"; path: RepositoryRoot; oids: Oid[] }
-  | { op: "filePatch"; path: string; comparison: Comparison; file: string }
+  | {
+      op: "filePatch";
+      path: string;
+      comparison: Comparison;
+      file: string;
+      context?: PatchContext;
+    }
   | { op: "fileHistory"; path: RepositoryRoot; oid: Oid; file: string }
   | { op: "blame"; path: RepositoryRoot; oid: Oid; file: string }
   | { op: "overview"; path: RepositoryRoot; mode: FetchMode }
@@ -89,7 +96,13 @@ type RepositoryRequest =
   | { op: "conflictSummary"; path: RepositoryRoot }
   | { op: "wholeFileConflict"; path: RepositoryRoot; file: string }
   | { op: "worktreeStatus"; path: RepositoryRoot }
-  | { op: "worktreePatch"; path: RepositoryRoot; file: string; side: Side }
+  | {
+      op: "worktreePatch";
+      path: RepositoryRoot;
+      file: string;
+      side: Side;
+      context?: PatchContext;
+    }
   | { op: "write"; path: RepositoryRoot; operation: Operation; expect: Expect }
   | { op: "undo"; path: RepositoryRoot; id: EntryId }
   | { op: "redo"; path: RepositoryRoot; id: EntryId }
@@ -203,8 +216,9 @@ export async function filePatch(
   path: string,
   comparison: Comparison,
   file: string,
+  context?: PatchContext,
 ) {
-  return (await run({ op: "filePatch", path, comparison, file })).data;
+  return (await run({ op: "filePatch", path, comparison, file, context })).data;
 }
 
 export async function fileHistory(
@@ -247,8 +261,9 @@ export async function worktreePatch(
   path: RepositoryRoot,
   file: string,
   side: Side,
+  context?: PatchContext,
 ) {
-  return (await run({ op: "worktreePatch", path, file, side })).data;
+  return (await run({ op: "worktreePatch", path, file, side, context })).data;
 }
 
 export async function write(
