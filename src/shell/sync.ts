@@ -6,7 +6,7 @@ import {
   readyAdvances,
 } from "../domain/overview";
 import type { WriteNotice } from "../domain/operations";
-import { nameRejection, pushControl } from "../domain/push";
+import { explainBehindRejection, pushControl } from "../domain/push";
 import { worktreeHead } from "../domain/worktree";
 import type { PushIntent } from "../domain/push";
 import type {
@@ -124,7 +124,10 @@ export function useSyncControls({
   const pushFrom = (target: RepositoryRoot, intent: PushIntent) =>
     void store.push(target, intent).then((result) => {
       if (result)
-        post(target, { kind: "pushed", ...nameRejection(result, branches) });
+        post(target, {
+          kind: "pushed",
+          ...explainBehindRejection(result, branches),
+        });
     });
   return {
     opened,

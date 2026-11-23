@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { branchStatusSchema } from "./domain/overview";
 import {
-  nameRejection,
+  explainBehindRejection,
   pushAvailabilitySchema,
   pushControl,
   pushDisabledReason,
@@ -147,7 +147,7 @@ describe("push readiness", () => {
   });
   it("names a diverged or behind branch in the rejection", () => {
     const text = (branches: typeof behind) => {
-      const result = nameRejection(rejected, branches);
+      const result = explainBehindRejection(rejected, branches);
       return pushOutcomeText(result.outcome, result.intent);
     };
     expect(text(diverged)).toBe(

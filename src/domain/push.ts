@@ -138,8 +138,7 @@ function pushDestination(intent: PushIntent): string {
   return `${intent.remote}/${shortBranch(intent.destination)}`;
 }
 
-/** Null when the overview counts another commit, or against a ref that is not the destination's tracking ref. */
-function destinationCounts(
+function countsAgainstDestination(
   intent: PushIntent,
   branches: readonly BranchStatus[],
 ): Divergence | null {
@@ -162,13 +161,12 @@ function standing(intent: PushIntent, counts: Divergence): string {
     : `${branch} has diverged from ${target} (${counts.ahead} ahead, ${counts.behind} behind). Pull, then push again.`;
 }
 
-/** Replaces the remote's generic rejection when the overview already shows commits to pull. */
-export function nameRejection(
+export function explainBehindRejection(
   result: PushResult,
   branches: readonly BranchStatus[],
 ): PushResult {
   if (result.outcome.kind !== "rejected") return result;
-  const counts = destinationCounts(result.intent, branches);
+  const counts = countsAgainstDestination(result.intent, branches);
   if (!counts || counts.behind === 0) return result;
   return {
     ...result,
@@ -254,7 +252,7 @@ export function pushControl(
       label,
       title: reason ?? "Check the current push destination.",
     };
-  const counts = destinationCounts(preparation.intent, branches);
+  const counts = countsAgainstDestination(preparation.intent, branches);
   if (counts?.ahead === 0)
     return {
       kind: "disabled",
