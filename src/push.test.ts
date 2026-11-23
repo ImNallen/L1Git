@@ -19,7 +19,7 @@ const intent = pushIntentSchema.parse({
   fingerprint: "b".repeat(40),
 });
 
-const local = (state: unknown, oid = intent.source) => [
+const local = (state: unknown, oid: string = intent.source) => [
   branchStatusSchema.parse({
     reference: "refs/heads/local",
     name: "local",

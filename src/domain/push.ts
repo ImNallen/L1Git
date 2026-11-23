@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { branchRefSchema, overviewSchema } from "./overview";
+import { branchRefSchema, divergence, overviewSchema } from "./overview";
+import type { BranchStatus, Divergence } from "./overview";
 import { oidSchema } from "./repository";
 import { shortBranch } from "./refs";
 
@@ -137,6 +138,44 @@ function pushDestination(intent: PushIntent): string {
   return `${intent.remote}/${shortBranch(intent.destination)}`;
 }
 
+/** Null when the overview counts another commit, or against a ref that is not the destination's tracking ref. */
+function destinationCounts(
+  intent: PushIntent,
+  branches: readonly BranchStatus[],
+): Divergence | null {
+  const branch = branches.find(
+    (status) =>
+      status.reference === intent.branch && status.oid === intent.source,
+  );
+  const counts = branch && divergence(branch.state);
+  return counts?.upstream === `refs/remotes/${pushDestination(intent)}`
+    ? counts
+    : null;
+}
+
+function standing(intent: PushIntent, counts: Divergence): string {
+  const branch = shortBranch(intent.branch);
+  const target = pushDestination(intent);
+  if (counts.behind === 0) return `${branch} is up to date with ${target}.`;
+  return counts.ahead === 0
+    ? `${branch} is ${counts.behind} behind ${target}. Pull first.`
+    : `${branch} has diverged from ${target} (${counts.ahead} ahead, ${counts.behind} behind). Pull, then push again.`;
+}
+
+/** Replaces the remote's generic rejection when the overview already shows commits to pull. */
+export function nameRejection(
+  result: PushResult,
+  branches: readonly BranchStatus[],
+): PushResult {
+  if (result.outcome.kind !== "rejected") return result;
+  const counts = destinationCounts(result.intent, branches);
+  if (!counts || counts.behind === 0) return result;
+  return {
+    ...result,
+    outcome: { kind: "rejected", message: standing(result.intent, counts) },
+  };
+}
+
 export function pushDisabledReason(
   preparation: PushPreparation | undefined,
 ): string | null {
@@ -191,6 +230,7 @@ export type PushControl =
 export function pushControl(
   preparation: PushPreparation | undefined,
   busy: string | null,
+  branches: readonly BranchStatus[],
 ): PushControl {
   if (
     !busy &&
@@ -213,6 +253,13 @@ export function pushControl(
       kind: "disabled",
       label,
       title: reason ?? "Check the current push destination.",
+    };
+  const counts = destinationCounts(preparation.intent, branches);
+  if (counts?.ahead === 0)
+    return {
+      kind: "disabled",
+      label,
+      title: `Nothing to push. ${standing(preparation.intent, counts)}`,
     };
   return {
     kind: "ready",

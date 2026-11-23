@@ -6,7 +6,7 @@ import {
   readyAdvances,
 } from "../domain/overview";
 import type { WriteNotice } from "../domain/operations";
-import { pushControl } from "../domain/push";
+import { nameRejection, pushControl } from "../domain/push";
 import { worktreeHead } from "../domain/worktree";
 import type { PushIntent } from "../domain/push";
 import type {
@@ -106,6 +106,7 @@ export function useSyncControls({
     null,
   );
   const { root, state, repository } = opened;
+  const branches = repository?.overview.branches ?? [];
   const publishControl = pushControl(
     root === null ? undefined : view.pushByRoot.get(root),
     localBusyReason(writing, repository) ??
@@ -114,6 +115,7 @@ export function useSyncControls({
         : state?.kind === "unavailable"
           ? state.problem.message
           : "Checking the current repository…"),
+    branches,
   );
   const fetching = repository?.activity.kind === "fetching";
   const ready = repository ? readyAdvances(repository.overview).length : 0;
@@ -121,7 +123,8 @@ export function useSyncControls({
   const busy = localBusyReason(writing, repository);
   const pushFrom = (target: RepositoryRoot, intent: PushIntent) =>
     void store.push(target, intent).then((result) => {
-      if (result) post(target, { kind: "pushed", ...result });
+      if (result)
+        post(target, { kind: "pushed", ...nameRejection(result, branches) });
     });
   return {
     opened,

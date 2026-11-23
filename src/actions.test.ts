@@ -881,7 +881,7 @@ it("shows the prepared push destination and keeps unavailable push visible but d
   });
   const available = {
     ...repositoryScreen,
-    push: pushControl({ kind: "ready", intent }, null),
+    push: pushControl({ kind: "ready", intent }, null, []),
   };
   const run = commands();
   const item = paletteItems(available, run, true, [], null).find(
@@ -892,7 +892,7 @@ it("shows the prepared push destination and keeps unavailable push visible but d
   expect(run.push).toHaveBeenCalledOnce();
   const unavailable = {
     ...repositoryScreen,
-    push: pushControl({ kind: "unavailable", reason: "detached" }, null),
+    push: pushControl({ kind: "unavailable", reason: "detached" }, null, []),
   };
   const disabled = paletteItems(unavailable, run, true, [], null).find(
     ({ id }) => id === "action:push",
@@ -909,6 +909,7 @@ it("shows the prepared push destination and keeps unavailable push visible but d
     push: pushControl(
       { kind: "ready", intent },
       "Wait for the current operation.",
+      [],
     ),
   };
   expect(
@@ -922,7 +923,7 @@ it("opens the publish review from the palette for an untracked branch", async ()
   const { pushControl } = await import("./domain/push");
   const context = {
     ...repositoryScreen,
-    push: pushControl({ kind: "unavailable", reason: "noUpstream" }, null),
+    push: pushControl({ kind: "unavailable", reason: "noUpstream" }, null, []),
   };
   const run = commands();
   const item = paletteItems(context, run, true, [], null).find(
@@ -936,6 +937,7 @@ it("opens the publish review from the palette for an untracked branch", async ()
     pushControl(
       { kind: "unavailable", reason: "noUpstream" },
       "Wait for fetch.",
+      [],
     ).kind,
   ).toBe("disabled");
 });
