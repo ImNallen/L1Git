@@ -10,6 +10,7 @@ import {
   familyPicks,
   resolveTheme,
   themeFamilies,
+  updateCustomTheme,
   type CustomTheme,
   type CustomThemeVariant,
   type ThemeSettings,
@@ -268,5 +269,84 @@ it("deletes a custom family and sends each appearance that used it back to L1", 
     lightTheme: "l1-light",
     darkTheme: "grove-dark",
     customThemes: [dusk],
+  });
+});
+
+it("edits a variant in place, keeping its ids and the family's other variants", () => {
+  const settings: ThemeSettings = {
+    colorScheme: "system",
+    lightTheme: "custom-cat-1",
+    darkTheme: "custom-dusk",
+    customThemes: [catppuccin, dusk],
+  };
+  const edited = updateCustomTheme(settings, "custom-dusk", {
+    name: "Dawn",
+    appearance: "dark",
+    colors: { background: "#201a2a", accent: "#40a0e0" },
+  });
+  expect(edited).toEqual({
+    ...settings,
+    customThemes: [
+      catppuccin,
+      {
+        id: "custom-dusk-family",
+        name: "Dawn",
+        variants: [
+          {
+            id: "custom-dusk",
+            name: "Dawn",
+            appearance: "dark",
+            colors: { background: "#201a2a", accent: "#40a0e0" },
+          },
+        ],
+      },
+    ],
+  });
+  expect(
+    updateCustomTheme(settings, "custom-cat-2", {
+      name: "Frappe",
+      appearance: "dark",
+      colors: { background: "#303446", accent: "#ef9f76" },
+    }).customThemes[0],
+  ).toEqual({
+    ...catppuccin,
+    variants: [
+      catppuccin.variants[0],
+      catppuccin.variants[1],
+      {
+        ...catppuccin.variants[2],
+        colors: { background: "#303446", accent: "#ef9f76" },
+      },
+    ],
+  });
+});
+
+it("moves a picked variant to its new appearance's slot when an edit flips it", () => {
+  const settings: ThemeSettings = {
+    colorScheme: "light",
+    lightTheme: "custom-cat-1",
+    darkTheme: "grove-dark",
+    customThemes: [catppuccin],
+  };
+  const flipped = updateCustomTheme(settings, "custom-cat-1", {
+    name: "Latte",
+    appearance: "dark",
+    colors: { background: "#1e1e2e", accent: "#cba6f7" },
+  });
+  expect(flipped).toMatchObject({
+    colorScheme: "dark",
+    lightTheme: "l1-light",
+    darkTheme: "custom-cat-1",
+  });
+  expect(resolveTheme(flipped, false).id).toBe("custom-cat-1");
+  const unpicked = updateCustomTheme(settings, "custom-cat-0", {
+    name: "Mocha",
+    appearance: "light",
+    colors: { background: "#eff1f5", accent: "#cba6f7" },
+  });
+  expect(unpicked).toMatchObject({
+    colorScheme: "light",
+    lightTheme: "custom-cat-1",
+    darkTheme: "grove-dark",
   });
 });
