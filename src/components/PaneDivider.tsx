@@ -7,6 +7,7 @@ type Props = {
   max: number;
   direction: 1 | -1;
   onResize: (width: number) => void;
+  onResizeEnd: (width: number) => void;
 };
 
 export function PaneDivider({
@@ -16,10 +17,12 @@ export function PaneDivider({
   max,
   direction,
   onResize,
+  onResizeEnd,
 }: Props) {
   const origin = useRef({ x: 0, width });
-  const resize = (value: number) =>
-    onResize(Math.min(max, Math.max(min, value)));
+  const clamp = (value: number) => Math.min(max, Math.max(min, value));
+  const dragged = (clientX: number) =>
+    clamp(origin.current.width + direction * (clientX - origin.current.x));
   return (
     <div
       className="pane-divider"
@@ -36,19 +39,19 @@ export function PaneDivider({
       }}
       onPointerMove={(event) => {
         if (event.currentTarget.hasPointerCapture(event.pointerId))
-          resize(
-            origin.current.width +
-              direction * (event.clientX - origin.current.x),
-          );
+          onResize(dragged(event.clientX));
       }}
       onPointerUp={(event) => {
-        if (event.currentTarget.hasPointerCapture(event.pointerId))
-          event.currentTarget.releasePointerCapture(event.pointerId);
+        if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
+        event.currentTarget.releasePointerCapture(event.pointerId);
+        onResizeEnd(dragged(event.clientX));
       }}
       onKeyDown={(event) => {
         if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
           event.preventDefault();
-          resize(width + (event.key === "ArrowRight" ? 16 : -16) * direction);
+          onResizeEnd(
+            clamp(width + (event.key === "ArrowRight" ? 16 : -16) * direction),
+          );
         }
       }}
     />

@@ -192,7 +192,8 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     app.persistenceError ??
     expansion.persistenceError ??
     columns.persistenceError ??
-    visibility.persistenceError;
+    visibility.persistenceError ??
+    layout.persistenceError;
 
   return (
     <div

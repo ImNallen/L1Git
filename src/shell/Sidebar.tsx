@@ -10,6 +10,7 @@ import type { RepositoryRoot } from "../domain/repository";
 import type { RootSync } from "../overview";
 import type { Updates } from "../updates";
 import type { RefsState } from "../useRepositoryRefs";
+import { SIDEBAR_WIDTH } from "./useLayout";
 import type { Layout } from "./useLayout";
 import type { SidebarNavigation } from "./useNavigation";
 import type { SidebarRefActions } from "./useRefWrites";
@@ -52,7 +53,7 @@ export function Sidebar({
       <aside
         hidden={!layout.sidebarOpen}
         className="sidebar"
-        style={{ width: layout.sidebarWidth }}
+        style={{ width: layout.paneWidths.sidebar }}
         aria-label="Repository sidebar"
       >
         <div className="brand" data-tauri-drag-region />
@@ -87,11 +88,12 @@ export function Sidebar({
       {layout.sidebarOpen && (
         <PaneDivider
           label="Resize repository sidebar"
-          width={layout.sidebarWidth}
-          min={210}
-          max={400}
+          width={layout.paneWidths.sidebar}
+          min={SIDEBAR_WIDTH.min}
+          max={SIDEBAR_WIDTH.max}
           direction={1}
-          onResize={layout.setSidebarWidth}
+          onResize={(width) => layout.resizePane("sidebar", width)}
+          onResizeEnd={(width) => layout.savePaneWidth("sidebar", width)}
         />
       )}
     </>
