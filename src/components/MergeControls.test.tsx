@@ -58,6 +58,7 @@ const props: Parameters<typeof MergeControls>[0] = {
   onCloseReview: close,
   run,
   onInspect: () => {},
+  onConflicts: () => {},
 };
 function button(name: string) {
   const button = [...host.querySelectorAll("button")].find(

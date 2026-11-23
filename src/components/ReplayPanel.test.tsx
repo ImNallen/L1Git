@@ -367,6 +367,7 @@ const controls = (value: ReturnType<typeof mergeStateSchema.parse>) => (
     onCloseReview={() => {}}
     run={async () => ({ kind: "busy" })}
     onInspect={() => {}}
+    onConflicts={() => {}}
   />
 );
 

@@ -62,7 +62,9 @@ export function WorkspacePanes({
             columns={columns}
             commitActions={commitActions}
             commitReplay={commitReplay}
-            onOpenFirstFile={app.openFirstFile}
+            onOpenFirstFile={() => {
+              if (app.selection) app.openFirstFile(app.selection, app.compare);
+            }}
             onCancelOpen={app.cancelOpenFirstFile}
             scrollTopOf={app.scrollTopOf}
             onScroll={app.rememberScroll}

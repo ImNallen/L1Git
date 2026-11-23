@@ -158,6 +158,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     rereadChanges: loop.rereadChanges,
     selecting: nav.selecting,
     openInspector: layout.openInspector,
+    openFirstFile: app.openFirstFile,
     pull: overview.store.pull,
   });
   const drafts = useResolutionDrafts({

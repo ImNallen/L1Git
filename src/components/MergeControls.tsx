@@ -45,6 +45,7 @@ export function MergeControls({
   onCloseReview,
   run,
   onInspect,
+  onConflicts,
 }: {
   root: RepositoryRoot;
   read: Read<MergeState>;
@@ -56,6 +57,7 @@ export function MergeControls({
   onCloseReview: () => void;
   run: (action: MergeAction) => Promise<MergeCommandOutcome>;
   onInspect: () => void;
+  onConflicts: () => void;
 }) {
   const [notice, setNotice] = useState<{
     message: string;
@@ -192,6 +194,7 @@ export function MergeControls({
           busy={busy}
           run={execute}
           onClose={onCloseReview}
+          onConflicts={onConflicts}
         />
       )}
     </>
@@ -204,12 +207,14 @@ function MergeReviewDialog({
   busy,
   run,
   onClose,
+  onConflicts,
 }: {
   root: RepositoryRoot;
   selection: MergeSelection;
   busy: boolean;
   run: (action: MergeAction) => Promise<MergeCommandOutcome>;
   onClose: () => void;
+  onConflicts: () => void;
 }) {
   const [review, refresh] = useRead(JSON.stringify([root, selection]), () =>
     repositories.mergeReview(root, selection),
@@ -241,6 +246,8 @@ function MergeReviewDialog({
     ) {
       dialog.current?.close();
       onClose();
+      const { state } = result.report;
+      if (state.kind === "active" && state.unresolved.length > 0) onConflicts();
     } else if (result.kind === "failed") {
       setProblem(result.problem.message);
       refresh();
