@@ -13,9 +13,9 @@ A desktop Git client for macOS, Linux, and Windows. Browse your repositories, re
 - Try any branch locally in its own linked worktree, so you can run and test it without stashing or leaving the branch you are on. Remove the worktree from the same branch menu when you are done.
 - Fetch, fast-forward branches, and push or publish the current branch.
 - Pull the current branch from its upstream. When the branch has diverged, Pull (Fast-forward if possible) opens the merge review, Pull (Fast-forward only) leaves the branch as it is, and Pull (Rebase) rebases your local commits onto the upstream.
-- Merge a selected local or remote branch into the current working copy after reviewing both refs and commit IDs. Fast-forward when possible, or resolve text conflicts and finish or abort a merge commit.
+- Merge a selected local or remote branch into the current working copy after reviewing both refs, both commit IDs, and the files the merge will conflict in. Fast-forward when possible, or resolve text conflicts and finish or abort a merge commit.
 - Cherry-pick or revert one commit from the history menu or the command palette, after reviewing what it will do. A clean result commits straight away, and a conflict opens the resolver with Finish and Abort. Undo removes the new commit and its file changes.
-- Undo and redo local edits made through the app, including commits and discarded changes.
+- Undo and redo local edits made through the app, including commits and discarded changes, from the notice each write shows or from the **More** menu.
 - Choose light or dark themes, create your own, or import themes from VS Code and Open VSX.
 
 L1 Git does not force-push, and it does not resolve rebase conflicts. A Pull (Rebase) that hits a conflict is aborted and changes nothing. Fetch, fast-forward, push, remote setup, and merge Start, Finish, and Abort have no Undo entry. Creating and removing a worktree have no Undo entry either, and removing one drops the Undo entries made in it. The fetch and fast-forward that a pull runs have no Undo entry either. Pull (Rebase) has Undo and Redo. Merge resolution edits have Undo and Redo until you finish or abort.
@@ -24,13 +24,13 @@ L1 Git does not force-push, and it does not resolve rebase conflicts. A Pull (Re
 
 Download an installer from [GitHub Releases](https://github.com/ImNallen/L1Git/releases). Install Git 2.45 or later separately and make sure it is on your `PATH`.
 
-Open L1 Git, click **+** in the sidebar, and choose a local repository. You can also press **Cmd+O** on macOS or **Ctrl+O** on Windows and Linux. Bare repositories are unsupported.
+Open L1 Git, click **+** at the top of the sidebar, choose **Local folder**, and open a repository. You can also press **Cmd+O** on macOS or **Ctrl+O** on Windows and Linux. Bare repositories are unsupported.
 
 Select a branch to browse its history. Double-click a branch to check it out. Select **Uncommitted changes** to review your work, stage changes, and commit.
 
-L1 Git fetches saved repositories at startup and every 15 minutes by default. Change the interval in **Settings > Fetching**. Remote operations use your existing Git credentials and SSH agent, with interactive prompts disabled.
+L1 Git fetches saved repositories at startup and every 15 minutes by default. To change the interval, open **Settings**, then **General**, and set **Background fetch** under **Fetching**. Remote operations use your existing Git credentials and SSH agent, with interactive prompts disabled.
 
-To connect GitHub, open **Settings > Hosts** and click **Sign in to GitHub**. With your consent, L1 Git copies the [GitHub CLI](https://cli.github.com)'s sign-in into your system keychain and uses it only to read from GitHub. **Disconnect** deletes that copy and leaves the GitHub CLI signed in.
+To connect GitHub, open **Settings**, then **Hosts**, and click **Sign in to GitHub**. With your consent, L1 Git copies the [GitHub CLI](https://cli.github.com)'s sign-in into your system keychain and uses it only to read from GitHub. **Disconnect** deletes that copy and leaves the GitHub CLI signed in.
 
 Press **Cmd+P** on macOS or **Ctrl+P** elsewhere to open the command palette.
 
