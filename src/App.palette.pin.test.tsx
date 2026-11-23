@@ -264,7 +264,7 @@ it("the palette over Settings switches pages and leaves Settings", async () => {
   await app.runPaletteItem("Open Settings");
   await app.runPaletteItem("Open Appearance settings");
   expect(dialogs()).toEqual(["Settings"]);
-  expect(focused()).toBe("heading Appearance");
+  expect(focused()).toBe("h1 Appearance");
   await app.runPaletteItem("Back to repository");
   expect(dialogs()).toEqual([]);
   expect(focused()).toBe("button Settings");
