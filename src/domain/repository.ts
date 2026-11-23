@@ -675,6 +675,7 @@ export type ReplayReview = z.infer<typeof replayReviewSchema>;
 export type StatusEntry = z.infer<typeof statusEntrySchema>;
 export type WorktreeStatus = z.infer<typeof worktreeStatusSchema>;
 export type Side = z.infer<typeof sideSchema>;
+export type PatchContext = "hunks" | "whole";
 export type WorktreePatch = z.infer<typeof worktreePatchSchema>;
 export type EntryId = z.infer<typeof entryIdSchema>;
 export type LineSide = z.infer<typeof lineSideSchema>;

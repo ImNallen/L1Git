@@ -19,7 +19,11 @@
 [data-indicators="classic"] [data-line] {
   padding-inline-start: calc(16px + 1ch);
 }
-[data-indicators="classic"] [data-line-type="context"][data-line] {
+[data-indicators="classic"]
+  :is(
+    [data-line-type="context"],
+    [data-line-type="context-expanded"]
+  )[data-line] {
   padding-inline-start: 16px;
 }
 [data-separator="line-info-basic"] {
@@ -34,6 +38,21 @@
 [data-separator="line-info-basic"] [data-separator-content] {
   padding: 0;
   color: var(--hunk-text, var(--muted));
+}
+/* An expandable separator puts its button in the gutter column, so its text
+   starts where the code does. */
+[data-separator="line-info-basic"][data-expand-index] [data-separator-wrapper] {
+  padding-inline: 0;
+}
+[data-separator="line-info-basic"][data-expand-index] [data-separator-content] {
+  padding-inline-start: 16px;
+}
+[data-separator="line-info-basic"] [data-expand-button] {
+  color: var(--hunk-text, var(--muted));
+  cursor: pointer;
+}
+[data-separator="line-info-basic"] [data-expand-button]:hover {
+  color: var(--diffs-fg);
 }
 [data-line-type="change-addition"] {
   --diffs-computed-diff-line-bg: var(--diffs-bg-addition);
