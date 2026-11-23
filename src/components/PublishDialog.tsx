@@ -24,6 +24,15 @@ type RemoteEditor =
   | { kind: "saving"; name: string }
   | { kind: "savedNeedsRefresh"; name: string; message: string };
 
+function holdsCredential(endpoint: string) {
+  try {
+    const url = new URL(endpoint);
+    return url.username !== "" || url.password !== "";
+  } catch {
+    return false;
+  }
+}
+
 type Props = {
   root: RepositoryRoot;
   onPublish: (intent: PushIntent) => void;
@@ -100,7 +109,10 @@ export function PublishDialog({
     if (review.step.kind === "review") reviewHeading.current?.focus();
   }, [review.step.kind]);
   useEffect(() => {
-    if (editor.kind === "editing") remoteNameInput.current?.focus();
+    if (editor.kind === "editing") {
+      remoteNameInput.current?.focus();
+      remoteNameInput.current?.select();
+    }
     if (editor.kind === "closed" && options.kind === "loaded") {
       if (nextFocus.current === "review") reviewButton.current?.focus();
       else remoteInput.current?.focus();
@@ -160,7 +172,10 @@ export function PublishDialog({
     nextFocus.current = "review";
     ++optionsGeneration.current;
     dispatch({ kind: "edit" });
-    setEditor({ kind: "editing", name: "origin", url: "", error: null });
+    const name = available?.remotes.some((item) => item.name === "origin")
+      ? ""
+      : "origin";
+    setEditor({ kind: "editing", name, url: "", error: null });
   }
   async function reloadRemotes() {
     if (saving.current) return;
@@ -229,15 +244,17 @@ export function PublishDialog({
             "Could not confirm whether the remote was added. Reload remotes before trying again.",
         });
       } else {
+        const url = holdsCredential(input.url) ? "" : input.url;
         setEditor({
           kind: "editing",
           name: input.name,
-          url: "",
+          url,
           error: problem.message,
         });
-        requestAnimationFrame(() => {
-          if (lifetime.current === current) remoteUrlInput.current?.focus();
-        });
+        if (!url)
+          requestAnimationFrame(() => {
+            if (lifetime.current === current) remoteUrlInput.current?.focus();
+          });
       }
       return;
     }

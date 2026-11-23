@@ -222,6 +222,7 @@ it("discards preparation that resolves after the editor opens", async () => {
   expect(
     container.querySelector('[aria-label="Publication review"]'),
   ).toBeNull();
+  await fill("Remote name", "upstream");
   await submit();
   expect(onPublish).not.toHaveBeenCalled();
   expect(button("Review publication").disabled).toBe(false);
