@@ -162,6 +162,109 @@ it("a pull in a selected linked worktree shows its notice in the open repository
   );
 });
 
+const behindTopic = {
+  reference: "refs/heads/topic",
+  name: "topic",
+  oid: C6,
+  role: "other",
+  checkedOutAt: null,
+  state: {
+    kind: "behind",
+    upstream: "refs/remotes/origin/topic",
+    target: C5,
+    behind: 1,
+    blocker: null,
+  },
+};
+
+it("the sidebar fast-forward replaces a pull notice with its own", async () => {
+  const app = await mountApp({
+    world: (world) =>
+      world.overviews.set(
+        PIN,
+        overviewSchema.parse({
+          ...pinOverview(),
+          branches: [...pinOverview().branches, behindTopic],
+        }),
+      ),
+  });
+  answerFastForward(app, "main", { from: C4, to: C6, behind: 2 });
+  await app.click(
+    await toolbarItem(app, "Pull", "Pull (Fast-forward if possible)"),
+  );
+  expect(get("status", /Pulled/)).toBeTruthy();
+  app.bridge.respond("fastForward", () => ({
+    outcomes: [
+      { kind: "advanced", reference: "refs/heads/topic", from: C6, to: C5 },
+    ],
+    overview: pinOverview(),
+  }));
+  await app.contextMenu(refRow("refs/heads/topic")!);
+  await app.click(get("menuitem", "Fast-forward to origin/topic"));
+  expect(query("status", /Pulled/)).toBeNull();
+  const advanced = get("status", /Fast-forwarded/);
+  expect(advanced.textContent).toBe("Fast-forwarded topic.");
+  expect(get("button", "Dismiss", advanced)).toBeTruthy();
+});
+
+it("Fetch all names the fetched remotes and how many branches moved", async () => {
+  const app = await mountApp();
+  app.bridge.respond("overview", (request) =>
+    overviewSchema.parse({
+      ...pinOverview(),
+      fetch:
+        request.mode === "remote"
+          ? {
+              changed: true,
+              moved: 2,
+              coalesced: false,
+              remotes: [
+                { remote: "origin", outcome: { kind: "fetched" } },
+                { remote: "mirror", outcome: { kind: "fetched" } },
+                { remote: "archive", outcome: { kind: "skipped" } },
+              ],
+            }
+          : null,
+    }),
+  );
+  await app.runPaletteItem("Fetch all");
+  const fetched = get("status", /Fetched/);
+  expect(fetched.textContent).toBe(
+    "Fetched origin and mirror. 2 branches moved.",
+  );
+  expect(get("button", "Dismiss", fetched)).toBeTruthy();
+});
+
+it("a failed fetch shows its warning and no success notice", async () => {
+  const app = await mountApp();
+  app.bridge.respond("overview", (request) =>
+    overviewSchema.parse({
+      ...pinOverview(),
+      fetch:
+        request.mode === "remote"
+          ? {
+              changed: false,
+              moved: 0,
+              coalesced: false,
+              remotes: [
+                {
+                  remote: "origin",
+                  outcome: {
+                    kind: "failed",
+                    failure: "other",
+                    message: "No such remote path.",
+                  },
+                },
+              ],
+            }
+          : null,
+    }),
+  );
+  await app.runPaletteItem("Fetch all");
+  expect(alerts()).toEqual(["origin: Fetch failed. No such remote path."]);
+  expect(query("status", /Fetched/)).toBeNull();
+});
+
 it("the first persistence error among the four sources is shown", async () => {
   const app = await mountApp();
   const failing = new Set<string>();
