@@ -466,6 +466,104 @@ fn dirty_start_names_each_dirty_tracked_path() {
 }
 
 #[test]
+fn the_review_forecasts_the_paths_start_leaves_unmerged() {
+    let f = Fixture::new(true);
+    f.git(&["switch", "upstream"]);
+    fs::create_dir(f.root.join("moved")).unwrap();
+    f.put("moved/inside.txt", "incoming\n");
+    f.git(&["add", "."]);
+    f.git(&["commit", "-m", "directory"]);
+    f.git(&["switch", "main"]);
+    f.put("moved", "current\n");
+    f.git(&["add", "."]);
+    f.git(&["commit", "-m", "file"]);
+    let coordinator = f.coordinator();
+    let review = coordinator
+        .review_merge(f.path(), &MergeSelection::Upstream)
+        .unwrap();
+    let forecast = vec!["conflict.txt".to_owned(), "moved~HEAD".to_owned()];
+    assert_eq!(
+        review.prediction,
+        Some(MergePrediction::Conflict {
+            paths: forecast.clone()
+        })
+    );
+    let report = coordinator
+        .merge(f.path(), &MergeAction::Start { review })
+        .unwrap();
+    assert_eq!(active(report.state).conflicted, Some(forecast));
+}
+
+#[test]
+fn a_clean_review_forecasts_no_conflict() {
+    let f = Fixture::new(false);
+    let review = f
+        .coordinator()
+        .review_merge(f.path(), &MergeSelection::Upstream)
+        .unwrap();
+    assert_eq!(review.prediction, Some(MergePrediction::Clean));
+}
+
+#[test]
+fn start_refuses_a_forecast_that_no_longer_holds() {
+    let f = Fixture::new(true);
+    let attributes = f.root.join(".git/info/attributes");
+    fs::create_dir_all(attributes.parent().unwrap()).unwrap();
+    fs::write(&attributes, "conflict.txt merge=union\n").unwrap();
+    let coordinator = f.coordinator();
+    let review = coordinator
+        .review_merge(f.path(), &MergeSelection::Upstream)
+        .unwrap();
+    assert_eq!(review.prediction, Some(MergePrediction::Clean));
+    fs::remove_file(&attributes).unwrap();
+    let error = coordinator
+        .merge(f.path(), &MergeAction::Start { review })
+        .unwrap_err();
+    assert_eq!(
+        error.kind,
+        ErrorKind::StaleView {
+            reason: StaleReason::HeadMoved
+        },
+        "{error:?}"
+    );
+    assert!(!f.root.join(".git/MERGE_HEAD").exists());
+    assert_eq!(f.git(&["status", "--porcelain"]), "");
+}
+
+#[test]
+fn a_session_saved_before_forecasts_still_reads() {
+    let f = Fixture::new(true);
+    let coordinator = f.coordinator();
+    let session = f.start(&coordinator);
+    let (repo, record, _) = f.record();
+    let path = directory(&repo, session.id).join("state.json");
+    let mut value = serde_json::to_value(record).unwrap();
+    value["session"]["review"]
+        .as_object_mut()
+        .unwrap()
+        .remove("prediction")
+        .unwrap();
+    fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+    let older = active(coordinator.merge_state(f.path()).unwrap());
+    assert_eq!(
+        older.review,
+        MergeReview {
+            prediction: None,
+            ..session.review
+        }
+    );
+    coordinator
+        .merge(
+            f.path(),
+            &MergeAction::Abort {
+                session: session.id,
+            },
+        )
+        .unwrap();
+    assert!(!f.root.join(".git/MERGE_HEAD").exists());
+}
+
+#[test]
 fn stale_staged_result_and_ordinary_commit_cannot_finish() {
     let f = Fixture::new(false);
     let coordinator = f.coordinator();
@@ -1368,6 +1466,7 @@ fn equal_contained_and_fast_forward_are_terminal_and_move_only_destination() {
         }
         let review = f.selected(reference);
         assert_eq!(review.plan, MergePlan::UpToDate);
+        assert_eq!(review.prediction, None);
         let report = f
             .coordinator()
             .merge(f.path(), &MergeAction::Start { review })
@@ -1378,6 +1477,7 @@ fn equal_contained_and_fast_forward_are_terminal_and_move_only_destination() {
     f.git(&["update-ref", "refs/remotes/origin/topic", "upstream"]);
     let review = f.selected("refs/remotes/origin/topic");
     assert_eq!(review.plan, MergePlan::FastForward);
+    assert_eq!(review.prediction, None);
     let source = review.source.oid.clone();
     let report = f
         .coordinator()
