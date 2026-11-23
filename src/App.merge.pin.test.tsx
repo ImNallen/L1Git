@@ -550,3 +550,19 @@ it("a repository switch back to a merge reads its conflict summary once", async 
     app.bridge.lines((request) => request.op === "conflictSummary"),
   ).toEqual([`conflictSummary ${PIN}`]);
 });
+
+it("a conflict row whose summary read failed says so and still refuses Mark resolved", async () => {
+  const app = await mountApp({ world: mergingNotes });
+  app.bridge.fail("conflictSummary", {
+    kind: "timedOut",
+    message: "Reading the conflicts took too long.",
+  });
+  await app.click(historyRow("Uncommitted changes in pin,"));
+  expect(await conflictMenu(app, "notes.txt")).toEqual([
+    "Open in resolver",
+    "Mark resolved [L1 Git could not read this file's conflicts. Open it in the resolver.]",
+  ]);
+  app.bridge.reset();
+  await app.click(get("menuitem", /^Mark resolved/));
+  expect(app.bridge.count("write")).toBe(0);
+});
