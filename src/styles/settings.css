@@ -458,6 +458,7 @@
 }
 .theme-color-field {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   padding: 4px 0 4px 2px;
@@ -509,6 +510,13 @@
 }
 .theme-input[aria-invalid="true"] {
   border-color: var(--deleted);
+}
+.theme-color-error {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 11px;
+  text-align: right;
+  color: var(--error-text);
 }
 .create-theme-footer {
   display: flex;

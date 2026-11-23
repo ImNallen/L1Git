@@ -285,6 +285,38 @@ export function addCustomThemes(
   );
 }
 
+/** Rewrites one saved variant under its own id, and moves its pick to the new appearance's slot when the edit flips it. */
+export function updateCustomTheme(
+  settings: ThemeSettings,
+  variantId: ThemeId,
+  draft: ThemeDraft,
+): ThemeSettings {
+  const edited: CustomThemeVariant = {
+    id: variantId,
+    name: draft.name,
+    appearance: draft.appearance,
+    colors: { ...draft.colors },
+  };
+  const next = {
+    ...settings,
+    customThemes: settings.customThemes.map((theme) => {
+      if (!theme.variants.some((v) => v.id === variantId)) return theme;
+      const variants = theme.variants.map((v) =>
+        v.id === variantId ? edited : v,
+      );
+      return {
+        ...theme,
+        name: variants.length === 1 ? draft.name : theme.name,
+        variants,
+      };
+    }),
+  };
+  const slot = APPEARANCES.find((a) => settings[THEME_SLOT[a]] === variantId);
+  if (!slot || slot === draft.appearance) return next;
+  next[THEME_SLOT[slot]] = L1_VARIANTS[slot].id;
+  return chooseThemes(next, [customVariant(edited)]);
+}
+
 /** Sends any appearance that used one of the theme's variants back to L1. */
 export function deleteCustomTheme(
   settings: ThemeSettings,

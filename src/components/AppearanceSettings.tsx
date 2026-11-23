@@ -1,6 +1,14 @@
 import { useRef, useState } from "react";
 import type { CSSProperties } from "react";
-import { Copy, Moon, Paintbrush, Plus, Sun, Trash2 } from "lucide-react";
+import {
+  Copy,
+  Moon,
+  Paintbrush,
+  Pencil,
+  Plus,
+  Sun,
+  Trash2,
+} from "lucide-react";
 import type { AppearanceState } from "../appearance";
 import {
   draftOf,
@@ -138,6 +146,7 @@ function ThemeCard({
   picks,
   appearance,
   onPick,
+  onEdit,
   onDuplicate,
   onDelete,
 }: {
@@ -145,6 +154,7 @@ function ThemeCard({
   picks: Record<Appearance, string>;
   appearance: Appearance;
   onPick: (variants: readonly ThemeVariant[]) => void;
+  onEdit: (variant: ThemeVariant, opener: HTMLElement) => void;
   onDuplicate: (draft: ThemeDraft, opener: HTMLElement) => void;
   onDelete: () => void;
 }) {
@@ -178,6 +188,16 @@ function ThemeCard({
         >
           {family.name}
         </button>
+        {family.custom && shown && (
+          <button
+            className="icon-button"
+            aria-label={`Edit ${shown.name}`}
+            title="Edit theme"
+            onClick={(event) => onEdit(shown, event.currentTarget)}
+          >
+            <Pencil size={14} />
+          </button>
+        )}
         {shown && (
           <button
             className="icon-button"
@@ -211,15 +231,21 @@ function ThemeCard({
 export function AppearanceSettings({ appearance }: Props) {
   const themesHeading = useRef<HTMLHeadingElement>(null);
   const { settings, variant, persistenceError, nativeError } = appearance;
-  const [draft, setDraft] = useState<{ key: number; draft: ThemeDraft } | null>(
-    null,
-  );
+  const [draft, setDraft] = useState<{
+    key: number;
+    draft: ThemeDraft;
+    editing: string | null;
+  } | null>(null);
   const [deleting, setDeleting] = useState<ThemeFamily | null>(null);
   const [adding, setAdding] = useState(false);
   const opener = useRef<HTMLElement | null>(null);
-  const edit = (next: ThemeDraft, from: HTMLElement) => {
+  const open = (
+    next: ThemeDraft,
+    from: HTMLElement,
+    editing: string | null = null,
+  ) => {
     opener.current = from;
-    setDraft((d) => ({ key: (d?.key ?? 0) + 1, draft: next }));
+    setDraft((d) => ({ key: (d?.key ?? 0) + 1, draft: next, editing }));
   };
   const variants = {
     light: pickedVariant(settings, "light"),
@@ -283,7 +309,7 @@ export function AppearanceSettings({ appearance }: Props) {
                 className="button secondary"
                 id={settingsDestinations.create.targetId}
                 onClick={(event) =>
-                  edit(draftOf(variant, ""), event.currentTarget)
+                  open(draftOf(variant, ""), event.currentTarget)
                 }
               >
                 <Paintbrush size={14} />
@@ -307,7 +333,8 @@ export function AppearanceSettings({ appearance }: Props) {
                 picks={picks}
                 appearance={variant.appearance}
                 onPick={appearance.chooseThemes}
-                onDuplicate={edit}
+                onEdit={(v, from) => open(draftOf(v, v.name), from, v.id)}
+                onDuplicate={open}
                 onDelete={() => setDeleting(family)}
               />
             ))}
@@ -328,7 +355,12 @@ export function AppearanceSettings({ appearance }: Props) {
         <CreateThemePanel
           key={draft.key}
           initial={draft.draft}
-          onCreate={(family) => appearance.addThemes([family])}
+          editing={draft.editing !== null}
+          onSave={(saved) =>
+            draft.editing
+              ? appearance.updateTheme(draft.editing, saved)
+              : appearance.addThemes([{ name: saved.name, variants: [saved] }])
+          }
           onPreview={appearance.preview}
           onClose={() => {
             setDraft(null);

@@ -1,11 +1,10 @@
-import { useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 import { Paintbrush, X } from "lucide-react";
 import {
   APPEARANCE_LABEL,
   APPEARANCES,
   L1_VARIANTS,
   type ThemeDraft,
-  type ThemeFamilyDraft,
   type ThemeVariant,
 } from "../themes/catalog";
 import { formatHex, isDark, parseHex } from "../themes/color";
@@ -18,7 +17,8 @@ import {
 
 type Props = {
   initial: ThemeDraft;
-  onCreate: (family: ThemeFamilyDraft) => void;
+  editing: boolean;
+  onSave: (draft: ThemeDraft) => void;
   onPreview: (variant: ThemeVariant | null) => void;
   onClose: () => void;
 };
@@ -44,10 +44,12 @@ function ColorField({
   token,
   value,
   onChange,
+  onInvalid,
 }: {
   token: Token;
   value: string;
   onChange: (hex: string) => void;
+  onInvalid: (token: Token, invalid: boolean) => void;
 }) {
   const [text, setText] = useState(value);
   const [shown, setShown] = useState(value);
@@ -56,6 +58,10 @@ function ColorField({
     if (!represents(text, value)) setText(value);
   }
   const valid = parseHex(text) !== null;
+  useEffect(() => {
+    onInvalid(token, !valid);
+    return () => onInvalid(token, false);
+  }, [token, valid, onInvalid]);
   const change = (next: string) => {
     setText(next);
     const parsed = FULL_HEX.test(next.trim()) && parseHex(next);
@@ -63,11 +69,13 @@ function ColorField({
   };
   const settle = () => {
     const parsed = parseHex(text);
-    const hex = parsed ? formatHex(parsed) : value;
+    if (!parsed) return;
+    const hex = formatHex(parsed);
     setText(hex);
     if (hex !== value) onChange(hex);
   };
   const id = `theme-color-${token}`;
+  const errorId = `${id}-error`;
   return (
     <div className="theme-color-field">
       <label htmlFor={id}>{tokenLabel(token)}</label>
@@ -85,6 +93,7 @@ function ColorField({
         spellCheck={false}
         autoComplete="off"
         aria-invalid={!valid}
+        aria-describedby={valid ? undefined : errorId}
         value={text}
         onChange={(event) => change(event.target.value)}
         onBlur={settle}
@@ -92,21 +101,29 @@ function ColorField({
           if (event.key === "Enter") settle();
         }}
       />
+      {!valid && (
+        <p id={errorId} className="theme-color-error">
+          Enter a hex color such as #5b5bd6.
+        </p>
+      )}
     </div>
   );
 }
 
 export function CreateThemePanel({
   initial,
-  onCreate,
+  editing,
+  onSave,
   onPreview,
   onClose,
 }: Props) {
   const [draft, setDraft] = useState(initial);
   const [advanced, setAdvanced] = useState(false);
+  const [invalid, setInvalid] = useState<ReadonlySet<Token>>(new Set());
   const titleId = useId();
   const palette = completePalette(draft.appearance, draft.colors);
   const name = draft.name.trim();
+  const title = editing ? "Edit theme" : "Create theme";
 
   useEffect(() => {
     onPreview({
@@ -122,6 +139,17 @@ export function CreateThemePanel({
   }, [draft, onPreview]);
   useEffect(() => () => onPreview(null), [onPreview]);
 
+  const markInvalid = useCallback(
+    (token: Token, bad: boolean) =>
+      setInvalid((current) => {
+        if (current.has(token) === bad) return current;
+        const next = new Set(current);
+        if (bad) next.add(token);
+        else next.delete(token);
+        return next;
+      }),
+    [],
+  );
   const setColor = (token: Token, value: string) =>
     setDraft((d) => ({ ...d, colors: { ...d.colors, [token]: value } }));
   const setAppearance = (appearance: Appearance) =>
@@ -132,9 +160,14 @@ export function CreateThemePanel({
         : L1_VARIANTS[appearance].swatch.background;
       return { ...d, appearance, colors: { ...d.colors, background } };
     });
-  const create = () => {
-    if (!name) return;
-    onCreate({ name, variants: [{ ...draft, name }] });
+  const blocked = !name
+    ? "Name the theme first"
+    : invalid.size > 0
+      ? "Fix the invalid colors first"
+      : null;
+  const submit = () => {
+    if (blocked) return;
+    onSave({ ...draft, name });
     onClose();
   };
 
@@ -151,11 +184,11 @@ export function CreateThemePanel({
       }}
     >
       <header className="create-theme-header">
-        <h2 id={titleId}>Create theme</h2>
+        <h2 id={titleId}>{title}</h2>
         <span>Two colors, the rest derived</span>
         <button
           className="icon-button"
-          aria-label="Close create theme"
+          aria-label={`Close ${title.toLowerCase()}`}
           onClick={onClose}
         >
           <X size={15} />
@@ -178,7 +211,7 @@ export function CreateThemePanel({
               if (event.key !== "Enter") return;
               // Closing focuses the opener mid-keystroke, and Enter would then click it.
               event.preventDefault();
-              create();
+              submit();
             }}
           />
         </div>
@@ -226,6 +259,7 @@ export function CreateThemePanel({
               token={token}
               value={palette[token]}
               onChange={(value) => setColor(token, value)}
+              onInvalid={markInvalid}
             />
           ))}
         </div>
@@ -236,12 +270,12 @@ export function CreateThemePanel({
         </button>
         <button
           className="button primary"
-          disabled={!name}
-          title={name ? undefined : "Name the theme first"}
-          onClick={create}
+          disabled={blocked !== null}
+          title={blocked ?? undefined}
+          onClick={submit}
         >
           <Paintbrush size={14} />
-          Create theme
+          {editing ? "Save" : "Create theme"}
         </button>
       </footer>
     </div>
