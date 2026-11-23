@@ -186,6 +186,7 @@ it("sends the prepared push intent unchanged and validates strict push outcomes"
     remote: "origin",
     destination: "refs/heads/reviewed",
     endpoint: "Local or unrecognized remote",
+    tracksEndpoint: true,
     fingerprint: "b".repeat(40),
   });
   const { preparePush, push } = await load(true);
@@ -226,6 +227,7 @@ it.each([true, false])(
       source: oid,
       ...choice,
       endpoint: "/remote.git",
+      tracksEndpoint: true,
       fingerprint: "b".repeat(40),
     });
     const options = {

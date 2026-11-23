@@ -42,6 +42,7 @@ const intent = pushIntentSchema.parse({
   remote: "origin",
   destination: "refs/heads/release",
   endpoint: "Configured endpoint",
+  tracksEndpoint: true,
   fingerprint: "b".repeat(40),
 });
 const added: AddRemoteReport = {

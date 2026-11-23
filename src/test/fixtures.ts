@@ -454,6 +454,7 @@ export const readyPush = (): PushAvailability =>
       remote: "origin",
       destination: "refs/heads/main",
       endpoint: "https://example.com/pin.git",
+      tracksEndpoint: true,
       fingerprint: "b".repeat(40),
     },
   });

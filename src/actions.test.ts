@@ -877,6 +877,7 @@ it("shows the prepared push destination and keeps unavailable push visible but d
     remote: "upstream",
     destination: "refs/heads/release",
     endpoint: "https://example.test/project",
+    tracksEndpoint: true,
     fingerprint: "b".repeat(40),
   });
   const available = {

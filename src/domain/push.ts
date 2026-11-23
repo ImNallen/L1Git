@@ -11,6 +11,7 @@ export const pushIntentSchema = z.strictObject({
   remote: z.string().min(1),
   destination: branchRefSchema,
   endpoint: z.string(),
+  tracksEndpoint: z.boolean(),
   fingerprint: z.string().regex(/^[0-9a-f]{40}$/),
 });
 const pushUnavailableSchema = z.enum([
@@ -142,6 +143,7 @@ function countsAgainstDestination(
   intent: PushIntent,
   branches: readonly BranchStatus[],
 ): Divergence | null {
+  if (!intent.tracksEndpoint) return null;
   const branch = branches.find(
     (status) =>
       status.reference === intent.branch && status.oid === intent.source,

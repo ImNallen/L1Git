@@ -16,6 +16,7 @@ const intent = pushIntentSchema.parse({
   remote: "origin",
   destination: "refs/heads/release",
   endpoint: "Local or unrecognized remote",
+  tracksEndpoint: true,
   fingerprint: "b".repeat(40),
 });
 const ready: PushAvailability = { kind: "ready", intent };
