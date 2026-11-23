@@ -303,6 +303,27 @@ it("resizing the sidebar and the inspector saves both widths", async () => {
   }
 });
 
+it("a width dragged with fractional pointer coordinates comes back on the next launch", async () => {
+  const app = await mountApp();
+  const divider = get("separator", "Resize repository sidebar");
+  for (const [type, clientX] of [
+    ["pointerdown", 100.5],
+    ["pointermove", 180.25],
+    ["pointerup", 180.25],
+  ] as const) {
+    await app.act(() => {
+      divider.dispatchEvent(
+        new PointerEvent(type, { bubbles: true, pointerId: 1, clientX }),
+      );
+    });
+  }
+  expect(paneWidth("Resize repository sidebar")).toBe("360");
+  const saved = localStorage.getItem(PANE_WIDTHS_KEY);
+  if (!saved) throw new Error("Pane widths were not saved");
+  await mountApp({ stored: { [PANE_WIDTHS_KEY]: saved } });
+  expect(paneWidth("Resize repository sidebar")).toBe("360");
+});
+
 it("saved pane widths come back on launch", async () => {
   await mountApp({
     stored: {
