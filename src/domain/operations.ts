@@ -487,6 +487,41 @@ const partVerbs: Record<PartWrite, Verb> = {
   discardLines: { now: "Discard lines of", past: "Discarded lines of" },
 };
 
+/**
+ * Whether a landed write posts its result with Undo. Staging and resolving run
+ * often and show their result in place, so a notice for each would replace the
+ * one worth reading.
+ */
+export const announcesResult: Record<Operation["kind"], boolean> = {
+  stageFiles: false,
+  unstageFiles: false,
+  stageHunk: false,
+  unstageHunk: false,
+  stageLines: false,
+  unstageLines: false,
+  saveConflict: false,
+  resolveWhole: false,
+  discard: true,
+  discardHunk: true,
+  discardLines: true,
+  commit: true,
+  amend: true,
+  editMessage: true,
+  createBranch: true,
+  renameBranch: true,
+  deleteBranch: true,
+  checkout: true,
+  createTag: true,
+  deleteTag: true,
+  stashPush: true,
+  stashApply: true,
+  stashPop: true,
+  stashDrop: true,
+  replay: true,
+  finishReplay: true,
+  rebase: true,
+};
+
 function folderOf(path: string): string[] {
   return path.replace(/\/$/, "").split("/").slice(0, -1);
 }
@@ -621,6 +656,7 @@ export type WriteNotice =
   | { kind: "wrote"; operation: Operation; entry: EntryId }
   | { kind: "fetched"; remotes: readonly string[]; moved: number }
   | { kind: "advanced"; branches: readonly BranchRef[] }
+  | { kind: "removedWorktree"; name: string }
   | {
       kind: "failed";
       action: "write";

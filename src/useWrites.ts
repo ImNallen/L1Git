@@ -5,6 +5,7 @@ import * as repositories from "./repositories";
 import { beginDraftTask } from "./draftProtection";
 import { restoreUndone } from "./commitDrafts";
 import {
+  announcesResult,
   attemptLabel,
   describe,
   movesRefs,
@@ -171,7 +172,12 @@ export function useWrites(
                 step: action,
                 label: noticeLabel(action, operation, label),
               };
-      update(repository, (writes) => ({ ...writes, running: null, notice }));
+      const quiet =
+        outcome.kind === "applied" &&
+        action === "write" &&
+        !announcesResult[operation.kind];
+      if (!quiet)
+        update(repository, (writes) => ({ ...writes, running: null, notice }));
       return outcome;
     });
   }

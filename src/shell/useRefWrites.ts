@@ -86,7 +86,6 @@ export type WorktreeNotice =
       branch: string;
       created: NewWorktree;
     }
-  | { kind: "removed"; from: RepositoryRoot; name: string }
   | {
       kind: "removeFailed";
       from: RepositoryRoot;
@@ -150,7 +149,10 @@ export function useRefWrites({
   snapshot: RepositorySnapshot | null;
   selection: Selection | null;
   changes: ChangesByWorktree;
-  writes: Pick<WritesView, "write" | "createWorktree" | "removeWorktree">;
+  writes: Pick<
+    WritesView,
+    "write" | "createWorktree" | "removeWorktree" | "post"
+  >;
   nav: Pick<Navigation, "jump" | "checkedOut" | "sidebar">;
   staging: Pick<Staging, "selectedWorktree">;
   focus: Pick<Focus, "refocusIfLost">;
@@ -231,7 +233,8 @@ export function useRefWrites({
     const outcome = await writes.removeWorktree(removing.root);
     if (outcome.kind === "removed") {
       nav.sidebar.onRemove(removing.root);
-      setNotice({ kind: "removed", from, name: removing.name });
+      setNotice(null);
+      writes.post(from, { kind: "removedWorktree", name: removing.name });
       return;
     }
     setNotice({

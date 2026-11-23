@@ -69,7 +69,10 @@ export const localBusyReason = (
       ? "Wait for this repository's current operation to finish."
       : null;
 
-/** A fetch that failed anywhere leaves its warning to speak for it. */
+/**
+ * A fetch that failed anywhere posts nothing. Its warning speaks for it, and the
+ * notice already shown stays.
+ */
 function fetchedNotice(summary: FetchSummary | null): WriteNotice | null {
   if (!reached(summary)) return null;
   const remotes = summary.remotes.flatMap(({ remote, outcome }) =>
@@ -123,7 +126,7 @@ export function useSyncControls({
   /** The worktree whose checked-out branch Fetch falls back to. */
   activeRoot: RepositoryRoot | null;
   selectedBranch: Branch | null;
-  post: (root: RepositoryRoot, notice: WriteNotice | null) => void;
+  post: (root: RepositoryRoot, notice: WriteNotice) => void;
 }): SyncControls {
   const [publishingRoot, setPublishingRoot] = useState<RepositoryRoot | null>(
     null,
@@ -152,15 +155,21 @@ export function useSyncControls({
           ...explainBehindRejection(result, branches),
         });
     });
+  const postFound = (target: RepositoryRoot, notice: WriteNotice | null) => {
+    if (notice) post(target, notice);
+  };
   const fetchFrom = (
     target: RepositoryRoot,
     fetching: Promise<FetchSummary | null>,
-  ) => void fetching.then((summary) => post(target, fetchedNotice(summary)));
+  ) =>
+    void fetching.then((summary) => postFound(target, fetchedNotice(summary)));
   const advanceIn = (
     target: RepositoryRoot,
     advancing: Promise<readonly AdvanceOutcome[]>,
   ) =>
-    void advancing.then((outcomes) => post(target, advancedNotice(outcomes)));
+    void advancing.then((outcomes) =>
+      postFound(target, advancedNotice(outcomes)),
+    );
   return {
     opened,
     sidebar:

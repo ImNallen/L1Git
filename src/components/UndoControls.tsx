@@ -1,5 +1,5 @@
 import { Fragment, useLayoutEffect, useRef } from "react";
-import { Info, TriangleAlert, X } from "lucide-react";
+import { FolderGit2, Info, TriangleAlert, X } from "lucide-react";
 import {
   advancedText,
   describe,
@@ -109,6 +109,14 @@ function StepNotice({ writes }: { writes: WritesView }) {
         <div ref={row} className="notice info-notice" role="status">
           <span className="workspace-action-icon pull" aria-hidden="true" />
           <span>{advancedText(notice)}</span>
+          {dismiss}
+        </div>
+      );
+    case "removedWorktree":
+      return (
+        <div ref={row} className="notice info-notice" role="status">
+          <FolderGit2 size={14} />
+          <span>Removed worktree {notice.name}. Removal cannot be undone.</span>
           {dismiss}
         </div>
       );
