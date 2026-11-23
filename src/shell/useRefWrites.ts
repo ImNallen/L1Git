@@ -11,6 +11,7 @@ import {
   worktreeForStash,
 } from "../domain/operations";
 import type { BranchAsk, Step, TagAsk } from "../domain/operations";
+import type { BranchRef, FastForwardOffer } from "../domain/overview";
 import type {
   Branch,
   FullRef,
@@ -52,6 +53,11 @@ export type SidebarRefActions = {
     root: RepositoryRoot;
     disabled: boolean;
     onSelect: (branch: Branch) => void;
+  };
+  fastForward?: {
+    root: RepositoryRoot;
+    offer: (reference: FullRef) => FastForwardOffer | null;
+    onSelect: (branch: BranchRef) => void;
   };
   writable: {
     root: RepositoryRoot;

@@ -1,6 +1,7 @@
 import { useEffect, useSyncExternalStore } from "react";
 import * as repositories from "./repositories";
 import {
+  blockerReason,
   divergence,
   pullStep,
   readyAdvances,
@@ -104,7 +105,8 @@ export type OverviewStore = {
     branch: BranchRef,
     mode: PullMode,
   ): Promise<PullHandOff | null>;
-  updateAll(commonDir: RepositoryRoot): Promise<void>;
+  /** Fast-forwards every ready branch of `commonDir`, or only `branch`. */
+  updateAll(commonDir: RepositoryRoot, branch?: BranchRef): Promise<void>;
   setInterval(minutes: FetchInterval): void;
   onRefsChanged(listener: (roots: RepositoryRoot[]) => void): () => void;
   refreshLocal(commonDir: RepositoryRoot): Promise<void>;
@@ -647,9 +649,11 @@ export function createOverviewStore(deps: OverviewDeps): OverviewStore {
         handOff: (step) => (handedOff = step),
       }).then(() => handedOff);
     },
-    updateAll(commonDir) {
+    updateAll(commonDir, branch) {
       const repo = repos.get(commonDir);
-      const advances = repo ? readyAdvances(repo.overview) : [];
+      const advances = (repo ? readyAdvances(repo.overview) : []).filter(
+        (advance) => branch === undefined || advance.reference === branch,
+      );
       if (advances.length === 0) return Promise.resolve();
       return enqueue(commonDir, {
         kind: "fastForward",
@@ -761,9 +765,8 @@ function skipText(
     case "notBehind":
       return "It is no longer behind its upstream. Fetch again.";
     case "dirty":
-      return `Uncommitted changes in ${baseName(reason.worktree)}. Commit or stash first.`;
     case "inUse":
-      return `${baseName(reason.worktree)} is in the middle of a merge, rebase, or other operation.`;
+      return blockerReason(reason);
     case "failed":
       return reason.message;
     default: {
@@ -771,8 +774,4 @@ function skipText(
       return exhaustive;
     }
   }
-}
-
-function baseName(path: string): string {
-  return path.split("/").filter(Boolean).at(-1) ?? path;
 }

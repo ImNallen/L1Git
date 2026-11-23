@@ -1,12 +1,22 @@
 // @vitest-environment happy-dom
 import { expect, it } from "vitest";
+import { overviewSchema } from "./domain/overview";
 import {
   get,
   installHarness,
   mountApp,
+  refRow,
   repositoryRow,
 } from "./test/appHarness";
-import { activeMerge, OTHER, PIN, replayInProgress } from "./test/fixtures";
+import {
+  activeMerge,
+  C5,
+  C6,
+  OTHER,
+  PIN,
+  pinOverview,
+  replayInProgress,
+} from "./test/fixtures";
 import type { RepositoryRoot } from "./domain/repository";
 
 installHarness();
@@ -60,4 +70,55 @@ it("the open repository's pill follows its merge state without waiting for a pro
   expect(app.bridge.count("replayAbort")).toBe(1);
   expect(pill(PIN)).toBeNull();
   expect(app.bridge.count("operationProbe")).toBe(0);
+});
+
+it("the menu of a branch that is strictly behind fast-forwards only that branch", async () => {
+  const topic = {
+    reference: "refs/heads/topic",
+    name: "topic",
+    oid: C6,
+    role: "other",
+    checkedOutAt: null,
+    state: {
+      kind: "behind",
+      upstream: "refs/remotes/origin/topic",
+      target: C5,
+      behind: 1,
+      blocker: null,
+    },
+  };
+  const app = await mountApp({
+    world: (world) =>
+      world.overviews.set(
+        PIN,
+        overviewSchema.parse({
+          ...pinOverview(),
+          branches: [...pinOverview().branches, topic],
+        }),
+      ),
+  });
+  app.bridge.respond("fastForward", () => ({
+    outcomes: [
+      { kind: "advanced", reference: "refs/heads/topic", from: C6, to: C5 },
+    ],
+    overview: pinOverview(),
+  }));
+
+  await app.contextMenu(refRow("refs/heads/main")!);
+  expect(
+    get("menuitem", /^Fast-forward to origin\/main/).getAttribute(
+      "aria-disabled",
+    ),
+  ).toBe("true");
+  await app.press("Escape");
+
+  await app.contextMenu(refRow("refs/heads/topic")!);
+  const item = get("menuitem", "Fast-forward to origin/topic");
+  expect(item.getAttribute("aria-disabled")).toBe("false");
+  await app.click(item);
+  expect(
+    app.bridge.log
+      .filter((request) => request.op === "fastForward")
+      .map((request) => request.advances),
+  ).toEqual([[{ reference: "refs/heads/topic", from: C6, to: C5 }]]);
 });

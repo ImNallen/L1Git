@@ -424,6 +424,27 @@ describe("overview store", () => {
     ]);
   });
 
+  it("fast-forwards only the named branch, and nothing when it is not ready", async () => {
+    const h = harness();
+    h.store.track([app]);
+    await h.answer((label) => {
+      const [mode, path] = label.split(" ");
+      return overview(
+        path!,
+        `${path}/.git`,
+        [behind("main", b), behind("develop", c), upToDate("old")],
+        mode === "remote" ? { changed: false } : null,
+      );
+    });
+    void h.store.updateAll(root("/code/app/.git"), ref("old"));
+    expect(h.pendingLabels()).toEqual([]);
+    void h.store.updateAll(root("/code/app/.git"), ref("develop"));
+    expect(h.pendingLabels()).toEqual(["fastForward /code/app"]);
+    expect(h.advances).toEqual([
+      [{ reference: "refs/heads/develop", from: a, to: c }],
+    ]);
+  });
+
   it("sorts repositories by attention, then by name", async () => {
     const h = harness();
     const repos = {

@@ -211,7 +211,11 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
         sync={overview.view.syncByRoot}
         operations={overview.view.operations}
         navigation={nav.sidebar}
-        refActions={{ ...refWrites.sidebarActions, merge: merge.sidebar }}
+        refActions={{
+          ...refWrites.sidebarActions,
+          merge: merge.sidebar,
+          fastForward: sync.sidebar,
+        }}
         updates={updates}
         restart={restart}
       />
