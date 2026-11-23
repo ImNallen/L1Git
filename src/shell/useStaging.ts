@@ -28,6 +28,7 @@ type Discarding = {
   root: RepositoryRoot;
   write: Write;
   paths: string[];
+  untracked: number;
   skipped: number;
   returnFocus?: () => void;
 };

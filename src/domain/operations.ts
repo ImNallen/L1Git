@@ -428,10 +428,14 @@ export const discardablePaths = (status: WorktreeStatus): ReadonlySet<string> =>
 export function discardChoice(
   status: WorktreeStatus,
   paths: readonly string[],
-): { paths: string[]; skipped: number } {
+): { paths: string[]; untracked: number; skipped: number } {
   const able = discardablePaths(status);
   const kept = paths.filter((path) => able.has(path));
-  return { paths: kept, skipped: paths.length - kept.length };
+  const chosen = new Set(kept);
+  const untracked = status.entries.filter(
+    (entry) => entry.kind === "untracked" && chosen.has(entry.path),
+  ).length;
+  return { paths: kept, untracked, skipped: paths.length - kept.length };
 }
 
 const SHOWN_PATHS = 10;

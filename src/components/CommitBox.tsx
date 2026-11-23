@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { LoaderCircle, TriangleAlert } from "lucide-react";
 import * as repositories from "../repositories";
@@ -132,12 +132,13 @@ export function CommitBox({
     : branch === null
       ? "Commit"
       : `Commit to ${branch}`;
-  const hint =
-    draft.summary.trim() === ""
-      ? "Write a summary first."
-      : staged === 0 && !amending
-        ? "Stage a file first, or amend the previous commit."
-        : `${action} (${repositories.mac ? "⌘" : "Ctrl+"}Enter)`;
+  const reason =
+    staged === 0 && !amending
+      ? "Stage a file first, or amend the previous commit."
+      : draft.summary.trim() === ""
+        ? "Write a summary first."
+        : null;
+  const reasonId = useId();
   return (
     <div className="commit-box" role="group" aria-label="Commit">
       <input
@@ -185,7 +186,12 @@ export function CommitBox({
           type="button"
           className="button primary"
           aria-disabled={!ready}
-          title={hint}
+          aria-describedby={reason === null ? undefined : reasonId}
+          title={
+            reason === null
+              ? `${action} (${repositories.mac ? "⌘" : "Ctrl+"}Enter)`
+              : undefined
+          }
           onClick={() => void submit()}
         >
           {submitting || loading ? (
@@ -193,6 +199,11 @@ export function CommitBox({
           ) : null}
           <span className="commit-action-label">{action}</span>
         </button>
+        {reason !== null && (
+          <p id={reasonId} className="commit-reason">
+            {reason}
+          </p>
+        )}
       </div>
       {problem &&
         (commitOutput(problem) ?? (

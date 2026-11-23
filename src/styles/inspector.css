@@ -362,6 +362,11 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.commit-reason {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
 .commit-problem {
   margin-top: 0;
 }

@@ -435,6 +435,34 @@ it("the commit button names the branch, and says Amend while amending", async ()
   expect(get("button", "Commit to main")).toBeTruthy();
 });
 
+it("the commit box says why it cannot commit, as text that describes the button", async () => {
+  const app = await mountApp({
+    world: (world) => {
+      const status = pinStatus();
+      world.statuses.set(PIN, {
+        ...status,
+        entries: status.entries.filter((entry) => entry.path === "notes.txt"),
+      });
+    },
+  });
+  await app.click(historyRow("Uncommitted changes in pin,"));
+  const box = get("group", "Commit");
+  const reason = (name: string) => {
+    const id = get("button", name, box).getAttribute("aria-describedby");
+    return id === null ? null : document.getElementById(id)?.textContent;
+  };
+  const stageFirst = "Stage a file first, or amend the previous commit.";
+  expect(reason("Commit to main")).toBe(stageFirst);
+  expect(box.textContent).toContain(stageFirst);
+  await app.type(get("textbox", "Summary"), "Ship it");
+  expect(reason("Commit to main")).toBe(stageFirst);
+  await app.click(get("checkbox", undefined, box));
+  expect(reason("Amend")).toBeNull();
+  await app.type(get("textbox", "Summary"), "");
+  expect(reason("Amend")).toBe("Write a summary first.");
+  expect(box.textContent).toContain("Write a summary first.");
+});
+
 it("the commit button says Commit on a detached HEAD", async () => {
   const head = headSchema.parse({ kind: "detached", oid: C4 });
   const app = await mountApp({

@@ -2,9 +2,12 @@
 import { expect, it } from "vitest";
 import { overviewSchema } from "./domain/overview";
 import {
+  dialogs,
   get,
+  historyRow,
   installHarness,
   mountApp,
+  query,
   refRow,
   repositoryRow,
 } from "./test/appHarness";
@@ -15,9 +18,10 @@ import {
   OTHER,
   PIN,
   pinOverview,
+  pinStatus,
   replayInProgress,
 } from "./test/fixtures";
-import type { RepositoryRoot } from "./domain/repository";
+import type { RepositoryRoot, StatusEntry } from "./domain/repository";
 
 installHarness();
 
@@ -121,4 +125,66 @@ it("the menu of a branch that is strictly behind fast-forwards only that branch"
       .filter((request) => request.op === "fastForward")
       .map((request) => request.advances),
   ).toEqual([[{ reference: "refs/heads/topic", from: C6, to: C5 }]]);
+});
+
+const untracked = (path: string): StatusEntry => ({ kind: "untracked", path });
+
+const tracked = pinStatus().entries;
+const stagedOnly = tracked.filter((entry) => entry.path === "todo.txt");
+
+async function askDiscard(entries: StatusEntry[]) {
+  const app = await mountApp({
+    world: (world) => world.statuses.set(PIN, { ...pinStatus(), entries }),
+  });
+  await app.click(historyRow("Uncommitted changes in pin,"));
+  await app.runPaletteItem("Discard all changes…");
+  return { app, body: query("dialog")?.querySelector("p")?.textContent };
+}
+
+it("discarding one untracked file asks to delete it", async () => {
+  const { app, body } = await askDiscard([
+    ...stagedOnly,
+    untracked("scratch.txt"),
+  ]);
+  expect(dialogs()).toEqual(["Delete scratch.txt?"]);
+  expect(body).toBe(
+    "scratch.txt is untracked, and this discards all of it, so L1 Git deletes the file. You can undo this.",
+  );
+  await app.click(get("button", "Delete file"));
+  expect(dialogs()).toEqual([]);
+});
+
+it("discarding one tracked file keeps the restore wording", async () => {
+  const { body } = await askDiscard(tracked);
+  expect(dialogs()).toEqual(["Discard changes to notes.txt?"]);
+  expect(body).toBe(
+    "The file goes back to its staged or committed version. You can undo this.",
+  );
+  expect(get("button", "Discard changes")).toBeTruthy();
+});
+
+it("discarding tracked and untracked files says how many files it deletes", async () => {
+  const { body } = await askDiscard([
+    ...tracked,
+    untracked("scratch.txt"),
+    untracked("draft.md"),
+  ]);
+  expect(dialogs()).toEqual(["Discard changes to 3 files?"]);
+  expect(body).toBe(
+    "Each tracked file goes back to its staged or committed version, and L1 Git deletes 2 untracked files. You can undo this.",
+  );
+  expect(get("button", "Discard all")).toBeTruthy();
+});
+
+it("discarding only untracked files asks to delete them", async () => {
+  const { body } = await askDiscard([
+    ...stagedOnly,
+    untracked("scratch.txt"),
+    untracked("draft.md"),
+  ]);
+  expect(dialogs()).toEqual(["Delete 2 files?"]);
+  expect(body).toBe(
+    "These files are untracked, so L1 Git deletes them. You can undo this.",
+  );
+  expect(get("button", "Delete files")).toBeTruthy();
 });

@@ -6,30 +6,63 @@ import { PathList } from "./Dialog";
 
 type Props = {
   paths: readonly string[];
+  untracked: number;
   skipped: number;
   onDiscard: () => void;
   onClose: () => void;
 };
 
-export function DiscardDialog({ paths, skipped, onDiscard, onClose }: Props) {
-  const [only] = paths;
+function discardWords(paths: readonly string[], untracked: number) {
+  const [only, ...rest] = paths;
+  const one = only !== undefined && rest.length === 0;
+  const files = `${paths.length.toLocaleString()} files`;
+  if (untracked === paths.length)
+    return one
+      ? {
+          title: `Delete ${only}?`,
+          confirm: "Delete file",
+          outcome: outcomes.deleteFile(only),
+        }
+      : {
+          title: `Delete ${files}?`,
+          confirm: "Delete files",
+          outcome: "These files are untracked, so L1 Git deletes them.",
+        };
+  const title = one
+    ? `Discard changes to ${only}?`
+    : `Discard changes to ${files}?`;
+  const confirm = one ? "Discard changes" : "Discard all";
+  if (untracked > 0)
+    return {
+      title,
+      confirm,
+      outcome: `Each tracked file goes back to its staged or committed version, and L1 Git deletes ${untracked.toLocaleString()} untracked ${untracked === 1 ? "file" : "files"}.`,
+    };
+  return {
+    title,
+    confirm,
+    outcome: `${one ? "The file goes" : "Each file goes"} back to its staged or committed version.`,
+  };
+}
+
+export function DiscardDialog({
+  paths,
+  untracked,
+  skipped,
+  onDiscard,
+  onClose,
+}: Props) {
+  const { title, confirm, outcome } = discardWords(paths, untracked);
   return (
     <ConfirmDialog
       icon={Undo2}
-      title={
-        paths.length === 1
-          ? `Discard changes to ${only}?`
-          : `Discard changes to ${paths.length.toLocaleString()} files?`
-      }
+      title={title}
       closeLabel="Close discard changes"
-      confirm={paths.length === 1 ? "Discard changes" : "Discard all"}
+      confirm={confirm}
       onConfirm={onDiscard}
       onClose={onClose}
     >
-      <p>
-        Each file goes back to its staged or committed version, and new files
-        are deleted. You can undo this.
-      </p>
+      <p>{`${outcome} You can undo this.`}</p>
       <PathList paths={paths} label="Files to discard" />
       {skipped > 0 && (
         <p>

@@ -2395,6 +2395,30 @@ fn stash_apply_refuses_a_dirty_file_it_would_overwrite() {
 }
 
 #[test]
+fn stash_pop_names_every_conflicted_path_with_a_plural_verb() {
+    let repo = Repo::committed(&[("a", "a\n"), ("b", "b\n")]);
+    let coordinator = repo.coordinator();
+    repo.put("a", "stashed\n");
+    repo.put("b", "stashed\n");
+    stash_push(&coordinator, &repo, "s1", false, &[]).unwrap();
+    repo.put("a", "committed\n");
+    repo.put("b", "committed\n");
+    repo.git(&["commit", "--quiet", "-am", "c"]);
+    let error = stash_pop(&coordinator, &repo, 0).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::Conflict);
+    assert_eq!(
+        error.message,
+        "a and b have conflicts. The stash entry is kept."
+    );
+    assert_eq!(
+        stash_push(&coordinator, &repo, "s2", false, &[])
+            .unwrap_err()
+            .message,
+        "a and b have conflicts. Resolve them, then try again."
+    );
+}
+
+#[test]
 fn stash_pop_keeps_the_entry_when_the_apply_conflicts_and_undo_puts_the_file_back() {
     let repo = Repo::committed(&[("a", "a\n")]);
     let coordinator = repo.coordinator();
@@ -2404,7 +2428,13 @@ fn stash_pop_keeps_the_entry_when_the_apply_conflicts_and_undo_puts_the_file_bac
     repo.git(&["commit", "--quiet", "-am", "c"]);
     let error = stash_pop(&coordinator, &repo, 0).unwrap_err();
     assert_eq!(error.kind, ErrorKind::Conflict);
-    assert_eq!(error.message, "a have conflicts. The stash entry is kept.");
+    assert_eq!(error.message, "a has conflicts. The stash entry is kept.");
+    assert_eq!(
+        stash_push(&coordinator, &repo, "s2", false, &[])
+            .unwrap_err()
+            .message,
+        "a has conflicts. Resolve them, then try again."
+    );
     assert_eq!(repo.git(&["ls-files", "-s", "a"]).lines().count(), 3);
     assert_eq!(stash_list(&repo).lines().count(), 1);
     let applied = coordinator.undo_history(repo.path()).unwrap().undo.unwrap();

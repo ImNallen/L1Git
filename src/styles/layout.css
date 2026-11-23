@@ -204,14 +204,6 @@ kbd {
   color: var(--muted);
   background: var(--control);
 }
-.empty-scope {
-  margin-top: 60px;
-  color: var(--text-faint);
-  font-size: 11px;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-}
 .path-label {
   font-family: var(--mono);
   font-size: 11px !important;
