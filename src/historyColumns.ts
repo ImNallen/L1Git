@@ -8,7 +8,7 @@ export const historyColumns = [
   { id: "author", label: "Author", width: 140 },
   { id: "date", label: "Age", width: 60 },
   { id: "sha", label: "Commit ID" },
-  { id: "changes", label: "Changes", width: 96 },
+  { id: "changes", label: "Changes", width: 94 },
 ] as const;
 export type ColumnId = (typeof historyColumns)[number]["id"];
 

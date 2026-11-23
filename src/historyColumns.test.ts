@@ -12,14 +12,14 @@ import type { ColumnId } from "./historyColumns";
 describe("history column layout", () => {
   it("shows Age and Changes for new preferences", () => {
     const layout = columnLayout(58, restoreColumns({ getItem: () => null }), 7);
-    expect(layout.template).toBe("58px minmax(160px, 1fr) 60px 96px");
-    expect(layout.minWidth).toBe(374);
+    expect(layout.template).toBe("58px minmax(160px, 1fr) 60px 94px");
+    expect(layout.minWidth).toBe(372);
   });
 
   it("keeps the wider message minimum when only Changes is on", () => {
     const layout = columnLayout(58, new Set<ColumnId>(["changes"]), 7);
-    expect(layout.template).toBe("58px minmax(260px, 1fr) 96px");
-    expect(layout.minWidth).toBe(414);
+    expect(layout.template).toBe("58px minmax(260px, 1fr) 94px");
+    expect(layout.minWidth).toBe(412);
   });
 
   it("lays out every column in table order whatever order they were checked", () => {
@@ -29,9 +29,9 @@ describe("history column layout", () => {
       7,
     );
     expect(layout.template).toBe(
-      "106px minmax(160px, 1fr) 140px 60px 100px 96px",
+      "106px minmax(160px, 1fr) 140px 60px 100px 94px",
     );
-    expect(layout.minWidth).toBe(662);
+    expect(layout.minWidth).toBe(660);
     expect(layout.columns.map((column) => column.label)).toEqual([
       "Author",
       "Age",
