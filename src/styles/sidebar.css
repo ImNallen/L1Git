@@ -495,7 +495,8 @@ input::placeholder {
   color: var(--muted);
 }
 .repository-open > .repository-suffix {
-  flex-shrink: 1000;
+  flex: 1 1 0;
+  min-width: 0;
   color: var(--text-dim);
   font-weight: 400;
 }
