@@ -65,10 +65,13 @@ export const FAKE_HOME = "/fixture/home";
 
 const fromHome = (path: string) => path.replace(/^~(?=\/|$)/, FAKE_HOME);
 
-export const folder = (path: string, repository: boolean): DirectoryEntry => ({
+export const folder = (
+  path: string,
+  kind: DirectoryEntry["kind"],
+): DirectoryEntry => ({
   name: path.split("/").at(-1) ?? path,
   path,
-  repository,
+  kind,
 });
 
 export function createWorld(): World {
@@ -93,12 +96,12 @@ export function createWorld(): World {
       [OTHER, noUpstream()],
     ]),
     directories: new Map([
-      ["~", [folder(`${FAKE_HOME}/Projects`, false)]],
+      ["~", [folder(`${FAKE_HOME}/Projects`, "folder")]],
       [
         "~/Projects",
         [
-          folder(`${FAKE_HOME}/Projects/docs-site`, true),
-          folder(`${FAKE_HOME}/Projects/screenshots`, false),
+          folder(`${FAKE_HOME}/Projects/docs-site`, "repository"),
+          folder(`${FAKE_HOME}/Projects/screenshots`, "folder"),
         ],
       ],
     ]),
@@ -288,7 +291,7 @@ const handlers: Record<string, Handler> = {
     entries:
       world.directories.get(request.path) ??
       (world.snapshots.has(request.path as RepositoryRoot)
-        ? [folder(request.path, true)]
+        ? [folder(request.path, "repository")]
         : []),
   }),
   createRepository: (request, world) => {
