@@ -26,6 +26,21 @@ pub(crate) fn read(path: &Path, deadline: Deadline) -> Result<Vec<Remote>, Repos
         .collect()
 }
 
+/// A fork's pull requests are opened in its `upstream`, and a clone without one
+/// opens them in its `origin`.
+pub(crate) fn github(remotes: Vec<Remote>) -> Option<GitHubRepository> {
+    let rank = |name: &str| match name {
+        "upstream" => 0,
+        "origin" => 1,
+        _ => 2,
+    };
+    remotes
+        .into_iter()
+        .filter_map(|remote| Some((rank(&remote.name), remote.github?)))
+        .min_by_key(|(rank, _)| *rank)
+        .map(|(_, github)| github)
+}
+
 pub(crate) fn display_url(raw: &str) -> (String, Option<GitHubRepository>) {
     if !raw.contains("://") {
         if let Some((host, path)) = raw.split_once(':') {

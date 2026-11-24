@@ -2517,6 +2517,7 @@ describe("real Rust fetch and fast-forward contract", () => {
       { remote: "github", outcome: { kind: "skipped" } },
       { remote: "origin", outcome: { kind: "fetched" } },
     ]);
+    expect(fetched.github).toEqual({ owner: "l1-family", repo: "l1-git" });
   });
 
   it("rejects other origins and unexpected fields on fetch and fast-forward", async () => {

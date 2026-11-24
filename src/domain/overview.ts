@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { oidSchema, refSchema, rootSchema } from "./repository";
+import {
+  githubRepositorySchema,
+  oidSchema,
+  refSchema,
+  rootSchema,
+} from "./repository";
 import type { Branch, FullRef, Oid, RepositoryRoot } from "./repository";
 import { shortRemote } from "./refs";
 
@@ -71,6 +76,7 @@ export const overviewSchema = z.object({
   root: rootSchema,
   commonDir: rootSchema,
   name: z.string(),
+  github: githubRepositorySchema.nullable(),
   branches: z.array(branchStatusSchema),
   fetch: fetchSummarySchema.nullable(),
 });

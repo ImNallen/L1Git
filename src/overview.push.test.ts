@@ -24,6 +24,7 @@ const overview = overviewSchema.parse({
   root: main,
   commonDir: common,
   name: "main",
+  github: null,
   branches: [],
   fetch: null,
 });

@@ -269,6 +269,7 @@ export function pinOverview(): RepositoryOverview {
     root: PIN,
     commonDir: "/fixture/pin/.git",
     name: "pin",
+    github: null,
     branches: [
       {
         reference: "refs/heads/main",
@@ -306,6 +307,7 @@ export function otherOverview(): RepositoryOverview {
     root: OTHER,
     commonDir: "/fixture/other/.git",
     name: "other",
+    github: null,
     branches: [
       {
         reference: "refs/heads/trunk",
@@ -359,6 +361,7 @@ export function addEmptyRepository(
       root,
       commonDir: `${root}/.git`,
       name,
+      github: null,
       branches: [],
       fetch: null,
     }),

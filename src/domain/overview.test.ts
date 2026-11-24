@@ -37,6 +37,7 @@ const overview = overviewSchema.parse({
   root: "/code/app",
   commonDir: "/code/app/.git",
   name: "app",
+  github: null,
   branches: [
     row("develop", "mainline", {
       kind: "behind",
@@ -315,6 +316,7 @@ describe("pull target", () => {
       root: "/code/app",
       commonDir: "/code/app/.git",
       name: "app",
+      github: null,
       branches: [row("main", "default", state, "/code/app")],
       fetch: null,
     }).branches[0];
