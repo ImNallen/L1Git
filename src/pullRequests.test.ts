@@ -72,7 +72,7 @@ const open = (repo: string) => ({
   repository: { owner: "octo", repo },
   list: "open" as const,
 });
-const empty = { value: null, reading: false, problem: null };
+const empty = { value: null, at: null, reading: false, problem: null };
 
 function setup() {
   const replies: {
@@ -146,7 +146,9 @@ it("joins a running read of the same repository in any letter case", async () =>
 });
 
 it("keeps the last value while reading and after a failure, until a success", async () => {
+  const now = vi.spyOn(Date, "now").mockReturnValue(5_000);
   const { lists, replies } = await holding(5);
+  now.mockReturnValue(12_000);
   const failing = lists.refresh(open("app"));
   expect(lists.read()(open("app"))).toMatchObject({
     reading: true,
@@ -162,6 +164,7 @@ it("keeps the last value while reading and after a failure, until a success", as
   expect(lists.read()(open("app"))).toMatchObject({
     reading: false,
     value: { total: 5 },
+    at: 5_000,
     problem: { kind: "rateLimited", resetAt: 9 },
   });
 
@@ -178,9 +181,11 @@ it("keeps the last value while reading and after a failure, until a success", as
   await succeeding;
   expect(lists.read()(open("app"))).toEqual({
     value: { items: [], total: 6 },
+    at: 12_000,
     reading: false,
     problem: null,
   });
+  now.mockRestore();
 });
 
 it("gives a new snapshot only when an answer changes, and tells its listeners", async () => {
