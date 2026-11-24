@@ -18,6 +18,7 @@ import { createServer as createHttpServer } from "node:http";
 import type { Server } from "node:http";
 import { createServer } from "node:net";
 import { join, resolve } from "node:path";
+import { text } from "node:stream/consumers";
 import { setTimeout } from "node:timers/promises";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -3844,6 +3845,15 @@ describe("a cherry-pick or revert", () => {
 
 describe("real Rust host contract", () => {
   const token = "gho_integration";
+  const questionSchema = z.object({
+    variables: z.object({
+      owner: z.string(),
+      repo: z.string(),
+      merged: z.string().optional(),
+    }),
+  });
+  const recorded = (name: string) =>
+    readFileSync(`crates/host/tests/fixtures/github/${name}.json`, "utf8");
   const seen: string[] = [];
   let github: Server;
   let hostBridge: Awaited<ReturnType<typeof startBridge>>;
@@ -3862,9 +3872,22 @@ describe("real Rust host contract", () => {
     writeFileSync(join(fake, "token-octo"), `${token}\n`);
     github = createHttpServer((request, response) => {
       seen.push(`${request.url} ${request.headers.authorization}`);
-      const known =
-        request.url === "/user" &&
-        request.headers.authorization === `Bearer ${token}`;
+      const mine = request.headers.authorization === `Bearer ${token}`;
+      if (mine && request.url === "/graphql") {
+        void text(request).then((body) => {
+          const { variables } = questionSchema.parse(JSON.parse(body));
+          const { owner, repo, merged } = variables;
+          response.writeHead(200, { "Content-Type": "application/json" });
+          response.end(
+            recorded(merged ? "merged" : "open").replace(
+              "octo/app",
+              `${owner}/${repo}`,
+            ),
+          );
+        });
+        return;
+      }
+      const known = mine && request.url === "/user";
       response.writeHead(known ? 200 : 401, {
         "Content-Type": "application/json",
         ...(known ? { "X-OAuth-Scopes": "gist, read:org, repo" } : {}),
@@ -3962,6 +3985,68 @@ describe("real Rust host contract", () => {
     expect(
       readFileSync(join(fixture.root, "host", "host.json"), "utf8"),
     ).not.toContain(token);
+  });
+
+  it("reads the pull requests of a snapshot's own remote", async () => {
+    const snapshot = snapshotEnvelope.parse(
+      await (await post({ op: "snapshot", path: fixture.repository })).json(),
+    ).data;
+    const repository = snapshot.remotes.find(
+      (remote) => remote.name === "github",
+    )?.github;
+    const ask = async (body: unknown) =>
+      hostResponseSchema
+        .and(z.object({ ok: z.literal(true) }))
+        .parse(await (await hostPost(body)).json());
+    await ask({ op: "connectGh", login: "octo" });
+    seen.length = 0;
+
+    const open = await ask({ op: "pullRequests", repository, list: "open" });
+    if (open.op !== "pullRequests") throw new Error(open.op);
+    expect(open.data.total).toBe(59);
+    expect(open.data.items[0]).toEqual({
+      number: 12,
+      title: "Read the configuration file once",
+      state: { kind: "open", draft: false },
+      author: "hubot",
+      viewerIsAuthor: false,
+      head: "read-config-once",
+      base: "main",
+      labels: {
+        total: 4,
+        items: [
+          { name: "bug", color: "d73a4a" },
+          { name: "documentation", color: "0075ca" },
+          { name: "good first issue", color: "7057ff" },
+          { name: "help wanted", color: "008672" },
+        ],
+      },
+      comments: 23,
+      reviewRequested: true,
+      review: "changesRequested",
+      checks: { passed: 6, failed: 1, skipped: 0, running: 6 },
+      mergeable: "mergeable",
+      additions: 80,
+      deletions: 8,
+      updatedAt: "2026-11-24T15:33:39Z",
+    });
+    const merged = await ask({
+      op: "pullRequests",
+      repository,
+      list: "recentlyMerged",
+    });
+    if (merged.op !== "pullRequests") throw new Error(merged.op);
+    expect(
+      merged.data.items.map(({ number, state }) => [number, state]),
+    ).toEqual([
+      [10, { kind: "merged", at: "2026-11-17T19:18:14Z" }],
+      [8, { kind: "merged", at: "2026-11-23T18:24:25Z" }],
+    ]);
+    expect(seen).toEqual([
+      `/graphql Bearer ${token}`,
+      `/graphql Bearer ${token}`,
+    ]);
+    await ask({ op: "disconnect" });
   });
 
   it("checks host requests like repository requests and names every host operation", async () => {

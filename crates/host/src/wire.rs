@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::Login;
+use crate::pulls::{PullRequestList, PullRequests, Repository};
 
 /// Variants without fields are empty structs, because serde ignores unknown
 /// fields on an internally tagged unit variant.
@@ -29,6 +30,11 @@ pub enum Request {
     DeviceCancel {
         session: String,
     },
+    /// Asks GitHub for one repository's pull requests.
+    PullRequests {
+        repository: Repository,
+        list: PullRequestList,
+    },
 }
 
 /// `{op, data?, status}`.
@@ -50,6 +56,7 @@ pub enum Answer {
     DeviceStart,
     DevicePoll,
     DeviceCancel,
+    PullRequests(PullRequests),
 }
 
 /// Everything the webview knows about the host side. No field can hold a
@@ -218,6 +225,14 @@ pub enum ErrorKind {
     Keychain {
         problem: KeychainProblem,
     },
+    /// GitHub answers the same for something that is gone and something this
+    /// sign-in cannot read.
+    NotFound,
+    /// The token works, but not for this organization until the user
+    /// authorizes it at `url`.
+    SsoRequired {
+        url: String,
+    },
     /// `host.json` could not be written.
     Storage,
     /// The task running the request died before it answered.
@@ -385,6 +400,7 @@ mod tests {
     #[test]
     fn requests_reject_unknown_ops_and_fields() {
         let parse = |value: Value| serde_json::from_value::<Request>(value);
+        let pulls = |owner: &str, repo: &str, list: &str| json!({"op": "pullRequests", "repository": {"owner": owner, "repo": repo}, "list": list});
         assert!(matches!(
             parse(json!({"op": "status"})),
             Ok(Request::Status {})
@@ -397,6 +413,7 @@ mod tests {
             parse(json!({"op": "devicePoll", "session": "1"})),
             Ok(Request::DevicePoll { session }) if session == "1"
         ));
+        assert!(parse(pulls("octo", "app-2.x_y", "recentlyMerged")).is_ok());
         for refused in [
             json!({"op": "status", "extra": 1}),
             json!({"op": "connectGh", "login": "-x"}),
@@ -406,6 +423,12 @@ mod tests {
             json!({"op": "deviceStart", "clientId": "x"}),
             json!({"op": "devicePoll"}),
             json!({"op": "deviceCancel", "session": 1}),
+            pulls("octo", "app", "closed"),
+            pulls("octo", "app extra", "open"),
+            pulls("octo\"", "app", "open"),
+            pulls("octo", "..", "open"),
+            pulls("", "app", "open"),
+            json!({"op": "pullRequests", "repository": {"owner": "octo", "repo": "app", "extra": 1}, "list": "open"}),
         ] {
             assert!(parse(refused.clone()).is_err(), "{refused}");
         }

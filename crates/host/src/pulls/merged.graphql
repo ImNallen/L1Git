@@ -1,0 +1,7 @@
+query($owner: String!, $repo: String!, $merged: String!) {
+  repository(owner: $owner, name: $repo) { nameWithOwner }
+  merged: search(query: $merged, type: ISSUE, first: 50) {
+    totalCount: issueCount
+    nodes { ...row }
+  }
+}

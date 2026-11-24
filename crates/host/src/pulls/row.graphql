@@ -1,0 +1,25 @@
+fragment row on PullRequest {
+  number
+  title
+  isDraft
+  mergedAt
+  closedAt
+  headRefName
+  baseRefName
+  updatedAt
+  additions
+  deletions
+  mergeable
+  reviewDecision
+  totalCommentsCount
+  viewerDidAuthor
+  author { login }
+  labels(first: 10) { totalCount nodes { name color } }
+  latestOpinionatedReviews(first: 20) { nodes { state } }
+  statusCheckRollup {
+    contexts {
+      checkRunCountsByState { state count }
+      statusContextCountsByState { state count }
+    }
+  }
+}

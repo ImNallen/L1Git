@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread::{self, JoinHandle};
 
+use serde_json::Value;
+
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures")
@@ -126,6 +128,28 @@ impl Reply {
         }
     }
 
+    /// A recorded answer, with invented names in place of the recorded ones.
+    pub fn recorded(name: &str) -> Reply {
+        Reply::json(fs::read_to_string(fixture(&format!("github/{name}.json"))).unwrap())
+    }
+
+    pub fn graphql(answer: Value) -> Reply {
+        Reply::json(answer.to_string())
+    }
+
+    pub fn status(status: u16, body: &str) -> Reply {
+        Reply {
+            status,
+            headers: Vec::new(),
+            body: body.to_owned(),
+        }
+    }
+
+    pub fn with_header(mut self, name: &'static str, value: &str) -> Reply {
+        self.headers.push((name, value.to_owned()));
+        self
+    }
+
     pub fn redirect(location: &str) -> Reply {
         Reply {
             status: 302,
@@ -192,6 +216,8 @@ struct World {
     device_code: Option<Reply>,
     polls: VecDeque<Reply>,
     forms: Vec<Form>,
+    graphql: VecDeque<Reply>,
+    questions: Vec<Value>,
 }
 
 pub struct FakeGitHub {
@@ -245,6 +271,16 @@ impl FakeGitHub {
     pub fn forms(&self) -> Vec<Form> {
         lock(&self.world).forms.clone()
     }
+
+    /// Queues answers to GraphQL questions, one each.
+    pub fn graphql(&self, replies: impl IntoIterator<Item = Reply>) {
+        lock(&self.world).graphql.extend(replies);
+    }
+
+    /// The GraphQL questions asked so far.
+    pub fn questions(&self) -> Vec<Value> {
+        lock(&self.world).questions.clone()
+    }
 }
 
 impl Drop for FakeGitHub {
@@ -289,15 +325,27 @@ fn answer(mut request: tiny_http::Request, world: &Mutex<World>) {
         .iter()
         .find(|header| header.field.equiv("Authorization"))
         .map(|header| header.value.as_str().to_owned());
+    let question = (path == "/graphql").then(|| {
+        let mut body = String::new();
+        let _ = request.as_reader().read_to_string(&mut body);
+        serde_json::from_str(&body).unwrap_or(Value::Null)
+    });
     let reply = {
         let mut world = lock(world);
         world.seen.push(Seen {
             path,
             authorization: authorization.clone(),
         });
-        authorization
-            .and_then(|authorization| world.replies.get(&authorization).cloned())
-            .unwrap_or_else(Reply::bad_credentials)
+        match question {
+            Some(question) => {
+                world.questions.push(question);
+                world.graphql.pop_front()
+            }
+            None => {
+                authorization.and_then(|authorization| world.replies.get(&authorization).cloned())
+            }
+        }
+        .unwrap_or_else(Reply::bad_credentials)
     };
     respond(request, reply);
 }

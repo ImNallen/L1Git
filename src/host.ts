@@ -2,14 +2,16 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { hostErrorSchema, hostResponseSchema, hostRoute } from "./domain/host";
 import type {
   GhProbe,
+  HostCommand,
   HostProblem,
+  HostRead,
   HostRequest,
   HostResponse,
   HostStatus,
 } from "./domain/host";
 import { send } from "./transport";
 
-type Op = HostRequest["op"];
+type Op = HostCommand["op"];
 type Busy = Exclude<Op, "status" | "devicePoll">;
 type HostView = {
   status: HostStatus | null;
@@ -49,8 +51,10 @@ export function createHostClient(transport: HostTransport) {
   const running = new Map<Op, Promise<boolean>>();
   const listeners = new Set<() => void>();
   let poll: ReturnType<typeof setTimeout> | undefined;
+  let announced: number | undefined;
   function update(next: Partial<HostView>) {
     view = { ...view, ...next };
+    announced = view.status?.revision;
     listeners.forEach((listener) => listener());
   }
   function schedulePoll(minimumMs = 0) {
@@ -99,7 +103,7 @@ export function createHostClient(transport: HostTransport) {
     }
   }
 
-  function runOnce(body: HostRequest): Promise<boolean> {
+  function runOnce(body: HostCommand): Promise<boolean> {
     const current = running.get(body.op);
     if (current) return current;
     const call = exchange(body)
@@ -125,6 +129,17 @@ export function createHostClient(transport: HostTransport) {
     return call;
   }
 
+  /**
+   * Asks GitHub through Rust. It leaves `busy` and `problem` to the sign-in
+   * screen, but takes the status like any request, so a token GitHub refuses
+   * here signs that screen out too.
+   */
+  async function ask<R extends HostRead>(request: R): Promise<Exchanged<R>> {
+    const exchanged = await exchange(request);
+    if (view.status?.revision !== announced) update({});
+    return exchanged;
+  }
+
   function cancelDevice(): Promise<boolean> {
     const starting = running.get("deviceStart");
     if (starting) return starting.then(cancelDevice);
@@ -142,6 +157,7 @@ export function createHostClient(transport: HostTransport) {
         listeners.delete(listener);
       };
     },
+    ask,
     refresh: () => runOnce({ op: "status" }),
     probeGh: () => runOnce({ op: "probeGh" }),
     connectGh: (login: string) => runOnce({ op: "connectGh", login }),
