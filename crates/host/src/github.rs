@@ -261,6 +261,7 @@ pub(crate) enum ApiError {
     Unauthorized,
     RateLimited { reset_at: Option<u64> },
     Forbidden { message: String },
+    Unfinished { message: String },
     SsoRequired { url: String },
     NotFound { what: String },
     TooLarge,
@@ -293,10 +294,11 @@ impl GitHub<'_> {
             .map_err(|_| ApiError::Unreachable)?;
         let status = response.status().as_u16();
         let headers = response.headers().clone();
-        let body = read_body(response)?;
-        match classify(status, &headers, &body, unix_secs()) {
+        let body = read_body(response);
+        let seen = body.as_deref().unwrap_or_default();
+        match classify(status, &headers, seen, unix_secs()) {
             Some(error) => Err(error),
-            None => Ok((headers, body)),
+            None => Ok((headers, body?)),
         }
     }
 
@@ -471,6 +473,10 @@ pub(crate) fn api_failure(error: ApiError) -> Failure {
         ApiError::Forbidden { message } => Failure::new(
             ErrorKind::GitHubFailed { http_status: 403 },
             format!("GitHub refused the request: {message}"),
+        ),
+        ApiError::Unfinished { message } => Failure::new(
+            ErrorKind::GitHubFailed { http_status: 200 },
+            format!("GitHub could not finish the request: {message}"),
         ),
         ApiError::SsoRequired { url } => Failure::new(
             ErrorKind::SsoRequired { url },
