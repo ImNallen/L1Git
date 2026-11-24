@@ -11,7 +11,9 @@ import type {
   UndoHistory,
   WorktreeStatus,
 } from "../domain/repository";
-import type { GhProbe, HostStatus } from "../domain/host";
+import type { GhProbe, HostProblem, HostStatus } from "../domain/host";
+import type { PullRequestList, PullRequests } from "../domain/pullRequest";
+import type { GitHubRepository } from "../domain/repository";
 import { mergeSelectionSchema } from "../domain/merge";
 import { probeOf } from "../domain/inProgress";
 import type { MergeState } from "../domain/merge";
@@ -58,8 +60,18 @@ export type World = {
   pushes: Map<RepositoryRoot, PushAvailability>;
   /** What each typed path lists. An open repository lists itself. */
   directories: Map<string, DirectoryEntry[]>;
-  host: { status: HostStatus; probe: GhProbe };
+  host: {
+    status: HostStatus;
+    probe: GhProbe;
+    /** Each list by `pullsKey`. GitHub does not find a repository without one. */
+    pulls: Map<string, PullRequests>;
+  };
 };
+
+export const pullsKey = (name: string, list: PullRequestList) =>
+  `${name} ${list}`;
+const repositoryName = ({ owner, repo }: GitHubRepository) =>
+  `${owner}/${repo}`;
 
 export const FAKE_HOME = "/fixture/home";
 
@@ -118,6 +130,7 @@ export function createWorld(): World {
         access: "private",
         path: "/opt/homebrew/bin/gh",
       },
+      pulls: new Map(),
     },
   };
 }
@@ -322,9 +335,22 @@ const handlers: Record<string, Handler> = {
   redo: (request, world) => step(request, world, "redo"),
 };
 
+class HostRefusal {
+  constructor(readonly problem: HostFailure) {}
+}
+
+type HostFailure = Pick<HostProblem, "kind" | "message"> &
+  Record<string, unknown>;
+
+/** What a held or failed host request names, for `hold` and `failHost`. */
+const hostPath = (request: BridgeRequest) =>
+  request.repository === undefined
+    ? undefined
+    : repositoryName(request.repository as GitHubRepository);
+
 const hostHandlers: Record<
   string,
-  (request: BridgeRequest, host: World["host"]) => GhProbe | undefined
+  (request: BridgeRequest, host: World["host"]) => unknown
 > = {
   status: () => undefined,
   verify: () => undefined,
@@ -343,6 +369,17 @@ const hostHandlers: Record<
       },
     };
     return undefined;
+  },
+  pullRequests: (request, host) => {
+    const name = String(hostPath(request));
+    const found = host.pulls.get(
+      pullsKey(name, request.list as PullRequestList),
+    );
+    if (found) return found;
+    throw new HostRefusal({
+      kind: "notFound",
+      message: `L1 Git can't find ${name} on GitHub.`,
+    });
   },
   disconnect: (_, host) => {
     host.status = {
@@ -393,6 +430,7 @@ export function createBridge(world: World = createWorld()) {
   const unexpected: string[] = [];
   const holds: Hold[] = [];
   const overrides = new Map<string, Handler>();
+  const hostFailures: { name: string | undefined; problem: HostFailure }[] = [];
   let active = 0;
 
   function answer(request: BridgeRequest): unknown {
@@ -416,8 +454,33 @@ export function createBridge(world: World = createWorld()) {
       unexpected.push(`host ${request.op}`);
       throw new Error(`The fake bridge has no host answer for ${request.op}.`);
     }
-    const data = handler(request, world.host);
-    return { ok: true, op: request.op, data, status: world.host.status };
+    const { status } = world.host;
+    try {
+      const failure = hostFailures.findLast(
+        ({ name }) => name === undefined || name === hostPath(request),
+      );
+      if (failure && hostPath(request) !== undefined)
+        throw new HostRefusal(failure.problem);
+      const data = handler(request, world.host);
+      return { ok: true, op: request.op, data, status: world.host.status };
+    } catch (error) {
+      if (error instanceof HostRefusal)
+        return { ok: false, error: { ...error.problem, status } };
+      throw error;
+    }
+  }
+
+  async function held(op: string, path: string | undefined) {
+    const hold = holds.find(
+      (candidate) =>
+        !candidate.taken &&
+        candidate.op === op &&
+        (candidate.path === undefined || candidate.path === path),
+    );
+    if (!hold) return;
+    hold.taken = true;
+    hold.arrived.resolve();
+    await hold.gate.promise;
   }
 
   async function reply(answer: () => unknown): Promise<Response> {
@@ -446,20 +509,11 @@ export function createBridge(world: World = createWorld()) {
     const request = JSON.parse(init.body) as BridgeRequest;
     if (input === "/api/host") {
       hostLog.push(request);
+      await held(request.op, hostPath(request));
       return reply(() => answerHost(request));
     }
     log.push(request);
-    const hold = holds.find(
-      (candidate) =>
-        !candidate.taken &&
-        candidate.op === request.op &&
-        (candidate.path === undefined || candidate.path === request.path),
-    );
-    if (hold) {
-      hold.taken = true;
-      hold.arrived.resolve();
-      await hold.gate.promise;
-    }
+    await held(request.op, request.path);
     return reply(() => answer(request));
   }
 
@@ -507,6 +561,14 @@ export function createBridge(world: World = createWorld()) {
       return () => {
         if (previous) overrides.set(op, previous);
         else overrides.delete(op);
+      };
+    },
+    /** Fails every read of a repository on GitHub, or only of `name`. */
+    failHost(problem: HostFailure, name?: string) {
+      const failure = { name, problem };
+      hostFailures.push(failure);
+      return () => {
+        hostFailures.splice(hostFailures.indexOf(failure), 1);
       };
     },
     respond(

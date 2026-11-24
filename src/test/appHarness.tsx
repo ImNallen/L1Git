@@ -263,6 +263,7 @@ async function loadModules() {
 type Modules = Awaited<ReturnType<typeof loadModules>>;
 
 const IMPLICIT_ROLES: Record<string, string> = {
+  A: "link",
   BUTTON: "button",
   DIALOG: "dialog",
   TEXTAREA: "textbox",

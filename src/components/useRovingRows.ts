@@ -4,28 +4,32 @@ const ROW = "button:not(.branch-visibility, :disabled)";
 const SKIPPED = ".branch-visibility";
 
 /**
- * Makes the sidebar one Tab stop. Up and Down step through its rows, Home and
- * End jump to the ends, Right expands and Left collapses or returns to the
- * repository.
+ * Makes the sidebar, or another list of rows, one Tab stop. Up and Down step
+ * through its rows, Home and End jump to the ends, Right expands and Left
+ * collapses or returns to the repository. `letters` adds J and K for Down and Up.
  */
-export function useRovingRows(container: RefObject<HTMLElement | null>) {
+export function useRovingRows(
+  container: RefObject<HTMLElement | null>,
+  row = ROW,
+  letters = false,
+) {
   useEffect(() => {
     const root = container.current;
     if (!root) return;
     let current: HTMLElement | null = null;
     const rows = () =>
-      [...root.querySelectorAll<HTMLElement>(ROW)].filter(
-        (row) => !row.closest("[inert]"),
+      [...root.querySelectorAll<HTMLElement>(row)].filter(
+        (each) => !each.closest("[inert]"),
       );
 
     function sync() {
       const all = rows();
       if (!current || !all.includes(current))
         current =
-          all.find((row) => row.getAttribute("aria-current") === "true") ??
+          all.find((each) => each.getAttribute("aria-current") === "true") ??
           all[0] ??
           null;
-      for (const row of all) row.tabIndex = row === current ? 0 : -1;
+      for (const each of all) each.tabIndex = each === current ? 0 : -1;
       for (const skipped of root!.querySelectorAll<HTMLElement>(SKIPPED))
         skipped.tabIndex = -1;
     }
@@ -40,7 +44,7 @@ export function useRovingRows(container: RefObject<HTMLElement | null>) {
 
     function onFocusIn(event: FocusEvent) {
       const target = event.target;
-      if (!(target instanceof HTMLElement) || !target.matches(ROW)) return;
+      if (!(target instanceof HTMLElement) || !target.matches(row)) return;
       current = target;
       sync();
     }
@@ -49,13 +53,14 @@ export function useRovingRows(container: RefObject<HTMLElement | null>) {
       const target = event.target;
       if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey)
         return;
-      if (!(target instanceof HTMLElement) || !target.matches(ROW)) return;
+      if (!(target instanceof HTMLElement) || !target.matches(row)) return;
       const all = rows();
       const at = all.indexOf(target);
       const toggle = toggleOf(target);
       const expanded = toggle?.getAttribute("aria-expanded");
       let next: HTMLElement | null | undefined;
-      switch (event.key) {
+      const letter = { j: "ArrowDown", k: "ArrowUp" }[event.key];
+      switch ((letters && letter) || event.key) {
         case "ArrowDown":
           next = all[at + 1];
           break;
@@ -110,5 +115,5 @@ export function useRovingRows(container: RefObject<HTMLElement | null>) {
       root.removeEventListener("focusin", onFocusIn);
       root.removeEventListener("keydown", onKeyDown);
     };
-  }, [container]);
+  }, [container, row, letters]);
 }

@@ -61,10 +61,10 @@ export const pullRequestUrl = (
   number: number,
 ) => `https://github.com/${owner}/${repo}/pull/${number}`;
 
-const authorName = ({ author }: Pick<PullRequestSummary, "author">) =>
+export const authorName = ({ author }: Pick<PullRequestSummary, "author">) =>
   author ?? "ghost";
 
-const stateLabels = {
+export const stateLabels = {
   draft: "Draft",
   failing: "Checks failing",
   running: "Checks running",
@@ -93,7 +93,7 @@ export function rowState({
   return checks && met && mergeable === "mergeable" ? "ready" : "open";
 }
 
-const reviewLabels = {
+export const reviewLabels = {
   yours: "Your review",
   approved: "Approved",
   changesRequested: "Changes requested",
@@ -131,7 +131,7 @@ export function checksOf({
   return { kind: "none", label: "–" };
 }
 
-const changeSegments = 5;
+export const changeSegments = 5;
 
 /** How many of the bar's segments are added lines. Null when nothing changed. */
 export function addedSegments({
@@ -143,7 +143,7 @@ export function addedSegments({
 }
 
 /** When the row last changed, or when it merged. */
-const rowTime = ({
+export const rowTime = ({
   state,
   updatedAt,
 }: Pick<PullRequestSummary, "state" | "updatedAt">) =>
@@ -152,7 +152,7 @@ const rowTime = ({
 const isDraft = ({ state }: PullRequestSummary) =>
   state.kind === "open" && state.draft;
 
-const viewLabels = {
+export const viewLabels = {
   open: "All open",
   review: "Needs your review",
   mine: "Created by you",
@@ -160,6 +160,7 @@ const viewLabels = {
   merged: "Recently merged",
 } as const;
 export type View = keyof typeof viewLabels;
+export const views = Object.keys(viewLabels) as View[];
 
 const inView: Record<View, (pull: PullRequestSummary) => boolean> = {
   open: () => true,
@@ -169,7 +170,7 @@ const inView: Record<View, (pull: PullRequestSummary) => boolean> = {
   merged: () => true,
 };
 
-const listOf = (view: View): PullRequestList =>
+export const listOf = (view: View): PullRequestList =>
   view === "merged" ? "recentlyMerged" : "open";
 
 const sortLabels = {
@@ -180,6 +181,7 @@ const sortLabels = {
   largest: "Largest change",
 } as const;
 export type Sort = keyof typeof sortLabels;
+export const sorts = Object.keys(sortLabels) as Sort[];
 
 export const sortLabel = (sort: Sort, view: View) =>
   sort === "recent" && view === "merged" ? viewLabels.merged : sortLabels[sort];
@@ -199,8 +201,21 @@ const order: Record<
   largest: (left, right) => size(right) - size(left),
 };
 
-type ReviewFilter = Exclude<ReviewPill, "draft"> | "none";
-type ChecksFilter = Exclude<ChecksKind, "noAccess">;
+export type ReviewFilter = Exclude<ReviewPill, "draft"> | "none";
+export const reviewFilters: Record<ReviewFilter, string> = {
+  yours: reviewLabels.yours,
+  approved: reviewLabels.approved,
+  changesRequested: reviewLabels.changesRequested,
+  required: reviewLabels.required,
+  none: "No review",
+};
+export type ChecksFilter = Exclude<ChecksKind, "noAccess">;
+export const checksFilters: Record<ChecksFilter, string> = {
+  passed: "Passed",
+  failing: "Failing",
+  running: "Running",
+  none: "No checks",
+};
 
 type Filters = {
   query: string;
@@ -209,7 +224,7 @@ type Filters = {
   review: ReviewFilter | null;
   checks: ChecksFilter | null;
 };
-const noFilters: Filters = {
+export const noFilters: Filters = {
   query: "",
   labels: new Set(),
   author: null,
@@ -249,7 +264,7 @@ function matching(filters: Filters): (pull: PullRequestSummary) => boolean {
       ).includes(needle));
 }
 
-type Row = {
+export type Row = {
   key: string;
   repository: ListedRepository;
   pull: PullRequestSummary;
@@ -339,7 +354,7 @@ const nothings: Record<
   },
 };
 
-type Group = {
+export type Group = {
   /** Null for the one group of a list that is not grouped. */
   repository: ListedRepository | null;
   rows: readonly Row[];
@@ -421,7 +436,10 @@ export function listModel(
     section.cut === null || groups.includes(section) ? [] : [section.cut],
   );
   const answered = reads.filter(({ read }) => read.value !== null);
-  const across = repositories(answered.length);
+  const across =
+    answered.length < checked.length
+      ? `${answered.length.toLocaleString()} of ${repositories(checked.length)}`
+      : repositories(checked.length);
 
   function body(): ListModel["body"] {
     if (rows.length > 0)
@@ -565,13 +583,15 @@ export function notices(
       { kind: "offline", at: times.length > 0 ? Math.max(...times) : null },
     ];
   }
-  const connection = new Set(
-    failed.flatMap(({ problem }) => (shared(problem) ? [problem.message] : [])),
+  const connection = new Map(
+    failed.flatMap(({ problem }) =>
+      shared(problem) ? [[problem.kind, problem.message] as const] : [],
+    ),
   );
   const own = failed.filter(({ problem }) => !shared(problem));
   const rest = own.length - shownProblems;
   return [
-    ...[...connection].map(
+    ...[...connection.values()].map(
       (message): Notice => ({ kind: "connection", message }),
     ),
     ...own.slice(0, shownProblems).map(

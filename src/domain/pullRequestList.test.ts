@@ -431,7 +431,7 @@ describe("the filters", () => {
 
   it("say how much of the view is left", () => {
     expect(model(readOf, { query: "12" }).scope).toBe(
-      "2 of 4 pull requests across 1 repository",
+      "2 of 4 pull requests across 1 of 2 repositories",
     );
   });
 
@@ -564,7 +564,7 @@ describe("without rows", () => {
       detail: "No pull request is open in 2 repositories.",
     });
     expect(body({ app: holds(), site: failing("notFound") })).toMatchObject({
-      detail: "No pull request is open in 1 repository.",
+      detail: "No pull request is open in 1 of 2 repositories.",
     });
   });
 
@@ -641,6 +641,15 @@ describe("the notices", () => {
       { kind: "connection", message: "rateLimited." },
       { kind: "repository", repository: api },
     ]);
+  });
+
+  it("say the hourly limit once, though its minutes tick between reads", () => {
+    expect(
+      told({
+        app: failing("rateLimited", { message: "In 25 minutes.", resetAt: 9 }),
+        site: failing("rateLimited", { message: "In 24 minutes.", resetAt: 9 }),
+      }),
+    ).toEqual([{ kind: "connection", message: "In 24 minutes." }]);
   });
 
   it("name three repositories and count the rest", () => {

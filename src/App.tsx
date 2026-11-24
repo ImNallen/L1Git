@@ -1,5 +1,6 @@
 import { useAppearance } from "./appearance";
 import { useBranchVisibility } from "./branchVisibility";
+import { PullRequests } from "./components/PullRequests";
 import { useUpdateRestart } from "./components/UpdateRestart";
 import { useExpandedRepositories } from "./expandedRepositories";
 import { useFetchSettings } from "./fetchSettings";
@@ -48,8 +49,9 @@ import { useMergePanel } from "./shell/useMergePanel";
 import { useResolutionDrafts } from "./shell/useResolutionDrafts";
 import { useNavigation } from "./shell/useNavigation";
 import { usePalette, useShortcuts } from "./shell/usePalette";
+import { usePullRequests } from "./shell/usePullRequests";
 import { useRefWrites, useUndoSteps } from "./shell/useRefWrites";
-import { useSettingsScreen } from "./shell/useSettingsScreen";
+import { useScreen } from "./shell/useScreen";
 import { useStaging } from "./shell/useStaging";
 import { useWriteLoop } from "./shell/useWriteLoop";
 import { workspaceView } from "./shell/workspaceView";
@@ -72,8 +74,17 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     fetchSettings.intervalMinutes,
   );
   const layout = useLayout(view.shown);
-  const settings = useSettingsScreen(layout);
+  const screen = useScreen(layout);
   const focus = useFocus(layout.sidebarToggleRef);
+  const pulls = usePullRequests({
+    host,
+    entries: app.catalog.entries,
+    overview: overview.view,
+    intervalMinutes: fetchSettings.intervalMinutes,
+    screen,
+    focus,
+    layout,
+  });
   const palette = usePalette(focus);
   const expansion = useExpandedRepositories(app.catalog);
   const columns = useHistoryColumns();
@@ -111,7 +122,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     visibility,
     expansion,
     sidebarRefs: sidebarRefs.refs,
-    settings,
+    screen,
     focus,
     layout,
     paletteOpen: palette.open,
@@ -168,7 +179,8 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   });
   const undo = useUndoSteps({ writes, nav, focus });
   const actions = composeActions(
-    settings.actions,
+    screen.actions,
+    pulls.actions,
     layout.actions,
     palette.actions,
     history.actions,
@@ -190,6 +202,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   );
 
   const { commands } = actions;
+  const onPulls = screen.place === "pullRequests";
   const persistenceError =
     app.persistenceError ??
     expansion.persistenceError ??
@@ -204,7 +217,8 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
       <SidebarToggle layout={layout} toggle={commands.toggleSidebar} />
       <Sidebar
         layout={layout}
-        settings={settings}
+        screen={screen}
+        pulls={pulls}
         commands={commands}
         entries={app.catalog.entries}
         expansion={expansion}
@@ -222,7 +236,18 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
         restart={restart}
       />
       <main className="workspace">
-        <div className="repository-workspace">
+        {onPulls && (
+          <PullRequests
+            ref={focus.pullRequestsRef}
+            status={host.status}
+            hostProblem={host.problem}
+            onCheckHost={() => void host.refresh()}
+            state={pulls}
+            onSignIn={() => commands.openSettings("hosts")}
+            onLeave={commands.showHistory}
+          />
+        )}
+        <div className="repository-workspace" hidden={onPulls}>
           <div className="repository-content">
             <Toolbar
               actions={actions}
@@ -271,11 +296,13 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
           />
         </div>
       </main>
-      <InspectorToggle
-        layout={layout}
-        disabled={!view.shown}
-        toggle={commands.toggleInspector}
-      />
+      {!onPulls && (
+        <InspectorToggle
+          layout={layout}
+          disabled={!view.shown}
+          toggle={commands.toggleInspector}
+        />
+      )}
       {/* Overlays in this order, so dialogs opened in one commit stack as before. */}
       <RetainedResolutionHost
         drafts={drafts}
@@ -284,7 +311,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
         writes={writes}
       />
       <SettingsHost
-        settings={settings}
+        settings={screen}
         appearance={appearance}
         fetching={fetchSettings}
         updates={updates}

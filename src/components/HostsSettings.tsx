@@ -1,52 +1,17 @@
 import { useState } from "react";
 import { LoaderCircle, Unplug } from "lucide-react";
-import type { Access, HostStatus } from "../domain/host";
+import type { Access } from "../domain/host";
 import type { Host } from "../host";
 import { settingsDestinations } from "../settingsSearch";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { GitHubSignInDialog } from "./GitHubSignInDialog";
-import { WorkspaceIcon } from "./WorkspaceIcon";
-
-type Ended = NonNullable<
-  Extract<HostStatus["github"], { kind: "notConnected" }>["ended"]
->;
+import { NoHost } from "./NoHost";
 
 const access: Record<Access, string> = {
   private: "Reads private and public repositories.",
   publicOnly: "Reads public repositories only.",
   perRepository: "Reads the repositories this token allows.",
 };
-
-function endedText({ login, reason }: Ended) {
-  const account = login === null ? "" : ` for @${login}`;
-  switch (reason) {
-    case "revoked":
-      return `GitHub no longer accepts L1 Git's sign-in${account}.`;
-    case "tokenMissing":
-      return `L1 Git's sign-in${account} is no longer in the system keychain.`;
-    case "unreadable":
-      return "L1 Git could not read its saved GitHub connection.";
-    default: {
-      const exhaustive: never = reason;
-      return exhaustive;
-    }
-  }
-}
-
-function NoHostCard({ onSignIn }: { onSignIn: () => void }) {
-  return (
-    <div className="no-host-card">
-      <span className="no-host-glyph">
-        <WorkspaceIcon name="SettingsHosts" />
-      </span>
-      <h3>Connect a host to see pull requests</h3>
-      <p>Sign in once so L1 Git can read pull requests from GitHub.</p>
-      <button type="button" className="button primary" onClick={onSignIn}>
-        Sign in to GitHub
-      </button>
-    </div>
-  );
-}
 
 export function HostsSettings({ host }: { host: Host }) {
   const [signingIn, setSigningIn] = useState(false);
@@ -75,14 +40,10 @@ export function HostsSettings({ host }: { host: Host }) {
                 Checking the GitHub connection…
               </p>
             ) : github.kind === "notConnected" ? (
-              <>
-                {github.ended && (
-                  <p className="settings-error hosts-ended">
-                    {endedText(github.ended)}
-                  </p>
-                )}
-                <NoHostCard onSignIn={() => setSigningIn(true)} />
-              </>
+              <NoHost
+                ended={github.ended}
+                onSignIn={() => setSigningIn(true)}
+              />
             ) : (
               <div className="settings-row-group">
                 <div className="settings-row">

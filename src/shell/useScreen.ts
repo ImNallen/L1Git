@@ -1,47 +1,60 @@
 import { useCallback, useRef, useState } from "react";
 import type { RefObject } from "react";
 import { flushSync } from "react-dom";
-import type { Screen, SettingsSection } from "../actions";
+import type { Place, Screen, SettingsSection } from "../actions";
 import { defineSlice } from "./actionSlices";
 import type { ActionSlice } from "./actionSlices";
 import type { Layout } from "./useLayout";
 
-export type SettingsScreen = {
+export type ScreenState = {
   screen: Screen;
+  /** Where leaving Settings returns to. */
+  place: Place;
+  goTo: (place: Place) => void;
   section: SettingsSection;
   setSection: (section: SettingsSection) => void;
   settingsRef: RefObject<HTMLButtonElement | null>;
-  /** Back to the repository screen, focusing Settings, or the sidebar toggle while the sidebar is closed. */
+  /** Back to the place, focusing Settings, or the sidebar toggle while the sidebar is closed. */
   leave: () => void;
   /** Back to the repository screen without moving focus. */
   toRepository: () => void;
-  actions: ActionSlice<"screen" | "section", "openSettings" | "leaveSettings">;
+  actions: ActionSlice<
+    "screen" | "place" | "section",
+    "openSettings" | "leaveSettings"
+  >;
 };
 
-export function useSettingsScreen({
+export function useScreen({
   sidebarOpen,
   sidebarToggleRef,
-}: Pick<Layout, "sidebarOpen" | "sidebarToggleRef">): SettingsScreen {
-  const [screen, setScreen] = useState<Screen>("repository");
+}: Pick<Layout, "sidebarOpen" | "sidebarToggleRef">): ScreenState {
+  const [place, goTo] = useState<Place>("repository");
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [section, setSection] = useState<SettingsSection>("general");
   const settingsRef = useRef<HTMLButtonElement>(null);
+  const screen: Screen = settingsOpen ? "settings" : place;
   const leave = useCallback(() => {
-    flushSync(() => setScreen("repository"));
+    flushSync(() => setSettingsOpen(false));
     (sidebarOpen ? settingsRef : sidebarToggleRef).current?.focus();
   }, [sidebarOpen, sidebarToggleRef]);
   return {
     screen,
+    place,
+    goTo,
     section,
     setSection,
     settingsRef,
     leave,
-    toRepository: () => setScreen("repository"),
+    toRepository: () => {
+      setSettingsOpen(false);
+      goTo("repository");
+    },
     actions: defineSlice({
-      context: { screen, section },
+      context: { screen, place, section },
       commands: {
         openSettings: (next?: SettingsSection) => {
           if (next) setSection(next);
-          setScreen("settings");
+          setSettingsOpen(true);
         },
         leaveSettings: leave,
       },
