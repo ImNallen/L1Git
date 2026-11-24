@@ -1,0 +1,58 @@
+import { expect, it } from "vitest";
+import { createReadQueue } from "./pullRequestQueue";
+import type { ListRequest } from "./pullRequestQueue";
+
+const open = (name: string): ListRequest => ({
+  repository: { key: name, name, github: { owner: "octo", repo: name } },
+  list: "open",
+});
+const all = (...names: string[]) => names.map(open);
+const settled = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+function setup() {
+  const started: string[] = [];
+  const ends = new Map<string, (passed: boolean) => void>();
+  const queue = createReadQueue(({ repository }) => {
+    started.push(repository.name);
+    return new Promise((resolve) => ends.set(repository.name, resolve));
+  });
+  return {
+    queue,
+    started,
+    end(name: string, passed = true) {
+      ends.get(name)?.(passed);
+      return settled();
+    },
+  };
+}
+
+it("reads the first alone, then four at a time, in the order asked", async () => {
+  const { queue, started, end } = setup();
+  queue.add(all("a", "b", "c", "d", "e", "f"));
+  expect(started).toEqual(["a"]);
+  await end("a");
+  expect(started).toEqual(["a", "b", "c", "d", "e"]);
+  await end("c");
+  expect(started).toEqual(["a", "b", "c", "d", "e", "f"]);
+});
+
+it("asks for a waiting or running read once, and for an ended one again", async () => {
+  const { queue, started, end } = setup();
+  queue.add(all("a", "b"));
+  queue.add([...all("a", "b"), { ...open("b"), list: "recentlyMerged" }]);
+  await end("a");
+  expect(started).toEqual(["a", "b", "b"]);
+  queue.add(all("a"));
+  expect(started).toEqual(["a", "b", "b", "a"]);
+});
+
+it("drops the rest when the keychain stays locked, and tries alone again", async () => {
+  const { queue, started, end } = setup();
+  queue.add(all("a", "b", "c"));
+  await end("a", false);
+  expect(started).toEqual(["a"]);
+  queue.add(all("a", "b", "c"));
+  expect(started).toEqual(["a", "a"]);
+  await end("a");
+  expect(started).toEqual(["a", "a", "b", "c"]);
+});
