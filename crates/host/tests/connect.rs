@@ -193,6 +193,23 @@ fn rate_limit_reports_when_it_resets() {
 }
 
 #[test]
+fn an_answer_is_read_whole_up_to_8_mib_and_refused_beyond() {
+    let cap = 8 * 1024 * 1024;
+    let world = World::new();
+    let user = Reply::user("octo", 1, Some("repo"));
+    world.github.answer("gho_octo", user.clone().padded(cap));
+    let connected = world.send(connect("octo")).unwrap();
+    assert_eq!(connected["status"]["github"]["login"], "octo");
+
+    world.github.answer("gho_octo", user.padded(cap + 1));
+    let error = world.send(json!({"op": "verify"})).unwrap_err();
+    assert_eq!(error["kind"], "gitHubFailed");
+    let message = error["message"].as_str().unwrap();
+    assert!(message.contains("too large"), "{message}");
+    assert_eq!(error["status"]["github"]["kind"], "connected");
+}
+
+#[test]
 fn redirects_never_carry_the_token() {
     let world = World::new();
     let elsewhere = FakeGitHub::start();
