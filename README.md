@@ -16,6 +16,7 @@ A desktop Git client for macOS, Linux, and Windows. Browse your repositories, re
 - Merge a selected local or remote branch into the current working copy after reviewing both refs, both commit IDs, and the files the merge will conflict in. Fast-forward when possible, or resolve text conflicts and finish or abort a merge commit.
 - Cherry-pick or revert one commit from the history menu or the command palette, after reviewing what it will do. A clean result commits straight away, and a conflict opens the resolver with Finish and Abort. Undo removes the new commit and its file changes.
 - Undo and redo local edits made through the app, including commits and discarded changes, from the notice that a commit, a discard, or another history change shows, or from the **More** menu.
+- See the open and recently merged pull requests of all your saved GitHub repositories in one list. Filter, sort, and search it, and open a pull request on GitHub.
 - Choose light or dark themes, create your own, or import themes from VS Code and Open VSX.
 
 L1 Git does not force-push, and it does not resolve rebase conflicts. A Pull (Rebase) that hits a conflict is aborted and changes nothing. Fetch, fast-forward, push, remote setup, and merge Start, Finish, and Abort have no Undo entry. Creating and removing a worktree have no Undo entry either, and removing one drops the Undo entries made in it. The fetch and fast-forward that a pull runs have no Undo entry either. Pull (Rebase) has Undo and Redo. Merge resolution edits have Undo and Redo until you finish or abort.
@@ -31,6 +32,8 @@ Select a branch to browse its history. Double-click a branch to check it out. Se
 L1 Git fetches saved repositories at startup and every 15 minutes by default. To change the interval, open **Settings**, then **General**, and set **Background fetch** under **Fetching**. Remote operations use your existing Git credentials and SSH agent, with interactive prompts disabled.
 
 To connect GitHub, open **Settings**, then **Hosts**, and click **Sign in to GitHub**. With your consent, L1 Git copies the [GitHub CLI](https://cli.github.com)'s sign-in into your system keychain and uses it only to read from GitHub. **Disconnect** deletes that copy and leaves the GitHub CLI signed in.
+
+To see pull requests, click **Pull requests** beside **Settings** at the bottom of the sidebar. Press **Esc** to go back to the history.
 
 Press **Cmd+P** on macOS or **Ctrl+P** elsewhere to open the command palette.
 
