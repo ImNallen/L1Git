@@ -6,6 +6,7 @@ fragment row on PullRequest {
   closedAt
   headRefName
   baseRefName
+  createdAt
   updatedAt
   additions
   deletions

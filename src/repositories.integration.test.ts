@@ -4031,6 +4031,7 @@ describe("real Rust host contract", () => {
       mergeable: "mergeable",
       additions: 80,
       deletions: 8,
+      createdAt: "2026-11-18T09:02:51Z",
       updatedAt: "2026-11-24T15:33:39Z",
     });
     const merged = await ask({

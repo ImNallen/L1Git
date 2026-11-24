@@ -82,7 +82,8 @@ fn list(owner: &str, repo: &str, list: &str) -> Value {
 fn row(number: u32) -> Value {
     json!({
         "number": number, "title": "Fix it", "isDraft": false, "mergedAt": null, "closedAt": null,
-        "headRefName": "fix", "baseRefName": "main", "updatedAt": "2026-11-24T16:23:14Z",
+        "headRefName": "fix", "baseRefName": "main",
+        "createdAt": "2026-11-24T16:23:14Z", "updatedAt": "2026-11-24T16:23:14Z",
         "additions": 1, "deletions": 2, "mergeable": "MERGEABLE", "reviewDecision": null,
         "totalCommentsCount": 0, "viewerDidAuthor": false, "author": {"login": "hubot"},
         "labels": {"totalCount": 0, "nodes": []}, "latestOpinionatedReviews": {"totalCount": 0, "nodes": []},
@@ -158,6 +159,7 @@ fn open_pull_requests_answer_in_l1_gits_words() {
                 "comments": 23, "reviewRequested": true, "review": "changesRequested",
                 "checks": {"passed": 6, "failed": 1, "skipped": 0, "running": 6},
                 "mergeable": "mergeable", "additions": 80, "deletions": 8,
+                "createdAt": "2026-11-18T09:02:51Z",
                 "updatedAt": "2026-11-24T15:33:39Z",
             },
             {
@@ -167,6 +169,7 @@ fn open_pull_requests_answer_in_l1_gits_words() {
                 "comments": 2, "reviewRequested": false, "review": "required",
                 "checks": {"passed": 6, "failed": 0, "skipped": 7, "running": 0},
                 "mergeable": "mergeable", "additions": 123, "deletions": 0,
+                "createdAt": "2026-11-24T14:47:30Z",
                 "updatedAt": "2026-11-24T15:31:48Z",
             },
             {
@@ -176,6 +179,7 @@ fn open_pull_requests_answer_in_l1_gits_words() {
                 "comments": 1, "reviewRequested": false, "review": "approved",
                 "checks": {"passed": 12, "failed": 0, "skipped": 6, "running": 0},
                 "mergeable": "conflicting", "additions": 201, "deletions": 195,
+                "createdAt": "2026-11-21T10:33:08Z",
                 "updatedAt": "2026-11-23T14:11:27Z",
             },
             {
@@ -186,6 +190,7 @@ fn open_pull_requests_answer_in_l1_gits_words() {
                 "comments": 4, "reviewRequested": false, "review": "required",
                 "checks": {"passed": 0, "failed": 0, "skipped": 0, "running": 0},
                 "mergeable": "mergeable", "additions": 35, "deletions": 2,
+                "createdAt": "2026-11-02T22:15:44Z",
                 "updatedAt": "2026-11-20T01:58:16Z",
             },
         ]})
