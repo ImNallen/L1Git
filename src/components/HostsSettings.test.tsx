@@ -32,6 +32,8 @@ const prompt = {
   expiresInMs: 899_000,
   pollAfterMs: 5_000,
 };
+const accepted = () =>
+  container.querySelector(".settings-row [role='status']")?.textContent;
 const row = () =>
   container.querySelector(".settings-row")?.textContent?.replace(/\s+/g, " ");
 
@@ -188,7 +190,7 @@ it("asks consent for the probed account and connects as that account", async () 
   expect(sent.at(-1)).toEqual({ op: "connectGh", login: "hubot" });
   expect(dialog()).toBeNull();
   expect(row()).toBe(
-    "@octogithub.com · Reads public repositories only.Check connectionDisconnect",
+    "@octogithub.com · Reads public repositories only.GitHub accepted this sign-in just now.Check connectionDisconnect",
   );
 });
 
@@ -217,6 +219,20 @@ it("keeps the dialog open with Rust's message when connecting fails", async () =
   expect(container.querySelector("[role='alert']")).toBeNull();
 });
 
+it("says nothing was accepted when a check fails", async () => {
+  failures.set("verify", {
+    kind: "unreachable",
+    message:
+      "L1 Git could not reach GitHub. Check your connection, then try again.",
+  });
+  await show(connected());
+  await click("Check connection");
+  expect(accepted()).toBeUndefined();
+  expect(container.querySelector("[role='alert']")?.textContent).toBe(
+    "L1 Git could not reach GitHub. Check your connection, then try again.",
+  );
+});
+
 it.each([
   ["private", "Reads private and public repositories."],
   ["publicOnly", "Reads public repositories only."],
@@ -228,8 +244,10 @@ it.each([
 
 it("checks the connection, and disconnects only after confirming", async () => {
   await show(connected());
+  expect(accepted()).toBeUndefined();
   await click("Check connection");
   expect(ops()).toEqual(["status", "verify"]);
+  expect(accepted()).toBe("GitHub accepted this sign-in just now.");
   await click("Disconnect");
   expect(dialog()?.textContent).toContain(
     "L1 Git will delete its copy of the sign-in for @octo from the system keychain. The GitHub CLI stays signed in.",
