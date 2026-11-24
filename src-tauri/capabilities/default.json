@@ -10,7 +10,11 @@
     "core:webview:allow-set-webview-background-color",
     {
       "identifier": "opener:allow-open-url",
-      "allow": [{ "url": "https://*" }]
+      "allow": [
+        { "url": "https://*" },
+        { "url": "http://*" },
+        { "url": "mailto:*" }
+      ]
     }
   ]
 }
