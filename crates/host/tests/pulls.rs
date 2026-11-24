@@ -362,7 +362,6 @@ fn other_refusals_show_githubs_own_sentence() {
         withheld(vec![refusal("FORBIDDEN", json!(["repository"]))]),
         withheld(vec![refusal("INSUFFICIENT_SCOPES", json!(["repository"]))]),
         json!({"errors": [refusal("INSUFFICIENT_SCOPES", json!([]))]}),
-        json!({"data": null, "errors": [{"message": "GitHub says INSUFFICIENT_SCOPES."}]}),
     ] {
         let error = world.fails(Reply::graphql(answer));
         assert_eq!(error["kind"], "gitHubFailed");
@@ -370,6 +369,44 @@ fn other_refusals_show_githubs_own_sentence() {
         let message = error["message"].as_str().unwrap();
         assert!(message.contains("GitHub says "), "{message}");
     }
+}
+
+#[test]
+fn an_error_without_a_type_is_githubs_fault() {
+    let world = World::connected();
+    for errors in [
+        json!([{"message": "Something went wrong while executing your query."}]),
+        json!([{"type": null, "path": null, "message": "Something went wrong while executing your query."}]),
+    ] {
+        let error = world.fails(Reply::graphql(json!({"data": null, "errors": errors})));
+        assert_eq!(error["kind"], "gitHubFailed");
+        assert_eq!(error["httpStatus"], 200);
+        let message = error["message"].as_str().unwrap();
+        assert!(message.contains("could not finish"), "{message}");
+        assert!(message.contains("Something went wrong"), "{message}");
+    }
+}
+
+#[test]
+fn explicit_nulls_are_no_errors() {
+    let world = World::connected();
+    let mut answer = open("octo/app", vec![row(7)], &[]);
+    answer["errors"] = json!(null);
+    assert_eq!(world.opens(answer)["total"], 1);
+}
+
+#[test]
+fn a_list_github_left_out_is_not_an_empty_list() {
+    let world = World::connected();
+    let mut answer = open("octo/app", vec![], &[]);
+    answer["data"]["repository"]["pullRequests"] = json!({"totalCount": 59, "nodes": null});
+    assert_eq!(world.fails(Reply::graphql(answer))["kind"], "notFound");
+    let merged = json!({"data": {"repository": {"nameWithOwner": "octo/app"}, "merged": {"totalCount": 27, "nodes": null}}});
+    world.github.graphql([Reply::graphql(merged)]);
+    let error = world
+        .send(list("octo", "app", "recentlyMerged"))
+        .unwrap_err();
+    assert_eq!(error["kind"], "notFound");
 }
 
 #[test]
