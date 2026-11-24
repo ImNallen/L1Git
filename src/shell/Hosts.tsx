@@ -21,7 +21,7 @@ import type { ComposedActions } from "./actionSlices";
 import type { DiffPane } from "./useDiffPane";
 import type { Navigation } from "./useNavigation";
 import type { Palette } from "./usePalette";
-import type { SettingsScreen } from "./useSettingsScreen";
+import type { ScreenState } from "./useScreen";
 import type { Staging } from "./useStaging";
 
 export function StashHost({
@@ -136,7 +136,7 @@ export function SettingsHost({
   restart,
   host,
 }: {
-  settings: SettingsScreen;
+  settings: Pick<ScreenState, "screen" | "section" | "setSection" | "leave">;
   appearance: AppearanceState;
   fetching: ReturnType<typeof useFetchSettings>;
   updates: Updates;

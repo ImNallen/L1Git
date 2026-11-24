@@ -10,6 +10,7 @@
 @import "./styles/focus.css";
 @import "./styles/workspacePalette.css";
 @import "./styles/operation.css";
+@import "./styles/pullRequests.css";
 
 :root {
   font-family: "InterVariable", Inter, sans-serif;

@@ -2,17 +2,19 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 import type { FileDiffHandle } from "../components/FileDiffPane";
 import type { HistoryHandle } from "../components/History";
+import type { PullRequestsHandle } from "../components/PullRequests";
 import { focusIsShown } from "./dom";
 
 /**
  * Where focus goes when its element disappears: History, then the open diff,
- * then the sidebar toggle. History's and FileDiffPane's own focus effects
- * assume this order.
+ * then the pull requests, then the sidebar toggle. History's and FileDiffPane's
+ * own focus effects assume this order. A hidden one never takes focus.
  */
 export type Focus = {
   historyRef: RefObject<HistoryHandle | null>;
   fileDiffRef: RefObject<FileDiffHandle | null>;
-  /** Stable. The first of History, the diff, and the sidebar toggle that ends up focused and shown. */
+  pullRequestsRef: RefObject<PullRequestsHandle | null>;
+  /** Stable. The first of these and the sidebar toggle that ends up focused and shown. */
   fallback: () => void;
   /** On the next frame, `fallback()` unless a shown element has focus. */
   refocusIfLost: () => void;
@@ -29,10 +31,12 @@ export function useFocus(
   const [lostFocusChecks, setLostFocusChecks] = useState(0);
   const historyRef = useRef<HistoryHandle>(null);
   const fileDiffRef = useRef<FileDiffHandle>(null);
+  const pullRequestsRef = useRef<PullRequestsHandle>(null);
   const fallback = useCallback(() => {
     for (const focus of [
       () => historyRef.current?.focus(),
       () => fileDiffRef.current?.focus(),
+      () => pullRequestsRef.current?.focus(),
       () =>
         document
           .querySelector<HTMLElement>(".repository-open[aria-current='true']")
@@ -46,6 +50,7 @@ export function useFocus(
   return {
     historyRef,
     fileDiffRef,
+    pullRequestsRef,
     fallback,
     refocusIfLost: () =>
       requestAnimationFrame(() => {

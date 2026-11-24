@@ -14,6 +14,7 @@ import type { FullRef, Oid, RepositoryRoot } from "./domain/repository";
 
 const repositoryScreen: ActionContext = {
   screen: "repository",
+  place: "repository",
   section: "appearance",
   dialogOpen: false,
   adding: false,
@@ -53,6 +54,9 @@ function commands(): Commands {
     addRepository: vi.fn(),
     openSettings: vi.fn(),
     leaveSettings: vi.fn(),
+    showPullRequests: vi.fn(),
+    showHistory: vi.fn(),
+    searchPullRequests: vi.fn(),
     toggleSidebar: vi.fn(),
     toggleInspector: vi.fn(),
     fetch: vi.fn(),
@@ -210,12 +214,12 @@ describe("command palette", () => {
     );
     only?.run();
     expect(handlers.pullFastForwardOnly).toHaveBeenCalledOnce();
-    expect(titles(pulling, "pull")).toEqual([
+    expect(titles(pulling, "pull (")).toEqual([
       "Pull (Fast-forward if possible)",
       "Pull (Fast-forward only)",
       "Pull (Rebase)",
     ]);
-    expect(titles(repositoryScreen, "pull")).toEqual([]);
+    expect(titles(repositoryScreen, "pull (")).toEqual([]);
   });
 
   it("folds case and accents and says nothing for no match", () => {
@@ -229,6 +233,7 @@ describe("command palette", () => {
       "Fetch all",
       "Search history",
       "Add repository",
+      "Show pull requests",
       "Toggle sidebar",
       "Toggle commit inspector",
       "Open Settings",
@@ -280,6 +285,29 @@ describe("command palette", () => {
     ]);
   });
 
+  it("leaves only its own actions on the pull requests", () => {
+    const pulls: ActionContext = {
+      ...repositoryScreen,
+      screen: "pullRequests",
+      place: "pullRequests",
+    };
+    expect(titles(pulls, "")).toEqual([
+      "Back to history",
+      "Search pull requests",
+      "Toggle sidebar",
+      "Open Settings",
+      "Open General settings",
+      "Open Appearance settings",
+      "Open Hosts settings",
+    ]);
+    expect(titles(repositoryScreen, "pull requests")).toEqual([
+      "Show pull requests",
+    ]);
+    expect(titles({ ...pulls, screen: "settings" }, "back to")).toEqual([
+      "Back to pull requests",
+    ]);
+  });
+
   it("offers selection and comparison actions only when they apply", () => {
     const comparing: ActionContext = {
       ...repositoryScreen,
@@ -320,6 +348,7 @@ describe("command palette", () => {
       "Try feature/fetch-retry locally…",
       "Create tag…",
       "Add repository",
+      "Show pull requests",
       "Toggle sidebar",
       "Toggle commit inspector",
       "Open Settings",
@@ -353,6 +382,7 @@ describe("command palette", () => {
       "Show file history",
       "Show blame",
       "Show all branches",
+      "Show pull requests",
     ]);
     expect(titles(ready, "solo")).toEqual([
       "Stop soloing main",
@@ -670,6 +700,24 @@ describe("shortcuts", () => {
     const settings: ActionContext = { ...repositoryScreen, screen: "settings" };
     expect(id(settings, key("Escape"))).toBe("leaveSettings");
     expect(id({ ...settings, dialogOpen: true }, key("Escape"))).toBeNull();
+  });
+
+  it("leaves the pull requests with Escape and searches them with Cmd+F, unless a dialog or typing owns the key", () => {
+    const pulls: ActionContext = {
+      ...repositoryScreen,
+      screen: "pullRequests",
+      place: "pullRequests",
+      file: { hasCommit: true, lineActions: [] },
+    };
+    const find = key("f", { metaKey: true });
+    expect(id(pulls, key("Escape"))).toBe("showHistory");
+    expect(id({ ...pulls, typing: true }, key("Escape"))).toBeNull();
+    expect(id({ ...pulls, dialogOpen: true }, key("Escape"))).toBeNull();
+    expect(id(pulls, find)).toBe("searchPullRequests");
+    expect(id({ ...pulls, typing: true }, find)).toBe("searchPullRequests");
+    expect(id({ ...pulls, dialogOpen: true }, find)).toBeNull();
+    expect(id(pulls, key("z", { metaKey: true }))).toBeNull();
+    expect(id(pulls, key("o", { metaKey: true }))).toBeNull();
   });
 });
 

@@ -10,7 +10,7 @@ import { createPortal } from "react-dom";
 
 let exitingMenu: ReturnType<typeof captureExit> = null;
 
-const ITEMS = "[role=menuitem], [role=menuitemcheckbox]";
+const ITEMS = "[role^=menuitem]";
 
 export function opensMenu(event: ReactKeyboardEvent): boolean {
   return event.key === "ContextMenu" || (event.shiftKey && event.key === "F10");

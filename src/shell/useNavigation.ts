@@ -24,7 +24,7 @@ import type { Jump, JumpTarget, JumpView, UserSelection } from "./navigation";
 import type { Focus } from "./useFocus";
 import type { HistoryPane } from "./useHistoryPane";
 import type { Layout } from "./useLayout";
-import type { SettingsScreen } from "./useSettingsScreen";
+import type { ScreenState } from "./useScreen";
 import type { WorkspaceApi, WorkspaceView } from "./workspaceView";
 
 type RefStepTarget = RefStep & { root: RepositoryRoot };
@@ -93,7 +93,7 @@ export function useNavigation({
   visibility,
   expansion,
   sidebarRefs,
-  settings,
+  screen,
   focus: { historyRef, fallback, focusNamedBranch },
   layout: { sidebarToggleRef },
   paletteOpen,
@@ -108,7 +108,7 @@ export function useNavigation({
   };
   expansion: { setExpanded: (root: RepositoryRoot, expanded: boolean) => void };
   sidebarRefs: ReadonlyMap<RepositoryRoot, RefsState>;
-  settings: Pick<SettingsScreen, "toRepository">;
+  screen: Pick<ScreenState, "toRepository">;
   focus: Pick<Focus, "historyRef" | "fallback" | "focusNamedBranch">;
   layout: Pick<Layout, "sidebarToggleRef">;
   paletteOpen: boolean;
@@ -167,7 +167,7 @@ export function useNavigation({
   function showRepository(root: RepositoryRoot) {
     cancelGridFocus();
     setSidebarJump(null);
-    settings.toRepository();
+    screen.toRepository();
     expansion.setExpanded(root, true);
     if (root !== snapshot?.root) void app.selectRepository(root);
   }

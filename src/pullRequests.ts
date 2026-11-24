@@ -28,7 +28,7 @@ const unread: Read<never> = {
  * ends under one name was answered for that account. Only the same account
  * signing in twice within a second keeps its name.
  */
-function signIn(status: HostStatus | null): string | null {
+export function signIn(status: HostStatus | null): string | null {
   return status?.github.kind === "connected"
     ? `${status.github.login} ${status.github.connectedAt}`
     : null;

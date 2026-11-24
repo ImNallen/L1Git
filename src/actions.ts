@@ -15,7 +15,9 @@ import type { PartAction } from "./domain/operations";
 import type { BranchVisibility, VisibilityRule } from "./domain/visibility";
 import { shortOid } from "./domain/shortOid";
 
-export type Screen = "repository" | "settings";
+/** The two screens Settings opens over. */
+export type Place = "repository" | "pullRequests";
+export type Screen = Place | "settings";
 export const settingsSections = [
   { id: "general", label: "General", icon: "SettingsGeneral" },
   { id: "appearance", label: "Appearance", icon: "SettingsPalette" },
@@ -26,6 +28,7 @@ export type FileView = "unified" | "split" | "history" | "blame";
 
 export type ActionContext = {
   screen: Screen;
+  place: Place;
   section: SettingsSection;
   dialogOpen: boolean;
   adding: boolean;
@@ -75,6 +78,9 @@ export type Commands = {
   addRepository: () => void;
   openSettings: (section?: SettingsSection) => void;
   leaveSettings: () => void;
+  showPullRequests: () => void;
+  showHistory: () => void;
+  searchPullRequests: () => void;
   toggleSidebar: () => void;
   toggleInspector: () => void;
   fetch: () => void;
@@ -173,6 +179,9 @@ export type ActionId =
   | "cherryPick"
   | "revert"
   | "addRepository"
+  | "showPullRequests"
+  | "showHistory"
+  | "searchPullRequests"
   | "toggleSidebar"
   | "toggleInspector"
   | "openSettings"
@@ -191,6 +200,10 @@ type Action = {
 
 const onRepository = (context: ActionContext) =>
   context.screen === "repository";
+const onPullRequests = (context: ActionContext) =>
+  context.screen === "pullRequests";
+const outsideSettings = (context: ActionContext) =>
+  context.screen !== "settings";
 const keysFree = (context: ActionContext) =>
   onRepository(context) && !context.adding;
 const writable = (context: ActionContext) =>
@@ -584,6 +597,26 @@ export const actions: readonly Action[] = [
     run: (commands) => commands.addRepository(),
   },
   {
+    id: "showPullRequests",
+    title: "Show pull requests",
+    available: onRepository,
+    run: (commands) => commands.showPullRequests(),
+  },
+  {
+    id: "showHistory",
+    title: "Back to history",
+    shortcut: { key: "Escape", modifier: "unchecked", yieldsToTyping: true },
+    available: (context) => onPullRequests(context) && !context.dialogOpen,
+    run: (commands) => commands.showHistory(),
+  },
+  {
+    id: "searchPullRequests",
+    title: "Search pull requests",
+    shortcut: { key: "f", modifier: "platform" },
+    available: (context) => onPullRequests(context) && !context.dialogOpen,
+    run: (commands) => commands.searchPullRequests(),
+  },
+  {
     id: "toggleSidebar",
     title: "Toggle sidebar",
     available: () => true,
@@ -598,20 +631,24 @@ export const actions: readonly Action[] = [
   {
     id: "openSettings",
     title: "Open Settings",
-    available: onRepository,
+    available: outsideSettings,
     run: (commands) => commands.openSettings(),
   },
   ...settingsSections.map(
     ({ id, label }): Action => ({
       id: `${id}Settings`,
       title: `Open ${label} settings`,
-      available: (context) => onRepository(context) || context.section !== id,
+      available: (context) =>
+        outsideSettings(context) || context.section !== id,
       run: (commands) => commands.openSettings(id),
     }),
   ),
   {
     id: "leaveSettings",
-    title: "Back to repository",
+    title: (context) =>
+      context.place === "repository"
+        ? "Back to repository"
+        : "Back to pull requests",
     shortcut: { key: "Escape", modifier: "unchecked" },
     available: (context) =>
       context.screen === "settings" && !context.dialogOpen,

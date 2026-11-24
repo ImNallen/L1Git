@@ -1,10 +1,13 @@
+import { ArrowLeft, GitPullRequest } from "lucide-react";
 import { WorkspaceIcon } from "../components/WorkspaceIcon";
 import type { Commands } from "../actions";
 import { PaneDivider } from "../components/PaneDivider";
+import { PullRequestFilters } from "../components/PullRequestFilters";
 import { RepositoryTree } from "../components/RepositoryTree";
 import type { UpdateRestart } from "../components/UpdateRestart";
 import { UpdateAffordance } from "../components/UpdatesSettings";
 import type { OperationProbe } from "../domain/merge";
+import { waitingText } from "../domain/pullRequestList";
 import type { RecentRepository } from "../domain/recents";
 import type { RepositoryRoot } from "../domain/repository";
 import type { RootSync } from "../overview";
@@ -14,11 +17,13 @@ import { SIDEBAR_WIDTH } from "./useLayout";
 import type { Layout } from "./useLayout";
 import type { SidebarNavigation } from "./useNavigation";
 import type { SidebarRefActions } from "./useRefWrites";
-import type { SettingsScreen } from "./useSettingsScreen";
+import type { PullRequestsState } from "./usePullRequests";
+import type { ScreenState } from "./useScreen";
 
 export function Sidebar({
   layout,
-  settings,
+  screen,
+  pulls,
   commands,
   entries,
   expansion,
@@ -32,8 +37,9 @@ export function Sidebar({
   restart,
 }: {
   layout: Layout;
-  settings: Pick<SettingsScreen, "settingsRef">;
-  commands: Pick<Commands, "openSettings">;
+  screen: Pick<ScreenState, "place" | "settingsRef">;
+  pulls: PullRequestsState;
+  commands: Pick<Commands, "openSettings" | "showPullRequests" | "showHistory">;
   entries: RecentRepository[];
   expansion: {
     expanded: ReadonlySet<RepositoryRoot>;
@@ -48,16 +54,28 @@ export function Sidebar({
   updates: Updates;
   restart: UpdateRestart;
 }) {
+  const onPulls = screen.place === "pullRequests";
   return (
     <>
       <aside
         hidden={!layout.sidebarOpen}
         className="sidebar"
         style={{ width: layout.paneWidths.sidebar }}
-        aria-label="Repository sidebar"
+        aria-label={onPulls ? "Pull request sidebar" : "Repository sidebar"}
       >
         <div className="brand" data-tauri-drag-region />
-        <div className="repository-navigation">
+        {onPulls && (
+          <div className="repository-navigation">
+            <PullRequestFilters
+              model={pulls.model}
+              choices={pulls.choices}
+              reading={pulls.reading}
+              onChoose={pulls.choose}
+              onRefresh={pulls.refresh}
+            />
+          </div>
+        )}
+        <div className="repository-navigation" hidden={onPulls}>
           <RepositoryTree
             entries={entries}
             expanded={expansion.expanded}
@@ -74,7 +92,7 @@ export function Sidebar({
         </div>
         <footer className="sidebar-bottom">
           <button
-            ref={settings.settingsRef}
+            ref={screen.settingsRef}
             className="icon-button"
             aria-label="Settings"
             title="Settings"
@@ -82,6 +100,11 @@ export function Sidebar({
           >
             <WorkspaceIcon name="Settings" size={18} />
           </button>
+          <PullRequestsEntry
+            onPulls={onPulls}
+            pulls={pulls}
+            commands={commands}
+          />
           <UpdateAffordance updates={updates} restart={restart} />
         </footer>
       </aside>
@@ -97,5 +120,54 @@ export function Sidebar({
         />
       )}
     </>
+  );
+}
+
+/** The way to the pull requests, which widens into the way back. */
+function PullRequestsEntry({
+  onPulls,
+  pulls: { entryRef, waiting },
+  commands,
+}: {
+  onPulls: boolean;
+  pulls: Pick<PullRequestsState, "entryRef" | "waiting">;
+  commands: Pick<Commands, "showPullRequests" | "showHistory">;
+}) {
+  if (onPulls)
+    return (
+      <button
+        ref={entryRef}
+        className="pull-entry back"
+        title="Back to history"
+        onClick={commands.showHistory}
+      >
+        <ArrowLeft size={14} />
+        <span>Back to history</span>
+        <kbd aria-hidden="true">Esc</kbd>
+      </button>
+    );
+  const badge = waiting === null || waiting === 0 ? null : waiting;
+  return (
+    <button
+      ref={entryRef}
+      className="icon-button pull-entry"
+      aria-label={
+        badge === null
+          ? "Pull requests"
+          : `Pull requests, ${waitingText(badge)}`
+      }
+      onClick={commands.showPullRequests}
+    >
+      <GitPullRequest size={18} />
+      {badge !== null && (
+        <span className="pull-badge" aria-hidden="true">
+          {badge > 99 ? "99+" : badge}
+        </span>
+      )}
+      <span className="pull-entry-tooltip" aria-hidden="true">
+        Pull requests
+        {badge !== null && <small>{waitingText(badge)}</small>}
+      </span>
+    </button>
   );
 }
