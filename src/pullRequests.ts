@@ -16,7 +16,7 @@ export type Read<T> = {
   reading: boolean;
   problem: HostProblem | null;
 };
-const unread: Read<never> = {
+export const unread: Read<never> = {
   value: null,
   at: null,
   reading: false,

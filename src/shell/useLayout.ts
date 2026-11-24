@@ -51,6 +51,8 @@ export type Layout = {
   toolbarMenu: ToolbarMenu | null;
   setToolbarMenu: (menu: ToolbarMenu | null) => void;
   sidebarOpen: boolean;
+  inspectorOpen: boolean;
+  /** Open, with a commit to inspect. */
   inspectorVisible: boolean;
   paneWidths: PaneWidths;
   resizePane: (pane: Pane, width: number) => void;
@@ -102,6 +104,7 @@ export function useLayout(shown: WorkspaceView["shown"]): Layout {
     toolbarMenu,
     setToolbarMenu,
     sidebarOpen,
+    inspectorOpen,
     inspectorVisible: Boolean(shown && inspectorOpen),
     paneWidths,
     resizePane: (pane, width) =>

@@ -24,21 +24,25 @@ export function SidebarToggle({
 
 export function InspectorToggle({
   layout,
+  label,
+  visible,
   disabled,
   toggle,
 }: {
-  layout: Layout;
+  layout: Pick<Layout, "inspectorToggleRef">;
+  label: string;
+  visible: boolean;
   disabled: boolean;
   toggle: () => void;
 }) {
   return (
     <button
       ref={layout.inspectorToggleRef}
-      className={`icon-button inspector-toggle ${layout.inspectorVisible ? "toggled" : ""}`}
+      className={`icon-button inspector-toggle ${visible ? "toggled" : ""}`}
       disabled={disabled}
-      aria-label="Toggle commit inspector"
-      title="Toggle commit inspector"
-      aria-pressed={layout.inspectorVisible}
+      aria-label={label}
+      title={label}
+      aria-pressed={visible}
       onClick={toggle}
     >
       <PanelRight size={16} />

@@ -256,6 +256,8 @@ async function loadModules() {
       // test from racing that prefetch when it opens a file.
       import("../components/FileDiffPane"),
       import("../components/ConflictResolver"),
+      import("../components/Markdown"),
+      import("../components/Hunk"),
     ]);
   return { App, appearance, overview, draftProtection, resolutionDrafts };
 }
@@ -270,6 +272,9 @@ const IMPLICIT_ROLES: Record<string, string> = {
   NAV: "navigation",
   ASIDE: "complementary",
   SECTION: "region",
+  ARTICLE: "article",
+  H2: "heading",
+  H3: "heading",
 };
 
 function roleOf(element: Element): string | null {

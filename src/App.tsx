@@ -1,4 +1,4 @@
-import { useAppearance } from "./appearance";
+import { isPainted, useAppearance } from "./appearance";
 import { useBranchVisibility } from "./branchVisibility";
 import { PullRequests } from "./components/PullRequests";
 import { useUpdateRestart } from "./components/UpdateRestart";
@@ -203,6 +203,9 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
 
   const { commands } = actions;
   const onPulls = screen.place === "pullRequests";
+  const inspectorShown = onPulls
+    ? pulls.opened !== null && layout.inspectorOpen
+    : layout.inspectorVisible;
   const persistenceError =
     app.persistenceError ??
     expansion.persistenceError ??
@@ -212,7 +215,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
 
   return (
     <div
-      className={`app ${macNative ? "native-mac" : ""} ${layout.sidebarOpen ? "" : "sidebar-hidden"} ${layout.inspectorVisible ? "" : "inspector-hidden"}`}
+      className={`app ${macNative ? "native-mac" : ""} ${layout.sidebarOpen ? "" : "sidebar-hidden"} ${inspectorShown ? "" : "inspector-hidden"}`}
     >
       <SidebarToggle layout={layout} toggle={commands.toggleSidebar} />
       <Sidebar
@@ -243,7 +246,11 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
             hostProblem={host.problem}
             onCheckHost={() => void host.refresh()}
             state={pulls}
+            layout={layout}
+            theme={appearance.variant.appearance}
+            painted={isPainted(appearance.variant)}
             onSignIn={() => commands.openSettings("hosts")}
+            onBack={commands.closePullRequest}
             onLeave={commands.showHistory}
           />
         )}
@@ -296,10 +303,14 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
           />
         </div>
       </main>
-      {!onPulls && (
+      {(!onPulls || pulls.opened) && (
         <InspectorToggle
           layout={layout}
-          disabled={!view.shown}
+          label={
+            onPulls ? "Toggle pull request details" : "Toggle commit inspector"
+          }
+          visible={inspectorShown}
+          disabled={!onPulls && !view.shown}
           toggle={commands.toggleInspector}
         />
       )}

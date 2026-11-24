@@ -20,6 +20,7 @@ const repositoryScreen: ActionContext = {
   adding: false,
   searchable: true,
   inspectable: true,
+  pullRequestOpen: false,
   repository: {
     fetching: false,
     idle: true,
@@ -57,6 +58,7 @@ function commands(): Commands {
     showPullRequests: vi.fn(),
     showHistory: vi.fn(),
     searchPullRequests: vi.fn(),
+    closePullRequest: vi.fn(),
     toggleSidebar: vi.fn(),
     toggleInspector: vi.fn(),
     fetch: vi.fn(),
@@ -718,6 +720,21 @@ describe("shortcuts", () => {
     expect(id({ ...pulls, dialogOpen: true }, find)).toBeNull();
     expect(id(pulls, key("z", { metaKey: true }))).toBeNull();
     expect(id(pulls, key("o", { metaKey: true }))).toBeNull();
+  });
+
+  it("leaves a pull request for the list with Escape, and has no list to search", () => {
+    const pull: ActionContext = {
+      ...repositoryScreen,
+      screen: "pullRequests",
+      place: "pullRequests",
+      pullRequestOpen: true,
+    };
+    expect(id(pull, key("Escape"))).toBe("closePullRequest");
+    expect(id({ ...pull, typing: true }, key("Escape"))).toBeNull();
+    expect(id({ ...pull, dialogOpen: true }, key("Escape"))).toBeNull();
+    expect(id(pull, key("f", { metaKey: true }))).toBeNull();
+    const settings: ActionContext = { ...pull, screen: "settings" };
+    expect(id(settings, key("Escape"))).toBe("leaveSettings");
   });
 });
 

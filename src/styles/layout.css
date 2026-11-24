@@ -239,7 +239,8 @@ kbd {
     border-left: 1px solid var(--border-strong);
     box-shadow: -12px 0 40px var(--shadow-pane);
   }
-  .repository-workspace > .pane-divider {
+  .repository-workspace > .pane-divider,
+  .pull-requests > .pane-divider {
     display: none;
   }
 }

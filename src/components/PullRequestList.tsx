@@ -1,10 +1,10 @@
+import type { MouseEvent } from "react";
 import {
   CircleCheck,
   CircleDashed,
   CircleX,
   MessageSquare,
 } from "lucide-react";
-import { initials } from "../domain/author";
 import {
   addedSegments,
   authorName,
@@ -21,9 +21,9 @@ import type { Group, ListedRepository, Row } from "../domain/pullRequestList";
 import type { PullRequestSummary } from "../domain/pullRequest";
 import { shortRelativeTime } from "../domain/time";
 import { formatChangeCount } from "../historyColumns";
+import { native } from "../transport";
 import { PullRequestIcon } from "./PullRequestIcon";
-
-const plainName = (login: string) => login.replace(/\[bot\]$/, "");
+import { Avatar } from "./PullRequestParts";
 
 const checkIcons = {
   passed: CircleCheck,
@@ -90,7 +90,26 @@ function rowName(repository: ListedRepository, pull: PullRequestSummary) {
     .join(", ");
 }
 
-function PullRequestRow({ row: { repository, pull } }: { row: Row }) {
+type Open = (row: Row, link: HTMLAnchorElement) => void;
+
+const plainly = ({ metaKey, ctrlKey, shiftKey, altKey }: MouseEvent) =>
+  !metaKey && !ctrlKey && !shiftKey && !altKey;
+
+/** The app's opener takes a click with Control, and leaves the rest to nobody. */
+function openOutside(event: MouseEvent<HTMLAnchorElement>) {
+  if (!native) return;
+  event.preventDefault();
+  event.currentTarget.dispatchEvent(
+    new window.MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+      ctrlKey: true,
+    }),
+  );
+}
+
+function PullRequestRow({ row, onOpen }: { row: Row; onOpen: Open }) {
+  const { repository, pull } = row;
   const state = rowState(pull);
   const pill = reviewPill(pull);
   const author = authorName(pull);
@@ -103,6 +122,15 @@ function PullRequestRow({ row: { repository, pull } }: { row: Row }) {
       target="_blank"
       rel="noreferrer"
       aria-label={rowName(repository, pull)}
+      onClick={(event) => {
+        if (event.metaKey) openOutside(event);
+        if (!plainly(event)) return;
+        event.preventDefault();
+        onOpen(row, event.currentTarget);
+      }}
+      onAuxClick={(event) => {
+        if (event.button === 1) openOutside(event);
+      }}
     >
       <PullRequestIcon state={state} />
       <span className="pull-summary">
@@ -142,7 +170,7 @@ function PullRequestRow({ row: { repository, pull } }: { row: Row }) {
         {repository.name}
       </span>
       <span className="pull-author" title={author}>
-        <span className="pull-avatar">{initials(plainName(author))}</span>
+        <Avatar login={pull.author} />
         <span>{author}</span>
       </span>
       <span className="pull-review">
@@ -179,7 +207,13 @@ export function PullRequestColumns({ merged }: { merged: boolean }) {
   );
 }
 
-export function PullRequestGroups({ groups }: { groups: readonly Group[] }) {
+export function PullRequestGroups({
+  groups,
+  onOpen,
+}: {
+  groups: readonly Group[];
+  onOpen: Open;
+}) {
   return groups.map(({ repository, rows, cut }) => (
     <section
       key={repository?.key ?? ""}
@@ -195,7 +229,7 @@ export function PullRequestGroups({ groups }: { groups: readonly Group[] }) {
       <ul className="pull-rows" aria-label="Pull requests">
         {rows.map((row) => (
           <li key={row.key}>
-            <PullRequestRow row={row} />
+            <PullRequestRow row={row} onOpen={onOpen} />
           </li>
         ))}
       </ul>

@@ -34,6 +34,8 @@ export type ActionContext = {
   adding: boolean;
   searchable: boolean;
   inspectable: boolean;
+  /** Whether one pull request shows in place of the list. */
+  pullRequestOpen: boolean;
   push: PushControl | null;
   repository: {
     fetching: boolean;
@@ -81,6 +83,7 @@ export type Commands = {
   showPullRequests: () => void;
   showHistory: () => void;
   searchPullRequests: () => void;
+  closePullRequest: () => void;
   toggleSidebar: () => void;
   toggleInspector: () => void;
   fetch: () => void;
@@ -182,6 +185,7 @@ export type ActionId =
   | "showPullRequests"
   | "showHistory"
   | "searchPullRequests"
+  | "closePullRequest"
   | "toggleSidebar"
   | "toggleInspector"
   | "openSettings"
@@ -202,6 +206,10 @@ const onRepository = (context: ActionContext) =>
   context.screen === "repository";
 const onPullRequests = (context: ActionContext) =>
   context.screen === "pullRequests";
+const onPullRequestList = (context: ActionContext) =>
+  onPullRequests(context) && !context.pullRequestOpen && !context.dialogOpen;
+const onPullRequest = (context: ActionContext) =>
+  onPullRequests(context) && context.pullRequestOpen;
 const outsideSettings = (context: ActionContext) =>
   context.screen !== "settings";
 const keysFree = (context: ActionContext) =>
@@ -603,17 +611,24 @@ export const actions: readonly Action[] = [
     run: (commands) => commands.showPullRequests(),
   },
   {
+    id: "closePullRequest",
+    title: "Back to pull requests",
+    shortcut: { key: "Escape", modifier: "unchecked", yieldsToTyping: true },
+    available: (context) => onPullRequest(context) && !context.dialogOpen,
+    run: (commands) => commands.closePullRequest(),
+  },
+  {
     id: "showHistory",
     title: "Back to history",
     shortcut: { key: "Escape", modifier: "unchecked", yieldsToTyping: true },
-    available: (context) => onPullRequests(context) && !context.dialogOpen,
+    available: onPullRequestList,
     run: (commands) => commands.showHistory(),
   },
   {
     id: "searchPullRequests",
     title: "Search pull requests",
     shortcut: { key: "f", modifier: "platform" },
-    available: (context) => onPullRequests(context) && !context.dialogOpen,
+    available: onPullRequestList,
     run: (commands) => commands.searchPullRequests(),
   },
   {
@@ -624,8 +639,12 @@ export const actions: readonly Action[] = [
   },
   {
     id: "toggleInspector",
-    title: "Toggle commit inspector",
-    available: (context) => onRepository(context) && context.inspectable,
+    title: (context) =>
+      onPullRequest(context)
+        ? "Toggle pull request details"
+        : "Toggle commit inspector",
+    available: (context) =>
+      onPullRequest(context) || (onRepository(context) && context.inspectable),
     run: (commands) => commands.toggleInspector(),
   },
   {

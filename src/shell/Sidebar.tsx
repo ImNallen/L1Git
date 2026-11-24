@@ -126,11 +126,11 @@ export function Sidebar({
 /** The way to the pull requests, which widens into the way back. */
 function PullRequestsEntry({
   onPulls,
-  pulls: { entryRef, waiting },
+  pulls: { entryRef, waiting, opened },
   commands,
 }: {
   onPulls: boolean;
-  pulls: Pick<PullRequestsState, "entryRef" | "waiting">;
+  pulls: Pick<PullRequestsState, "entryRef" | "waiting" | "opened">;
   commands: Pick<Commands, "showPullRequests" | "showHistory">;
 }) {
   if (onPulls)
@@ -143,7 +143,7 @@ function PullRequestsEntry({
       >
         <ArrowLeft size={14} />
         <span>Back to history</span>
-        <kbd aria-hidden="true">Esc</kbd>
+        {opened === null && <kbd aria-hidden="true">Esc</kbd>}
       </button>
     );
   const badge = waiting === null || waiting === 0 ? null : waiting;
