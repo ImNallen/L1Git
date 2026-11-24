@@ -84,6 +84,12 @@ fn decode<T: Default + DeserializeOwned>(
     })
 }
 
+fn gave_up(kind: &str) -> bool {
+    matches!(kind, "RESOURCE_LIMITS_EXCEEDED" | "SERVICE_UNAVAILABLE")
+        || kind.contains("TIMEOUT")
+        || kind.contains("TIMED_OUT")
+}
+
 impl Withheld {
     /// Why GitHub left out `what`, which it would have answered under `root`.
     pub(crate) fn explain(self, root: &str, what: String) -> ApiError {
@@ -95,9 +101,9 @@ impl Withheld {
         match (error.kind.as_deref(), self.sso_url) {
             (Some("NOT_FOUND"), _) => ApiError::NotFound { what },
             (Some("FORBIDDEN"), Some(url)) => ApiError::SsoRequired { url },
-            (Some(_), _) => ApiError::Forbidden { message },
-            // GitHub types what it refuses, and not what it fails at.
-            (None, _) => ApiError::Unfinished { message },
+            (Some(kind), _) if !gave_up(kind) => ApiError::Forbidden { message },
+            // GitHub types what it refuses, and seldom what it fails at.
+            _ => ApiError::Unfinished { message },
         }
     }
 

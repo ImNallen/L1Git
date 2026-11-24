@@ -3,6 +3,8 @@
 #[allow(dead_code)]
 mod support;
 
+use std::sync::{Arc, Barrier};
+use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use l1_git_host::{Endpoints, GhChoice, Host, HostConfig, Request, VaultChoice, run};
@@ -676,10 +678,18 @@ fn a_pull_request_too_large_for_github_reads_without_its_threads() {
         "data": {"repository": {"pullRequest": null}},
         "errors": [{"path": ["repository", "pullRequest", "reviewThreads"], "message": "Something went wrong."}],
     });
+    let gave_up = |kind: &str| {
+        let mut answer = unfinished.clone();
+        answer["errors"][0]["type"] = json!(kind);
+        Reply::graphql(answer)
+    };
     for failure in [
         Reply::status(502, "<html>"),
         Reply::status(504, "<html>"),
-        Reply::graphql(unfinished),
+        gave_up("RESOURCE_LIMITS_EXCEEDED"),
+        gave_up("SERVICE_UNAVAILABLE"),
+        gave_up("TIMEOUT"),
+        Reply::graphql(unfinished.clone()),
         Reply::status(200, "<html>"),
     ] {
         let world = World::connected();
@@ -718,6 +728,47 @@ fn a_failure_is_asked_about_once_more_at_most() {
         world.github.graphql([refused]);
         assert_eq!(world.pull().unwrap_err()["kind"], kind);
         assert_eq!(asked_for_threads(&world), [true]);
+    }
+}
+
+#[test]
+fn a_disconnect_stops_the_second_ask() {
+    let world = World::connected();
+    let answered = Arc::new(Barrier::new(2));
+    world.github.graphql([
+        Reply::status(502, "<html>").after(&answered),
+        Reply::graphql(without_threads()),
+    ]);
+    let error = thread::scope(|scope| {
+        let read = scope.spawn(|| world.pull().unwrap_err());
+        while world.github.questions().is_empty() {
+            thread::yield_now();
+        }
+        world.send(json!({"op": "disconnect"})).unwrap();
+        answered.wait();
+        read.join().unwrap()
+    });
+    assert_eq!(error["kind"], "interrupted");
+    assert_eq!(error["status"]["github"]["kind"], "notConnected");
+    assert_eq!(asked_for_threads(&world), [true]);
+}
+
+#[test]
+fn what_github_could_not_finish_is_not_a_refusal() {
+    let world = World::connected();
+    for kind in [
+        "RESOURCE_LIMITS_EXCEEDED",
+        "SERVICE_UNAVAILABLE",
+        "TIMEOUT",
+        "QUERY_TIMED_OUT",
+    ] {
+        let error = world.fails(Reply::graphql(withheld(vec![refusal(
+            kind,
+            json!(["repository"]),
+        )])));
+        assert_eq!(error["httpStatus"], 200);
+        let message = error["message"].as_str().unwrap();
+        assert!(message.contains("could not finish"), "{message}");
     }
 }
 

@@ -240,7 +240,8 @@ pub enum ErrorKind {
     },
     /// `host.json` could not be written.
     Storage,
-    /// The task running the request died before it answered.
+    /// The task running the request died, or its sign-in ended, before GitHub
+    /// answered.
     Interrupted,
     /// This build has no OAuth client ID, so it cannot sign in through a
     /// browser.

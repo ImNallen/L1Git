@@ -1,7 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Barrier, Mutex, MutexGuard, PoisonError};
 use std::thread::{self, JoinHandle};
 
 use serde_json::Value;
@@ -89,6 +89,7 @@ pub struct Reply {
     status: u16,
     headers: Vec<(&'static str, String)>,
     body: String,
+    after: Option<Arc<Barrier>>,
 }
 
 impl Reply {
@@ -105,6 +106,7 @@ impl Reply {
             body: format!(
                 r#"{{"login":"{login}","id":{id},"node_id":"MDQ6VXNlcjE=","type":"User","site_admin":false,"name":"The Octocat"}}"#
             ),
+            after: None,
         }
     }
 
@@ -113,6 +115,7 @@ impl Reply {
             status: 401,
             headers: vec![("Content-Type", "application/json; charset=utf-8".to_owned())],
             body: r#"{"message":"Bad credentials","documentation_url":"https://docs.github.com/rest","status":"401"}"#.to_owned(),
+            after: None,
         }
     }
 
@@ -125,6 +128,7 @@ impl Reply {
                 ("X-RateLimit-Reset", reset.to_string()),
             ],
             body: r#"{"message":"API rate limit exceeded for user ID 1.","documentation_url":"https://docs.github.com/rest/overview/rate-limits-for-the-rest-api","status":"403"}"#.to_owned(),
+            after: None,
         }
     }
 
@@ -142,6 +146,7 @@ impl Reply {
             status,
             headers: Vec::new(),
             body: body.to_owned(),
+            after: None,
         }
     }
 
@@ -150,11 +155,18 @@ impl Reply {
         self
     }
 
+    /// Waits for the test to reach the barrier too.
+    pub fn after(mut self, reached: &Arc<Barrier>) -> Reply {
+        self.after = Some(Arc::clone(reached));
+        self
+    }
+
     pub fn redirect(location: &str) -> Reply {
         Reply {
             status: 302,
             headers: vec![("Location", location.to_owned())],
             body: String::new(),
+            after: None,
         }
     }
 
@@ -172,6 +184,7 @@ impl Reply {
             status: 200,
             headers: vec![("Content-Type", "application/json; charset=utf-8".to_owned())],
             body,
+            after: None,
         }
     }
 
@@ -351,6 +364,9 @@ fn answer(mut request: tiny_http::Request, world: &Mutex<World>) {
 }
 
 fn respond(request: tiny_http::Request, reply: Reply) {
+    if let Some(reached) = reply.after {
+        reached.wait();
+    }
     let mut response = tiny_http::Response::from_string(reply.body)
         .with_status_code(tiny_http::StatusCode(reply.status));
     for (name, value) in reply.headers {

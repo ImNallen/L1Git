@@ -338,6 +338,25 @@ fn stale_401_cannot_sign_out_a_newer_connection() {
 }
 
 #[test]
+fn a_read_asks_nothing_more_once_its_connection_ended() {
+    let fixture = Fixture::new();
+    for end in [
+        |fixture: &Fixture| drop(run(&fixture.host, Request::Disconnect {}).unwrap()),
+        |fixture: &Fixture| fixture.connect("gho_two", "hubot").unwrap(),
+    ] {
+        fixture.connect("gho_one", "octo").unwrap();
+        let seen = std::cell::Cell::new(0);
+        let read = fixture.host.with_github(|github| {
+            end(&fixture);
+            seen.set(fixture.github.seen().len());
+            github.user().map(drop)
+        });
+        assert_eq!(read.unwrap_err().kind, ErrorKind::Interrupted);
+        assert_eq!(fixture.github.seen().len(), seen.get());
+    }
+}
+
+#[test]
 fn missing_token_forgets_with_ended_token_missing() {
     let fixture = Fixture::new();
     fixture.connect("gho_one", "octo").unwrap();
