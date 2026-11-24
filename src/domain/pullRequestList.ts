@@ -436,7 +436,10 @@ export function listModel(
     section.cut === null || groups.includes(section) ? [] : [section.cut],
   );
   const answered = reads.filter(({ read }) => read.value !== null);
-  const across = repositories(answered.length);
+  const across =
+    answered.length < checked.length
+      ? `${answered.length.toLocaleString()} of ${repositories(checked.length)}`
+      : repositories(checked.length);
 
   function body(): ListModel["body"] {
     if (rows.length > 0)

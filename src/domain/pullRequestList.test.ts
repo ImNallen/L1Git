@@ -431,7 +431,7 @@ describe("the filters", () => {
 
   it("say how much of the view is left", () => {
     expect(model(readOf, { query: "12" }).scope).toBe(
-      "2 of 4 pull requests across 1 repository",
+      "2 of 4 pull requests across 1 of 2 repositories",
     );
   });
 
@@ -564,7 +564,7 @@ describe("without rows", () => {
       detail: "No pull request is open in 2 repositories.",
     });
     expect(body({ app: holds(), site: failing("notFound") })).toMatchObject({
-      detail: "No pull request is open in 1 repository.",
+      detail: "No pull request is open in 1 of 2 repositories.",
     });
   });
 
