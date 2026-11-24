@@ -47,5 +47,7 @@ export function createReadQueue(
       }
       pump();
     },
+    /** Running reads finish, and the rest never start. */
+    close: () => waiting.clear(),
   };
 }

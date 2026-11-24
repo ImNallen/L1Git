@@ -1,4 +1,4 @@
-import { useImperativeHandle, useRef } from "react";
+import { useEffect, useImperativeHandle, useRef } from "react";
 import type { Ref } from "react";
 import { GitPullRequest, Plug, TriangleAlert } from "lucide-react";
 import { flushSync } from "react-dom";
@@ -7,6 +7,7 @@ import { elsewhereText, viewLabels } from "../domain/pullRequestList";
 import type { ListModel, Notice } from "../domain/pullRequestList";
 import { relativeTime } from "../domain/time";
 import { mac } from "../repositories";
+import { focusIsShown } from "../shell/dom";
 import type { PullRequestsState } from "../shell/usePullRequests";
 import { NoHost } from "./NoHost";
 import {
@@ -202,6 +203,13 @@ export function PullRequests({
       scroller.current?.querySelector<HTMLElement>(`${ROW}, button`) ??
       region.current
     )?.focus();
+  const focused = useRef<EventTarget | null>(null);
+  useEffect(() => {
+    const { current } = focused;
+    if (!(current instanceof Node) || current.isConnected) return;
+    focused.current = null;
+    if (!focusIsShown()) focus();
+  });
   useImperativeHandle(ref, () => ({
     focus,
     search: () => {
@@ -225,6 +233,9 @@ export function PullRequests({
       className="pull-requests"
       aria-label="Pull requests"
       tabIndex={-1}
+      onFocus={(event) => {
+        focused.current = event.target;
+      }}
       onKeyDown={(event) => {
         if (event.target !== event.currentTarget) return;
         if (event.key !== "ArrowDown" && event.key !== "j") return;

@@ -583,13 +583,15 @@ export function notices(
       { kind: "offline", at: times.length > 0 ? Math.max(...times) : null },
     ];
   }
-  const connection = new Set(
-    failed.flatMap(({ problem }) => (shared(problem) ? [problem.message] : [])),
+  const connection = new Map(
+    failed.flatMap(({ problem }) =>
+      shared(problem) ? [[problem.kind, problem.message] as const] : [],
+    ),
   );
   const own = failed.filter(({ problem }) => !shared(problem));
   const rest = own.length - shownProblems;
   return [
-    ...[...connection].map(
+    ...[...connection.values()].map(
       (message): Notice => ({ kind: "connection", message }),
     ),
     ...own.slice(0, shownProblems).map(

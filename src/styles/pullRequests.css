@@ -370,10 +370,6 @@
   padding: 0;
   list-style: none;
 }
-.pull-rows > li {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 52px;
-}
 .pull-row {
   height: 52px;
   border-bottom: 1px solid var(--border);

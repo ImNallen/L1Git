@@ -67,7 +67,7 @@ export function PullRequestFilters({
           className="icon-button"
           aria-label="Refresh pull requests"
           title="Refresh pull requests"
-          disabled={onRefresh === null}
+          aria-disabled={onRefresh === null}
           onClick={onRefresh ?? undefined}
         >
           <RefreshCw size={14} className={reading ? "spin" : undefined} />

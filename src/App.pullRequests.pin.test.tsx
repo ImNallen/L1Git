@@ -497,6 +497,48 @@ it("asks a locked keychain once", async () => {
   expect(notices()).toEqual(["The system keychain is locked.Try again"]);
 });
 
+it("leaves a locked keychain alone until the user comes back or tries again", async () => {
+  const timers = vi.spyOn(window, "setInterval");
+  const app = await mount();
+  app.bridge.failHost({
+    kind: "keychain",
+    problem: "locked",
+    message: "The system keychain is locked.",
+  });
+  await visit(app);
+  const now = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 120_000);
+  await app.refocusWindow();
+  await app.act(() => {
+    for (const [run, ms] of timers.mock.calls)
+      if (ms === 15 * 60_000 && typeof run === "function") run();
+  });
+  expect(reads(app.bridge)).toEqual(["pin open"]);
+  await app.click(get("button", /^Back to history/));
+  await app.refocusWindow();
+  expect(reads(app.bridge), "not from the history either").toHaveLength(1);
+  await visit(app);
+  expect(reads(app.bridge)).toHaveLength(2);
+  await app.click(get("button", "Try again"));
+  expect(reads(app.bridge)).toHaveLength(3);
+  now.mockRestore();
+  timers.mockRestore();
+});
+
+it("keeps focus in the list when a refresh takes the focused row away", async () => {
+  const app = await mount();
+  await visit(app);
+  await app.act(() => get("link", /^Review a replay/).focus());
+  app.bridge.world.host.pulls.set(
+    pullsKey("octo/pin", "open"),
+    list(pull(2, "Filter by author")),
+  );
+  const now = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 120_000);
+  await app.refocusWindow();
+  now.mockRestore();
+  expect(titles()).not.toContain("Review a replay");
+  expect(document.activeElement?.matches("a.pull-row")).toBe(true);
+});
+
 it("narrows by repository, label, review and author, and clears it all", async () => {
   const app = await mount();
   await visit(app);

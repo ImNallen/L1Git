@@ -46,6 +46,15 @@ it("asks for a waiting or running read once, and for an ended one again", async 
   expect(started).toEqual(["a", "b", "b", "a"]);
 });
 
+it("starts nothing more once it is closed", async () => {
+  const { queue, started, end } = setup();
+  queue.add(all("a", "b", "c", "d", "e", "f"));
+  await end("a");
+  queue.close();
+  await end("b");
+  expect(started).toEqual(["a", "b", "c", "d", "e"]);
+});
+
 it("drops the rest when the keychain stays locked, and tries alone again", async () => {
   const { queue, started, end } = setup();
   queue.add(all("a", "b", "c"));

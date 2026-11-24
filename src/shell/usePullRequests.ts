@@ -130,20 +130,22 @@ export function usePullRequests({
   }
 
   const reads = wanted.map(({ repository, list }) => readOf(repository, list));
-  const refreshInBackground = useEffectEvent(() => {
-    const limited = reads.some(
+  const limited = () =>
+    reads.some(
       ({ problem }) =>
         problem?.kind === "rateLimited" &&
         (problem.resetAt ?? 0) * 1_000 > Date.now(),
     );
-    if (!limited) refresh();
+  // Asking a locked keychain again takes the user's own step.
+  const locked = reads.some(({ problem }) => problem?.kind === "keychain");
+  const refreshOnVisit = useEffectEvent(() => {
+    if (!limited()) refresh();
+  });
+  const refreshInBackground = useEffectEvent(() => {
+    if (!limited() && !locked) refresh();
   });
   const readUnread = useEffectEvent(() => {
-    if (
-      account === null ||
-      reads.some(({ problem }) => problem?.kind === "keychain")
-    )
-      return;
+    if (account === null || locked) return;
     const unread = wanted.filter((_, index) => {
       const read = reads[index];
       return read?.value === null && read.problem === null && !read.reading;
@@ -161,8 +163,9 @@ export function usePullRequests({
   });
 
   useEffect(() => {
-    if (shown) refreshInBackground();
+    if (shown) refreshOnVisit();
   }, [shown]);
+  useEffect(() => () => queue.close(), [queue]);
   useEffect(() => {
     if (mergedShown) readMerged();
   }, [mergedShown]);

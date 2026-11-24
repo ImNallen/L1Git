@@ -643,6 +643,15 @@ describe("the notices", () => {
     ]);
   });
 
+  it("say the hourly limit once, though its minutes tick between reads", () => {
+    expect(
+      told({
+        app: failing("rateLimited", { message: "In 25 minutes.", resetAt: 9 }),
+        site: failing("rateLimited", { message: "In 24 minutes.", resetAt: 9 }),
+      }),
+    ).toEqual([{ kind: "connection", message: "In 24 minutes." }]);
+  });
+
   it("name three repositories and count the rest", () => {
     const many = ["a", "b", "c", "d", "e"].map(repository);
     expect(
