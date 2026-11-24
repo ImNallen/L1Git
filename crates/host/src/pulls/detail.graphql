@@ -1,0 +1,47 @@
+query($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      number title body isDraft mergedAt closedAt createdAt updatedAt
+      author { login } viewerDidAuthor
+      additions deletions changedFiles
+      labels(first: 20) { totalCount nodes { name color } }
+      baseRefName headRefName headRefOid isCrossRepository maintainerCanModify
+      headRepository { name owner { login } }
+      mergeable mergeStateStatus
+      reviewRequests(first: 100) { nodes { requestedReviewer {
+        ... on User { login } ... on Bot { login } ... on Mannequin { login }
+      } } }
+      latestReviews(first: 100) { nodes { author { login } state } }
+      latestOpinionatedReviews(first: 100) { nodes { author { login } state } }
+      statusCheckRollup { contexts(first: 100) { totalCount nodes {
+        __typename
+        ... on CheckRun { name status conclusion startedAt completedAt url: detailsUrl isRequired(pullRequestNumber: $number) }
+        ... on StatusContext { context state url: targetUrl isRequired(pullRequestNumber: $number) }
+      } } }
+      commits(last: 100) { totalCount nodes { commit { ...commit } } }
+      timelineItems(last: 100, itemTypes: [PULL_REQUEST_COMMIT, PULL_REQUEST_REVIEW, ISSUE_COMMENT, HEAD_REF_FORCE_PUSHED_EVENT, MERGED_EVENT, CLOSED_EVENT, REOPENED_EVENT, HEAD_REF_DELETED_EVENT, READY_FOR_REVIEW_EVENT, CONVERT_TO_DRAFT_EVENT]) {
+        totalCount: filteredCount
+        nodes {
+          __typename
+          ... on PullRequestCommit { commit { ...commit } }
+          ... on PullRequestReview { id author { login } submittedAt state body }
+          ... on IssueComment { author { login } at: createdAt body }
+          ... on HeadRefForcePushedEvent { author: actor { login } at: createdAt beforeCommit { oid } afterCommit { oid } }
+          ... on MergedEvent { author: actor { login } at: createdAt commit { oid } }
+          ... on ClosedEvent { author: actor { login } at: createdAt }
+          ... on ReopenedEvent { author: actor { login } at: createdAt }
+          ... on HeadRefDeletedEvent { author: actor { login } at: createdAt }
+          ... on ReadyForReviewEvent { author: actor { login } at: createdAt }
+          ... on ConvertToDraftEvent { author: actor { login } at: createdAt }
+        }
+      }
+      reviewThreads(first: 100) { totalCount nodes {
+        id path line startLine originalLine originalStartLine diffSide isOutdated isResolved
+        first: comments(first: 1) { nodes { diffHunk pullRequestReview { id } } }
+        comments(first: 50) { totalCount nodes { author { login } at: createdAt body } }
+      } }
+    }
+  }
+}
+
+fragment commit on Commit { oid messageHeadline committedDate author { name user { login } } }

@@ -1,17 +1,19 @@
 //! What the pull request screens read, in L1 Git's own words. The GraphQL
-//! documents and the shapes they answer in stay in `list`.
+//! documents and the shapes they answer in stay in `list` and `detail`.
 
+mod detail;
 mod list;
 
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+pub use detail::PullRequest;
 pub use list::{PullRequestList, PullRequests};
 
 /// The same shape a snapshot's remotes carry. Both names go into search
 /// queries, so neither can hold a space or a quote.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Repository {
     owner: Name,
@@ -98,6 +100,13 @@ impl State {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+struct Label {
+    name: String,
+    /// Six hex digits.
+    color: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "SCREAMING_SNAKE_CASE"))]
 enum Mergeability {
     Mergeable,
@@ -106,6 +115,8 @@ enum Mergeability {
     Unknown,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 enum CheckState {
     Passed,
     Failed,
@@ -114,9 +125,9 @@ enum CheckState {
 }
 
 impl CheckState {
-    /// Reads a check run's state and a commit status's state, which share
-    /// their spellings. Like gh, a state GitHub adds later counts as running,
-    /// so it never looks like a pass.
+    /// Reads a check run's state, status or conclusion and a commit status's
+    /// state, which share their spellings. Like gh, a state GitHub adds later
+    /// counts as running, so it never looks like a pass.
     fn from_github(state: &str) -> CheckState {
         match state {
             "SUCCESS" => CheckState::Passed,
@@ -155,10 +166,14 @@ impl<T> Nodes<T> {
         self.nodes.into_iter().flatten().flatten()
     }
 
-    fn page<U>(self, parse: impl FnMut(T) -> U) -> Page<U> {
+    fn page<U>(self, parse: impl FnMut(T) -> Option<U>) -> Page<U> {
         Page {
             total: self.total_count,
-            items: self.items().map(parse).collect(),
+            items: self.items().filter_map(parse).collect(),
         }
     }
+}
+
+fn items<T>(nodes: Option<Nodes<T>>) -> impl Iterator<Item = T> {
+    nodes.into_iter().flat_map(Nodes::items)
 }

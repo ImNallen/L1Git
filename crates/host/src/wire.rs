@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::Login;
-use crate::pulls::{PullRequestList, PullRequests, Repository};
+use crate::pulls::{PullRequest, PullRequestList, PullRequests, Repository};
 
 /// Variants without fields are empty structs, because serde ignores unknown
 /// fields on an internally tagged unit variant.
@@ -35,6 +35,10 @@ pub enum Request {
         repository: Repository,
         list: PullRequestList,
     },
+    PullRequest {
+        repository: Repository,
+        number: u32,
+    },
 }
 
 /// `{op, data?, status}`.
@@ -57,6 +61,7 @@ pub enum Answer {
     DevicePoll,
     DeviceCancel,
     PullRequests(PullRequests),
+    PullRequest(Box<PullRequest>),
 }
 
 /// Everything the webview knows about the host side. No field can hold a
@@ -428,6 +433,8 @@ mod tests {
             pulls("octo\"", "app", "open"),
             pulls("octo", "..", "open"),
             pulls("", "app", "open"),
+            json!({"op": "pullRequest", "repository": {"owner": "octo", "repo": "app"}, "number": -1}),
+            json!({"op": "pullRequest", "repository": {"owner": "octo", "repo": "app"}, "number": "1"}),
             json!({"op": "pullRequests", "repository": {"owner": "octo", "repo": "app", "extra": 1}, "list": "open"}),
         ] {
             assert!(parse(refused.clone()).is_err(), "{refused}");

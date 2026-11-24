@@ -1,0 +1,137 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "number": 10,
+        "title": "Cache the parsed theme",
+        "body": "Parsing took 40 ms.",
+        "isDraft": false,
+        "mergedAt": "2026-11-17T19:18:14Z",
+        "closedAt": "2026-11-17T19:18:14Z",
+        "createdAt": "2026-11-16T09:00:00Z",
+        "updatedAt": "2026-11-17T19:18:36Z",
+        "author": {
+          "login": "monalisa"
+        },
+        "viewerDidAuthor": true,
+        "additions": 12,
+        "deletions": 4,
+        "changedFiles": 2,
+        "labels": {
+          "totalCount": 0,
+          "nodes": []
+        },
+        "baseRefName": "main",
+        "headRefName": "cache-theme",
+        "headRefOid": "6666666666666666666666666666666666666666",
+        "isCrossRepository": false,
+        "maintainerCanModify": false,
+        "headRepository": {
+          "name": "app",
+          "owner": {
+            "login": "octo"
+          }
+        },
+        "mergeable": "UNKNOWN",
+        "mergeStateStatus": "UNKNOWN",
+        "reviewRequests": {
+          "nodes": []
+        },
+        "latestReviews": {
+          "nodes": [
+            {
+              "author": {
+                "login": "review-bot"
+              },
+              "state": "COMMENTED"
+            },
+            {
+              "author": {
+                "login": "hubot"
+              },
+              "state": "APPROVED"
+            }
+          ]
+        },
+        "latestOpinionatedReviews": {
+          "nodes": [
+            {
+              "author": {
+                "login": "hubot"
+              },
+              "state": "APPROVED"
+            }
+          ]
+        },
+        "statusCheckRollup": {
+          "contexts": {
+            "totalCount": 18,
+            "nodes": [
+              {
+                "__typename": "CheckRun",
+                "name": "build",
+                "status": "COMPLETED",
+                "conclusion": "SKIPPED",
+                "startedAt": "2026-11-17T17:11:27Z",
+                "completedAt": "2026-11-17T17:11:19Z",
+                "url": "https://github.com/octo/app/actions/runs/1/job/1",
+                "isRequired": false
+              }
+            ]
+          }
+        },
+        "commits": {
+          "totalCount": 2,
+          "nodes": [
+            {
+              "commit": {
+                "oid": "7777777777777777777777777777777777777777",
+                "messageHeadline": "Cache the parsed theme",
+                "committedDate": "2026-11-17T16:36:33Z",
+                "author": {
+                  "name": "Monalisa",
+                  "user": {
+                    "login": "monalisa"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "timelineItems": {
+          "totalCount": 9,
+          "nodes": [
+            {
+              "__typename": "MergedEvent",
+              "author": {
+                "login": "hubot"
+              },
+              "at": "2026-11-17T19:18:14Z",
+              "commit": {
+                "oid": "6666666666666666666666666666666666666666"
+              }
+            },
+            {
+              "__typename": "ClosedEvent",
+              "author": {
+                "login": "hubot"
+              },
+              "at": "2026-11-17T19:18:14Z"
+            },
+            {
+              "__typename": "HeadRefDeletedEvent",
+              "author": {
+                "login": "hubot"
+              },
+              "at": "2026-11-17T19:18:36Z"
+            }
+          ]
+        },
+        "reviewThreads": {
+          "totalCount": 3,
+          "nodes": []
+        }
+      }
+    }
+  }
+}
