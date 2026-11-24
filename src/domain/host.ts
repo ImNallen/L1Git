@@ -118,6 +118,11 @@ export const hostRoute: Route = {
   error: hostErrorSchema,
 };
 
+export type HostResponse = z.infer<typeof hostResponseSchema>;
+/** `transport` is a failure to reach Rust at all, so it carries no status. */
+export type HostProblem =
+  | z.infer<typeof hostErrorSchema>
+  | { kind: "transport"; message: string };
 export type HostStatus = z.infer<typeof hostStatusSchema>;
 export type GhProbe = z.infer<typeof ghProbeSchema>;
 export type Access = z.infer<typeof accessSchema>;
