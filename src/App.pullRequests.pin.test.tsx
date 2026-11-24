@@ -524,19 +524,44 @@ it("leaves a locked keychain alone until the user comes back or tries again", as
   timers.mockRestore();
 });
 
-it("keeps focus in the list when a refresh takes the focused row away", async () => {
-  const app = await mount();
-  await visit(app);
-  await app.act(() => get("link", /^Review a replay/).focus());
-  app.bridge.world.host.pulls.set(
-    pullsKey("octo/pin", "open"),
-    list(pull(2, "Filter by author")),
-  );
+async function refreshWithout(app: Harness, number: number) {
+  const { pulls } = app.bridge.world.host;
+  const key = pullsKey("octo/pin", "open");
+  const rest = [1, 2, 5].filter((each) => each !== number);
+  pulls.set(key, list(...rest.map((each) => pull(each, `Row ${each}`))));
   const now = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 120_000);
   await app.refocusWindow();
   now.mockRestore();
-  expect(titles()).not.toContain("Review a replay");
-  expect(document.activeElement?.matches("a.pull-row")).toBe(true);
+}
+const threeRows = (world: World) => {
+  world.host.pulls.set(
+    pullsKey("octo/pin", "open"),
+    list(pull(1, "Row 1"), pull(2, "Row 2"), pull(5, "Row 5")),
+  );
+  world.host.pulls.set(pullsKey("octo/other", "open"), list());
+};
+
+it("moves focus to the next row, without scrolling, when a refresh takes its row away", async () => {
+  const app = await mount({ world: threeRows });
+  await visit(app);
+  await app.act(() => get("link", /^Row 2/).focus());
+  const focus = vi.spyOn(HTMLElement.prototype, "focus");
+  await refreshWithout(app, 2);
+  expect(focus.mock.calls).toEqual([[{ preventScroll: true }]]);
+  focus.mockRestore();
+  expect(document.activeElement?.getAttribute("aria-label")).toMatch(/^Row 5/);
+});
+
+it("leaves focus alone when the user had left the row that a refresh takes away", async () => {
+  const app = await mount({ world: threeRows });
+  await visit(app);
+  await app.act(() => {
+    const row = get("link", /^Row 2/);
+    row.focus();
+    row.blur();
+  });
+  await refreshWithout(app, 2);
+  expect(document.activeElement).toBe(document.body);
 });
 
 it("narrows by repository, label, review and author, and clears it all", async () => {

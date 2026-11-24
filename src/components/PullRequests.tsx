@@ -203,12 +203,15 @@ export function PullRequests({
       scroller.current?.querySelector<HTMLElement>(`${ROW}, button`) ??
       region.current
     )?.focus();
-  const focused = useRef<EventTarget | null>(null);
+  const focused = useRef<{ element: HTMLElement; row: number } | null>(null);
   useEffect(() => {
     const { current } = focused;
-    if (!(current instanceof Node) || current.isConnected) return;
+    if (current === null || current.element.isConnected) return;
     focused.current = null;
-    if (!focusIsShown()) focus();
+    if (focusIsShown()) return;
+    const rows = scroller.current?.querySelectorAll<HTMLElement>(ROW) ?? [];
+    const next = rows[Math.min(current.row, rows.length - 1)] ?? region.current;
+    next?.focus({ preventScroll: true });
   });
   useImperativeHandle(ref, () => ({
     focus,
@@ -233,8 +236,19 @@ export function PullRequests({
       className="pull-requests"
       aria-label="Pull requests"
       tabIndex={-1}
-      onFocus={(event) => {
-        focused.current = event.target;
+      onFocus={({ target }) => {
+        const rows = scroller.current?.querySelectorAll(ROW) ?? [];
+        focused.current = {
+          element: target,
+          row: [...rows].indexOf(target),
+        };
+      }}
+      onBlur={({ target }) => {
+        // A removed element may blur first, and only its removal moves focus.
+        setTimeout(() => {
+          if (target.isConnected && focused.current?.element === target)
+            focused.current = null;
+        });
       }}
       onKeyDown={(event) => {
         if (event.target !== event.currentTarget) return;
