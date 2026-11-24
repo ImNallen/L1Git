@@ -182,3 +182,4 @@ export function useHost() {
   return { ...view, ...client };
 }
 export type Host = ReturnType<typeof useHost>;
+export type HostClient = ReturnType<typeof createHostClient>;
