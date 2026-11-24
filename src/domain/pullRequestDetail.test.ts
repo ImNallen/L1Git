@@ -358,6 +358,27 @@ describe("the conversation", () => {
     ).toEqual(["closed", "reopened", "merged", "branchDeleted"]);
   });
 
+  it("names an entry the same wherever it stands", () => {
+    const keys = (items: TimelineEvent[]) =>
+      conversation({
+        timeline: page(items),
+        threads: page([thread("T1", {}, 4)]),
+      }).map(({ key }) => key);
+    const pushed: TimelineEvent = {
+      id: "P1",
+      kind: "forcePushed",
+      from: null,
+      to: null,
+      by: "maja",
+      at: at(9),
+    };
+    const rest = [comment(3), review("R1", 5, { body: "Hm" }), comment(6)];
+    const before = keys([commit("1", 1), comment(2), ...rest]);
+    const after = keys([...rest, commit("2", 8), pushed]);
+    expect(after.slice(0, 4)).toEqual(before.slice(-4));
+    expect(new Set(after).size).toBe(after.length);
+  });
+
   it("reads without threads", () => {
     expect(
       outline({
@@ -536,6 +557,21 @@ describe("a thread's lines", () => {
     expect(
       patch("@@ -1,1 +1,1 @@\n-a\n\\ No newline at end of file\n+b"),
     ).toEqual(["@@ -1,1 +1,1 @@", "-a", "\\ No newline at end of file", "+b"]);
+  });
+
+  it("never begins with that mark", () => {
+    const mark = "\\ No newline at end of file";
+    const hunk = ["@@ -1,4 +1,3 @@", " a", "-b", mark, "+c", "+d", "+e"];
+    expect(patch(hunk.join("\n"))).toEqual([
+      "@@ -2,0 +2,3 @@",
+      "+c",
+      "+d",
+      "+e",
+    ]);
+    const range = ["@@ -1,1 +1,13 @@", "-a", mark, ...lines(11, "+")];
+    expect(
+      patch(range.join("\n"), { originalLine: 11, originalStartLine: 1 }),
+    ).toEqual(["@@ -1,0 +1,11 @@", ...lines(11, "+")]);
   });
 
   it("reads an empty line as context", () => {
@@ -908,6 +944,38 @@ describe("the merge box", () => {
       "ready",
       "Ready to merge",
       "The only check passed.",
+    ],
+    [
+      "never ready while GitHub is still working it out",
+      {
+        mergeable: "unknown",
+        ...reviewed(["jonas", "approved"]),
+        checks: page(passed(2)),
+      },
+      "unknown",
+      "Can't tell yet",
+      "GitHub hasn't said yet whether this can merge.",
+    ],
+    [
+      "failing, with no promise while GitHub is still working it out",
+      { ...unstable, mergeable: "unknown", checks: page([failing]) },
+      "failing",
+      "1 check is failing",
+      "GitHub hasn't said yet whether this can merge.",
+    ],
+    [
+      "unstable, when the checks can't be read",
+      { ...unstable, ...reviewed(["jonas", "approved"]), checks: null },
+      "unknown",
+      "A check hasn't passed",
+      "It isn't required, so this can still merge. L1 Git can't see which one it is.",
+    ],
+    [
+      "unstable, with checks left out",
+      { ...unstable, checks: page(passed(100), 140) },
+      "unknown",
+      "A check hasn't passed",
+      "It isn't required, so this can still merge. L1 Git can't see which one it is.",
     ],
     [
       "ready, when the checks can't be read",

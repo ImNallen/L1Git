@@ -178,9 +178,9 @@ export function conversation({
   );
 
   const entries: Entry[] = [];
-  timeline.items.forEach((event, index) => {
-    const { by, at } = event;
-    const happened = { key: `${event.kind} ${at} ${index}`, by, at };
+  for (const event of timeline.items) {
+    const { id: key, by, at } = event;
+    const happened = { key, by, at };
     switch (event.kind) {
       case "commit": {
         const last = entries.at(-1);
@@ -193,40 +193,38 @@ export function conversation({
         else
           entries.push({
             ...happened,
-            key: event.oid,
             kind: "commits",
             commits: [event],
           });
-        return;
+        break;
       }
       case "comment":
         entries.push({ ...happened, kind: "comment", body: event.body });
-        return;
+        break;
       case "review": {
         const own = byReview.get(event.id) ?? [];
         const says = event.body.trim() !== "";
         if (says || own.length > 0)
           entries.push({
             ...happened,
-            key: event.id,
             kind: "review",
             state: event.state,
             body: event.body,
             threads: own,
           });
         else if (event.state !== "commented")
-          entries.push({ ...happened, key: event.id, kind: "event", event });
-        return;
+          entries.push({ ...happened, kind: "event", event });
+        break;
       }
       case "closed":
         // A merge closes the pull request too, which says nothing more.
         if (!mergedAt.has(at))
           entries.push({ ...happened, kind: "event", event });
-        return;
+        break;
       default:
         entries.push({ ...happened, kind: "event", event });
     }
-  });
+  }
 
   for (const thread of loose) {
     const first = thread.comments.items[0];
@@ -337,8 +335,8 @@ export type Excerpt =
   | { kind: "text"; text: string };
 
 /**
- * The end of a thread's hunk, where its comment is: the commented lines, at
- * least four and at most twelve. Null when GitHub sent none.
+ * The end of a thread's hunk, where its comment is: the commented lines, out of
+ * the last four at least and the last twelve at most. Null when GitHub sent none.
  */
 export function excerpt({
   hunk,
@@ -387,7 +385,14 @@ export function excerpt({
     commented < 0
       ? FEWEST_LINES
       : Math.min(MOST_LINES, Math.max(FEWEST_LINES, rows.length - commented));
-  const shown = rows.slice(-wanted);
+  const end = rows.slice(-wanted);
+  // The mark of a missing newline says it of the line before.
+  const shown = end.slice(
+    Math.max(
+      0,
+      end.findIndex(({ line }) => !line.startsWith("\\")),
+    ),
+  );
   const [top] = shown;
   if (!top) return null;
   const olds = shown.filter(({ onOld }) => onOld).length;
@@ -495,7 +500,7 @@ export const checkUrl = ({ url }: Check) =>
 
 type CommitItem =
   | { kind: "commit"; commit: PullRequest["commits"]["items"][number] }
-  | { kind: "forcePushed"; key: string; event: EventOf<"forcePushed"> };
+  | { kind: "forcePushed"; event: EventOf<"forcePushed"> };
 export type CommitDay = {
   key: string;
   label: string;
@@ -529,15 +534,14 @@ export function commitDays(
     .reverse();
   const atOf = (item: CommitItem) =>
     Date.parse(item.kind === "commit" ? item.commit.at : item.event.at);
-  timeline.items.forEach((event, index) => {
-    if (event.kind !== "forcePushed") return;
+  for (const event of timeline.items) {
+    if (event.kind !== "forcePushed") continue;
     const older = items.findIndex((item) => atOf(item) <= Date.parse(event.at));
     items.splice(older < 0 ? items.length : older, 0, {
       kind: "forcePushed",
-      key: `${event.at} ${index}`,
       event,
     });
-  });
+  }
   const days: (Omit<CommitDay, "items"> & { items: CommitItem[] })[] = [];
   for (const item of items) {
     const label = dayLabel(new Date(atOf(item)), now, locale);
@@ -597,9 +601,10 @@ export function mergeBox(
     checks.filter((check) => check.required && check.state === wanted);
   const blocked = mergeState === "blocked";
   const open =
-    mergeState === "clean" ||
-    mergeState === "unstable" ||
-    mergeState === "hasHooks";
+    mergeable === "mergeable" &&
+    (mergeState === "clean" ||
+      mergeState === "unstable" ||
+      mergeState === "hasHooks");
   const unsaid = "GitHub hasn't said yet whether this can merge.";
   // A login keeps its own letters, at the start of a sentence too.
   const sentence = (text: string) =>
@@ -717,6 +722,13 @@ export function mergeBox(
           ? "None of the others is required, so this can merge now."
           : "This can merge now.",
       ),
+      act: false,
+    };
+  if (open && mergeState === "unstable" && !whole)
+    return {
+      kind: "unknown",
+      title: "A check hasn't passed",
+      text: "It isn't required, so this can still merge. L1 Git can't see which one it is.",
       act: false,
     };
   if (open) {
