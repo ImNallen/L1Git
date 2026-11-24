@@ -45,6 +45,7 @@
               ]
             },
             "latestOpinionatedReviews": {
+              "totalCount": 1,
               "nodes": [
                 {
                   "state": "CHANGES_REQUESTED"
@@ -102,6 +103,7 @@
               "nodes": []
             },
             "latestOpinionatedReviews": {
+              "totalCount": 0,
               "nodes": []
             },
             "statusCheckRollup": {
@@ -155,6 +157,7 @@
               "nodes": []
             },
             "latestOpinionatedReviews": {
+              "totalCount": 1,
               "nodes": [
                 {
                   "state": "APPROVED"
@@ -221,6 +224,7 @@
               ]
             },
             "latestOpinionatedReviews": {
+              "totalCount": 0,
               "nodes": []
             },
             "statusCheckRollup": null

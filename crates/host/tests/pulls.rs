@@ -76,7 +76,7 @@ fn row(number: u32) -> Value {
         "headRefName": "fix", "baseRefName": "main", "updatedAt": "2026-11-24T16:23:14Z",
         "additions": 1, "deletions": 2, "mergeable": "MERGEABLE", "reviewDecision": null,
         "totalCommentsCount": 0, "viewerDidAuthor": false, "author": {"login": "hubot"},
-        "labels": {"totalCount": 0, "nodes": []}, "latestOpinionatedReviews": {"nodes": []},
+        "labels": {"totalCount": 0, "nodes": []}, "latestOpinionatedReviews": {"totalCount": 0, "nodes": []},
         "statusCheckRollup": null,
     })
 }
@@ -171,7 +171,7 @@ fn open_pull_requests_answer_in_l1_gits_words() {
     );
     assert_eq!(
         world.github.questions()[0]["variables"],
-        json!({"owner": "octo", "repo": "app", "requested": "repo:octo/app is:pr is:open review-requested:@me"})
+        json!({"owner": "octo", "repo": "app", "requested": "repo:octo/app is:pr is:open review-requested:@me sort:updated-desc"})
     );
 }
 
@@ -261,7 +261,7 @@ fn a_renamed_repository_still_marks_requested_reviews() {
     assert_eq!(asked.len(), 2);
     assert_eq!(
         asked[1]["variables"]["requested"],
-        "repo:octo/new is:pr is:open review-requested:@me"
+        "repo:octo/new is:pr is:open review-requested:@me sort:updated-desc"
     );
 }
 
@@ -448,7 +448,12 @@ fn a_withheld_row_still_counts() {
 fn states_and_verdicts_claim_the_least() {
     let world = World::connected();
     let contexts = |runs: Value, statuses: Value| json!({"statusCheckRollup": {"contexts": {"checkRunCountsByState": runs, "statusContextCountsByState": statuses}}});
-    let opinions = |states: &[&str]| json!({"latestOpinionatedReviews": {"nodes": states.iter().map(|state| json!({"state": state})).collect::<Vec<_>>()}});
+    let opinions = |states: &[&str]| json!({"latestOpinionatedReviews": {"totalCount": states.len(), "nodes": states.iter().map(|state| json!({"state": state})).collect::<Vec<_>>()}});
+    let more = |states: &[&str]| {
+        let mut fields = opinions(states);
+        fields["latestOpinionatedReviews"]["totalCount"] = json!(states.len() + 1);
+        fields
+    };
     let page = world.opens(open(
         "octo/app",
         vec![
@@ -469,6 +474,9 @@ fn states_and_verdicts_claim_the_least() {
                 json!([{"state": "EXPECTED", "count": 10}, {"state": "ERROR", "count": 20}, {"state": "SUCCESS", "count": 30}]),
             )),
             row_with(10, contexts(json!(null), json!([]))),
+            row_with(11, more(&["APPROVED"])),
+            row_with(12, more(&["APPROVED", "CHANGES_REQUESTED"])),
+            row_with(13, more(&[])),
         ],
         &[],
     ));
@@ -494,4 +502,7 @@ fn states_and_verdicts_claim_the_least() {
         json!({"passed": 30, "failed": 24, "skipped": 3, "running": 13})
     );
     assert_eq!(item(10)["checks"], json!(null));
+    assert_eq!(item(11)["review"], "required");
+    assert_eq!(item(12)["review"], "changesRequested");
+    assert_eq!(item(13)["review"], "required");
 }

@@ -29,6 +29,7 @@
             "nodes": []
           },
           "latestOpinionatedReviews": {
+            "totalCount": 1,
             "nodes": [
               {
                 "state": "APPROVED"
@@ -95,6 +96,7 @@
             ]
           },
           "latestOpinionatedReviews": {
+            "totalCount": 1,
             "nodes": [
               {
                 "state": "APPROVED"

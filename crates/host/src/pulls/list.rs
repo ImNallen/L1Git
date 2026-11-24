@@ -179,7 +179,8 @@ impl GitHub<'_> {
 
     fn open(&self, repository: &Repository) -> Result<(String, PullRequests), ApiError> {
         let Repository { owner, repo } = repository;
-        let requested = format!("repo:{repository} is:pr is:open review-requested:@me");
+        let requested =
+            format!("repo:{repository} is:pr is:open review-requested:@me sort:updated-desc");
         let Reply {
             data: Open {
                 repository: found,
@@ -271,15 +272,19 @@ fn summary(row: Row, requested: &HashSet<u32>, checks_withheld: bool) -> Summary
 }
 
 /// GitHub decides only where a rule asks for reviews. Elsewhere one request
-/// for changes outweighs any approval, as it would under a rule.
+/// for changes outweighs any approval, as it would under a rule. A verdict that
+/// GitHub left out may be one, so the rest cannot approve.
 fn verdict(opinions: Nodes<Opinion>) -> Option<Review> {
-    opinions.items().fold(None, |verdict, opinion| {
-        match (opinion.state.as_str(), &verdict) {
-            ("CHANGES_REQUESTED", _) => Some(Review::ChangesRequested),
-            ("APPROVED", None) => Some(Review::Approved),
-            _ => verdict,
-        }
-    })
+    let total = opinions.total_count as usize;
+    let states: Vec<_> = opinions.items().map(|opinion| opinion.state).collect();
+    let any = |state| states.iter().any(|found| found == state);
+    if any("CHANGES_REQUESTED") {
+        Some(Review::ChangesRequested)
+    } else if states.len() < total {
+        Some(Review::Required)
+    } else {
+        any("APPROVED").then_some(Review::Approved)
+    }
 }
 
 fn counts(rollup: Option<Rollup>, withheld: bool) -> Option<CheckCounts> {

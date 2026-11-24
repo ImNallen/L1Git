@@ -15,7 +15,7 @@ fragment row on PullRequest {
   viewerDidAuthor
   author { login }
   labels(first: 10) { totalCount nodes { name color } }
-  latestOpinionatedReviews(first: 20) { nodes { state } }
+  latestOpinionatedReviews(first: 20) { totalCount nodes { state } }
   statusCheckRollup {
     contexts {
       checkRunCountsByState { state count }
