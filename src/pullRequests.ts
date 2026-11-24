@@ -9,12 +9,19 @@ type Answered<T> =
   | { ok: false; problem: HostProblem };
 
 /** The last value stays while a read runs and after one fails. */
-type Read<T> = {
+export type Read<T> = {
   value: T | null;
+  /** When `value` was answered, in milliseconds. */
+  at: number | null;
   reading: boolean;
   problem: HostProblem | null;
 };
-const unread: Read<never> = { value: null, reading: false, problem: null };
+const unread: Read<never> = {
+  value: null,
+  at: null,
+  reading: false,
+  problem: null,
+};
 
 /**
  * Names one sign-in. Two accounts never share a name, so a read that starts and
@@ -71,7 +78,12 @@ function createReads<Request, T>(
       put(
         key,
         answer.ok
-          ? { value: answer.reply.data, reading: false, problem: null }
+          ? {
+              value: answer.reply.data,
+              at: Date.now(),
+              reading: false,
+              problem: null,
+            }
           : { ...last, problem: answer.problem },
       );
     });

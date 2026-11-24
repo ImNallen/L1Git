@@ -147,3 +147,5 @@ export const pullRequestSchema = z.object({
 });
 
 export type PullRequestList = "open" | "recentlyMerged";
+export type PullRequests = z.infer<typeof pullRequestsSchema>;
+export type PullRequestSummary = PullRequests["items"][number];
