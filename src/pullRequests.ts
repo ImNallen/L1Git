@@ -17,8 +17,9 @@ type Read<T> = {
 const unread: Read<never> = { value: null, reading: false, problem: null };
 
 /**
- * Names one sign-in. Two accounts never share a name and a name never comes
- * back, so a read that starts and ends under one name was answered under it.
+ * Names one sign-in. Two accounts never share a name, so a read that starts and
+ * ends under one name was answered for that account. Only the same account
+ * signing in twice within a second keeps its name.
  */
 function signIn(status: HostStatus | null): string | null {
   return status?.github.kind === "connected"
