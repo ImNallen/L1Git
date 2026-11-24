@@ -109,21 +109,24 @@
               "at": "2026-11-17T19:18:14Z",
               "commit": {
                 "oid": "6666666666666666666666666666666666666666"
-              }
+              },
+              "id": "ME_1"
             },
             {
               "__typename": "ClosedEvent",
               "author": {
                 "login": "hubot"
               },
-              "at": "2026-11-17T19:18:14Z"
+              "at": "2026-11-17T19:18:14Z",
+              "id": "CE_1"
             },
             {
               "__typename": "HeadRefDeletedEvent",
               "author": {
                 "login": "hubot"
               },
-              "at": "2026-11-17T19:18:36Z"
+              "at": "2026-11-17T19:18:36Z",
+              "id": "HRDE_1"
             }
           ]
         },

@@ -629,22 +629,22 @@ fn one_pull_request_answers_in_l1_gits_words() {
                     {"oid": "3".repeat(40), "headline": "Keep the parsed file", "by": "hubot", "at": "2026-11-19T18:59:20Z"},
                 ]},
                 "timeline": {"total": 8, "items": [
-                    {"kind": "commit", "oid": "2".repeat(40), "headline": "Read the file once", "by": "hubot", "at": "2026-11-18T23:07:11Z"},
-                    {"kind": "forcePushed", "from": "4".repeat(40), "to": "5".repeat(40), "by": "hubot", "at": "2026-10-13T18:51:33Z"},
-                    {"kind": "readyForReview", "by": "hubot", "at": "2026-05-07T21:46:18Z"},
+                    {"id": "PURC_1", "kind": "commit", "oid": "2".repeat(40), "headline": "Read the file once", "by": "hubot", "at": "2026-11-18T23:07:11Z"},
+                    {"id": "HRFPE_1", "kind": "forcePushed", "from": "4".repeat(40), "to": "5".repeat(40), "by": "hubot", "at": "2026-10-13T18:51:33Z"},
+                    {"id": "RFRE_1", "kind": "readyForReview", "by": "hubot", "at": "2026-05-07T21:46:18Z"},
                     {"kind": "review", "id": "PRR_1", "state": "commented", "body": "Looks close.", "by": "review-bot", "at": "2026-11-18T23:12:36Z"},
-                    {"kind": "comment", "body": "Thanks for the pull request.", "by": "octo-bot", "at": "2026-10-13T18:48:27Z"},
+                    {"id": "IC_1", "kind": "comment", "body": "Thanks for the pull request.", "by": "octo-bot", "at": "2026-10-13T18:48:27Z"},
                 ]},
                 "threads": {"total": 6, "items": [
                     {
                         "id": "PRRT_1", "review": "PRR_1", "path": "src/config.rs", "line": null, "startLine": null, "originalLine": 175, "originalStartLine": null,
                         "side": "right", "outdated": true, "resolved": true, "hunk": hunk,
-                        "comments": {"total": 2, "items": [{"by": "review-bot", "at": "2026-11-18T23:12:35Z", "body": "Could this stay lazy?"}]},
+                        "comments": {"total": 2, "items": [{"id": "PRRC_1", "by": "review-bot", "at": "2026-11-18T23:12:35Z", "body": "Could this stay lazy?"}]},
                     },
                     {
                         "id": "PRRT_2", "review": null, "path": "src/main.rs", "line": 30, "startLine": 30, "originalLine": 26, "originalStartLine": null,
                         "side": "right", "outdated": false, "resolved": false, "hunk": hunk,
-                        "comments": {"total": 4, "items": [{"by": "monalisa", "at": "2026-11-19T18:23:35Z", "body": "Could this stay lazy?"}]},
+                        "comments": {"total": 4, "items": [{"id": "PRRC_2", "by": "monalisa", "at": "2026-11-19T18:23:35Z", "body": "Could this stay lazy?"}]},
                     },
                 ]},
             })
@@ -784,9 +784,9 @@ fn a_merged_pull_request_tells_how_it_ended() {
     assert_eq!(
         data["timeline"]["items"],
         json!([
-            {"kind": "merged", "oid": "6".repeat(40), "by": "hubot", "at": "2026-11-17T19:18:14Z"},
-            {"kind": "closed", "by": "hubot", "at": "2026-11-17T19:18:14Z"},
-            {"kind": "branchDeleted", "by": "hubot", "at": "2026-11-17T19:18:36Z"},
+            {"id": "ME_1", "kind": "merged", "oid": "6".repeat(40), "by": "hubot", "at": "2026-11-17T19:18:14Z"},
+            {"id": "CE_1", "kind": "closed", "by": "hubot", "at": "2026-11-17T19:18:14Z"},
+            {"id": "HRDE_1", "kind": "branchDeleted", "by": "hubot", "at": "2026-11-17T19:18:36Z"},
         ])
     );
     assert_eq!(data["viewerIsAuthor"], true);
@@ -849,25 +849,24 @@ fn reviewers_show_what_is_asked_of_them_last() {
 #[test]
 fn the_timeline_skips_what_it_cannot_tell_but_counts_it() {
     let world = World::connected();
-    let act =
-        |kind: &str| json!({"__typename": kind, "author": null, "at": "2026-11-24T16:23:14Z"});
+    let act = |kind: &str| json!({"__typename": kind, "id": kind, "author": null, "at": "2026-11-24T16:23:14Z"});
     let data = world.pulls(pull(json!({"timelineItems": {"totalCount": 9, "nodes": [
         {"__typename": "PullRequestReview", "id": "PRR_2", "author": {"login": "octo"}, "submittedAt": null, "state": "PENDING", "body": "Not sent yet."},
         {"__typename": "NewEvent", "extra": {"nested": 1}},
         null,
         act("ReopenedEvent"),
         act("ConvertToDraftEvent"),
-        {"__typename": "HeadRefForcePushedEvent", "author": null, "at": "2026-11-24T16:23:14Z", "beforeCommit": null, "afterCommit": null},
-        {"__typename": "PullRequestCommit", "commit": {"oid": "a", "messageHeadline": "Fix it", "committedDate": "2026-11-24T16:23:14Z", "author": {"name": "Mona Lisa", "user": null}}},
+        {"__typename": "HeadRefForcePushedEvent", "id": "HRFPE_1", "author": null, "at": "2026-11-24T16:23:14Z", "beforeCommit": null, "afterCommit": null},
+        {"__typename": "PullRequestCommit", "id": "PURC_1", "commit": {"oid": "a", "messageHeadline": "Fix it", "committedDate": "2026-11-24T16:23:14Z", "author": {"name": "Mona Lisa", "user": null}}},
     ]}})));
     let at = "2026-11-24T16:23:14Z";
     assert_eq!(
         data["timeline"],
         json!({"total": 9, "items": [
-            {"kind": "reopened", "by": null, "at": at},
-            {"kind": "convertedToDraft", "by": null, "at": at},
-            {"kind": "forcePushed", "from": null, "to": null, "by": null, "at": at},
-            {"kind": "commit", "oid": "a", "headline": "Fix it", "by": "Mona Lisa", "at": at},
+            {"id": "ReopenedEvent", "kind": "reopened", "by": null, "at": at},
+            {"id": "ConvertToDraftEvent", "kind": "convertedToDraft", "by": null, "at": at},
+            {"id": "HRFPE_1", "kind": "forcePushed", "from": null, "to": null, "by": null, "at": at},
+            {"id": "PURC_1", "kind": "commit", "oid": "a", "headline": "Fix it", "by": "Mona Lisa", "at": at},
         ]})
     );
 }

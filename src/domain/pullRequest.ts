@@ -49,37 +49,38 @@ export const pullRequestsSchema = page(
 );
 
 const happened = { by: account, at: time };
+/** `id` is GitHub's own, and stays the same from one read to the next. */
+const entry = { id: z.string(), ...happened };
 const eventSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("commit"),
     oid: z.string(),
     headline: z.string(),
-    ...happened,
+    ...entry,
   }),
   z.object({
     kind: z.literal("review"),
-    id: z.string(),
     state: reviewStateSchema,
     body: z.string(),
-    ...happened,
+    ...entry,
   }),
-  z.object({ kind: z.literal("comment"), body: z.string(), ...happened }),
+  z.object({ kind: z.literal("comment"), body: z.string(), ...entry }),
   z.object({
     kind: z.literal("forcePushed"),
     from: z.string().nullable(),
     to: z.string().nullable(),
-    ...happened,
+    ...entry,
   }),
   z.object({
     kind: z.literal("merged"),
     oid: z.string().nullable(),
-    ...happened,
+    ...entry,
   }),
-  z.object({ kind: z.literal("closed"), ...happened }),
-  z.object({ kind: z.literal("reopened"), ...happened }),
-  z.object({ kind: z.literal("branchDeleted"), ...happened }),
-  z.object({ kind: z.literal("readyForReview"), ...happened }),
-  z.object({ kind: z.literal("convertedToDraft"), ...happened }),
+  z.object({ kind: z.literal("closed"), ...entry }),
+  z.object({ kind: z.literal("reopened"), ...entry }),
+  z.object({ kind: z.literal("branchDeleted"), ...entry }),
+  z.object({ kind: z.literal("readyForReview"), ...entry }),
+  z.object({ kind: z.literal("convertedToDraft"), ...entry }),
 ]);
 
 export const pullRequestSchema = z.object({
@@ -132,7 +133,7 @@ export const pullRequestSchema = z.object({
       outdated: z.boolean(),
       resolved: z.boolean(),
       hunk: z.string(),
-      comments: page(z.object({ body: z.string(), ...happened })),
+      comments: page(z.object({ body: z.string(), ...entry })),
     }),
   ).nullable(),
   mergeable: mergeableSchema,
