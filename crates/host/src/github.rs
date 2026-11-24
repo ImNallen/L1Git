@@ -14,7 +14,8 @@ use crate::state::{CommitId, unix_secs};
 use crate::vault::{Token, keychain};
 use crate::wire::{Access, EndReason, ErrorKind, Failure, Method};
 
-const BODY_CAP: u64 = 1024 * 1024;
+/// The largest answer measured is 140 KB, for a busy pull request.
+const BODY_CAP: u64 = 8 * 1024 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
@@ -260,6 +261,7 @@ pub(crate) enum ApiError {
     Unauthorized,
     RateLimited { reset_at: Option<u64> },
     Forbidden { message: String },
+    TooLarge,
     Status(u16),
     Unreachable,
     Unexpected,
@@ -268,9 +270,12 @@ pub(crate) enum ApiError {
 pub(crate) fn read_body(response: Response) -> Result<Vec<u8>, ApiError> {
     let mut body = Vec::new();
     response
-        .take(BODY_CAP)
+        .take(BODY_CAP + 1)
         .read_to_end(&mut body)
         .map_err(|_| ApiError::Unreachable)?;
+    if body.len() as u64 > BODY_CAP {
+        return Err(ApiError::TooLarge);
+    }
     Ok(body)
 }
 
@@ -444,6 +449,10 @@ pub(crate) fn api_failure(error: ApiError) -> Failure {
         ApiError::Forbidden { message } => Failure::new(
             ErrorKind::GitHubFailed { http_status: 403 },
             format!("GitHub refused the request: {message}"),
+        ),
+        ApiError::TooLarge => Failure::new(
+            ErrorKind::GitHubFailed { http_status: 200 },
+            "GitHub's answer is too large for L1 Git to read. Open it on GitHub instead.",
         ),
         ApiError::Status(code) => Failure::new(
             ErrorKind::GitHubFailed { http_status: code },
