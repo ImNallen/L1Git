@@ -1,4 +1,3 @@
-use std::io::Read;
 use std::time::{Duration, Instant};
 
 use reqwest::header::{ACCEPT, CONTENT_TYPE};
@@ -7,7 +6,7 @@ use serde::de::DeserializeOwned;
 use url::Url;
 
 use crate::Host;
-use crate::github::{self, ApiError, BODY_CAP, api_failure};
+use crate::github::{self, ApiError, api_failure, read_body};
 use crate::state::{WriteLock, unix_nanos};
 use crate::vault::Token;
 use crate::wire::{DevicePrompt, ErrorKind, Failure, Method};
@@ -156,11 +155,7 @@ impl Host {
             .send()
             .map_err(|_| api_failure(ApiError::Unreachable))?;
         let status = response.status().as_u16();
-        let mut bytes = Vec::new();
-        response
-            .take(BODY_CAP)
-            .read_to_end(&mut bytes)
-            .map_err(|_| api_failure(ApiError::Unreachable))?;
+        let bytes = read_body(response).map_err(api_failure)?;
         match serde_json::from_slice(&bytes) {
             Ok(reply) => Ok((status, reply)),
             Err(_) if !(200..300).contains(&status) => Err(api_failure(ApiError::Status(status))),

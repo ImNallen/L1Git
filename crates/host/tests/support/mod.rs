@@ -134,6 +134,15 @@ impl Reply {
         }
     }
 
+    /// Grows a JSON object's answer to `bytes` in all.
+    pub fn padded(mut self, bytes: usize) -> Reply {
+        let padding = bytes - self.body.len() - r#""padding":"","#.len();
+        self.body
+            .insert_str(1, &format!(r#""padding":"{}","#, "x".repeat(padding)));
+        assert_eq!(self.body.len(), bytes);
+        self
+    }
+
     fn json(body: String) -> Reply {
         Reply {
             status: 200,
