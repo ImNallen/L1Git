@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { Route } from "../transport";
-import { pullRequestsSchema } from "./pullRequest";
+import { pullRequestSchema, pullRequestsSchema } from "./pullRequest";
 import type { PullRequestList } from "./pullRequest";
 import type { GitHubRepository } from "./repository";
 
@@ -111,6 +111,11 @@ export const hostResponseSchema = z.discriminatedUnion("op", [
     data: pullRequestsSchema,
     status: hostStatusSchema,
   }),
+  z.object({
+    op: z.literal("pullRequest"),
+    data: pullRequestSchema,
+    status: hostStatusSchema,
+  }),
 ]);
 
 export type HostCommand =
@@ -119,11 +124,9 @@ export type HostCommand =
   | { op: "devicePoll" | "deviceCancel"; session: string };
 
 /** A question about GitHub's data, so any number can wait at once. */
-export type HostRead = {
-  op: "pullRequests";
-  repository: GitHubRepository;
-  list: PullRequestList;
-};
+export type HostRead =
+  | { op: "pullRequests"; repository: GitHubRepository; list: PullRequestList }
+  | { op: "pullRequest"; repository: GitHubRepository; number: number };
 
 export type HostRequest = HostCommand | HostRead;
 

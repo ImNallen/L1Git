@@ -1,0 +1,268 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "number": 12,
+        "title": "Read the configuration file once",
+        "body": "The file was read for **every** request.",
+        "isDraft": false,
+        "mergedAt": null,
+        "closedAt": null,
+        "createdAt": "2026-05-07T21:40:00Z",
+        "updatedAt": "2026-11-24T15:33:39Z",
+        "author": {
+          "login": "hubot"
+        },
+        "viewerDidAuthor": false,
+        "additions": 80,
+        "deletions": 8,
+        "changedFiles": 3,
+        "labels": {
+          "totalCount": 1,
+          "nodes": [
+            {
+              "name": "bug",
+              "color": "d73a4a"
+            }
+          ]
+        },
+        "baseRefName": "main",
+        "headRefName": "read-config-once",
+        "headRefOid": "1111111111111111111111111111111111111111",
+        "isCrossRepository": true,
+        "maintainerCanModify": true,
+        "headRepository": {
+          "name": "app",
+          "owner": {
+            "login": "hubot"
+          }
+        },
+        "mergeable": "MERGEABLE",
+        "mergeStateStatus": "BLOCKED",
+        "reviewRequests": {
+          "nodes": [
+            {
+              "requestedReviewer": {
+                "login": "monalisa"
+              }
+            }
+          ]
+        },
+        "latestReviews": {
+          "nodes": [
+            {
+              "author": {
+                "login": "review-bot"
+              },
+              "state": "COMMENTED"
+            }
+          ]
+        },
+        "latestOpinionatedReviews": {
+          "nodes": [
+            {
+              "author": {
+                "login": "monalisa"
+              },
+              "state": "CHANGES_REQUESTED"
+            }
+          ]
+        },
+        "statusCheckRollup": {
+          "contexts": {
+            "totalCount": 11,
+            "nodes": [
+              {
+                "__typename": "CheckRun",
+                "name": "build",
+                "status": "COMPLETED",
+                "conclusion": "SUCCESS",
+                "startedAt": "2026-11-20T18:16:37Z",
+                "completedAt": "2026-11-20T18:20:24Z",
+                "url": "https://github.com/octo/app/actions/runs/1/job/1",
+                "isRequired": true
+              },
+              {
+                "__typename": "CheckRun",
+                "name": "lint",
+                "status": "COMPLETED",
+                "conclusion": "SUCCESS",
+                "startedAt": "2026-11-20T18:16:37Z",
+                "completedAt": "2026-11-20T18:20:17Z",
+                "url": "https://github.com/octo/app/actions/runs/1/job/2",
+                "isRequired": false
+              },
+              {
+                "__typename": "CheckRun",
+                "name": "license/cla",
+                "status": "IN_PROGRESS",
+                "conclusion": null,
+                "startedAt": "2026-07-19T02:59:11Z",
+                "completedAt": null,
+                "url": "https://github.com/octo/app/actions/runs/1/job/3",
+                "isRequired": false
+              }
+            ]
+          }
+        },
+        "commits": {
+          "totalCount": 6,
+          "nodes": [
+            {
+              "commit": {
+                "oid": "2222222222222222222222222222222222222222",
+                "messageHeadline": "Read the file once",
+                "committedDate": "2026-11-18T23:07:11Z",
+                "author": {
+                  "name": "Hubot",
+                  "user": {
+                    "login": "hubot"
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "3333333333333333333333333333333333333333",
+                "messageHeadline": "Keep the parsed file",
+                "committedDate": "2026-11-19T18:59:20Z",
+                "author": {
+                  "name": "Hubot",
+                  "user": {
+                    "login": "hubot"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "timelineItems": {
+          "totalCount": 8,
+          "nodes": [
+            {
+              "__typename": "PullRequestCommit",
+              "commit": {
+                "oid": "2222222222222222222222222222222222222222",
+                "messageHeadline": "Read the file once",
+                "committedDate": "2026-11-18T23:07:11Z",
+                "author": {
+                  "name": "Hubot",
+                  "user": {
+                    "login": "hubot"
+                  }
+                }
+              }
+            },
+            {
+              "__typename": "HeadRefForcePushedEvent",
+              "author": {
+                "login": "hubot"
+              },
+              "at": "2026-10-13T18:51:33Z",
+              "beforeCommit": {
+                "oid": "4444444444444444444444444444444444444444"
+              },
+              "afterCommit": {
+                "oid": "5555555555555555555555555555555555555555"
+              }
+            },
+            {
+              "__typename": "ReadyForReviewEvent",
+              "author": {
+                "login": "hubot"
+              },
+              "at": "2026-05-07T21:46:18Z"
+            },
+            {
+              "__typename": "PullRequestReview",
+              "author": {
+                "login": "review-bot"
+              },
+              "submittedAt": "2026-11-18T23:12:36Z",
+              "state": "COMMENTED",
+              "body": "Looks close.",
+              "id": "PRR_1"
+            },
+            {
+              "__typename": "IssueComment",
+              "author": {
+                "login": "octo-bot"
+              },
+              "at": "2026-10-13T18:48:27Z",
+              "body": "Thanks for the pull request."
+            }
+          ]
+        },
+        "reviewThreads": {
+          "totalCount": 6,
+          "nodes": [
+            {
+              "path": "src/config.rs",
+              "line": null,
+              "startLine": null,
+              "originalLine": 175,
+              "originalStartLine": null,
+              "diffSide": "RIGHT",
+              "isOutdated": true,
+              "isResolved": true,
+              "comments": {
+                "totalCount": 2,
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "review-bot"
+                    },
+                    "at": "2026-11-18T23:12:35Z",
+                    "body": "Could this stay lazy?"
+                  }
+                ]
+              },
+              "id": "PRRT_1",
+              "first": {
+                "nodes": [
+                  {
+                    "diffHunk": "@@ -1,2 +1,2 @@\n-let file = read();\n+let file = read_once();",
+                    "pullRequestReview": {
+                      "id": "PRR_1"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "path": "src/main.rs",
+              "line": 30,
+              "startLine": 30,
+              "originalLine": 26,
+              "originalStartLine": null,
+              "diffSide": "RIGHT",
+              "isOutdated": false,
+              "isResolved": false,
+              "comments": {
+                "totalCount": 4,
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "monalisa"
+                    },
+                    "at": "2026-11-19T18:23:35Z",
+                    "body": "Could this stay lazy?"
+                  }
+                ]
+              },
+              "id": "PRRT_2",
+              "first": {
+                "nodes": [
+                  {
+                    "diffHunk": "@@ -1,2 +1,2 @@\n-let file = read();\n+let file = read_once();",
+                    "pullRequestReview": null
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

@@ -3850,10 +3850,19 @@ describe("real Rust host contract", () => {
       owner: z.string(),
       repo: z.string(),
       merged: z.string().optional(),
+      number: z.number().optional(),
     }),
   });
-  const recorded = (name: string) =>
-    readFileSync(`crates/host/tests/fixtures/github/${name}.json`, "utf8");
+  function answerTo(question: string) {
+    const { variables } = questionSchema.parse(JSON.parse(question));
+    const { owner, repo, merged, number } = variables;
+    const list = merged ? "merged" : "open";
+    const pull = number === 12 ? "pull-open" : "pull-merged";
+    return readFileSync(
+      `crates/host/tests/fixtures/github/${number ? pull : list}.json`,
+      "utf8",
+    ).replace("octo/app", `${owner}/${repo}`);
+  }
   const seen: string[] = [];
   let github: Server;
   let hostBridge: Awaited<ReturnType<typeof startBridge>>;
@@ -3874,16 +3883,9 @@ describe("real Rust host contract", () => {
       seen.push(`${request.url} ${request.headers.authorization}`);
       const mine = request.headers.authorization === `Bearer ${token}`;
       if (mine && request.url === "/graphql") {
-        void text(request).then((body) => {
-          const { variables } = questionSchema.parse(JSON.parse(body));
-          const { owner, repo, merged } = variables;
+        void text(request).then((question) => {
           response.writeHead(200, { "Content-Type": "application/json" });
-          response.end(
-            recorded(merged ? "merged" : "open").replace(
-              "octo/app",
-              `${owner}/${repo}`,
-            ),
-          );
+          response.end(answerTo(question));
         });
         return;
       }
@@ -4042,10 +4044,40 @@ describe("real Rust host contract", () => {
       [10, { kind: "merged", at: "2026-11-17T19:18:14Z" }],
       [8, { kind: "merged", at: "2026-11-23T18:24:25Z" }],
     ]);
-    expect(seen).toEqual([
-      `/graphql Bearer ${token}`,
-      `/graphql Bearer ${token}`,
+
+    const one = await ask({ op: "pullRequest", repository, number: 12 });
+    if (one.op !== "pullRequest") throw new Error(one.op);
+    expect(one.data).toMatchObject({
+      number: 12,
+      state: { kind: "open", draft: false },
+      head: { branch: "read-config-once", crossRepository: true },
+      reviewers: [
+        { login: "monalisa", state: "requested" },
+        { login: "review-bot", state: "commented" },
+      ],
+      mergeState: "blocked",
+    });
+    expect(one.data.checks?.items.map(({ state }) => state)).toEqual([
+      "passed",
+      "passed",
+      "running",
     ]);
+    expect(one.data.timeline.items.map(({ kind }) => kind)).toEqual([
+      "commit",
+      "forcePushed",
+      "readyForReview",
+      "review",
+      "comment",
+    ]);
+    expect(one.data.threads.items.map(({ line }) => line)).toEqual([null, 30]);
+    const ended = await ask({ op: "pullRequest", repository, number: 10 });
+    if (ended.op !== "pullRequest") throw new Error(ended.op);
+    expect(ended.data.timeline.items.map(({ kind }) => kind)).toEqual([
+      "merged",
+      "closed",
+      "branchDeleted",
+    ]);
+    expect(seen).toEqual(Array(4).fill(`/graphql Bearer ${token}`));
     await ask({ op: "disconnect" });
   });
 

@@ -3,7 +3,9 @@ use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use super::{Actor, CHECKS, CheckState, Mergeability, Nodes, Page, Repository, State, login};
+use super::{
+    Actor, CHECKS, CheckState, Label, Mergeability, Nodes, Page, Repository, State, login,
+};
 use crate::github::{ApiError, GitHub};
 use crate::graphql::Reply;
 use crate::state::unix_secs;
@@ -46,13 +48,6 @@ pub struct Summary {
     additions: u32,
     deletions: u32,
     updated_at: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct Label {
-    name: String,
-    /// Six hex digits.
-    color: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -212,7 +207,7 @@ impl GitHub<'_> {
         let checks_withheld = withheld.field(CHECKS);
         let page = found
             .pull_requests
-            .page(|row| summary(row, &requested, checks_withheld));
+            .page(|row| Some(summary(row, &requested, checks_withheld)));
         Ok((found.name_with_owner, page))
     }
 
@@ -241,7 +236,7 @@ impl GitHub<'_> {
             ));
         };
         let checks_withheld = withheld.field(CHECKS);
-        let page = merged.page(|row| summary(row, &HashSet::new(), checks_withheld));
+        let page = merged.page(|row| Some(summary(row, &HashSet::new(), checks_withheld)));
         Ok((found.name_with_owner, page))
     }
 }
@@ -251,7 +246,7 @@ fn summary(row: Row, requested: &HashSet<u32>, checks_withheld: bool) -> Summary
         review_requested: requested.contains(&row.number),
         review: row
             .review_decision
-            .or_else(|| verdict(row.latest_opinionated_reviews?)),
+            .or_else(|| row.latest_opinionated_reviews.and_then(verdict)),
         checks: counts(row.status_check_rollup, checks_withheld),
         number: row.number,
         title: row.title,
@@ -262,7 +257,7 @@ fn summary(row: Row, requested: &HashSet<u32>, checks_withheld: bool) -> Summary
         base: row.base_ref_name,
         labels: row
             .labels
-            .map_or_else(Page::empty, |labels| labels.page(|label| label)),
+            .map_or_else(Page::empty, |labels| labels.page(Some)),
         comments: row.total_comments_count.unwrap_or(0),
         mergeable: row.mergeable,
         additions: row.additions,

@@ -150,6 +150,9 @@ pub fn run(host: &Host, request: Request) -> Result<Response, HostError> {
         Request::PullRequests { repository, list } => host
             .with_github(|github| github.pull_requests(&repository, list))
             .map(|read| Answer::PullRequests(read.value)),
+        Request::PullRequest { repository, number } => host
+            .with_github(|github| github.pull_request(&repository, number))
+            .map(|read| Answer::PullRequest(Box::new(read.value))),
     };
     let status = host.status();
     match outcome {
