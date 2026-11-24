@@ -650,8 +650,75 @@ fn one_pull_request_answers_in_l1_gits_words() {
     );
     assert_eq!(
         world.github.questions()[0]["variables"],
-        json!({"owner": "octo", "repo": "app", "number": 12})
+        json!({"owner": "octo", "repo": "app", "number": 12, "threads": true})
     );
+}
+
+/// An answer without the threads, which GitHub leaves out when not asked.
+fn without_threads() -> Value {
+    let mut answer = pull(json!({}));
+    let found = answer["data"]["repository"]["pullRequest"].as_object_mut();
+    found.unwrap().remove("reviewThreads");
+    answer
+}
+
+fn asked_for_threads(world: &World) -> Vec<Value> {
+    let questions = world.github.questions();
+    questions
+        .iter()
+        .map(|question| question["variables"]["threads"].clone())
+        .collect()
+}
+
+#[test]
+fn a_pull_request_too_large_for_github_reads_without_its_threads() {
+    let unfinished = json!({
+        "data": {"repository": {"pullRequest": null}},
+        "errors": [{"path": ["repository", "pullRequest", "reviewThreads"], "message": "Something went wrong."}],
+    });
+    for failure in [
+        Reply::status(502, "<html>"),
+        Reply::status(504, "<html>"),
+        Reply::graphql(unfinished),
+        Reply::status(200, "<html>"),
+    ] {
+        let world = World::connected();
+        world
+            .github
+            .graphql([failure, Reply::graphql(without_threads())]);
+        let data = world.pull().unwrap()["data"].clone();
+        assert_eq!(data["threads"], json!(null));
+        assert_eq!(data["timeline"], json!({"items": [], "total": 0}));
+        assert_eq!(asked_for_threads(&world), [true, false]);
+    }
+}
+
+#[test]
+fn a_failure_is_asked_about_once_more_at_most() {
+    let world = World::connected();
+    world
+        .github
+        .graphql([Reply::status(502, "<html>"), Reply::status(504, "<html>")]);
+    let error = world.pull().unwrap_err();
+    assert_eq!(error["httpStatus"], 504);
+    assert_eq!(asked_for_threads(&world), [true, false]);
+
+    for (refused, kind) in [
+        (
+            Reply::graphql(json!({
+                "data": {"repository": {"pullRequest": null}},
+                "errors": [refusal("NOT_FOUND", json!(["repository", "pullRequest"]))],
+            })),
+            "notFound",
+        ),
+        (Reply::rate_limited(4_000_000_000), "rateLimited"),
+        (Reply::status(500, ""), "gitHubFailed"),
+    ] {
+        let world = World::connected();
+        world.github.graphql([refused]);
+        assert_eq!(world.pull().unwrap_err()["kind"], kind);
+        assert_eq!(asked_for_threads(&world), [true]);
+    }
 }
 
 #[test]

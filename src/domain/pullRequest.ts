@@ -118,6 +118,7 @@ export const pullRequestSchema = z.object({
     z.object({ oid: z.string(), headline: z.string(), ...happened }),
   ),
   timeline: page(eventSchema),
+  /** Null when GitHub could only answer without them. */
   threads: page(
     z.object({
       id: z.string(),
@@ -133,7 +134,7 @@ export const pullRequestSchema = z.object({
       hunk: z.string(),
       comments: page(z.object({ body: z.string(), ...happened })),
     }),
-  ),
+  ).nullable(),
   mergeable: mergeableSchema,
   mergeState: z.enum([
     "behind",

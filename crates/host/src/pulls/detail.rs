@@ -35,7 +35,8 @@ pub struct PullRequest {
     /// The newest 100, oldest first, as is `timeline`.
     commits: Page<Commit>,
     timeline: Page<Event>,
-    threads: Page<Thread>,
+    /// None when GitHub could only answer without them.
+    threads: Option<Page<Thread>>,
     mergeable: Mergeability,
     merge_state: MergeState,
 }
@@ -216,7 +217,7 @@ struct Node {
     status_check_rollup: Option<Rollup>,
     commits: Nodes<PullCommit>,
     timeline_items: Nodes<Item>,
-    review_threads: Nodes<ThreadNode>,
+    review_threads: Option<Nodes<ThreadNode>>,
 }
 
 #[derive(Deserialize)]
@@ -375,13 +376,29 @@ impl GitHub<'_> {
         repository: &Repository,
         number: u32,
     ) -> Result<PullRequest, ApiError> {
+        match self.ask_pull_request(repository, number, true) {
+            // GitHub runs out of time over a pull request with many threads, and
+            // says so in any of these ways.
+            Err(
+                ApiError::Status(502 | 504) | ApiError::Unfinished { .. } | ApiError::Unexpected,
+            ) => self.ask_pull_request(repository, number, false),
+            answer => answer,
+        }
+    }
+
+    fn ask_pull_request(
+        &self,
+        repository: &Repository,
+        number: u32,
+        threads: bool,
+    ) -> Result<PullRequest, ApiError> {
         let Repository { owner, repo } = repository;
         let Reply {
             data: Answer { repository: found },
             withheld,
         } = self.graphql(
             DETAIL,
-            json!({"owner": owner, "repo": repo, "number": number}),
+            json!({"owner": owner, "repo": repo, "number": number, "threads": threads}),
         )?;
         let Some(found) = found else {
             return Err(withheld.explain("repository", repository.to_string()));
@@ -434,7 +451,7 @@ fn parse(node: Node, checks_withheld: bool) -> PullRequest {
         timeline: node.timeline_items.page(event),
         threads: node
             .review_threads
-            .page(|thread| Some(self::thread(thread))),
+            .map(|threads| threads.page(|thread| Some(self::thread(thread)))),
         mergeable: node.mergeable,
         merge_state: node.merge_state_status,
     }

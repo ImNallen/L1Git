@@ -1,4 +1,4 @@
-query($owner: String!, $repo: String!, $number: Int!) {
+query($owner: String!, $repo: String!, $number: Int!, $threads: Boolean!) {
   repository(owner: $owner, name: $repo) {
     pullRequest(number: $number) {
       number title body isDraft mergedAt closedAt createdAt updatedAt
@@ -35,7 +35,7 @@ query($owner: String!, $repo: String!, $number: Int!) {
           ... on ConvertToDraftEvent { author: actor { login } at: createdAt }
         }
       }
-      reviewThreads(first: 100) { totalCount nodes {
+      reviewThreads(first: 100) @include(if: $threads) { totalCount nodes {
         id path line startLine originalLine originalStartLine diffSide isOutdated isResolved
         first: comments(first: 1) { nodes { diffHunk pullRequestReview { id } } }
         comments(first: 50) { totalCount nodes { author { login } at: createdAt body } }
