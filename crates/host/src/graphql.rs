@@ -20,11 +20,16 @@ pub(crate) struct Withheld {
 
 #[derive(Deserialize)]
 struct Refusal {
-    #[serde(rename = "type", default)]
-    kind: String,
+    #[serde(rename = "type")]
+    kind: Option<String>,
     message: String,
-    #[serde(default)]
-    path: Vec<Value>,
+    path: Option<Vec<Value>>,
+}
+
+impl Refusal {
+    fn path(&self) -> &[Value] {
+        self.path.as_deref().unwrap_or_default()
+    }
 }
 
 impl GitHub<'_> {
@@ -52,14 +57,14 @@ fn decode<T: Default + DeserializeOwned>(
     #[derive(Deserialize)]
     struct Envelope<T> {
         data: Option<T>,
-        #[serde(default = "Vec::new")]
-        errors: Vec<Refusal>,
+        errors: Option<Vec<Refusal>>,
     }
     let Envelope { data, errors } =
         serde_json::from_slice::<Envelope<T>>(body).map_err(|_| ApiError::Unexpected)?;
+    let errors = errors.unwrap_or_default();
     if errors
         .iter()
-        .any(|error| matches!(error.kind.as_str(), "RATE_LIMITED" | "RATE_LIMIT"))
+        .any(|error| matches!(error.kind.as_deref(), Some("RATE_LIMITED" | "RATE_LIMIT")))
     {
         return Err(ApiError::RateLimited {
             reset_at: reset_at(headers, now),
@@ -82,16 +87,17 @@ fn decode<T: Default + DeserializeOwned>(
 impl Withheld {
     /// Why GitHub left out `what`, which it would have answered under `root`.
     pub(crate) fn explain(self, root: &str, what: String) -> ApiError {
-        let at_root = |error: &&Refusal| error.path.first().is_some_and(|step| step == root);
+        let at_root = |error: &&Refusal| error.path().first().is_some_and(|step| step == root);
         let Some(error) = self.errors.iter().find(at_root).or(self.errors.first()) else {
             return ApiError::NotFound { what };
         };
-        match (error.kind.as_str(), self.sso_url) {
-            ("NOT_FOUND", _) => ApiError::NotFound { what },
-            ("FORBIDDEN", Some(url)) => ApiError::SsoRequired { url },
-            _ => ApiError::Forbidden {
-                message: error.message.clone(),
-            },
+        let message = error.message.clone();
+        match (error.kind.as_deref(), self.sso_url) {
+            (Some("NOT_FOUND"), _) => ApiError::NotFound { what },
+            (Some("FORBIDDEN"), Some(url)) => ApiError::SsoRequired { url },
+            (Some(_), _) => ApiError::Forbidden { message },
+            // GitHub types what it refuses, and not what it fails at.
+            (None, _) => ApiError::Unfinished { message },
         }
     }
 
@@ -99,6 +105,6 @@ impl Withheld {
     pub(crate) fn field(&self, field: &str) -> bool {
         self.errors
             .iter()
-            .any(|error| error.path.iter().any(|step| step == field))
+            .any(|error| error.path().iter().any(|step| step == field))
     }
 }

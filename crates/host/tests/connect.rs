@@ -210,6 +210,17 @@ fn an_answer_is_read_whole_up_to_8_mib_and_refused_beyond() {
 }
 
 #[test]
+fn a_refusal_counts_however_long_its_body_is() {
+    let world = World::new();
+    world.send(connect("octo")).unwrap();
+    let refusal = Reply::bad_credentials().padded(8 * 1024 * 1024 + 1);
+    world.github.answer("gho_octo", refusal);
+    let error = world.send(json!({"op": "verify"})).unwrap_err();
+    assert_eq!(error["kind"], "signedOut");
+    assert_eq!(error["status"]["github"]["ended"]["reason"], "revoked");
+}
+
+#[test]
 fn redirects_never_carry_the_token() {
     let world = World::new();
     let elsewhere = FakeGitHub::start();

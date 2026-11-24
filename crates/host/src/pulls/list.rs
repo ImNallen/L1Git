@@ -189,6 +189,11 @@ impl GitHub<'_> {
         let Some(found) = found else {
             return Err(withheld.explain("repository", repository.to_string()));
         };
+        if found.pull_requests.nodes.is_none() {
+            return Err(
+                withheld.explain("repository", format!("the pull requests in {repository}"))
+            );
+        }
         // Without the requests every row would say that nobody waits for the
         // viewer's review.
         let requested = requested
@@ -229,7 +234,7 @@ impl GitHub<'_> {
         let Some(found) = found else {
             return Err(withheld.explain("repository", repository.to_string()));
         };
-        let Some(merged) = merged else {
+        let Some(merged) = merged.filter(|merged| merged.nodes.is_some()) else {
             return Err(withheld.explain(
                 "merged",
                 format!("the merged pull requests in {repository}"),
