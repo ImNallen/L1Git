@@ -43,6 +43,7 @@ export const pullRequestsSchema = page(
     mergeable: mergeableSchema,
     additions: count,
     deletions: count,
+    createdAt: time,
     updatedAt: time,
   }),
 );

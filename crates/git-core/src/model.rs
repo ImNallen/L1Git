@@ -857,6 +857,8 @@ pub struct RepositoryOverview {
     pub root: String,
     pub common_dir: String,
     pub name: String,
+    /// The repository on GitHub that its pull requests are opened in.
+    pub github: Option<GitHubRepository>,
     /// Every local branch, sorted by ref name.
     pub branches: Vec<BranchStatus>,
     /// Present only when this call fetched or joined a fetch.

@@ -289,6 +289,40 @@ fn fast_forwards_the_checked_out_default_branch_after_a_fetch() {
 }
 
 #[test]
+fn names_the_github_repository_that_takes_its_pull_requests() {
+    let world = World::new();
+    let coordinator = coordinator(&world);
+    let named = || {
+        let overview = coordinator
+            .overview(world.path(), FetchMode::Local)
+            .unwrap();
+        overview
+            .github
+            .map(|github| format!("{}/{}", github.owner, github.repo))
+    };
+    let point = |remote: &str, url: &str| {
+        git(
+            &world.work,
+            &["config", &format!("remote.{remote}.url"), url],
+        );
+    };
+    assert_eq!(named(), None, "a local path is not on GitHub");
+
+    point("zeta", "https://github.com/zeta/app.git");
+    point("backup", "git@github.com:backup/app.git");
+    assert_eq!(named().as_deref(), Some("backup/app"), "the first by name");
+
+    point("origin", "https://github.com/octo/fork.git");
+    assert_eq!(named().as_deref(), Some("octo/fork"));
+
+    point("upstream", "https://gitlab.com/octo/app.git");
+    assert_eq!(named().as_deref(), Some("octo/fork"));
+
+    point("upstream", "ssh://git@github.com/octo/app.git");
+    assert_eq!(named().as_deref(), Some("octo/app"));
+}
+
+#[test]
 fn a_fetch_counts_each_moved_branch_once_and_skips_symbolic_refs() {
     let world = World::new();
     let coordinator = coordinator(&world);

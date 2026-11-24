@@ -2,7 +2,7 @@ use crate::{
     Blocker, BranchRef, BranchRole, BranchState, BranchStatus, FetchSummary, Oid, RepositoryError,
     RepositoryOverview,
     git::{self, Deadline, Finished, Mutation},
-    repository, stderr,
+    remotes, repository, stderr,
 };
 use std::{
     collections::HashMap,
@@ -232,6 +232,7 @@ pub(super) fn read(
         root: repository::utf8(root)?,
         common_dir: repository::utf8(common_dir)?,
         name: repository::display_name(main_worktree),
+        github: remotes::github(remotes::read(root, reads)?),
         branches,
         fetch,
     })

@@ -47,6 +47,7 @@ pub struct Summary {
     mergeable: Mergeability,
     additions: u32,
     deletions: u32,
+    created_at: String,
     updated_at: String,
 }
 
@@ -108,6 +109,7 @@ struct Row {
     closed_at: Option<String>,
     head_ref_name: String,
     base_ref_name: String,
+    created_at: String,
     updated_at: String,
     additions: u32,
     deletions: u32,
@@ -267,6 +269,7 @@ fn summary(row: Row, requested: &HashSet<u32>, checks_withheld: bool) -> Summary
         mergeable: row.mergeable,
         additions: row.additions,
         deletions: row.deletions,
+        created_at: row.created_at,
         updated_at: row.updated_at,
     }
 }
