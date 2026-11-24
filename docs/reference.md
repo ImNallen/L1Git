@@ -117,7 +117,7 @@ The dialog can also sign in through a browser, but only in a build made with `L1
 
 L1 Git keeps its copy of the token in the system keychain under the service `dev.l1.git`: the login keychain on macOS, Credential Manager on Windows, and the Secret Service on Linux. `host.json` in the app's configuration folder records the login, the API address, and what the token can read, never the token. The token stays in the Rust side of L1 Git, and the window never receives it. L1 Git only reads from GitHub. Launching L1 Git reads `host.json` and never the keychain, and opening Settings reads neither, so neither brings up a keychain prompt.
 
-**Check connection** asks GitHub who the saved token belongs to, and updates the login and what it can read. If GitHub no longer accepts the token, or the keychain no longer holds it, L1 Git forgets the connection and says why above **Sign in to GitHub**. **Disconnect** asks first, then removes the record from `host.json` and the token from the keychain. It does not revoke the token on GitHub, so `gh` stays signed in. Signing out of `gh` later does not disconnect L1 Git either.
+**Check connection** asks GitHub who the saved token belongs to, and updates the login and what it can read. When GitHub accepts the token, the row says so under the login. A new sign-in shows the same line. If GitHub no longer accepts the token, or the keychain no longer holds it, L1 Git forgets the connection and says why above **Sign in to GitHub**. **Disconnect** asks first, then removes the record from `host.json` and the token from the keychain. It does not revoke the token on GitHub, so `gh` stays signed in. Signing out of `gh` later does not disconnect L1 Git either.
 
 ## Pull the current branch
 

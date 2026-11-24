@@ -51,6 +51,7 @@ function NoHostCard({ onSignIn }: { onSignIn: () => void }) {
 export function HostsSettings({ host }: { host: Host }) {
   const [signingIn, setSigningIn] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
+  const [accepted, setAccepted] = useState(false);
   const github = host.status?.github;
   return (
     <section className="settings-page" aria-labelledby="hosts-heading">
@@ -88,13 +89,21 @@ export function HostsSettings({ host }: { host: Host }) {
                   <div>
                     <h3 className="hosts-login">@{github.login}</h3>
                     <p>github.com · {access[github.access]}</p>
+                    {accepted && (
+                      <p role="status">
+                        GitHub accepted this sign-in just now.
+                      </p>
+                    )}
                   </div>
                   <div className="update-actions">
                     <button
                       type="button"
                       className="button secondary"
                       disabled={host.busy !== null}
-                      onClick={() => void host.verify()}
+                      onClick={() => {
+                        setAccepted(false);
+                        void host.verify().then(setAccepted);
+                      }}
                     >
                       {host.busy === "verify" && (
                         <LoaderCircle size={14} className="spin" />
@@ -122,7 +131,13 @@ export function HostsSettings({ host }: { host: Host }) {
         </section>
       </div>
       {signingIn && (
-        <GitHubSignInDialog host={host} onClose={() => setSigningIn(false)} />
+        <GitHubSignInDialog
+          host={host}
+          onClose={() => {
+            setSigningIn(false);
+            setAccepted(github?.kind === "connected");
+          }}
+        />
       )}
       {disconnecting && github?.kind === "connected" && (
         <ConfirmDialog
