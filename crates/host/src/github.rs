@@ -252,7 +252,7 @@ fn build(https_only: bool) -> Option<Client> {
 }
 
 pub(crate) struct GitHub<'a> {
-    http: &'a Client,
+    pub(crate) http: &'a Client,
     api: &'a ApiBase,
     token: &'a Token,
 }
@@ -261,6 +261,8 @@ pub(crate) enum ApiError {
     Unauthorized,
     RateLimited { reset_at: Option<u64> },
     Forbidden { message: String },
+    SsoRequired { url: String },
+    NotFound { what: String },
     TooLarge,
     Status(u16),
     Unreachable,
@@ -280,11 +282,11 @@ pub(crate) fn read_body(response: Response) -> Result<Vec<u8>, ApiError> {
 }
 
 impl GitHub<'_> {
-    fn url(&self, path: &str) -> Result<Url, ApiError> {
+    pub(crate) fn url(&self, path: &str) -> Result<Url, ApiError> {
         self.api.0.join(path).map_err(|_| ApiError::Unexpected)
     }
 
-    fn send(&self, request: RequestBuilder) -> Result<(HeaderMap, Vec<u8>), ApiError> {
+    pub(crate) fn send(&self, request: RequestBuilder) -> Result<(HeaderMap, Vec<u8>), ApiError> {
         let response = request
             .header(AUTHORIZATION, self.token.authorization())
             .send()
@@ -328,28 +330,48 @@ impl GitHub<'_> {
     }
 }
 
+fn header<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
+    headers
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+}
+
+fn retry_after(headers: &HeaderMap) -> Option<u64> {
+    header(headers, "retry-after").and_then(|value| value.parse().ok())
+}
+
+pub(crate) fn reset_at(headers: &HeaderMap, now: u64) -> Option<u64> {
+    retry_after(headers)
+        .map(|after| now.saturating_add(after))
+        .or_else(|| header(headers, "x-ratelimit-reset").and_then(|value| value.parse().ok()))
+}
+
+/// Where the user authorizes a token for an organization's single sign-on. The
+/// window offers it as a link, so it has to lead to GitHub.
+pub(crate) fn sso_url(headers: &HeaderMap) -> Option<String> {
+    let url = header(headers, "x-github-sso")?.strip_prefix("required; url=")?;
+    let url = Url::parse(url).ok()?;
+    (url.scheme() == "https" && url.host_str() == Some("github.com")).then(|| url.into())
+}
+
 fn classify(status: u16, headers: &HeaderMap, body: &[u8], now: u64) -> Option<ApiError> {
-    let header = |name: &str| {
-        headers
-            .get(name)
-            .and_then(|value| value.to_str().ok())
-            .map(str::trim)
-    };
-    let retry_after = header("retry-after").and_then(|value| value.parse::<u64>().ok());
-    let limited =
-        status == 429 || retry_after.is_some() || header("x-ratelimit-remaining") == Some("0");
+    let limited = status == 429
+        || retry_after(headers).is_some()
+        || header(headers, "x-ratelimit-remaining") == Some("0");
     match status {
         200..=299 => None,
         401 => Some(ApiError::Unauthorized),
         403 | 429 if limited => Some(ApiError::RateLimited {
-            reset_at: retry_after
-                .map(|after| now.saturating_add(after))
-                .or_else(|| header("x-ratelimit-reset").and_then(|value| value.parse().ok())),
+            reset_at: reset_at(headers, now),
         }),
         403 => {
             #[derive(Deserialize)]
             struct Refusal {
                 message: String,
+            }
+            if let Some(url) = sso_url(headers) {
+                return Some(ApiError::SsoRequired { url });
             }
             let message = serde_json::from_slice::<Refusal>(body)
                 .map(|refusal| refusal.message)
@@ -449,6 +471,16 @@ pub(crate) fn api_failure(error: ApiError) -> Failure {
         ApiError::Forbidden { message } => Failure::new(
             ErrorKind::GitHubFailed { http_status: 403 },
             format!("GitHub refused the request: {message}"),
+        ),
+        ApiError::SsoRequired { url } => Failure::new(
+            ErrorKind::SsoRequired { url },
+            "This organization requires single sign-on. Authorize L1 Git's sign-in on GitHub, then try again.",
+        ),
+        ApiError::NotFound { what } => Failure::new(
+            ErrorKind::NotFound,
+            format!(
+                "L1 Git can't find {what} on GitHub. It may be gone, or this sign-in may not be able to read it. Check the account in Settings › Hosts."
+            ),
         ),
         ApiError::TooLarge => Failure::new(
             ErrorKind::GitHubFailed { http_status: 200 },

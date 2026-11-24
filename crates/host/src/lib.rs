@@ -6,7 +6,9 @@ mod connect;
 mod device;
 mod gh;
 mod github;
+mod graphql;
 mod process;
+mod pulls;
 mod state;
 mod vault;
 mod wire;
@@ -145,6 +147,9 @@ pub fn run(host: &Host, request: Request) -> Result<Response, HostError> {
         Request::DeviceCancel { session } => {
             host.device_cancel(&session).map(|()| Answer::DeviceCancel)
         }
+        Request::PullRequests { repository, list } => host
+            .with_github(|github| github.pull_requests(&repository, list))
+            .map(|read| Answer::PullRequests(read.value)),
     };
     let status = host.status();
     match outcome {

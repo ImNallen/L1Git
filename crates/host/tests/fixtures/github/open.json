@@ -1,0 +1,243 @@
+{
+  "data": {
+    "repository": {
+      "nameWithOwner": "octo/app",
+      "pullRequests": {
+        "totalCount": 59,
+        "nodes": [
+          {
+            "number": 12,
+            "title": "Read the configuration file once",
+            "isDraft": false,
+            "mergedAt": null,
+            "closedAt": null,
+            "headRefName": "read-config-once",
+            "baseRefName": "main",
+            "updatedAt": "2026-11-24T15:33:39Z",
+            "additions": 80,
+            "deletions": 8,
+            "mergeable": "MERGEABLE",
+            "reviewDecision": "CHANGES_REQUESTED",
+            "totalCommentsCount": 23,
+            "viewerDidAuthor": false,
+            "author": {
+              "login": "hubot"
+            },
+            "labels": {
+              "totalCount": 4,
+              "nodes": [
+                {
+                  "name": "bug",
+                  "color": "d73a4a"
+                },
+                {
+                  "name": "documentation",
+                  "color": "0075ca"
+                },
+                {
+                  "name": "good first issue",
+                  "color": "7057ff"
+                },
+                {
+                  "name": "help wanted",
+                  "color": "008672"
+                }
+              ]
+            },
+            "latestOpinionatedReviews": {
+              "totalCount": 1,
+              "nodes": [
+                {
+                  "state": "CHANGES_REQUESTED"
+                }
+              ]
+            },
+            "statusCheckRollup": {
+              "contexts": {
+                "checkRunCountsByState": [
+                  { "state": "ACTION_REQUIRED", "count": 0 },
+                  { "state": "CANCELLED", "count": 0 },
+                  { "state": "COMPLETED", "count": 0 },
+                  { "state": "FAILURE", "count": 1 },
+                  { "state": "IN_PROGRESS", "count": 6 },
+                  { "state": "NEUTRAL", "count": 0 },
+                  { "state": "PENDING", "count": 0 },
+                  { "state": "QUEUED", "count": 0 },
+                  { "state": "SKIPPED", "count": 0 },
+                  { "state": "STALE", "count": 0 },
+                  { "state": "STARTUP_FAILURE", "count": 0 },
+                  { "state": "SUCCESS", "count": 6 },
+                  { "state": "TIMED_OUT", "count": 0 },
+                  { "state": "WAITING", "count": 0 }
+                ],
+                "statusContextCountsByState": [
+                  { "state": "EXPECTED", "count": 0 },
+                  { "state": "ERROR", "count": 0 },
+                  { "state": "FAILURE", "count": 0 },
+                  { "state": "PENDING", "count": 0 },
+                  { "state": "SUCCESS", "count": 0 }
+                ]
+              }
+            }
+          },
+          {
+            "number": 7,
+            "title": "Try a faster parser",
+            "isDraft": true,
+            "mergedAt": null,
+            "closedAt": null,
+            "headRefName": "faster-parser",
+            "baseRefName": "main",
+            "updatedAt": "2026-11-24T15:31:48Z",
+            "additions": 123,
+            "deletions": 0,
+            "mergeable": "MERGEABLE",
+            "reviewDecision": "REVIEW_REQUIRED",
+            "totalCommentsCount": 2,
+            "viewerDidAuthor": false,
+            "author": {
+              "login": "monalisa"
+            },
+            "labels": {
+              "totalCount": 0,
+              "nodes": []
+            },
+            "latestOpinionatedReviews": {
+              "totalCount": 0,
+              "nodes": []
+            },
+            "statusCheckRollup": {
+              "contexts": {
+                "checkRunCountsByState": [
+                  { "state": "ACTION_REQUIRED", "count": 0 },
+                  { "state": "CANCELLED", "count": 0 },
+                  { "state": "COMPLETED", "count": 0 },
+                  { "state": "FAILURE", "count": 0 },
+                  { "state": "IN_PROGRESS", "count": 0 },
+                  { "state": "NEUTRAL", "count": 0 },
+                  { "state": "PENDING", "count": 0 },
+                  { "state": "QUEUED", "count": 0 },
+                  { "state": "SKIPPED", "count": 7 },
+                  { "state": "STALE", "count": 0 },
+                  { "state": "STARTUP_FAILURE", "count": 0 },
+                  { "state": "SUCCESS", "count": 6 },
+                  { "state": "TIMED_OUT", "count": 0 },
+                  { "state": "WAITING", "count": 0 }
+                ],
+                "statusContextCountsByState": [
+                  { "state": "EXPECTED", "count": 0 },
+                  { "state": "ERROR", "count": 0 },
+                  { "state": "FAILURE", "count": 0 },
+                  { "state": "PENDING", "count": 0 },
+                  { "state": "SUCCESS", "count": 0 }
+                ]
+              }
+            }
+          },
+          {
+            "number": 11,
+            "title": "Explain an empty search",
+            "isDraft": false,
+            "mergedAt": null,
+            "closedAt": null,
+            "headRefName": "empty-search",
+            "baseRefName": "main",
+            "updatedAt": "2026-11-23T14:11:27Z",
+            "additions": 201,
+            "deletions": 195,
+            "mergeable": "CONFLICTING",
+            "reviewDecision": "APPROVED",
+            "totalCommentsCount": 1,
+            "viewerDidAuthor": true,
+            "author": {
+              "login": "octo"
+            },
+            "labels": {
+              "totalCount": 0,
+              "nodes": []
+            },
+            "latestOpinionatedReviews": {
+              "totalCount": 1,
+              "nodes": [
+                {
+                  "state": "APPROVED"
+                }
+              ]
+            },
+            "statusCheckRollup": {
+              "contexts": {
+                "checkRunCountsByState": [
+                  { "state": "ACTION_REQUIRED", "count": 0 },
+                  { "state": "CANCELLED", "count": 0 },
+                  { "state": "COMPLETED", "count": 0 },
+                  { "state": "FAILURE", "count": 0 },
+                  { "state": "IN_PROGRESS", "count": 0 },
+                  { "state": "NEUTRAL", "count": 0 },
+                  { "state": "PENDING", "count": 0 },
+                  { "state": "QUEUED", "count": 0 },
+                  { "state": "SKIPPED", "count": 6 },
+                  { "state": "STALE", "count": 0 },
+                  { "state": "STARTUP_FAILURE", "count": 0 },
+                  { "state": "SUCCESS", "count": 12 },
+                  { "state": "TIMED_OUT", "count": 0 },
+                  { "state": "WAITING", "count": 0 }
+                ],
+                "statusContextCountsByState": [
+                  { "state": "EXPECTED", "count": 0 },
+                  { "state": "ERROR", "count": 0 },
+                  { "state": "FAILURE", "count": 0 },
+                  { "state": "PENDING", "count": 0 },
+                  { "state": "SUCCESS", "count": 0 }
+                ]
+              }
+            }
+          },
+          {
+            "number": 9,
+            "title": "Fix a typo in the guide",
+            "isDraft": false,
+            "mergedAt": null,
+            "closedAt": null,
+            "headRefName": "fix-typo",
+            "baseRefName": "main",
+            "updatedAt": "2026-11-20T01:58:16Z",
+            "additions": 35,
+            "deletions": 2,
+            "mergeable": "MERGEABLE",
+            "reviewDecision": "REVIEW_REQUIRED",
+            "totalCommentsCount": 4,
+            "viewerDidAuthor": false,
+            "author": {
+              "login": "monalisa"
+            },
+            "labels": {
+              "totalCount": 2,
+              "nodes": [
+                {
+                  "name": "bug",
+                  "color": "d73a4a"
+                },
+                {
+                  "name": "documentation",
+                  "color": "0075ca"
+                }
+              ]
+            },
+            "latestOpinionatedReviews": {
+              "totalCount": 0,
+              "nodes": []
+            },
+            "statusCheckRollup": null
+          }
+        ]
+      }
+    },
+    "requested": {
+      "nodes": [
+        {
+          "number": 12
+        }
+      ]
+    }
+  }
+}

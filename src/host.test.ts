@@ -273,3 +273,128 @@ it("keeps polling a browser sign-in after a poll fails to reach Rust", async () 
   expect(transport).toHaveBeenCalledTimes(3);
   expect(host.read().problem).toBeNull();
 });
+
+const openIn = (repo: string) => ({
+  op: "pullRequests" as const,
+  repository: { owner: "octo", repo },
+  list: "open" as const,
+});
+const rows = (total: number, revision: number) => ({
+  op: "pullRequests",
+  data: { items: [], total },
+  status: connected(revision),
+});
+
+async function signedIn() {
+  const fixture = client();
+  const status = fixture.host.refresh();
+  fixture.replies[0]?.resolve({ op: "status", status: connected(1) });
+  await status;
+  return fixture;
+}
+
+it("answers two repositories read at once with their own pull requests", async () => {
+  const { host, replies } = await signedIn();
+  const first = host.ask(openIn("first"));
+  const second = host.ask(openIn("second"));
+  replies[2]?.resolve(rows(22, 1));
+  replies[1]?.resolve(rows(11, 1));
+  expect(await first).toMatchObject({
+    ok: true,
+    reply: { data: { total: 11 } },
+  });
+  expect(await second).toMatchObject({
+    ok: true,
+    reply: { data: { total: 22 } },
+  });
+});
+
+it("leaves busy and problem to the commands while reads run and fail", async () => {
+  const { host, replies } = await signedIn();
+  const verify = host.verify();
+  replies[1]?.reject({
+    kind: "unreachable",
+    message: "L1 Git could not reach GitHub.",
+    status: connected(1),
+  });
+  await verify;
+  const before = host.read();
+  expect(before.problem).toBe("L1 Git could not reach GitHub.");
+  const read = host.ask(openIn("app"));
+  expect(host.read()).toBe(before);
+  replies[2]?.reject({
+    kind: "notFound",
+    message: "L1 Git can't find octo/app on GitHub.",
+    status: connected(1),
+  });
+  expect(await read).toMatchObject({
+    ok: false,
+    problem: {
+      kind: "notFound",
+      message: "L1 Git can't find octo/app on GitHub.",
+    },
+  });
+  expect(host.read()).toMatchObject({
+    busy: null,
+    problem: "L1 Git could not reach GitHub.",
+  });
+});
+
+it("tells listeners about reads only when the status moved, and once", async () => {
+  const { host, replies } = await signedIn();
+  const heard = vi.fn();
+  host.subscribe(heard);
+  const reads = ["a", "b", "c"].map((repo) => host.ask(openIn(repo)));
+  for (const reply of replies.slice(1)) reply.resolve(rows(0, 1));
+  await Promise.all(reads);
+  expect(heard).not.toHaveBeenCalled();
+
+  const refused = ["a", "b", "c"].map((repo) => host.ask(openIn(repo)));
+  for (const reply of replies.slice(4))
+    reply.reject({
+      kind: "signedOut",
+      message: "GitHub no longer accepts L1 Git's sign-in.",
+      status: notConnected(2, { login: "octo", reason: "revoked" }),
+    });
+  await Promise.all(refused);
+  expect(heard).toHaveBeenCalledOnce();
+  expect(host.read()).toMatchObject({
+    status: notConnected(2, { login: "octo", reason: "revoked" }),
+    problem: null,
+  });
+});
+
+it("reports a read that never reached Rust and keeps the status", async () => {
+  const { host, replies } = await signedIn();
+  const read = host.ask(openIn("app"));
+  replies[1]?.reject(new Error("The development bridge is unavailable."));
+  expect(await read).toEqual({
+    ok: false,
+    problem: {
+      kind: "transport",
+      message: "The development bridge is unavailable.",
+    },
+  });
+  expect(host.read().status).toEqual(connected(1));
+});
+
+it("keeps polling a browser sign-in when a read delivers a newer status", async () => {
+  vi.useFakeTimers();
+  const { host, transport, replies } = client();
+  void host.startDevice();
+  replies[0]?.resolve({ op: "deviceStart", status: waiting(2, 5_000) });
+  await vi.advanceTimersByTimeAsync(0);
+  void host.ask(openIn("app"));
+  replies[1]?.reject({
+    kind: "notConnected",
+    message: "L1 Git is not connected to GitHub.",
+    status: waiting(3, 2_000),
+  });
+  await vi.advanceTimersByTimeAsync(1_999);
+  expect(transport).toHaveBeenCalledTimes(2);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(transport).toHaveBeenLastCalledWith({
+    op: "devicePoll",
+    session: "s1",
+  });
+});

@@ -1,0 +1,12 @@
+query($owner: String!, $repo: String!, $requested: String!) {
+  repository(owner: $owner, name: $repo) {
+    nameWithOwner
+    pullRequests(states: OPEN, first: 50, orderBy: {field: UPDATED_AT, direction: DESC}) {
+      totalCount
+      nodes { ...row }
+    }
+  }
+  requested: search(query: $requested, type: ISSUE, first: 100) {
+    nodes { ... on PullRequest { number } }
+  }
+}

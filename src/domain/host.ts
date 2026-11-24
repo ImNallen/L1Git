@@ -1,5 +1,8 @@
 import { z } from "zod";
 import type { Route } from "../transport";
+import { pullRequestsSchema } from "./pullRequest";
+import type { PullRequestList } from "./pullRequest";
+import type { GitHubRepository } from "./repository";
 
 const accessSchema = z.enum(["private", "publicOnly", "perRepository"]);
 
@@ -81,6 +84,8 @@ export const hostErrorSchema = z.discriminatedUnion("kind", [
     problem: z.enum(["locked", "unavailable"]),
     ...failure,
   }),
+  z.object({ kind: z.literal("notFound"), ...failure }),
+  z.object({ kind: z.literal("ssoRequired"), url: z.string(), ...failure }),
   z.object({ kind: z.literal("storage"), ...failure }),
   z.object({ kind: z.literal("interrupted"), ...failure }),
   z.object({ kind: z.literal("deviceUnavailable"), ...failure }),
@@ -101,12 +106,26 @@ export const hostResponseSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("deviceStart"), status: hostStatusSchema }),
   z.object({ op: z.literal("devicePoll"), status: hostStatusSchema }),
   z.object({ op: z.literal("deviceCancel"), status: hostStatusSchema }),
+  z.object({
+    op: z.literal("pullRequests"),
+    data: pullRequestsSchema,
+    status: hostStatusSchema,
+  }),
 ]);
 
-export type HostRequest =
+export type HostCommand =
   | { op: "status" | "probeGh" | "disconnect" | "verify" | "deviceStart" }
   | { op: "connectGh"; login: string }
   | { op: "devicePoll" | "deviceCancel"; session: string };
+
+/** A question about GitHub's data, so any number can wait at once. */
+export type HostRead = {
+  op: "pullRequests";
+  repository: GitHubRepository;
+  list: PullRequestList;
+};
+
+export type HostRequest = HostCommand | HostRead;
 
 export const hostRequestOps = hostResponseSchema.options.map(
   (option) => option.shape.op.value,
@@ -118,6 +137,11 @@ export const hostRoute: Route = {
   error: hostErrorSchema,
 };
 
+export type HostResponse = z.infer<typeof hostResponseSchema>;
+/** `transport` is a failure to reach Rust at all, so it carries no status. */
+export type HostProblem =
+  | z.infer<typeof hostErrorSchema>
+  | { kind: "transport"; message: string };
 export type HostStatus = z.infer<typeof hostStatusSchema>;
 export type GhProbe = z.infer<typeof ghProbeSchema>;
 export type Access = z.infer<typeof accessSchema>;

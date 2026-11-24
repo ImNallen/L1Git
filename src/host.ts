@@ -1,9 +1,17 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { hostErrorSchema, hostResponseSchema, hostRoute } from "./domain/host";
-import type { GhProbe, HostRequest, HostStatus } from "./domain/host";
+import type {
+  GhProbe,
+  HostCommand,
+  HostProblem,
+  HostRead,
+  HostRequest,
+  HostResponse,
+  HostStatus,
+} from "./domain/host";
 import { send } from "./transport";
 
-type Op = HostRequest["op"];
+type Op = HostCommand["op"];
 type Busy = Exclude<Op, "status" | "devicePoll">;
 type HostView = {
   status: HostStatus | null;
@@ -12,6 +20,17 @@ type HostView = {
   problem: string | null;
 };
 type HostTransport = (request: HostRequest) => Promise<unknown>;
+type Reply<R extends HostRequest> = Extract<HostResponse, { op: R["op"] }>;
+type Exchanged<R extends HostRequest> =
+  | { ok: true; reply: Reply<R> }
+  | { ok: false; problem: HostProblem };
+
+function answers<R extends HostRequest>(
+  request: R,
+  response: HostResponse,
+): response is Reply<R> {
+  return response.op === request.op;
+}
 
 const transportProblem = (error: unknown) =>
   error instanceof Error
@@ -32,8 +51,10 @@ export function createHostClient(transport: HostTransport) {
   const running = new Map<Op, Promise<boolean>>();
   const listeners = new Set<() => void>();
   let poll: ReturnType<typeof setTimeout> | undefined;
+  let announced: number | undefined;
   function update(next: Partial<HostView>) {
     view = { ...view, ...next };
+    announced = view.status?.revision;
     listeners.forEach((listener) => listener());
   }
   function schedulePoll(minimumMs = 0) {
@@ -58,32 +79,45 @@ export function createHostClient(transport: HostTransport) {
     );
   }
 
-  function runOnce(body: HostRequest): Promise<boolean> {
+  /** Every reply carries the status, so every request takes it from here. */
+  async function exchange<R extends HostRequest>(
+    request: R,
+  ): Promise<Exchanged<R>> {
+    try {
+      const response = hostResponseSchema.parse(await transport(request));
+      if (!answers(request, response))
+        throw new Error(
+          `L1 Git asked for ${request.op} and got an answer for ${response.op}. Try again.`,
+        );
+      accept(response.status);
+      return { ok: true, reply: response };
+    } catch (error) {
+      const failure = hostErrorSchema.safeParse(error);
+      if (!failure.success)
+        return {
+          ok: false,
+          problem: { kind: "transport", message: transportProblem(error) },
+        };
+      accept(failure.data.status);
+      return { ok: false, problem: failure.data };
+    }
+  }
+
+  function runOnce(body: HostCommand): Promise<boolean> {
     const current = running.get(body.op);
     if (current) return current;
-    const call = Promise.resolve(body)
-      .then(transport)
-      .then((value) => {
-        const response = hostResponseSchema.parse(value);
-        if (response.op !== body.op)
-          throw new Error(
-            `L1 Git asked for ${body.op} and got an answer for ${response.op}. Try again.`,
-          );
-        accept(response.status);
-        if (response.op === "probeGh") view = { ...view, probe: response.data };
-        return true;
-      })
-      .catch((error: unknown) => {
-        const failure = hostErrorSchema.safeParse(error);
-        if (!failure.success) {
-          view = { ...view, problem: transportProblem(error) };
-          if (body.op === "devicePoll") schedulePoll(unreachableRetryMs);
-          return false;
+    const call = exchange(body)
+      .then((outcome) => {
+        if (outcome.ok) {
+          if (outcome.reply.op === "probeGh")
+            view = { ...view, probe: outcome.reply.data };
+          return true;
         }
-        accept(failure.data.status);
-        const { kind, message } = failure.data;
+        const { kind, message } = outcome.problem;
         const explained = kind === "signedOut" || kind === "notConnected";
         view = { ...view, problem: explained ? null : message };
+        if (kind === "transport" && body.op === "devicePoll")
+          schedulePoll(unreachableRetryMs);
         return false;
       })
       .finally(() => {
@@ -93,6 +127,17 @@ export function createHostClient(transport: HostTransport) {
     running.set(body.op, call);
     update({ busy: busy(), problem: null });
     return call;
+  }
+
+  /**
+   * Asks GitHub through Rust. It leaves `busy` and `problem` to the sign-in
+   * screen, but takes the status like any request, so a token GitHub refuses
+   * here signs that screen out too.
+   */
+  async function ask<R extends HostRead>(request: R): Promise<Exchanged<R>> {
+    const exchanged = await exchange(request);
+    if (view.status?.revision !== announced) update({});
+    return exchanged;
   }
 
   function cancelDevice(): Promise<boolean> {
@@ -112,6 +157,7 @@ export function createHostClient(transport: HostTransport) {
         listeners.delete(listener);
       };
     },
+    ask,
     refresh: () => runOnce({ op: "status" }),
     probeGh: () => runOnce({ op: "probeGh" }),
     connectGh: (login: string) => runOnce({ op: "connectGh", login }),

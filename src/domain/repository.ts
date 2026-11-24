@@ -128,6 +128,11 @@ const commitSchema = z.object({
 });
 /** `commit` carries the combined changes of the branch that ends at `tip`. */
 const squashSchema = z.object({ tip: oidSchema, commit: oidSchema });
+const githubRepositorySchema = z.object({
+  owner: z.string(),
+  repo: z.string(),
+});
+export type GitHubRepository = z.infer<typeof githubRepositorySchema>;
 export const snapshotSchema = z.object({
   root: rootSchema,
   name: z.string(),
@@ -141,7 +146,7 @@ export const snapshotSchema = z.object({
     z.object({
       name: z.string(),
       url: z.string(),
-      github: z.object({ owner: z.string(), repo: z.string() }).nullable(),
+      github: githubRepositorySchema.nullable(),
     }),
   ),
   commits: z.array(commitSchema),
