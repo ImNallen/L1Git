@@ -1,15 +1,17 @@
 use crate::{
     AddRemote, AddRemoteReport, Advance, Applied, Blame, BranchMerged, BranchTip, CloneUrl,
-    CommitDetail, Comparison, ConflictFile, ConflictSummary, Coordinator, EntryId, Expect,
-    FastForwardReport, FetchMode, FilePatch, FileRevision, Head, LineStats, MergeAction,
-    MergeReport, MergeReview, MergeSelection, MergeState, NewRepository, NewWorktree, Operation,
-    OperationProbe, PatchContext, PublishChoice, PublishOptions, PushAvailability, PushIntent,
-    PushReport, ReplayOf, ReplayReview, RepositoryError, RepositoryOverview, RepositoryRefs,
-    RepositorySnapshot, Side, UndoHistory, WholeFileConflict, WorktreePatch, WorktreeReview,
-    WorktreeSource, WorktreeStatus,
+    CommitDetail, CommitsFetch, Comparison, ConflictFile, ConflictSummary, Coordinator, EntryId,
+    Expect, FastForwardReport, FetchMode, FilePatch, FileRevision, GitHubRepository, Head,
+    LineStats, MergeAction, MergeReport, MergeReview, MergeSelection, MergeState, NewRepository,
+    NewWorktree, Oid, Operation, OperationProbe, PatchContext, PublishChoice, PublishOptions,
+    PushAvailability, PushIntent, PushReport, RangeFiles, RangePatch, ReplayOf, ReplayReview,
+    RepositoryError, RepositoryOverview, RepositoryRefs, RepositorySnapshot, Side, UndoHistory,
+    WantedCommits, WholeFileConflict, WorktreePatch, WorktreeReview, WorktreeSource,
+    WorktreeStatus,
     directories::{DirectoryListing, expand_home, home_dir, list_directories},
     file_history::{blame_within, file_history_within},
     git::LocalRead,
+    range::{range_files_within, range_patches_within},
     repository::{
         commit_detail_within, file_patch_within, line_stats_within, refs_within, snapshot_within,
     },
@@ -62,8 +64,23 @@ pub enum Request {
         path: String,
         comparison: Comparison,
         file: String,
+        /// The file's path at the base, which is `file` unless it was renamed.
+        /// With it the file reads as `RangePatches` reads it.
+        #[serde(default)]
+        from: Option<String>,
         #[serde(default)]
         context: PatchContext,
+    },
+    RangeFiles {
+        path: String,
+        base: Oid,
+        head: Oid,
+    },
+    #[serde(rename_all = "camelCase")]
+    RangePatches {
+        path: String,
+        merge_base: Oid,
+        head: Oid,
     },
     FileHistory {
         path: String,
@@ -78,6 +95,11 @@ pub enum Request {
     Overview {
         path: String,
         mode: FetchMode,
+    },
+    FetchCommits {
+        path: String,
+        github: GitHubRepository,
+        oids: WantedCommits,
     },
     PublishOptions {
         path: String,
@@ -186,9 +208,12 @@ pub enum Response {
     CommitDetail(CommitDetail),
     LineStats(Vec<LineStats>),
     FilePatch(FilePatch),
+    RangeFiles(RangeFiles),
+    RangePatches(Vec<RangePatch>),
     FileHistory(Vec<FileRevision>),
     Blame(Blame),
     Overview(RepositoryOverview),
+    FetchCommits(CommitsFetch),
     PublishOptions(PublishOptions),
     AddRemote(AddRemoteReport),
     PreparePublish(PushAvailability),
@@ -250,13 +275,31 @@ pub fn run(coordinator: &Coordinator, request: Request) -> Result<Response, Repo
             path,
             comparison,
             file,
+            from,
             context,
         } => Response::FilePatch(file_patch_within(
             &path,
             &comparison,
             &file,
+            from.as_deref(),
             context,
             deadline(LocalRead::FilePatch),
+        )?),
+        Request::RangeFiles { path, base, head } => Response::RangeFiles(range_files_within(
+            &path,
+            &base,
+            &head,
+            deadline(LocalRead::RangeFiles),
+        )?),
+        Request::RangePatches {
+            path,
+            merge_base,
+            head,
+        } => Response::RangePatches(range_patches_within(
+            &path,
+            &merge_base,
+            &head,
+            deadline(LocalRead::RangePatches),
         )?),
         Request::FileHistory { path, oid, file } => Response::FileHistory(file_history_within(
             &path,
@@ -271,6 +314,9 @@ pub fn run(coordinator: &Coordinator, request: Request) -> Result<Response, Repo
             deadline(LocalRead::Blame),
         )?),
         Request::Overview { path, mode } => Response::Overview(coordinator.overview(&path, mode)?),
+        Request::FetchCommits { path, github, oids } => {
+            Response::FetchCommits(coordinator.fetch_commits(&path, &github, &oids)?)
+        }
         Request::PublishOptions { path } => {
             Response::PublishOptions(coordinator.publish_options(&path)?)
         }

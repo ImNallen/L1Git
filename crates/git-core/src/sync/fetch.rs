@@ -1,5 +1,6 @@
 use crate::{
-    ErrorKind, FetchBranch, FetchFailure, FetchOutcome, FetchSummary, RemoteFetch, RepositoryError,
+    CommitsFetch, ErrorKind, FetchBranch, FetchFailure, FetchOutcome, FetchSummary, Oid,
+    RemoteFetch, RepositoryError,
     git::{self, Deadline, Finished, Mutation},
     remotes, stderr,
 };
@@ -189,22 +190,41 @@ fn fetch(
     branch: Option<&str>,
     deadline: Duration,
 ) -> Result<FetchOutcome, RepositoryError> {
-    Ok(
-        match git::mutate(root, Mutation::Fetch { remote, branch }, deadline)? {
-            Finished::Succeeded => FetchOutcome::Fetched,
-            Finished::Failed { stderr } => FetchOutcome::Failed {
-                failure: stderr::classify(&stderr),
-                message: stderr::summarize(&stderr),
-            },
-            Finished::TimedOut => FetchOutcome::Failed {
-                failure: FetchFailure::TimedOut,
-                message: format!(
-                    "{remote} did not answer within {} seconds.",
-                    deadline.as_secs()
-                ),
-            },
-        },
-    )
+    let finished = git::mutate(root, Mutation::Fetch { remote, branch }, deadline)?;
+    Ok(match failed(finished, remote, deadline) {
+        None => FetchOutcome::Fetched,
+        Some((failure, message)) => FetchOutcome::Failed { failure, message },
+    })
+}
+
+/// Fetches the objects behind `oids` and moves no ref.
+pub(super) fn fetch_commits(
+    root: &Path,
+    remote: &str,
+    oids: &[Oid],
+    deadline: Duration,
+) -> Result<CommitsFetch, RepositoryError> {
+    let finished = git::mutate(root, Mutation::FetchCommits { remote, oids }, deadline)?;
+    Ok(match failed(finished, remote, deadline) {
+        None => CommitsFetch::Done,
+        Some((failure, message)) => CommitsFetch::Failed { failure, message },
+    })
+}
+
+fn failed(finished: Finished, remote: &str, deadline: Duration) -> Option<(FetchFailure, String)> {
+    match finished {
+        Finished::Succeeded => None,
+        Finished::Failed { stderr } => {
+            Some((stderr::classify(&stderr), stderr::summarize(&stderr)))
+        }
+        Finished::TimedOut => Some((
+            FetchFailure::TimedOut,
+            format!(
+                "{remote} did not answer within {} seconds.",
+                deadline.as_secs()
+            ),
+        )),
+    }
 }
 
 /// The remotes `git fetch --all` leaves out.

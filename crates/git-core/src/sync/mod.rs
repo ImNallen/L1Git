@@ -21,9 +21,10 @@ pub use read::InProgress;
 pub(crate) use read::{in_progress, pseudoref_exists};
 
 use crate::{
-    Advance, AdvanceOutcome, FastForwardReport, FetchMode, FetchOutcome, FetchSummary,
-    RepositoryError, RepositoryOverview, SkipReason,
+    Advance, AdvanceOutcome, CommitsFetch, FastForwardReport, FetchMode, FetchOutcome,
+    FetchSummary, GitHubRepository, RepositoryError, RepositoryOverview, SkipReason, WantedCommits,
     git::{Deadline, LocalRead, LocalWrite, WriteDeadline},
+    remotes,
 };
 use std::{
     collections::HashMap,
@@ -264,6 +265,31 @@ impl Coordinator {
             }
         };
         read::read(&repository, Some(summary), deadline, reads.renewed())
+    }
+
+    /// Fetches commits by their ids from the remote that is `github`, so a pull
+    /// request from a fork or a deleted branch can be read. No ref moves.
+    pub fn fetch_commits(
+        &self,
+        path: &str,
+        github: &GitHubRepository,
+        commits: &WantedCommits,
+    ) -> Result<CommitsFetch, RepositoryError> {
+        let reads = self.deadline(LocalRead::BranchStatus);
+        let repository = read::open(path, reads)?;
+        let remotes = remotes::read(&repository.root, reads)?;
+        let Some(remote) = remotes::of_github(remotes, github) else {
+            return Ok(CommitsFetch::NoRemote);
+        };
+        self.gated(&repository.common_dir, || {
+            let _slot = self.slots.acquire();
+            fetch::fetch_commits(
+                &repository.root,
+                &remote,
+                commits.oids(),
+                self.limits.fetch_deadline,
+            )
+        })
     }
 
     /// Fast-forwards each requested branch in order, then rereads the repository

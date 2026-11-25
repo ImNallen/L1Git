@@ -18,6 +18,7 @@ import type {
   PullRequests,
 } from "../domain/pullRequest";
 import type { GitHubRepository } from "../domain/repository";
+import { rangeFilesSchema, rangePatchesSchema } from "../domain/range";
 import { mergeSelectionSchema } from "../domain/merge";
 import { probeOf } from "../domain/inProgress";
 import type { MergeState } from "../domain/merge";
@@ -295,6 +296,37 @@ const handlers: Record<string, Handler> = {
     patch: "--- a/notes.txt\n+++ b/notes.txt\n@@ -1 +1 @@\n-old\n+new\n",
     lossy: false,
   }),
+  rangeFiles: (request) =>
+    rangeFilesSchema.parse({
+      kind: "ready",
+      mergeBase: request.base,
+      files: [
+        {
+          path: "notes.txt",
+          status: "M",
+          from: null,
+          similarity: null,
+          added: 1,
+          deleted: 1,
+          oldBlob: request.base,
+          newBlob: request.head,
+          submodule: false,
+        },
+      ],
+      contentMissing: false,
+    }),
+  rangePatches: () =>
+    rangePatchesSchema.parse([
+      {
+        path: "notes.txt",
+        patch: {
+          kind: "text",
+          patch: "--- a/notes.txt\n+++ b/notes.txt\n@@ -1 +1 @@\n-old\n+new\n",
+          lossy: false,
+        },
+      },
+    ]),
+  fetchCommits: () => ({ kind: "done" }),
   worktreePatch: () => ({
     kind: "diff",
     diff: {

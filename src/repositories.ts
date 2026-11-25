@@ -24,6 +24,11 @@ import {
 import type { AddRemoteInput, PublishChoice, PushIntent } from "./domain/push";
 import { fastForwardReportSchema, overviewSchema } from "./domain/overview";
 import type { Comparison } from "./domain/comparison";
+import {
+  commitsFetchSchema,
+  rangeFilesSchema,
+  rangePatchesSchema,
+} from "./domain/range";
 import type { Advance, FetchMode } from "./domain/overview";
 import {
   appliedSchema,
@@ -52,6 +57,7 @@ import type {
   BranchTip,
   EntryId,
   Expect,
+  GitHubRepository,
   Head,
   Oid,
   Operation,
@@ -81,11 +87,20 @@ type RepositoryRequest =
       path: string;
       comparison: Comparison;
       file: string;
+      from?: string;
       context?: PatchContext;
     }
+  | { op: "rangeFiles"; path: RepositoryRoot; base: Oid; head: Oid }
+  | { op: "rangePatches"; path: RepositoryRoot; mergeBase: Oid; head: Oid }
   | { op: "fileHistory"; path: RepositoryRoot; oid: Oid; file: string }
   | { op: "blame"; path: RepositoryRoot; oid: Oid; file: string }
   | { op: "overview"; path: RepositoryRoot; mode: FetchMode }
+  | {
+      op: "fetchCommits";
+      path: RepositoryRoot;
+      github: GitHubRepository;
+      oids: [Oid] | [Oid, Oid];
+    }
   | { op: "publishOptions"; path: RepositoryRoot }
   | { op: "addRemote"; path: RepositoryRoot; remote: AddRemoteInput }
   | { op: "preparePublish"; path: RepositoryRoot; choice: PublishChoice }
@@ -133,9 +148,12 @@ const responseSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("commitDetail"), data: detailSchema }),
   z.object({ op: z.literal("lineStats"), data: lineStatsSchema }),
   z.object({ op: z.literal("filePatch"), data: filePatchSchema }),
+  z.object({ op: z.literal("rangeFiles"), data: rangeFilesSchema }),
+  z.object({ op: z.literal("rangePatches"), data: rangePatchesSchema }),
   z.object({ op: z.literal("fileHistory"), data: fileHistorySchema }),
   z.object({ op: z.literal("blame"), data: blameSchema }),
   z.object({ op: z.literal("overview"), data: overviewSchema }),
+  z.object({ op: z.literal("fetchCommits"), data: commitsFetchSchema }),
   z.object({ op: z.literal("publishOptions"), data: publishOptionsSchema }),
   z.object({ op: z.literal("addRemote"), data: addRemoteReportSchema }),
   z.object({ op: z.literal("preparePublish"), data: pushAvailabilitySchema }),
@@ -212,13 +230,36 @@ export async function lineStats(path: RepositoryRoot, oids: Oid[]) {
   return (await run({ op: "lineStats", path, oids })).data;
 }
 
+/** `from` is the file's path at the base, which is `file` unless it was renamed. With it the file reads as `rangePatches` reads it. */
 export async function filePatch(
   path: string,
   comparison: Comparison,
   file: string,
   context?: PatchContext,
+  from?: string,
 ) {
-  return (await run({ op: "filePatch", path, comparison, file, context })).data;
+  return (await run({ op: "filePatch", path, comparison, file, from, context }))
+    .data;
+}
+
+export async function rangeFiles(path: RepositoryRoot, base: Oid, head: Oid) {
+  return (await run({ op: "rangeFiles", path, base, head })).data;
+}
+
+export async function rangePatches(
+  path: RepositoryRoot,
+  mergeBase: Oid,
+  head: Oid,
+) {
+  return (await run({ op: "rangePatches", path, mergeBase, head })).data;
+}
+
+export async function fetchCommits(
+  path: RepositoryRoot,
+  github: GitHubRepository,
+  oids: [Oid] | [Oid, Oid],
+) {
+  return (await run({ op: "fetchCommits", path, github, oids })).data;
 }
 
 export async function fileHistory(

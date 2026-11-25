@@ -4,7 +4,7 @@ use crate::{
     RepositoryRefs, RepositorySnapshot, Squash, Stash, Submodule, Tag, Target, TargetDetail,
     Worktree,
     git::{self, Deadline, LocalRead},
-    remotes, status,
+    range, remotes, status,
 };
 use std::{
     collections::HashMap,
@@ -984,6 +984,7 @@ pub fn file_patch(
         path,
         comparison,
         file,
+        None,
         PatchContext::Hunks,
         Deadline::of(LocalRead::FilePatch),
     )
@@ -993,6 +994,7 @@ pub(crate) fn file_patch_within(
     path: &str,
     comparison: &Comparison,
     file: &str,
+    from: Option<&str>,
     context: PatchContext,
     deadline: Deadline,
 ) -> Result<FilePatch, RepositoryError> {
@@ -1003,11 +1005,22 @@ pub(crate) fn file_patch_within(
     }
     let (base, target) = match ends {
         Ends::Trees { base, target } => (base, target),
+        Ends::Worktree { .. } if from.is_some() => {
+            return Err(RepositoryError::new(
+                ErrorKind::UnsupportedPath,
+                "L1 Git reads a renamed file only between two commits.",
+            ));
+        }
         Ends::Worktree { base, root } => {
             return status::worktree_file_patch(&root, &base.oid, file, context, deadline)?
                 .ok_or_else(|| unchanged_path(comparison));
         }
     };
+    if let Some(from) = from {
+        let ends = [diff_from(&base, &target), &target.oid];
+        return range::file_patch(&root, ends, from, file, context, deadline)?
+            .ok_or_else(|| unchanged_path(comparison));
+    }
     let args = |format| {
         [
             "--literal-pathspecs",
