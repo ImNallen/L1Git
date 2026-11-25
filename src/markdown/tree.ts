@@ -7,14 +7,15 @@ type Aimed = Words & { dir: Direction | null };
 export type Piece =
   | (Words & { kind: "paragraph" | "strong" | "emphasis" | "strike" | "code" })
   | (Words & { kind: "table" | "head" | "body" | "row" | "notes" | "note" })
-  /** A paragraph that keeps the line breaks in its text. */
-  | (Words & { kind: "lines" })
+  /** A paragraph, and some words, that keep the line breaks in their text. */
+  | (Words & { kind: "lines" | "typed" })
   | (Words & { kind: "heading"; level: 1 | 2 | 3 })
   | (Words & { kind: "link"; url: string })
   | (Words & { kind: "item"; task: boolean })
   | (Words & { kind: "cell"; header: boolean; align: Align | null })
   | (Aimed & { kind: "quote" | "bullets" })
   | (Aimed & { kind: "numbers"; start: number })
+  /** A suggestion without text is one to delete the lines. */
   | { kind: "block"; language: string; text: string }
   | { kind: "box"; checked: boolean }
   /** Where a line may break, in a run of characters without such a place. */

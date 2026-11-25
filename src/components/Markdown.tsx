@@ -27,7 +27,9 @@ function shown(piece: Shown): ReactNode {
     case "paragraph":
       return around("p");
     case "lines":
-      return around("p", { className: "markdown-html" });
+      return around("p", { className: "markdown-lines" });
+    case "typed":
+      return around("span", { className: "markdown-lines" });
     case "strong":
       return around("strong");
     case "emphasis":
@@ -101,12 +103,14 @@ function shown(piece: Shown): ReactNode {
         <figure className="pull-code markdown-code">
           {piece.language === "suggestion" && (
             <figcaption>
-              {piece.text.trim() === ""
+              {piece.text === ""
                 ? "Suggested change: delete these lines"
-                : "Suggested change"}
+                : piece.text.trim() === ""
+                  ? "Suggested change: blank lines"
+                  : "Suggested change"}
             </figcaption>
           )}
-          {piece.text.trim() !== "" && (
+          {piece.text !== "" && (
             <Block text={piece.text} language={piece.language} />
           )}
         </figure>
@@ -119,7 +123,14 @@ function shown(piece: Shown): ReactNode {
 }
 
 /** Text from GitHub, as it was read. It can't run anything, and it loads nothing. */
-export function Markdown({ tree }: { tree: Tree }) {
-  if (tree.pieces.length === 0) return <p>No visible text.</p>;
+export function Markdown({
+  tree,
+  isWhole = true,
+}: {
+  tree: Tree;
+  /** Not while there is more of the text. */
+  isWhole?: boolean;
+}) {
+  if (tree.pieces.length === 0) return isWhole ? <p>No visible text.</p> : null;
   return createElement(Fragment, null, ...tree.pieces.map(shown));
 }

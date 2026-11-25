@@ -5,6 +5,8 @@ const dictionary =
 const ideographic =
   "\\u2e80-\\u9fff\\uac00-\\ud7af\\uf900-\\ufaff\\uff00-\\uffef";
 const steers = "\\u202a-\\u202e\\u2066-\\u2069";
+const rightToLeft =
+  "\\u0590-\\u08ff\\u200f\\ufb1d-\\ufdff\\ufe70-\\ufefc\\u{10800}-\\u{10fff}\\u{1e800}-\\u{1efff}";
 
 /** Characters WebKit measures together, so that each more of them costs more. */
 const joined =
@@ -47,8 +49,12 @@ export const turnsIn = (text: string) =>
   (text.match(toOther)?.length ?? 0) +
   3 * (text.match(toDictionary)?.length ?? 0);
 
-const first =
-  /(?<rtl>[\u0590-\u08ff\u200f\ufb1d-\ufdff\ufe70-\ufefc\u{10800}-\u{10fff}\u{1e800}-\u{1efff}])|\p{L}/u;
+const otherWay = new RegExp(`[${rightToLeft}${steers}]`, "u");
+
+/** Whether a text may hold words in two directions. */
+export const isTwoWay = (text: string) => otherWay.test(text);
+
+const first = new RegExp(`(?<rtl>[${rightToLeft}])|\\p{L}`, "u");
 
 /** Where a text begins, if it has any letter. */
 export function directionOf(text: string): "ltr" | "rtl" | null {

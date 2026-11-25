@@ -152,7 +152,7 @@ describe("links", () => {
 describe("images", () => {
   it("are links, and never load", async () => {
     await show(
-      '![a cat](https://a.test/cat.png) ![](https://a.test/x.png)\n\n<img width="10" alt="shot" src="https://a.test/shot.png" onerror="alert(1)">',
+      '![a cat](https://a.test/cat.png) ![&#8203;](https://a.test/x.png)\n\n<img width="10" alt="shot" src="https://a.test/shot.png" onerror="alert(1)">',
     );
     expect(host.querySelector("img")).toBeNull();
     expect(links()).toEqual([
@@ -306,15 +306,50 @@ it("says when a suggestion is to delete the lines", async () => {
   expect(host.querySelectorAll("figure")).toHaveLength(1);
 });
 
-it("breaks lines where the text does, as GitHub does in what people write", async () => {
-  await show("Fixes #1\nFixes **#2\nand** #3\r\n- a\n  b\n\n`x\ny`");
-  expect(host.querySelectorAll("p br")).toHaveLength(2);
-  expect(host.querySelectorAll("li br")).toHaveLength(1);
-  expect(host.querySelectorAll("code br")).toHaveLength(0);
-  expect(host.querySelector("p")?.innerHTML.replace(/<br>\n/g, "<br>")).toBe(
-    "Fixes #1<br>Fixes <strong>#2<br>and</strong> #3",
+it.each([
+  ["```suggestion\n\n```", " "],
+  ["```suggestion\n\n\n```", "\n"],
+  ["> ```suggestion\r\n>\r\n> ```", " "],
+  ["```suggestion\n  \n```", "  "],
+  ["> ```suggestion\n>\n\na", " "],
+])("%j suggests blank lines", async (text, lines) => {
+  await show(text);
+  expect(host.querySelector("figcaption")?.textContent).toBe(
+    "Suggested change: blank lines",
   );
+  expect(host.querySelector("pre")?.textContent).toBe(lines);
 });
+
+it("breaks lines where the text does, as GitHub does in what people write", async () => {
+  await show(
+    "Fixes #1 \nFixes **#2\nand** #3\r\n- a\r  b\\\n  c  \n  d\n\n`x\ny`\n![i\nj](u)",
+  );
+  const lines = (element: string) =>
+    [...host.querySelectorAll(`${element} .markdown-lines`)].map(
+      ({ textContent }) => textContent,
+    );
+  expect(lines("p")).toEqual(["Fixes #1\nFixes ", "#2\nand", "\n"]);
+  expect(host.querySelector("p")?.textContent).toBe(
+    "Fixes #1\nFixes #2\nand #3",
+  );
+  expect(lines("li")).toEqual(["a\nb\nc\nd"]);
+  expect(lines("code")).toEqual([]);
+  expect(lines("a")).toEqual([]);
+});
+
+it.each([
+  ["a\n&nbsp;&nbsp;b", "a\n\u00a0\u00a0b"],
+  ["a\n&emsp;b", "a\n\u2003b"],
+  ["a\n\u3000b", "a\n\u3000b"],
+  ["a  \n&nbsp;b", "a\n\u00a0b"],
+  ["a\n \t b \t \nc", "a\nb\nc"],
+])(
+  "%j keeps no spaces after a break but wide and unbreakable ones",
+  async (text, shown) => {
+    await show(text);
+    expect(host.querySelector("p")?.textContent).toBe(shown);
+  },
+);
 
 it("shows code through Pierre, and names a suggestion", async () => {
   await show(
