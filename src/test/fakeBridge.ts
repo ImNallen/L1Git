@@ -310,6 +310,8 @@ const handlers: Record<string, Handler> = {
           deleted: 1,
           oldBlob: request.base,
           newBlob: request.head,
+          oldMode: "100644",
+          newMode: "100644",
           submodule: false,
         },
       ],

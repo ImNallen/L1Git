@@ -63,6 +63,9 @@ pub struct RangeFile {
     /// commit it is at.
     pub old_blob: Option<Oid>,
     pub new_blob: Option<Oid>,
+    /// Git's six digits, `None` on the side that does not have the file.
+    pub old_mode: Option<String>,
+    pub new_mode: Option<String>,
     /// What the range leaves at `path`, or deletes there, is a submodule.
     pub submodule: bool,
 }
@@ -388,6 +391,8 @@ fn file(change: &Change, counts: Option<(u64, u64)>) -> Result<RangeFile, Reposi
         deleted: counts.map(|(_, deleted)| deleted),
         old_blob: change.old.blob()?,
         new_blob: change.new.blob()?,
+        old_mode: change.old.mode(),
+        new_mode: change.new.mode(),
         submodule: left.mode == b"160000",
     })
 }

@@ -3,6 +3,7 @@ import { fetchFailureSchema } from "./overview";
 import { filePatchSchema, oidSchema } from "./repository";
 
 const count = z.number().int().nonnegative();
+const modeSchema = z.string().regex(/^[0-7]{6}$/);
 const rangeFileSchema = z.strictObject({
   path: z.string(),
   status: z.enum(["A", "D", "M", "T", "R"]),
@@ -15,6 +16,8 @@ const rangeFileSchema = z.strictObject({
   /** Null on the side that does not have the file. A submodule's is the commit it is at. */
   oldBlob: oidSchema.nullable(),
   newBlob: oidSchema.nullable(),
+  oldMode: modeSchema.nullable(),
+  newMode: modeSchema.nullable(),
   submodule: z.boolean(),
 });
 export const rangeFilesSchema = z.discriminatedUnion("kind", [

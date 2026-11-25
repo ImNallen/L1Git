@@ -37,6 +37,8 @@ const file = (path: string, fields: Partial<RangeFile> = {}): RangeFile => ({
   deleted: 1,
   oldBlob: oid("1"),
   newBlob: oid("2"),
+  oldMode: "100644",
+  newMode: "100644",
   submodule: false,
   ...fields,
 });
