@@ -383,15 +383,13 @@ fn picks_the_remote_of_the_repository_on_github() {
 fn says_why_a_fetch_failed() {
     let world = World::new();
     let absent = oid(&"3".repeat(40));
-    let CommitsFetch::Failed { failure, message } = world.fetch("octo/app", &[&absent]) else {
-        panic!("a failure");
-    };
-    assert_eq!(failure, FetchFailure::Other);
-    assert!(message.contains("not our ref"), "{message}");
-    assert_eq!(
-        world.fetch("octo/app", &[&world.head, &absent]),
-        CommitsFetch::Failed { failure, message }
-    );
+    for commits in [&[&absent][..], &[&world.head, &absent]] {
+        let CommitsFetch::Failed { failure, message } = world.fetch("octo/app", commits) else {
+            panic!("a failure");
+        };
+        assert_eq!(failure, FetchFailure::Other);
+        assert!(message.contains("not our ref"), "{message}");
+    }
 
     let secret = World::new();
     git(
