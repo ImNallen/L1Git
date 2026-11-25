@@ -45,3 +45,6 @@ export const commitsFetchSchema = z.discriminatedUnion("kind", [
     message: z.string(),
   }),
 ]);
+
+export type RangeFile = z.infer<typeof rangeFileSchema>;
+export type CommitsFetch = z.infer<typeof commitsFetchSchema>;

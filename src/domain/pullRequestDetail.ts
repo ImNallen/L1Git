@@ -30,7 +30,7 @@ type EventOf<Kind extends TimelineEvent["kind"]> = Extract<
 >;
 
 const seconds = (at: string) => Date.parse(at) / 1_000;
-const counted = (count: number, one: string, many = `${one}s`) =>
+export const counted = (count: number, one: string, many = `${one}s`) =>
   `${count.toLocaleString()} ${count === 1 ? one : many}`;
 
 const isLogin = (login: string | null, other: string | null) =>

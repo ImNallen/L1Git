@@ -3,6 +3,7 @@ import * as repositories from "./repositories";
 import {
   blockerReason,
   divergence,
+  fetchFailureLabels,
   pullStep,
   readyAdvances,
   repositoryRank,
@@ -779,14 +780,6 @@ export function useOverview(
   return { view, store };
 }
 
-const failureLabel = {
-  auth: "Authentication failed",
-  network: "Network error",
-  timedOut: "Timed out",
-  busy: "Repository busy",
-  other: "Fetch failed",
-} as const;
-
 export function repositoryWarnings(
   repo: Pick<RepositoryState, "fetch" | "outcomes">,
 ): string[] {
@@ -797,7 +790,7 @@ export function repositoryWarnings(
         ? repo.fetch.remotes.flatMap(({ remote, outcome }) =>
             outcome.kind === "failed"
               ? [
-                  `${remote}: ${failureLabel[outcome.failure]}. ${outcome.message}`,
+                  `${remote}: ${fetchFailureLabels[outcome.failure]}. ${outcome.message}`,
                 ]
               : [],
           )

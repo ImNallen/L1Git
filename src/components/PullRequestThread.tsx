@@ -1,5 +1,10 @@
 import { memo, Suspense, useId, useRef, useState } from "react";
-import { excerpt, lineLabel, personName } from "../domain/pullRequestDetail";
+import {
+  counted,
+  excerpt,
+  lineLabel,
+  personName,
+} from "../domain/pullRequestDetail";
 import type { Excerpt } from "../domain/pullRequestDetail";
 import type { ReviewThread } from "../domain/pullRequest";
 import { turnsIn } from "../markdown/runs";
@@ -42,8 +47,7 @@ function ThreadHunk({ path, of }: { path: string; of: Excerpt }) {
 const endOf = (path: string) =>
   path.length > 100 ? `…${path.slice(-100)}` : path;
 
-const comments = (count: number) =>
-  `${count.toLocaleString()} ${count === 1 ? "comment" : "comments"}`;
+const comments = (count: number) => counted(count, "comment");
 
 /** A resolved thread starts as one row. */
 export const Thread = memo(function Thread({
