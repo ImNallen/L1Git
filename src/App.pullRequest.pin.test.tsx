@@ -770,6 +770,21 @@ const resolvedThread = {
   comments: page([{ id: "TC1", body: "Fixed", by: "sara", at: at(3) }]),
 };
 
+it("shows a folded thread that is open again on GitHub", async () => {
+  const at = (resolved: boolean) => (world: World) =>
+    world.host.details.set(
+      pullKey("octo/pin", 1),
+      pull(1, { threads: page([{ ...resolvedThread, resolved }]) }),
+    );
+  const app = await visit({ world: at(true) });
+  await open(app, 1);
+  const [comment] = resolvedThread.comments.items;
+  expect(await read(app)).not.toContain(comment!.body);
+  at(false)(app.bridge.world);
+  await app.click(refresh());
+  expect(await read(app)).toContain(comment!.body);
+});
+
 it("keeps what was expanded while another tab shows", async () => {
   const long = `${`${"Long words. ".repeat(20)}\n\n`.repeat(200)}the end`;
   const app = await visit({

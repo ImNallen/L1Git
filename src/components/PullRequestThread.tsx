@@ -56,7 +56,8 @@ export const Thread = memo(function Thread({
   url: string;
 }) {
   const { path, outdated, resolved, comments: said } = thread;
-  const [open, setOpen] = useState(!resolved);
+  const [expanded, setExpanded] = useState(!resolved);
+  const open = expanded || !resolved;
   const content = useId();
   const cut = excerpt(thread);
   return (
@@ -73,7 +74,7 @@ export const Thread = memo(function Thread({
             className="thread-toggle"
             aria-expanded={open}
             aria-controls={content}
-            onClick={() => setOpen(!open)}
+            onClick={() => setExpanded(!expanded)}
           >
             <span className="thread-resolved">Resolved</span>
             <span>{comments(said.total)}</span>
