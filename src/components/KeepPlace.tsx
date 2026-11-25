@@ -2,29 +2,35 @@ import { Component } from "react";
 import type { RefObject } from "react";
 
 /** What a reader may be looking at, down to a paragraph. */
-const PLACES = ".entry, .thread, .thread-comments > li, .markdown > *";
-const REMEMBERED = 8;
+const PLACES =
+  ".entry, .thread, .thread-comments > li, .markdown > *, .markdown-plain > *";
+const LOOKS = 8;
 
 type Place = { element: Element; top: number };
 
 const topOf = (element: Element) => element.getBoundingClientRect().top;
 
-/** The places nearest to the top of the panel, unless it is at its beginning. */
+/**
+ * Places in the view, the nearest to its top first, unless the panel is at its
+ * beginning. Looking at a few points takes as long in a panel of any length.
+ */
 function placesIn(panel: HTMLElement): Place[] {
   if (panel.scrollTop === 0) return [];
-  const bounds = panel.getBoundingClientRect();
-  return [...panel.querySelectorAll(PLACES)]
-    .map((element) => ({ element, bounds: element.getBoundingClientRect() }))
-    .filter(
-      ({ bounds: { top, bottom } }) =>
-        bottom > bounds.top && top < bounds.bottom,
-    )
-    .map(({ element, bounds: { top } }) => ({ element, top }))
+  const { left, top, width, height } = panel.getBoundingClientRect();
+  const found = new Set<Element>();
+  for (let look = 0; look < LOOKS; look += 1) {
+    let place = document
+      .elementsFromPoint(left + width / 2, top + 1 + (height * look) / LOOKS)
+      .find((element) => panel.contains(element))
+      ?.closest(PLACES);
+    for (; place; place = place.parentElement?.closest(PLACES))
+      found.add(place);
+  }
+  return [...found]
+    .map((element) => ({ element, top: topOf(element) }))
     .sort(
-      (left, right) =>
-        Math.abs(left.top - bounds.top) - Math.abs(right.top - bounds.top),
-    )
-    .slice(0, REMEMBERED);
+      (left, right) => Math.abs(left.top - top) - Math.abs(right.top - top),
+    );
 }
 
 /** WebKit keeps no place when what is above it grows or shrinks, so this does. */
@@ -32,13 +38,9 @@ export class KeepPlace extends Component<{
   panel: RefObject<HTMLElement | null>;
 }> {
   private places: Place[] = [];
-  private scrollTop = 0;
-  private observed: HTMLElement | null = null;
-  private frame = 0;
+  // Each scroll is heard, and remembered, before a frame looks at sizes.
   private readonly sizes = new ResizeObserver(() => {
-    const { panel } = this;
-    // A scroll that has not been remembered yet is the reader's own.
-    if (panel?.scrollTop === this.scrollTop) this.restore(this.places);
+    this.restore(this.places);
     this.remember();
   });
 
@@ -50,12 +52,6 @@ export class KeepPlace extends Component<{
     const { panel } = this;
     if (!panel || panel.clientHeight === 0) return;
     this.places = placesIn(panel);
-    this.scrollTop = panel.scrollTop;
-  };
-
-  private readonly scrolled = () => {
-    cancelAnimationFrame(this.frame);
-    this.frame = requestAnimationFrame(this.remember);
   };
 
   private restore(places: readonly Place[]) {
@@ -68,12 +64,6 @@ export class KeepPlace extends Component<{
 
   private observe() {
     const { panel } = this;
-    if (panel !== this.observed) {
-      this.observed?.removeEventListener("scroll", this.scrolled);
-      panel?.addEventListener("scroll", this.scrolled, { passive: true });
-      this.observed = panel;
-      this.places = [];
-    }
     this.sizes.disconnect();
     if (!panel) return;
     this.sizes.observe(panel);
@@ -81,12 +71,13 @@ export class KeepPlace extends Component<{
   }
 
   componentDidMount() {
+    this.panel?.addEventListener("scroll", this.remember, { passive: true });
     this.observe();
   }
 
   getSnapshotBeforeUpdate(): Place[] {
     const { panel } = this;
-    return panel ? placesIn(panel) : [];
+    return panel && panel.clientHeight > 0 ? placesIn(panel) : this.places;
   }
 
   componentDidUpdate(_: unknown, __: unknown, places: Place[]) {
@@ -97,8 +88,7 @@ export class KeepPlace extends Component<{
 
   componentWillUnmount() {
     this.sizes.disconnect();
-    this.observed?.removeEventListener("scroll", this.scrolled);
-    cancelAnimationFrame(this.frame);
+    this.panel?.removeEventListener("scroll", this.remember);
   }
 
   render() {

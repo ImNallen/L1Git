@@ -6,7 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
-import type { KeyboardEvent, Ref } from "react";
+import type { KeyboardEvent, ReactNode, Ref } from "react";
 import {
   ArrowLeft,
   ExternalLink,
@@ -197,6 +197,39 @@ function Failure({
   );
 }
 
+function Panel({
+  id,
+  labelledBy,
+  busy,
+  hidden,
+  children,
+}: {
+  id: string;
+  labelledBy: string;
+  busy: boolean;
+  hidden: boolean;
+  children: ReactNode;
+}) {
+  const panel = useRef<HTMLDivElement>(null);
+  return (
+    <>
+      <div
+        ref={panel}
+        id={id}
+        className="pull-panel"
+        role="tabpanel"
+        aria-labelledby={labelledBy}
+        aria-busy={busy}
+        tabIndex={0}
+        hidden={hidden}
+      >
+        {children}
+      </div>
+      <KeepPlace panel={panel} />
+    </>
+  );
+}
+
 export type PullRequestDetailHandle = { focus: () => void };
 
 export function PullRequestDetail({
@@ -224,7 +257,6 @@ export function PullRequestDetail({
   const [tab, setTab] = useState<Tab>("conversation");
   const id = useId();
   const title = useRef<HTMLHeadingElement>(null);
-  const panel = useRef<HTMLDivElement>(null);
   useImperativeHandle(ref, () => ({
     focus: () => title.current?.focus({ preventScroll: true }),
   }));
@@ -327,15 +359,11 @@ export function PullRequestDetail({
           // What was expanded in the conversation stays so behind another tab.
           .filter((of) => of === tab || (of === "conversation" && pull))
           .map((of) => (
-            <div
+            <Panel
               key={of}
-              ref={of === tab ? panel : undefined}
               id={panelId(of)}
-              className="pull-panel"
-              role="tabpanel"
-              aria-labelledby={tabId(of)}
-              aria-busy={read.reading}
-              tabIndex={0}
+              labelledBy={tabId(of)}
+              busy={read.reading}
               hidden={of !== tab}
             >
               <SurroundingsContext value={surroundings}>
@@ -362,10 +390,9 @@ export function PullRequestDetail({
                   <PullRequestChecks pull={pull} url={url} />
                 )}
               </SurroundingsContext>
-            </div>
+            </Panel>
           ))}
       </article>
-      <KeepPlace panel={panel} />
       {layout.inspectorOpen && (
         <>
           <PaneDivider
