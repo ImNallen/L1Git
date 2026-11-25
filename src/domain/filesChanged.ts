@@ -21,14 +21,13 @@ export const rangeOf = (
   { base, baseOid, head }: Pick<PullRequest, "base" | "baseOid" | "head">,
 ): Range => ({ repository, base, baseOid, head: head.oid });
 
-/** Null when a person can't be told. */
+/** Null when a person can't be told: of plain commits, only their authors are known. */
 function pushed(
   { timeline }: Pick<PullRequest, "timeline">,
   head: Oid,
 ): string | null {
   const to = (event: TimelineEvent) =>
-    (event.kind === "commit" && event.oid === head) ||
-    (event.kind === "forcePushed" && event.to === head);
+    event.kind === "forcePushed" && event.to === head;
   return timeline.items.findLast(to)?.by ?? null;
 }
 

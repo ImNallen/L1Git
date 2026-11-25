@@ -99,13 +99,13 @@ describe("newerThan", () => {
     ["the same", pull("main", "1"), null],
     ["a base that moved", { ...pull("main", "1"), baseOid: oid("c") }, null],
     [
-      "commits",
+      "commits, whose author may not be who pushed them",
       pull("main", "2", [commit("ada", "1"), commit("maja", "2")]),
-      { text: "maja pushed new commits.", show: "Show them" },
+      { text: "New commits were pushed.", show: "Show them" },
     ],
     [
-      "the viewer's commits",
-      pull("main", "2", [commit("Octo", "2")]),
+      "the viewer's force push",
+      pull("main", "2", [forced("Octo", "2")]),
       { text: "You pushed new commits.", show: "Show them" },
     ],
     [
@@ -119,8 +119,13 @@ describe("newerThan", () => {
       { text: "New commits were pushed.", show: "Show them" },
     ],
     [
-      "commits of nobody GitHub knows",
-      pull("main", "2", [commit(null, "2")]),
+      "a force push by nobody GitHub knows",
+      pull("main", "2", [forced(null, "2")]),
+      { text: "New commits were pushed.", show: "Show them" },
+    ],
+    [
+      "commits on a force push",
+      pull("main", "2", [forced("maja", "1"), commit("maja", "2")]),
       { text: "New commits were pushed.", show: "Show them" },
     ],
     [
@@ -129,8 +134,8 @@ describe("newerThan", () => {
       { text: "The base changed to next.", show: "Show it" },
     ],
     [
-      "commits and another base",
-      pull("next", "2", [commit("maja", "2")]),
+      "a force push and another base",
+      pull("next", "2", [forced("maja", "2")]),
       {
         text: "maja pushed new commits, and the base changed to next.",
         show: "Show them",
