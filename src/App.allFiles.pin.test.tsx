@@ -130,9 +130,9 @@ const fold = (path: string | RegExp) => get("button", path, panel());
 it("shows each file after the other, and keeps the choice", async () => {
   const app = await openAll();
   expect(headers()).toEqual([
-    "src/a.ts+2−1",
-    "src/{old.ts → new.ts}Renamed+2−1",
-    "src/z.png",
+    "src/a.ts+2−1Viewed",
+    "src/{old.ts → new.ts}Renamed+2−1Viewed",
+    "src/z.pngViewed",
   ]);
   expect(panel().querySelector(".files-toolbar")?.textContent).toMatch(
     /^3 files\+4−2/,

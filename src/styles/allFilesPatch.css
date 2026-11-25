@@ -2,3 +2,10 @@
 [data-file] :is([data-line], [data-column-number]) {
   display: none;
 }
+[data-file-end] {
+  display: none;
+}
+:is([data-diff], [data-file]) ~ [data-file-end] {
+  display: block;
+  height: 48px;
+}

@@ -227,7 +227,7 @@ export function PullRequestInspector({
   onShowChecks,
 }: {
   opened: OpenedPullRequest;
-  files: Pick<FilesChangedState, "held" | "choose">;
+  files: Pick<FilesChangedState, "held" | "viewed" | "choose">;
   onShowChecks: () => void;
 }) {
   const { repository, number, tab, read, viewer } = opened;
@@ -271,6 +271,7 @@ export function PullRequestInspector({
         {tab === "files" ? (
           <ChangedFilesSection
             held={files.held}
+            viewed={files.viewed}
             pull={pull}
             url={`${url}/files`}
             onGo={files.choose}

@@ -10,6 +10,7 @@ import { keyExpanders } from "./expanders";
 import { VirtualizedFileDiff } from "@pierre/diffs";
 import type { FileDiffMetadata, VirtualFileMetrics } from "@pierre/diffs";
 import { changeStops, nextChange } from "../domain/changeStops";
+import type { RangeFile } from "../domain/range";
 
 const LINE = 22;
 /** What Pierre reckons with until it has measured, as the stylesheet has it. */
@@ -65,6 +66,8 @@ export type DiffSteps = {
   toStart: (at: number) => void;
   /** Says which file is current, if it knows better. */
   tell?: () => void;
+  /** Keeps the reader's place when marking a file folds or unfolds it. */
+  beforeMark?: (file: RangeFile, isViewed: boolean) => void;
 };
 
 export function useDiffSteps(

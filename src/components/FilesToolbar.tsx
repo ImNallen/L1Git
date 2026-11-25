@@ -3,8 +3,9 @@ import { lineTotals, pathLabel } from "../domain/filesChanged";
 import type { DiffStyle } from "../domain/lineSelection";
 import { counted } from "../domain/pullRequestDetail";
 import type { RangeFile } from "../domain/range";
+import { viewedCount } from "../domain/viewedFiles";
 import type { FilesChangedState, FilesView } from "../shell/useFilesChanged";
-import { FileTotals, StatusPill } from "./FileParts";
+import { FileTotals, StatusPill, ViewedBox } from "./FileParts";
 import { LineTotals } from "./LineTotals";
 
 const styles: { style: DiffStyle; label: string }[] = [
@@ -20,12 +21,16 @@ function OneFile({
   file,
   at,
   count,
+  isViewed,
   onGo,
+  onMark,
 }: {
   file: RangeFile;
   at: number;
   count: number;
+  isViewed: boolean;
   onGo: (at: number) => void;
+  onMark: (isViewed: boolean) => void;
 }) {
   const label = pathLabel(file);
   return (
@@ -58,6 +63,7 @@ function OneFile({
       </span>
       <StatusPill file={file} />
       <FileTotals file={file} />
+      <ViewedBox isCurrent isViewed={isViewed} onMark={onMark} />
     </>
   );
 }
@@ -66,7 +72,7 @@ export function FilesToolbar({
   files,
   contentMissing,
   at,
-  state: { diffStyle, view, setLook, go },
+  state: { diffStyle, view, setLook, viewed, mark, go },
 }: {
   files: readonly RangeFile[];
   contentMissing: boolean;
@@ -80,9 +86,21 @@ export function FilesToolbar({
         <span className="files-all">
           <strong>{counted(files.length, "file")}</strong>
           {!contentMissing && <LineTotals {...lineTotals(files)} />}
+          <span className="files-viewed-count">
+            · Viewed {viewedCount(viewed.size, files.length)}
+          </span>
         </span>
       ) : (
-        file && <OneFile file={file} at={at} count={files.length} onGo={go} />
+        file && (
+          <OneFile
+            file={file}
+            at={at}
+            count={files.length}
+            isViewed={viewed.has(file)}
+            onGo={go}
+            onMark={(isViewed) => mark(file, isViewed)}
+          />
+        )
       )}
       <div
         className="diff-style"

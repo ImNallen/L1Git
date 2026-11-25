@@ -65,6 +65,7 @@ function commands(): Commands {
     previousFile: vi.fn(),
     nextChange: vi.fn(),
     previousChange: vi.fn(),
+    toggleViewed: vi.fn(),
     toggleSidebar: vi.fn(),
     toggleInspector: vi.fn(),
     fetch: vi.fn(),
@@ -758,17 +759,23 @@ describe("staging and undo", () => {
       screen: "pullRequests" as const,
       place: "pullRequests" as const,
       pullRequestOpen: true,
-      filesChanged: { at: 1, count: 3 },
+      filesChanged: { at: 1, count: 3, isViewed: false },
     };
     const pressed = (context: ActionContext, letter: string, init = {}) =>
       shortcutAction(context, key(letter, init), true)?.id ?? null;
-    expect(["j", "k", "n", "p"].map((each) => pressed(files, each))).toEqual([
+    expect(
+      ["j", "k", "n", "p", "v"].map((each) => pressed(files, each)),
+    ).toEqual([
       "nextFile",
       "previousFile",
       "nextChange",
       "previousChange",
+      "toggleViewed",
     ]);
-    const at = (at: number) => ({ ...files, filesChanged: { at, count: 3 } });
+    const at = (at: number) => ({
+      ...files,
+      filesChanged: { at, count: 3, isViewed: false },
+    });
     expect(pressed(at(0), "k")).toBeNull();
     expect(pressed(at(2), "j")).toBeNull();
     expect(pressed(at(2), "n"), "a change may be left").toBe("nextChange");
@@ -792,6 +799,14 @@ describe("staging and undo", () => {
         ({ title }) => title === "Next file",
       )?.shortcut,
     ).toBe("J");
+    const toggle = (isViewed: boolean) => {
+      const context = { ...at(1), filesChanged: { at: 1, count: 3, isViewed } };
+      return paletteItems(context, commands(), true, [], null).find(
+        ({ shortcut }) => shortcut === "V",
+      )?.title;
+    };
+    expect(toggle(false)).toBe("Mark file viewed");
+    expect(toggle(true)).toBe("Mark file unviewed");
   });
 
   it("offers Undo and Redo only with an entry, titled with its label", () => {

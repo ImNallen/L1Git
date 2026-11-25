@@ -16,6 +16,33 @@ export function FileTotals({ file: { added, deleted } }: { file: RangeFile }) {
   ) : null;
 }
 
+export function ViewedBox({
+  name = "Viewed",
+  isCurrent,
+  isViewed,
+  onMark,
+}: {
+  name?: string;
+  isCurrent: boolean;
+  isViewed: boolean;
+  onMark: (isViewed: boolean) => void;
+}) {
+  return (
+    <label
+      className="files-viewed"
+      title={isCurrent ? "Viewed (V)" : undefined}
+    >
+      <input
+        type="checkbox"
+        aria-label={name}
+        checked={isViewed}
+        onChange={(event) => onMark(event.target.checked)}
+      />
+      <span>Viewed</span>
+    </label>
+  );
+}
+
 /** What changed besides lines. */
 export function Moved({
   file: { from, similarity },

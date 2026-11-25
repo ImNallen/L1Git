@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { ChevronDown, FileX2, TriangleAlert } from "lucide-react";
 import { partialClone, pathLabel } from "../domain/filesChanged";
 import type { RangeFile } from "../domain/range";
-import { FileTotals, Moved, StatusPill } from "./FileParts";
+import { FileTotals, Moved, StatusPill, ViewedBox } from "./FileParts";
 import { ThreadsElsewhere } from "./ReviewThreads";
 import type { Unfolded } from "./ReviewThreads";
 import type { FileEntry } from "./useFileItems";
@@ -10,11 +10,17 @@ import type { FileEntry } from "./useFileItems";
 export function FileHeader({
   entry: { file, part, parts },
   folded,
+  isCurrent,
+  isViewed,
   onFold,
+  onMark,
 }: {
   entry: FileEntry;
   folded: boolean;
+  isCurrent: boolean;
+  isViewed: boolean;
   onFold: () => void;
+  onMark: (isViewed: boolean) => void;
 }) {
   const label = pathLabel(file);
   return (
@@ -35,6 +41,12 @@ export function FileHeader({
         <span className="files-part">{part === 0 ? "Before" : "After"}</span>
       )}
       {part === 0 && <FileTotals file={file} />}
+      <ViewedBox
+        name={`Viewed, ${label}`}
+        isCurrent={isCurrent}
+        isViewed={isViewed}
+        onMark={onMark}
+      />
     </div>
   );
 }

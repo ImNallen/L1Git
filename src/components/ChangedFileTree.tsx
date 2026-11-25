@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { WorkspaceIcon } from "./WorkspaceIcon";
 import type { GitStatus } from "@pierre/trees";
 import { FileTree, useFileTree, useFileTreeSearch } from "@pierre/trees/react";
@@ -61,9 +62,14 @@ type Props = {
   labels?: ReadonlyMap<string, RowLabel>;
   /** How many comments a file has. */
   comments?: ReadonlyMap<string, number>;
+  /** Files to dim and check. */
+  viewed?: ReadonlySet<string>;
+  overTree?: ReactNode;
 };
 
 const ROW_HEIGHT = 34;
+/** The stylesheet knows the part by its color. */
+const VIEWED = { text: "✓", color: "var(--viewed)" };
 
 type RowItem = { action: RowAction; paths: string[]; blocked: string | null };
 
@@ -101,8 +107,10 @@ export function ChangedFileTree({
   onRowFocus,
   labels,
   comments,
+  viewed,
+  overTree,
 }: Props) {
-  const commentsNow = useRef(comments);
+  const decorations = useRef({ comments, viewed });
   const onSelectFileRef = useRef(onSelectFile);
   useEffect(() => {
     onSelectFileRef.current = onSelectFile;
@@ -133,12 +141,13 @@ export function ChangedFileTree({
         return { text: String(pathsUnder(files, item).length) };
       const path = changedPathAt(files, item.path);
       const label = path === undefined ? undefined : labels?.get(path);
-      const count =
-        (path === undefined ? undefined : commentsNow.current?.get(path)) ?? 0;
+      const { comments, viewed } = decorations.current;
+      const count = (path === undefined ? undefined : comments?.get(path)) ?? 0;
       const parts = [
         ...(count > 0
           ? [{ text: count.toLocaleString(), color: "var(--blue)" }]
           : []),
+        ...(path !== undefined && viewed?.has(path) ? [VIEWED] : []),
         ...(label
           ? [{ text: label.text, color: labelColors[label.tone] }]
           : []),
@@ -186,11 +195,12 @@ ${treeStyles}`,
     syncing.current = false;
   }, [model, selectedPath]);
   useEffect(() => {
-    if (commentsNow.current === comments) return;
-    commentsNow.current = comments;
+    const { current: last } = decorations;
+    if (last.comments === comments && last.viewed === viewed) return;
+    decorations.current = { comments, viewed };
     // Draws the rows again, where they are.
     model.setLabels();
-  }, [model, comments]);
+  }, [model, comments, viewed]);
   const [height, setHeight] = useState(() => fittedTreeHeight(model, maxRows));
   useEffect(() => {
     if (maxRows === undefined) return;
@@ -291,6 +301,7 @@ ${treeStyles}`,
         {search.value && search.matchingPaths.length === 0 && (
           <p className="tree-hint">No changed files match.</p>
         )}
+        {overTree}
         {tree}
       </>
     );
