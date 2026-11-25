@@ -535,7 +535,7 @@ const withheld = (problem: HostProblem) =>
   problem.kind === "ssoRequired" ||
   (problem.kind === "gitHubFailed" && problem.httpStatus === 403);
 
-const offline = ({ kind }: HostProblem) =>
+export const offline = ({ kind }: HostProblem) =>
   kind === "unreachable" || kind === "transport";
 
 /** These come from the connection, so every repository would say the same. */

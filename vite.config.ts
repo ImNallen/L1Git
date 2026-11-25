@@ -1,9 +1,13 @@
-import { defineConfig } from "vite";
+import { defaultClientConditions, defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [react()],
   clearScreen: false,
+  // Without a document, as in a worker, a module must not expect one.
+  resolve: { conditions: ["worker", ...defaultClientConditions] },
+  // What a worker needs is found with the rest, not once it starts.
+  optimizeDeps: { entries: ["index.html", "src/markdown/worker.ts"] },
   server: {
     host: "127.0.0.1",
     port: Number(process.env.L1GIT_DEV_PORT ?? 1422),

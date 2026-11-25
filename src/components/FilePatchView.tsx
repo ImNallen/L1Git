@@ -4,16 +4,13 @@ import { DIFFS_TAG_NAME } from "@pierre/diffs";
 import type { FileDiffMetadata, SelectedLineRange } from "@pierre/diffs";
 import { FileX2, TriangleAlert } from "lucide-react";
 import { FileDiff, Virtualizer } from "@pierre/diffs/react";
-import focusStyles from "../styles/focus.css?inline";
-import patchStyles from "../styles/filePatch.css?inline";
-import defaultPatchStyles from "../styles/defaultFilePatch.css?inline";
-import { pierreThemeOptions } from "../themes/diffTheme";
 import type { Appearance } from "../themes/palette";
 import { sidesFor } from "../domain/fileSides";
 import { hunkAnchor, parsedFiles } from "../domain/lineSelection";
 import type { DiffStyle, HunkBar } from "../domain/lineSelection";
 import type { PartAction } from "../domain/operations";
 import type { FilePatch, LinePick } from "../domain/repository";
+import { patchOptions } from "./patchOptions";
 
 export type { DiffStyle };
 
@@ -121,10 +118,7 @@ function Patch({
   const options = useMemo(
     () =>
       ({
-        ...pierreThemeOptions(theme, painted),
-        unsafeCSS: `${focusStyles}
-${patchStyles}
-${theme === "dark" && !painted ? defaultPatchStyles : ""}`,
+        ...patchOptions(theme, painted),
         diffStyle,
         diffIndicators: "classic",
         hunkSeparators: "line-info-basic",
