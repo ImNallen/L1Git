@@ -133,6 +133,11 @@ async function open(app: Harness, number: number) {
 }
 const detail = () => query("article", /^Row/);
 const said = () => document.querySelector(".conversation")?.textContent ?? null;
+/** What it says once each text had its turn. */
+async function read(app: Harness) {
+  for (let frame = 0; frame < 5; frame += 1) await app.flushFrames();
+  return said();
+}
 const tab = (name: string) => get("tab", new RegExp(`^${name}`));
 const chosen = () =>
   queryAll("tab")
@@ -157,7 +162,9 @@ it("opens a row in the app, and shows it whole", async () => {
   expect(focused()).toBe("heading Row 1 #1");
   expect(link, "the list is hidden").toThrow();
   expect(query("textbox", "Search pull requests")).toBeNull();
-  expect(said()).toMatch(/^Mmaja opened this pull request .*Reads once\./);
+  expect(await read(app)).toMatch(
+    /^Mmaja opened this pull request .*Reads once\./,
+  );
   expect(said()).toContain("maja added 1 commit");
   expect(said()).toContain("sara commented");
   expect(queryAll("tab").map(({ textContent }) => textContent)).toEqual([
@@ -409,6 +416,7 @@ it("folds a resolved thread, and shows the hunk of another as text when it is no
   const folded = get("region", "Thread on a.ts");
   expect(folded.textContent).toBe("a.tsLine 3OutdatedResolved1 commentShow");
   await app.click(get("button", /^Resolved/, folded));
+  await read(app);
   expect(folded.textContent).toContain("Fixed");
   expect(
     get("region", "Thread on b.ts").querySelector("pre")?.textContent,
@@ -641,7 +649,7 @@ it("shows nothing of the last sign-in", async () => {
   );
   await app.click(get("button", "Sign in as @octo"));
   await app.click(get("button", "Close settings"));
-  expect(said()).toContain("For the next account.");
+  expect(await read(app)).toContain("For the next account.");
 });
 
 const lockedKeychain = {
@@ -778,6 +786,7 @@ it("keeps what was expanded while another tab shows", async () => {
   expect(said(), "hidden").not.toBeNull();
   expect(query("list", "Conversation")).toBeNull();
   await app.click(tab("Conversation"));
+  await read(app);
   expect(get("region", "Thread on a.ts").textContent).toContain("Fixed");
   expect(get("button", "Show less")).toBeTruthy();
 });
@@ -799,6 +808,7 @@ it("keeps each entry when earlier ones go", async () => {
       ),
   });
   await open(app, 1);
+  await read(app);
   const entry = () =>
     [...document.querySelectorAll(".entry")].find(({ textContent }) =>
       textContent?.includes("Comment 4"),
@@ -810,6 +820,6 @@ it("keeps each entry when earlier ones go", async () => {
     pull(1, { timeline: page(comments(3, 7), 142) }),
   );
   await app.click(refresh());
-  expect(said()).toContain("Comment 6");
+  expect(await read(app)).toContain("Comment 6");
   expect(entry()).toBe(before);
 });

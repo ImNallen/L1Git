@@ -1,32 +1,46 @@
-import { memo, Suspense, useId, useState } from "react";
+import { memo, Suspense, useId, useRef, useState } from "react";
 import { excerpt, lineLabel, personName } from "../domain/pullRequestDetail";
 import type { Excerpt } from "../domain/pullRequestDetail";
 import type { ReviewThread } from "../domain/pullRequest";
+import { turnsIn } from "../markdown/runs";
 import { Hunk } from "../shell/lazyViews";
 import { Body, Plainly } from "./PullRequestBody";
 import { Ago, Avatar, OnGitHub } from "./PullRequestParts";
+import { useTurn } from "./useTurn";
+
+const LINE = 20;
+/** What is above, below, and around its lines. */
+const EDGES = 18;
 
 function ThreadHunk({ path, of }: { path: string; of: Excerpt }) {
-  const plain = (
-    <pre className="thread-plain">
-      {of.kind === "text" ? of.text : of.patch.split("\n").slice(3).join("\n")}
-    </pre>
-  );
-  if (of.kind === "text") return plain;
-  const lines = of.patch.split("\n").length - 4;
+  const place = useRef<HTMLDivElement>(null);
+  const text =
+    of.kind === "text" ? of.text : of.patch.split("\n").slice(3, -1).join("\n");
+  const isShown = useTurn(place, text.length / 20 + 2 * turnsIn(text));
+  const plain = <pre className="thread-plain">{text}</pre>;
   return (
     <div
+      ref={place}
       className="pull-code thread-hunk"
-      style={{ minHeight: `${lines * 20}px` }}
+      style={{ minHeight: text.split("\n").length * LINE + EDGES }}
     >
-      <Plainly key={of.patch} fallback={plain}>
-        <Suspense>
-          <Hunk path={path} patch={of.patch} />
-        </Suspense>
-      </Plainly>
+      {isShown &&
+        (of.kind === "text" ? (
+          plain
+        ) : (
+          <Plainly key={of.patch} fallback={plain}>
+            <Suspense fallback={plain}>
+              <Hunk path={path} patch={of.patch} before={plain} />
+            </Suspense>
+          </Plainly>
+        ))}
     </div>
   );
 }
+
+/** The end of a path says more. A longer one has no place to be shown. */
+const endOf = (path: string) =>
+  path.length > 100 ? `…${path.slice(-100)}` : path;
 
 const comments = (count: number) =>
   `${count.toLocaleString()} ${count === 1 ? "comment" : "comments"}`;
@@ -49,7 +63,7 @@ export const Thread = memo(function Thread({
     <section className="thread" aria-label={`Thread on ${path}`}>
       <div className="thread-heading">
         <span className="thread-path" title={path}>
-          <bdi>{path}</bdi>
+          <bdi>{endOf(path)}</bdi>
         </span>
         <span className="thread-line">{lineLabel(thread)}</span>
         {outdated && <span className="thread-outdated">Outdated</span>}

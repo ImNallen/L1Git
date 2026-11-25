@@ -390,11 +390,11 @@ button.pull-link:hover:not(:disabled) {
   color: var(--muted);
   font-size: 11px;
 }
-.thread-hunk,
-.thread-plain {
+.thread-hunk {
   border-block: 1px solid var(--border);
 }
 .thread-plain,
+.code-plain,
 .markdown-plain {
   margin: 0;
   overflow: auto;
@@ -403,10 +403,13 @@ button.pull-link:hover:not(:disabled) {
   font-size: 12px;
   line-height: 20px;
 }
+/* As high as Pierre makes it, so that nothing moves when it is painted. */
+.code-plain,
 .thread-plain {
-  padding: 4px 12px;
+  padding: 8px 12px;
 }
-.markdown-plain {
+.markdown-plain pre {
+  margin: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }

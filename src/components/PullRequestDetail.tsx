@@ -1,4 +1,11 @@
-import { useId, useImperativeHandle, useMemo, useRef, useState } from "react";
+import {
+  useEffect,
+  useId,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { KeyboardEvent, Ref } from "react";
 import {
   ArrowLeft,
@@ -20,6 +27,7 @@ import {
 } from "../domain/pullRequestDetail";
 import type { PullState } from "../domain/pullRequestDetail";
 import { pullRequestUrl, stateLabels } from "../domain/pullRequestList";
+import { markdownReader } from "../markdown/markdownReader";
 import { INSPECTOR_WIDTH } from "../shell/useLayout";
 import type { Layout } from "../shell/useLayout";
 import type { OpenedPullRequest } from "../shell/usePullRequests";
@@ -220,6 +228,7 @@ export function PullRequestDetail({
   useImperativeHandle(ref, () => ({
     focus: () => title.current?.focus({ preventScroll: true }),
   }));
+  useEffect(() => markdownReader.warm(), []);
   const url = pullRequestUrl(repository.github, number);
   const { owner, repo } = repository.github;
   const notice = detailNotice(read, repository);

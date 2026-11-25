@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { ReactNode } from "react";
 import {
   CircleCheck,
@@ -28,6 +29,7 @@ import { shortOid } from "../domain/shortOid";
 import { Body } from "./PullRequestBody";
 import { Ago, Avatar, OnGitHub } from "./PullRequestParts";
 import { Thread } from "./PullRequestThread";
+import { Turns, TurnsContext } from "./turns";
 
 type EventEntry = Extract<Entry, { kind: "event" }>;
 
@@ -236,30 +238,33 @@ export function PullRequestConversation({
     pull.threads === null
       ? "Review threads didn't load. GitHub couldn't answer for a pull request this large."
       : threadsLeftOut(pull);
+  const [turns] = useState(() => new Turns());
   return (
-    <ol className="conversation" aria-label="Conversation">
-      <li className="entry">
-        <Card
-          by={pull.author}
-          viewer={viewer}
-          at={pull.createdAt}
-          verb="opened this pull request"
-          pill={<AuthorPill />}
-        >
-          {pull.body.trim() === "" ? (
-            <p className="entry-nothing">No description.</p>
-          ) : (
-            <Body text={pull.body} />
-          )}
-        </Card>
-      </li>
-      {earlier !== null && <LeftOut text={earlier} url={url} />}
-      {threads !== null && <LeftOut text={threads} url={url} />}
-      {conversation(pull).map((entry) => (
-        <li className="entry" key={entry.key}>
-          <Shown entry={entry} pull={pull} viewer={viewer} url={url} />
+    <TurnsContext value={turns}>
+      <ol className="conversation" aria-label="Conversation">
+        <li className="entry">
+          <Card
+            by={pull.author}
+            viewer={viewer}
+            at={pull.createdAt}
+            verb="opened this pull request"
+            pill={<AuthorPill />}
+          >
+            {pull.body.trim() === "" ? (
+              <p className="entry-nothing">No description.</p>
+            ) : (
+              <Body text={pull.body} />
+            )}
+          </Card>
         </li>
-      ))}
-    </ol>
+        {earlier !== null && <LeftOut text={earlier} url={url} />}
+        {threads !== null && <LeftOut text={threads} url={url} />}
+        {conversation(pull).map((entry) => (
+          <li className="entry" key={entry.key}>
+            <Shown entry={entry} pull={pull} viewer={viewer} url={url} />
+          </li>
+        ))}
+      </ol>
+    </TurnsContext>
   );
 }

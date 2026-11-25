@@ -1,52 +1,14 @@
-import { createElement, Fragment, use, useMemo } from "react";
+import { createElement, Fragment, Suspense } from "react";
 import type { ReactNode } from "react";
-import { EXTENSION_TO_FILE_FORMAT } from "@pierre/diffs";
-import { File } from "@pierre/diffs/react";
 import type { Shown, Tree } from "../markdown/tree";
-import { pierreThemeOptions } from "../themes/diffTheme";
-import { SurroundingsContext } from "./pullRequestText";
+import { Code } from "../shell/lazyViews";
 
-const languages = new Set<unknown>(Object.values(EXTENSION_TO_FILE_FORMAT));
-const known = (language: string) =>
-  languages.has(language)
-    ? language
-    : Object.hasOwn(EXTENSION_TO_FILE_FORMAT, language)
-      ? (EXTENSION_TO_FILE_FORMAT[language] ?? "text")
-      : "text";
-
-/** Painting this much takes 120 ms of a frame in WebKit, for some languages. */
-const MOST_PAINTED = 10_000;
-
-function Code({ text, language }: { text: string; language: string }) {
-  const { theme, painted } = use(SurroundingsContext);
-  const file = useMemo(
-    () => ({
-      name: "code",
-      contents: text,
-      lang: text.length > MOST_PAINTED ? "text" : known(language),
-    }),
-    [text, language],
-  );
-  const options = useMemo(
-    () => ({
-      ...pierreThemeOptions(theme, painted),
-      disableFileHeader: true,
-      disableLineNumbers: true,
-    }),
-    [theme, painted],
-  );
-  const deletes = text.trim() === "";
+function Block({ text, language }: { text: string; language: string }) {
+  const before = <pre className="code-plain">{text}</pre>;
   return (
-    <figure className="pull-code markdown-code">
-      {language === "suggestion" && (
-        <figcaption>
-          {deletes
-            ? "Suggested change: delete these lines"
-            : "Suggested change"}
-        </figcaption>
-      )}
-      {!deletes && <File file={file} options={options} />}
-    </figure>
+    <Suspense fallback={before}>
+      <Code text={text} language={language} before={before} />
+    </Suspense>
   );
 }
 
@@ -135,7 +97,20 @@ function shown(piece: Shown): ReactNode {
         </div>
       );
     case "block":
-      return <Code text={piece.text} language={piece.language} />;
+      return (
+        <figure className="pull-code markdown-code">
+          {piece.language === "suggestion" && (
+            <figcaption>
+              {piece.text.trim() === ""
+                ? "Suggested change: delete these lines"
+                : "Suggested change"}
+            </figcaption>
+          )}
+          {piece.text.trim() !== "" && (
+            <Block text={piece.text} language={piece.language} />
+          )}
+        </figure>
+      );
     default: {
       const exhaustive: never = piece;
       return exhaustive;
