@@ -45,8 +45,8 @@ export type FilesChanged = {
   at: number;
   /** Where in the current file to begin. */
   enter: "start" | "end";
-  /** A file that is not here was not asked for yet. */
-  patches: ReadonlyMap<RangeFile, PatchRead>;
+  /** Null until all were asked for. A file that is not here is to be read by itself. */
+  patches: ReadonlyMap<RangeFile, PatchRead> | null;
 };
 
 type Deps = Pick<
@@ -138,13 +138,8 @@ export function createFilesChanged(deps: Deps) {
       contentMissing,
       counts,
     } as const;
-    if (contentMissing || files.length === 0) return set({ read, at });
-    set({
-      read,
-      at,
-      patches: new Map(files.map((file) => [file, { kind: "reading" }])),
-    });
-    if (!isCurrent()) return;
+    set({ read, at });
+    if (contentMissing || files.length === 0 || !isCurrent()) return;
     // A file without an answer here is read by itself.
     const answers = await deps
       .rangePatches(root, mergeBase, head)
@@ -190,7 +185,7 @@ export function createFilesChanged(deps: Deps) {
     read: { kind: "reading" },
     at: 0,
     enter: "start",
-    patches: new Map(),
+    patches: null,
   } as const;
 
   function patchOf(file: RangeFile, context: PatchContext) {
@@ -212,7 +207,7 @@ export function createFilesChanged(deps: Deps) {
   function readPatch(file: RangeFile) {
     const mine = turn;
     const set = (patch: PatchRead) => {
-      if (turn === mine && held)
+      if (turn === mine && held?.patches)
         put({ ...held, patches: new Map(held.patches).set(file, patch) });
     };
     set({ kind: "reading" });
@@ -228,11 +223,13 @@ export function createFilesChanged(deps: Deps) {
       : null;
   }
 
+  function readFile(file: RangeFile) {
+    if (held?.patches && !held.patches.has(file)) readPatch(file);
+  }
+
   function readCurrent() {
     const file = current();
-    if (held?.read.kind !== "ready" || held.read.contentMissing || !file)
-      return;
-    if (!held.patches.has(file)) readPatch(file);
+    if (file) readFile(file);
   }
 
   return {
@@ -269,10 +266,10 @@ export function createFilesChanged(deps: Deps) {
     },
     showNewest,
     retry() {
-      const file = current();
       if (held?.read.kind === "stopped") begin({ ...held, ...unread });
-      else if (file) readPatch(file);
     },
+    readFile,
+    readFileAgain: readPatch,
     go(at: number, enter: FilesChanged["enter"] = "start") {
       if (held?.read.kind !== "ready") return;
       const file = held.read.files[at];

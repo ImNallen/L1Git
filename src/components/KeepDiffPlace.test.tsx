@@ -106,6 +106,8 @@ const render = (diffStyle: DiffStyle = "unified") =>
           </div>
         </div>
         <KeepDiffPlace
+          startsAt={() => null}
+          onLeave={() => {}}
           body={body}
           parts={parts}
           isShown={isShown}

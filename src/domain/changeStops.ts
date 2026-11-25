@@ -44,22 +44,24 @@ function firstOf(count: number, is: (index: number) => boolean): number {
 }
 
 /**
- * Where to scroll for the next change or the one before, or null when that
- * would move nothing. `topOf` is where one of the `count` changes is, which
- * takes time to say, `at` is where the view begins, and `most` how far it
- * scrolls. `above` is what to leave over a change.
+ * The next change or the one before, and where to scroll for it, or null when
+ * that would move nothing. `topOf` is where one of the `count` changes is,
+ * which takes time to say, `at` is where the view begins, and `most` how far
+ * it scrolls. `above` is what to leave over a change.
  */
-export function scrollToChange(
+export function nextChange(
   count: number,
   topOf: (change: number) => number,
   { at, most, above }: { at: number; most: number; above: number },
   by: 1 | -1,
-): number | null {
+): { change: number; scrollTop: number } | null {
   const wanted = (change: number) =>
     Math.min(Math.max(topOf(change) - above, 0), most);
   const found =
     by === 1
       ? firstOf(count, (change) => wanted(change) > at + 1)
       : firstOf(count, (change) => wanted(change) >= at - 1) - 1;
-  return found < 0 || found >= count ? null : wanted(found);
+  return found < 0 || found >= count
+    ? null
+    : { change: found, scrollTop: wanted(found) };
 }

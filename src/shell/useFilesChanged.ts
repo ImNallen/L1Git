@@ -17,16 +17,23 @@ const LOOK_KEY = "l1git.filesChanged.v1";
 const lookSchema = z.object({
   version: z.literal(1),
   diffStyle: z.enum(["unified", "split"]),
+  view: z.enum(["one", "all"]).default("one"),
 });
+type Look = Omit<z.infer<typeof lookSchema>, "version">;
+/** Whether one file shows at a time, or each after the other. */
+export type FilesView = Look["view"];
 
 export type FilesChangedState = {
   /** Null until the open pull request's tab was opened. */
   held: FilesChanged | null;
   diffStyle: DiffStyle;
-  setDiffStyle: (style: DiffStyle) => void;
+  view: FilesView;
+  setLook: (look: Partial<Look>) => void;
   go: (at: number) => void;
   showNewest: () => void;
   retry: () => void;
+  readFile: (file: RangeFile) => void;
+  readFileAgain: (file: RangeFile) => void;
   whole: (file: RangeFile) => Promise<string>;
   ref: RefObject<DiffSteps | null>;
   persistenceError: string | null;
@@ -49,10 +56,12 @@ export function useFilesChanged({
 }): FilesChangedState {
   const [store] = useState(() => createFilesChanged(repositories));
   const latest = useSyncExternalStore(store.subscribe, store.read);
-  const [diffStyle, setStyle] = useState<DiffStyle>(
+  const [{ diffStyle, view }, setLook] = useState<Look>(
     () =>
-      readStored(browserStorage(), LOOK_KEY, lookSchema)?.diffStyle ??
-      "unified",
+      readStored(browserStorage(), LOOK_KEY, lookSchema) ?? {
+        diffStyle: "unified",
+        view: "one",
+      },
   );
   const [persistenceError, setPersistenceError] = useState<string | null>(null);
   const ref = useRef<DiffSteps>(null);
@@ -78,13 +87,15 @@ export function useFilesChanged({
   return {
     held,
     diffStyle,
-    setDiffStyle: (style) => {
-      setStyle(style);
+    view,
+    setLook: (look) => {
+      const next = { diffStyle, view, ...look };
+      setLook(next);
       setPersistenceError(
         writeStored(
           browserStorage(),
           LOOK_KEY,
-          { version: 1, diffStyle: style },
+          { version: 1, ...next },
           "The diff layout changed for this session. Could not save it.",
         ),
       );
@@ -92,6 +103,8 @@ export function useFilesChanged({
     go: store.go,
     showNewest: store.showNewest,
     retry: store.retry,
+    readFile: store.readFile,
+    readFileAgain: store.readFileAgain,
     whole: store.whole,
     ref,
     persistenceError,

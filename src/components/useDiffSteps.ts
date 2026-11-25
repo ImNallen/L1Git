@@ -9,7 +9,7 @@ import type { Ref, RefObject } from "react";
 import { keyExpanders } from "./expanders";
 import { VirtualizedFileDiff } from "@pierre/diffs";
 import type { FileDiffMetadata, VirtualFileMetrics } from "@pierre/diffs";
-import { changeStops, scrollToChange } from "../domain/changeStops";
+import { changeStops, nextChange } from "../domain/changeStops";
 
 const LINE = 22;
 /** What Pierre reckons with until it has measured, as the stylesheet has it. */
@@ -22,7 +22,8 @@ export const reviewMetrics: VirtualFileMetrics = {
   spacing: 0,
 };
 
-const ABOVE_CHANGE = 3 * LINE;
+/** What to leave over a change. */
+export const ABOVE_CHANGE = 3 * LINE;
 
 export type DrawnPart = {
   node: HTMLElement;
@@ -94,8 +95,8 @@ export function useDiffSteps(
         most: scroller.scrollHeight - scroller.clientHeight,
         above: ABOVE_CHANGE,
       };
-      const to = scrollToChange(stops.length, topOf, view, by);
-      if (to !== null) scroller.scrollTop = to;
+      const to = nextChange(stops.length, topOf, view, by);
+      if (to) scroller.scrollTop = to.scrollTop;
       return to !== null;
     },
     [body, stops, parts],

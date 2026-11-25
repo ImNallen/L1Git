@@ -111,7 +111,7 @@ function setup(deps: Partial<Deps> = {}) {
       const held = store.read();
       if (held?.read.kind !== "ready") return null;
       const current = held.read.files[held.at];
-      const read = current && held.patches.get(current);
+      const read = current && held.patches?.get(current);
       return read?.kind === "ready" && read.patch.kind === "text"
         ? read.patch.patch
         : (read?.kind ?? null);
@@ -219,7 +219,9 @@ describe("reading a range", () => {
 
   it("says why a file can't be read, and reads it again when asked", async () => {
     let fails = true;
+    const files = [file("b.ts"), file("a.ts")];
     const { store, patch, filePatch } = setup({
+      rangeFiles: async () => ready(files),
       rangePatches: async () => [],
       filePatch: vi.fn<Deps["filePatch"]>(async () => {
         if (fails) throw new Error("no");
@@ -232,7 +234,7 @@ describe("reading a range", () => {
     await settle();
     expect(filePatch).toHaveBeenCalledTimes(1);
     fails = false;
-    store.retry();
+    store.readFileAgain(files[1]!);
     await settle();
     expect(patch()).toBe("at last");
   });

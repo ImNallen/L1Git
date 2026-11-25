@@ -257,7 +257,7 @@ it("keeps Unified or Split for the next time", async () => {
   expect(get("button", "Unified").getAttribute("aria-pressed")).toBe("true");
   await app.click(get("button", "Split"));
   expect(localStorage.getItem("l1git.filesChanged.v1")).toBe(
-    '{"version":1,"diffStyle":"split"}',
+    '{"version":1,"diffStyle":"split","view":"one"}',
   );
   for (const [stored, expected] of [
     ['{"version":1,"diffStyle":"split"}', "Split"],

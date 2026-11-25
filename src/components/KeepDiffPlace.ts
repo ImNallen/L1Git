@@ -4,16 +4,14 @@ import type { DiffStyle } from "../domain/lineSelection";
 import { reviewMetrics, scrollerIn } from "./useDiffSteps";
 import type { DrawnPart } from "./useDiffSteps";
 
-type Place = {
-  scrollTop: number;
-  /** The first line in the view, and how far below its top. */
-  line: {
-    part: number;
-    side: "deletions" | "additions";
-    number: number;
-    below: number;
-  } | null;
+/** The first line in the view, and how far below its top. */
+export type LinePlace = {
+  part: number;
+  side: "deletions" | "additions";
+  number: number;
+  below: number;
 };
+type Place = { scrollTop: number; line: LinePlace | null };
 
 /** Pierre measures what it drew in the frame after. */
 const STILL_FRAMES = 3;
@@ -81,6 +79,8 @@ function distanceTo(
 }
 
 type Props = {
+  startsAt: () => LinePlace | null;
+  onLeave: (place: LinePlace) => void;
   body: RefObject<HTMLElement | null>;
   parts: () => DrawnPart[];
   isShown: boolean;
@@ -152,6 +152,8 @@ export class KeepDiffPlace extends Component<Props> {
       scroller.addEventListener(event, this.stop, { passive: true });
     this.sizes.observe(scroller);
     for (const child of scroller.children) this.sizes.observe(child);
+    const line = this.props.startsAt();
+    if (line) this.settle({ scrollTop: 0, line });
   }
 
   getSnapshotBeforeUpdate(): Place | null {
@@ -182,6 +184,7 @@ export class KeepDiffPlace extends Component<Props> {
   }
 
   componentWillUnmount() {
+    if (this.place?.line) this.props.onLeave(this.place.line);
     this.stop();
     this.sizes.disconnect();
   }

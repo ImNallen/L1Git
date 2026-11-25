@@ -1,4 +1,4 @@
-import { memo, useId, useState } from "react";
+import { memo, useId } from "react";
 import { ChevronDown, MessageSquare } from "lucide-react";
 import type { ReviewThread } from "../domain/pullRequest";
 import { lineLabel } from "../domain/pullRequestDetail";
@@ -6,8 +6,14 @@ import { chipOf, elsewhereLabel } from "../domain/reviewThreads";
 import { Avatar } from "./PullRequestParts";
 import { Thread, ThreadComments } from "./PullRequestThread";
 
+/** Which threads are unfolded, and which files' other ones. */
+export type Unfolded = {
+  ids: ReadonlySet<string>;
+  toggle: (id: string) => void;
+};
+
 /** A thread in one row, which unfolds. */
-export const ThreadChip = memo(function ThreadChip({
+const ThreadChip = memo(function ThreadChip({
   thread,
   viewer,
   url,
@@ -62,17 +68,54 @@ export const ThreadChip = memo(function ThreadChip({
   );
 });
 
-/** The threads of a file that have no line in what is shown of it. */
-export function ThreadsElsewhere({
+/** The threads on one line. */
+export function ThreadChips({
+  ids,
   threads,
   viewer,
   url,
+  unfolded,
 }: {
+  ids: readonly string[];
   threads: readonly ReviewThread[];
   viewer: string;
   url: string;
+  unfolded: Unfolded;
 }) {
-  const [open, setOpen] = useState(false);
+  return (
+    <div className="thread-chips">
+      {threads
+        .filter(({ id }) => ids.includes(id))
+        .map((thread) => (
+          <ThreadChip
+            key={thread.id}
+            thread={thread}
+            viewer={viewer}
+            url={url}
+            open={unfolded.ids.has(thread.id)}
+            onToggle={unfolded.toggle}
+          />
+        ))}
+    </div>
+  );
+}
+
+/** The threads of a file that have no line in what is shown of it. */
+export function ThreadsElsewhere({
+  path,
+  threads,
+  viewer,
+  url,
+  unfolded,
+}: {
+  path: string;
+  threads: readonly ReviewThread[];
+  viewer: string;
+  url: string;
+  unfolded: Unfolded;
+}) {
+  const id = `elsewhere ${path}`;
+  const open = unfolded.ids.has(id);
   const content = useId();
   return (
     <section className="threads-elsewhere" aria-label="Other comments">
@@ -81,7 +124,7 @@ export function ThreadsElsewhere({
         className="threads-elsewhere-row"
         aria-expanded={open}
         aria-controls={content}
-        onClick={() => setOpen(!open)}
+        onClick={() => unfolded.toggle(id)}
       >
         <MessageSquare size={14} aria-hidden="true" />
         {elsewhereLabel(threads)}

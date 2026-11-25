@@ -12,6 +12,7 @@ import type { PartAction } from "../domain/operations";
 import type { FilePatch, LinePick } from "../domain/repository";
 import type { ThreadsOnLine } from "../domain/reviewThreads";
 import { KeepDiffPlace } from "./KeepDiffPlace";
+import type { LinePlace } from "./KeepDiffPlace";
 import { patchOptions } from "./patchOptions";
 import { reviewMetrics, useDiffSteps, useDrawnParts } from "./useDiffSteps";
 import type { DiffSteps } from "./useDiffSteps";
@@ -34,6 +35,8 @@ export type Parts = {
 export type Review = {
   ref: Ref<DiffSteps>;
   startsAtEnd: boolean;
+  startsAt: () => LinePlace | null;
+  onLeave: (place: LinePlace) => void;
   isShown: boolean;
   above: ReactNode;
   below: ReactNode;
@@ -298,6 +301,8 @@ function Patch({
         <KeepDiffPlace
           body={scroll}
           parts={drawnParts}
+          startsAt={review.startsAt}
+          onLeave={review.onLeave}
           isShown={review.isShown}
           diffStyle={diffStyle}
         />
