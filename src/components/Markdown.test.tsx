@@ -1,11 +1,23 @@
 // @vitest-environment happy-dom
-import { act } from "react";
+import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { FileProps } from "@pierre/diffs/react";
 import { Markdown } from "./Markdown";
 import { SurroundingsContext } from "./pullRequestText";
 
+const painted = vi.hoisted(() => new Map<object, unknown>());
+vi.mock("@pierre/diffs/react", async (load) => {
+  const pierre = await load<typeof import("@pierre/diffs/react")>();
+  return {
+    ...pierre,
+    File: (props: FileProps<unknown, unknown>) => {
+      painted.set(props.file, props.file.lang);
+      return createElement(pierre.File, props);
+    },
+  };
+});
 vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
 
 let host: HTMLElement;
@@ -46,6 +58,7 @@ describe("links", () => {
     ["[a](https://a.test/x?y#z)", "https://a.test/x?y#z"],
     ["[a](http://a.test)", "http://a.test/"],
     ["[a](mailto:a@b.test)", "mailto:a@b.test"],
+    ["[a](mailto:a@b.test?attach=/etc/passwd&body=x#y)", "mailto:a@b.test"],
     ["[a](//a.test/x)", "https://a.test/x"],
     ["[a](docs/x.md)", "https://github.com/octo/app/docs/x.md"],
     ["[a](/octo/other)", "https://github.com/octo/other"],
@@ -73,11 +86,51 @@ describe("links", () => {
     "[a](#heading)",
     "[a]()",
     "[a](https://)",
+    "[a](mailto:?bcc=a@b.test)",
     '<a href="javascript:alert(1)">a</a>',
   ])("%s opens nothing", async (text) => {
     await show(text);
     expect(links()).toEqual([]);
     expect(host.textContent).toContain("a");
+  });
+
+  it.each([
+    ['See <a href="https://a.test">the <b>docs</b></a> now', "the docs"],
+    ['**See <a href="https://a.test">the *docs*</a>**', "the docs"],
+    ['<a href="https://a.test"><img alt="shot" src="b.png"></a>', "shot"],
+    ['| a |\n|---|\n| <a href="https://a.test">x</a> |', "x"],
+    ['<p>See <a href="https://a.test">the docs</a></p>', "the docs"],
+    ["[**bold**](https://a.test)", "bold"],
+  ])("%s links its words", async (text, words) => {
+    await show(text);
+    expect(links()).toEqual([[words, "https://a.test/"]]);
+  });
+
+  it.each([
+    'a <a href="https://a.test"></a>',
+    'a <a href="https://a.test"> </a>',
+    'a <a href="https://a.test">not closed',
+    'a **<a href="https://a.test">x**</a>',
+    'a <a href="https://a.test"><b></b><!-- x --></a>',
+    "a [](https://a.test)",
+    "a [ ](https://a.test) [\u200b\u2060](https://a.test)",
+    "a [][r] [&nbsp;][r]\n\n[r]: https://a.test",
+    'a\n\n<a href="https://a.test"></a>',
+    '<a href="https://a.test">\n\na\n\n</a>',
+    '<p>a<a href="https://a.test"> <i></i></a></p>',
+  ])("%j has no link, as it would have no words", async (text) => {
+    await show(text);
+    expect(links()).toEqual([]);
+    expect(host.textContent).toContain("a");
+    expect(host.textContent).not.toContain("<");
+  });
+
+  it("ends a link where the next one begins", async () => {
+    await show(
+      '<a href="https://a.test">a <a href="https://b.test">b</a> c</a>',
+    );
+    expect(links()).toEqual([["b", "https://b.test/"]]);
+    expect(host.textContent).toBe("a b c");
   });
 
   it("leaves mentions and numbers alone", async () => {
@@ -151,6 +204,49 @@ it("keeps the lines of HTML, without the gaps between its elements", async () =>
   ).toEqual(["Notes\none", "two", "End"]);
 });
 
+it.each([
+  ["<p>one</p><p>two</p>", ["one", "two"]],
+  ["<ul><li>one</li><li>two</li></ul>", ["one", "two"]],
+  ["<h3>one</h3>two<br>three<hr>four", ["one", "two", "three", "four"]],
+  [
+    "<table><tr><td>a</td><td>b</td></tr><tr><th>c</th></tr></table>",
+    ["a b", "c"],
+  ],
+  ["<div>one <b>more</b><i>over</i></div>", ["one moreover"]],
+  ["one<p>two</p>three", ["one two three"]],
+  ["<div>one\n   \n two</div>", ["one", "two"]],
+])("%j keeps its words apart", async (text, lines) => {
+  await show(text);
+  expect(
+    (host.textContent ?? "")
+      .split("\n")
+      .map((line) => line.replace(/ +/g, " ").trim())
+      .filter((line) => line !== ""),
+  ).toEqual(lines);
+});
+
+it.each([
+  ["**a<br>b**", "strong"],
+  ["*a<br>b*", "em"],
+  ["~~a<br>b~~", "del"],
+  ["[a<br>b][r]\n\n[r]: https://a.test", "a"],
+  ["[a<br>b](https://a.test)", "a"],
+])("%s keeps its line break", async (text, element) => {
+  await show(text);
+  expect(host.querySelector(element)?.innerHTML).toMatch(/^a<br>\s*b$/);
+});
+
+it("puts no paragraph into a line", async () => {
+  await show(
+    '**<img src="https://a.test/i.png" alt="I"> end** [<img src="https://a.test/i.png" alt="I">][r]\n\n[r]: https://b.test',
+  );
+  expect(host.querySelectorAll("p")).toHaveLength(1);
+  expect(links()).toEqual([
+    ["I", "https://a.test/i.png"],
+    ["I", "https://b.test/"],
+  ]);
+});
+
 it("starts headings at the fourth level", async () => {
   await show("# One\n## Two\n### Three\n###### Six");
   expect(
@@ -187,6 +283,24 @@ it("shows code through Pierre, and names a suggestion", async () => {
   expect(host.querySelector("p code")?.textContent).toBe("inline");
 });
 
+it("paints only as much code as it can at once", async () => {
+  const block = (language: string, length: number) =>
+    `\`\`\`${language}\n${"a ".repeat(length / 2)}\n\`\`\`\n\n`;
+  const languages = async (text: string) => {
+    painted.clear();
+    await show(text);
+    return [...painted.values()];
+  };
+  expect(await languages(block("ts", 6_000).repeat(2))).toEqual([
+    "typescript",
+    "text",
+  ]);
+  const all = ["ts", "js", "css", "go", "rust", "ruby", "java"];
+  expect(
+    await languages(all.map((language) => block(language, 10)).join("")),
+  ).toEqual(["typescript", "javascript", "css", "go", "rust", "ruby", "text"]);
+});
+
 it("shows tables, even broken ones", async () => {
   await show(
     "| a | b |\n|---|---|\n| 1 |\n| 1 | 2 | 3 |\n\n| no | rule |\n| x |",
@@ -204,14 +318,50 @@ it("repeats no ids from footnotes", async () => {
 });
 
 it.each([
+  ["a rule", `Intro\n\n${"-".repeat(200)}\n\n**bold**`],
+  ["a rule with spaces", `${"- ".repeat(80)}\n\n**bold**`],
+  ["stars", `${"* ".repeat(80)}\n\n**bold**`],
+  ["a quoted rule", `> ${"-".repeat(80)}\n\n**bold**`],
+  ["a heading's line", `Intro\n${"=".repeat(80)}\n\n**bold**`],
+  ["code with rules", `**bold**\n\n\`\`\`\n${"-".repeat(80)}\nlog\n\`\`\``],
+  ["an ASCII table", `\`\`\`\n+${"-".repeat(70)}+\n| a |\n\`\`\`\n**bold**`],
+  ["a wide table", `| a | b |\n|${"-".repeat(90)}|---|\n| **bold** | c |`],
+  [
+    "a long log",
+    `**bold**\n\`\`\`\n${'[12/345] cc -O2 "a_b[0]" *x `y`\n'.repeat(600)}\`\`\``,
+  ],
+  [
+    "a long list of links",
+    `**bold**\n${"- [`a_b`](https://a.test/x): does *this*\n".repeat(400)}`,
+  ],
+  [
+    "a long table of links",
+    `**bold**\n\n| \`a\` | b |\n|---|---|\n${"| [`a_b`](https://a.test) | **1** |\n".repeat(300)}`,
+  ],
+  [
+    "long prose in another script",
+    `**bold** [字](https://a.test) ${"漢字".repeat(9_000)}`,
+  ],
+])("reads %s", async (_, text) => {
+  await show(text);
+  expect(host.querySelector("strong")?.textContent).toBe("bold");
+});
+
+const wide = (columns: number, rows: number) =>
+  `${"|a".repeat(columns)}\n${"|-".repeat(columns)}\n${"|\n".repeat(rows)}`;
+
+it.each([
+  ["a table that fills itself", wide(875, 1_000), "too many parts"],
+  ["a table of one row", wide(1_400, 3), "too many parts"],
   ["quotes in quotes", `${">".repeat(400)} deep`, "tangled"],
   ["lists in lists", `${"1. ".repeat(400)} deep`, "tangled"],
   ["emphasis without end", "*a_ ".repeat(5_000), "tangled"],
   [
     "lists in lists over many lines",
     Array.from({ length: 70 }, (_, at) => `${"  ".repeat(at)}- a`).join("\n"),
-    "nested too deep",
+    "tangled",
   ],
+  ["lists in lists in one line", `${"- ".repeat(30)}a`, "nested too deep"],
 ])("refuses %s", async (_, text, why) => {
   const caught: unknown[] = [];
   await act(() => root.unmount());
