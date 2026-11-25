@@ -173,12 +173,25 @@
 }
 
 .pull-requests {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+.pull-list,
+.pull-detail {
   container-type: inline-size;
   display: flex;
   flex-direction: column;
   flex: 1;
   min-width: 0;
   min-height: 0;
+}
+.pull-requests[hidden],
+.pull-panel[hidden],
+.pull-list[hidden] {
+  display: none;
 }
 .pull-requests:focus-visible {
   outline: none;

@@ -286,7 +286,7 @@ const reviewVerbs: Record<ReviewState, string> = {
   commented: "reviewed",
 };
 
-const reviewStateLabels: Record<ReviewState, string> = {
+export const reviewStateLabels: Record<ReviewState, string> = {
   requested: "Waiting",
   approved: "Approved",
   changesRequested: "Changes requested",
@@ -421,7 +421,7 @@ export function excerpt({
   };
 }
 
-const checkStates = {
+export const checkStates = {
   failed: { group: "Failing", result: "Failed" },
   running: { group: "Running", result: "Running" },
   passed: { group: "Passed", result: "Passed" },

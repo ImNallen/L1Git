@@ -1,102 +1,37 @@
-import { useEffect, useImperativeHandle, useRef } from "react";
+import { memo, useEffect, useImperativeHandle, useRef } from "react";
 import type { Ref } from "react";
-import { GitPullRequest, Plug, TriangleAlert } from "lucide-react";
+import { GitPullRequest } from "lucide-react";
 import { flushSync } from "react-dom";
 import type { HostStatus } from "../domain/host";
 import { elsewhereText, viewLabels } from "../domain/pullRequestList";
-import type { ListModel, Notice } from "../domain/pullRequestList";
-import { relativeTime } from "../domain/time";
+import type { ListModel, Row } from "../domain/pullRequestList";
 import { mac } from "../repositories";
 import { focusIsShown } from "../shell/dom";
+import type { Layout } from "../shell/useLayout";
 import type { PullRequestsState } from "../shell/usePullRequests";
+import type { Appearance } from "../themes/palette";
 import { NoHost } from "./NoHost";
+import { PullRequestDetail } from "./PullRequestDetail";
+import type { PullRequestDetailHandle } from "./PullRequestDetail";
 import {
   PullRequestColumns,
   PullRequestGroups,
   PullRequestSkeleton,
 } from "./PullRequestList";
 import { PullRequestMenus } from "./PullRequestMenus";
+import { clock, PullRequestNotice } from "./PullRequestNotice";
 import { useRovingRows } from "./useRovingRows";
 import { WorkspaceIcon } from "./WorkspaceIcon";
 
 export type PullRequestsHandle = {
-  /** The current row, else the first control, else the screen itself. */
+  /** The open pull request, else the row it was opened from or the current
+   * one, else the first control, else the screen itself. */
   focus: () => void;
   search: () => void;
 };
 
 /** The skeleton's rows are not links. */
 const ROW = "a.pull-row";
-
-/** "14:02", with the day once it is not today. */
-function clock(at: number): string {
-  const date = new Date(at);
-  const time = date.toLocaleTimeString(undefined, { timeStyle: "short" });
-  return date.toDateString() === new Date().toDateString()
-    ? time
-    : `${date.toLocaleDateString()} ${time}`;
-}
-
-function NoticeRow({
-  notice,
-  onRefresh,
-}: {
-  notice: Notice;
-  onRefresh: (() => void) | null;
-}) {
-  switch (notice.kind) {
-    case "offline":
-      return (
-        <div className="notice info-notice" role="status">
-          <Plug size={14} />
-          <span>
-            {notice.at === null
-              ? "Offline. No pull requests were read yet."
-              : `Offline. Showing pull requests as of ${clock(notice.at)}, ${relativeTime(notice.at / 1_000)}.`}
-          </span>
-          <button type="button" onClick={onRefresh ?? undefined}>
-            Try again
-          </button>
-        </div>
-      );
-    case "connection":
-      return (
-        <div className="notice warning-notice" role="status">
-          <TriangleAlert size={14} />
-          <span>{notice.message}</span>
-          <button type="button" onClick={onRefresh ?? undefined}>
-            Try again
-          </button>
-        </div>
-      );
-    case "repository":
-      return (
-        <div className="notice warning-notice" role="status">
-          <TriangleAlert size={14} />
-          <span>
-            <strong>Couldn&apos;t read {notice.repository.name}.</strong>{" "}
-            {notice.message}
-          </span>
-          {notice.authorize !== null && (
-            <a href={notice.authorize} target="_blank" rel="noreferrer">
-              Authorize on GitHub
-            </a>
-          )}
-        </div>
-      );
-    case "more":
-      return (
-        <div className="notice warning-notice" role="status">
-          <TriangleAlert size={14} />
-          <span>And {notice.count.toLocaleString()} more.</span>
-        </div>
-      );
-    default: {
-      const exhaustive: never = notice;
-      return exhaustive;
-    }
-  }
-}
 
 function Empty({
   title,
@@ -126,10 +61,12 @@ function Empty({
 function Body({
   body,
   merged,
+  onOpen,
   onClearFilters,
 }: {
   body: ListModel["body"];
   merged: boolean;
+  onOpen: (row: Row, link: HTMLAnchorElement) => void;
   onClearFilters: () => void;
 }) {
   switch (body.kind) {
@@ -155,7 +92,7 @@ function Body({
       return (
         <>
           <PullRequestColumns merged={merged} />
-          <PullRequestGroups groups={body.groups} />
+          <PullRequestGroups groups={body.groups} onOpen={onOpen} />
           {body.everything && (
             <div className="pull-everything">
               <p>That&apos;s everything waiting on you.</p>
@@ -174,43 +111,92 @@ function Body({
   }
 }
 
-export function PullRequests({
+/** Keeps its place while something else is on screen, and waits for its turn. */
+export const PullRequests = memo(
+  Screen,
+  (before, now) => before.hidden && now.hidden,
+);
+
+function Screen({
   ref,
+  hidden,
   status,
   hostProblem,
   onCheckHost,
   state,
+  layout,
+  theme,
+  painted,
   onSignIn,
+  onBack,
   onLeave,
 }: {
   ref: Ref<PullRequestsHandle>;
+  hidden: boolean;
   /** Null until Rust has said whether GitHub is connected. */
   status: HostStatus | null;
   hostProblem: string | null;
   onCheckHost: () => void;
   state: PullRequestsState;
+  layout: Layout;
+  theme: Appearance;
+  painted: boolean;
   onSignIn: () => void;
+  /** Back to the list. */
+  onBack: () => void;
   onLeave: () => void;
 }) {
-  const { saved, model, choices, choose } = state;
+  const { saved, model, choices, choose, opened } = state;
   const region = useRef<HTMLElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const search = useRef<HTMLInputElement>(null);
+  const detail = useRef<PullRequestDetailHandle>(null);
   useRovingRows(scroller, ROW, true);
-  const focus = () =>
+  const rows = () => [
+    ...(scroller.current?.querySelectorAll<HTMLAnchorElement>(ROW) ?? []),
+  ];
+  const openedFrom = useRef<{ href: string; row: number } | null>(null);
+  function backToRow({ href, row }: { href: string; row: number }) {
+    const all = rows();
+    const next =
+      all.find((each) => each.href === href) ??
+      all[Math.min(row, all.length - 1)];
+    if (!next) return false;
+    next.focus({ preventScroll: true });
+    // Only a list that was left for the history has lost its place.
+    const bounds = scroller.current?.getBoundingClientRect();
+    const { top, bottom } = next.getBoundingClientRect();
+    if (bounds && (bottom <= bounds.top || top >= bounds.bottom))
+      next.scrollIntoView({ block: "nearest" });
+    return true;
+  }
+  function focus() {
+    if (hidden) return;
+    if (detail.current) return detail.current.focus();
+    const from = openedFrom.current;
+    openedFrom.current = null;
+    if (from !== null && backToRow(from)) return;
     (
       scroller.current?.querySelector<HTMLElement>(`${ROW}[tabindex="0"]`) ??
       scroller.current?.querySelector<HTMLElement>(`${ROW}, button`) ??
       region.current
     )?.focus();
+  }
+  function open({ repository, pull }: Row, link: HTMLAnchorElement) {
+    // WebKit focuses no link on a click, and the arrows go on from this one.
+    link.focus({ preventScroll: true });
+    openedFrom.current = { href: link.href, row: rows().indexOf(link) };
+    state.open({ repository, number: pull.number });
+  }
   const focused = useRef<{ element: HTMLElement; row: number } | null>(null);
   useEffect(() => {
     const { current } = focused;
     if (current === null || current.element.isConnected) return;
     focused.current = null;
     if (focusIsShown()) return;
-    const rows = scroller.current?.querySelectorAll<HTMLElement>(ROW) ?? [];
-    const next = rows[Math.min(current.row, rows.length - 1)] ?? region.current;
+    if (detail.current) return detail.current.focus();
+    const all = rows();
+    const next = all[Math.min(current.row, all.length - 1)] ?? region.current;
     next?.focus({ preventScroll: true });
   });
   useImperativeHandle(ref, () => ({
@@ -235,12 +221,12 @@ export function PullRequests({
       ref={region}
       className="pull-requests"
       aria-label="Pull requests"
+      hidden={hidden}
       tabIndex={-1}
       onFocus={({ target }) => {
-        const rows = scroller.current?.querySelectorAll(ROW) ?? [];
         focused.current = {
           element: target,
-          row: [...rows].indexOf(target),
+          row: rows().findIndex((row) => row === target),
         };
       }}
       onBlur={({ target }) => {
@@ -257,97 +243,113 @@ export function PullRequests({
         focus();
       }}
     >
-      <header className="toolbar pull-toolbar" data-tauri-drag-region>
-        <h2>{viewLabels[choices.view]}</h2>
-        <span className="pull-scope" role="status">
-          {listing &&
-            (asOf === null
-              ? model.scope
-              : `${model.scope}, as of ${clock(asOf)}`)}
-        </span>
+      <div className="pull-list" hidden={opened !== null}>
+        <header className="toolbar pull-toolbar" data-tauri-drag-region>
+          <h2>{viewLabels[choices.view]}</h2>
+          <span className="pull-scope" role="status">
+            {listing &&
+              (asOf === null
+                ? model.scope
+                : `${model.scope}, as of ${clock(asOf)}`)}
+          </span>
+          {listing && (
+            <div className="pull-search" role="search">
+              <WorkspaceIcon name="SettingsSearch" />
+              <input
+                ref={search}
+                aria-label="Search pull requests"
+                placeholder="Search title, number, branch or author"
+                spellCheck={false}
+                autoComplete="off"
+                value={choices.query}
+                onChange={(event) => choose({ query: event.target.value })}
+                onKeyDown={(event) => {
+                  if (event.nativeEvent.isComposing) return;
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    if (choices.query === "") onLeave();
+                    else choose({ query: "" });
+                  } else if (event.key === "ArrowDown") {
+                    event.preventDefault();
+                    focus();
+                  }
+                }}
+              />
+              <kbd aria-hidden="true">{mac ? "⌘ F" : "Ctrl F"}</kbd>
+            </div>
+          )}
+        </header>
+        {listing &&
+          state.notices.map((notice) => (
+            <PullRequestNotice
+              key={
+                notice.kind === "repository"
+                  ? notice.repository.key
+                  : `${notice.kind} ${"message" in notice ? notice.message : ""}`
+              }
+              notice={notice}
+              shows="pull requests"
+              onRefresh={state.refresh}
+            />
+          ))}
         {listing && (
-          <div className="pull-search" role="search">
-            <WorkspaceIcon name="SettingsSearch" />
-            <input
-              ref={search}
-              aria-label="Search pull requests"
-              placeholder="Search title, number, branch or author"
-              spellCheck={false}
-              autoComplete="off"
-              value={choices.query}
-              onChange={(event) => choose({ query: event.target.value })}
-              onKeyDown={(event) => {
-                if (event.nativeEvent.isComposing) return;
-                if (event.key === "Escape") {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  if (choices.query === "") onLeave();
-                  else choose({ query: "" });
-                } else if (event.key === "ArrowDown") {
-                  event.preventDefault();
-                  focus();
-                }
+          <PullRequestMenus
+            choices={choices}
+            authors={model.authors}
+            onChoose={choose}
+          />
+        )}
+        <div ref={scroller} className="pull-scroll" aria-busy={state.reading}>
+          {github === undefined ? (
+            hostProblem !== null && (
+              <Empty
+                title="Couldn't check the GitHub connection"
+                detail={hostProblem}
+                action={{ label: "Try again", run: onCheckHost }}
+              />
+            )
+          ) : github.kind === "notConnected" ? (
+            <div className="pull-no-host">
+              <NoHost ended={github.ended} onSignIn={onSignIn} />
+            </div>
+          ) : saved.listed.length === 0 ? (
+            !saved.opening && (
+              <Empty
+                title="No saved repository is on GitHub"
+                detail="L1 Git lists pull requests of saved repositories that have a github.com remote."
+              />
+            )
+          ) : (
+            <Body
+              body={model.body}
+              merged={choices.view === "merged"}
+              onOpen={open}
+              onClearFilters={() => {
+                flushSync(state.clearFilters);
+                focus();
               }}
             />
-            <kbd aria-hidden="true">{mac ? "⌘ F" : "Ctrl F"}</kbd>
-          </div>
-        )}
-      </header>
-      {listing &&
-        state.notices.map((notice) => (
-          <NoticeRow
-            key={
-              notice.kind === "repository"
-                ? notice.repository.key
-                : `${notice.kind} ${"message" in notice ? notice.message : ""}`
-            }
-            notice={notice}
-            onRefresh={state.refresh}
-          />
-        ))}
-      {listing && (
-        <PullRequestMenus
-          choices={choices}
-          authors={model.authors}
-          onChoose={choose}
+          )}
+          {footnotes.map((note) => (
+            <p className="pull-note" key={note}>
+              {note}
+            </p>
+          ))}
+        </div>
+      </div>
+      {opened && (
+        <PullRequestDetail
+          key={opened.key}
+          ref={detail}
+          opened={opened}
+          layout={layout}
+          theme={theme}
+          painted={painted}
+          onBack={onBack}
+          onRefresh={state.refresh}
         />
       )}
-      <div ref={scroller} className="pull-scroll" aria-busy={state.reading}>
-        {github === undefined ? (
-          hostProblem !== null && (
-            <Empty
-              title="Couldn't check the GitHub connection"
-              detail={hostProblem}
-              action={{ label: "Try again", run: onCheckHost }}
-            />
-          )
-        ) : github.kind === "notConnected" ? (
-          <div className="pull-no-host">
-            <NoHost ended={github.ended} onSignIn={onSignIn} />
-          </div>
-        ) : saved.listed.length === 0 ? (
-          !saved.opening && (
-            <Empty
-              title="No saved repository is on GitHub"
-              detail="L1 Git lists pull requests of saved repositories that have a github.com remote."
-            />
-          )
-        ) : (
-          <Body
-            body={model.body}
-            merged={choices.view === "merged"}
-            onClearFilters={() => {
-              flushSync(state.clearFilters);
-              focus();
-            }}
-          />
-        )}
-        {footnotes.map((note) => (
-          <p className="pull-note" key={note}>
-            {note}
-          </p>
-        ))}
-      </div>
     </section>
   );
 }

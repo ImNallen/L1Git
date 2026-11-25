@@ -46,6 +46,18 @@ it("asks for a waiting or running read once, and for an ended one again", async 
   expect(started).toEqual(["a", "b", "b", "a"]);
 });
 
+it("puts what the user is looking at ahead of everything that waits", async () => {
+  const { queue, started, end } = setup();
+  queue.add(all("a", "b", "c"));
+  const detail = { repository: open("d").repository, number: 12 };
+  queue.addFirst(detail);
+  queue.addFirst(detail);
+  await end("a");
+  expect(started).toEqual(["a", "d", "b", "c"]);
+  queue.addFirst(detail);
+  expect(started, "it still runs").toEqual(["a", "d", "b", "c"]);
+});
+
 it("starts nothing more once it is closed", async () => {
   const { queue, started, end } = setup();
   queue.add(all("a", "b", "c", "d", "e", "f"));

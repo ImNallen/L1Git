@@ -1,6 +1,7 @@
 import { useRepositoryMotion } from "./useRepositoryMotion";
 import { MotionBoundary } from "./MotionBoundary";
 import { Collapse } from "./Collapse";
+import { useCopy } from "./useCopy";
 import { useInspectorMotion } from "./useInspectorMotion";
 import { WorkspaceIcon } from "./WorkspaceIcon";
 import type { MergeState } from "../domain/merge";
@@ -40,7 +41,6 @@ import type { Comparison } from "../domain/comparison";
 import type {
   ChangedFile,
   Commit,
-  Oid,
   RepositoryRoot,
   RepositorySnapshot,
   Worktree,
@@ -202,16 +202,11 @@ export function CommitInspector({
     swapCompare: onSwap,
   } = selecting;
   const { refs, lane } = placement;
-  const [copy, setCopy] = useState<"idle" | "copied" | "failed">("idle");
+  const { copy, copyText, forgetCopy } = useCopy();
   const [changesOpen, setChangesOpen] = useState(true);
   useEffect(() => {
-    setCopy("idle");
-  }, [selection]);
-  useEffect(() => {
-    if (copy !== "copied") return;
-    const timer = window.setTimeout(() => setCopy("idle"), 1500);
-    return () => window.clearTimeout(timer);
-  }, [copy]);
+    forgetCopy();
+  }, [selection, forgetCopy]);
   const inspectedCommit =
     state.kind === "ready" && state.detail.target.kind === "commit"
       ? state.detail.target.commit
@@ -235,15 +230,6 @@ export function CommitInspector({
     sameComparison(key.comparison, comparison);
   const detail = state.kind === "ready" && current(state) ? state.detail : null;
   const error = state.kind === "error" && current(state) ? state.error : null;
-
-  async function copySha(oid: Oid) {
-    try {
-      await navigator.clipboard.writeText(oid);
-      setCopy("copied");
-    } catch {
-      setCopy("failed");
-    }
-  }
 
   if (selection?.kind === "worktree" && compare === null) {
     const operation = worktree ? inProgress(writes.merge) : null;
@@ -404,7 +390,7 @@ export function CommitInspector({
           <div className="commit-information">
             <button
               className={`sha-chip ${copy}`}
-              onClick={() => void copySha(target.commit.oid)}
+              onClick={() => void copyText(target.commit.oid)}
               aria-label={`Copy commit SHA ${target.commit.oid}`}
               title={copy === "copied" ? "Copied" : `Copy ${target.commit.oid}`}
             >

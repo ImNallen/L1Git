@@ -5,9 +5,11 @@ export type ListRequest = {
   repository: ListedRepository;
   list: PullRequestList;
 };
+export type DetailRequest = { repository: ListedRepository; number: number };
+export type ReadRequest = ListRequest | DetailRequest;
 
-const keyOf = ({ repository, list }: ListRequest) =>
-  `${repository.key} ${list}`;
+const keyOf = (request: ReadRequest) =>
+  `${request.repository.key} ${"list" in request ? request.list : request.number}`;
 
 /** GitHub limits how much work one account asks of it at once. */
 const atOnce = 4;
@@ -19,9 +21,9 @@ const atOnce = 4;
  * asking again.
  */
 export function createReadQueue(
-  read: (request: ListRequest) => Promise<boolean>,
+  read: (request: ReadRequest) => Promise<boolean>,
 ) {
-  const waiting = new Map<string, ListRequest>();
+  const waiting = new Map<string, ReadRequest>();
   const running = new Set<string>();
   let unlocked = false;
 
@@ -40,12 +42,18 @@ export function createReadQueue(
   }
 
   return {
-    add(requests: readonly ListRequest[]) {
+    add(requests: readonly ReadRequest[]) {
       for (const request of requests) {
         const key = keyOf(request);
         if (!running.has(key)) waiting.set(key, request);
       }
       pump();
+    },
+    /** Ahead of everything that waits, for what the user is looking at. */
+    addFirst(request: ReadRequest) {
+      const rest = [...waiting.values()];
+      waiting.clear();
+      this.add([request, ...rest]);
     },
     /** Running reads finish, and the rest never start. */
     close: () => waiting.clear(),

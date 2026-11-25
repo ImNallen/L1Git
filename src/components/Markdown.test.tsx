@@ -19,6 +19,18 @@ vi.mock("@pierre/diffs/react", async (load) => {
   };
 });
 vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+vi.stubGlobal(
+  "IntersectionObserver",
+  class {
+    constructor(private look: IntersectionObserverCallback) {}
+    observe = (target: Element) =>
+      this.look(
+        [{ target, isIntersecting: true } as IntersectionObserverEntry],
+        this as unknown as IntersectionObserver,
+      );
+    unobserve() {}
+  },
+);
 
 let host: HTMLElement;
 let root: Root;
@@ -36,6 +48,10 @@ async function show(text: string) {
   await act(() => root.render(<Markdown tree={tree} />));
   return host;
 }
+const code = (count: number) =>
+  vi.waitFor(() =>
+    expect(host.querySelectorAll("diffs-container")).toHaveLength(count),
+  );
 const links = () =>
   [...host.querySelectorAll("a")].map((link) => [
     link.textContent,
@@ -304,7 +320,10 @@ it("shows code through Pierre, and names a suggestion", async () => {
   await show(
     "```ts\nconst a = 1;\n```\n\n```suggestion\nlet b;\n```\n\n```nonsense-language\nc\n```\n\nand `inline`",
   );
-  expect(host.querySelectorAll("diffs-container")).toHaveLength(3);
+  expect(
+    [...host.querySelectorAll("pre")].map(({ textContent }) => textContent),
+  ).toEqual(["const a = 1;", "let b;", "c"]);
+  await code(3);
   expect(host.querySelector("figcaption")?.textContent).toBe(
     "Suggested change",
   );
@@ -314,7 +333,9 @@ it("shows code through Pierre, and names a suggestion", async () => {
 it("paints no code that would take long to paint", async () => {
   const languages = async (length: number) => {
     painted.clear();
+    await act(() => root.render(null));
     await show(`\`\`\`ts\n${"a ".repeat(length / 2)}\n\`\`\``);
+    await code(1);
     return [...painted.values()];
   };
   expect(await languages(10_000)).toEqual(["typescript"]);

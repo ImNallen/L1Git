@@ -12,7 +12,11 @@ import type {
   WorktreeStatus,
 } from "../domain/repository";
 import type { GhProbe, HostProblem, HostStatus } from "../domain/host";
-import type { PullRequestList, PullRequests } from "../domain/pullRequest";
+import type {
+  PullRequest,
+  PullRequestList,
+  PullRequests,
+} from "../domain/pullRequest";
 import type { GitHubRepository } from "../domain/repository";
 import { mergeSelectionSchema } from "../domain/merge";
 import { probeOf } from "../domain/inProgress";
@@ -65,11 +69,14 @@ export type World = {
     probe: GhProbe;
     /** Each list by `pullsKey`. GitHub does not find a repository without one. */
     pulls: Map<string, PullRequests>;
+    /** Each pull request by `pullKey`. */
+    details: Map<string, PullRequest>;
   };
 };
 
 export const pullsKey = (name: string, list: PullRequestList) =>
   `${name} ${list}`;
+export const pullKey = (name: string, number: number) => `${name}#${number}`;
 const repositoryName = ({ owner, repo }: GitHubRepository) =>
   `${owner}/${repo}`;
 
@@ -131,6 +138,7 @@ export function createWorld(): World {
         path: "/opt/homebrew/bin/gh",
       },
       pulls: new Map(),
+      details: new Map(),
     },
   };
 }
@@ -381,6 +389,15 @@ const hostHandlers: Record<
       message: `L1 Git can't find ${name} on GitHub.`,
     });
   },
+  pullRequest: (request, host) => {
+    const key = pullKey(String(hostPath(request)), Number(request.number));
+    const found = host.details.get(key);
+    if (found) return found;
+    throw new HostRefusal({
+      kind: "notFound",
+      message: `L1 Git can't find ${key} on GitHub.`,
+    });
+  },
   disconnect: (_, host) => {
     host.status = {
       ...host.status,
@@ -456,11 +473,12 @@ export function createBridge(world: World = createWorld()) {
     }
     const { status } = world.host;
     try {
+      const path = hostPath(request);
+      const one = pullKey(String(path), Number(request.number));
       const failure = hostFailures.findLast(
-        ({ name }) => name === undefined || name === hostPath(request),
+        ({ name }) => name === undefined || name === path || name === one,
       );
-      if (failure && hostPath(request) !== undefined)
-        throw new HostRefusal(failure.problem);
+      if (failure && path !== undefined) throw new HostRefusal(failure.problem);
       const data = handler(request, world.host);
       return { ok: true, op: request.op, data, status: world.host.status };
     } catch (error) {
@@ -563,7 +581,8 @@ export function createBridge(world: World = createWorld()) {
         else overrides.delete(op);
       };
     },
-    /** Fails every read of a repository on GitHub, or only of `name`. */
+    /** Fails every read of a repository on GitHub, or only of `name`, which
+     * can be a `pullKey`. */
     failHost(problem: HostFailure, name?: string) {
       const failure = { name, problem };
       hostFailures.push(failure);
