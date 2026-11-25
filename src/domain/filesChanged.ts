@@ -2,7 +2,7 @@ import { changedFileTreeInput, treePath } from "./changedFiles";
 import { undrawn } from "./fileSides";
 import { fetchFailureLabels } from "./overview";
 import type { PullRequest, TimelineEvent } from "./pullRequest";
-import { personName } from "./pullRequestDetail";
+import { counted, personName } from "./pullRequestDetail";
 import type { ListedRepository } from "./pullRequestList";
 import type { CommitsFetch, RangeFile } from "./range";
 import type { FilePatch, GitHubRepository, Oid, Problem } from "./repository";
@@ -57,16 +57,20 @@ export function newerThan(
 /** Why there is nothing to show. */
 export type Stop =
   | { kind: "unrelated"; shallow: boolean }
+  | { kind: "treesMissing" }
   | { kind: "stillMissing" }
   | Exclude<CommitsFetch, { kind: "done" }>
   | { kind: "unreadable"; problem: Problem };
+
+const partialClone =
+  "This is a partial clone, and file contents aren't on this computer.";
 
 export function stopText(
   stop: Stop,
   { owner, repo }: GitHubRepository,
 ): {
   title: string;
-  detail: string;
+  detail: string | null;
   /** Whether the detail is Git's own words. */
   verbatim: boolean;
   /** Whether another try may end otherwise. */
@@ -89,6 +93,13 @@ export function stopText(
             verbatim: false,
             retry: false,
           };
+    case "treesMissing":
+      return {
+        title: partialClone,
+        detail: null,
+        verbatim: false,
+        retry: false,
+      };
     case "stillMissing":
       return {
         ...getting,
@@ -140,6 +151,38 @@ export const lineTotals = (files: readonly RangeFile[]) => ({
   added: files.reduce((sum, { added }) => sum + (added ?? 0), 0),
   deleted: files.reduce((sum, { deleted }) => sum + (deleted ?? 0), 0),
 });
+
+type Counts = Pick<PullRequest, "changedFiles" | "additions" | "deletions">;
+
+/** An edited rename is a deletion and an addition when no contents were read. */
+const unpaired = (files: readonly RangeFile[]) =>
+  Math.min(
+    files.filter(({ status }) => status === "A").length,
+    files.filter(({ status }) => status === "D").length,
+  );
+
+/** How what was read here is not what GitHub counts, or null when it is. */
+export function countsNotice(
+  {
+    files,
+    contentMissing,
+  }: { files: readonly RangeFile[]; contentMissing: boolean },
+  github: Counts,
+): string | null {
+  const here = { ...lineTotals(files), changedFiles: files.length };
+  const most = contentMissing ? unpaired(files) : 0;
+  const more = here.changedFiles - github.changedFiles;
+  const sameLines =
+    contentMissing ||
+    (here.added === github.additions && here.deleted === github.deletions);
+  if (more >= 0 && more <= most && sameLines) return null;
+  const words = (changedFiles: number, added: number, deleted: number) =>
+    contentMissing
+      ? counted(changedFiles, "file")
+      : `${counted(changedFiles, "file")}, +${added.toLocaleString()} −${deleted.toLocaleString()}`;
+  const { changedFiles, additions, deletions } = github;
+  return `GitHub counts ${words(changedFiles, additions, deletions)}. This shows ${words(here.changedFiles, here.added, here.deleted)}.`;
+}
 
 /** "src/{ → replay}/Panel.tsx". */
 export function pathLabel({

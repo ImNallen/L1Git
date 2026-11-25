@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  countsNotice,
   distinctPaths,
   inPlaceOfLines,
   inTreeOrder,
@@ -31,6 +32,7 @@ function file(path: string, fields: Partial<RangeFile> = {}): RangeFile {
     kind: "ready",
     mergeBase: oid("a"),
     contentMissing: false,
+    shallow: false,
     files: [
       {
         path,
@@ -140,7 +142,7 @@ describe("newerThan", () => {
 });
 
 describe("stopText", () => {
-  it.each<[Stop, string, boolean, boolean]>([
+  it.each<[Stop, string | null, boolean, boolean]>([
     [
       { kind: "unrelated", shallow: true },
       "This is a shallow clone, and the commit where this pull request starts isn't in it.",
@@ -153,6 +155,7 @@ describe("stopText", () => {
       false,
       false,
     ],
+    [{ kind: "treesMissing" }, null, false, false],
     [
       { kind: "stillMissing" },
       "GitHub answered, but the commits still aren't in this clone.",
@@ -222,6 +225,56 @@ describe("the list of files", () => {
         file("c", { added: 2, deleted: 7 }),
       ]),
     ).toEqual({ added: 5, deleted: 7 });
+  });
+});
+
+describe("countsNotice", () => {
+  const files = [
+    file("a", { added: 600, deleted: 88 }),
+    file("b", { status: "A", added: 1_040, deleted: 0 }),
+    file("c", { status: "D", added: 0, deleted: 0 }),
+    file("logo", { added: null, deleted: null }),
+  ];
+  const all = { files, contentMissing: false };
+  const unread = {
+    files: files.map((each) => ({ ...each, added: null, deleted: null })),
+    contentMissing: true,
+  };
+  const counts = (
+    changedFiles: number,
+    additions: number,
+    deletions: number,
+  ) => ({ changedFiles, additions, deletions });
+  it.each([
+    ["the same", all, counts(4, 1_640, 88), null],
+    [
+      "other files",
+      all,
+      counts(3, 1_640, 88),
+      "GitHub counts 3 files, +1,640 −88. This shows 4 files, +1,640 −88.",
+    ],
+    [
+      "other lines",
+      all,
+      counts(1, 612, 89),
+      "GitHub counts 1 file, +612 −89. This shows 4 files, +1,640 −88.",
+    ],
+    ["lines that nobody read", unread, counts(4, 1, 2), null],
+    ["a rename that nobody could see", unread, counts(3, 1, 2), null],
+    [
+      "more than a rename can explain",
+      unread,
+      counts(2, 1, 2),
+      "GitHub counts 2 files. This shows 4 files.",
+    ],
+    [
+      "fewer files",
+      unread,
+      counts(5, 1, 2),
+      "GitHub counts 5 files. This shows 4 files.",
+    ],
+  ])("compares %s", (_, read, github, notice) => {
+    expect(countsNotice(read, github)).toBe(notice);
   });
 });
 
