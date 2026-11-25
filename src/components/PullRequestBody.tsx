@@ -196,7 +196,7 @@ export const Body = memo(function Body({ text }: { text: string }) {
           key={content.text}
           fallback={<Plain paragraphs={content.paragraphs} />}
         >
-          <Markdown tree={content.tree} />
+          <Markdown tree={content.tree} isWhole={content.text === text} />
         </Plainly>
       ) : (
         content && <Plain paragraphs={content.paragraphs.slice(0, steps)} />

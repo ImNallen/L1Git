@@ -72,6 +72,10 @@ describe("a text that holds too much", () => {
     ["code that turns", `\`\`\`\n${bidi(4_100)}\n\`\`\``, "turns too often"],
     ["steered words", "a\u2066".repeat(2_001), "turns too often"],
     ["words in two scripts", "aか".repeat(2_001), "turns too often"],
+    ["lines of Hebrew", "א\n".repeat(2_010), "turns too often"],
+    ["lines by Hebrew", `**א** ${"a\n".repeat(2_010)}`, "turns too often"],
+    ["lines of HTML", `<p>${"א\n".repeat(2_010)}`, "turns too often"],
+    ["lines", "a\n".repeat(21_000), "too many parts"],
     ["and in one with a dictionary", "aไ".repeat(501), "turns too often"],
     [
       "characters of every kind",
@@ -92,6 +96,11 @@ describe("a text that holds too much", () => {
       "זהו טקסט בעברית של API או `code`. ".repeat(900),
     ],
     ["a word without end", "a".repeat(65_000)],
+    ["many lines", "a\n".repeat(19_000)],
+    ["many lines with spaces at their ends", "a  \n".repeat(15_000)],
+    ["lines of Chinese", "字\n".repeat(19_000)],
+    ["lines of Hebrew", "זהו טקסט בעברית\n".repeat(1_900)],
+    ["lines of links", "[a](b)\n".repeat(900)],
     ["Thai", "ภาษาไทย และ API ".repeat(480)],
     ["Chinese", "使用 React 的钩子，以及类型。".repeat(1_900)],
   ])("is not: %s", (_, text) => {
@@ -102,6 +111,41 @@ describe("a text that holds too much", () => {
 it("says about how many elements it takes to show a text", () => {
   expect(read("a").weight).toBe(2 + 1 / 20);
   expect(read("אa").weight).toBe(3 + 2 / 20);
+});
+
+describe("a text", () => {
+  it.each([
+    "[](http://x.y)",
+    "<a href=x></a>",
+    "<span></span>",
+    "#",
+    "-",
+    "1.",
+    "> >",
+    "- >",
+    "| |\n|-|\n| |",
+    "&nbsp;",
+    "\u200b\n\u200b",
+    "&#8203;",
+    "**\u2060**",
+    "\u00ad\u202e",
+    "<p>&nbsp;</p>",
+  ])("shows nothing: %j", (written) => {
+    expect(read(written).pieces).toEqual([]);
+  });
+
+  it.each([
+    "![](x)",
+    '<img src="x">',
+    "> ---",
+    "- [x] &nbsp;",
+    "```\n\u200b\n```",
+    "> ```suggestion\n> ```",
+    "\uf8ff",
+    "# \n\n- .",
+  ])("shows something: %j", (written) => {
+    expect(read(written).pieces).not.toEqual([]);
+  });
 });
 
 it("fills up no table that is too large", () => {

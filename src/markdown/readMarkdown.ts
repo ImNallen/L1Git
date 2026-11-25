@@ -3,7 +3,7 @@ import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
 import remarkRehype from "remark-rehype";
 import { unified } from "unified";
-import { directionOf, runs, turnsIn } from "./runs";
+import { directionOf, isTwoWay, runs, turnsIn } from "./runs";
 import type { Align, Direction, Piece, Shown, Tree } from "./tree";
 
 /** Beyond these, showing a text would take long, however fast it was read. */
@@ -22,7 +22,10 @@ type Node = {
   value?: string;
   url?: string;
   alt?: string | null;
-  data?: { hProperties: { className?: string; dir?: Direction } };
+  data?: {
+    hName?: string;
+    hProperties?: { className?: string; dir?: Direction };
+  };
   children?: Node[];
 };
 
@@ -32,6 +35,7 @@ type Html = {
   value?: string;
   tagName?: string;
   properties?: Record<string, unknown>;
+  position?: { start: { line: number }; end: { line: number } };
   children?: Html[];
 };
 
@@ -141,7 +145,7 @@ function withoutTags(nodes: readonly Node[]): Node[] {
   return shown;
 }
 
-const visible = /[^\s\p{C}\p{Default_Ignorable_Code_Point}]/u;
+const visible = /[^\s\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}]/u;
 const links = new Set(["link", "linkReference"]);
 const drawn = new Set(["image", "imageReference", "footnoteReference"]);
 const shows = ({ type, value = "", children = [] }: Node): boolean =>
@@ -190,15 +194,27 @@ function paragraph(words: Node[]): Node[] {
 const lengthOf = (url: string) =>
   url.replace(/[^\x21-\x7e]/g, "%00%00%00").length;
 
-/** GitHub breaks a line wherever the person who wrote it did. */
-const withBreaks = (node: Node): Node[] =>
-  node.type === "text"
-    ? (node.value ?? "")
-        .split(/\r\n?|\n/)
-        .flatMap((line, at) =>
-          at === 0 ? [text(line)] : [{ type: "break" }, text(line.trimStart())],
-        )
-    : [node];
+/**
+ * GitHub breaks a line wherever the person who wrote it did. The lines stay one
+ * text, so that a text of many is not one of many elements.
+ */
+function inLines(nodes: readonly Node[]): Node[] {
+  const joined: Node[] = [];
+  for (const node of nodes) {
+    const before = joined.at(-1);
+    if (node.type !== "text" && node.type !== "break") joined.push(node);
+    else {
+      const said = (node.value ?? "\n").replace(/\r\n?/g, "\n");
+      if (before?.type === "text") before.value += said;
+      else joined.push(text(said));
+    }
+  }
+  return joined.map((node) =>
+    node.type === "text" && node.value?.includes("\n")
+      ? { type: "typed", data: { hName: "span" }, children: [node] }
+      : node,
+  );
+}
 
 /** HTML is never rendered. What it says stays, as plain text. */
 function htmlAsText() {
@@ -210,12 +226,11 @@ function htmlAsText() {
     if ((parent.align?.length ?? 0) * parent.children.length > most.pieces)
       throw new Error("This text has too many parts.");
     for (const node of parent.children) walk(node);
-    parent.children = parent.children.flatMap(withBreaks);
     parent.children = flow.has(parent.type)
       ? parent.children.flatMap((node) =>
           node.type === "html" ? paragraph(said(node.value ?? "")) : [node],
         )
-      : withoutTags(parent.children).flatMap((node) =>
+      : withoutTags(inLines(parent.children)).flatMap((node) =>
           wordless(node) ? (node.children ?? []) : [node],
         );
     if (parent.type !== "list" && parent.type !== "blockquote") return;
@@ -258,12 +273,21 @@ const around = {
   tr: "row",
   section: "notes",
   sup: "note",
+  span: "typed",
 } as const;
 const levels = { h1: 1, h2: 2, h3: 3, h4: 3, h5: 3, h6: 3 } as const;
 const has = <Keys extends object>(
   keys: Keys,
   key: string,
 ): key is string & keyof Keys => Object.hasOwn(keys, key);
+
+/** Bullets and borders around nothing are nothing to see. */
+const isSeen = (piece: Shown): boolean =>
+  typeof piece === "string"
+    ? visible.test(piece)
+    : "children" in piece
+      ? piece.children.some(isSeen)
+      : piece.kind === "block" || piece.kind === "box" || piece.kind === "rule";
 
 const wordsIn = ({ value = "", children = [] }: Html): string =>
   value + children.map(wordsIn).join("");
@@ -273,6 +297,8 @@ export function readMarkdown(markdown: string, base: string): Tree {
   let pieces = 0;
   let size = 0;
   let turns = 0;
+  let lines = 0;
+  let twoWay = false;
   const kinds = new Set<string>();
   let linked = false;
 
@@ -282,12 +308,21 @@ export function readMarkdown(markdown: string, base: string): Tree {
     pieces += typeof made !== "string" && made.kind === "block" ? 10 : 1;
     size += holding.length;
     turns += turnsIn(holding);
+    if (typeof made === "string") {
+      const more = made.match(/\n(?=.)/gs)?.length ?? 0;
+      // A line is laid out in a fifth of the time of a piece.
+      pieces += more / 5;
+      lines += more;
+      twoWay ||= isTwoWay(made);
+    }
     for (const kind of holding.match(/[^\0-\u024f]/gu) ?? []) kinds.add(kind);
     if (pieces > most.pieces) throw new Error("This text has too many parts.");
     if (size > most.characters) throw new Error("This text is too long.");
     if (kinds.size > most.kinds)
       throw new Error("This text has too many kinds.");
-    if (turns > most.turns) throw new Error("This text turns too often.");
+    // Among words in two directions, a line takes as long as a turn.
+    if (Math.max(turns, twoWay ? lines : 0) > most.turns)
+      throw new Error("This text turns too often.");
     return made;
   }
   const write = (value: string) =>
@@ -370,10 +405,12 @@ export function readMarkdown(markdown: string, base: string): Tree {
       );
     if (tagName === "pre") {
       const code = node.children?.[0] ?? node;
-      const text = wordsIn(code).replace(/\n$/, "");
+      const { start, end } = node.position!;
+      const hasLines = end.line - start.line > 1;
+      // A suggestion without lines is one to delete them, unlike a blank line.
+      const text = wordsIn(code).replace(/\n$/, "") || (hasLines ? " " : "");
       const [name = ""] = (code.properties?.className ?? []) as string[];
       const language = name.replace(/^language-/, "").toLowerCase();
-      // An empty suggestion is one to delete the lines.
       return text.trim() === "" && language !== "suggestion"
         ? []
         : [make({ kind: "block", language, text }, text)];
@@ -384,8 +421,9 @@ export function readMarkdown(markdown: string, base: string): Tree {
 
   const root: Html = parser.runSync(parser.parse(markdown));
   const blocks = root.children?.filter(({ type }) => type === "element") ?? [];
+  const all = blocks.flatMap(shown);
   return {
-    pieces: blocks.flatMap(shown),
+    pieces: all.some(isSeen) ? all : [],
     size,
     weight: pieces + turns + size / 20,
   };

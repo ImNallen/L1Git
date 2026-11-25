@@ -107,6 +107,26 @@ it("is shown as it was written once it is near and that takes long", async () =>
   expect(body().innerHTML).toBe("<p><strong>a</strong></p>");
 });
 
+it("says that nothing is to be seen only of a whole text", async () => {
+  const hidden = `<!-- ${"a ".repeat(10_000)}-->`;
+  const start = "<!-- a -->\n";
+  const text = `${start}${hidden}\nb`;
+  await show(text);
+  await read(start.trim());
+  await frame();
+  expect(host.textContent).toBe("Show all");
+  await act(() => host.querySelector("button")!.click());
+  await frame();
+  expect(host.textContent, "not yet read").toBe("Show less");
+  await read(text);
+  await frame();
+  expect(host.textContent).toBe("bShow less");
+  await show(hidden);
+  await read(hidden);
+  await frame();
+  expect(host.textContent).toBe("No visible text.Show less");
+});
+
 it("is wanted once it is near", async () => {
   await show("a");
   const [reading] = readings;

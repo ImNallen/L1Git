@@ -537,7 +537,7 @@ button.pull-link:hover:not(:disabled) {
   border: 0;
   background: var(--border-strong);
 }
-.markdown .markdown-html {
+.markdown .markdown-lines {
   white-space: pre-line;
 }
 .markdown-table {
