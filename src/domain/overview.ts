@@ -46,7 +46,7 @@ export const branchStatusSchema = z.object({
   checkedOutAt: rootSchema.nullable(),
   state: branchStateSchema,
 });
-const fetchFailureSchema = z.enum([
+export const fetchFailureSchema = z.enum([
   "auth",
   "network",
   "timedOut",

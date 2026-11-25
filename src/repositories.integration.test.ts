@@ -49,6 +49,11 @@ import {
 } from "./domain/repository";
 import type { WorktreeStatus } from "./domain/repository";
 import {
+  commitsFetchSchema,
+  rangeFilesSchema,
+  rangePatchesSchema,
+} from "./domain/range";
+import {
   addRemoteReportSchema,
   publishOptionsSchema,
   pushAvailabilitySchema,
@@ -1058,6 +1063,104 @@ describe("real Rust transport contract", () => {
       message:
         "L1 Git could not read this file (Permission denied (os error 13)). Check its permissions, then refresh.",
     });
+  });
+
+  it("fetches a range's commits by id, then reads its files and patches", async () => {
+    const work = join(fixture.root, "range");
+    const other = join(fixture.root, "range-other");
+    const url = "https://github.com/octo/app.git";
+    const git = (path: string, ...args: string[]) =>
+      execFileSync("git", ["-C", path, ...args], { encoding: "utf8" }).trim();
+    for (const clone of [work, other])
+      git(fixture.root, "clone", "--quiet", fixture.remote, clone);
+    git(work, "config", "remote.origin.url", url);
+    git(work, "config", `url.${fixture.remote}.insteadOf`, url);
+    git(other, "config", "user.name", "Ada");
+    git(other, "config", "user.email", "ada@example.test");
+    const base = git(other, "rev-parse", "HEAD");
+    git(other, "mv", "graph.ts", "lanes.ts");
+    writeFileSync(join(other, "new.txt"), "one\n");
+    git(other, "add", "new.txt");
+    git(other, "commit", "--quiet", "-m", "range");
+    const head = git(other, "rev-parse", "HEAD");
+    git(other, "push", "--quiet", "origin", "HEAD:refs/pull/1/head");
+    const refs = git(work, "for-each-ref");
+    const files = async () =>
+      answer("rangeFiles", rangeFilesSchema).parse(
+        await (await post({ op: "rangeFiles", path: work, base, head })).json(),
+      ).data;
+    const fetched = async (repo: string, oid: string) =>
+      answer("fetchCommits", commitsFetchSchema).parse(
+        await (
+          await post({
+            op: "fetchCommits",
+            path: work,
+            github: { owner: "Octo", repo },
+            oids: [oid],
+          })
+        ).json(),
+      ).data;
+    expect(await files()).toEqual({ kind: "missing", oids: [head] });
+    expect(await fetched("docs", head)).toEqual({ kind: "noRemote" });
+    expect(await fetched("app", "3".repeat(40))).toMatchObject({
+      kind: "failed",
+      failure: "other",
+    });
+    expect(await fetched("app", head)).toEqual({ kind: "done" });
+    expect(git(work, "for-each-ref")).toBe(refs);
+    expect(existsSync(join(work, ".git", "FETCH_HEAD"))).toBe(false);
+    const range = await files();
+    expect(range).toMatchObject({
+      kind: "ready",
+      mergeBase: base,
+      contentMissing: false,
+      shallow: false,
+      files: [
+        {
+          path: "lanes.ts",
+          status: "R",
+          from: "graph.ts",
+          similarity: 100,
+          added: 0,
+          deleted: 0,
+          submodule: false,
+        },
+        { path: "new.txt", status: "A", from: null, added: 1, oldBlob: null },
+      ],
+    });
+    const patches = answer("rangePatches", rangePatchesSchema).parse(
+      await (
+        await post({ op: "rangePatches", path: work, mergeBase: base, head })
+      ).json(),
+    ).data;
+    expect(patches.map(({ path }) => path)).toEqual(["lanes.ts", "new.txt"]);
+    const renamed = answer("filePatch", filePatchSchema).parse(
+      await (
+        await post({
+          op: "filePatch",
+          path: work,
+          comparison: between(base, head),
+          file: "lanes.ts",
+          from: "graph.ts",
+        })
+      ).json(),
+    ).data;
+    expect(renamed).toEqual(patches[0]?.patch);
+    expect(renamed).toMatchObject({
+      patch:
+        "diff --git a/graph.ts b/lanes.ts\nsimilarity index 100%\nrename from graph.ts\nrename to lanes.ts\n",
+    });
+    for (const oids of [[], [base, head, base], ["main"]])
+      expect(
+        (
+          await rejected({
+            op: "fetchCommits",
+            path: work,
+            github: { owner: "octo", repo: "app" },
+            oids,
+          })
+        ).status,
+      ).toBe(400);
   });
 
   it("rejects other origins, absent origins, unknown operations, and malformed requests", async () => {

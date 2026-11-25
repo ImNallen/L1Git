@@ -3,6 +3,7 @@ mod exit_signals;
 mod file_history;
 mod git;
 mod model;
+mod range;
 mod remotes;
 mod repository;
 mod run;
@@ -21,6 +22,9 @@ pub use exit_signals::{OnQuit, stop_git_on_exit_signals};
 pub use file_history::{blame, file_history};
 pub use git::stop_all_git;
 pub use model::*;
+pub use range::{
+    RANGE_PATCH_LIMIT, RangeFile, RangeFiles, RangePatch, RangeStatus, range_files, range_patches,
+};
 pub use repository::{
     HISTORY_LIMIT, LINE_STATS_LIMIT, commit_detail, file_patch, line_stats, refs, snapshot,
 };

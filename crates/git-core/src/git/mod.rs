@@ -10,7 +10,7 @@ use crate::{BranchRef, ErrorKind, Oid, RepositoryError};
 use std::{
     io::{self, Read, Write as _},
     path::Path,
-    process::{Child, Command, ExitStatus, Stdio},
+    process::{Child, ChildStdout, Command, ExitStatus, Stdio},
     sync::{
         Mutex, MutexGuard, PoisonError,
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -65,6 +65,18 @@ fn command(path: &Path, args: &[&str]) -> Command {
     command
 }
 
+/// Reads only objects. Without the index Git starts no file system monitor, and
+/// an unreadable index does not matter.
+fn objects_command(path: &Path, args: &[&str]) -> Command {
+    let mut command = base(path, false);
+    command
+        .args(["-c", "core.fsmonitor=false"])
+        .args(args)
+        .env("GIT_INDEX_FILE", "")
+        .env("GIT_ATTR_NOSYSTEM", "1");
+    command
+}
+
 fn quitting() -> RepositoryError {
     RepositoryError::new(
         ErrorKind::GitFailed,
@@ -94,6 +106,9 @@ pub(crate) enum LocalRead {
     CommitDetail,
     LineStats,
     FilePatch,
+    RangeFiles,
+    RangePatches,
+    RangePatch,
     FileHistory,
     Blame,
     WorktreeStatus,
@@ -120,7 +135,12 @@ impl LocalRead {
             | Self::BranchMerged
             | Self::WorktreeReview => 30,
             Self::CommitDetail | Self::FilePatch => 20,
-            Self::FileHistory | Self::Blame | Self::BranchStatus => 60,
+            Self::RangeFiles
+            | Self::RangePatches
+            | Self::RangePatch
+            | Self::FileHistory
+            | Self::Blame
+            | Self::BranchStatus => 60,
         })
     }
 
@@ -130,7 +150,9 @@ impl LocalRead {
             Self::Refs => "the branches",
             Self::CommitDetail => "this commit",
             Self::LineStats => "the line counts",
-            Self::FilePatch => "this file's diff",
+            Self::FilePatch | Self::RangePatch => "this file's diff",
+            Self::RangeFiles => "the changed files",
+            Self::RangePatches => "the diffs of the changed files",
             Self::FileHistory => "this file's history",
             Self::Blame => "this file's blame",
             Self::WorktreeStatus => "the worktree status",
@@ -220,21 +242,33 @@ impl Deadline {
     }
 }
 
-struct Ran {
+struct Ran<T> {
     status: ExitStatus,
-    stdout: Capped,
+    stdout: T,
     stderr: CapturedPipe,
 }
 
-/// Spawns Git in its own process group so an expired deadline, or `stop`
-/// turning true, stops every process it started, such as a clean filter.
 fn execute(
-    mut command: Command,
+    command: Command,
     deadline: Deadline,
     input: Option<Vec<u8>>,
     cap: Option<usize>,
     stop: Option<&dyn Fn() -> bool>,
-) -> Result<Ran, RepositoryError> {
+) -> Result<Ran<Capped>, RepositoryError> {
+    execute_reading(command, deadline, input, stop, move |pipe| {
+        capped(pipe, cap)
+    })
+}
+
+/// Spawns Git in its own process group so an expired deadline, or `stop`
+/// turning true, stops every process it started, such as a clean filter.
+fn execute_reading<T: Send + 'static>(
+    mut command: Command,
+    deadline: Deadline,
+    input: Option<Vec<u8>>,
+    stop: Option<&dyn Fn() -> bool>,
+    read: impl FnOnce(&mut ChildStdout) -> io::Result<T> + Send + 'static,
+) -> Result<Ran<T>, RepositoryError> {
     command
         .stdin(if input.is_some() {
             Stdio::piped()
@@ -258,7 +292,7 @@ fn execute(
     };
     let (sender, receiver) = mpsc::channel();
     thread::spawn(move || {
-        let _ = sender.send(capped(&mut pipe, cap));
+        let _ = sender.send(read(&mut pipe));
     });
     let stdout = loop {
         let wait = if cfg!(windows) || stop.is_some() {
@@ -343,7 +377,7 @@ pub(crate) struct Exit {
     pub(crate) stdout: Vec<u8>,
 }
 
-fn whole(ran: Ran) -> Result<Exit, RepositoryError> {
+fn whole(ran: Ran<Capped>) -> Result<Exit, RepositoryError> {
     let Capped::Within(stdout) = ran.stdout else {
         return Err(read_failed());
     };
@@ -360,6 +394,20 @@ fn whole(ran: Ran) -> Result<Exit, RepositoryError> {
 
 pub(crate) fn run(path: &Path, args: &[&str], deadline: Deadline) -> Result<Exit, RepositoryError> {
     whole(execute(command(path, args), deadline, None, None, None)?)
+}
+
+pub(crate) fn run_objects(
+    path: &Path,
+    args: &[&str],
+    deadline: Deadline,
+) -> Result<Exit, RepositoryError> {
+    whole(execute(
+        objects_command(path, args),
+        deadline,
+        None,
+        None,
+        None,
+    )?)
 }
 
 pub(crate) fn config_flag(
@@ -497,6 +545,18 @@ pub(crate) fn read_capped(
     Ok(run.stdout)
 }
 
+/// What `read` makes of Git's output as it arrives, and whether Git succeeded.
+/// Git stops when `read` returns before the end.
+pub(crate) fn run_objects_reading<T: Send + 'static>(
+    path: &Path,
+    args: &[&str],
+    deadline: Deadline,
+    read: impl FnOnce(&mut ChildStdout) -> io::Result<T> + Send + 'static,
+) -> Result<(T, bool), RepositoryError> {
+    let ran = execute_reading(objects_command(path, args), deadline, None, None, read)?;
+    Ok((ran.stdout, ran.status.success()))
+}
+
 pub(crate) fn text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }
@@ -555,6 +615,11 @@ pub(crate) enum Mutation<'a> {
     Fetch {
         remote: &'a str,
         branch: Option<&'a str>,
+    },
+    /// Only the objects behind `oids`. Git moves no ref.
+    FetchCommits {
+        remote: &'a str,
+        oids: &'a [Oid],
     },
     ProbeFastForward {
         branch: &'a BranchRef,
@@ -635,6 +700,30 @@ impl Mutation<'_> {
                 ]);
                 args.extend(branch);
                 owned(&args)
+            }
+            Self::FetchCommits { remote, oids } => {
+                let mut args = owned(&[
+                    // Git 2.48 and 2.49 update the remote HEAD on any fetch.
+                    "-c",
+                    &format!("remote.{remote}.followRemoteHEAD=never"),
+                    // A bundle's branches would become refs.
+                    "-c",
+                    "fetch.bundleURI=",
+                    "fetch",
+                    "--no-tags",
+                    "--no-prune",
+                    "--no-prune-tags",
+                    // Without it a configured refspec such as `+*:refs/x/*`
+                    // gives each commit a ref.
+                    "--refmap=",
+                    "--no-write-fetch-head",
+                    "--no-auto-maintenance",
+                    "--recurse-submodules=no",
+                    "--end-of-options",
+                    remote,
+                ]);
+                args.extend(oids.iter().map(|oid| oid.as_str().to_owned()));
+                args
             }
             // The probe reads only this repository, so a ban on the file
             // transport does not apply to it.

@@ -29,16 +29,23 @@ pub(crate) fn read(path: &Path, deadline: Deadline) -> Result<Vec<Remote>, Repos
 /// A fork's pull requests are opened in its `upstream`, and a clone without one
 /// opens them in its `origin`.
 pub(crate) fn github(remotes: Vec<Remote>) -> Option<GitHubRepository> {
-    let rank = |name: &str| match name {
-        "upstream" => 0,
-        "origin" => 1,
-        _ => 2,
-    };
+    preferred(remotes, |_| true)?.github
+}
+
+/// The remote that is `github`, by the same preference.
+pub(crate) fn of_github(remotes: Vec<Remote>, github: &GitHubRepository) -> Option<String> {
+    Some(preferred(remotes, |remote| remote.is(github))?.name)
+}
+
+fn preferred(remotes: Vec<Remote>, matches: impl Fn(&GitHubRepository) -> bool) -> Option<Remote> {
     remotes
         .into_iter()
-        .filter_map(|remote| Some((rank(&remote.name), remote.github?)))
-        .min_by_key(|(rank, _)| *rank)
-        .map(|(_, github)| github)
+        .filter(|remote| remote.github.as_ref().is_some_and(&matches))
+        .min_by_key(|remote| match remote.name.as_str() {
+            "upstream" => 0,
+            "origin" => 1,
+            _ => 2,
+        })
 }
 
 pub(crate) fn display_url(raw: &str) -> (String, Option<GitHubRepository>) {

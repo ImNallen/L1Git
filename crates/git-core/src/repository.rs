@@ -802,6 +802,13 @@ fn read_commit(root: &Path, oid: &str, deadline: Deadline) -> Result<Commit, Rep
         .ok_or_else(git::malformed)
 }
 
+pub(crate) fn unavailable_commit() -> RepositoryError {
+    RepositoryError::new(
+        ErrorKind::InvalidOid,
+        "This commit is no longer available. Refresh the repository.",
+    )
+}
+
 pub(crate) fn verify_commit(
     root: &Path,
     oid: &str,
@@ -819,10 +826,7 @@ pub(crate) fn verify_commit(
         deadline,
     )?;
     if !verified.status.success() {
-        return Err(RepositoryError::new(
-            ErrorKind::InvalidOid,
-            "This commit is no longer available. Refresh the repository.",
-        ));
+        return Err(unavailable_commit());
     }
     Ok(())
 }
@@ -1145,7 +1149,7 @@ pub(crate) fn line_stats_within(
         .collect())
 }
 
-fn unchanged_path(comparison: &Comparison) -> RepositoryError {
+pub(crate) fn unchanged_path(comparison: &Comparison) -> RepositoryError {
     RepositoryError::new(
         ErrorKind::UnchangedPath,
         if matches!(comparison.base, Base::FirstParent {}) {

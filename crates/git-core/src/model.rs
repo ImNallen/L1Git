@@ -71,10 +71,18 @@ pub struct Worktree {
     pub main: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GitHubRepository {
     pub owner: String,
     pub repo: String,
+}
+
+impl GitHubRepository {
+    /// GitHub ignores the case of both names.
+    pub(crate) fn is(&self, other: &Self) -> bool {
+        self.owner.eq_ignore_ascii_case(&other.owner) && self.repo.eq_ignore_ascii_case(&other.repo)
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -674,6 +682,31 @@ impl TryFrom<String> for Oid {
     }
 }
 
+/// One or two commits to fetch. `git fetch` without any would fetch branches.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(try_from = "Vec<Oid>")]
+pub struct WantedCommits(Vec<Oid>);
+
+impl WantedCommits {
+    pub(crate) fn oids(&self) -> &[Oid] {
+        &self.0
+    }
+}
+
+impl TryFrom<Vec<Oid>> for WantedCommits {
+    type Error = RepositoryError;
+    fn try_from(oids: Vec<Oid>) -> Result<Self, Self::Error> {
+        if matches!(oids.len(), 1 | 2) {
+            Ok(Self(oids))
+        } else {
+            Err(RepositoryError::new(
+                ErrorKind::InvalidOid,
+                "Fetch one or two commits at a time.",
+            ))
+        }
+    }
+}
+
 fn lower_hex(value: &str) -> bool {
     value
         .bytes()
@@ -968,6 +1001,19 @@ pub enum FetchFailure {
     TimedOut,
     Busy,
     Other,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum CommitsFetch {
+    Done,
+    /// No remote of this repository is the one on GitHub that the request names.
+    NoRemote,
+    Failed {
+        failure: FetchFailure,
+        /// Git's own words with credentials removed from URLs.
+        message: String,
+    },
 }
 
 /// Move `reference` from `from` to `to`, exactly the pair shown in a `Behind` row.

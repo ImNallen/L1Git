@@ -403,6 +403,101 @@ it.each([true, false])(
   },
 );
 
+it("sends a range's reads and its fetch and validates their answers", async () => {
+  const { fetchCommits, filePatch, rangeFiles, rangePatches } =
+    await load(true);
+  const head = oidSchema.parse("b".repeat(40));
+  const sent = () =>
+    (invoke.mock.lastCall?.[1] as { request: unknown }).request;
+  const file = {
+    path: "lib/b.ts",
+    status: "R",
+    from: "src/b.ts",
+    similarity: 94,
+    added: 3,
+    deleted: 1,
+    oldBlob: oid,
+    newBlob: head,
+    submodule: false,
+  };
+  const ready = {
+    kind: "ready",
+    mergeBase: oid,
+    files: [
+      file,
+      {
+        ...file,
+        path: "logo.png",
+        status: "A",
+        from: null,
+        similarity: null,
+        added: null,
+        deleted: null,
+        oldBlob: null,
+      },
+    ],
+    contentMissing: false,
+    shallow: false,
+  };
+  for (const data of [
+    ready,
+    { kind: "treesMissing" },
+    { kind: "missing", oids: [head] },
+    { kind: "unrelated", shallow: true },
+  ]) {
+    invoke.mockResolvedValueOnce({ op: "rangeFiles", data });
+    expect(await rangeFiles(root, oid, head)).toEqual(data);
+  }
+  expect(sent()).toEqual({ op: "rangeFiles", path: root, base: oid, head });
+  invoke.mockResolvedValueOnce({
+    op: "rangeFiles",
+    data: { ...ready, files: [{ ...file, status: "C" }] },
+  });
+  await expect(rangeFiles(root, oid, head)).rejects.toHaveProperty("issues");
+
+  const patch = { kind: "text", patch: "", lossy: false };
+  const patches = [
+    { path: "lib/b.ts", patch },
+    { path: "logo.png", patch: null },
+  ];
+  invoke.mockResolvedValueOnce({ op: "rangePatches", data: patches });
+  expect(await rangePatches(root, oid, head)).toEqual(patches);
+  expect(sent()).toEqual({
+    op: "rangePatches",
+    path: root,
+    mergeBase: oid,
+    head,
+  });
+
+  invoke.mockResolvedValueOnce({ op: "filePatch", data: patch });
+  const comparison = singleCommit(head);
+  await filePatch(root, comparison, "lib/b.ts", "whole", "src/b.ts");
+  expect(sent()).toEqual({
+    op: "filePatch",
+    path: root,
+    comparison,
+    file: "lib/b.ts",
+    from: "src/b.ts",
+    context: "whole",
+  });
+
+  const github = { owner: "octo", repo: "app" };
+  for (const data of [
+    { kind: "done" },
+    { kind: "noRemote" },
+    { kind: "failed", failure: "auth", message: "Permission denied." },
+  ]) {
+    invoke.mockResolvedValueOnce({ op: "fetchCommits", data });
+    expect(await fetchCommits(root, github, [oid, head])).toEqual(data);
+  }
+  expect(sent()).toEqual({
+    op: "fetchCommits",
+    path: root,
+    github,
+    oids: [oid, head],
+  });
+});
+
 it("sends Try it locally's review, create, and remove and validates their answers", async () => {
   const { createWorktree, removeWorktree, worktreeReview } = await load(true);
   const source = {
