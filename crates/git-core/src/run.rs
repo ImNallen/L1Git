@@ -11,7 +11,7 @@ use crate::{
     directories::{DirectoryListing, expand_home, home_dir, list_directories},
     file_history::{blame_within, file_history_within},
     git::LocalRead,
-    range::{range_files_within, range_patches_within},
+    range::{range_files_within, range_patch_within, range_patches_within},
     repository::{
         commit_detail_within, file_patch_within, line_stats_within, refs_within, snapshot_within,
     },
@@ -277,14 +277,23 @@ pub fn run(coordinator: &Coordinator, request: Request) -> Result<Response, Repo
             file,
             from,
             context,
-        } => Response::FilePatch(file_patch_within(
-            &path,
-            &comparison,
-            &file,
-            from.as_deref(),
-            context,
-            deadline(LocalRead::FilePatch),
-        )?),
+        } => Response::FilePatch(match from {
+            Some(from) => range_patch_within(
+                &path,
+                &comparison,
+                &from,
+                &file,
+                context,
+                deadline(LocalRead::RangePatch),
+            )?,
+            None => file_patch_within(
+                &path,
+                &comparison,
+                &file,
+                context,
+                deadline(LocalRead::FilePatch),
+            )?,
+        }),
         Request::RangeFiles { path, base, head } => Response::RangeFiles(range_files_within(
             &path,
             &base,

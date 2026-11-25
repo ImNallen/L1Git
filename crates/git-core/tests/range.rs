@@ -8,6 +8,7 @@ use std::{
     collections::BTreeMap,
     fs,
     io::Write,
+    os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     process::{Command, Stdio},
 };
@@ -77,10 +78,23 @@ struct Fixture {
 
 impl Fixture {
     fn new() -> Self {
+        Self::of("sha1")
+    }
+
+    fn of(format: &str) -> Self {
         let directory = tempfile::tempdir().unwrap();
         let repo = directory.path().join("repo with spaces");
         fs::create_dir(&repo).unwrap();
-        git(&repo, &["init", "--quiet", "--initial-branch=main"], b"");
+        git(
+            &repo,
+            &[
+                "init",
+                "--quiet",
+                "--initial-branch=main",
+                &format!("--object-format={format}"),
+            ],
+            b"",
+        );
         Self { directory, repo }
     }
 
@@ -160,6 +174,7 @@ fn ready(files: RangeFiles) -> Vec<RangeFile> {
         RangeFiles::Ready {
             files,
             content_missing: false,
+            shallow: false,
             ..
         } => files,
         other => panic!("every file, got {other:?}"),
@@ -298,6 +313,7 @@ fn lists_every_kind_of_change_in_gits_order() {
             merge_base: head.clone(),
             files: Vec::new(),
             content_missing: false,
+            shallow: false,
         }
     );
     assert_eq!(range_patches(fixture.path(), head, head).unwrap(), []);
@@ -389,17 +405,25 @@ fn a_renamed_file_reads_whole_and_only_under_its_own_old_path() {
             "{from:?} {file:?}"
         );
     }
-    let error = fixture.read(serde_json::json!({
-        "op": "filePatch",
-        "path": fixture.path(),
-        "comparison": {
-            "base": {"kind": "commit", "oid": base},
-            "target": {"kind": "worktree", "root": fixture.repo},
-        },
-        "file": "re\"named",
-        "from": "edited",
-    }));
-    assert!(matches!(error, Err(ErrorKind::UnsupportedPath)));
+    for (base, target) in [
+        (
+            serde_json::json!({"kind": "commit", "oid": base}),
+            serde_json::json!({"kind": "worktree", "root": fixture.repo}),
+        ),
+        (
+            serde_json::json!({"kind": "firstParent"}),
+            serde_json::json!({"kind": "commit", "oid": head}),
+        ),
+    ] {
+        let error = fixture.read(serde_json::json!({
+            "op": "filePatch",
+            "path": fixture.path(),
+            "comparison": {"base": base, "target": target},
+            "file": "re\"named",
+            "from": "edited",
+        }));
+        assert!(matches!(error, Err(ErrorKind::UnsupportedPath)));
+    }
 }
 
 #[test]
@@ -439,9 +463,61 @@ fn a_path_that_is_also_a_folder_reads_alone() {
 }
 
 #[test]
+fn a_file_keeps_the_pairing_of_the_whole_range() {
+    let fixture = Fixture::new();
+    let edited = |end: u32| lines(0..end);
+    for (before, after) in [
+        (
+            tree(&[("d", FILE, &edited(27)), ("e", FILE, &edited(30))]),
+            tree(&[("d/x", FILE, &edited(30))]),
+        ),
+        (
+            tree(&[("b/a", FILE, &edited(30))]),
+            tree(&[("b", FILE, &edited(27)), ("c", FILE, &edited(30))]),
+        ),
+        (
+            tree(&[("e", FILE, &edited(30)), ("z", FILE, &edited(29))]),
+            tree(&[("e/a", FILE, &edited(33)), ("e/z", FILE, &edited(29))]),
+        ),
+        (
+            tree(&[("m", FILE, &lines(0..30)), ("n", FILE, &lines(0..30))]),
+            tree(&[
+                ("m/k", FILE, &lines(0..30)),
+                ("m/m", FILE, &lines(0..30)),
+                ("m/n", FILE, &lines(0..30)),
+            ]),
+        ),
+        (
+            tree(&[("p/x", FILE, &edited(40)), ("q", FILE, &edited(31))]),
+            tree(&[("p", FILE, &edited(36)), ("r", FILE, &edited(40))]),
+        ),
+    ] {
+        agrees(&fixture, &fixture.range(&before, &after));
+    }
+    let mut random = Random(77);
+    for _ in 0..40 {
+        let (before, after) = (random.colliding(), random.colliding());
+        agrees(&fixture, &fixture.range(&before, &after));
+    }
+}
+
+fn agrees(fixture: &Fixture, range: &(Oid, Oid)) {
+    let files = fixture.files(range);
+    for (file, (path, patch)) in files.iter().zip(fixture.patches(range)) {
+        let from = file.from.as_deref().unwrap_or(&path);
+        assert_eq!(
+            fixture.one(range, from, &path),
+            Ok(patch.unwrap()),
+            "{path:?} of {:?}",
+            summary(&files)
+        );
+    }
+}
+
+#[test]
 fn a_persons_configuration_and_checkout_change_nothing() {
     let fixture = Fixture::new();
-    let mut before = tree(&[
+    let before = tree(&[
         (".gitattributes", FILE, b"*.rs diff=mine\n"),
         (
             ".gitmodules",
@@ -449,10 +525,16 @@ fn a_persons_configuration_and_checkout_change_nothing() {
             b"[submodule \"m\"]\n\tpath = m\n\turl = ../m\n\tignore = all\n",
         ),
         ("a/code.rs", FILE, b"f\ne\nb\ne\ne\nb\nd\na\n"),
+        ("a/plain", FILE, b"f\ne\nb\ne\ne\nb\nd\na\n"),
         ("b/indent.rs", FILE, b"1\n2\na\n\nb\n3\n4\n"),
         ("m", SUBMODULE, PINNED.as_bytes()),
         ("moved", FILE, &lines(0..40)),
         ("moved too", FILE, &lines(100..140)),
+        (
+            "named",
+            FILE,
+            b"top\n\xc3\xa9 \xff\nhead_ing {  \r\n 1\n 2\n 3\n 4\n 5\n",
+        ),
         ("\u{e9}", FILE, b"one\n"),
     ]);
     let mut after = before.clone();
@@ -461,10 +543,21 @@ fn a_persons_configuration_and_checkout_change_nothing() {
         (FILE, b"d\na\nf\ne\nb\ne\ne\nb\n".to_vec()),
     );
     after.insert(
+        b"a/plain".to_vec(),
+        (FILE, b"d\na\nf\ne\nb\ne\ne\nb\n".to_vec()),
+    );
+    after.insert(
         b"b/indent.rs".to_vec(),
         (FILE, b"1\n2\na\n\nb\na\n\nb\n3\n4\n".to_vec()),
     );
     after.insert(b"m".to_vec(), (SUBMODULE, MOVED.as_bytes().to_vec()));
+    after.insert(
+        b"named".to_vec(),
+        (
+            FILE,
+            b"top\n\xc3\xa9 \xff\nhead_ing {  \r\n 1\n 2\n 3\n 4\n five\n".to_vec(),
+        ),
+    );
     after.insert("\u{e9}".as_bytes().to_vec(), (FILE, b"two\n".to_vec()));
     for (from, to, kept) in [
         ("moved", "elsewhere", 0..45),
@@ -494,32 +587,50 @@ fn a_persons_configuration_and_checkout_change_nothing() {
         summary(&pinned.0),
         [
             "M a/code.rs +2 -2",
+            "M a/plain +2 -2",
             "M b/indent.rs +3 -0",
             "R elsewhere < moved 88 +5 -0",
             "M m +1 -1 sub",
+            "M named +1 -1",
             "R other < moved too 88 +5 -0",
             "M \u{e9} +1 -1",
         ]
     );
 
+    let named = &pinned.1.iter().find(|(path, _)| path == "named").unwrap().1;
+    assert!(
+        matches!(named, Some(FilePatch::Text { patch, .. }) if patch.contains(" @@ head_ing {\n")),
+        "{named:?}"
+    );
+
     let attributes = fixture.directory.path().join("attributes");
     fs::write(&attributes, "* -diff\n").unwrap();
-    // An attribute of the checked-out branch, not of the range.
     fs::write(fixture.repo.join(".gitattributes"), "*.rs binary\n").unwrap();
+    let monitor = fixture.directory.path().join("monitor");
+    let ran = fixture.directory.path().join("monitor ran");
+    fs::write(&monitor, format!("#!/bin/sh\n: > '{}'\n", ran.display())).unwrap();
+    fs::set_permissions(&monitor, fs::Permissions::from_mode(0o755)).unwrap();
     for (key, value) in [
-        ("core.abbrev", "7"),
+        ("core.abbrev", "40"),
         ("core.attributesFile", attributes.to_str().unwrap()),
         ("core.bigFileThreshold", "1"),
+        ("core.fsmonitor", monitor.to_str().unwrap()),
+        ("core.ignoreCase", "true"),
         ("core.quotePath", "true"),
         ("color.ui", "always"),
         ("color.diff", "always"),
         ("diff.algorithm", "patience"),
         ("diff.context", "9"),
+        ("diff.default.algorithm", "patience"),
+        ("diff.default.binary", "true"),
+        ("diff.default.funcname", "^top$"),
+        ("diff.default.xfuncname", "^(top)$"),
         ("diff.external", "/usr/bin/false"),
         ("diff.ignoreSubmodules", "all"),
         ("diff.indentHeuristic", "false"),
         ("diff.interHunkContext", "9"),
         ("diff.mine.algorithm", "patience"),
+        ("diff.mine.binary", "true"),
         ("diff.mine.command", "/usr/bin/false"),
         ("diff.mine.textconv", "/usr/bin/false"),
         ("diff.mnemonicPrefix", "true"),
@@ -530,21 +641,42 @@ fn a_persons_configuration_and_checkout_change_nothing() {
         ("diff.renames", "false"),
         ("diff.submodule", "log"),
         ("diff.suppressBlankEmpty", "true"),
+        ("i18n.logOutputEncoding", "utf-16"),
         ("submodule.m.ignore", "all"),
     ] {
         fixture.git(&["config", key, value]);
     }
     assert_eq!(read(), pinned);
 
-    // A range that does change the attributes is read with those of its head.
-    before.insert(b"b/kept.rs".to_vec(), (FILE, b"same\n".to_vec()));
-    let mut attributed = before.clone();
-    attributed.insert(b".gitattributes".to_vec(), (FILE, b"*.rs -diff\n".to_vec()));
-    attributed.insert(b"b/kept.rs".to_vec(), (FILE, b"edited\n".to_vec()));
-    assert_eq!(
-        summary(&fixture.files(&fixture.range(&before, &attributed))),
-        ["M .gitattributes +1 -1", "M b/kept.rs bin"]
-    );
+    assert!(!ran.exists(), "a range read ran the file system monitor");
+
+    // A range is of two trees, so a broken index does not matter.
+    fs::write(fixture.repo.join(".git/index"), "broken").unwrap();
+    assert_eq!(read(), pinned);
+}
+
+#[test]
+fn attributes_never_change_what_a_range_shows() {
+    for format in ["sha1", "sha256"] {
+        let fixture = Fixture::of(format);
+        let range = fixture.range(
+            &tree(&[
+                (".gitattributes", FILE, b"* -diff\n"),
+                ("data", FILE, b"\0\x01"),
+                ("uv.lock", FILE, b"one\n"),
+            ]),
+            &tree(&[
+                (".gitattributes", FILE, b"* binary\ndata diff\n"),
+                ("data", FILE, b"\0\x02"),
+                ("uv.lock", FILE, b"two\n"),
+            ]),
+        );
+        assert_eq!(
+            summary(&fixture.files(&range)),
+            ["M .gitattributes +2 -1", "M data bin", "M uv.lock +1 -1"]
+        );
+        agrees(&fixture, &range);
+    }
 }
 
 #[test]
@@ -576,10 +708,10 @@ fn a_huge_file_keeps_the_patches_after_it_until_the_limit() {
     assert!(matches!(&small.1, Some(FilePatch::Text { patch, .. }) if patch.ends_with("+after\n")));
     for (path, patch) in &patches[..4] {
         assert_eq!(fixture.one(&range, path, path).ok(), *patch);
-        assert_eq!(
-            file_patch(fixture.path(), &between(&range), path).ok(),
-            *patch
-        );
+        if matches!(patch, Some(FilePatch::Text { .. })) {
+            let plain = file_patch(fixture.path(), &between(&range), path).unwrap();
+            assert_eq!(hunks(&plain), hunks(patch.as_ref().unwrap()));
+        }
     }
     let read = patches.iter().take_while(|(_, patch)| patch.is_some());
     let bytes: usize = read
@@ -650,6 +782,69 @@ fn names_missing_commits_and_histories_without_a_merge_base() {
     );
 }
 
+#[test]
+fn a_shallow_clone_says_so_because_its_merge_base_can_be_too_old() {
+    let fixture = Fixture::new();
+    let at = |text: &str| tree(&[("f", FILE, text.as_bytes())]);
+    let old = fixture.commit(&at("old\n"), &[]);
+    let fork = fixture.commit(&at("fork\n"), &[&old]);
+    let base = fixture.commit(&at("base\n"), &[&fork, &old]);
+    let before = fixture.commit(&at("before\n"), &[&fork]);
+    let head = fixture.commit(&at("head\n"), &[&before, &old]);
+    let found = |path: &str| match range_files(path, &base, &head).unwrap() {
+        RangeFiles::Ready {
+            merge_base,
+            shallow,
+            ..
+        } => (merge_base, shallow),
+        other => panic!("a list, got {other:?}"),
+    };
+    assert_eq!(found(fixture.path()), (fork, false));
+    fixture.git(&["update-ref", "refs/heads/main", base.as_str()]);
+    fixture.git(&["update-ref", "refs/heads/topic", head.as_str()]);
+    let clone = clone(&fixture, &["--depth=2", "--no-single-branch"]);
+    assert_eq!(found(&clone), (old, true));
+}
+
+#[test]
+fn reads_only_commits() {
+    let fixture = Fixture::new();
+    let range = fixture.range(
+        &tree(&[("f", FILE, b"one\n")]),
+        &tree(&[("f", FILE, b"two\n")]),
+    );
+    let (base, head) = &range;
+    fixture.git(&["tag", "-a", "-m", "tag", "v1", head.as_str()]);
+    let tag = oid(&fixture.git(&["rev-parse", "v1"]));
+    assert_eq!(
+        range_files(fixture.path(), base, &tag).unwrap(),
+        RangeFiles::Missing {
+            oids: vec![tag.clone()]
+        }
+    );
+    for (base, head) in [(base, &tag), (&tag, head)] {
+        let error = range_patches(fixture.path(), base, head).unwrap_err();
+        assert_eq!(error.kind, ErrorKind::InvalidOid);
+        let one = fixture.one(&(base.clone(), head.clone()), "f", "f");
+        assert_eq!(one, Err(ErrorKind::InvalidOid));
+    }
+}
+
+#[test]
+fn a_treeless_clone_answers_that_it_has_no_trees() {
+    let fixture = Fixture::new();
+    let (base, head) = fixture.range(
+        &tree(&[("f", FILE, b"one\n")]),
+        &tree(&[("f", FILE, b"two\n")]),
+    );
+    fixture.git(&["update-ref", "refs/heads/main", head.as_str()]);
+    let clone = clone(&fixture, &["--filter=tree:0"]);
+    assert_eq!(
+        range_files(&clone, &base, &head).unwrap(),
+        RangeFiles::TreesMissing
+    );
+}
+
 fn clone(fixture: &Fixture, options: &[&str]) -> String {
     fixture.git(&["config", "uploadpack.allowFilter", "true"]);
     let source = url::Url::from_file_path(fixture.repo.canonicalize().unwrap()).unwrap();
@@ -686,6 +881,7 @@ fn a_partial_clone_without_contents_still_lists_the_files() {
     let RangeFiles::Ready {
         files,
         content_missing: true,
+        shallow: false,
         ..
     } = range_files(&clone, base, head).unwrap()
     else {
@@ -799,6 +995,42 @@ impl Random {
         }
     }
 
+    /// A small tree of a few names that collide with each other's folders.
+    fn colliding(&mut self) -> Tree {
+        let names = [
+            "a", "a/a", "a/b", "a/b/c", "b", "b/a", "c", "c/a", "d", "a.b", "a-b", "b\"", "b\n",
+            "*",
+        ];
+        let mut tree = Tree::new();
+        for _ in 0..2 + self.below(9) {
+            let path = self.pick(&names).as_bytes().to_vec();
+            let holds = |folder: &[u8], path: &[u8]| {
+                path.starts_with(folder) && path.get(folder.len()) == Some(&b'/')
+            };
+            if tree
+                .keys()
+                .any(|other| holds(other, &path) || holds(&path, other))
+            {
+                continue;
+            }
+            let entry = match self.below(8) {
+                0 => (SYMLINK, b"a/b".to_vec()),
+                1 => (SUBMODULE, PINNED.as_bytes().to_vec()),
+                2 => (FILE, Vec::new()),
+                kind => {
+                    let start = self.pick(&[0, 3, 200]);
+                    let mut text = lines(start..start + 40);
+                    for _ in 0..self.below(8) {
+                        text.extend(format!("more {}\n", self.below(4)).into_bytes());
+                    }
+                    (if kind == 3 { EXECUTABLE } else { FILE }, text)
+                }
+            };
+            tree.insert(path, entry);
+        }
+        tree
+    }
+
     fn changed(&mut self, before: &Tree) -> Tree {
         let mut after = before.clone();
         for path in before.keys() {
@@ -861,15 +1093,15 @@ fn generated_ranges_read_the_same_together_and_alone() {
         for (file, (path, patch)) in files.iter().zip(&patches) {
             let context = format!("seed {seed}, {path:?}");
             assert_eq!(&file.path, path, "{context}");
-            let patch = patch.as_ref().unwrap();
+            let read = patch.as_ref().unwrap();
             let from = file.from.as_deref().unwrap_or(path);
             assert_eq!(
                 fixture.one(&range, from, path).as_ref(),
-                Ok(patch),
+                Ok(read),
                 "{context}"
             );
-            match patch {
-                FilePatch::Text { patch, lossy } => {
+            match read {
+                FilePatch::Text { patch, .. } => {
                     let count = |sign| {
                         let mut in_hunk = false;
                         let mut count = 0;
@@ -889,11 +1121,8 @@ fn generated_ranges_read_the_same_together_and_alone() {
                         );
                     }
                     if !binary && file.from.is_none() && !path.contains('\u{301}') {
-                        assert_eq!(
-                            file_patch(fixture.path(), &between(&range), path).unwrap(),
-                            *patch_of(patch, *lossy),
-                            "{context}"
-                        );
+                        let plain = file_patch(fixture.path(), &between(&range), path).unwrap();
+                        assert_eq!(hunks(&plain), hunks(read), "{context}");
                     }
                     whole.push(patch.clone());
                 }
@@ -906,8 +1135,9 @@ fn generated_ranges_read_the_same_together_and_alone() {
             &[
                 "-c",
                 "core.quotePath=false",
-                &format!("--attr-source={}", head.as_str()),
+                "--attr-source=4b825dc642cb6eb9a060e54bf8d69288fbee4904",
                 "diff-tree",
+                "--full-index",
                 "-r",
                 "-p",
                 "-M",
@@ -935,9 +1165,13 @@ fn generated_ranges_read_the_same_together_and_alone() {
     }
 }
 
-fn patch_of(patch: &str, lossy: bool) -> Box<FilePatch> {
-    Box::new(FilePatch::Text {
-        patch: patch.to_owned(),
-        lossy,
-    })
+/// Its lines without the headers, whose ids the plain read abbreviates.
+fn hunks(patch: &FilePatch) -> Vec<&str> {
+    match patch {
+        FilePatch::Text { patch, .. } => patch
+            .split_inclusive('\n')
+            .filter(|line| !line.starts_with("index "))
+            .collect(),
+        other => panic!("a text patch, got {other:?}"),
+    }
 }

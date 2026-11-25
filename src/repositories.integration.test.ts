@@ -1114,6 +1114,7 @@ describe("real Rust transport contract", () => {
       kind: "ready",
       mergeBase: base,
       contentMissing: false,
+      shallow: false,
       files: [
         {
           path: "lanes.ts",

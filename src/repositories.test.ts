@@ -437,9 +437,11 @@ it("sends a range's reads and its fetch and validates their answers", async () =
       },
     ],
     contentMissing: false,
+    shallow: false,
   };
   for (const data of [
     ready,
+    { kind: "treesMissing" },
     { kind: "missing", oids: [head] },
     { kind: "unrelated", shallow: true },
   ]) {

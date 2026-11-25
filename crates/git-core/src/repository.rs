@@ -4,7 +4,7 @@ use crate::{
     RepositoryRefs, RepositorySnapshot, Squash, Stash, Submodule, Tag, Target, TargetDetail,
     Worktree,
     git::{self, Deadline, LocalRead},
-    range, remotes, status,
+    remotes, status,
 };
 use std::{
     collections::HashMap,
@@ -802,6 +802,13 @@ fn read_commit(root: &Path, oid: &str, deadline: Deadline) -> Result<Commit, Rep
         .ok_or_else(git::malformed)
 }
 
+pub(crate) fn unavailable_commit() -> RepositoryError {
+    RepositoryError::new(
+        ErrorKind::InvalidOid,
+        "This commit is no longer available. Refresh the repository.",
+    )
+}
+
 pub(crate) fn verify_commit(
     root: &Path,
     oid: &str,
@@ -819,10 +826,7 @@ pub(crate) fn verify_commit(
         deadline,
     )?;
     if !verified.status.success() {
-        return Err(RepositoryError::new(
-            ErrorKind::InvalidOid,
-            "This commit is no longer available. Refresh the repository.",
-        ));
+        return Err(unavailable_commit());
     }
     Ok(())
 }
@@ -984,7 +988,6 @@ pub fn file_patch(
         path,
         comparison,
         file,
-        None,
         PatchContext::Hunks,
         Deadline::of(LocalRead::FilePatch),
     )
@@ -994,7 +997,6 @@ pub(crate) fn file_patch_within(
     path: &str,
     comparison: &Comparison,
     file: &str,
-    from: Option<&str>,
     context: PatchContext,
     deadline: Deadline,
 ) -> Result<FilePatch, RepositoryError> {
@@ -1005,22 +1007,11 @@ pub(crate) fn file_patch_within(
     }
     let (base, target) = match ends {
         Ends::Trees { base, target } => (base, target),
-        Ends::Worktree { .. } if from.is_some() => {
-            return Err(RepositoryError::new(
-                ErrorKind::UnsupportedPath,
-                "L1 Git reads a renamed file only between two commits.",
-            ));
-        }
         Ends::Worktree { base, root } => {
             return status::worktree_file_patch(&root, &base.oid, file, context, deadline)?
                 .ok_or_else(|| unchanged_path(comparison));
         }
     };
-    if let Some(from) = from {
-        let ends = [diff_from(&base, &target), &target.oid];
-        return range::file_patch(&root, ends, from, file, context, deadline)?
-            .ok_or_else(|| unchanged_path(comparison));
-    }
     let args = |format| {
         [
             "--literal-pathspecs",
@@ -1158,7 +1149,7 @@ pub(crate) fn line_stats_within(
         .collect())
 }
 
-fn unchanged_path(comparison: &Comparison) -> RepositoryError {
+pub(crate) fn unchanged_path(comparison: &Comparison) -> RepositoryError {
     RepositoryError::new(
         ErrorKind::UnchangedPath,
         if matches!(comparison.base, Base::FirstParent {}) {

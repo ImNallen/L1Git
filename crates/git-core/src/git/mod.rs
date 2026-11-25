@@ -65,6 +65,18 @@ fn command(path: &Path, args: &[&str]) -> Command {
     command
 }
 
+/// Reads only objects. Without the index Git starts no file system monitor, and
+/// an unreadable index does not matter.
+fn objects_command(path: &Path, args: &[&str]) -> Command {
+    let mut command = base(path, false);
+    command
+        .args(["-c", "core.fsmonitor=false"])
+        .args(args)
+        .env("GIT_INDEX_FILE", "")
+        .env("GIT_ATTR_NOSYSTEM", "1");
+    command
+}
+
 fn quitting() -> RepositoryError {
     RepositoryError::new(
         ErrorKind::GitFailed,
@@ -96,6 +108,7 @@ pub(crate) enum LocalRead {
     FilePatch,
     RangeFiles,
     RangePatches,
+    RangePatch,
     FileHistory,
     Blame,
     WorktreeStatus,
@@ -124,6 +137,7 @@ impl LocalRead {
             Self::CommitDetail | Self::FilePatch => 20,
             Self::RangeFiles
             | Self::RangePatches
+            | Self::RangePatch
             | Self::FileHistory
             | Self::Blame
             | Self::BranchStatus => 60,
@@ -136,7 +150,7 @@ impl LocalRead {
             Self::Refs => "the branches",
             Self::CommitDetail => "this commit",
             Self::LineStats => "the line counts",
-            Self::FilePatch => "this file's diff",
+            Self::FilePatch | Self::RangePatch => "this file's diff",
             Self::RangeFiles => "the changed files",
             Self::RangePatches => "the diffs of the changed files",
             Self::FileHistory => "this file's history",
@@ -382,6 +396,20 @@ pub(crate) fn run(path: &Path, args: &[&str], deadline: Deadline) -> Result<Exit
     whole(execute(command(path, args), deadline, None, None, None)?)
 }
 
+pub(crate) fn run_objects(
+    path: &Path,
+    args: &[&str],
+    deadline: Deadline,
+) -> Result<Exit, RepositoryError> {
+    whole(execute(
+        objects_command(path, args),
+        deadline,
+        None,
+        None,
+        None,
+    )?)
+}
+
 pub(crate) fn config_flag(
     path: &Path,
     key: &str,
@@ -519,13 +547,13 @@ pub(crate) fn read_capped(
 
 /// What `read` makes of Git's output as it arrives, and whether Git succeeded.
 /// Git stops when `read` returns before the end.
-pub(crate) fn run_reading<T: Send + 'static>(
+pub(crate) fn run_objects_reading<T: Send + 'static>(
     path: &Path,
     args: &[&str],
     deadline: Deadline,
     read: impl FnOnce(&mut ChildStdout) -> io::Result<T> + Send + 'static,
 ) -> Result<(T, bool), RepositoryError> {
-    let ran = execute_reading(command(path, args), deadline, None, None, read)?;
+    let ran = execute_reading(objects_command(path, args), deadline, None, None, read)?;
     Ok((ran.stdout, ran.status.success()))
 }
 

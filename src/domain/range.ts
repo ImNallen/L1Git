@@ -24,7 +24,11 @@ export const rangeFilesSchema = z.discriminatedUnion("kind", [
     files: z.array(rangeFileSchema),
     /** Git could not read every file's contents, as in a partial clone. No file has line counts, and one that was renamed and edited is a deletion and an addition. */
     contentMissing: z.boolean(),
+    /** The clone is shallow, so `mergeBase` can be older than the commit where the head really forked. */
+    shallow: z.boolean(),
   }),
+  /** A partial clone that does not have the folders of these commits. */
+  z.strictObject({ kind: z.literal("treesMissing") }),
   z.strictObject({ kind: z.literal("missing"), oids: z.array(oidSchema) }),
   z.strictObject({ kind: z.literal("unrelated"), shallow: z.boolean() }),
 ]);

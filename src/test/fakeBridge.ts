@@ -314,6 +314,7 @@ const handlers: Record<string, Handler> = {
         },
       ],
       contentMissing: false,
+      shallow: false,
     }),
   rangePatches: () =>
     rangePatchesSchema.parse([

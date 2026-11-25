@@ -1,22 +1,24 @@
+mod output;
+
 use crate::{
-    FilePatch, Oid, PatchContext, RepositoryError,
+    Base, Comparison, ErrorKind, FilePatch, Oid, PatchContext, RepositoryError, Target,
     git::{self, Deadline, LocalRead},
-    repository::{PATCH_LIMIT, non_utf8_path, root, text_patch, verify_commit},
+    repository::{PATCH_LIMIT, non_utf8_path, root, unavailable_commit, unchanged_path},
 };
+use output::{Change, Limit, Patches, changes, counts, read_patches, unreadable};
 use serde::Serialize;
 use std::{
-    io::{self, BufRead, BufReader, Read},
+    io::{self, BufReader},
     iter,
     path::Path,
 };
 
 /// The patches of one range together. A patch over `PATCH_LIMIT` does not count.
 pub const RANGE_PATCH_LIMIT: usize = 8 * PATCH_LIMIT;
-const PIECE: u64 = 64 * 1024;
-const BLOCK: &[u8] = b"diff --git ";
 const RENAMES: &str = "--find-renames=50%";
 /// Pairs files by their blob ids alone, so it reads no contents.
 const EXACT_RENAMES: &str = "--find-renames=100%";
+const NO_RENAMES: &str = "--no-renames";
 
 /// What `head` changed since it forked from `base`.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -34,7 +36,12 @@ pub enum RangeFiles {
         /// files then have no line counts, and one that was renamed and edited
         /// is a deletion and an addition.
         content_missing: bool,
+        /// The clone is shallow, so `merge_base` can be older than the commit
+        /// where `head` really forked.
+        shallow: bool,
     },
+    /// A partial clone that does not have the folders of these commits.
+    TreesMissing,
     /// This clone does not have these commits.
     Missing { oids: Vec<Oid> },
     /// No commit is in the history of both. A `shallow` clone may lack it.
@@ -97,31 +104,38 @@ pub(crate) fn range_files_within(
     if !oids.is_empty() {
         return Ok(RangeFiles::Missing { oids });
     }
-    let found = git::run(
+    let shallow = git::read(&root, &["rev-parse", "--is-shallow-repository"], deadline)?;
+    let shallow = git::line(&shallow) == "true";
+    let found = git::run_objects(
         &root,
         &["merge-base", base.as_str(), head.as_str()],
         deadline,
     )?;
     let merge_base = match found.status.code() {
         Some(0) => Oid::try_from(git::line(&found.stdout))?,
-        Some(1) => {
-            return Ok(RangeFiles::Unrelated {
-                shallow: git::line(&git::read(
-                    &root,
-                    &["rev-parse", "--is-shallow-repository"],
-                    deadline,
-                )?) == "true",
-            });
-        }
+        Some(1) => return Ok(RangeFiles::Unrelated { shallow }),
         _ => return Err(git::read_failed()),
     };
-    let ends = [merge_base.as_str(), head.as_str()];
-    let counted = git::run(
+    let ends = [&merge_base, head];
+    let counted = git::run_objects(
         &root,
         &strs(&args(ends, RENAMES, &["--raw", "--numstat"], &[])),
         deadline,
     )?;
-    let files = if counted.status.success() {
+    let content_missing = !counted.status.success();
+    let files = if content_missing {
+        let Some(changes) = names(&root, ends, deadline)? else {
+            return if partial(&root, deadline)? {
+                Ok(RangeFiles::TreesMissing)
+            } else {
+                Err(git::read_failed())
+            };
+        };
+        changes
+            .iter()
+            .map(|change| file(change, None))
+            .collect::<Result<_, _>>()?
+    } else {
         let mut output = counted.stdout.as_slice();
         let changes = changes(&mut output).map_err(unreadable)?;
         let counts = changes
@@ -132,16 +146,12 @@ pub(crate) fn range_files_within(
         iter::zip(changes, counts)
             .map(|(change, counts)| file(&change, counts))
             .collect::<Result<_, _>>()?
-    } else {
-        names(&root, ends, deadline)?
-            .iter()
-            .map(|change| file(change, None))
-            .collect::<Result<_, _>>()?
     };
     Ok(RangeFiles::Ready {
         merge_base,
         files,
-        content_missing: !counted.status.success(),
+        content_missing,
+        shallow,
     })
 }
 
@@ -165,19 +175,20 @@ pub(crate) fn range_patches_within(
     deadline: Deadline,
 ) -> Result<Vec<RangePatch>, RepositoryError> {
     let root = root(path, deadline)?;
-    for oid in [merge_base, head] {
-        verify_commit(&root, oid.as_str(), deadline)?;
-    }
-    let ends = [merge_base.as_str(), head.as_str()];
+    let ends = [merge_base, head];
+    verify(&root, ends, deadline)?;
     let formats = ["--raw", PatchContext::Hunks.patch_format()];
-    let (changes, patches) = match patches(
-        &root,
-        &args(ends, RENAMES, &formats, &[]),
-        RANGE_PATCH_LIMIT,
-        deadline,
-    )? {
+    let limit = Limit {
+        bytes: RANGE_PATCH_LIMIT,
+        files: usize::MAX,
+    };
+    let args = args(ends, RENAMES, &formats, &[]);
+    let (changes, patches) = match patches(&root, &args, limit, deadline)? {
         Some(read) => (read.changes, read.patches),
-        None => (names(&root, ends, deadline)?, Vec::new()),
+        None => (
+            names(&root, ends, deadline)?.ok_or_else(git::read_failed)?,
+            Vec::new(),
+        ),
     };
     Ok(changes
         .iter()
@@ -189,56 +200,92 @@ pub(crate) fn range_patches_within(
         .collect())
 }
 
-/// One file of a range, as `range_patches` reads it, or `None` when the range
-/// has no such change. `from` is `file` itself unless the file was renamed.
-pub(crate) fn file_patch(
-    root: &Path,
-    ends: [&str; 2],
+/// One file of the range between two commits, as `range_patches` reads it.
+/// `from` is `file` itself unless the file was renamed.
+pub(crate) fn range_patch_within(
+    path: &str,
+    comparison: &Comparison,
     from: &str,
     file: &str,
     context: PatchContext,
     deadline: Deadline,
-) -> Result<Option<FilePatch>, RepositoryError> {
-    let paths = if from == file {
-        &[file][..]
-    } else {
-        &[from, file]
+) -> Result<FilePatch, RepositoryError> {
+    let (Base::Commit { oid: base }, Target::Commit { oid: head }) =
+        (&comparison.base, &comparison.target)
+    else {
+        return Err(RepositoryError::new(
+            ErrorKind::UnsupportedPath,
+            "L1 Git reads a file with its old path only between two commits.",
+        ));
     };
-    if paths.iter().any(|path| path.is_empty()) {
-        return Ok(None);
+    let root = root(path, deadline)?;
+    let ends = [&Oid::try_from(base.clone())?, &Oid::try_from(head.clone())?];
+    verify(&root, ends, deadline)?;
+    if file.is_empty() || from.is_empty() {
+        return Err(unchanged_path(comparison));
     }
-    let read = patches(
-        root,
-        &args(ends, RENAMES, &["--raw", context.patch_format()], paths),
-        usize::MAX,
-        deadline,
-    )?
-    .ok_or_else(git::read_failed)?;
-    let found = iter::zip(read.changes, read.patches)
-        .find(|(change, _)| {
-            change.path == file.as_bytes()
-                && change
-                    .from
-                    .as_ref()
-                    .map_or(from == file, |(old, _)| old == from.as_bytes())
-        })
-        .map(|(_, patch)| patch);
-    if found.is_none() && paths.iter().any(|path| path.contains('\u{FFFD}')) {
-        return Err(non_utf8_path());
-    }
-    Ok(found)
+    let formats = ["--raw", context.patch_format()];
+    let find = |args: &[String], files| -> Result<_, RepositoryError> {
+        let limit = Limit {
+            bytes: usize::MAX,
+            files,
+        };
+        let read = patches(&root, args, limit, deadline)?;
+        Ok(read.map(|read| {
+            iter::zip(read.changes, read.patches)
+                .find(|(change, _)| {
+                    change.path == file.as_bytes()
+                        && match &change.from {
+                            None => from == file,
+                            Some((old, _)) => old == from.as_bytes(),
+                        }
+                })
+                .map(|(_, patch)| patch)
+        }))
+    };
+    let found = if from == file {
+        let alone = args(ends, NO_RENAMES, &formats, &[file]);
+        find(&alone, usize::MAX)?.ok_or_else(git::read_failed)?
+    } else {
+        match find(&args(ends, RENAMES, &formats, &[from, file]), usize::MAX)? {
+            Some(Some(patch)) => Some(patch),
+            // A path also takes in the files of a folder with its name, and one
+            // of them can pair up instead. Git then lists the whole range from
+            // that file on, and stops after it. It fails when there is none.
+            alone => {
+                let skip = format!("--skip-to={file}");
+                let whole = args(ends, RENAMES, &[formats[0], formats[1], &skip], &[]);
+                match (find(&whole, 1)?, alone) {
+                    (Some(found), _) => found,
+                    (None, Some(_)) => None,
+                    (None, None) => return Err(git::read_failed()),
+                }
+            }
+        }
+    };
+    found.ok_or_else(|| {
+        if [from, file]
+            .iter()
+            .any(|path| path.contains(char::REPLACEMENT_CHARACTER))
+        {
+            non_utf8_path()
+        } else {
+            unchanged_path(comparison)
+        }
+    })
 }
 
 /// Pins whatever a person's configuration could change, so a range reads the
-/// same everywhere and its line counts match GitHub's. Attributes come from the
-/// range's own head, because the checked-out branch can have others.
-fn args<'a>(
-    [base, head]: [&'a str; 2],
-    renames: &'a str,
-    formats: &[&'a str],
-    paths: &[&'a str],
-) -> Vec<String> {
-    let attributes = format!("--attr-source={head}");
+/// same everywhere. GitHub ignores attributes, so they come from an empty tree.
+fn args(ends: [&Oid; 2], renames: &str, formats: &[&str], paths: &[&str]) -> Vec<String> {
+    let [base, head] = ends.map(Oid::as_str);
+    let attributes = format!(
+        "--attr-source={}",
+        match head.len() {
+            64 => "6ef19b41225c5369f1c104d45d8d85efa9b057b53b14b4b9b939dd74decc5321",
+            _ => "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+        }
+    );
     let mut args = vec![
         "-c",
         "core.attributesFile=",
@@ -247,6 +294,11 @@ fn args<'a>(
         // Git on macOS would otherwise compose the decomposed names in `paths`.
         "-c",
         "core.precomposeUnicode=false",
+        "-c",
+        "diff.default.binary=auto",
+        // What Git itself takes as the heading of a hunk.
+        "-c",
+        "diff.default.xfuncname=^([A-Za-z_$].*)$",
         &attributes,
         "--literal-pathspecs",
         "diff-tree",
@@ -254,6 +306,7 @@ fn args<'a>(
         "-r",
         "-z",
         "--no-abbrev",
+        "--full-index",
         renames,
         "-l1000",
         "--diff-algorithm=myers",
@@ -266,6 +319,14 @@ fn args<'a>(
     args.extend([base, head, "--"]);
     args.extend(paths);
     args.into_iter().map(str::to_owned).collect()
+}
+
+fn verify(root: &Path, ends: [&Oid; 2], deadline: Deadline) -> Result<(), RepositoryError> {
+    if missing(root, &ends, deadline)?.is_empty() {
+        Ok(())
+    } else {
+        Err(unavailable_commit())
+    }
 }
 
 fn missing(root: &Path, oids: &[&Oid], deadline: Deadline) -> Result<Vec<Oid>, RepositoryError> {
@@ -290,47 +351,26 @@ fn missing(root: &Path, oids: &[&Oid], deadline: Deadline) -> Result<Vec<Oid>, R
         .collect())
 }
 
-/// The changes of a range without reading any file's contents.
-fn names(root: &Path, ends: [&str; 2], deadline: Deadline) -> Result<Vec<Change>, RepositoryError> {
+/// The changes of a range without reading any file's contents, or `None` when
+/// Git failed.
+fn names(
+    root: &Path,
+    ends: [&Oid; 2],
+    deadline: Deadline,
+) -> Result<Option<Vec<Change>>, RepositoryError> {
     let args = args(ends, EXACT_RENAMES, &["--raw"], &[]);
-    changes(&mut git::read(root, &strs(&args), deadline)?.as_slice()).map_err(unreadable)
-}
-
-struct Change {
-    path: Vec<u8>,
-    /// A renamed file's old path and similarity.
-    from: Option<(Vec<u8>, u8)>,
-    status: RangeStatus,
-    old: Side,
-    new: Side,
-}
-
-/// One side of a change, with a mode of zeros when it has no file.
-struct Side {
-    mode: Vec<u8>,
-    oid: Vec<u8>,
-}
-
-impl Side {
-    fn exists(&self) -> bool {
-        self.mode.iter().any(|digit| *digit != b'0')
+    let listed = git::run_objects(root, &strs(&args), deadline)?;
+    if !listed.status.success() {
+        return Ok(None);
     }
-
-    fn blob(&self) -> Result<Option<Oid>, RepositoryError> {
-        self.exists()
-            .then(|| Oid::try_from(git::text(&self.oid)).map_err(|_| git::malformed()))
-            .transpose()
-    }
+    changes(&mut listed.stdout.as_slice())
+        .map(Some)
+        .map_err(unreadable)
 }
 
-impl Change {
-    /// Git shows a change of type as a deletion and an addition.
-    fn blocks(&self) -> usize {
-        match self.status {
-            RangeStatus::TypeChanged => 2,
-            _ => 1,
-        }
-    }
+fn partial(root: &Path, deadline: Deadline) -> Result<bool, RepositoryError> {
+    let promisors = ["config", "--get-regexp", r"^remote\..*\.promisor$"];
+    Ok(git::run(root, &promisors, deadline)?.status.success())
 }
 
 fn file(change: &Change, counts: Option<(u64, u64)>) -> Result<RangeFile, RepositoryError> {
@@ -352,106 +392,14 @@ fn file(change: &Change, counts: Option<(u64, u64)>) -> Result<RangeFile, Reposi
     })
 }
 
-fn malformed() -> io::Error {
-    io::ErrorKind::InvalidData.into()
-}
-
-fn unreadable(error: io::Error) -> RepositoryError {
-    if error.kind() == io::ErrorKind::InvalidData {
-        git::malformed()
-    } else {
-        git::read_failed()
-    }
-}
-
-fn field(output: &mut impl BufRead) -> io::Result<Vec<u8>> {
-    let mut field = Vec::new();
-    output.read_until(0, &mut field)?;
-    if field.pop() != Some(0) {
-        return Err(malformed());
-    }
-    Ok(field)
-}
-
-/// Reads `--raw -z` records up to the first byte that starts none.
-fn changes(output: &mut impl BufRead) -> io::Result<Vec<Change>> {
-    let mut changes = Vec::new();
-    while output.fill_buf()?.first() == Some(&b':') {
-        let record = field(output)?;
-        let columns: Vec<_> = record[1..].split(|byte| *byte == b' ').collect();
-        let [old_mode, new_mode, old_oid, new_oid, status] = columns[..] else {
-            return Err(malformed());
-        };
-        let side = |mode: &[u8], oid: &[u8]| Side {
-            mode: mode.to_vec(),
-            oid: oid.to_vec(),
-        };
-        let (status, from) = match status {
-            b"A" => (RangeStatus::Added, None),
-            b"D" => (RangeStatus::Deleted, None),
-            b"M" => (RangeStatus::Modified, None),
-            b"T" => (RangeStatus::TypeChanged, None),
-            [b'R', similarity @ ..] => {
-                let similarity = number(similarity)?;
-                (RangeStatus::Renamed, Some((field(output)?, similarity)))
-            }
-            _ => return Err(malformed()),
-        };
-        changes.push(Change {
-            path: field(output)?,
-            from,
-            status,
-            old: side(old_mode, old_oid),
-            new: side(new_mode, new_oid),
-        });
-    }
-    Ok(changes)
-}
-
-/// Reads the `--numstat -z` record of `change`, which has no counts for a
-/// binary file.
-fn counts(output: &mut impl BufRead, change: &Change) -> io::Result<Option<(u64, u64)>> {
-    let record = field(output)?;
-    let mut columns = record.splitn(3, |byte| *byte == b'\t');
-    let (Some(added), Some(deleted), Some(path)) = (columns.next(), columns.next(), columns.next())
-    else {
-        return Err(malformed());
-    };
-    let path = match &change.from {
-        None => path.to_vec(),
-        Some((from, _)) if path.is_empty() && field(output)? == *from => field(output)?,
-        Some(_) => return Err(malformed()),
-    };
-    if path != change.path {
-        return Err(malformed());
-    }
-    Ok(match (added, deleted) {
-        (b"-", b"-") => None,
-        _ => Some((number(added)?, number(deleted)?)),
-    })
-}
-
-fn number<T: std::str::FromStr>(digits: &[u8]) -> io::Result<T> {
-    std::str::from_utf8(digits)
-        .ok()
-        .and_then(|digits| digits.parse().ok())
-        .ok_or_else(malformed)
-}
-
-struct Patches {
-    changes: Vec<Change>,
-    /// Of the first changes, up to the limit.
-    patches: Vec<FilePatch>,
-}
-
 /// `None` when Git failed.
 fn patches(
     root: &Path,
     args: &[String],
-    limit: usize,
+    limit: Limit,
     deadline: Deadline,
 ) -> Result<Option<Patches>, RepositoryError> {
-    let (read, succeeded) = git::run_reading(root, &strs(args), deadline, move |stdout| {
+    let (read, succeeded) = git::run_objects_reading(root, &strs(args), deadline, move |stdout| {
         Ok(read_patches(&mut BufReader::new(stdout), limit))
     })?;
     match read {
@@ -463,104 +411,4 @@ fn patches(
 
 fn strs(args: &[String]) -> Vec<&str> {
     args.iter().map(String::as_str).collect()
-}
-
-/// Every line of a hunk starts with a space, a sign, or a backslash, and a
-/// header quotes a path's newlines, so only a block's first line starts with
-/// `BLOCK`. A line can be longer than memory allows, so it arrives in pieces.
-fn read_patches(output: &mut impl BufRead, limit: usize) -> io::Result<Patches> {
-    let changes = changes(output)?;
-    if !changes.is_empty() && !field(output)?.is_empty() {
-        return Err(malformed());
-    }
-    let mut patches = Vec::with_capacity(changes.len());
-    let mut kept = 0;
-    let mut open: Option<Open> = None;
-    let mut piece = Vec::new();
-    let mut line_start = true;
-    loop {
-        piece.clear();
-        output.take(PIECE).read_until(b'\n', &mut piece)?;
-        let first = line_start && piece.starts_with(BLOCK);
-        match &mut open {
-            Some(open) if first && open.blocks_left > 0 => open.next_block(),
-            _ if first || piece.is_empty() => {
-                if let Some(open) = open.take() {
-                    let patch = open.finish()?;
-                    if let FilePatch::Text { patch, .. } = &patch {
-                        kept += patch.len();
-                    }
-                    if kept > limit {
-                        break;
-                    }
-                    patches.push(patch);
-                }
-                if piece.is_empty() {
-                    if patches.len() != changes.len() {
-                        return Err(malformed());
-                    }
-                    break;
-                }
-                let change = changes.get(patches.len()).ok_or_else(malformed)?;
-                open = Some(Open::new(change.blocks()));
-            }
-            _ => {}
-        }
-        open.as_mut().ok_or_else(malformed)?.add(&piece, line_start);
-        line_start = piece.ends_with(b"\n");
-    }
-    Ok(Patches { changes, patches })
-}
-
-/// The patch being read.
-struct Open {
-    blocks_left: usize,
-    in_header: bool,
-    binary: bool,
-    bytes: u64,
-    /// Empty once `bytes` passes the limit.
-    kept: Vec<u8>,
-}
-
-impl Open {
-    fn new(blocks: usize) -> Self {
-        Self {
-            blocks_left: blocks - 1,
-            in_header: true,
-            binary: false,
-            bytes: 0,
-            kept: Vec::new(),
-        }
-    }
-
-    fn next_block(&mut self) {
-        self.blocks_left -= 1;
-        self.in_header = true;
-    }
-
-    fn add(&mut self, piece: &[u8], line_start: bool) {
-        if self.in_header && line_start {
-            self.in_header = !piece.starts_with(b"@@ ");
-            self.binary |= self.in_header && piece.starts_with(b"Binary files ");
-        }
-        self.bytes += piece.len() as u64;
-        if self.bytes <= PATCH_LIMIT as u64 {
-            self.kept.extend_from_slice(piece);
-        } else {
-            self.kept = Vec::new();
-        }
-    }
-
-    fn finish(self) -> io::Result<FilePatch> {
-        if self.blocks_left > 0 {
-            return Err(malformed());
-        }
-        Ok(if self.binary {
-            FilePatch::Binary
-        } else if self.bytes > PATCH_LIMIT as u64 {
-            FilePatch::TooLarge { bytes: self.bytes }
-        } else {
-            text_patch(&self.kept)
-        })
-    }
 }
