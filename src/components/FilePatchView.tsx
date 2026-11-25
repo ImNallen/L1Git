@@ -5,7 +5,7 @@ import type { FileDiffMetadata, SelectedLineRange } from "@pierre/diffs";
 import { FileX2, TriangleAlert } from "lucide-react";
 import { FileDiff, Virtualizer } from "@pierre/diffs/react";
 import type { Appearance } from "../themes/palette";
-import { sidesFor } from "../domain/fileSides";
+import { sidesFor, undrawn } from "../domain/fileSides";
 import { hunkAnchor, parsedFiles } from "../domain/lineSelection";
 import type { DiffStyle, HunkBar } from "../domain/lineSelection";
 import type { PartAction } from "../domain/operations";
@@ -47,11 +47,7 @@ export function Diff({
     return (
       <div className="file-diff-empty">
         <FileX2 size={28} />
-        <p>
-          {diff.kind === "binary"
-            ? "Binary file. L1 Git does not display binary changes."
-            : `This change is ${(diff.bytes / 1024 / 1024).toFixed(1)} MiB, above the 1 MiB display limit.`}
-        </p>
+        <p>{undrawn(diff)}</p>
       </div>
     );
   return (

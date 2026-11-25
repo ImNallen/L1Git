@@ -7,6 +7,12 @@ export function patchText(diff: FilePatch | null): string {
   return diff.patch;
 }
 
+/** Why a patch isn't drawn. */
+export const undrawn = (diff: Exclude<FilePatch, { kind: "text" }>) =>
+  diff.kind === "binary"
+    ? "Binary file. L1 Git does not display binary changes."
+    : `This change is ${(diff.bytes / 1024 / 1024).toFixed(1)} MiB, above the 1 MiB display limit.`;
+
 /**
  * Rebuilds both sides of `shown` from the same read with every line of
  * context. The file can change between the two reads, so a side that

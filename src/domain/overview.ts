@@ -53,6 +53,16 @@ export const fetchFailureSchema = z.enum([
   "busy",
   "other",
 ]);
+export const fetchFailureLabels: Record<
+  z.infer<typeof fetchFailureSchema>,
+  string
+> = {
+  auth: "Authentication failed",
+  network: "Network error",
+  timedOut: "Timed out",
+  busy: "Repository busy",
+  other: "Fetch failed",
+};
 const fetchSummarySchema = z.object({
   changed: z.boolean(),
   moved: z.number().int().nonnegative(),
