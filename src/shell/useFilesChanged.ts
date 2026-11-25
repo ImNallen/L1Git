@@ -30,6 +30,8 @@ export type FilesChangedState = {
   view: FilesView;
   setLook: (look: Partial<Look>) => void;
   go: (at: number) => void;
+  /** As `go`, and back to its beginning when it is the current one. */
+  choose: (at: number) => void;
   showNewest: () => void;
   retry: () => void;
   readFile: (file: RangeFile) => void;
@@ -101,6 +103,10 @@ export function useFilesChanged({
       );
     },
     go: store.go,
+    choose: (to) => {
+      if (to === at) ref.current?.toStart();
+      else store.go(to);
+    },
     showNewest: store.showNewest,
     retry: store.retry,
     readFile: store.readFile,

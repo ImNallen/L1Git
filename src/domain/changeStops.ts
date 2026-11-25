@@ -13,7 +13,7 @@ export function changeStops(patch: readonly FileDiffMetadata[]): ChangeStop[] {
     hunks.flatMap(({ deletionStart, additionStart, hunkContent }) => {
       let deletion = deletionStart;
       let addition = additionStart;
-      return hunkContent.flatMap((block): ChangeStop[] => {
+      return hunkContent.flatMap((block, at): ChangeStop[] => {
         if (block.type === "context") {
           deletion += block.lines;
           addition += block.lines;
@@ -25,14 +25,15 @@ export function changeStops(patch: readonly FileDiffMetadata[]): ChangeStop[] {
             : { part, side: "additions", line: addition };
         deletion += block.deletions;
         addition += block.additions;
-        return [stop];
+        // Pierre draws some of one run's added lines before its deleted ones.
+        return hunkContent[at - 1]?.type === "change" ? [] : [stop];
       });
     }),
   );
 }
 
 /** The first of `count` for which `is` is true, when it is for each one after. */
-function firstOf(count: number, is: (index: number) => boolean): number {
+export function firstOf(count: number, is: (index: number) => boolean): number {
   let from = 0;
   let to = count;
   while (from < to) {

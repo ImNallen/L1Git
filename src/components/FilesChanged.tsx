@@ -1,7 +1,12 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import type { RefObject } from "react";
 import { RefreshCw, TriangleAlert, X } from "lucide-react";
-import { newerThan, pathLabel, stopText } from "../domain/filesChanged";
+import {
+  countsNotice,
+  newerThan,
+  pathLabel,
+  stopText,
+} from "../domain/filesChanged";
 import type { Stop } from "../domain/filesChanged";
 import type { PullRequest, ReviewThread } from "../domain/pullRequest";
 import type { RangeFile } from "../domain/range";
@@ -12,6 +17,7 @@ import type { FilesChanged as Held } from "../filesChanged";
 import type { FilesChangedState, FilesView } from "../shell/useFilesChanged";
 import { AllFiles } from "./AllFiles";
 import { FileChanged } from "./FileChanged";
+import { FilesBoundary } from "./FilesBoundary";
 import { FilesState, ReadingFiles } from "./FilesState";
 import { FilesToolbar } from "./FilesToolbar";
 import type { LinePlace } from "./KeepDiffPlace";
@@ -274,7 +280,11 @@ export function FilesChanged({
   const [ids, toggle] = useToggled<string>();
   const [folded, fold] = useToggled<RangeFile>();
   const unfolded = useMemo(() => ({ ids, toggle }), [ids, toggle]);
-  const { range, read, at } = held;
+  const { range, read, at, counted } = held;
+  const counts = useMemo(
+    () => (read.kind === "ready" ? countsNotice(read, counted) : null),
+    [read, counted],
+  );
   const file = read.kind === "ready" ? read.files[at] : undefined;
   const newer = read.kind === "reading" ? null : newerThan(range, pull, viewer);
   const [problem, setProblem] = useState<{
@@ -306,30 +316,36 @@ export function FilesChanged({
           state={files}
         />
       )}
-      {read.kind === "ready" && read.counts !== null && (
+      {counts !== null && (
         <p className="files-counts">
-          {read.counts} <OnGitHub url={url} />
+          {counts} <OnGitHub url={url} />
         </p>
       )}
       <span className="visually-hidden" role="status">
         {said(held)}
       </span>
-      <Shown
-        pane={pane}
-        holdsFocus={holdsFocus}
-        left={left}
-        unfolded={unfolded}
-        folded={folded}
-        onFold={fold}
-        isShown={isShown}
-        held={held}
-        files={files}
-        whole={whole}
-        onRetry={keepingFocus(files.retry)}
-        onRetryFile={(of) => keepingFocus(() => files.readFileAgain(of))()}
-        viewer={viewer}
+      <FilesBoundary
+        key={`${files.view} ${files.view === "one" ? at : ""} ${range.head}`}
         url={url}
-      />
+        onRetry={keepingFocus(() => {})}
+      >
+        <Shown
+          pane={pane}
+          holdsFocus={holdsFocus}
+          left={left}
+          unfolded={unfolded}
+          folded={folded}
+          onFold={fold}
+          isShown={isShown}
+          held={held}
+          files={files}
+          whole={whole}
+          onRetry={keepingFocus(files.retry)}
+          onRetryFile={(of) => keepingFocus(() => files.readFileAgain(of))()}
+          viewer={viewer}
+          url={url}
+        />
+      </FilesBoundary>
       <Notices
         newer={newer}
         problem={

@@ -29,8 +29,6 @@ type RangeRead =
       mergeBase: Oid;
       files: readonly RangeFile[];
       contentMissing: boolean;
-      /** How this is not what GitHub counts, or null when it is. */
-      counts: string | null;
     };
 
 /** What the Files changed tab holds, whichever way it shows it. */
@@ -40,6 +38,8 @@ export type FilesChanged = {
   range: Range;
   /** The newest read whose head is the range's. */
   pull: PullRequest;
+  /** The newest whose base branch is, too: its counts are of the range. */
+  counted: PullRequest;
   read: RangeRead;
   /** The current file, among the files that were read. */
   at: number;
@@ -101,7 +101,7 @@ export function createFilesChanged(deps: Deps) {
 
   async function load(
     { repository: { root, github }, baseOid, head }: Range,
-    pinned: PullRequest,
+    counted: () => PullRequest,
     isCurrent: () => boolean,
     set: (change: Partial<FilesChanged>) => void,
   ) {
@@ -122,8 +122,7 @@ export function createFilesChanged(deps: Deps) {
     }
     if (found.kind === "missing") return stopped({ kind: "stillMissing" });
     if (found.kind !== "ready") return stopped(found);
-    const counts = countsNotice(found, pinned);
-    if (counts !== null && found.shallow)
+    if (found.shallow && countsNotice(found, counted()) !== null)
       return stopped({ kind: "unrelated", shallow: true });
     const { files: listed, mergeBase, contentMissing } = found;
     const files = inTreeOrder(listed);
@@ -136,7 +135,6 @@ export function createFilesChanged(deps: Deps) {
       mergeBase,
       files,
       contentMissing,
-      counts,
     } as const;
     set({ read, at });
     if (contentMissing || files.length === 0 || !isCurrent()) return;
@@ -162,7 +160,8 @@ export function createFilesChanged(deps: Deps) {
       if (isCurrent() && held) put({ ...held, ...change });
     };
     put(next);
-    load(next.range, next.pull, isCurrent, set).catch((error: unknown) => {
+    const counted = () => held?.counted ?? next.counted;
+    load(next.range, counted, isCurrent, set).catch((error: unknown) => {
       const stop: Stop = { kind: "unreadable", problem: problemFrom(error) };
       set({ read: { kind: "stopped", stop } });
     });
@@ -178,7 +177,7 @@ export function createFilesChanged(deps: Deps) {
     stopWaiting();
     const range = rangeOf(held.range.repository, newest);
     const pull = withThreads(newest, held.pull);
-    begin({ of: held.of, range, pull, ...unread });
+    begin({ of: held.of, range, pull, counted: pull, ...unread });
   }
 
   const unread = {
@@ -256,13 +255,18 @@ export function createFilesChanged(deps: Deps) {
         stopWaiting();
         path = null;
         turn = {};
-        put({ of, range: rangeOf(repository, pull), pull, ...unread });
+        const range = rangeOf(repository, pull);
+        put({ of, range, pull, counted: pull, ...unread });
         if (isComing) wait = setTimeout(showNewest, MOST_WAIT);
         else showNewest();
       } else if (wait !== null) {
         if (!isComing) showNewest();
       } else if (isNew && pull.head.oid === held.range.head)
-        put({ ...held, pull: withThreads(pull, held.pull) });
+        put({
+          ...held,
+          pull: withThreads(pull, held.pull),
+          counted: pull.base === held.range.base ? pull : held.counted,
+        });
     },
     showNewest,
     retry() {

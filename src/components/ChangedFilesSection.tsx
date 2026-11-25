@@ -58,6 +58,8 @@ function Tree({
       ),
     [files, threads],
   );
+  const choose = (path: string) =>
+    onGo(files.findIndex((file) => shownPath(file.path) === path));
   return (
     <ChangedFileTree
       files={named.map(({ path, status }) => ({
@@ -67,9 +69,8 @@ function Tree({
       labels={labels}
       comments={comments}
       selectedPath={selected ? shownPath(selected.path) : null}
-      onSelectFile={(path) =>
-        onGo(files.findIndex((file) => shownPath(file.path) === path))
-      }
+      onSelectFile={choose}
+      onSelectAgain={choose}
     />
   );
 }

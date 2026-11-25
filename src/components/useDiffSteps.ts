@@ -61,6 +61,8 @@ export function useDrawnParts() {
 export type DiffSteps = {
   /** Scrolls to the next change or the one before. False when there is none. */
   step: (by: 1 | -1) => boolean;
+  /** Scrolls to where the current file begins. */
+  toStart: () => void;
 };
 
 export function useDiffSteps(
@@ -101,7 +103,14 @@ export function useDiffSteps(
     },
     [body, stops, parts],
   );
-  useImperativeHandle(ref, () => ({ step: (by) => scroll(by) }), [scroll]);
+  useImperativeHandle(
+    ref,
+    () => ({
+      step: (by) => scroll(by),
+      toStart: () => scrollerIn(body)?.scrollTo({ top: 0 }),
+    }),
+    [scroll, body],
+  );
   useEffect(() => {
     if (startsAtEnd) scroll(-1, Infinity);
   }, [startsAtEnd, scroll]);

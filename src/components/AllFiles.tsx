@@ -9,10 +9,9 @@ import {
   useState,
 } from "react";
 import type { Ref, RefObject } from "react";
-import type { CodeView, FileDiffMetadata } from "@pierre/diffs";
+import type { FileDiffMetadata } from "@pierre/diffs";
 import { CodeView as Viewer } from "@pierre/diffs/react";
 import type { CodeViewHandle } from "@pierre/diffs/react";
-import { changeStops, nextChange } from "../domain/changeStops";
 import { sidesFor } from "../domain/fileSides";
 import type { DiffStyle } from "../domain/lineSelection";
 import type { ReviewThread } from "../domain/pullRequest";
@@ -30,33 +29,18 @@ import { SurroundingsContext } from "./pullRequestText";
 import { ThreadChips } from "./ReviewThreads";
 import type { Unfolded } from "./ReviewThreads";
 import { hasSelection } from "./selection";
+import { tabIntoView } from "./tabIntoView";
 import { Turns, TurnsContext } from "./turns";
-import { ABOVE_CHANGE, reviewMetrics } from "./useDiffSteps";
+import { HEADER, layout, useAllFilesSteps } from "./useAllFilesSteps";
+import { reviewMetrics } from "./useDiffSteps";
 import type { DiffSteps } from "./useDiffSteps";
 import { entryId, fileOfDiff, useFileItems } from "./useFileItems";
-import type { FileEntry, FileNote } from "./useFileItems";
+import type { FileNote } from "./useFileItems";
 import { useSteady } from "./useSteady";
 
-/** As the stylesheet has it. */
-const HEADER = 40;
 /** Above this many lines, a file is drawn without colors, which takes Pierre too long. */
 const MOST_COLORED = 3_000;
-const REPORT_MS = 100;
 const HELD_FRAMES = 20;
-const layout = { paddingTop: 0, paddingBottom: 64, gap: 0 };
-
-/** What a step went to. It is current until the reader scrolls. */
-type Goal = { id: string } | null;
-
-/** The one whose header is pinned. */
-const pinned = (viewer: CodeView<FileNote>) =>
-  viewer
-    .getRenderedItems()
-    .findLast(
-      ({ id }) =>
-        (viewer.getTopForItem(id) ?? Infinity) <= viewer.getScrollTop() + 1,
-    )?.id;
-
 /** Every file of a pull request, one after the other. */
 export function AllFiles({
   ref,
@@ -154,52 +138,18 @@ export function AllFiles({
     } as const;
   }, [theme, painted, diffStyle, appearances]);
 
-  const shownAt = useRef(0);
-  const goal = useRef<Goal>(null);
+  const steps = useAllFilesSteps({
+    viewer,
+    entries,
+    folded,
+    contentMissing,
+    at,
+    isReady,
+    onAt,
+    onRead,
+  });
+  const { onScroll, letGo } = steps;
   const holding = useRef(0);
-  const timer = useRef(0);
-  const report = useCallback(() => {
-    const instance = viewer();
-    timer.current = 0;
-    if (!instance || goal.current !== null) return;
-    if ((scroller.current?.clientHeight ?? 0) === 0) return;
-    const current = pinned(instance);
-    const now = current === undefined ? undefined : entries.get(current)?.at;
-    if (now === undefined || now === shownAt.current) return;
-    shownAt.current = now;
-    onAt(now);
-  }, [viewer, entries, onAt]);
-  const latestReport = useRef(report);
-  latestReport.current = report;
-  const onScroll = useCallback(() => {
-    if (timer.current === 0)
-      timer.current = window.setTimeout(
-        () => latestReport.current(),
-        REPORT_MS,
-      );
-  }, []);
-  useEffect(() => () => window.clearTimeout(timer.current), []);
-
-  useLayoutEffect(function beginAtTop() {
-    shownAt.current = 0;
-    goal.current = null;
-  }, []);
-  useLayoutEffect(
-    function goToCurrent() {
-      const instance = viewer();
-      if (!isReady || !instance || at === shownAt.current) return;
-      if (!entries.has(entryId(at))) return;
-      cancelAnimationFrame(holding.current);
-      shownAt.current = at;
-      goal.current = { id: entryId(at) };
-      instance.scrollTo({ type: "item", id: entryId(at) });
-    },
-    [viewer, isReady, entries, at],
-  );
-  const letGo = useCallback(() => {
-    cancelAnimationFrame(holding.current);
-    goal.current = null;
-  }, []);
   /** Over the frames in which what is above it is drawn and measured. */
   const hold = useCallback(
     (place: AllFilesPlace) => {
@@ -226,13 +176,13 @@ export function AllFiles({
       hold({
         id: entryId(begins, line.part),
         line: { side: line.side, number: line.number },
-        below: Math.max(line.below, HEADER),
+        below: line.below,
       });
     },
     [isReady, hold, begins],
   );
   const leave = (place: AllFilesPlace | null) => {
-    report();
+    steps.report();
     const entry = place && entries.get(place.id);
     if (entry && place.line)
       onLeave(entry.at, {
@@ -247,83 +197,34 @@ export function AllFiles({
     root.tabIndex = 0;
     root.setAttribute("role", "region");
     root.setAttribute("aria-label", "All changed files");
+    const onInput = (event: Event) => {
+      cancelAnimationFrame(holding.current);
+      const steps = event instanceof KeyboardEvent && /^[np]$/.test(event.key);
+      if (!steps) letGo();
+    };
     const events = ["wheel", "pointerdown", "keydown", "touchmove"];
     for (const event of events)
-      root.addEventListener(event, letGo, { passive: true });
+      root.addEventListener(event, onInput, { passive: true });
+    root.addEventListener("keydown", tabIntoView);
     if (holdsFocus.current || document.activeElement === pane.current)
       root.focus({ preventScroll: true });
     holdsFocus.current = false;
     return () => {
-      for (const event of events) root.removeEventListener(event, letGo);
+      for (const event of events) root.removeEventListener(event, onInput);
+      root.removeEventListener("keydown", tabIntoView);
       holdsFocus.current = root.contains(document.activeElement);
     };
   }, [isReady, pane, holdsFocus, letGo]);
 
-  const step = (by: 1 | -1): boolean => {
-    const instance = viewer();
-    const root = scroller.current;
-    if (!instance || !root) return false;
-    const all = [...entries.values()];
-    const most = Math.max(
-      0,
-      instance.getScrollHeight() + layout.paddingBottom - instance.getHeight(),
-    );
-    const top = instance.getScrollTop();
-    const rendered = instance.getRenderedItems();
+  const step = (by: 1 | -1) => {
     cancelAnimationFrame(holding.current);
-    const from = goal.current?.id ?? pinned(instance);
-    const first = all.findIndex(({ id }) => id === from);
-    const go = (
-      entry: FileEntry,
-      stop: { side: "deletions" | "additions"; line: number },
-    ) => {
-      goal.current = { id: entry.id };
-      if (shownAt.current !== entry.at) {
-        shownAt.current = entry.at;
-        onAt(entry.at);
-      }
-      instance.scrollTo({
-        type: "line",
-        id: entry.id,
-        lineNumber: stop.line,
-        side: stop.side,
-        offset: ABOVE_CHANGE,
-      });
-      // The next step may come before the next frame.
-      instance.render(true);
-      return true;
-    };
-    for (let index = first; index >= 0 && index < all.length; index += by) {
-      const entry = all[index];
-      if (!entry?.diff || folded.has(entry.file)) continue;
-      const stops = changeStops([entry.diff]);
-      const item = rendered.find(({ id }) => id === entry.id);
-      if (index === first && item?.type === "diff") {
-        const start = instance.getTopForItem(entry.id) ?? 0;
-        const next = nextChange(
-          stops.length,
-          (change) => {
-            const stop = stops[change];
-            return (
-              start +
-              ((stop &&
-                item.instance.getLinePosition(stop.line, stop.side)?.top) ??
-                0)
-            );
-          },
-          { at: top, most, above: HEADER + ABOVE_CHANGE },
-          by,
-        );
-        const stop = next && stops[next.change];
-        if (stop) return go(entry, stop);
-        continue;
-      }
-      const stop = by === 1 ? stops[0] : stops.at(-1);
-      if (stop) return go(entry, stop);
-    }
-    return true;
+    return steps.step(by);
   };
-  useImperativeHandle(ref, () => ({ step }));
+  const toStart = () => {
+    cancelAnimationFrame(holding.current);
+    steps.goTo(entryId(at));
+  };
+  useImperativeHandle(ref, () => ({ step, toStart }));
 
   if (!isReady) return <ReadingFiles />;
   return (

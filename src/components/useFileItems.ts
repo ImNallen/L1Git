@@ -3,6 +3,7 @@ import { parsePatchFiles } from "@pierre/diffs";
 import type {
   CodeViewItem,
   DiffLineAnnotation,
+  FileContents,
   FileDiffMetadata,
 } from "@pierre/diffs";
 import { inPlaceOfLines, modeChange, shownPath } from "../domain/filesChanged";
@@ -34,9 +35,15 @@ export type FileEntry = {
   elsewhere: readonly ReviewThread[];
   mode: string | null;
   lossy: boolean;
+  /** Whether a line may be taller than the others. */
+  isUneven: boolean;
 };
 
 export const entryId = (at: number, part = 0) => `${at}.${part}`;
+
+/** What the browser breaks a line at and Git doesn't. */
+const breaks = /\r(?!\n)|[\u2028\u2029]/;
+const brokenPatches = new WeakSet<FilePatch>();
 
 const parsed = new WeakMap<FilePatch, FileDiffMetadata[]>();
 const filesOfDiffs = new WeakMap<FileDiffMetadata, RangeFile>();
@@ -50,6 +57,7 @@ function partsOf(file: RangeFile, patch: FilePatch): FileDiffMetadata[] {
   const parts = parsePatchFiles(patch.patch).flatMap(({ files }) => files);
   for (const part of parts) filesOfDiffs.set(part, file);
   parsed.set(patch, parts);
+  if (breaks.test(patch.patch)) brokenPatches.add(patch);
   return parts;
 }
 
@@ -104,6 +112,7 @@ function entriesOf(
     elsewhere,
     mode: patch && diffs.length > 0 ? modeChange(patch) : null,
     lossy: patch?.kind === "text" && patch.lossy,
+    isUneven: patch !== null && brokenPatches.has(patch),
   };
   const rest = diffs.slice(1).map(
     (diff, index): FileEntry => ({
@@ -120,10 +129,28 @@ function entriesOf(
   }));
 }
 
-const hasNote = ({ part, file, mode, lossy, elsewhere, diff }: FileEntry) =>
-  diff === null ||
-  (part === 0 &&
-    (file.from !== null || mode !== null || lossy || elsewhere.length > 0));
+const linelessFiles = new WeakMap<RangeFile, FileContents>();
+
+/** The same object each time, or Pierre throws when it draws it folded after unfolded. */
+function lineless(file: RangeFile): FileContents {
+  const before = linelessFiles.get(file);
+  if (before) return before;
+  const name = shownPath(file.path);
+  // Pierre draws no note on a file without lines, so this has one to hide.
+  const made: FileContents = { name, contents: "\n", lang: "text" };
+  linelessFiles.set(file, made);
+  return made;
+}
+
+const hasNote = (entry: FileEntry) =>
+  entry.diff === null ||
+  // Pierre measures the lines of what has a note.
+  entry.isUneven ||
+  (entry.part === 0 &&
+    (entry.file.from !== null ||
+      entry.mode !== null ||
+      entry.lossy ||
+      entry.elsewhere.length > 0));
 
 function itemOf(
   entry: FileEntry,
@@ -136,8 +163,7 @@ function itemOf(
     return {
       id,
       type: "file",
-      // Pierre draws no note on a file without lines, so this has one to hide.
-      file: { name: shownPath(file.path), contents: "\n", lang: "text" },
+      file: lineless(file),
       annotations: [{ lineNumber: 0, metadata: "file" }],
       collapsed,
       version,

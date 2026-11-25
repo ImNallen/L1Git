@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { beforeEach, expect, it, vi } from "vitest";
+import { CodeView } from "@pierre/diffs";
 import type { PullRequest, ReviewThread } from "./domain/pullRequest";
 import type { RangeFile } from "./domain/range";
 import { oidSchema } from "./domain/repository";
@@ -190,6 +191,133 @@ it("folds a file, and skips its changes", async () => {
   await app.click(get("button", "All files", panel()));
   await frames(app);
   expect(fold("src/a.ts").getAttribute("aria-expanded")).toBe("false");
+});
+
+it("folds a file without lines, and unfolds it", async () => {
+  const app = await openAll();
+  const chevron = fold("src/z.png");
+  for (const expanded of ["false", "true", "false"]) {
+    await app.click(chevron);
+    await frames(app);
+    expect(fold("src/z.png").getAttribute("aria-expanded")).toBe(expanded);
+  }
+});
+
+it("shows a message when Pierre fails, and draws them when asked", async () => {
+  const app = await openAll();
+  const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+  const items = vi.spyOn(CodeView.prototype, "setItems");
+  try {
+    items.mockImplementation(() => {
+      throw new Error("a different file");
+    });
+    await app.click(fold("src/a.ts"));
+    expect(panel().textContent).toContain("Couldn't show the changes");
+    expect(get("link", "Open on GitHub", panel()).getAttribute("href")).toBe(
+      "https://github.com/octo/pin/pull/1/files",
+    );
+    items.mockRestore();
+    await app.click(get("button", "Try again", panel()));
+    await frames(app);
+    expect(headers()).toHaveLength(3);
+    items.mockImplementation(() => {
+      throw new Error("a different file");
+    });
+    await app.click(fold("src/a.ts"));
+    await app.click(get("button", "One file", panel()));
+    expect(
+      document.querySelector(".files-position")?.textContent,
+      "the other view is there",
+    ).toBe("1 of 3");
+  } finally {
+    items.mockRestore();
+    logged.mockRestore();
+  }
+});
+
+it("goes back to the beginning of the file that is chosen again", async () => {
+  const app = await openAll();
+  const tree = get(
+    "complementary",
+    "Pull request details",
+  ).querySelector<HTMLElement>("file-tree-container")!;
+  const row = tree.shadowRoot!.querySelector("[aria-selected=true]")!;
+  // As a click on the row is outside of the shadow.
+  tree.click = () => {
+    const click = new MouseEvent("click", { bubbles: true });
+    const path = click.composedPath.bind(click);
+    click.composedPath = () => [row, ...path()];
+    tree.dispatchEvent(click);
+  };
+  const scrollTo = vi.spyOn(CodeView.prototype, "scrollTo");
+  await app.click(tree);
+  expect(scrollTo).toHaveBeenCalledWith({ type: "item", id: "0.0" });
+  scrollTo.mockRestore();
+});
+
+it("tabs from the files to the first header in the view", async () => {
+  await openAll();
+  const files = get("region", "All changed files", panel());
+  files.focus();
+  const tabbed = new KeyboardEvent("keydown", {
+    key: "Tab",
+    bubbles: true,
+    cancelable: true,
+  });
+  files.dispatchEvent(tabbed);
+  expect(tabbed.defaultPrevented).toBe(true);
+  expect(focused()).toBe("button src/a.ts");
+});
+
+it("stops at a file that is not read, and goes on from there", async () => {
+  const held: { release: () => void }[] = [];
+  const app = await openAll({}, (bridge) => {
+    bridge.respond("rangePatches", () =>
+      patches().map((each) =>
+        each.path === "src/new.ts" ? { ...each, patch: null } : each,
+      ),
+    );
+    bridge.respond("filePatch", () => ({
+      kind: "text",
+      patch: patchOf("src/new.ts", "src/old.ts"),
+      lossy: false,
+    }));
+    held.push(bridge.hold("filePatch"));
+  });
+  const scrollTo = vi.spyOn(CodeView.prototype, "scrollTo");
+  await app.press("n");
+  await app.press("n");
+  expect(selected()).toBe("src/new.ts");
+  await app.press("n");
+  expect(selected(), "it waits").toBe("src/new.ts");
+  scrollTo.mockClear();
+  held[0]!.release();
+  await frames(app);
+  expect(scrollTo).toHaveBeenCalledWith(
+    expect.objectContaining({ type: "line", id: "1.0", lineNumber: 11 }),
+  );
+  await app.press("p");
+  expect(selected()).toBe("src/a.ts");
+  scrollTo.mockRestore();
+});
+
+it("passes over a file that could not be read", async () => {
+  const app = await openAll({}, (bridge) => {
+    bridge.respond("rangePatches", () =>
+      patches().map((each) =>
+        each.path === "src/a.ts" ? { ...each, patch: null } : each,
+      ),
+    );
+    bridge.respond("filePatch", () => {
+      throw new Error("not now");
+    });
+  });
+  await app.press("n");
+  expect(selected()).toBe("src/new.ts");
+  await frames(app);
+  await app.press("p");
+  await frames(app);
+  expect(selected(), "nothing before it").toBe("src/new.ts");
 });
 
 it("shows threads on their lines, and the rest over the file", async () => {

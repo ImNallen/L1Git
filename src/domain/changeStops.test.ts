@@ -34,6 +34,26 @@ describe("changeStops", () => {
     ]);
   });
 
+  it("stops once at a run whose lines Pierre pairs", () => {
+    const [file] = parsePatchFiles(`--- a/a
++++ b/a
+@@ -1,2 +1,3 @@
+ const ok = 1;
+-const x = 2;
++if (x) { begin }
++const z = 2;
+`)[0]!.files;
+    const [hunk] = file!.hunks;
+    expect(hunk!.hunkContent.map(({ type }) => type)).toEqual([
+      "context",
+      "change",
+      "change",
+    ]);
+    expect(changeStops([file!])).toEqual([
+      { part: 0, side: "additions", line: 2 },
+    ]);
+  });
+
   it("counts both parts of a changed type", () => {
     expect(
       stops(`diff --git a/link b/link
