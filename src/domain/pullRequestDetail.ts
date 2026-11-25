@@ -329,6 +329,11 @@ export function lineLabel({
 const HUNK = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
 const FEWEST_LINES = 4;
 const MOST_LINES = 12;
+/** A line in two scripts takes longer. One of 10,000 took 100 ms of a frame. */
+function cutLine(line: string): string {
+  const most = /[^\0-\u024f]/.test(line) ? 100 : 1_000;
+  return line.length > most ? `${line.slice(0, most)}…` : line;
+}
 
 export type Excerpt =
   | { kind: "diff"; patch: string }
@@ -357,7 +362,12 @@ export function excerpt({
   )
     return {
       kind: "text",
-      text: hunk.trimEnd().split("\n").slice(-MOST_LINES).join("\n"),
+      text: hunk
+        .trimEnd()
+        .split("\n")
+        .slice(-MOST_LINES)
+        .map(cutLine)
+        .join("\n"),
     };
   // A side without lines is named by the line before it.
   const first = (start: string | undefined, count: string | undefined) =>
@@ -405,7 +415,7 @@ export function excerpt({
       "--- a/file",
       "+++ b/file",
       `@@ -${at(top.old, olds)} +${at(top.next, nexts)} @@`,
-      ...shown.map(({ line }) => (line === "" ? " " : line)),
+      ...shown.map(({ line }) => (line === "" ? " " : cutLine(line))),
       "",
     ].join("\n"),
   };

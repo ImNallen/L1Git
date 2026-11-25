@@ -595,6 +595,19 @@ describe("a thread's lines", () => {
     expect(patch("@@ -1,1 +1,1 @@")).toMatchObject({ kind: "text" });
     expect(patch(" \n")).toBeNull();
   });
+
+  it("cuts a line without end", () => {
+    const cut = `+${"a".repeat(999)}…`;
+    expect(patch(`@@ -0,0 +1,1 @@\n+${"a".repeat(5_000)}`)).toEqual([
+      "@@ -0,0 +1,1 @@",
+      cut,
+    ]);
+    expect(patch(`+${"a".repeat(5_000)}`)).toEqual({ kind: "text", text: cut });
+    expect(patch(`+${"אa".repeat(2_500)}`)).toEqual({
+      kind: "text",
+      text: `+${"אa".repeat(50).slice(0, 99)}…`,
+    });
+  });
 });
 
 it("labels the reviewers", () => {
