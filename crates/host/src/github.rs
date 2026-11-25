@@ -255,15 +255,29 @@ pub(crate) struct GitHub<'a> {
     pub(crate) http: &'a Client,
     api: &'a ApiBase,
     token: &'a Token,
+    /// The connection the token is from. None for a sign-in that is not one yet.
+    connection: Option<(&'a Host, CommitId)>,
 }
 
 pub(crate) enum ApiError {
+    /// The connection ended or changed, so its token is not to be used again.
+    Ended,
     Unauthorized,
-    RateLimited { reset_at: Option<u64> },
-    Forbidden { message: String },
-    Unfinished { message: String },
-    SsoRequired { url: String },
-    NotFound { what: String },
+    RateLimited {
+        reset_at: Option<u64>,
+    },
+    Forbidden {
+        message: String,
+    },
+    Unfinished {
+        message: String,
+    },
+    SsoRequired {
+        url: String,
+    },
+    NotFound {
+        what: String,
+    },
     TooLarge,
     Status(u16),
     Unreachable,
@@ -288,6 +302,11 @@ impl GitHub<'_> {
     }
 
     pub(crate) fn send(&self, request: RequestBuilder) -> Result<(HeaderMap, Vec<u8>), ApiError> {
+        if let Some((host, generation)) = self.connection
+            && host.generation() != Some(generation)
+        {
+            return Err(ApiError::Ended);
+        }
         let response = request
             .header(AUTHORIZATION, self.token.authorization())
             .send()
@@ -394,6 +413,7 @@ pub(crate) fn verify(
         http,
         api,
         token: &token,
+        connection: None,
     }
     .user()?;
     Ok(Verified {
@@ -411,22 +431,23 @@ pub(crate) struct Fetched<T> {
 }
 
 impl Host {
+    fn generation(&self) -> Option<CommitId> {
+        let state = self.lock();
+        let connection = state.saved.get(self.endpoints.api())?;
+        Some(connection.generation)
+    }
+
     pub(crate) fn with_github<T>(
         &self,
         read: impl FnOnce(&GitHub<'_>) -> Result<T, ApiError>,
     ) -> Result<Fetched<T>, Failure> {
         let api = self.endpoints.api();
-        let generation = self
-            .lock()
-            .saved
-            .get(api)
-            .map(|connection| connection.generation)
-            .ok_or_else(|| {
-                Failure::new(
-                    ErrorKind::NotConnected,
-                    "L1 Git is not connected to GitHub. Sign in from Settings › Hosts.",
-                )
-            })?;
+        let generation = self.generation().ok_or_else(|| {
+            Failure::new(
+                ErrorKind::NotConnected,
+                "L1 Git is not connected to GitHub. Sign in from Settings › Hosts.",
+            )
+        })?;
         let Some(token) = self.vault.read(api).map_err(keychain)? else {
             self.forget(&self.lock_writes(), generation, EndReason::TokenMissing);
             return Err(Failure::new(
@@ -438,6 +459,7 @@ impl Host {
             http: self.http.client()?,
             api,
             token: &token,
+            connection: Some((self, generation)),
         };
         match read(&github) {
             Ok(value) => Ok(Fetched { value, generation }),
@@ -455,6 +477,10 @@ impl Host {
 
 pub(crate) fn api_failure(error: ApiError) -> Failure {
     match error {
+        ApiError::Ended => Failure::new(
+            ErrorKind::Interrupted,
+            "L1 Git's GitHub sign-in changed before GitHub answered. Try again.",
+        ),
         ApiError::Unauthorized => Failure::new(
             ErrorKind::Rejected,
             "GitHub did not accept the GitHub CLI's sign-in. Run gh auth login, then try again.",

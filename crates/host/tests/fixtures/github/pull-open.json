@@ -151,7 +151,8 @@
                     "login": "hubot"
                   }
                 }
-              }
+              },
+              "id": "PURC_1"
             },
             {
               "__typename": "HeadRefForcePushedEvent",
@@ -164,14 +165,16 @@
               },
               "afterCommit": {
                 "oid": "5555555555555555555555555555555555555555"
-              }
+              },
+              "id": "HRFPE_1"
             },
             {
               "__typename": "ReadyForReviewEvent",
               "author": {
                 "login": "hubot"
               },
-              "at": "2026-05-07T21:46:18Z"
+              "at": "2026-05-07T21:46:18Z",
+              "id": "RFRE_1"
             },
             {
               "__typename": "PullRequestReview",
@@ -189,7 +192,8 @@
                 "login": "octo-bot"
               },
               "at": "2026-10-13T18:48:27Z",
-              "body": "Thanks for the pull request."
+              "body": "Thanks for the pull request.",
+              "id": "IC_1"
             }
           ]
         },
@@ -213,7 +217,8 @@
                       "login": "review-bot"
                     },
                     "at": "2026-11-18T23:12:35Z",
-                    "body": "Could this stay lazy?"
+                    "body": "Could this stay lazy?",
+                    "id": "PRRC_1"
                   }
                 ]
               },
@@ -246,7 +251,8 @@
                       "login": "monalisa"
                     },
                     "at": "2026-11-19T18:23:35Z",
-                    "body": "Could this stay lazy?"
+                    "body": "Could this stay lazy?",
+                    "id": "PRRC_2"
                   }
                 ]
               },

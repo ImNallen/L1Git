@@ -1,4 +1,4 @@
-query($owner: String!, $repo: String!, $number: Int!) {
+query($owner: String!, $repo: String!, $number: Int!, $threads: Boolean!) {
   repository(owner: $owner, name: $repo) {
     pullRequest(number: $number) {
       number title body isDraft mergedAt closedAt createdAt updatedAt
@@ -23,22 +23,22 @@ query($owner: String!, $repo: String!, $number: Int!) {
         totalCount: filteredCount
         nodes {
           __typename
-          ... on PullRequestCommit { commit { ...commit } }
+          ... on PullRequestCommit { id commit { ...commit } }
           ... on PullRequestReview { id author { login } submittedAt state body }
-          ... on IssueComment { author { login } at: createdAt body }
-          ... on HeadRefForcePushedEvent { author: actor { login } at: createdAt beforeCommit { oid } afterCommit { oid } }
-          ... on MergedEvent { author: actor { login } at: createdAt commit { oid } }
-          ... on ClosedEvent { author: actor { login } at: createdAt }
-          ... on ReopenedEvent { author: actor { login } at: createdAt }
-          ... on HeadRefDeletedEvent { author: actor { login } at: createdAt }
-          ... on ReadyForReviewEvent { author: actor { login } at: createdAt }
-          ... on ConvertToDraftEvent { author: actor { login } at: createdAt }
+          ... on IssueComment { id author { login } at: createdAt body }
+          ... on HeadRefForcePushedEvent { id author: actor { login } at: createdAt beforeCommit { oid } afterCommit { oid } }
+          ... on MergedEvent { id author: actor { login } at: createdAt commit { oid } }
+          ... on ClosedEvent { id author: actor { login } at: createdAt }
+          ... on ReopenedEvent { id author: actor { login } at: createdAt }
+          ... on HeadRefDeletedEvent { id author: actor { login } at: createdAt }
+          ... on ReadyForReviewEvent { id author: actor { login } at: createdAt }
+          ... on ConvertToDraftEvent { id author: actor { login } at: createdAt }
         }
       }
-      reviewThreads(first: 100) { totalCount nodes {
+      reviewThreads(first: 100) @include(if: $threads) { totalCount nodes {
         id path line startLine originalLine originalStartLine diffSide isOutdated isResolved
         first: comments(first: 1) { nodes { diffHunk pullRequestReview { id } } }
-        comments(first: 50) { totalCount nodes { author { login } at: createdAt body } }
+        comments(first: 50) { totalCount nodes { id author { login } at: createdAt body } }
       } }
     }
   }

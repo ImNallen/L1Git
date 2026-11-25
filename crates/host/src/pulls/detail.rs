@@ -35,7 +35,8 @@ pub struct PullRequest {
     /// The newest 100, oldest first, as is `timeline`.
     commits: Page<Commit>,
     timeline: Page<Event>,
-    threads: Page<Thread>,
+    /// None when GitHub could only answer without them.
+    threads: Option<Page<Thread>>,
     mergeable: Mergeability,
     merge_state: MergeState,
 }
@@ -105,6 +106,7 @@ struct Commit {
 
 #[derive(Debug, Serialize)]
 struct Event {
+    id: String,
     by: Option<String>,
     at: String,
     #[serde(flatten)]
@@ -119,7 +121,6 @@ enum What {
         headline: String,
     },
     Review {
-        id: String,
         state: ReviewState,
         body: String,
     },
@@ -169,6 +170,7 @@ enum Side {
 
 #[derive(Debug, Serialize)]
 struct Comment {
+    id: String,
     by: Option<String>,
     at: String,
     body: String,
@@ -216,7 +218,7 @@ struct Node {
     status_check_rollup: Option<Rollup>,
     commits: Nodes<PullCommit>,
     timeline_items: Nodes<Item>,
-    review_threads: Nodes<ThreadNode>,
+    review_threads: Option<Nodes<ThreadNode>>,
 }
 
 #[derive(Deserialize)]
@@ -296,6 +298,7 @@ struct Oid {
 
 #[derive(Deserialize)]
 struct Act {
+    id: String,
     author: Option<Actor>,
     at: String,
 }
@@ -304,6 +307,7 @@ struct Act {
 #[serde(tag = "__typename", rename_all_fields = "camelCase")]
 enum Item {
     PullRequestCommit {
+        id: String,
         commit: GitCommit,
     },
     PullRequestReview {
@@ -315,12 +319,14 @@ enum Item {
     },
     IssueComment(CommentNode),
     HeadRefForcePushedEvent {
+        id: String,
         author: Option<Actor>,
         at: String,
         before_commit: Option<Oid>,
         after_commit: Option<Oid>,
     },
     MergedEvent {
+        id: String,
         author: Option<Actor>,
         at: String,
         commit: Option<Oid>,
@@ -336,6 +342,7 @@ enum Item {
 
 #[derive(Deserialize)]
 struct CommentNode {
+    id: String,
     author: Option<Actor>,
     at: String,
     body: String,
@@ -375,13 +382,29 @@ impl GitHub<'_> {
         repository: &Repository,
         number: u32,
     ) -> Result<PullRequest, ApiError> {
+        match self.ask_pull_request(repository, number, true) {
+            // GitHub runs out of time over a pull request with many threads, and
+            // says so in any of these ways.
+            Err(
+                ApiError::Status(502 | 504) | ApiError::Unfinished { .. } | ApiError::Unexpected,
+            ) => self.ask_pull_request(repository, number, false),
+            answer => answer,
+        }
+    }
+
+    fn ask_pull_request(
+        &self,
+        repository: &Repository,
+        number: u32,
+        threads: bool,
+    ) -> Result<PullRequest, ApiError> {
         let Repository { owner, repo } = repository;
         let Reply {
             data: Answer { repository: found },
             withheld,
         } = self.graphql(
             DETAIL,
-            json!({"owner": owner, "repo": repo, "number": number}),
+            json!({"owner": owner, "repo": repo, "number": number, "threads": threads}),
         )?;
         let Some(found) = found else {
             return Err(withheld.explain("repository", repository.to_string()));
@@ -434,7 +457,7 @@ fn parse(node: Node, checks_withheld: bool) -> PullRequest {
         timeline: node.timeline_items.page(event),
         threads: node
             .review_threads
-            .page(|thread| Some(self::thread(thread))),
+            .map(|threads| threads.page(|thread| Some(self::thread(thread)))),
         mergeable: node.mergeable,
         merge_state: node.merge_state_status,
     }
@@ -522,13 +545,14 @@ fn commit(commit: GitCommit) -> Commit {
 }
 
 fn event(item: Item) -> Option<Event> {
-    let act = |Act { author, at }: Act, what| Event {
+    let act = |Act { id, author, at }: Act, what| Event {
+        id,
         by: login(author),
         at,
         what,
     };
     Some(match item {
-        Item::PullRequestCommit { commit: node } => {
+        Item::PullRequestCommit { id, commit: node } => {
             let Commit {
                 oid,
                 headline,
@@ -536,6 +560,7 @@ fn event(item: Item) -> Option<Event> {
                 at,
             } = commit(node);
             Event {
+                id,
                 by,
                 at,
                 what: What::Commit { oid, headline },
@@ -549,21 +574,30 @@ fn event(item: Item) -> Option<Event> {
             state,
             body,
         } => Event {
+            id,
             by: login(author),
             at: submitted_at?,
-            what: What::Review { id, state, body },
+            what: What::Review { state, body },
         },
-        Item::IssueComment(CommentNode { author, at, body }) => Event {
+        Item::IssueComment(CommentNode {
+            id,
+            author,
+            at,
+            body,
+        }) => Event {
+            id,
             by: login(author),
             at,
             what: What::Comment { body },
         },
         Item::HeadRefForcePushedEvent {
+            id,
             author,
             at,
             before_commit,
             after_commit,
         } => Event {
+            id,
             by: login(author),
             at,
             what: What::ForcePushed {
@@ -571,7 +605,13 @@ fn event(item: Item) -> Option<Event> {
                 to: after_commit.map(|commit| commit.oid),
             },
         },
-        Item::MergedEvent { author, at, commit } => Event {
+        Item::MergedEvent {
+            id,
+            author,
+            at,
+            commit,
+        } => Event {
+            id,
             by: login(author),
             at,
             what: What::Merged {
@@ -606,12 +646,20 @@ fn thread(node: ThreadNode) -> Thread {
         outdated: node.is_outdated,
         resolved: node.is_resolved,
         hunk,
-        comments: node.comments.page(|CommentNode { author, at, body }| {
-            Some(Comment {
-                by: login(author),
-                at,
-                body,
-            })
-        }),
+        comments: node.comments.page(
+            |CommentNode {
+                 id,
+                 author,
+                 at,
+                 body,
+             }| {
+                Some(Comment {
+                    id,
+                    by: login(author),
+                    at,
+                    body,
+                })
+            },
+        ),
     }
 }

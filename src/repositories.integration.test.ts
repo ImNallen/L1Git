@@ -4071,7 +4071,7 @@ describe("real Rust host contract", () => {
       "review",
       "comment",
     ]);
-    expect(one.data.threads.items.map(({ line }) => line)).toEqual([null, 30]);
+    expect(one.data.threads?.items.map(({ line }) => line)).toEqual([null, 30]);
     const ended = await ask({ op: "pullRequest", repository, number: 10 });
     if (ended.op !== "pullRequest") throw new Error(ended.op);
     expect(ended.data.timeline.items.map(({ kind }) => kind)).toEqual([

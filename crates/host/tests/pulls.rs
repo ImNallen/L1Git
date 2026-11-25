@@ -3,6 +3,8 @@
 #[allow(dead_code)]
 mod support;
 
+use std::sync::{Arc, Barrier};
+use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use l1_git_host::{Endpoints, GhChoice, Host, HostConfig, Request, VaultChoice, run};
@@ -627,22 +629,22 @@ fn one_pull_request_answers_in_l1_gits_words() {
                     {"oid": "3".repeat(40), "headline": "Keep the parsed file", "by": "hubot", "at": "2026-11-19T18:59:20Z"},
                 ]},
                 "timeline": {"total": 8, "items": [
-                    {"kind": "commit", "oid": "2".repeat(40), "headline": "Read the file once", "by": "hubot", "at": "2026-11-18T23:07:11Z"},
-                    {"kind": "forcePushed", "from": "4".repeat(40), "to": "5".repeat(40), "by": "hubot", "at": "2026-10-13T18:51:33Z"},
-                    {"kind": "readyForReview", "by": "hubot", "at": "2026-05-07T21:46:18Z"},
+                    {"id": "PURC_1", "kind": "commit", "oid": "2".repeat(40), "headline": "Read the file once", "by": "hubot", "at": "2026-11-18T23:07:11Z"},
+                    {"id": "HRFPE_1", "kind": "forcePushed", "from": "4".repeat(40), "to": "5".repeat(40), "by": "hubot", "at": "2026-10-13T18:51:33Z"},
+                    {"id": "RFRE_1", "kind": "readyForReview", "by": "hubot", "at": "2026-05-07T21:46:18Z"},
                     {"kind": "review", "id": "PRR_1", "state": "commented", "body": "Looks close.", "by": "review-bot", "at": "2026-11-18T23:12:36Z"},
-                    {"kind": "comment", "body": "Thanks for the pull request.", "by": "octo-bot", "at": "2026-10-13T18:48:27Z"},
+                    {"id": "IC_1", "kind": "comment", "body": "Thanks for the pull request.", "by": "octo-bot", "at": "2026-10-13T18:48:27Z"},
                 ]},
                 "threads": {"total": 6, "items": [
                     {
                         "id": "PRRT_1", "review": "PRR_1", "path": "src/config.rs", "line": null, "startLine": null, "originalLine": 175, "originalStartLine": null,
                         "side": "right", "outdated": true, "resolved": true, "hunk": hunk,
-                        "comments": {"total": 2, "items": [{"by": "review-bot", "at": "2026-11-18T23:12:35Z", "body": "Could this stay lazy?"}]},
+                        "comments": {"total": 2, "items": [{"id": "PRRC_1", "by": "review-bot", "at": "2026-11-18T23:12:35Z", "body": "Could this stay lazy?"}]},
                     },
                     {
                         "id": "PRRT_2", "review": null, "path": "src/main.rs", "line": 30, "startLine": 30, "originalLine": 26, "originalStartLine": null,
                         "side": "right", "outdated": false, "resolved": false, "hunk": hunk,
-                        "comments": {"total": 4, "items": [{"by": "monalisa", "at": "2026-11-19T18:23:35Z", "body": "Could this stay lazy?"}]},
+                        "comments": {"total": 4, "items": [{"id": "PRRC_2", "by": "monalisa", "at": "2026-11-19T18:23:35Z", "body": "Could this stay lazy?"}]},
                     },
                 ]},
             })
@@ -650,8 +652,124 @@ fn one_pull_request_answers_in_l1_gits_words() {
     );
     assert_eq!(
         world.github.questions()[0]["variables"],
-        json!({"owner": "octo", "repo": "app", "number": 12})
+        json!({"owner": "octo", "repo": "app", "number": 12, "threads": true})
     );
+}
+
+/// An answer without the threads, which GitHub leaves out when not asked.
+fn without_threads() -> Value {
+    let mut answer = pull(json!({}));
+    let found = answer["data"]["repository"]["pullRequest"].as_object_mut();
+    found.unwrap().remove("reviewThreads");
+    answer
+}
+
+fn asked_for_threads(world: &World) -> Vec<Value> {
+    let questions = world.github.questions();
+    questions
+        .iter()
+        .map(|question| question["variables"]["threads"].clone())
+        .collect()
+}
+
+#[test]
+fn a_pull_request_too_large_for_github_reads_without_its_threads() {
+    let unfinished = json!({
+        "data": {"repository": {"pullRequest": null}},
+        "errors": [{"path": ["repository", "pullRequest", "reviewThreads"], "message": "Something went wrong."}],
+    });
+    let gave_up = |kind: &str| {
+        let mut answer = unfinished.clone();
+        answer["errors"][0]["type"] = json!(kind);
+        Reply::graphql(answer)
+    };
+    for failure in [
+        Reply::status(502, "<html>"),
+        Reply::status(504, "<html>"),
+        gave_up("RESOURCE_LIMITS_EXCEEDED"),
+        gave_up("SERVICE_UNAVAILABLE"),
+        gave_up("TIMEOUT"),
+        Reply::graphql(unfinished.clone()),
+        Reply::status(200, "<html>"),
+    ] {
+        let world = World::connected();
+        world
+            .github
+            .graphql([failure, Reply::graphql(without_threads())]);
+        let data = world.pull().unwrap()["data"].clone();
+        assert_eq!(data["threads"], json!(null));
+        assert_eq!(data["timeline"], json!({"items": [], "total": 0}));
+        assert_eq!(asked_for_threads(&world), [true, false]);
+    }
+}
+
+#[test]
+fn a_failure_is_asked_about_once_more_at_most() {
+    let world = World::connected();
+    world
+        .github
+        .graphql([Reply::status(502, "<html>"), Reply::status(504, "<html>")]);
+    let error = world.pull().unwrap_err();
+    assert_eq!(error["httpStatus"], 504);
+    assert_eq!(asked_for_threads(&world), [true, false]);
+
+    for (refused, kind) in [
+        (
+            Reply::graphql(json!({
+                "data": {"repository": {"pullRequest": null}},
+                "errors": [refusal("NOT_FOUND", json!(["repository", "pullRequest"]))],
+            })),
+            "notFound",
+        ),
+        (Reply::rate_limited(4_000_000_000), "rateLimited"),
+        (Reply::status(500, ""), "gitHubFailed"),
+    ] {
+        let world = World::connected();
+        world.github.graphql([refused]);
+        assert_eq!(world.pull().unwrap_err()["kind"], kind);
+        assert_eq!(asked_for_threads(&world), [true]);
+    }
+}
+
+#[test]
+fn a_disconnect_stops_the_second_ask() {
+    let world = World::connected();
+    let answered = Arc::new(Barrier::new(2));
+    world.github.graphql([
+        Reply::status(502, "<html>").after(&answered),
+        Reply::graphql(without_threads()),
+    ]);
+    let error = thread::scope(|scope| {
+        let read = scope.spawn(|| world.pull().unwrap_err());
+        while world.github.questions().is_empty() {
+            thread::yield_now();
+        }
+        world.send(json!({"op": "disconnect"})).unwrap();
+        answered.wait();
+        read.join().unwrap()
+    });
+    assert_eq!(error["kind"], "interrupted");
+    assert_eq!(error["status"]["github"]["kind"], "notConnected");
+    assert_eq!(asked_for_threads(&world), [true]);
+}
+
+#[test]
+fn what_github_could_not_finish_is_not_a_refusal() {
+    let world = World::connected();
+    for kind in [
+        "RESOURCE_LIMITS_EXCEEDED",
+        "SERVICE_UNAVAILABLE",
+        "TIMEOUT",
+        "QUERY_TIMED_OUT",
+    ] {
+        let error = world.fails(Reply::graphql(withheld(vec![refusal(
+            kind,
+            json!(["repository"]),
+        )])));
+        assert_eq!(error["httpStatus"], 200);
+        let message = error["message"].as_str().unwrap();
+        assert!(message.contains("could not finish"), "{message}");
+    }
 }
 
 #[test]
@@ -666,9 +784,9 @@ fn a_merged_pull_request_tells_how_it_ended() {
     assert_eq!(
         data["timeline"]["items"],
         json!([
-            {"kind": "merged", "oid": "6".repeat(40), "by": "hubot", "at": "2026-11-17T19:18:14Z"},
-            {"kind": "closed", "by": "hubot", "at": "2026-11-17T19:18:14Z"},
-            {"kind": "branchDeleted", "by": "hubot", "at": "2026-11-17T19:18:36Z"},
+            {"id": "ME_1", "kind": "merged", "oid": "6".repeat(40), "by": "hubot", "at": "2026-11-17T19:18:14Z"},
+            {"id": "CE_1", "kind": "closed", "by": "hubot", "at": "2026-11-17T19:18:14Z"},
+            {"id": "HRDE_1", "kind": "branchDeleted", "by": "hubot", "at": "2026-11-17T19:18:36Z"},
         ])
     );
     assert_eq!(data["viewerIsAuthor"], true);
@@ -731,25 +849,24 @@ fn reviewers_show_what_is_asked_of_them_last() {
 #[test]
 fn the_timeline_skips_what_it_cannot_tell_but_counts_it() {
     let world = World::connected();
-    let act =
-        |kind: &str| json!({"__typename": kind, "author": null, "at": "2026-11-24T16:23:14Z"});
+    let act = |kind: &str| json!({"__typename": kind, "id": kind, "author": null, "at": "2026-11-24T16:23:14Z"});
     let data = world.pulls(pull(json!({"timelineItems": {"totalCount": 9, "nodes": [
         {"__typename": "PullRequestReview", "id": "PRR_2", "author": {"login": "octo"}, "submittedAt": null, "state": "PENDING", "body": "Not sent yet."},
         {"__typename": "NewEvent", "extra": {"nested": 1}},
         null,
         act("ReopenedEvent"),
         act("ConvertToDraftEvent"),
-        {"__typename": "HeadRefForcePushedEvent", "author": null, "at": "2026-11-24T16:23:14Z", "beforeCommit": null, "afterCommit": null},
-        {"__typename": "PullRequestCommit", "commit": {"oid": "a", "messageHeadline": "Fix it", "committedDate": "2026-11-24T16:23:14Z", "author": {"name": "Mona Lisa", "user": null}}},
+        {"__typename": "HeadRefForcePushedEvent", "id": "HRFPE_1", "author": null, "at": "2026-11-24T16:23:14Z", "beforeCommit": null, "afterCommit": null},
+        {"__typename": "PullRequestCommit", "id": "PURC_1", "commit": {"oid": "a", "messageHeadline": "Fix it", "committedDate": "2026-11-24T16:23:14Z", "author": {"name": "Mona Lisa", "user": null}}},
     ]}})));
     let at = "2026-11-24T16:23:14Z";
     assert_eq!(
         data["timeline"],
         json!({"total": 9, "items": [
-            {"kind": "reopened", "by": null, "at": at},
-            {"kind": "convertedToDraft", "by": null, "at": at},
-            {"kind": "forcePushed", "from": null, "to": null, "by": null, "at": at},
-            {"kind": "commit", "oid": "a", "headline": "Fix it", "by": "Mona Lisa", "at": at},
+            {"id": "ReopenedEvent", "kind": "reopened", "by": null, "at": at},
+            {"id": "ConvertToDraftEvent", "kind": "convertedToDraft", "by": null, "at": at},
+            {"id": "HRFPE_1", "kind": "forcePushed", "from": null, "to": null, "by": null, "at": at},
+            {"id": "PURC_1", "kind": "commit", "oid": "a", "headline": "Fix it", "by": "Mona Lisa", "at": at},
         ]})
     );
 }
