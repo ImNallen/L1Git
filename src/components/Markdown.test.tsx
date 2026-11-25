@@ -152,7 +152,7 @@ describe("links", () => {
 describe("images", () => {
   it("are links, and never load", async () => {
     await show(
-      '![a cat](https://a.test/cat.png) ![](https://a.test/x.png)\n\n<img width="10" alt="shot" src="https://a.test/shot.png" onerror="alert(1)">',
+      '![a cat](https://a.test/cat.png) ![&#8203;](https://a.test/x.png)\n\n<img width="10" alt="shot" src="https://a.test/shot.png" onerror="alert(1)">',
     );
     expect(host.querySelector("img")).toBeNull();
     expect(links()).toEqual([
@@ -311,6 +311,7 @@ it.each([
   ["```suggestion\n\n\n```", "\n"],
   ["> ```suggestion\r\n>\r\n> ```", " "],
   ["```suggestion\n  \n```", "  "],
+  ["> ```suggestion\n>\n\na", " "],
 ])("%j suggests blank lines", async (text, lines) => {
   await show(text);
   expect(host.querySelector("figcaption")?.textContent).toBe(

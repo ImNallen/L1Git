@@ -35,7 +35,7 @@ type Html = {
   value?: string;
   tagName?: string;
   properties?: Record<string, unknown>;
-  position?: { start: { line: number }; end: { line: number } };
+  position?: Record<"start" | "end", { line: number; offset?: number }>;
   children?: Html[];
 };
 
@@ -145,7 +145,9 @@ function withoutTags(nodes: readonly Node[]): Node[] {
   return shown;
 }
 
-const visible = /[^\s\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}]/u;
+/** Other spaces, controls, and fillers may be drawn, in some fonts. */
+const visible =
+  /[^\t\n\f\r \u00a0\u00ad\u034f\u061c\u2000-\u200f\u2028-\u202f\u205f-\u206f\u3000\u3164\ufe00-\ufe0f\ufeff]/;
 const links = new Set(["link", "linkReference"]);
 const drawn = new Set(["image", "imageReference", "footnoteReference"]);
 const shows = ({ type, value = "", children = [] }: Node): boolean =>
@@ -281,13 +283,17 @@ const has = <Keys extends object>(
   key: string,
 ): key is string & keyof Keys => Object.hasOwn(keys, key);
 
-/** Bullets and borders around nothing are nothing to see. */
-const isSeen = (piece: Shown): boolean =>
-  typeof piece === "string"
-    ? visible.test(piece)
-    : "children" in piece
-      ? piece.children.some(isSeen)
-      : piece.kind === "block" || piece.kind === "box" || piece.kind === "rule";
+const framed = new Set(["block", "box", "cell", "code", "item", "rule"]);
+/** What has a line beside or through it, wherever it takes space. */
+const lined = new Set(["quote", "strike"]);
+function isSeen(piece: Shown, seen = visible): boolean {
+  if (typeof piece === "string") return seen.test(piece);
+  if (framed.has(piece.kind)) return true;
+  const within = lined.has(piece.kind) ? /[^\t\n\f\r ]/ : seen;
+  return (
+    "children" in piece && piece.children.some((child) => isSeen(child, within))
+  );
+}
 
 const wordsIn = ({ value = "", children = [] }: Html): string =>
   value + children.map(wordsIn).join("");
@@ -297,8 +303,10 @@ export function readMarkdown(markdown: string, base: string): Tree {
   let pieces = 0;
   let size = 0;
   let turns = 0;
-  let lines = 0;
   let twoWay = false;
+  /** What lines add to these in a text of two directions. */
+  const apart = { pieces: 0, turns: 0 };
+  const held = (own: number, more: number) => (twoWay ? own + more : own);
   const kinds = new Set<string>();
   let linked = false;
 
@@ -308,20 +316,14 @@ export function readMarkdown(markdown: string, base: string): Tree {
     pieces += typeof made !== "string" && made.kind === "block" ? 10 : 1;
     size += holding.length;
     turns += turnsIn(holding);
-    if (typeof made === "string") {
-      const more = made.match(/\n(?=.)/gs)?.length ?? 0;
-      // A line is laid out in a fifth of the time of a piece.
-      pieces += more / 5;
-      lines += more;
-      twoWay ||= isTwoWay(made);
-    }
+    twoWay ||= typeof made === "string" && isTwoWay(made);
     for (const kind of holding.match(/[^\0-\u024f]/gu) ?? []) kinds.add(kind);
-    if (pieces > most.pieces) throw new Error("This text has too many parts.");
+    if (held(pieces, apart.pieces) > most.pieces)
+      throw new Error("This text has too many parts.");
     if (size > most.characters) throw new Error("This text is too long.");
     if (kinds.size > most.kinds)
       throw new Error("This text has too many kinds.");
-    // Among words in two directions, a line takes as long as a turn.
-    if (Math.max(turns, twoWay ? lines : 0) > most.turns)
+    if (held(turns, apart.turns) > most.turns)
       throw new Error("This text turns too often.");
     return made;
   }
@@ -331,6 +333,21 @@ export function readMarkdown(markdown: string, base: string): Tree {
         ? [make(run, run)]
         : [make({ kind: "seam" }, ""), make(run, run)],
     );
+  function countLines(node: Html) {
+    const words = wordsIn(node);
+    const lines = words.split("\n");
+    const breaks = lines.length - 1;
+    if (node.tagName === "p") {
+      apart.turns += breaks;
+      return;
+    }
+    // A line is laid out in a fifth of the time of a piece, but among words in
+    // two directions, as slowly as after a <br>, which took three.
+    pieces += breaks / 5;
+    apart.pieces += 2.8 * breaks - 1;
+    for (const line of lines) apart.turns += turnsIn(line);
+    apart.turns -= turnsIn(words);
+  }
   function link(href: string, children: () => Shown[]): Shown[] {
     const url = linked ? null : linkUrl(href, base);
     if (url === null) return children();
@@ -347,6 +364,8 @@ export function readMarkdown(markdown: string, base: string): Tree {
       (node.children ?? [])
         .filter((child) => child.type !== "text" || !holds.has(tagName))
         .flatMap(shown);
+    const isLines = tagName === "p" && properties.className !== undefined;
+    if (isLines || tagName === "span") countLines(node);
     const dir = (properties.dir ?? null) as Direction | null;
     const piece = (): Piece | null => {
       if (has(around, tagName))
@@ -360,7 +379,7 @@ export function readMarkdown(markdown: string, base: string): Tree {
       switch (tagName) {
         case "p":
           return {
-            kind: properties.className === undefined ? "paragraph" : "lines",
+            kind: isLines ? "lines" : "paragraph",
             children: children(),
           };
         case "blockquote":
@@ -400,13 +419,17 @@ export function readMarkdown(markdown: string, base: string): Tree {
     };
     if (tagName === "a") return link(attribute(node, "href") ?? "", children);
     if (tagName === "img")
-      return link(attribute(node, "src") ?? "", () =>
-        write(attribute(node, "alt")?.trim() || "Image"),
-      );
+      return link(attribute(node, "src") ?? "", () => {
+        const alt = attribute(node, "alt")?.trim() ?? "";
+        return write(visible.test(alt) ? alt : "Image");
+      });
     if (tagName === "pre") {
       const code = node.children?.[0] ?? node;
       const { start, end } = node.position!;
-      const hasLines = end.line - start.line > 1;
+      const written = markdown.slice(start.offset, end.offset);
+      // It ends with a line in a quote, or else with its fence.
+      const hasLines =
+        end.line - start.line > 1 || /[\r\n][\s>]*>\s*$/.test(written);
       // A suggestion without lines is one to delete them, unlike a blank line.
       const text = wordsIn(code).replace(/\n$/, "") || (hasLines ? " " : "");
       const [name = ""] = (code.properties?.className ?? []) as string[];
@@ -423,8 +446,8 @@ export function readMarkdown(markdown: string, base: string): Tree {
   const blocks = root.children?.filter(({ type }) => type === "element") ?? [];
   const all = blocks.flatMap(shown);
   return {
-    pieces: all.some(isSeen) ? all : [],
+    pieces: all.some((piece) => isSeen(piece)) ? all : [],
     size,
-    weight: pieces + turns + size / 20,
+    weight: held(pieces, apart.pieces) + held(turns, apart.turns) + size / 20,
   };
 }
