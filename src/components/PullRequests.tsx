@@ -7,6 +7,7 @@ import { elsewhereText, viewLabels } from "../domain/pullRequestList";
 import type { ListModel, Row } from "../domain/pullRequestList";
 import { mac } from "../repositories";
 import { focusIsShown } from "../shell/dom";
+import type { FilesChangedState } from "../shell/useFilesChanged";
 import type { Layout } from "../shell/useLayout";
 import type { PullRequestsState } from "../shell/usePullRequests";
 import type { Appearance } from "../themes/palette";
@@ -124,6 +125,7 @@ function Screen({
   hostProblem,
   onCheckHost,
   state,
+  files,
   layout,
   theme,
   painted,
@@ -138,6 +140,7 @@ function Screen({
   hostProblem: string | null;
   onCheckHost: () => void;
   state: PullRequestsState;
+  files: FilesChangedState;
   layout: Layout;
   theme: Appearance;
   painted: boolean;
@@ -238,7 +241,7 @@ function Screen({
       }}
       onKeyDown={(event) => {
         if (event.target !== event.currentTarget) return;
-        if (event.key !== "ArrowDown" && event.key !== "j") return;
+        if (opened || (event.key !== "ArrowDown" && event.key !== "j")) return;
         event.preventDefault();
         focus();
       }}
@@ -342,10 +345,13 @@ function Screen({
         <PullRequestDetail
           key={opened.key}
           ref={detail}
+          isShown={!hidden}
           opened={opened}
+          files={files}
           layout={layout}
           theme={theme}
           painted={painted}
+          onTab={state.showTab}
           onBack={onBack}
           onRefresh={state.refresh}
         />

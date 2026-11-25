@@ -56,6 +56,10 @@
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar) var(--panel-raised);
 }
+/* Pierre takes one without height to be above the view, and scrolls past it once it is drawn. */
+.file-diff-scroll > div > diffs-container {
+  min-height: 1px;
+}
 .file-diff-empty {
   flex: 1;
   display: flex;

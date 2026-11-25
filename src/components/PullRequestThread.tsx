@@ -49,6 +49,40 @@ const endOf = (path: string) =>
 
 const comments = (count: number) => counted(count, "comment");
 
+export function ThreadComments({
+  thread: { comments: said },
+  viewer,
+  url,
+}: {
+  thread: ReviewThread;
+  viewer: string;
+  url: string;
+}) {
+  return (
+    <>
+      <ul className="thread-comments">
+        {said.items.map(({ id, by, at, body }) => (
+          <li key={id}>
+            <Avatar login={by} />
+            <div className="thread-comment">
+              <p className="thread-by">
+                <strong>{personName(by, viewer)}</strong> <Ago at={at} />
+              </p>
+              <Body text={body} />
+            </div>
+          </li>
+        ))}
+      </ul>
+      {said.items.length < said.total && (
+        <p className="thread-more">
+          {comments(said.total - said.items.length)} more.{" "}
+          <OnGitHub url={url} />
+        </p>
+      )}
+    </>
+  );
+}
+
 /** A resolved thread starts as one row. */
 export const Thread = memo(function Thread({
   thread,
@@ -90,25 +124,7 @@ export const Thread = memo(function Thread({
         {open && (
           <>
             {cut && <ThreadHunk path={path} of={cut} />}
-            <ul className="thread-comments">
-              {said.items.map(({ id, by, at, body }) => (
-                <li key={id}>
-                  <Avatar login={by} />
-                  <div className="thread-comment">
-                    <p className="thread-by">
-                      <strong>{personName(by, viewer)}</strong> <Ago at={at} />
-                    </p>
-                    <Body text={body} />
-                  </div>
-                </li>
-              ))}
-            </ul>
-            {said.items.length < said.total && (
-              <p className="thread-more">
-                {comments(said.total - said.items.length)} more.{" "}
-                <OnGitHub url={url} />
-              </p>
-            )}
+            <ThreadComments thread={thread} viewer={viewer} url={url} />
           </>
         )}
       </div>

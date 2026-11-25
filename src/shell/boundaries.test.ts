@@ -79,6 +79,7 @@ describe("shell boundaries", () => {
       "useScreen",
       "useFocus",
       "usePullRequests",
+      "useFilesChanged",
       "usePalette",
       "useExpandedRepositories",
       "useHistoryColumns",

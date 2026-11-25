@@ -11,6 +11,11 @@ export function Avatar({ login }: { login: string | null }) {
   );
 }
 
+export const Bars = ({ count }: { count: number }) =>
+  Array.from({ length: count }, (_, index) => (
+    <i className="pull-bone" key={index} aria-hidden="true" />
+  ));
+
 export function Ago({ at }: { at: string }) {
   const date = new Date(at);
   return (

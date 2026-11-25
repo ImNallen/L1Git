@@ -28,8 +28,8 @@ export type Palette = {
   /** Closes, then returns focus to the element focused before it opened, else `focus.fallback()`. */
   close: () => void;
   run: (item: PaletteItem) => void;
-  /** `typing` is false because a palette item never runs from a text field; the keydown handler sets it per event. */
-  actions: ActionSlice<"picked" | "typing">;
+  /** `typing` and `menuOpen` are false because a palette item never runs from a text field or a menu; the keydown handler sets them per event. */
+  actions: ActionSlice<"picked" | "typing" | "menuOpen">;
 };
 
 export function usePalette({
@@ -57,7 +57,11 @@ export function usePalette({
       refocusIfLost();
     },
     actions: defineSlice({
-      context: { picked: palette?.picked ?? null, typing: false },
+      context: {
+        picked: palette?.picked ?? null,
+        typing: false,
+        menuOpen: false,
+      },
       commands: {},
     }),
   };
@@ -67,8 +71,8 @@ export function usePalette({
  * The one global keydown listener: on `window`, in the bubble phase,
  * registered once. It reads the actions through a ref written in a layout
  * effect, so a key pressed right after a commit sees that commit's context.
- * Open dialogs come from the DOM and typing from `composedPath()[0]`; the
- * palette shortcut checks `event.target`.
+ * Open dialogs and menus come from the DOM and typing from
+ * `composedPath()[0]`; the palette shortcut checks `event.target`.
  */
 export function useShortcuts(
   actions: ComposedActions,
@@ -99,8 +103,9 @@ export function useShortcuts(
       }
       const [origin] = event.composedPath();
       const typing = typingIn(origin instanceof HTMLElement ? origin : null);
+      const menuOpen = document.querySelector("[role=menu]") !== null;
       const action = shortcutAction(
-        { ...context, dialogOpen, typing },
+        { ...context, dialogOpen, menuOpen, typing },
         event,
         mac,
       );

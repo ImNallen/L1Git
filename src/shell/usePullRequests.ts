@@ -50,8 +50,13 @@ import type { ScreenState } from "./useScreen";
 
 const FOCUS_REFRESH_MS = 60_000;
 
+export type PullRequestTab = "conversation" | "commits" | "files" | "checks";
+
 export type OpenedPullRequest = {
   key: string;
+  /** This pull request, as this sign-in reads it. */
+  id: string;
+  tab: PullRequestTab;
   repository: ListedRepository;
   number: number;
   /** What a list says of it, for as long as one does. */
@@ -80,6 +85,7 @@ export type PullRequestsState = {
   /** Null while the list shows, and while there is no sign-in. */
   opened: OpenedPullRequest | null;
   open: (pull: DetailRequest) => void;
+  showTab: (tab: PullRequestTab) => void;
   /** The sidebar's way in and back. */
   entryRef: RefObject<HTMLButtonElement | null>;
   actions: ActionSlice<
@@ -110,7 +116,7 @@ function openedOf(
   met: HostProblem | null,
   { body }: ListModel,
   readOf: ReadOf,
-): OpenedPullRequest {
+): Omit<OpenedPullRequest, "id" | "tab"> {
   const key = `${repository.key}#${number}`;
   const rows =
     body.kind === "rows" ? body.groups.flatMap((group) => group.rows) : [];
@@ -168,6 +174,10 @@ export function usePullRequests({
   );
   const problemMet = useSyncExternalStore(subscribe, met);
   const [asked, setAsked] = useState<DetailRequest | null>(null);
+  const [chosen, setChosen] = useState<{
+    id: string;
+    tab: PullRequestTab;
+  } | null>(null);
   const [visited, setVisited] = useState(false);
   const [choices, setChoices] = useState(initialChoices);
   const [, passMinute] = useReducer((minutes: number) => minutes + 1, 0);
@@ -229,6 +239,8 @@ export function usePullRequests({
   )
     setAsked(null);
   const opened = viewer === null ? null : asked;
+  const id = opened && `${account} ${opened.repository.key}#${opened.number}`;
+  const tab = chosen !== null && chosen.id === id ? chosen.tab : "conversation";
   const openedRead = opened
     ? lookInto({ repository: opened.repository.github, number: opened.number })
     : unread;
@@ -273,10 +285,7 @@ export function usePullRequests({
 
   // Ahead of the list's, so a locked keychain asks for what is on screen.
   useOpenedReads({
-    visit:
-      shown && opened
-        ? `${account} ${opened.repository.key}#${opened.number}`
-        : null,
+    visit: shown ? id : null,
     opened: openedRead,
     read: () => {
       if (opened) queue.addFirst(opened);
@@ -347,15 +356,23 @@ export function usePullRequests({
     waiting: useMemo(() => waiting(listed, readOf), [listed, readOf]),
     opened: useMemo(
       () =>
-        opened && viewer !== null
-          ? openedOf(opened, viewer, openedRead, keptBack, model, readOf)
+        opened && id !== null && viewer !== null
+          ? {
+              id,
+              tab,
+              ...openedOf(opened, viewer, openedRead, keptBack, model, readOf),
+            }
           : null,
-      [opened, viewer, openedRead, keptBack, model, readOf],
+      [opened, id, tab, viewer, openedRead, keptBack, model, readOf],
     ),
     open: (pull) => {
-      flushSync(() => setAsked(pull));
+      flushSync(() => {
+        setAsked(pull);
+        setChosen(null);
+      });
       pullRequestsRef.current?.focus();
     },
+    showTab: (tab) => setChosen(id === null ? null : { id, tab }),
     entryRef,
     actions: defineSlice({
       context: { pullRequestOpen: opened !== null },

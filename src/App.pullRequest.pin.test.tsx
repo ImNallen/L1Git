@@ -1,12 +1,9 @@
 // @vitest-environment happy-dom
 import { expect, it, vi } from "vitest";
-import { pullRequestSchema } from "./domain/pullRequest";
-import type { PullRequest, PullRequestSummary } from "./domain/pullRequest";
 import {
   focused,
   get,
   installHarness,
-  mountApp,
   paletteTitles,
   query,
   queryAll,
@@ -14,124 +11,20 @@ import {
 import type { Harness } from "./test/appHarness";
 import { pullKey, pullsKey } from "./test/fakeBridge";
 import type { Bridge, World } from "./test/fakeBridge";
-import { OTHER, PIN } from "./test/fixtures";
+import {
+  at,
+  link,
+  open,
+  page,
+  pull,
+  refresh,
+  row,
+  tab,
+  visit,
+} from "./test/pullRequests";
 
 installHarness();
 
-const at = (hour: number) =>
-  `2026-11-02T${String(hour).padStart(2, "0")}:00:00Z`;
-const page = <T,>(items: T[], total = items.length) => ({ items, total });
-
-function row(number: number, fields: Partial<PullRequestSummary> = {}) {
-  return {
-    number,
-    title: `Row ${number}`,
-    state: { kind: "open" as const, draft: false },
-    author: "maja",
-    viewerIsAuthor: false,
-    head: `branch-${number}`,
-    base: "main",
-    labels: page([]),
-    comments: 0,
-    reviewRequested: false,
-    review: null,
-    checks: { passed: 0, failed: 0, skipped: 0, running: 0 },
-    mergeable: "mergeable" as const,
-    additions: 1,
-    deletions: 1,
-    createdAt: at(0),
-    updatedAt: `2026-11-02T00:00:${60 - number}Z`,
-    ...fields,
-  };
-}
-
-function pull(number: number, fields: Partial<PullRequest> = {}): PullRequest {
-  const { head: branch, checks: _, ...summary } = row(number);
-  return pullRequestSchema.parse({
-    ...summary,
-    body: "Reads **once**.",
-    baseOid: "b".repeat(40),
-    changedFiles: 2,
-    head: {
-      branch,
-      oid: "1".repeat(40),
-      repository: { owner: "octo", repo: "pin" },
-      crossRepository: false,
-      maintainerCanModify: false,
-    },
-    reviewers: [],
-    checks: page([]),
-    commits: page([
-      { oid: "a".repeat(40), headline: "Read it", by: "maja", at: at(1) },
-    ]),
-    timeline: page([
-      {
-        id: "C1",
-        kind: "commit",
-        oid: "a".repeat(40),
-        headline: "Read it",
-        by: "maja",
-        at: at(1),
-      },
-      { id: "K1", kind: "comment", body: "Why?", by: "sara", at: at(2) },
-    ]),
-    threads: page([]),
-    mergeState: "clean",
-    ...fields,
-  });
-}
-
-function world(world: World) {
-  for (const [root, repo] of [
-    [PIN, "pin"],
-    [OTHER, "other"],
-  ] as const)
-    world.overviews.set(root, {
-      ...world.overviews.get(root)!,
-      github: { owner: "octo", repo },
-    });
-  const { pulls, details } = world.host;
-  pulls.set(pullsKey("octo/pin", "open"), page([row(1), row(2), row(5)]));
-  pulls.set(pullsKey("octo/other", "open"), page([row(3)]));
-  pulls.set(pullsKey("octo/pin", "recentlyMerged"), page([]));
-  pulls.set(pullsKey("octo/other", "recentlyMerged"), page([]));
-  details.set(pullKey("octo/pin", 1), pull(1));
-  details.set(pullKey("octo/pin", 2), pull(2, { body: "" }));
-  world.host.status = {
-    ...world.host.status,
-    github: {
-      kind: "connected",
-      login: "octo",
-      api: "https://api.github.com/",
-      method: "gh",
-      access: "private",
-      connectedAt: 1,
-    },
-  };
-}
-
-async function visit(
-  more: {
-    world?: (world: World) => void;
-    bridge?: (bridge: Bridge) => void;
-    width?: number;
-  } = {},
-) {
-  const app = await mountApp({
-    ...more,
-    world: (each) => {
-      world(each);
-      more.world?.(each);
-    },
-  });
-  await app.click(get("button", /^Pull requests/));
-  return app;
-}
-
-const link = (number: number) => get("link", new RegExp(`^Row ${number},`));
-async function open(app: Harness, number: number) {
-  await app.click(link(number));
-}
 const detail = () => query("article", /^Row/);
 const said = () => document.querySelector(".conversation")?.textContent ?? null;
 /** What it says once each text had its turn. */
@@ -139,7 +32,6 @@ async function read(app: Harness) {
   for (let frame = 0; frame < 5; frame += 1) await app.flushFrames();
   return said();
 }
-const tab = (name: string) => get("tab", new RegExp(`^${name}`));
 const chosen = () =>
   queryAll("tab")
     .filter((each) => each.getAttribute("aria-selected") === "true")
@@ -153,7 +45,6 @@ const reads = (bridge: Bridge) =>
   bridge.hostLog.flatMap(({ op, number }) =>
     op === "pullRequest" ? [Number(number)] : [],
   );
-const refresh = () => get("button", "Refresh pull requests");
 
 it("opens a row in the app, and shows it whole", async () => {
   const app = await visit();
@@ -171,6 +62,7 @@ it("opens a row in the app, and shows it whole", async () => {
   expect(queryAll("tab").map(({ textContent }) => textContent)).toEqual([
     "Conversation1",
     "Commits1",
+    "Files changed2",
     "Checks0",
   ]);
   expect(document.querySelector(".pull-position")?.textContent).toBe("1 of 4");
@@ -311,7 +203,7 @@ it("steps through the tabs with the arrows, and starts each pull request anew", 
   await app.press("ArrowRight");
   expect(chosen()).toEqual(["Conversation1"]);
   await app.press("ArrowLeft");
-  expect(queryAll("tab").map((each) => each.tabIndex)).toEqual([-1, -1, 0]);
+  expect(queryAll("tab").map((each) => each.tabIndex)).toEqual([-1, -1, -1, 0]);
   await app.click(refresh());
   expect(chosen(), "a refresh keeps it").toEqual(["Checks0"]);
 

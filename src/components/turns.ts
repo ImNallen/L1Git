@@ -44,7 +44,7 @@ export class Turns {
   join(turn: Turn): () => void {
     const { place } = turn;
     this.sight ??= new IntersectionObserver(this.look, {
-      root: place.closest(".pull-panel"),
+      root: place.closest(".file-diff-scroll, .pull-panel"),
       rootMargin: "50% 0px",
     });
     this.turns.set(place, turn);

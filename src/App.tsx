@@ -42,6 +42,7 @@ import { PublishHost } from "./shell/SyncRegions";
 import { Toolbar } from "./shell/Toolbar";
 import { useActiveWorktree } from "./shell/useActiveWorktree";
 import { useDiffPane } from "./shell/useDiffPane";
+import { useFilesChanged } from "./shell/useFilesChanged";
 import { useFocus, useFocusRecovery } from "./shell/useFocus";
 import { useHistoryPane } from "./shell/useHistoryPane";
 import { useLayout } from "./shell/useLayout";
@@ -85,6 +86,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     focus,
     layout,
   });
+  const files = useFilesChanged({ opened: pulls.opened, screen });
   const palette = usePalette(focus);
   const expansion = useExpandedRepositories(app.catalog);
   const columns = useHistoryColumns();
@@ -181,6 +183,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
   const actions = composeActions(
     screen.actions,
     pulls.actions,
+    files.actions,
     layout.actions,
     palette.actions,
     history.actions,
@@ -211,7 +214,8 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     expansion.persistenceError ??
     columns.persistenceError ??
     visibility.persistenceError ??
-    layout.persistenceError;
+    layout.persistenceError ??
+    files.persistenceError;
 
   return (
     <div
@@ -247,6 +251,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
             hostProblem={host.problem}
             onCheckHost={() => void host.refresh()}
             state={pulls}
+            files={files}
             layout={layout}
             theme={appearance.variant.appearance}
             painted={isPainted(appearance.variant)}

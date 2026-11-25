@@ -5,6 +5,7 @@ const diffViews = () => import("../components/FileDiffPane");
 const resolutionViews = () => import("../components/ConflictResolver");
 const code = () => import("../components/Code");
 const hunk = () => import("../components/Hunk");
+const filesChanged = () => import("../components/FilesChanged");
 export const FileDiffPane = lazy(() =>
   diffViews().then((m) => ({ default: m.FileDiffPane })),
 );
@@ -13,6 +14,9 @@ export const RetainedResolution = lazy(() =>
 );
 export const Code = lazy(() => code().then((m) => ({ default: m.Code })));
 export const Hunk = lazy(() => hunk().then((m) => ({ default: m.Hunk })));
+export const FilesChanged = lazy(() =>
+  filesChanged().then((m) => ({ default: m.FilesChanged })),
+);
 
 export function usePrefetchLazyViews() {
   useEffect(() => {
@@ -21,5 +25,6 @@ export function usePrefetchLazyViews() {
     void resolutionViews();
     void code();
     void hunk();
+    void filesChanged();
   }, []);
 }

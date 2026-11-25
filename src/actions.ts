@@ -36,6 +36,8 @@ export type ActionContext = {
   inspectable: boolean;
   /** Whether one pull request shows in place of the list. */
   pullRequestOpen: boolean;
+  /** Where the Files changed tab is among its files, while it shows one. */
+  filesChanged: { at: number; count: number } | null;
   push: PushControl | null;
   repository: {
     fetching: boolean;
@@ -74,6 +76,7 @@ export type ActionContext = {
   /** The active worktree's branch, which Pull updates. */
   pull: PullTarget;
   typing: boolean;
+  menuOpen: boolean;
 };
 
 export type Commands = {
@@ -84,6 +87,10 @@ export type Commands = {
   showHistory: () => void;
   searchPullRequests: () => void;
   closePullRequest: () => void;
+  nextFile: () => void;
+  previousFile: () => void;
+  nextChange: () => void;
+  previousChange: () => void;
   toggleSidebar: () => void;
   toggleInspector: () => void;
   fetch: () => void;
@@ -131,7 +138,7 @@ export type Commands = {
 
 type Shortcut = {
   key: string;
-  modifier: "platform" | "cmdOrCtrl" | "unchecked";
+  modifier: "platform" | "cmdOrCtrl" | "unchecked" | "none";
   shift?: true;
   yieldsToTyping?: true;
 };
@@ -186,6 +193,10 @@ export type ActionId =
   | "showHistory"
   | "searchPullRequests"
   | "closePullRequest"
+  | "nextFile"
+  | "previousFile"
+  | "nextChange"
+  | "previousChange"
   | "toggleSidebar"
   | "toggleInspector"
   | "openSettings"
@@ -210,6 +221,11 @@ const onPullRequestList = (context: ActionContext) =>
   onPullRequests(context) && !context.pullRequestOpen && !context.dialogOpen;
 const onPullRequest = (context: ActionContext) =>
   onPullRequests(context) && context.pullRequestOpen;
+const onFilesChanged = (context: ActionContext) =>
+  onPullRequest(context) &&
+  context.filesChanged !== null &&
+  !context.dialogOpen &&
+  !context.menuOpen;
 const outsideSettings = (context: ActionContext) =>
   context.screen !== "settings";
 const keysFree = (context: ActionContext) =>
@@ -242,6 +258,11 @@ const UNDO_SHORTCUT: Shortcut = {
   modifier: "platform",
   yieldsToTyping: true,
 };
+const letter = (key: string): Shortcut => ({
+  key,
+  modifier: "none",
+  yieldsToTyping: true,
+});
 const REDO_SHORTCUT: Shortcut = { ...UNDO_SHORTCUT, shift: true };
 
 export const actions: readonly Action[] = [
@@ -618,6 +639,40 @@ export const actions: readonly Action[] = [
     run: (commands) => commands.closePullRequest(),
   },
   {
+    id: "nextFile",
+    title: "Next file",
+    shortcut: letter("j"),
+    available: (context) => {
+      const place = context.filesChanged;
+      return (
+        onFilesChanged(context) && place !== null && place.at + 1 < place.count
+      );
+    },
+    run: (commands) => commands.nextFile(),
+  },
+  {
+    id: "previousFile",
+    title: "Previous file",
+    shortcut: letter("k"),
+    available: (context) =>
+      onFilesChanged(context) && (context.filesChanged?.at ?? 0) > 0,
+    run: (commands) => commands.previousFile(),
+  },
+  {
+    id: "nextChange",
+    title: "Next change",
+    shortcut: letter("n"),
+    available: onFilesChanged,
+    run: (commands) => commands.nextChange(),
+  },
+  {
+    id: "previousChange",
+    title: "Previous change",
+    shortcut: letter("p"),
+    available: onFilesChanged,
+    run: (commands) => commands.previousChange(),
+  },
+  {
     id: "showHistory",
     title: "Back to history",
     shortcut: { key: "Escape", modifier: "unchecked", yieldsToTyping: true },
@@ -698,6 +753,8 @@ export function matchesShortcut(
   if (event.key.toLowerCase() !== shortcut.key.toLowerCase()) return false;
   if (shortcut.modifier === "unchecked") return true;
   if (shortcut.modifier === "cmdOrCtrl") return event.metaKey || event.ctrlKey;
+  if (shortcut.modifier === "none")
+    return !(event.metaKey || event.ctrlKey || event.shiftKey || event.altKey);
   return (
     (mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey) &&
     event.shiftKey === (shortcut.shift === true) &&
@@ -752,6 +809,7 @@ function shortcutLabel(shortcut: Shortcut, mac: boolean): string {
   if (shortcut.modifier === "unchecked")
     return shortcut.key === "Escape" ? "Esc" : shortcut.key;
   const key = shortcut.key.toUpperCase();
+  if (shortcut.modifier === "none") return key;
   if (mac) return `${shortcut.shift ? "⇧" : ""}⌘${key}`;
   return `Ctrl+${shortcut.shift ? "Shift+" : ""}${key}`;
 }
