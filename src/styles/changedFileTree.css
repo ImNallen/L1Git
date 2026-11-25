@@ -78,7 +78,8 @@
   align-items: center;
   gap: 6px;
 }
-[data-item-section="decoration"] > [title]::before {
+/* A row that Pierre uses again keeps an empty title. */
+[data-item-section="decoration"] > [title]:not([title=""])::before {
   content: "";
   width: 14px;
   height: 14px;

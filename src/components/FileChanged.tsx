@@ -1,7 +1,12 @@
 import { use, useCallback, useLayoutEffect, useMemo, useState } from "react";
 import type { ReactNode, Ref, RefObject } from "react";
 import { ChevronRight, FileX2 } from "lucide-react";
-import { inPlaceOfLines } from "../domain/filesChanged";
+import {
+  inPlaceOfLines,
+  modeChange,
+  partialClone,
+  shownPath,
+} from "../domain/filesChanged";
 import { parsedFiles } from "../domain/lineSelection";
 import type { DiffStyle } from "../domain/lineSelection";
 import type { ReviewThread } from "../domain/pullRequest";
@@ -13,20 +18,34 @@ import { Diff } from "./FilePatchView";
 import { FilesState, ReadingFiles } from "./FilesState";
 import { SurroundingsContext } from "./pullRequestText";
 import { ThreadChip, ThreadsElsewhere } from "./ReviewThreads";
+import { hasSelection } from "./selection";
 import { Turns, TurnsContext } from "./turns";
 import type { DiffSteps } from "./useDiffSteps";
+import { useSteady } from "./useSteady";
 
-function MovedFrom({ file: { from, similarity } }: { file: RangeFile }) {
-  if (from === null) return null;
+/** What changed besides lines. */
+function Moved({
+  file: { from, similarity },
+  mode,
+}: {
+  file: RangeFile;
+  mode: string | null;
+}) {
+  if (from === null && mode === null) return null;
   return (
     <p className="files-moved">
-      Moved from{" "}
-      <code>
-        <bdi>{from}</bdi>
-      </code>
-      {similarity !== null && similarity < 100 && (
-        <span> · {similarity}% the same.</span>
+      {from !== null && (
+        <>
+          Moved from{" "}
+          <code>
+            <bdi>{shownPath(from)}</bdi>
+          </code>
+          {similarity !== null && similarity < 100 && (
+            <span> · {similarity}% the same.</span>
+          )}{" "}
+        </>
       )}
+      {mode}
     </p>
   );
 }
@@ -66,7 +85,7 @@ export function FileChanged({
   enter,
   patch,
   contentMissing,
-  threads,
+  threads: newest,
   unfolded,
   isShown,
   diffStyle,
@@ -97,6 +116,12 @@ export function FileChanged({
 }) {
   const { theme, painted } = use(SurroundingsContext);
   const [turns] = useState(() => new Turns());
+  const isSelected = useCallback(
+    () => pane.current !== null && hasSelection(pane.current),
+    [pane],
+  );
+  // Pierre draws every line again for other threads, and a selection is lost.
+  const threads = useSteady(newest, isSelected);
   const diff = patch?.kind === "ready" ? patch.patch : null;
   const words = diff && inPlaceOfLines(file, diff);
   const lines = words === null && diff?.kind === "text" ? diff.patch : null;
@@ -136,8 +161,8 @@ export function FileChanged({
     // Pierre makes the one of a diff, and takes no attributes for it.
     scroller.tabIndex = 0;
     scroller.setAttribute("role", "region");
-    scroller.setAttribute("aria-label", file.path);
-    if (!holdsFocus.current) return;
+    scroller.setAttribute("aria-label", shownPath(file.path));
+    if (!holdsFocus.current && document.activeElement !== pane.current) return;
     holdsFocus.current = false;
     scroller.focus({ preventScroll: true });
   });
@@ -178,10 +203,7 @@ export function FileChanged({
     if (contentMissing)
       return (
         <Lineless above={above} below={below}>
-          <FilesState
-            title="This is a partial clone, and file contents aren't on this computer."
-            url={url}
-          />
+          <FilesState title={partialClone} url={url} />
         </Lineless>
       );
     if (patch?.kind === "failed")
@@ -227,7 +249,10 @@ export function FileChanged({
   };
   return (
     <TurnsContext value={turns}>
-      <MovedFrom file={file} />
+      <Moved
+        file={file}
+        mode={lines === null || !diff ? null : modeChange(diff)}
+      />
       <div className="files-body">{body()}</div>
     </TurnsContext>
   );

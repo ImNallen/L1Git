@@ -2,7 +2,15 @@ import { parsePatchFiles } from "@pierre/diffs";
 import type { FileDiffLoadedFiles, FileDiffMetadata } from "@pierre/diffs";
 import type { FilePatch } from "./repository";
 
+const overLimit = (bytes: number) =>
+  `is ${(bytes / 1024 / 1024).toFixed(1)} MiB, above the 1 MiB display limit.`;
+
+/** The patch of a file that was read with every line of context. */
 export function patchText(diff: FilePatch | null): string {
+  if (diff?.kind === "tooLarge")
+    throw new Error(
+      `With all of its lines, this change ${overLimit(diff.bytes)}`,
+    );
   if (diff?.kind !== "text") throw new Error("The file has no text diff.");
   return diff.patch;
 }
@@ -11,7 +19,7 @@ export function patchText(diff: FilePatch | null): string {
 export const undrawn = (diff: Exclude<FilePatch, { kind: "text" }>) =>
   diff.kind === "binary"
     ? "Binary file. L1 Git does not display binary changes."
-    : `This change is ${(diff.bytes / 1024 / 1024).toFixed(1)} MiB, above the 1 MiB display limit.`;
+    : `This change ${overLimit(diff.bytes)}`;
 
 /**
  * Rebuilds both sides of `shown` from the same read with every line of

@@ -15,7 +15,15 @@ import type { Harness } from "./test/appHarness";
 import { pullKey } from "./test/fakeBridge";
 import type { Bridge, World } from "./test/fakeBridge";
 import { PIN } from "./test/fixtures";
-import { at, open, page, pull, refresh, tab, visit } from "./test/pullRequests";
+import {
+  at,
+  open,
+  page,
+  pull as anyPull,
+  refresh,
+  tab,
+  visit,
+} from "./test/pullRequests";
 
 installHarness();
 
@@ -44,7 +52,15 @@ const ready = (listed = files, contentMissing = false) => ({
   mergeBase: oid("a"),
   files: listed,
   contentMissing,
+  shallow: false,
 });
+const pull = (number: number, fields: Partial<PullRequest> = {}) =>
+  anyPull(number, {
+    changedFiles: 3,
+    additions: 4,
+    deletions: 2,
+    ...fields,
+  });
 
 function answer(bridge: Bridge) {
   bridge.respond("rangeFiles", () => ready());
@@ -105,6 +121,10 @@ async function openFiles(
       answer(bridge);
       more?.bridge?.(bridge);
     },
+    world: (world) => {
+      world.host.details.set(pullKey("octo/pin", 1), pull(1));
+      more?.world?.(world);
+    },
   });
   await open(app, number);
   await app.click(tab("Files changed"));
@@ -115,11 +135,11 @@ async function backToList(app: Harness) {
 }
 
 it("reads nothing before the tab is opened, and then once", async () => {
-  const app = await visit({ bridge: answer });
+  const app = await visit({ bridge: answer, ...detail() });
   await open(app, 1);
   await app.click(tab("Commits"));
   expect(reads(app.bridge)).toEqual([]);
-  expect(tab("Files changed").textContent).toBe("Files changed2");
+  expect(tab("Files changed").textContent).toBe("Files changed3");
   await app.click(tab("Files changed"));
   expect(reads(app.bridge)).toEqual(["rangeFiles", "rangePatches"]);
   expect(app.bridge.log.find(({ op }) => op === "rangeFiles")).toMatchObject({
@@ -334,13 +354,45 @@ it.each([
     () => ready(files, true),
     "This is a partial clone, and file contents aren't on this computer.",
   ],
+  [
+    "a partial clone without folders",
+    () => ({ kind: "treesMissing" }),
+    "This is a partial clone, and file contents aren't on this computer.",
+  ],
 ])("says what there is to say about %s", async (_, found, words) => {
   const app = await openFiles({
+    ...(_ === "no files" &&
+      detail({ changedFiles: 0, additions: 0, deletions: 0 })),
     bridge: (bridge) => bridge.respond("rangeFiles", found),
   });
   expect(panel().textContent).toContain(words);
   expect(get("link", "Open on GitHub", panel())).toBeTruthy();
   expect(reads(app.bridge)).toEqual(["rangeFiles"]);
+});
+
+it("says when GitHub counts otherwise, and shows the diff", async () => {
+  const app = await openFiles(detail({ changedFiles: 14, additions: 612 }));
+  const notice = panel().querySelector<HTMLElement>(".files-counts")!;
+  expect(notice.textContent).toBe(
+    "GitHub counts 14 files, +612 −2. This shows 3 files, +4 −2. Open on GitHub",
+  );
+  expect(get("link", "Open on GitHub", notice).getAttribute("href")).toBe(
+    "https://github.com/octo/pin/pull/1/files",
+  );
+  expect(place()).toBe("1 of 3");
+  app.bridge.world.host.details.set(pullKey("octo/pin", 1), pull(1));
+  await app.click(refresh());
+  expect(panel().querySelector(".files-counts"), "it is pinned").not.toBeNull();
+});
+
+it("shows no diff of a shallow clone that GitHub counts otherwise", async () => {
+  await openFiles({
+    ...detail({ changedFiles: 2 }),
+    bridge: (bridge) =>
+      bridge.respond("rangeFiles", () => ({ ...ready(), shallow: true })),
+  });
+  expect(panel().textContent).toContain("This is a shallow clone");
+  expect(place()).toBeUndefined();
 });
 
 it("says that its clone is gone, and reads it when it is back", async () => {
@@ -357,8 +409,11 @@ it("says that its clone is gone, and reads it when it is back", async () => {
     "Couldn't read the changesThe folder is gone.",
   );
   back();
-  await app.click(get("button", "Try again"));
+  const again = get("button", "Try again");
+  again.focus();
+  await app.click(again);
   expect(place()).toBe("1 of 3");
+  expect(focused()).toBe("region src/a.ts");
 });
 
 it("keeps what it shows when more is pushed, until asked", async () => {
@@ -395,7 +450,10 @@ it("keeps what it shows when more is pushed, until asked", async () => {
 
   details.set(pullKey("octo/pin", 1), newer);
   await app.click(refresh());
-  await app.click(get("button", "Show them"));
+  const show = get("button", "Show them");
+  show.focus();
+  await app.click(show);
+  expect(focused()).toBe("region src/new.ts");
   expect(notice()).toBeNull();
   expect(place(), "the same file").toBe("2 of 3");
   expect(
@@ -465,6 +523,110 @@ it("shows threads that come later, and none of another head", async () => {
     "S1 commentsara: “Says one”",
     "S1 commentsara: “Says two”",
   ]);
+});
+
+it("keeps the threads it has when GitHub gives up on them", async () => {
+  const app = await openFiles(detail({ threads: page([thread("one")]) }));
+  const { details } = app.bridge.world.host;
+  const key = pullKey("octo/pin", 1);
+  const chip = queryAll("button", /Says one/)[0]!;
+  chip.focus();
+  details.set(key, pull(1, { threads: null }));
+  await app.click(refresh());
+  expect(chips()).toEqual(["S1 commentsara: “Says one”"]);
+  expect(queryAll("button", /Says one/)[0]).toBe(chip);
+  details.set(key, pull(1, { threads: page([]) }));
+  await app.click(refresh());
+  expect(chips(), "none is an answer").toEqual([]);
+});
+
+it("leaves the diff alone while something in it is selected", async () => {
+  const app = await openFiles(detail({ threads: page([thread("one")]) }));
+  const { details } = app.bridge.world.host;
+  const key = pullKey("octo/pin", 1);
+  const selection = getSelection()!;
+  selection.selectAllChildren(document.querySelector(".thread-chip-words")!);
+  details.set(key, pull(1, { threads: page([thread("one"), thread("two")]) }));
+  await app.click(refresh());
+  expect(chips()).toHaveLength(1);
+  selection.removeAllRanges();
+  document.dispatchEvent(new Event("selectionchange"));
+  await app.settle();
+  expect(chips()).toHaveLength(2);
+});
+
+it("says that a file's mode changed with its lines", async () => {
+  const app = await openFiles({
+    bridge: (bridge) =>
+      bridge.respond("rangePatches", () =>
+        files.map(({ path, from }) => ({
+          path,
+          patch: {
+            kind: "text",
+            lossy: false,
+            patch: patchOf(path, from ?? path).replace(
+              "\n",
+              "\nold mode 100644\nnew mode 100755\n",
+            ),
+          },
+        })),
+      ),
+  });
+  expect(panel().querySelector(".files-moved")?.textContent).toBe(
+    "Made executable.",
+  );
+  await app.press("j");
+  expect(panel().querySelector(".files-moved")?.textContent).toBe(
+    "Moved from src/old.ts · 94% the same. Made executable.",
+  );
+});
+
+it("says why it can't show more lines of a file", async () => {
+  const app = await openFiles({
+    bridge: (bridge) =>
+      bridge.respond("filePatch", () => ({
+        kind: "tooLarge",
+        bytes: 3 * 1024 * 1024,
+      })),
+  });
+  const host = panel().querySelector("diffs-container")!;
+  const expander = host.shadowRoot!.querySelector<HTMLElement>(
+    "[data-expand-button]",
+  )!;
+  expect(expander.tabIndex).toBe(0);
+  expect(expander.getAttribute("aria-label")).toBe("Show 9 unmodified lines");
+  expander.dispatchEvent(
+    new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+  );
+  await app.settle();
+  const notice = () => panel().querySelector<HTMLElement>(".notice");
+  expect(notice()?.textContent).toBe(
+    "Couldn't show more lines. With all of its lines, this change is 3.0 MiB, above the 1 MiB display limit.",
+  );
+  await app.click(get("button", "Dismiss", notice()!));
+  expect(notice()).toBeNull();
+  await app.click(expander);
+  await app.press("j");
+  expect(notice(), "it is about the other file").toBeNull();
+});
+
+it("shows the characters that would turn a path around", async () => {
+  const path = "src/evil\u202egpj.ts";
+  const app = await openFiles({
+    bridge: (bridge) => {
+      bridge.respond("rangeFiles", () => ready([file(path)]));
+      bridge.respond("rangePatches", () => [
+        { path, patch: { kind: "text", patch: patchOf(path), lossy: false } },
+      ]);
+    },
+  });
+  await app.settle();
+  expect(panel().textContent).toContain("src/evil<U+202E>gpj.ts");
+  const row = get("complementary", "Pull request details")
+    .querySelector("file-tree-container")!
+    .shadowRoot!.querySelector("[data-item-type=file]")!;
+  expect(row.getAttribute("aria-label")).toBe("evil<U+202E>gpj.ts");
+  expect(row.getAttribute("aria-selected")).toBe("true");
 });
 
 it("lists the files beside them, and goes to the one that is chosen", async () => {

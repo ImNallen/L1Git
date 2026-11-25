@@ -1,4 +1,4 @@
-import { inTreeOrder, rangeOf } from "./domain/filesChanged";
+import { countsNotice, inTreeOrder, rangeOf } from "./domain/filesChanged";
 import type { Range, Stop } from "./domain/filesChanged";
 import type { PullRequest } from "./domain/pullRequest";
 import type { ListedRepository } from "./domain/pullRequestList";
@@ -29,6 +29,8 @@ type RangeRead =
       mergeBase: Oid;
       files: readonly RangeFile[];
       contentMissing: boolean;
+      /** How this is not what GitHub counts, or null when it is. */
+      counts: string | null;
     };
 
 /** What the Files changed tab holds, whichever way it shows it. */
@@ -52,12 +54,22 @@ type Deps = Pick<
   "rangeFiles" | "rangePatches" | "filePatch" | "fetchCommits"
 >;
 
+/** How long to wait for a fresher read before showing the one there is. */
+const MOST_WAIT = 1_000;
+
+/** GitHub gives up on the threads of some reads, and they are still there. */
+const withThreads = (pull: PullRequest, last: PullRequest): PullRequest =>
+  pull.threads === null && pull.head.oid === last.head.oid
+    ? { ...pull, threads: last.threads }
+    : pull;
+
 export function createFilesChanged(deps: Deps) {
   const listeners = new Set<() => void>();
   let held: FilesChanged | null = null;
   let newest: PullRequest | null = null;
   /** The path to come back to when another range is read. */
   let path: string | null = null;
+  let wait: ReturnType<typeof setTimeout> | null = null;
   /** Another object for each range read, so that no late answer is of another. */
   let turn: object = {};
   const fetches = new Map<string, Promise<CommitsFetch>>();
@@ -89,6 +101,7 @@ export function createFilesChanged(deps: Deps) {
 
   async function load(
     { repository: { root, github }, baseOid, head }: Range,
+    pinned: PullRequest,
     isCurrent: () => boolean,
     set: (change: Partial<FilesChanged>) => void,
   ) {
@@ -108,14 +121,23 @@ export function createFilesChanged(deps: Deps) {
       found = await look();
     }
     if (found.kind === "missing") return stopped({ kind: "stillMissing" });
-    if (found.kind === "unrelated") return stopped(found);
+    if (found.kind !== "ready") return stopped(found);
+    const counts = countsNotice(found, pinned);
+    if (counts !== null && found.shallow)
+      return stopped({ kind: "unrelated", shallow: true });
     const { files: listed, mergeBase, contentMissing } = found;
     const files = inTreeOrder(listed);
     const at = Math.max(
       0,
       files.findIndex((file) => file.path === path),
     );
-    const read = { kind: "ready", mergeBase, files, contentMissing } as const;
+    const read = {
+      kind: "ready",
+      mergeBase,
+      files,
+      contentMissing,
+      counts,
+    } as const;
     if (contentMissing || files.length === 0) return set({ read, at });
     set({
       read,
@@ -145,10 +167,23 @@ export function createFilesChanged(deps: Deps) {
       if (isCurrent() && held) put({ ...held, ...change });
     };
     put(next);
-    load(next.range, isCurrent, set).catch((error: unknown) => {
+    load(next.range, next.pull, isCurrent, set).catch((error: unknown) => {
       const stop: Stop = { kind: "unreadable", problem: problemFrom(error) };
       set({ read: { kind: "stopped", stop } });
     });
+  }
+
+  function stopWaiting() {
+    if (wait !== null) clearTimeout(wait);
+    wait = null;
+  }
+
+  function showNewest() {
+    if (!held || !newest) return;
+    stopWaiting();
+    const range = rangeOf(held.range.repository, newest);
+    const pull = withThreads(newest, held.pull);
+    begin({ of: held.of, range, pull, ...unread });
   }
 
   const unread = {
@@ -208,20 +243,31 @@ export function createFilesChanged(deps: Deps) {
       };
     },
     read: () => held,
-    /** Begins once for `of`, and after that learns only what may change. */
-    see(of: string, repository: ListedRepository, pull: PullRequest) {
+    /**
+     * Begins once for `of`, and after that learns only what may change.
+     * `isComing` while a fresher read is on its way, which is waited for.
+     */
+    see(
+      of: string,
+      repository: ListedRepository,
+      pull: PullRequest,
+      isComing: boolean,
+    ) {
+      const isNew = newest !== pull;
       newest = pull;
       if (held?.of !== of) {
+        stopWaiting();
         path = null;
-        begin({ of, range: rangeOf(repository, pull), pull, ...unread });
-      } else if (held.pull !== pull && pull.head.oid === held.range.head)
-        put({ ...held, pull });
+        turn = {};
+        put({ of, range: rangeOf(repository, pull), pull, ...unread });
+        if (isComing) wait = setTimeout(showNewest, MOST_WAIT);
+        else showNewest();
+      } else if (wait !== null) {
+        if (!isComing) showNewest();
+      } else if (isNew && pull.head.oid === held.range.head)
+        put({ ...held, pull: withThreads(pull, held.pull) });
     },
-    showNewest() {
-      if (!held || !newest) return;
-      const range = rangeOf(held.range.repository, newest);
-      begin({ of: held.of, range, pull: newest, ...unread });
-    },
+    showNewest,
     retry() {
       const file = current();
       if (held?.read.kind === "stopped") begin({ ...held, ...unread });
@@ -240,6 +286,7 @@ export function createFilesChanged(deps: Deps) {
       return patchText(await patchOf(file, "whole"));
     },
     close() {
+      stopWaiting();
       turn = {};
       newest = null;
       if (held) put(null);

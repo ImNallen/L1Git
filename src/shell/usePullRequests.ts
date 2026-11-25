@@ -62,6 +62,8 @@ export type OpenedPullRequest = {
   /** What a list says of it, for as long as one does. */
   summary: PullRequestSummary | null;
   read: Read<PullRequest>;
+  /** Whether a fresher read runs, or waits for its turn. */
+  isComing: boolean;
   /** Its place among the rows on the list. */
   position: { at: number; of: number } | null;
   /** The login whose reads these are. */
@@ -116,7 +118,7 @@ function openedOf(
   met: HostProblem | null,
   { body }: ListModel,
   readOf: ReadOf,
-): Omit<OpenedPullRequest, "id" | "tab"> {
+): Omit<OpenedPullRequest, "id" | "tab" | "isComing"> {
   const key = `${repository.key}#${number}`;
   const rows =
     body.kind === "rows" ? body.groups.flatMap((group) => group.rows) : [];
@@ -244,6 +246,8 @@ export function usePullRequests({
   const openedRead = opened
     ? lookInto({ repository: opened.repository.github, number: opened.number })
     : unread;
+  const isComing =
+    openedRead.reading || (opened !== null && queue.waits(opened));
   const reads = [
     ...wanted.map(({ repository, list }) => readOf(repository, list)),
     openedRead,
@@ -360,10 +364,11 @@ export function usePullRequests({
           ? {
               id,
               tab,
+              isComing,
               ...openedOf(opened, viewer, openedRead, keptBack, model, readOf),
             }
           : null,
-      [opened, id, tab, viewer, openedRead, keptBack, model, readOf],
+      [opened, id, tab, isComing, viewer, openedRead, keptBack, model, readOf],
     ),
     open: (pull) => {
       flushSync(() => {

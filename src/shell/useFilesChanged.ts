@@ -60,12 +60,13 @@ export function useFilesChanged({
   const isShown = opened?.tab === "files";
   const repository = opened?.repository ?? null;
   const pull = opened?.read.value ?? null;
+  const isComing = opened?.isComing === true;
   useEffect(() => {
     const before = store.read()?.of ?? null;
     if (before !== null && before !== id) store.close();
     if (id === null || repository === null || pull === null) return;
-    if (isShown || before === id) store.see(id, repository, pull);
-  }, [store, id, isShown, repository, pull]);
+    if (isShown || before === id) store.see(id, repository, pull, isComing);
+  }, [store, id, isShown, repository, pull, isComing]);
 
   const held = latest !== null && latest.of === id ? latest : null;
   const count = held?.read.kind === "ready" ? held.read.files.length : 0;

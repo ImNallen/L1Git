@@ -1,5 +1,5 @@
 import { parsePatchFiles } from "@pierre/diffs";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { changeStops, scrollToChange } from "./changeStops";
 
 const stops = (patch: string) =>
@@ -57,6 +57,11 @@ index 0000000..2222222
 
 describe("scrollToChange", () => {
   const tops = [66, 500, 900, 1960, 2000];
+  const to = (
+    of: readonly number[],
+    view: Parameters<typeof scrollToChange>[2],
+    by: 1 | -1,
+  ) => scrollToChange(of.length, (change) => of[change]!, view, by);
   const view = (at: number) => ({ at, most: 1500, above: 66 });
   it.each([
     ["next", 0, 1, 434],
@@ -69,13 +74,20 @@ describe("scrollToChange", () => {
     ["before", 434, -1, 0],
     ["before, at the beginning", 0, -1, null],
   ] as const)("finds the %s from %i", (_, at, by, expected) => {
-    expect(scrollToChange(tops, view(at), by)).toBe(expected);
+    expect(to(tops, view(at), by)).toBe(expected);
   });
 
   it("moves nothing in a file that fits or has no change", () => {
-    expect(
-      scrollToChange([66, 200], { at: 0, most: 0, above: 66 }, 1),
-    ).toBeNull();
-    expect(scrollToChange([], view(0), 1)).toBeNull();
+    expect(to([66, 200], { at: 0, most: 0, above: 66 }, 1)).toBeNull();
+    expect(to([], view(0), 1)).toBeNull();
+    expect(to([], view(0), -1)).toBeNull();
+  });
+
+  it("asks for few of many places", () => {
+    const topOf = vi.fn((change: number) => 100 + change * 50);
+    const end = { at: 100_000, most: 300_000, above: 66 };
+    expect(scrollToChange(4_000, topOf, end, 1)).toBe(100_034);
+    expect(scrollToChange(4_000, topOf, end, -1)).toBe(99_984);
+    expect(topOf.mock.calls.length).toBeLessThan(40);
   });
 });

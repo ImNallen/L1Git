@@ -31,20 +31,35 @@ export function changeStops(patch: readonly FileDiffMetadata[]): ChangeStop[] {
   );
 }
 
+/** The first of `count` for which `is` is true, when it is for each one after. */
+function firstOf(count: number, is: (index: number) => boolean): number {
+  let from = 0;
+  let to = count;
+  while (from < to) {
+    const middle = (from + to) >> 1;
+    if (is(middle)) to = middle;
+    else from = middle + 1;
+  }
+  return from;
+}
+
 /**
  * Where to scroll for the next change or the one before, or null when that
- * would move nothing. `tops` are where the changes are, `at` is where the view
- * begins, and `most` how far it scrolls. `above` is what to leave over a change.
+ * would move nothing. `topOf` is where one of the `count` changes is, which
+ * takes time to say, `at` is where the view begins, and `most` how far it
+ * scrolls. `above` is what to leave over a change.
  */
 export function scrollToChange(
-  tops: readonly number[],
+  count: number,
+  topOf: (change: number) => number,
   { at, most, above }: { at: number; most: number; above: number },
   by: 1 | -1,
 ): number | null {
-  const wanted = tops.map((top) => Math.min(Math.max(top - above, 0), most));
+  const wanted = (change: number) =>
+    Math.min(Math.max(topOf(change) - above, 0), most);
   const found =
     by === 1
-      ? wanted.find((each) => each > at + 1)
-      : wanted.findLast((each) => each < at - 1);
-  return found ?? null;
+      ? firstOf(count, (change) => wanted(change) > at + 1)
+      : firstOf(count, (change) => wanted(change) >= at - 1) - 1;
+  return found < 0 || found >= count ? null : wanted(found);
 }

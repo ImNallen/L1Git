@@ -17,10 +17,7 @@ const repository = {
 const base = oid("b");
 const mergeBase = oid("a");
 
-function pull(
-  head: string,
-  fields: Partial<Pick<PullRequest, "base" | "title">> = {},
-): PullRequest {
+function pull(head: string, fields: Partial<PullRequest> = {}): PullRequest {
   const page = { items: [], total: 0 };
   return pullRequestSchema.parse({
     number: 1,
@@ -72,8 +69,10 @@ const text = (patch: string): FilePatch => ({
   patch,
   lossy: false,
 });
-const ready = (files: RangeFile[], contentMissing = false) =>
-  ({ kind: "ready", mergeBase, files, contentMissing }) as const;
+const ready = (
+  files: RangeFile[],
+  { contentMissing = false, shallow = false } = {},
+) => ({ kind: "ready", mergeBase, files, contentMissing, shallow }) as const;
 const missing = (...heads: string[]) =>
   ({ kind: "missing", oids: heads.map(oid) }) as const;
 
@@ -131,8 +130,8 @@ function deferred<T>() {
 describe("reading a range", () => {
   it("reads the files and every patch, once, in the order of the tree", async () => {
     const { store, kinds, paths, patch, ...deps } = setup();
-    store.see("me one", repository, pull("1"));
-    store.see("me one", repository, pull("1"));
+    store.see("me one", repository, pull("1"), false);
+    store.see("me one", repository, pull("1"), false);
     await settle();
     expect(kinds).toEqual(["reading", "ready"]);
     expect(deps.rangeFiles).toHaveBeenCalledExactlyOnceWith(
@@ -154,9 +153,12 @@ describe("reading a range", () => {
   });
 
   it("asks for nothing more when nothing changed or no contents are here", async () => {
-    for (const answer of [ready([]), ready([file("a.ts")], true)]) {
+    for (const answer of [
+      ready([]),
+      ready([file("a.ts")], { contentMissing: true }),
+    ]) {
       const { store, ...deps } = setup({ rangeFiles: async () => answer });
-      store.see("me one", repository, pull("1"));
+      store.see("me one", repository, pull("1"), false);
       await settle();
       store.go(1);
       await settle();
@@ -174,7 +176,7 @@ describe("reading a range", () => {
         { path: "b.ts", patch: null },
       ],
     });
-    store.see("me one", repository, pull("1"));
+    store.see("me one", repository, pull("1"), false);
     await settle();
     expect(filePatch).not.toHaveBeenCalled();
     store.go(1);
@@ -210,7 +212,7 @@ describe("reading a range", () => {
     const { store, patch } = setup({
       rangePatches: () => Promise.reject(new Error("too long")),
     });
-    store.see("me one", repository, pull("1"));
+    store.see("me one", repository, pull("1"), false);
     await settle();
     expect(patch()).toBe("own a.ts");
   });
@@ -224,7 +226,7 @@ describe("reading a range", () => {
         return text("at last");
       }),
     });
-    store.see("me one", repository, pull("1"));
+    store.see("me one", repository, pull("1"), false);
     await settle();
     expect(patch()).toBe("failed");
     await settle();
@@ -236,6 +238,108 @@ describe("reading a range", () => {
   });
 });
 
+describe("a fresher read on its way", () => {
+  const heads = (rangeFiles: Deps["rangeFiles"]) =>
+    vi.mocked(rangeFiles).mock.calls.map(([, , head]) => head);
+
+  it("is the one that is pinned when it lands", async () => {
+    const { store, rangeFiles } = setup();
+    store.see("me one", repository, pull("1"), true);
+    store.see("me one", repository, pull("1"), true);
+    await settle();
+    expect(store.read()?.read.kind).toBe("reading");
+    expect(rangeFiles).not.toHaveBeenCalled();
+    store.see("me one", repository, pull("2"), false);
+    await settle();
+    expect(heads(rangeFiles)).toEqual([oid("2")]);
+    expect(store.read()?.range.head).toBe(oid("2"));
+    store.see("me one", repository, pull("3"), true);
+    store.see("me one", repository, pull("3"), false);
+    await settle();
+    expect(heads(rangeFiles), "only the first look waits").toEqual([oid("2")]);
+  });
+
+  it("is not waited for after it fails", async () => {
+    const { store, rangeFiles } = setup();
+    const last = pull("1");
+    store.see("me one", repository, last, true);
+    store.see("me one", repository, last, false);
+    await settle();
+    expect(heads(rangeFiles)).toEqual([oid("1")]);
+  });
+
+  it("is not waited for longer than a second", async () => {
+    vi.useFakeTimers();
+    const { store, rangeFiles } = setup();
+    store.see("me one", repository, pull("1"), true);
+    vi.advanceTimersByTime(999);
+    expect(rangeFiles).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(heads(rangeFiles)).toEqual([oid("1")]);
+    vi.useRealTimers();
+    store.see("me one", repository, pull("2"), false);
+    await settle();
+    expect(store.read()?.range.head, "what is pinned stays").toBe(oid("1"));
+  });
+
+  it("is not waited for by a tab that closed", () => {
+    vi.useFakeTimers();
+    const { store, rangeFiles } = setup();
+    store.see("me one", repository, pull("1"), true);
+    store.close();
+    vi.advanceTimersByTime(2_000);
+    vi.useRealTimers();
+    expect(rangeFiles).not.toHaveBeenCalled();
+  });
+});
+
+describe("a range that is not what GitHub counts", () => {
+  const counted = { changedFiles: 1, additions: 1, deletions: 1 };
+  const otherwise = { ...counted, additions: 7 };
+  async function read(
+    answer: ReturnType<typeof ready>,
+    fields: Partial<PullRequest>,
+  ) {
+    const { store } = setup({ rangeFiles: async () => answer });
+    store.see("me one", repository, pull("1", fields), false);
+    await settle();
+    return { store, read: store.read()?.read };
+  }
+
+  it("shows with a notice, from the read it was pinned from", async () => {
+    expect((await read(ready([file("a.ts")]), counted)).read).toMatchObject({
+      counts: null,
+    });
+    const { store } = await read(ready([file("a.ts")]), otherwise);
+    store.see("me one", repository, pull("1", counted), false);
+    expect(store.read()?.read).toMatchObject({
+      kind: "ready",
+      counts: "GitHub counts 1 file, +7 −1. This shows 1 file, +1 −1.",
+    });
+  });
+
+  it("does not show in a shallow clone, where it may start elsewhere", async () => {
+    const shallow = ready([file("a.ts")], { shallow: true });
+    expect((await read(shallow, counted)).read?.kind).toBe("ready");
+    expect((await read(shallow, otherwise)).read).toEqual({
+      kind: "stopped",
+      stop: { kind: "unrelated", shallow: true },
+    });
+  });
+
+  it("is not read in a partial clone without its folders", async () => {
+    const { store } = setup({
+      rangeFiles: async () => ({ kind: "treesMissing" }),
+    });
+    store.see("me one", repository, pull("1"), false);
+    await settle();
+    expect(store.read()?.read).toEqual({
+      kind: "stopped",
+      stop: { kind: "treesMissing" },
+    });
+  });
+});
+
 describe("a commit that is missing", () => {
   it("is fetched once, and then the range is read", async () => {
     const rangeFiles = vi
@@ -243,7 +347,7 @@ describe("a commit that is missing", () => {
       .mockResolvedValueOnce(missing("1"))
       .mockResolvedValueOnce(ready([file("a.ts")]));
     const { store, kinds, fetchCommits } = setup({ rangeFiles });
-    store.see("me one", repository, pull("1"));
+    store.see("me one", repository, pull("1"), false);
     await settle();
     expect(kinds).toEqual(["reading", "fetching", "ready"]);
     expect(fetchCommits).toHaveBeenCalledExactlyOnceWith(
@@ -257,7 +361,7 @@ describe("a commit that is missing", () => {
     const { store, fetchCommits } = setup({
       rangeFiles: async () => missing("b", "1"),
     });
-    store.see("me one", repository, pull("1"));
+    store.see("me one", repository, pull("1"), false);
     await settle();
     expect(fetchCommits).toHaveBeenCalledExactlyOnceWith(
       root,
@@ -278,10 +382,10 @@ describe("a commit that is missing", () => {
       rangeFiles: async () => missing("1"),
       fetchCommits: vi.fn<Deps["fetchCommits"]>(async () => got),
     });
-    store.see("me one", repository, pull("1"));
+    store.see("me one", repository, pull("1"), false);
     await settle();
     expect(store.read()?.read).toEqual({ kind: "stopped", stop: got });
-    store.see("me one", repository, pull("1", { title: "Read again" }));
+    store.see("me one", repository, pull("1", { title: "Read again" }), false);
     await settle();
     expect(fetchCommits).toHaveBeenCalledTimes(1);
     store.retry();
@@ -295,7 +399,7 @@ describe("a commit that is missing", () => {
       fetchCommits: () =>
         Promise.reject({ kind: "lockHeld", message: "Another Git runs." }),
     });
-    store.see("me one", repository, pull("1"));
+    store.see("me one", repository, pull("1"), false);
     await settle();
     expect(store.read()?.read).toEqual({
       kind: "stopped",
@@ -306,7 +410,7 @@ describe("a commit that is missing", () => {
   it("is not fetched for a tab that closed meanwhile", async () => {
     const answer = deferred<ReturnType<typeof missing>>();
     const { store, fetchCommits } = setup({ rangeFiles: () => answer.promise });
-    store.see("me one", repository, pull("1"));
+    store.see("me one", repository, pull("1"), false);
     store.close();
     answer.resolve(missing("1"));
     await settle();
@@ -324,10 +428,10 @@ describe("a commit that is missing", () => {
       rangeFiles,
       fetchCommits: vi.fn(() => got.promise),
     });
-    store.see("me one", repository, pull("1"));
+    store.see("me one", repository, pull("1"), false);
     await settle();
     store.close();
-    store.see("me one", repository, pull("1"));
+    store.see("me one", repository, pull("1"), false);
     await settle();
     expect(store.read()?.read.kind).toBe("fetching");
     got.resolve({ kind: "done" });
@@ -341,7 +445,7 @@ describe("a commit that is missing", () => {
 it("says why a clone can't be read, and why two histories are none", async () => {
   const problem = { kind: "missingPath", message: "It is gone." } as const;
   const gone = setup({ rangeFiles: () => Promise.reject(problem) });
-  gone.store.see("me one", repository, pull("1"));
+  gone.store.see("me one", repository, pull("1"), false);
   await settle();
   expect(gone.store.read()?.read).toEqual({
     kind: "stopped",
@@ -350,7 +454,7 @@ it("says why a clone can't be read, and why two histories are none", async () =>
   const unrelated = setup({
     rangeFiles: async () => ({ kind: "unrelated", shallow: true }),
   });
-  unrelated.store.see("me one", repository, pull("1"));
+  unrelated.store.see("me one", repository, pull("1"), false);
   await settle();
   expect(unrelated.store.read()?.read).toEqual({
     kind: "stopped",
@@ -366,9 +470,9 @@ describe("a late answer", () => {
       .mockReturnValueOnce(late.promise)
       .mockResolvedValue(ready([file("new.ts")]));
     const { store, paths } = setup({ rangeFiles });
-    store.see("me one", repository, pull("1"));
+    store.see("me one", repository, pull("1"), false);
     store.close();
-    store.see("other", repository, pull("2"));
+    store.see("other", repository, pull("2"), false);
     await settle();
     late.resolve(ready([file("late.ts")]));
     await settle();
@@ -379,7 +483,7 @@ describe("a late answer", () => {
   it("shows nothing after the tab closed", async () => {
     const late = deferred<ReturnType<typeof ready>>();
     const { store } = setup({ rangeFiles: () => late.promise });
-    store.see("me one", repository, pull("1"));
+    store.see("me one", repository, pull("1"), false);
     store.close();
     late.resolve(ready([file("late.ts")]));
     await settle();
@@ -391,14 +495,14 @@ describe("a newer read", () => {
   it("is taken for its threads and counts while the head is the same", async () => {
     const { store, rangeFiles } = setup();
     const first = pull("1");
-    store.see("me one", repository, first);
+    store.see("me one", repository, first, false);
     await settle();
     store.go(1);
     const again = pull("1", { title: "Again", base: "next" });
-    store.see("me one", repository, again);
+    store.see("me one", repository, again, false);
     expect(store.read()).toMatchObject({ pull: again, at: 1 });
     expect(store.read()?.range.base).toBe("main");
-    store.see("me one", repository, pull("2"));
+    store.see("me one", repository, pull("2"), false);
     await settle();
     expect(store.read()).toMatchObject({ pull: again, at: 1 });
     expect(rangeFiles).toHaveBeenCalledTimes(1);
@@ -406,11 +510,11 @@ describe("a newer read", () => {
 
   it("is shown when asked for, at the same file", async () => {
     const { store, paths, rangeFiles } = setup();
-    store.see("me one", repository, pull("1"));
+    store.see("me one", repository, pull("1"), false);
     await settle();
     store.go(1);
     const newer = pull("2", { base: "next" });
-    store.see("me one", repository, newer);
+    store.see("me one", repository, newer, false);
     vi.mocked(rangeFiles).mockResolvedValue(
       ready(["0.ts", "a.ts", "b.ts"].map((path) => file(path))),
     );
@@ -429,7 +533,7 @@ describe("a newer read", () => {
 
 it("steps to files there are, and says where to begin in one", async () => {
   const { store } = setup();
-  store.see("me one", repository, pull("1"));
+  store.see("me one", repository, pull("1"), false);
   await settle();
   store.go(1, "end");
   expect(store.read()).toMatchObject({ at: 1, enter: "end" });

@@ -1,6 +1,12 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import type { RefObject } from "react";
-import { ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  RefreshCw,
+  TriangleAlert,
+  X,
+} from "lucide-react";
 import {
   newerThan,
   pathLabel,
@@ -11,6 +17,7 @@ import type { Stop } from "../domain/filesChanged";
 import type { DiffStyle } from "../domain/lineSelection";
 import type { PullRequest, ReviewThread } from "../domain/pullRequest";
 import type { RangeFile } from "../domain/range";
+import { problemFrom } from "../domain/repository";
 import { threadsByFile } from "../domain/reviewThreads";
 import { clampMessage } from "../domain/worktree";
 import type { FilesChanged as Held } from "../filesChanged";
@@ -19,6 +26,7 @@ import { FileChanged } from "./FileChanged";
 import type { Unfolded } from "./FileChanged";
 import { FilesState, ReadingFiles } from "./FilesState";
 import { LineTotals } from "./LineTotals";
+import { OnGitHub } from "./PullRequestParts";
 
 const styles: { style: DiffStyle; label: string }[] = [
   { style: "unified", label: "Unified" },
@@ -112,7 +120,7 @@ function Stopped({
   );
   return (
     <FilesState title={title} url={url} onRetry={retry ? onRetry : null}>
-      {verbatim ? (
+      {detail === null ? null : verbatim ? (
         <pre className="problem-detail" role="alert">
           {clampMessage(detail)}
         </pre>
@@ -145,6 +153,47 @@ function said({ read, at }: Held): string {
   }
 }
 
+/** Over the end of the diff, which stays where it is. */
+function Notices({
+  newer,
+  problem,
+  onShow,
+  onDismiss,
+}: {
+  newer: ReturnType<typeof newerThan>;
+  problem: string | null;
+  onShow: () => void;
+  onDismiss: () => void;
+}) {
+  return (
+    <div className="files-notices">
+      {problem !== null && (
+        <div className="notice warning-notice" role="status">
+          <TriangleAlert size={14} aria-hidden="true" />
+          <span>Couldn&apos;t show more lines. {problem}</span>
+          <button
+            type="button"
+            className="notice-dismiss"
+            aria-label="Dismiss"
+            onClick={onDismiss}
+          >
+            <X size={14} aria-hidden="true" />
+          </button>
+        </div>
+      )}
+      {newer && (
+        <div className="notice info-notice" role="status">
+          <RefreshCw size={14} aria-hidden="true" />
+          <span>{newer.text}</span>
+          <button type="button" onClick={onShow}>
+            {newer.show}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 const none: ReviewThread[] = [];
 
 function Shown({
@@ -153,7 +202,9 @@ function Shown({
   unfolded,
   isShown,
   held,
-  files: { ref, diffStyle, go, retry, whole },
+  files: { ref, diffStyle, go },
+  whole,
+  onRetry,
   viewer,
   url,
 }: {
@@ -163,14 +214,22 @@ function Shown({
   isShown: boolean;
   held: Held;
   files: FilesChangedState;
+  whole: (file: RangeFile) => Promise<string>;
+  onRetry: () => void;
   viewer: string;
   url: string;
 }) {
-  const { read, at, enter, patches, pull } = held;
+  const {
+    read,
+    at,
+    enter,
+    patches,
+    pull: { threads: page },
+  } = held;
   const changed = read.kind === "ready" ? read.files : null;
   const threads = useMemo(
-    () => threadsByFile(changed ?? [], pull.threads?.items ?? []),
-    [changed, pull],
+    () => threadsByFile(changed ?? [], page?.items ?? []),
+    [changed, page],
   );
   switch (read.kind) {
     case "reading":
@@ -182,7 +241,9 @@ function Shown({
         </FilesState>
       );
     case "stopped":
-      return <Stopped stop={read.stop} held={held} url={url} onRetry={retry} />;
+      return (
+        <Stopped stop={read.stop} held={held} url={url} onRetry={onRetry} />
+      );
     case "ready": {
       const file = read.files[at];
       if (!file) return <FilesState title="No changes." url={url} />;
@@ -203,7 +264,7 @@ function Shown({
           viewer={viewer}
           url={url}
           whole={() => whole(file)}
-          onRetry={retry}
+          onRetry={onRetry}
           onNext={at + 1 < read.files.length ? () => go(at + 1) : null}
         />
       );
@@ -248,7 +309,21 @@ export function FilesChanged({
   const unfolded = useMemo(() => ({ threads, toggle }), [threads, toggle]);
   const { range, read, at } = held;
   const file = read.kind === "ready" ? read.files[at] : undefined;
-  const newer = newerThan(range, pull, viewer);
+  const newer = read.kind === "reading" ? null : newerThan(range, pull, viewer);
+  const [problem, setProblem] = useState<{
+    file: RangeFile;
+    message: string;
+  } | null>(null);
+  const whole = (of: RangeFile) =>
+    files.whole(of).catch((error: unknown) => {
+      setProblem({ file: of, message: problemFrom(error).message });
+      throw error;
+    });
+  // Its button goes away, and the focus would go with it.
+  const keepingFocus = (act: () => void) => () => {
+    pane.current?.focus({ preventScroll: true });
+    act();
+  };
   return (
     <section
       ref={pane}
@@ -266,14 +341,10 @@ export function FilesChanged({
           onDiffStyle={files.setDiffStyle}
         />
       )}
-      {newer && (
-        <div className="notice info-notice" role="status">
-          <RefreshCw size={14} />
-          <span>{newer.text}</span>
-          <button type="button" onClick={files.showNewest}>
-            {newer.show}
-          </button>
-        </div>
+      {read.kind === "ready" && read.counts !== null && (
+        <p className="files-counts">
+          {read.counts} <OnGitHub url={url} />
+        </p>
       )}
       <span className="visually-hidden" role="status">
         {said(held)}
@@ -285,8 +356,16 @@ export function FilesChanged({
         isShown={isShown}
         held={held}
         files={files}
+        whole={whole}
+        onRetry={keepingFocus(files.retry)}
         viewer={viewer}
         url={url}
+      />
+      <Notices
+        newer={newer}
+        problem={problem?.file === file ? (problem?.message ?? null) : null}
+        onShow={keepingFocus(files.showNewest)}
+        onDismiss={keepingFocus(() => setProblem(null))}
       />
     </section>
   );

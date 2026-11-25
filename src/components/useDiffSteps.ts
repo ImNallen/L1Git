@@ -1,5 +1,12 @@
-import { useCallback, useEffect, useImperativeHandle, useRef } from "react";
+import {
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+} from "react";
 import type { Ref, RefObject } from "react";
+import { keyExpanders } from "./expanders";
 import { VirtualizedFileDiff } from "@pierre/diffs";
 import type { FileDiffMetadata, VirtualFileMetrics } from "@pierre/diffs";
 import { changeStops, scrollToChange } from "../domain/changeStops";
@@ -30,6 +37,7 @@ export const scrollerIn = (body: RefObject<HTMLElement | null>) =>
 export function useDrawnParts() {
   const drawn = useRef(new Map<HTMLElement, VirtualizedFileDiff<unknown>>());
   const onPostRender = useCallback((node: HTMLElement, instance: object) => {
+    keyExpanders(node);
     if (instance instanceof VirtualizedFileDiff)
       drawn.current.set(node, instance);
   }, []);
@@ -61,29 +69,36 @@ export function useDiffSteps(
   parts: () => DrawnPart[],
   startsAtEnd: boolean,
 ) {
+  const stops = useMemo(() => changeStops(patch), [patch]);
   const scroll = useCallback(
     (by: 1 | -1, from?: number): boolean => {
       const scroller = scrollerIn(body);
       if (!scroller) return false;
-      const drawn = parts();
       const origin = scroller.getBoundingClientRect().top - scroller.scrollTop;
-      const tops = changeStops(patch).flatMap(({ part, side, line }) => {
-        const { node, instance } = drawn[part] ?? {};
-        const place = instance?.getLinePosition(line, side);
-        return node && place
-          ? node.getBoundingClientRect().top - origin + place.top
-          : [];
-      });
+      const drawn = parts().map(({ node, instance }) => ({
+        instance,
+        top: node.getBoundingClientRect().top - origin,
+      }));
+      const topOf = (stop: number) => {
+        const { part, side, line } = stops[stop] ?? { part: -1 };
+        const { instance, top = 0 } = drawn[part] ?? {};
+        return (
+          top +
+          (line === undefined
+            ? 0
+            : (instance?.getLinePosition(line, side)?.top ?? 0))
+        );
+      };
       const view = {
         at: from ?? scroller.scrollTop,
         most: scroller.scrollHeight - scroller.clientHeight,
         above: ABOVE_CHANGE,
       };
-      const to = scrollToChange(tops, view, by);
+      const to = scrollToChange(stops.length, topOf, view, by);
       if (to !== null) scroller.scrollTop = to;
       return to !== null;
     },
-    [body, patch, parts],
+    [body, stops, parts],
   );
   useImperativeHandle(ref, () => ({ step: (by) => scroll(by) }), [scroll]);
   useEffect(() => {

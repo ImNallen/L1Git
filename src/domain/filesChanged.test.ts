@@ -5,9 +5,11 @@ import {
   inPlaceOfLines,
   inTreeOrder,
   lineTotals,
+  modeChange,
   newerThan,
   pathLabel,
   rangeOf,
+  shownPath,
   statusWord,
   stopText,
 } from "./filesChanged";
@@ -233,6 +235,31 @@ describe("the list of files", () => {
   });
 });
 
+it("shows what would turn a path around", () => {
+  expect(shownPath("src/שלום.ts")).toBe("src/שלום.ts");
+  expect(shownPath("a\u202egpj\u2066.ts")).toBe("a<U+202E>gpj<U+2066>.ts");
+  expect(shownPath("\u061ca\u200e\u200f")).toBe("<U+061C>a<U+200E><U+200F>");
+  const files = [file("b/z"), file("\u202ea"), file("b/\u202ea")];
+  expect(inTreeOrder(files).map(({ path }) => path)).toEqual([
+    "b/\u202ea",
+    "b/z",
+    "\u202ea",
+  ]);
+});
+
+it("tells of a mode that changed with the lines", () => {
+  const patch = (header: string): FilePatch => ({
+    kind: "text",
+    patch: `diff --git a/a b/a\n${header}@@ -1 +1 @@\n-old mode 100644\n+new mode 100755\n`,
+    lossy: false,
+  });
+  expect(modeChange(patch(""))).toBeNull();
+  expect(modeChange(patch("old mode 100644\nnew mode 100755\n"))).toBe(
+    "Made executable.",
+  );
+  expect(modeChange({ kind: "binary" })).toBeNull();
+});
+
 describe("countsNotice", () => {
   const files = [
     file("a", { added: 600, deleted: 88 }),
@@ -331,19 +358,19 @@ describe("inPlaceOfLines", () => {
       "an executable",
       { newBlob: oid("1") },
       text(modes("100644", "100755")),
-      "The file was made executable. Its contents did not change.",
+      "Made executable. Its contents did not change.",
     ],
     [
       "no executable",
       { newBlob: oid("1") },
       text(modes("100755", "100644")),
-      "The file is no longer executable. Its contents did not change.",
+      "No longer executable. Its contents did not change.",
     ],
     [
       "another mode",
       { newBlob: oid("1") },
       text(modes("100664", "100644")),
-      "The file mode changed from 100664 to 100644. Its contents did not change.",
+      "Mode changed from 100664 to 100644. Its contents did not change.",
     ],
     [
       "a name",
@@ -355,7 +382,7 @@ describe("inPlaceOfLines", () => {
       "a name and a mode",
       { status: "R", from: "b", similarity: 100 },
       text(`${modes("100644", "100755")}similarity index 100%\n`),
-      "Renamed. The file was made executable. Its contents did not change.",
+      "Renamed. Made executable. Its contents did not change.",
     ],
     [
       "an empty file",

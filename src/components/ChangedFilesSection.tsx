@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import type { GitStatus } from "@pierre/trees";
-import { distinctPaths, lineTotals } from "../domain/filesChanged";
+import { distinctPaths, lineTotals, shownPath } from "../domain/filesChanged";
 import type { PullRequest } from "../domain/pullRequest";
 import { threadsLeftOut } from "../domain/pullRequestDetail";
 import type { RangeFile } from "../domain/range";
@@ -30,7 +30,14 @@ function Tree({
   threads: PullRequest["threads"];
   onGo: (at: number) => void;
 }) {
-  const named = useMemo(() => distinctPaths(files), [files]);
+  const named = useMemo(
+    () =>
+      distinctPaths(files).map(({ path, status }) => ({
+        path: shownPath(path),
+        status,
+      })),
+    [files],
+  );
   const labels = useMemo(
     () =>
       new Map(
@@ -40,11 +47,12 @@ function Tree({
       ),
     [named],
   );
+  const selected = files[at];
   const comments = useMemo(
     () =>
       new Map(
         [...threadsByFile(files, threads?.items ?? [])].map(([file, own]) => [
-          file.path,
+          shownPath(file.path),
           commentsIn(own),
         ]),
       ),
@@ -58,9 +66,9 @@ function Tree({
       }))}
       labels={labels}
       comments={comments}
-      selectedPath={files[at]?.path ?? null}
+      selectedPath={selected ? shownPath(selected.path) : null}
       onSelectFile={(path) =>
-        onGo(files.findIndex((file) => file.path === path))
+        onGo(files.findIndex((file) => shownPath(file.path) === path))
       }
     />
   );

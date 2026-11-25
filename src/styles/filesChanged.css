@@ -124,6 +124,38 @@
 .file-diff.files-changed .diff-style button {
   width: 64px;
 }
+.file-diff.files-changed {
+  position: relative;
+}
+.files-notices {
+  position: absolute;
+  inset: auto 20px 16px;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+.files-notices > .notice {
+  max-width: 100%;
+  border: 1px solid var(--border-control);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 28%);
+  pointer-events: auto;
+}
+.files-notices > .notice > button:not(.notice-dismiss) {
+  margin-left: 12px;
+}
+.files-counts {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 8px 20px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 20px;
+}
 .files-moved {
   flex-shrink: 0;
   margin: 0;
@@ -151,6 +183,13 @@
   display: flex;
   justify-content: flex-end;
   padding: 16px 20px 24px;
+}
+/* Room for the notices over it. */
+.files-changed .file-diff-scroll::after {
+  content: "";
+  display: block;
+  flex-shrink: 0;
+  height: 48px;
 }
 .files-state .problem-detail {
   max-width: 560px;
