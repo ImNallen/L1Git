@@ -4,8 +4,8 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FileProps } from "@pierre/diffs/react";
+import { readMarkdown } from "../markdown/readMarkdown";
 import { Markdown } from "./Markdown";
-import { SurroundingsContext } from "./pullRequestText";
 
 const painted = vi.hoisted(() => new Map<object, unknown>());
 vi.mock("@pierre/diffs/react", async (load) => {
@@ -32,19 +32,8 @@ afterEach(async () => {
 });
 
 async function show(text: string) {
-  await act(() =>
-    root.render(
-      <SurroundingsContext
-        value={{
-          base: "https://github.com/octo/app/",
-          theme: "dark",
-          painted: false,
-        }}
-      >
-        <Markdown text={text} />
-      </SurroundingsContext>,
-    ),
-  );
+  const tree = readMarkdown(text, "https://github.com/octo/app/");
+  await act(() => root.render(<Markdown tree={tree} />));
   return host;
 }
 const links = () =>
@@ -301,22 +290,14 @@ it("shows code through Pierre, and names a suggestion", async () => {
   expect(host.querySelector("p code")?.textContent).toBe("inline");
 });
 
-it("paints only as much code as it can at once", async () => {
-  const block = (language: string, length: number) =>
-    `\`\`\`${language}\n${"a ".repeat(length / 2)}\n\`\`\`\n\n`;
-  const languages = async (text: string) => {
+it("paints no code that would take long to paint", async () => {
+  const languages = async (length: number) => {
     painted.clear();
-    await show(text);
+    await show(`\`\`\`ts\n${"a ".repeat(length / 2)}\n\`\`\``);
     return [...painted.values()];
   };
-  expect(await languages(block("ts", 6_000).repeat(2))).toEqual([
-    "typescript",
-    "text",
-  ]);
-  const all = ["ts", "js", "css", "go", "rust", "ruby", "java"];
-  expect(
-    await languages(all.map((language) => block(language, 10)).join("")),
-  ).toEqual(["typescript", "javascript", "css", "go", "rust", "ruby", "text"]);
+  expect(await languages(10_000)).toEqual(["typescript"]);
+  expect(await languages(10_002)).toEqual(["text"]);
 });
 
 it("shows tables, even broken ones", async () => {
@@ -356,6 +337,8 @@ it.each([
     "a long table of links",
     `**bold**\n\n| \`a\` | b |\n|---|---|\n${"| [`a_b`](https://a.test) | **1** |\n".repeat(300)}`,
   ],
+  ["quotes in quotes", `${">".repeat(400)} **bold**`],
+  ["lists in lists", `${"- ".repeat(60)}**bold**`],
   [
     "long prose in another script",
     `**bold** [字](https://a.test) ${"漢字".repeat(9_000)}`,
@@ -363,27 +346,4 @@ it.each([
 ])("reads %s", async (_, text) => {
   await show(text);
   expect(host.querySelector("strong")?.textContent).toBe("bold");
-});
-
-const wide = (columns: number, rows: number) =>
-  `${"|a".repeat(columns)}\n${"|-".repeat(columns)}\n${"|\n".repeat(rows)}`;
-
-it.each([
-  ["a table that fills itself", wide(875, 1_000), "too many parts"],
-  ["a table of one row", wide(1_400, 3), "too many parts"],
-  ["quotes in quotes", `${">".repeat(400)} deep`, "tangled"],
-  ["lists in lists", `${"1. ".repeat(400)} deep`, "tangled"],
-  ["emphasis without end", "*a_ ".repeat(5_000), "tangled"],
-  [
-    "lists in lists over many lines",
-    Array.from({ length: 70 }, (_, at) => `${"  ".repeat(at)}- a`).join("\n"),
-    "tangled",
-  ],
-  ["lists in lists in one line", `${"- ".repeat(30)}a`, "nested too deep"],
-])("refuses %s", async (_, text, why) => {
-  const caught: unknown[] = [];
-  await act(() => root.unmount());
-  root = createRoot(host, { onUncaughtError: (error) => caught.push(error) });
-  await show(text).catch((error: unknown) => caught.push(error));
-  expect(String(caught[0])).toContain(why);
 });
