@@ -44,6 +44,7 @@ const pull = (number: number) => ({
     author: "hubot",
     viewerIsAuthor: false,
     base: "main",
+    baseOid: "b".repeat(40),
     labels: { items: [], total: 0 },
     additions: 1,
     deletions: 2,

@@ -14,6 +14,8 @@ export type ListedRepository = {
   key: string;
   /** What the sidebar calls the first saved repository with these pull requests. */
   name: string;
+  /** That repository's. */
+  root: RepositoryRoot;
   github: GitHubRepository;
 };
 
@@ -50,6 +52,7 @@ export function savedRepositories(
       listed.set(key, {
         key,
         name: suffix ? `${name} ${suffix}` : name,
+        root,
         github,
       });
   }

@@ -1,9 +1,15 @@
 import { expect, it } from "vitest";
 import { createReadQueue } from "./pullRequestQueue";
 import type { ListRequest } from "./pullRequestQueue";
+import { rootSchema } from "./domain/repository";
 
 const open = (name: string): ListRequest => ({
-  repository: { key: name, name, github: { owner: "octo", repo: name } },
+  repository: {
+    key: name,
+    name,
+    root: rootSchema.parse(`/work/${name}`),
+    github: { owner: "octo", repo: name },
+  },
   list: "open",
 });
 const all = (...names: string[]) => names.map(open);

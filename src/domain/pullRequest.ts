@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { githubRepositorySchema } from "./repository";
+import { githubRepositorySchema, oidSchema } from "./repository";
 
 const page = <Item extends z.ZodType>(item: Item) =>
   z.object({ items: z.array(item), total: z.number().int().nonnegative() });
@@ -91,6 +91,7 @@ export const pullRequestSchema = z.object({
   author: account,
   viewerIsAuthor: z.boolean(),
   base: z.string(),
+  baseOid: oidSchema,
   labels: labelsSchema,
   additions: count,
   deletions: count,
@@ -99,7 +100,7 @@ export const pullRequestSchema = z.object({
   updatedAt: time,
   head: z.object({
     branch: z.string(),
-    oid: z.string(),
+    oid: oidSchema,
     repository: githubRepositorySchema.nullable(),
     crossRepository: z.boolean(),
     maintainerCanModify: z.boolean(),

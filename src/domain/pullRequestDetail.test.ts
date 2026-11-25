@@ -31,6 +31,7 @@ import {
   reviewers,
   threadsLeftOut,
 } from "./pullRequestDetail";
+import { rootSchema } from "./repository";
 
 const oid = (digit: string) => digit.repeat(40);
 const at = (minute: number) =>
@@ -46,6 +47,7 @@ function pull(fields: Partial<PullRequest> = {}): PullRequest {
     author: "maja",
     viewerIsAuthor: false,
     base: "main",
+    baseOid: oid("b"),
     labels: page([]),
     additions: 1,
     deletions: 2,
@@ -143,6 +145,7 @@ describe("the notice", () => {
   const repository = {
     key: "octo/app",
     name: "app",
+    root: rootSchema.parse("/work/app"),
     github: { owner: "octo", repo: "app" },
   };
   const status = {

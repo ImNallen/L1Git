@@ -62,6 +62,7 @@ const labels = (...names: string[]) => ({
 const repository = (name: string): ListedRepository => ({
   key: `octo/${name}`,
   name,
+  root: rootSchema.parse(`/work/${name}`),
   github: { owner: "octo", repo: name },
 });
 const app = repository("app");
@@ -170,12 +171,39 @@ describe("the saved repositories", () => {
         {
           key: "octo/app",
           name: "app work",
+          root: "/work/app",
           github: { owner: "Octo", repo: "app" },
         },
       ],
       elsewhere: 1,
       opening: true,
     });
+  });
+
+  it("stands for the first saved clone that loaded", () => {
+    const roots = new Map<RepositoryRoot, RootState>([
+      [
+        root("/gone/app"),
+        {
+          kind: "unavailable",
+          problem: { kind: "missingPath", message: "Gone." },
+        },
+      ],
+      [root("/slow/app"), { kind: "opening" }],
+      open("/work/app", "/work/app/.git"),
+      open("/home/app", "/home/app/.git"),
+    ]);
+    const { listed } = savedRepositories(
+      ["/gone/app", "/slow/app", "/work/app", "/home/app"].map(entry),
+      {
+        roots,
+        repositories: [
+          overview("/home/app/.git", "octo/app"),
+          overview("/work/app/.git", "octo/app"),
+        ],
+      },
+    );
+    expect(listed.map((repository) => repository.root)).toEqual(["/work/app"]);
   });
 
   it("has not opened a repository the overview does not know yet", () => {

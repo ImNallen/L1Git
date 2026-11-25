@@ -50,6 +50,7 @@ function pull(number: number, fields: Partial<PullRequest> = {}): PullRequest {
   return pullRequestSchema.parse({
     ...summary,
     body: "Reads **once**.",
+    baseOid: "b".repeat(40),
     changedFiles: 2,
     head: {
       branch,
