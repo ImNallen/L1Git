@@ -247,6 +247,24 @@ it("puts no paragraph into a line", async () => {
   ]);
 });
 
+it("takes the direction of lists and quotes from their words", async () => {
+  await show(
+    "- **פריט**\n- item\n  - item\n\n3. item פריט\n\n> ציטוט\n\n- 1\n- 2",
+  );
+  expect(
+    [...host.querySelectorAll("ul, ol, blockquote")].map((block) => [
+      block.tagName,
+      block.getAttribute("dir"),
+    ]),
+  ).toEqual([
+    ["UL", "rtl"],
+    ["UL", "ltr"],
+    ["OL", "ltr"],
+    ["BLOCKQUOTE", "rtl"],
+    ["UL", null],
+  ]);
+});
+
 it("starts headings at the fourth level", async () => {
   await show("# One\n## Two\n### Three\n###### Six");
   expect(

@@ -16,7 +16,7 @@ type Node = {
   alt?: string | null;
   lang?: string | null;
   align?: unknown[] | null;
-  data?: { hProperties: { className: string } };
+  data?: { hProperties: { className?: string; dir?: "ltr" | "rtl" } };
   children?: Node[];
 };
 
@@ -132,6 +132,30 @@ const shows = ({ type, value = "", children = [] }: Node): boolean =>
 /** A link without words would be a place to land on, and nothing to see. */
 const wordless = (node: Node) => links.has(node.type) && !shows(node);
 
+const letter = /\p{L}/u;
+const rightToLeft =
+  /[\p{Script=Hebrew}\p{Script=Arabic}\p{Script=Syriac}\p{Script=Thaana}\p{Script=Nko}\p{Script=Adlam}]/u;
+
+/**
+ * Where a block's own words begin. A `dir` of `auto` says the same, but WebKit
+ * looks through the whole block for each element in it.
+ */
+function direction({
+  type,
+  value = "",
+  children = [],
+}: Node): "ltr" | "rtl" | null {
+  if (type === "text") {
+    const [first] = letter.exec(value) ?? [];
+    return first === undefined ? null : rightToLeft.test(first) ? "rtl" : "ltr";
+  }
+  for (const child of children) {
+    const found = direction(child);
+    if (found !== null) return found;
+  }
+  return null;
+}
+
 const flow = new Set(["root", "blockquote", "listItem", "footnoteDefinition"]);
 
 function paragraph(words: Node[]): Node[] {
@@ -180,6 +204,9 @@ function htmlAsText() {
         : withoutTags(parent.children).flatMap((node) =>
             wordless(node) ? (node.children ?? []) : [node],
           );
+      if (parent.type !== "list" && parent.type !== "blockquote") return;
+      const dir = direction(parent);
+      if (dir !== null) parent.data = { hProperties: { dir } };
     };
     walk(tree, 0);
   };
