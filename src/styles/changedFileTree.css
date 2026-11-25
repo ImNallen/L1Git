@@ -65,12 +65,27 @@
   background: var(--workspace-file-icon, var(--trees-fg-muted));
   mask: url("/assets/workspace/File.svg") center / contain no-repeat;
 }
+[data-item-type="file"] > [data-item-section="git"]:empty,
 [data-item-type="folder"] > [data-item-section="git"] {
   display: none;
 }
 [data-item-section="decoration"] {
   color: var(--workspace-file-count, var(--trees-fg-muted));
   font-size: 10px;
+}
+[data-item-section="decoration"] > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+/* A row that Pierre uses again keeps an empty title. */
+[data-item-section="decoration"] > [title]:not([title=""])::before {
+  content: "";
+  width: 14px;
+  height: 14px;
+  margin-right: -3px;
+  background: var(--blue);
+  mask: url("/assets/inspector/Comment.svg") center / contain no-repeat;
 }
 [data-type="item"] {
   transition:

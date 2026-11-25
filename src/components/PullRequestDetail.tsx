@@ -1,10 +1,10 @@
 import {
+  Suspense,
   useEffect,
   useId,
   useImperativeHandle,
   useMemo,
   useRef,
-  useState,
 } from "react";
 import type { KeyboardEvent, ReactNode, Ref } from "react";
 import {
@@ -30,9 +30,15 @@ import { pullRequestUrl, stateLabels } from "../domain/pullRequestList";
 import { markdownReader } from "../markdown/markdownReader";
 import { INSPECTOR_WIDTH } from "../shell/useLayout";
 import type { Layout } from "../shell/useLayout";
-import type { OpenedPullRequest } from "../shell/usePullRequests";
+import { FilesChanged } from "../shell/lazyViews";
+import type { FilesChangedState } from "../shell/useFilesChanged";
+import type {
+  OpenedPullRequest,
+  PullRequestTab,
+} from "../shell/usePullRequests";
 import type { Appearance } from "../themes/palette";
 import { CopyButton } from "./CopyButton";
+import { ReadingFiles } from "./FilesState";
 import { KeepPlace } from "./KeepPlace";
 import { PaneDivider } from "./PaneDivider";
 import { PullRequestChecks } from "./PullRequestChecks";
@@ -49,13 +55,16 @@ const tabs = {
     label: "Commits",
     count: ({ commits }: PullRequest) => commits.total.toLocaleString(),
   },
+  files: {
+    label: "Files changed",
+    count: ({ changedFiles }: PullRequest) => changedFiles.toLocaleString(),
+  },
   checks: {
     label: "Checks",
     count: ({ checks }: PullRequest) => checks?.total.toLocaleString() ?? "–",
   },
-} as const;
-type Tab = keyof typeof tabs;
-const order = Object.keys(tabs) as Tab[];
+} as const satisfies Record<PullRequestTab, unknown>;
+const order = Object.keys(tabs) as PullRequestTab[];
 
 const stateIcons: Record<PullState, LucideIcon> = {
   open: GitPullRequest,
@@ -199,33 +208,37 @@ function Failure({
 
 function Panel({
   id,
+  of,
   labelledBy,
   busy,
   hidden,
   children,
 }: {
   id: string;
+  of: PullRequestTab;
   labelledBy: string;
   busy: boolean;
   hidden: boolean;
   children: ReactNode;
 }) {
   const panel = useRef<HTMLDivElement>(null);
+  const scrolls = of !== "files";
   return (
     <>
       <div
         ref={panel}
         id={id}
         className="pull-panel"
+        data-tab={of}
         role="tabpanel"
         aria-labelledby={labelledBy}
         aria-busy={busy}
-        tabIndex={0}
+        tabIndex={scrolls ? 0 : undefined}
         hidden={hidden}
       >
         {children}
       </div>
-      <KeepPlace panel={panel} />
+      {scrolls && <KeepPlace panel={panel} />}
     </>
   );
 }
@@ -234,27 +247,33 @@ export type PullRequestDetailHandle = { focus: () => void };
 
 export function PullRequestDetail({
   ref,
+  isShown,
   opened,
+  files,
   layout,
   theme,
   painted,
+  onTab,
   onBack,
   onRefresh,
 }: {
   ref: Ref<PullRequestDetailHandle>;
+  /** Whether it is on screen. */
+  isShown: boolean;
   opened: OpenedPullRequest;
+  files: FilesChangedState;
   layout: Pick<
     Layout,
     "inspectorOpen" | "paneWidths" | "resizePane" | "savePaneWidth"
   >;
   theme: Appearance;
   painted: boolean;
+  onTab: (tab: PullRequestTab) => void;
   onBack: () => void;
   onRefresh: (() => void) | null;
 }) {
-  const { repository, number, read, position, viewer } = opened;
+  const { repository, number, tab, read, position, viewer } = opened;
   const { value: pull, problem } = read;
-  const [tab, setTab] = useState<Tab>("conversation");
   const id = useId();
   const title = useRef<HTMLHeadingElement>(null);
   useImperativeHandle(ref, () => ({
@@ -265,14 +284,14 @@ export function PullRequestDetail({
   const { owner, repo } = repository.github;
   const notice = detailNotice(read, repository);
   const loading = pull === null && problem === null;
-  const tabId = (of: Tab) => `${id}-${of}`;
-  const panelId = (of: Tab) => `${id}-${of}-panel`;
+  const tabId = (of: PullRequestTab) => `${id}-${of}`;
+  const panelId = (of: PullRequestTab) => `${id}-${of}-panel`;
   const surroundings = useMemo(
     () => ({ base: `https://github.com/${owner}/${repo}/`, theme, painted }),
     [owner, repo, theme, painted],
   );
-  const show = (next: Tab) => {
-    flushSync(() => setTab(next));
+  const show = (next: PullRequestTab) => {
+    flushSync(() => onTab(next));
     document.getElementById(tabId(next))?.focus();
   };
   function steer(event: KeyboardEvent) {
@@ -312,7 +331,7 @@ export function PullRequestDetail({
           )}
           <a
             className="button secondary"
-            href={url}
+            href={tab === "files" ? `${url}/files` : url}
             target="_blank"
             rel="noreferrer"
           >
@@ -339,7 +358,7 @@ export function PullRequestDetail({
               aria-selected={tab === of}
               aria-controls={panelId(of)}
               tabIndex={tab === of ? 0 : -1}
-              onClick={() => setTab(of)}
+              onClick={() => onTab(of)}
             >
               {tabs[of].label}
               <span className="pull-tab-count">
@@ -356,11 +375,17 @@ export function PullRequestDetail({
           />
         )}
         {order
-          // What was expanded in the conversation stays so behind another tab.
-          .filter((of) => of === tab || (of === "conversation" && pull))
+          // What was expanded stays so behind another tab.
+          .filter(
+            (of) =>
+              of === tab ||
+              (of === "conversation" && pull) ||
+              (of === "files" && files.held),
+          )
           .map((of) => (
             <Panel
               key={of}
+              of={of}
               id={panelId(of)}
               labelledBy={tabId(of)}
               busy={read.reading}
@@ -386,6 +411,19 @@ export function PullRequestDetail({
                   />
                 ) : of === "commits" ? (
                   <PullRequestCommits pull={pull} viewer={viewer} url={url} />
+                ) : of === "files" ? (
+                  <Suspense fallback={<ReadingFiles />}>
+                    {files.held && (
+                      <FilesChanged
+                        isShown={isShown && of === tab}
+                        files={files}
+                        held={files.held}
+                        pull={pull}
+                        viewer={viewer}
+                        url={`${url}/files`}
+                      />
+                    )}
+                  </Suspense>
                 ) : (
                   <PullRequestChecks pull={pull} url={url} />
                 )}
@@ -410,6 +448,7 @@ export function PullRequestDetail({
           >
             <PullRequestInspector
               opened={opened}
+              files={files}
               onShowChecks={() => show("checks")}
             />
           </div>

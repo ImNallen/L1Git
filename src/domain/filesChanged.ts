@@ -61,7 +61,7 @@ export type Stop =
   | Exclude<CommitsFetch, { kind: "done" }>
   | { kind: "unreadable"; problem: Problem };
 
-const partialClone =
+export const partialClone =
   "This is a partial clone, and file contents aren't on this computer.";
 
 export function stopText(
@@ -131,18 +131,30 @@ export function stopText(
   }
 }
 
+const turning = /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
+
+/** A path, with the characters to be seen that would turn what follows around. */
+export const shownPath = (path: string) =>
+  path.replace(
+    turning,
+    (each) =>
+      `<U+${each.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0")}>`,
+  );
+
 /** The order of the tree, so that a step to the next file is a step down it. */
 export function inTreeOrder(files: readonly RangeFile[]): RangeFile[] {
+  const shown = files.map(({ path }) => ({ path: shownPath(path) }));
   const place = new Map(
-    changedFileTreeInput(files).paths.map((path, at) => [path, at]),
+    changedFileTreeInput(shown).paths.map((path, at) => [path, at]),
   );
-  const placeOf = ({ path }: RangeFile) => place.get(treePath(path)) ?? 0;
+  const placeOf = ({ path }: RangeFile) =>
+    place.get(treePath(shownPath(path))) ?? 0;
   return [...files].sort((left, right) => placeOf(left) - placeOf(right));
 }
 
 /** One file for each name, as a tree needs. Names of bytes that are no text can look the same. */
 export const distinctPaths = (files: readonly RangeFile[]) => [
-  ...new Map(files.map((file) => [file.path, file])).values(),
+  ...new Map(files.map((file) => [shownPath(file.path), file])).values(),
 ];
 
 /** Binary files have no lines. */
@@ -188,9 +200,9 @@ export function pathLabel({
   path,
   from,
 }: Pick<RangeFile, "path" | "from">): string {
-  if (from === null) return path;
-  const old = from.split("/");
-  const now = path.split("/");
+  if (from === null) return shownPath(path);
+  const old = shownPath(from).split("/");
+  const now = shownPath(path).split("/");
   const most = Math.min(old.length, now.length);
   let start = 0;
   while (start < most - 1 && old[start] === now[start]) start += 1;
@@ -241,17 +253,18 @@ export function statusWord({
   }
 }
 
-const modes = (patch: string) =>
-  /^old mode (\d+)\nnew mode (\d+)$/m.exec(patch);
+/** Every line of a hunk begins with a space, a sign, or a backslash. */
+const hasLines = (patch: string) => /^@@ /m.test(patch);
 
-function modeWords(patch: string): string | null {
-  const [, before, after] = modes(patch) ?? [];
+/** Null for a file that kept its mode, or whose patch is not text. */
+export function modeChange(patch: FilePatch): string | null {
+  if (patch.kind !== "text") return null;
+  const [, before, after] =
+    /^old mode (\d+)\nnew mode (\d+)$/m.exec(patch.patch) ?? [];
   if (before === undefined) return null;
-  if (before === "100644" && after === "100755")
-    return "The file was made executable.";
-  if (before === "100755" && after === "100644")
-    return "The file is no longer executable.";
-  return `The file mode changed from ${before} to ${after}.`;
+  if (before === "100644" && after === "100755") return "Made executable.";
+  if (before === "100755" && after === "100644") return "No longer executable.";
+  return `Mode changed from ${before} to ${after}.`;
 }
 
 function submoduleWords({
@@ -280,9 +293,6 @@ function submoduleWords({
   }
 }
 
-/** Every line of a hunk begins with a space, a sign, or a backslash. */
-const hasLines = (patch: string) => /^@@ /m.test(patch);
-
 /** What a file says in place of lines, or null when it has lines to draw. */
 export function inPlaceOfLines(
   file: RangeFile,
@@ -292,7 +302,7 @@ export function inPlaceOfLines(
   if (submodule !== null) return submodule;
   if (patch.kind !== "text") return undrawn(patch);
   if (hasLines(patch.patch)) return null;
-  const mode = modeWords(patch.patch);
+  const mode = modeChange(patch);
   switch (file.status) {
     case "A":
       return "This file was added empty.";

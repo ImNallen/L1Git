@@ -13,6 +13,7 @@ import {
   treePath,
 } from "../domain/changedFiles";
 import type { ChangeStatus } from "../domain/repository";
+import { counted } from "../domain/pullRequestDetail";
 import { useTreeMotion } from "./useTreeMotion";
 import { ContextMenu } from "./ContextMenu";
 
@@ -56,6 +57,8 @@ type Props = {
   onFocused?: () => void;
   onRowFocus?: (row: string) => void;
   labels?: ReadonlyMap<string, RowLabel>;
+  /** How many comments a file has. */
+  comments?: ReadonlyMap<string, number>;
 };
 
 const ROW_HEIGHT = 34;
@@ -94,7 +97,9 @@ export function ChangedFileTree({
   onFocused,
   onRowFocus,
   labels,
+  comments,
 }: Props) {
+  const commentsNow = useRef(comments);
   const onSelectFileRef = useRef(onSelectFile);
   useEffect(() => {
     onSelectFileRef.current = onSelectFile;
@@ -125,10 +130,21 @@ export function ChangedFileTree({
         return { text: String(pathsUnder(files, item).length) };
       const path = changedPathAt(files, item.path);
       const label = path === undefined ? undefined : labels?.get(path);
-      return label
+      const count =
+        (path === undefined ? undefined : commentsNow.current?.get(path)) ?? 0;
+      const parts = [
+        ...(count > 0
+          ? [{ text: count.toLocaleString(), color: "var(--blue)" }]
+          : []),
+        ...(label
+          ? [{ text: label.text, color: labelColors[label.tone] }]
+          : []),
+      ];
+      return parts.length > 0
         ? {
-            text: label.text,
-            parts: [{ text: label.text, color: labelColors[label.tone] }],
+            text: parts.map(({ text }) => text).join(" "),
+            title: count > 0 ? counted(count, "comment") : undefined,
+            parts,
           }
         : null;
     },
@@ -160,10 +176,18 @@ ${treeStyles}`,
     syncing.current = true;
     for (const path of model.getSelectedPaths())
       if (path !== shown) model.getItem(path)?.deselect();
-    if (shown !== null && !model.getItem(shown)?.isSelected())
+    if (shown !== null && !model.getItem(shown)?.isSelected()) {
       model.getItem(shown)?.select();
+      model.scrollToPath(shown, { focus: false, offset: "nearest" });
+    }
     syncing.current = false;
   }, [model, selectedPath]);
+  useEffect(() => {
+    if (commentsNow.current === comments) return;
+    commentsNow.current = comments;
+    // Draws the rows again, where they are.
+    model.setLabels();
+  }, [model, comments]);
   const [height, setHeight] = useState(() => fittedTreeHeight(model, maxRows));
   useEffect(() => {
     if (maxRows === undefined) return;

@@ -12,6 +12,7 @@
 @import "./styles/operation.css";
 @import "./styles/pullRequests.css";
 @import "./styles/pullRequest.css";
+@import "./styles/filesChanged.css";
 
 :root {
   font-family: "InterVariable", Inter, sans-serif;

@@ -55,6 +55,7 @@ export function createReadQueue(
       waiting.clear();
       this.add([request, ...rest]);
     },
+    waits: (request: ReadRequest) => waiting.has(keyOf(request)),
     /** Running reads finish, and the rest never start. */
     close: () => waiting.clear(),
   };

@@ -260,6 +260,7 @@ async function loadModules() {
       import("../components/ConflictResolver"),
       import("../components/Code"),
       import("../components/Hunk"),
+      import("../components/FilesChanged"),
     ]);
   return { App, appearance, overview, draftProtection, resolutionDrafts };
 }

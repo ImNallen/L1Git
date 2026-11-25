@@ -21,6 +21,7 @@ const repositoryScreen: ActionContext = {
   searchable: true,
   inspectable: true,
   pullRequestOpen: false,
+  filesChanged: null,
   repository: {
     fetching: false,
     idle: true,
@@ -48,6 +49,7 @@ const repositoryScreen: ActionContext = {
   replay: null,
   pull: { kind: "unavailable", reason: "Check out a branch to pull into it." },
   typing: false,
+  menuOpen: false,
 };
 
 function commands(): Commands {
@@ -59,6 +61,10 @@ function commands(): Commands {
     showHistory: vi.fn(),
     searchPullRequests: vi.fn(),
     closePullRequest: vi.fn(),
+    nextFile: vi.fn(),
+    previousFile: vi.fn(),
+    nextChange: vi.fn(),
+    previousChange: vi.fn(),
     toggleSidebar: vi.fn(),
     toggleInspector: vi.fn(),
     fetch: vi.fn(),
@@ -745,6 +751,48 @@ describe("staging and undo", () => {
     ...repositoryScreen,
     history: { undo: "Stage README.md", redo: "Unstage 2 files" },
   };
+
+  it("steps through the changes of a pull request with bare letters", () => {
+    const files = {
+      ...repositoryScreen,
+      screen: "pullRequests" as const,
+      place: "pullRequests" as const,
+      pullRequestOpen: true,
+      filesChanged: { at: 1, count: 3 },
+    };
+    const pressed = (context: ActionContext, letter: string, init = {}) =>
+      shortcutAction(context, key(letter, init), true)?.id ?? null;
+    expect(["j", "k", "n", "p"].map((each) => pressed(files, each))).toEqual([
+      "nextFile",
+      "previousFile",
+      "nextChange",
+      "previousChange",
+    ]);
+    const at = (at: number) => ({ ...files, filesChanged: { at, count: 3 } });
+    expect(pressed(at(0), "k")).toBeNull();
+    expect(pressed(at(2), "j")).toBeNull();
+    expect(pressed(at(2), "n"), "a change may be left").toBe("nextChange");
+    for (const held of ["metaKey", "ctrlKey", "altKey", "shiftKey"])
+      expect(pressed(files, "j", { [held]: true })).toBeNull();
+    for (const instead of [
+      { typing: true },
+      { dialogOpen: true },
+      { menuOpen: true },
+      { filesChanged: null },
+      { pullRequestOpen: false },
+      { screen: "settings" as const },
+    ])
+      expect(pressed({ ...files, ...instead }, "j")).toBeNull();
+    expect(
+      claimedWhilePaletteOpen(key("j"), true),
+      "the palette's search has it",
+    ).toBe(false);
+    expect(
+      paletteItems(files, commands(), true, [], null).find(
+        ({ title }) => title === "Next file",
+      )?.shortcut,
+    ).toBe("J");
+  });
 
   it("offers Undo and Redo only with an entry, titled with its label", () => {
     expect(titles(repositoryScreen, "undo")).toEqual([]);

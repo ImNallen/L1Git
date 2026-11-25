@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
-import type { MouseEvent, RefObject } from "react";
+import type { MouseEvent, ReactNode, Ref, RefObject } from "react";
 import { DIFFS_TAG_NAME } from "@pierre/diffs";
 import type { FileDiffMetadata, SelectedLineRange } from "@pierre/diffs";
 import { FileX2, TriangleAlert } from "lucide-react";
@@ -10,7 +10,11 @@ import { hunkAnchor, parsedFiles } from "../domain/lineSelection";
 import type { DiffStyle, HunkBar } from "../domain/lineSelection";
 import type { PartAction } from "../domain/operations";
 import type { FilePatch, LinePick } from "../domain/repository";
+import type { ThreadsOnLine } from "../domain/reviewThreads";
+import { KeepDiffPlace } from "./KeepDiffPlace";
 import { patchOptions } from "./patchOptions";
+import { reviewMetrics, useDiffSteps, useDrawnParts } from "./useDiffSteps";
+import type { DiffSteps } from "./useDiffSteps";
 
 export type { DiffStyle };
 
@@ -26,6 +30,18 @@ export type Parts = {
   onLostFocus: () => void;
 };
 
+/** What a review shows with a diff, in one place to scroll. */
+export type Review = {
+  ref: Ref<DiffSteps>;
+  startsAtEnd: boolean;
+  isShown: boolean;
+  above: ReactNode;
+  below: ReactNode;
+  /** For each part of the patch. */
+  onLines: readonly ThreadsOnLine[][];
+  renderThreads: (ids: readonly string[]) => ReactNode;
+};
+
 type WholeRead = () => Promise<string>;
 
 export function Diff({
@@ -35,6 +51,7 @@ export function Diff({
   theme,
   painted,
   parts = null,
+  review = null,
 }: {
   diff: FilePatch;
   whole: WholeRead;
@@ -42,6 +59,7 @@ export function Diff({
   theme: Appearance;
   painted: boolean;
   parts?: Parts | null;
+  review?: Review | null;
 }) {
   if (diff.kind !== "text")
     return (
@@ -68,6 +86,7 @@ export function Diff({
         theme={theme}
         painted={painted}
         parts={parts}
+        review={review}
       />
     </>
   );
@@ -93,6 +112,7 @@ function Patch({
   theme,
   painted,
   parts,
+  review,
 }: {
   patch: string;
   whole: WholeRead;
@@ -100,6 +120,7 @@ function Patch({
   theme: Appearance;
   painted: boolean;
   parts: Parts | null;
+  review: Review | null;
 }) {
   const files = useMemo(() => parsedFiles(patch), [patch]);
   const latest = useRef(parts);
@@ -111,6 +132,15 @@ function Patch({
   const firstHunk = files[0]?.hunks[0];
   const barOnTop =
     writable && firstHunk !== undefined && hunkAnchor(firstHunk, 0) === null;
+  const scroll = useRef<HTMLDivElement>(null);
+  const { onPostRender, parts: drawnParts } = useDrawnParts();
+  useDiffSteps(
+    review?.ref,
+    scroll,
+    files,
+    drawnParts,
+    review?.startsAtEnd === true,
+  );
   const options = useMemo(
     () =>
       ({
@@ -119,6 +149,7 @@ function Patch({
         diffIndicators: "classic",
         hunkSeparators: "line-info-basic",
         disableFileHeader: !barOnTop,
+        onPostRender,
         loadDiffFiles: async (fileDiff: FileDiffMetadata) =>
           sidesFor(fileDiff, await latestWhole.current()),
         ...(writable && {
@@ -130,10 +161,9 @@ function Patch({
             gutterFirstAction(range),
         }),
       }) as const,
-    [diffStyle, theme, painted, writable, barOnTop],
+    [diffStyle, theme, painted, writable, barOnTop, onPostRender],
   );
   const pressed = useRef<{ hunk: number; action: PartAction } | null>(null);
-  const scroll = useRef<HTMLDivElement>(null);
   function gutterFirstAction(range: SelectedLineRange) {
     firstLineAction.current?.focus({ preventScroll: true });
     latest.current?.onGutterFirstAction(range);
@@ -229,26 +259,49 @@ function Patch({
         onClick={pressGutterPlusByKey}
       >
         <Virtualizer className="file-diff-scroll">
-          {files.map((file, index) => (
-            <FileDiff<HunkBar>
-              key={index}
-              fileDiff={file}
-              options={options}
-              {...(parts && {
-                selectedLines: parts.range,
-                lineAnnotations: file.hunks.flatMap(
-                  (hunk, at) => hunkAnchor(hunk, at) ?? [],
-                ),
-                renderAnnotation: ({ metadata: { hunk } }) =>
-                  bar(hunk, file.hunks.length),
-                ...(barOnTop && {
-                  renderCustomHeader: () => bar(0, file.hunks.length),
-                }),
-              })}
-            />
-          ))}
+          {review?.above}
+          {files.map((file, index) =>
+            review ? (
+              <FileDiff<readonly string[]>
+                key={index}
+                fileDiff={file}
+                options={options}
+                metrics={reviewMetrics}
+                lineAnnotations={review.onLines[index]}
+                renderAnnotation={({ metadata }) =>
+                  review.renderThreads(metadata)
+                }
+              />
+            ) : (
+              <FileDiff<HunkBar>
+                key={index}
+                fileDiff={file}
+                options={options}
+                {...(parts && {
+                  selectedLines: parts.range,
+                  lineAnnotations: file.hunks.flatMap(
+                    (hunk, at) => hunkAnchor(hunk, at) ?? [],
+                  ),
+                  renderAnnotation: ({ metadata: { hunk } }) =>
+                    bar(hunk, file.hunks.length),
+                  ...(barOnTop && {
+                    renderCustomHeader: () => bar(0, file.hunks.length),
+                  }),
+                })}
+              />
+            ),
+          )}
+          {review?.below}
         </Virtualizer>
       </div>
+      {review && (
+        <KeepDiffPlace
+          body={scroll}
+          parts={drawnParts}
+          isShown={review.isShown}
+          diffStyle={diffStyle}
+        />
+      )}
     </>
   );
 }

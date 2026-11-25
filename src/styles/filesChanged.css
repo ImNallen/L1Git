@@ -1,0 +1,342 @@
+.pull-panel:has(> :is(.files-changed, .files-skeleton)) {
+  padding: 0;
+  overflow: hidden;
+}
+.pull-panel:not([hidden]):has(> :is(.files-changed, .files-skeleton)) {
+  display: flex;
+}
+.file-diff.files-changed {
+  --diffs-line-height: 22px;
+  --annotation-row: var(--canvas);
+}
+:root[data-theme="light"] .file-diff.files-changed {
+  --annotation-row: var(--panel-raised);
+}
+.files-changed:focus {
+  outline: none;
+}
+.files-body {
+  display: contents;
+}
+.files-changed .file-diff-body {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.files-changed .file-diff-scroll {
+  overflow-anchor: none;
+}
+.files-changed .file-diff-scroll:focus-visible {
+  outline: none;
+}
+/* Over the diff, which would cover the scroller's own. */
+.file-diff-body:has(> .file-diff-scroll:focus-visible)::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  outline: var(--focus-ring);
+  outline-offset: -2px;
+  pointer-events: none;
+}
+
+.file-diff-toolbar.files-toolbar {
+  gap: 10px;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--border);
+}
+.files-steps {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 10px;
+  margin-right: 6px;
+}
+.files-steps button {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--border-control);
+  border-radius: 5px;
+  background: var(--control);
+  color: var(--text-secondary);
+}
+.files-steps button:hover:not([aria-disabled="true"]) {
+  background: var(--control-hover);
+}
+.files-steps button[aria-disabled="true"] {
+  color: var(--text-faint);
+  cursor: default;
+}
+.files-position {
+  color: var(--text-body);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.files-toolbar .file-diff-path {
+  flex: 0 1 auto;
+  color: var(--text);
+}
+.files-status {
+  flex-shrink: 0;
+  padding: 0 7px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  color: var(--text-body);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 18px;
+  white-space: nowrap;
+}
+.files-status.added {
+  background: var(--success-bg);
+  color: var(--success);
+}
+.files-status.deleted {
+  background: var(--error-bg);
+  color: var(--error-text);
+}
+.files-status.moved {
+  background: color-mix(in srgb, var(--blue) 14%, transparent);
+  color: var(--blue);
+}
+.line-totals {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 8px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.files-toolbar .line-totals {
+  font-family: var(--mono);
+}
+.files-toolbar .diff-style {
+  flex-shrink: 0;
+  margin-left: auto;
+}
+.file-diff.files-changed .diff-style {
+  gap: 6px;
+}
+.file-diff.files-changed .diff-style button {
+  width: 64px;
+}
+.file-diff.files-changed {
+  position: relative;
+}
+.files-notices {
+  position: absolute;
+  inset: auto 20px 16px;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+.files-notices > .notice {
+  max-width: 100%;
+  border: 1px solid var(--border-control);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 28%);
+  pointer-events: auto;
+}
+.files-notices > .notice > button:not(.notice-dismiss) {
+  margin-left: 12px;
+}
+.files-counts {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 8px 20px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 20px;
+}
+.files-moved {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 8px 20px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--blue) 6%, transparent);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+.files-moved code {
+  color: var(--text);
+  font-size: 11px;
+}
+
+.files-lineless {
+  display: flex;
+  flex-direction: column;
+}
+.files-lineless > :not(.threads-elsewhere, .files-next) {
+  flex: 1 0 auto;
+}
+.files-next {
+  display: flex;
+  justify-content: flex-end;
+  padding: 16px 20px 24px;
+}
+/* Room for the notices over it. */
+.files-changed .file-diff-scroll::after {
+  content: "";
+  display: block;
+  flex-shrink: 0;
+  height: 48px;
+}
+.files-state .problem-detail {
+  max-width: 560px;
+}
+.files-skeleton {
+  flex: 1;
+  padding: 24px 20px 0 84px;
+  overflow: hidden;
+}
+.files-skeleton i {
+  margin-bottom: 14px;
+}
+
+.threads-elsewhere {
+  border-bottom: 1px solid var(--border);
+}
+.threads-elsewhere-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 36px;
+  padding: 0 20px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.threads-elsewhere-row:hover:not(:disabled) {
+  background: var(--row-hover);
+  color: var(--text-secondary);
+}
+.threads-elsewhere-row svg:last-child,
+.thread-chip-row > svg {
+  flex-shrink: 0;
+  color: var(--muted);
+  transition: transform 160ms ease-out;
+}
+:is(.threads-elsewhere-row, .thread-chip-row)[aria-expanded="true"]
+  > svg:last-child {
+  transform: rotate(180deg);
+}
+.threads-elsewhere-list:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 860px;
+  padding: 6px 20px 20px;
+}
+/* As elsewhere on a pull request, not as in the diff around it. */
+.files-changed :is(.threads-elsewhere, .thread-chips) {
+  --diffs-line-height: 20px;
+  --diffs-gap-block: 8px;
+  font-family: "InterVariable", Inter, sans-serif;
+  font-size: 13px;
+  line-height: normal;
+  white-space: normal;
+  color: var(--text);
+  user-select: text;
+}
+.thread-chips {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 20px 8px 10px;
+}
+.thread-chip {
+  width: 550px;
+  max-width: 100%;
+  border: 1px solid var(--border-control);
+  border-radius: 6px;
+  background: var(--panel);
+}
+.thread-chip:has(> [aria-expanded="true"]) {
+  width: 820px;
+}
+.thread-chip-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 30px;
+  padding: 0 10px 0 8px;
+  border-radius: 5px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: start;
+}
+.thread-chip-row:hover:not(:disabled) {
+  color: var(--text-secondary);
+}
+.thread-chip-row strong {
+  flex-shrink: 0;
+  color: var(--text);
+  font-weight: 500;
+}
+.thread-chip-people {
+  display: flex;
+  flex-shrink: 0;
+  gap: 2px;
+}
+.thread-chip-words {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.thread-chip-lines,
+.thread-chip-row .thread-resolved {
+  flex-shrink: 0;
+  font-size: 11px;
+}
+.thread-chip > div:not([hidden]) {
+  border-top: 1px solid var(--border);
+}
+
+.pull-inspector-content[data-tab="files"] {
+  display: flex;
+  flex-direction: column;
+}
+.pull-inspector-content[data-tab="files"] > section {
+  flex-shrink: 0;
+}
+.pull-inspector-content > .files-section {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+  padding: 16px 17px 0;
+  border-bottom: 0;
+}
+.files-section > h3 {
+  align-items: center;
+  margin: 0 4px 12px;
+}
+.files-section h3 > .changed-files-title {
+  font-weight: 600;
+}
+.files-section .changed-files-filter {
+  height: 30px;
+}
+.files-section .changed-file-tree {
+  --trees-selected-bg-override: var(--nav-selected-bg);
+  --trees-selected-fg-override: var(--nav-selected-text);
+  --trees-status-renamed-override: var(--blue);
+}
+@media (prefers-reduced-motion: reduce) {
+  .threads-elsewhere-row svg:last-child,
+  .thread-chip-row > svg {
+    transition: none;
+  }
+}
