@@ -23,6 +23,7 @@
         },
         "baseRefName": "main",
         "headRefName": "cache-theme",
+        "baseRefOid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "headRefOid": "6666666666666666666666666666666666666666",
         "isCrossRepository": false,
         "maintainerCanModify": false,

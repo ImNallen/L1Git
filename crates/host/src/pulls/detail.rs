@@ -22,6 +22,7 @@ pub struct PullRequest {
     author: Option<String>,
     viewer_is_author: bool,
     base: String,
+    base_oid: String,
     head: Head,
     labels: Page<Label>,
     additions: u32,
@@ -205,6 +206,7 @@ struct Node {
     changed_files: u32,
     labels: Option<Nodes<Label>>,
     base_ref_name: String,
+    base_ref_oid: String,
     head_ref_name: String,
     head_ref_oid: String,
     is_cross_repository: bool,
@@ -432,6 +434,7 @@ fn parse(node: Node, checks_withheld: bool) -> PullRequest {
         author: login(node.author),
         viewer_is_author: node.viewer_did_author,
         base: node.base_ref_name,
+        base_oid: node.base_ref_oid,
         head: Head {
             branch: node.head_ref_name,
             oid: node.head_ref_oid,

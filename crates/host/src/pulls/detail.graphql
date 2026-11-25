@@ -5,7 +5,7 @@ query($owner: String!, $repo: String!, $number: Int!, $threads: Boolean!) {
       author { login } viewerDidAuthor
       additions deletions changedFiles
       labels(first: 20) { totalCount nodes { name color } }
-      baseRefName headRefName headRefOid isCrossRepository maintainerCanModify
+      baseRefName baseRefOid headRefName headRefOid isCrossRepository maintainerCanModify
       headRepository { name owner { login } }
       mergeable mergeStateStatus
       reviewRequests(first: 100) { nodes { requestedReviewer {
