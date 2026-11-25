@@ -99,7 +99,7 @@ export class MarkdownReader {
         () => {
           if (!isOwn()) return;
           this.unavailable = !this.ready;
-          this.giveUp();
+          this.giveUp(false);
         },
       );
     } catch {
@@ -122,7 +122,7 @@ export class MarkdownReader {
         this.worker.ask(question);
         // What was answered while the window was busy is heard first.
         this.timer = window.setTimeout(() => {
-          this.timer = window.setTimeout(() => this.giveUp());
+          this.timer = window.setTimeout(() => this.giveUp(true));
         }, BUDGET_MS);
       } else {
         this.warm();
@@ -137,13 +137,13 @@ export class MarkdownReader {
     if (this.waiting.delete(request)) request.done(tree);
   }
 
-  private finish(tree: Tree | null) {
+  private finish(tree: Tree | null, keep = true) {
     window.clearTimeout(this.timer);
     if (performance.now() - this.askedAt > HEAVY_MS) this.stop();
     const request = this.running;
     this.running = null;
     if (!request) return;
-    this.kept.add(request.question, tree);
+    if (keep) this.kept.add(request.question, tree);
     this.answer(request, tree);
   }
 
@@ -153,9 +153,10 @@ export class MarkdownReader {
     this.ready = false;
   }
 
-  private giveUp() {
+  /** A worker that broke says nothing about its text, which may be asked again. */
+  private giveUp(keep: boolean) {
     this.stop();
-    this.finish(null);
+    this.finish(null, keep);
     this.next();
   }
 }

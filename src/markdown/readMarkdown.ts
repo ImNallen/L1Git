@@ -190,6 +190,16 @@ function paragraph(words: Node[]): Node[] {
 const lengthOf = (url: string) =>
   url.replace(/[^\x21-\x7e]/g, "%00%00%00").length;
 
+/** GitHub breaks a line wherever the person who wrote it did. */
+const withBreaks = (node: Node): Node[] =>
+  node.type === "text"
+    ? (node.value ?? "")
+        .split(/\r\n?|\n/)
+        .flatMap((line, at) =>
+          at === 0 ? [text(line)] : [{ type: "break" }, text(line.trimStart())],
+        )
+    : [node];
+
 /** HTML is never rendered. What it says stays, as plain text. */
 function htmlAsText() {
   const walk = (parent: Node) => {
@@ -200,6 +210,7 @@ function htmlAsText() {
     if ((parent.align?.length ?? 0) * parent.children.length > most.pieces)
       throw new Error("This text has too many parts.");
     for (const node of parent.children) walk(node);
+    parent.children = parent.children.flatMap(withBreaks);
     parent.children = flow.has(parent.type)
       ? parent.children.flatMap((node) =>
           node.type === "html" ? paragraph(said(node.value ?? "")) : [node],
@@ -362,7 +373,8 @@ export function readMarkdown(markdown: string, base: string): Tree {
       const text = wordsIn(code).replace(/\n$/, "");
       const [name = ""] = (code.properties?.className ?? []) as string[];
       const language = name.replace(/^language-/, "").toLowerCase();
-      return text.trim() === ""
+      // An empty suggestion is one to delete the lines.
+      return text.trim() === "" && language !== "suggestion"
         ? []
         : [make({ kind: "block", language, text }, text)];
     }

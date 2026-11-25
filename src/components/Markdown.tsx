@@ -35,10 +35,17 @@ function Code({ text, language }: { text: string; language: string }) {
     }),
     [theme, painted],
   );
+  const deletes = text.trim() === "";
   return (
     <figure className="pull-code markdown-code">
-      {language === "suggestion" && <figcaption>Suggested change</figcaption>}
-      <File file={file} options={options} />
+      {language === "suggestion" && (
+        <figcaption>
+          {deletes
+            ? "Suggested change: delete these lines"
+            : "Suggested change"}
+        </figcaption>
+      )}
+      {!deletes && <File file={file} options={options} />}
     </figure>
   );
 }
@@ -138,5 +145,6 @@ function shown(piece: Shown): ReactNode {
 
 /** Text from GitHub, as it was read. It can't run anything, and it loads nothing. */
 export function Markdown({ tree }: { tree: Tree }) {
+  if (tree.pieces.length === 0) return <p>No visible text.</p>;
   return createElement(Fragment, null, ...tree.pieces.map(shown));
 }

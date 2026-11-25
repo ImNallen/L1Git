@@ -279,6 +279,27 @@ it("shows task lists that can't be ticked", async () => {
   expect(boxes[0]?.getAttribute("aria-label")).toBe("Done");
 });
 
+it("says so when nothing in a text is to be seen", async () => {
+  await show("<!-- Describe your change -->");
+  expect(host.textContent).toBe("No visible text.");
+});
+
+it("says when a suggestion is to delete the lines", async () => {
+  await show("```suggestion\n```\n\n```ts\n```");
+  expect(host.textContent).toBe("Suggested change: delete these lines");
+  expect(host.querySelectorAll("figure")).toHaveLength(1);
+});
+
+it("breaks lines where the text does, as GitHub does in what people write", async () => {
+  await show("Fixes #1\nFixes **#2\nand** #3\r\n- a\n  b\n\n`x\ny`");
+  expect(host.querySelectorAll("p br")).toHaveLength(2);
+  expect(host.querySelectorAll("li br")).toHaveLength(1);
+  expect(host.querySelectorAll("code br")).toHaveLength(0);
+  expect(host.querySelector("p")?.innerHTML.replace(/<br>\n/g, "<br>")).toBe(
+    "Fixes #1<br>Fixes <strong>#2<br>and</strong> #3",
+  );
+});
+
 it("shows code through Pierre, and names a suggestion", async () => {
   await show(
     "```ts\nconst a = 1;\n```\n\n```suggestion\nlet b;\n```\n\n```nonsense-language\nc\n```\n\nand `inline`",

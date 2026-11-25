@@ -271,4 +271,8 @@ it("goes on with a new worker when one breaks", () => {
   workers[1]!.ready();
   workers[1]!.answer(read("B"));
   expect(done).toEqual({ a: null, b: read("B") });
+  done = {};
+  ask("a");
+  workers[1]!.answer(read("A"));
+  expect(done, "a break says nothing about the text").toEqual({ a: read("A") });
 });
