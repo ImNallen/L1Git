@@ -504,7 +504,8 @@ button.pull-link:hover:not(:disabled) {
   list-style: none;
 }
 .markdown .task-list-item input {
-  margin: 0 6px 0 0;
+  margin: 0;
+  margin-inline-end: 6px;
   vertical-align: -2px;
 }
 .markdown a {
