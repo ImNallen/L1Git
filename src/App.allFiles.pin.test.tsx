@@ -42,6 +42,9 @@ const file = (path: string, fields: Partial<RangeFile> = {}): RangeFile => ({
 });
 const patchOf = (path: string, from = path) =>
   `diff --git a/${from} b/${path}\n--- a/${from}\n+++ b/${path}\n@@ -10,3 +10,4 @@\n one\n-two\n+TWO\n+and\n three\n`;
+/** Longer than the view, with a change at line 60. */
+const longPatch = (path: string, from = path) =>
+  `--- a/${from}\n+++ b/${path}\n@@ -1,99 +1,100 @@\n${" line\n".repeat(59)}+new\n${" line\n".repeat(40)}`;
 const files = [
   file("src/a.ts"),
   file("src/new.ts", { status: "R", from: "src/old.ts", similarity: 94 }),
@@ -236,7 +239,15 @@ it("shows a message when Pierre fails, and draws them when asked", async () => {
 });
 
 it("goes back to the beginning of the file that is chosen again", async () => {
-  const app = await openAll();
+  const app = await openAll({}, (bridge) =>
+    bridge.respond("rangePatches", () =>
+      patches().map((each) =>
+        each.path === "src/a.ts"
+          ? { ...each, patch: { ...each.patch, patch: longPatch("src/a.ts") } }
+          : each,
+      ),
+    ),
+  );
   const tree = get(
     "complementary",
     "Pull request details",
@@ -250,8 +261,11 @@ it("goes back to the beginning of the file that is chosen again", async () => {
     tree.dispatchEvent(click);
   };
   const scrollTo = vi.spyOn(CodeView.prototype, "scrollTo");
+  const scroller = get("region", "All changed files", panel());
+  scroller.scrollTop = 500;
+  scroller.dispatchEvent(new Event("scroll"));
   await app.click(tree);
-  expect(scrollTo).toHaveBeenCalledWith({ type: "item", id: "0.0" });
+  expect(scrollTo).toHaveBeenCalledWith({ type: "item", id: "0.0", offset: 0 });
   scrollTo.mockRestore();
 });
 
@@ -279,7 +293,7 @@ it("stops at a file that is not read, and goes on from there", async () => {
     );
     bridge.respond("filePatch", () => ({
       kind: "text",
-      patch: patchOf("src/new.ts", "src/old.ts"),
+      patch: longPatch("src/new.ts", "src/old.ts"),
       lossy: false,
     }));
     held.push(bridge.hold("filePatch"));
@@ -294,7 +308,7 @@ it("stops at a file that is not read, and goes on from there", async () => {
   held[0]!.release();
   await frames(app);
   expect(scrollTo).toHaveBeenCalledWith(
-    expect.objectContaining({ type: "line", id: "1.0", lineNumber: 11 }),
+    expect.objectContaining({ type: "line", id: "1.0", lineNumber: 60 }),
   );
   await app.press("p");
   expect(selected()).toBe("src/a.ts");

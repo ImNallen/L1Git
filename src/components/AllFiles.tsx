@@ -18,11 +18,11 @@ import type { ReviewThread } from "../domain/pullRequest";
 import type { RangeFile } from "../domain/range";
 import type { FilesChanged } from "../filesChanged";
 import allFilesStyles from "../styles/allFilesPatch.css?inline";
+import { AllFilesKeeper, HEADER, layout } from "./allFilesKeeper";
 import { keyExpanders } from "./expanders";
 import { FileHeader, OverLines } from "./FileNotes";
 import { ReadingFiles } from "./FilesState";
-import { KeepAllFilesPlace, scrollToPlace } from "./KeepAllFilesPlace";
-import type { AllFilesPlace } from "./KeepAllFilesPlace";
+import { KeepAllFilesPlace } from "./KeepAllFilesPlace";
 import type { LinePlace } from "./KeepDiffPlace";
 import { patchOptions } from "./patchOptions";
 import { SurroundingsContext } from "./pullRequestText";
@@ -31,7 +31,6 @@ import type { Unfolded } from "./ReviewThreads";
 import { hasSelection } from "./selection";
 import { tabIntoView } from "./tabIntoView";
 import { Turns, TurnsContext } from "./turns";
-import { HEADER, layout, useAllFilesSteps } from "./useAllFilesSteps";
 import { reviewMetrics } from "./useDiffSteps";
 import type { DiffSteps } from "./useDiffSteps";
 import { entryId, fileOfDiff, useFileItems } from "./useFileItems";
@@ -40,7 +39,7 @@ import { useSteady } from "./useSteady";
 
 /** Above this many lines, a file is drawn without colors, which takes Pierre too long. */
 const MOST_COLORED = 3_000;
-const HELD_FRAMES = 20;
+
 /** Every file of a pull request, one after the other. */
 export function AllFiles({
   ref,
@@ -138,51 +137,30 @@ export function AllFiles({
     } as const;
   }, [theme, painted, diffStyle, appearances]);
 
-  const steps = useAllFilesSteps({
-    viewer,
-    entries,
-    folded,
-    contentMissing,
-    at,
-    isReady,
-    onAt,
-    onRead,
-  });
-  const { onScroll, letGo } = steps;
-  const holding = useRef(0);
-  /** Over the frames in which what is above it is drawn and measured. */
-  const hold = useCallback(
-    (place: AllFilesPlace) => {
-      let frames = 0;
-      const again = () => {
-        const instance = viewer();
-        if (!instance?.getItem(place.id)) return;
-        scrollToPlace(instance, place, HEADER);
-        frames += 1;
-        if (frames < HELD_FRAMES)
-          holding.current = requestAnimationFrame(again);
-      };
-      cancelAnimationFrame(holding.current);
-      again();
+  const known = { entries, folded, contentMissing, onAt, onRead };
+  const [keeper] = useState(() => new AllFilesKeeper(viewer, known));
+  useLayoutEffect(() => keeper.update(known));
+  useEffect(() => () => keeper.stop(), [keeper]);
+  useLayoutEffect(
+    function goToCurrent() {
+      if (isReady) keeper.goTo(at);
     },
-    [viewer],
+    [keeper, isReady, entries, at],
   );
-  useEffect(() => () => cancelAnimationFrame(holding.current), []);
   const latestStart = useRef(startsAt);
   useLayoutEffect(
     function goToStart() {
       const line = isReady ? latestStart.current() : null;
       if (!line) return;
-      hold({
-        id: entryId(begins, line.part),
-        line: { side: line.side, number: line.number },
-        below: line.below,
-      });
+      const { part, side, number, below } = line;
+      const id = entryId(begins, part);
+      keeper.put({ id, line: { side, number }, below }, begins);
     },
-    [isReady, hold, begins],
+    [isReady, keeper, begins],
   );
-  const leave = (place: AllFilesPlace | null) => {
-    steps.report();
+  const leave = () => {
+    keeper.tell();
+    const place = keeper.hereInFile();
     const entry = place && entries.get(place.id);
     if (entry && place.line)
       onLeave(entry.at, {
@@ -197,46 +175,49 @@ export function AllFiles({
     root.tabIndex = 0;
     root.setAttribute("role", "region");
     root.setAttribute("aria-label", "All changed files");
-    const onInput = (event: Event) => {
-      cancelAnimationFrame(holding.current);
-      const steps = event instanceof KeyboardEvent && /^[np]$/.test(event.key);
-      if (!steps) letGo();
+    const scrolls = ["wheel", "touchmove"];
+    for (const event of scrolls)
+      root.addEventListener(event, keeper.free, { passive: true });
+    const touch = ({ target }: Event) => {
+      // A note tells more.
+      if (target instanceof Element && target.closest(".files-annotation"))
+        return;
+      keeper.touch();
     };
-    const events = ["wheel", "pointerdown", "keydown", "touchmove"];
-    for (const event of events)
-      root.addEventListener(event, onInput, { passive: true });
-    root.addEventListener("keydown", tabIntoView);
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Enter" || event.key === " ") touch(event);
+      tabIntoView(event);
+    };
+    root.addEventListener("pointerdown", touch);
+    root.addEventListener("keydown", onKey);
     if (holdsFocus.current || document.activeElement === pane.current)
       root.focus({ preventScroll: true });
     holdsFocus.current = false;
     return () => {
-      for (const event of events) root.removeEventListener(event, onInput);
-      root.removeEventListener("keydown", tabIntoView);
+      for (const event of scrolls) root.removeEventListener(event, keeper.free);
+      root.removeEventListener("pointerdown", touch);
+      root.removeEventListener("keydown", onKey);
       holdsFocus.current = root.contains(document.activeElement);
     };
-  }, [isReady, pane, holdsFocus, letGo]);
+  }, [isReady, pane, holdsFocus, keeper]);
 
-  const step = (by: 1 | -1) => {
-    cancelAnimationFrame(holding.current);
-    return steps.step(by);
-  };
-  const toStart = () => {
-    cancelAnimationFrame(holding.current);
-    steps.goTo(entryId(at));
-  };
-  useImperativeHandle(ref, () => ({ step, toStart }));
+  useImperativeHandle(ref, () => ({
+    step: (by) => {
+      keeper.step(by);
+      return true;
+    },
+    toStart: (of) => keeper.toStart(of),
+    tell: keeper.tell,
+  }));
 
   if (!isReady) return <ReadingFiles />;
   return (
     <TurnsContext value={turns}>
       <KeepAllFilesPlace
-        viewer={viewer}
-        header={HEADER}
+        keeper={keeper}
+        items={items}
         isShown={isShown}
-        onAppear={(place) => {
-          setAppearances((before) => before + 1);
-          if (place) hold(place);
-        }}
+        onAppear={() => setAppearances((before) => before + 1)}
         onLeave={leave}
       />
       <div className="file-diff-body files-body">
@@ -246,7 +227,7 @@ export function AllFiles({
           className="file-diff-scroll files-all-scroll"
           items={items}
           options={options}
-          onScroll={onScroll}
+          onScroll={keeper.onScroll}
           renderCustomHeader={({ id }) => {
             const entry = entries.get(id);
             return (
@@ -255,38 +236,51 @@ export function AllFiles({
                   entry={entry}
                   folded={folded.has(entry.file)}
                   onFold={() => {
-                    const instance = viewer();
-                    const top = instance?.getTopForItem(id) ?? 0;
-                    // Pierre keeps the place in it, where nothing will be.
-                    if (instance && top < instance.getScrollTop())
-                      instance.scrollTo({ type: "item", id });
+                    keeper.beforeFold(id);
                     onFold(entry.file);
                   }}
                 />
               )
             );
           }}
-          renderAnnotation={(...[{ metadata }, , { id }]) => {
+          renderAnnotation={(...[note, , { id }]) => {
             const entry = entries.get(id);
             if (!entry) return null;
-            return metadata === "file" ? (
-              <OverLines
-                entry={entry}
-                contentMissing={contentMissing}
-                viewer={login}
-                url={url}
-                unfolded={unfolded}
-                onRead={onRead}
-                onReadAgain={onReadAgain}
-              />
-            ) : (
-              <ThreadChips
-                ids={metadata}
-                threads={threads.get(entry.file) ?? []}
-                viewer={login}
-                url={url}
-                unfolded={unfolded}
-              />
+            const { metadata, lineNumber: number } = note;
+            const line =
+              "side" in note && number > 0 ? { side: note.side, number } : null;
+            const touch = () => keeper.touchAfter({ id, line });
+            return (
+              <div
+                className="files-annotation"
+                onPointerDownCapture={touch}
+                onKeyDownCapture={({ key }) => {
+                  if (key === "Enter" || key === " ") touch();
+                }}
+              >
+                {metadata === "file" ? (
+                  <OverLines
+                    entry={entry}
+                    contentMissing={contentMissing}
+                    viewer={login}
+                    url={url}
+                    unfolded={unfolded}
+                    onRead={onRead}
+                    onReadAgain={(file) => {
+                      keeper.beforeRead(entry.at);
+                      onReadAgain(file);
+                    }}
+                  />
+                ) : (
+                  <ThreadChips
+                    ids={metadata}
+                    threads={threads.get(entry.file) ?? []}
+                    viewer={login}
+                    url={url}
+                    unfolded={unfolded}
+                  />
+                )}
+              </div>
             );
           }}
         />

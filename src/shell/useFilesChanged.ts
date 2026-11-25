@@ -82,9 +82,14 @@ export function useFilesChanged({
   const held = latest !== null && latest.of === id ? latest : null;
   const count = held?.read.kind === "ready" ? held.read.files.length : 0;
   const at = held?.at ?? 0;
+  /** The current file as it is when a key is pressed. */
+  const now = () => {
+    ref.current?.tell?.();
+    return store.read()?.at ?? 0;
+  };
   const change = (by: 1 | -1) => {
     if (ref.current?.step(by) === true) return;
-    store.go(at + by, by === 1 ? "start" : "end");
+    store.go(now() + by, by === 1 ? "start" : "end");
   };
   return {
     held,
@@ -104,7 +109,7 @@ export function useFilesChanged({
     },
     go: store.go,
     choose: (to) => {
-      if (to === at) ref.current?.toStart();
+      if (to === now()) ref.current?.toStart(to);
       else store.go(to);
     },
     showNewest: store.showNewest,
@@ -122,8 +127,8 @@ export function useFilesChanged({
             : null,
       },
       commands: {
-        nextFile: () => store.go(at + 1),
-        previousFile: () => store.go(at - 1),
+        nextFile: () => store.go(now() + 1),
+        previousFile: () => store.go(now() - 1),
         nextChange: () => change(1),
         previousChange: () => change(-1),
       },

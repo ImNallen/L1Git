@@ -62,7 +62,9 @@ export type DiffSteps = {
   /** Scrolls to the next change or the one before. False when there is none. */
   step: (by: 1 | -1) => boolean;
   /** Scrolls to where the current file begins. */
-  toStart: () => void;
+  toStart: (at: number) => void;
+  /** Says which file is current, if it knows better. */
+  tell?: () => void;
 };
 
 export function useDiffSteps(
