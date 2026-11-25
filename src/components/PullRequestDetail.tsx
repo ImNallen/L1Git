@@ -1,4 +1,4 @@
-import { useId, useImperativeHandle, useRef, useState } from "react";
+import { useId, useImperativeHandle, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent, Ref } from "react";
 import {
   ArrowLeft,
@@ -25,6 +25,7 @@ import type { Layout } from "../shell/useLayout";
 import type { OpenedPullRequest } from "../shell/usePullRequests";
 import type { Appearance } from "../themes/palette";
 import { CopyButton } from "./CopyButton";
+import { KeepPlace } from "./KeepPlace";
 import { PaneDivider } from "./PaneDivider";
 import { PullRequestChecks } from "./PullRequestChecks";
 import { PullRequestCommits } from "./PullRequestCommits";
@@ -215,6 +216,7 @@ export function PullRequestDetail({
   const [tab, setTab] = useState<Tab>("conversation");
   const id = useId();
   const title = useRef<HTMLHeadingElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
   useImperativeHandle(ref, () => ({
     focus: () => title.current?.focus({ preventScroll: true }),
   }));
@@ -223,6 +225,11 @@ export function PullRequestDetail({
   const notice = detailNotice(read, repository);
   const loading = pull === null && problem === null;
   const tabId = (of: Tab) => `${id}-${of}`;
+  const panelId = (of: Tab) => `${id}-${of}-panel`;
+  const surroundings = useMemo(
+    () => ({ base: `https://github.com/${owner}/${repo}/`, theme, painted }),
+    [owner, repo, theme, painted],
+  );
   const show = (next: Tab) => {
     flushSync(() => setTab(next));
     document.getElementById(tabId(next))?.focus();
@@ -289,7 +296,7 @@ export function PullRequestDetail({
               id={tabId(of)}
               role="tab"
               aria-selected={tab === of}
-              aria-controls={`${id}-panel`}
+              aria-controls={panelId(of)}
               tabIndex={tab === of ? 0 : -1}
               onClick={() => setTab(of)}
             >
@@ -307,43 +314,49 @@ export function PullRequestDetail({
             onRefresh={onRefresh}
           />
         )}
-        <div
-          key={tab}
-          id={`${id}-panel`}
-          className="pull-panel"
-          role="tabpanel"
-          aria-labelledby={tabId(tab)}
-          aria-busy={read.reading}
-          tabIndex={0}
-        >
-          <SurroundingsContext
-            value={{
-              base: `https://github.com/${owner}/${repo}/`,
-              theme,
-              painted,
-            }}
-          >
-            {pull === null ? (
-              loading ? (
-                <Skeleton />
-              ) : (
-                <Failure
-                  opened={opened}
-                  url={url}
-                  onBack={onBack}
-                  onRefresh={onRefresh}
-                />
-              )
-            ) : tab === "conversation" ? (
-              <PullRequestConversation pull={pull} viewer={viewer} url={url} />
-            ) : tab === "commits" ? (
-              <PullRequestCommits pull={pull} viewer={viewer} url={url} />
-            ) : (
-              <PullRequestChecks pull={pull} url={url} />
-            )}
-          </SurroundingsContext>
-        </div>
+        {order
+          // What was expanded in the conversation stays so behind another tab.
+          .filter((of) => of === tab || (of === "conversation" && pull))
+          .map((of) => (
+            <div
+              key={of}
+              ref={of === tab ? panel : undefined}
+              id={panelId(of)}
+              className="pull-panel"
+              role="tabpanel"
+              aria-labelledby={tabId(of)}
+              aria-busy={read.reading}
+              tabIndex={0}
+              hidden={of !== tab}
+            >
+              <SurroundingsContext value={surroundings}>
+                {pull === null ? (
+                  loading ? (
+                    <Skeleton />
+                  ) : (
+                    <Failure
+                      opened={opened}
+                      url={url}
+                      onBack={onBack}
+                      onRefresh={onRefresh}
+                    />
+                  )
+                ) : of === "conversation" ? (
+                  <PullRequestConversation
+                    pull={pull}
+                    viewer={viewer}
+                    url={url}
+                  />
+                ) : of === "commits" ? (
+                  <PullRequestCommits pull={pull} viewer={viewer} url={url} />
+                ) : (
+                  <PullRequestChecks pull={pull} url={url} />
+                )}
+              </SurroundingsContext>
+            </div>
+          ))}
       </article>
+      <KeepPlace panel={panel} />
       {layout.inspectorOpen && (
         <>
           <PaneDivider

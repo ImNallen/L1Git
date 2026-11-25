@@ -239,9 +239,10 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
         restart={restart}
       />
       <main className="workspace">
-        {onPulls && (
+        {pulls.visited && (
           <PullRequests
             ref={focus.pullRequestsRef}
+            hidden={!onPulls}
             status={host.status}
             hostProblem={host.problem}
             onCheckHost={() => void host.refresh()}

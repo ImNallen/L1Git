@@ -166,6 +166,7 @@
   flex: 1;
   min-height: 0;
   overflow: auto;
+  overflow-anchor: none;
   padding: 24px 32px 40px;
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar) var(--panel-raised);

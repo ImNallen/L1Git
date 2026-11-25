@@ -643,3 +643,173 @@ it("shows nothing of the last sign-in", async () => {
   await app.click(get("button", "Close settings"));
   expect(said()).toContain("For the next account.");
 });
+
+const lockedKeychain = {
+  kind: "keychain" as const,
+  problem: "locked",
+  message: "The system keychain is locked.",
+};
+const spent = () => ({
+  kind: "rateLimited" as const,
+  message: "The limit is used up.",
+  resetAt: Math.ceil(Date.now() / 1_000) + 600,
+});
+const listNotices = () =>
+  [...document.querySelectorAll(".pull-list .notice")].map(
+    (notice) => notice.textContent,
+  );
+
+it("remembers a lock and a limit that only a closed one met", async () => {
+  for (const problem of [lockedKeychain, spent()]) {
+    const app = await visit();
+    await open(app, 1);
+    const recover = app.bridge.failHost(problem, pullKey("octo/pin", 1));
+    let now = later(31_000);
+    await app.refocusWindow();
+    now.mockRestore();
+    expect(notices()).toEqual([`${problem.message}Try again`]);
+    await app.click(get("button", "Pull requests"));
+    expect(listNotices()).toEqual([`${problem.message}Try again`]);
+    let asked = app.bridge.hostLog.length;
+    now = later(200_000);
+    await app.refocusWindow();
+    expect(app.bridge.hostLog).toHaveLength(asked);
+
+    recover();
+    await app.click(get("button", "Try again"));
+    expect(listNotices()).toEqual([]);
+    asked = app.bridge.hostLog.length;
+    now.mockRestore();
+    now = later(400_000);
+    await app.refocusWindow();
+    now.mockRestore();
+    expect(app.bridge.hostLog.length).toBeGreaterThan(asked);
+  }
+});
+
+it("shows the limit instead of asking for one it never read", async () => {
+  const app = await visit();
+  await open(app, 1);
+  const recover = app.bridge.failHost(spent(), pullKey("octo/pin", 1));
+  const now = later(31_000);
+  await app.refocusWindow();
+  now.mockRestore();
+  await app.click(get("button", "Pull requests"));
+  const asked = app.bridge.hostLog.length;
+  await open(app, 2);
+  expect(app.bridge.hostLog).toHaveLength(asked);
+  expect(get("heading", "Couldn't read #2 in pin")).toBeTruthy();
+  expect(get("region", "Pull requests").textContent).toContain(
+    "The limit is used up.",
+  );
+  await app.click(get("button", "Pull requests"));
+  await app.click(get("button", /^Recently merged/));
+  expect(app.bridge.hostLog, "nor for a list").toHaveLength(asked);
+
+  recover();
+  await app.click(get("button", /^All open/));
+  await open(app, 2);
+  await app.click(get("button", "Try again"));
+  expect(said()).not.toBeNull();
+});
+
+it("keeps its tab, its places, and the row to return to over a visit to the history", async () => {
+  const app = await visit();
+  const list = document.querySelector(".pull-scroll")!;
+  await open(app, 2);
+  await app.click(tab("Commits"));
+  const panel = get("tabpanel", "Commits1");
+  await app.click(get("button", "Back to history"));
+  expect(query("region", "Pull requests")).toBeNull();
+  await app.click(get("button", /^Pull requests/));
+  expect(chosen()).toEqual(["Commits1"]);
+  expect(get("tabpanel", "Commits1")).toBe(panel);
+  expect(document.querySelector(".pull-scroll")).toBe(list);
+  expect(focused()).toBe("heading Row 2 #2");
+  await app.press("Escape");
+  expect(focused()).toMatch(/^link Row 2,/);
+});
+
+it("closes, and reads no more, when its repository is removed", async () => {
+  const app = await visit();
+  await open(app, 3);
+  expect(reads(app.bridge)).toEqual([3]);
+  await app.click(get("button", "Back to history"));
+  await app.contextMenu(get("button", /^other/));
+  await app.click(get("menuitem", "Remove"));
+  await app.click(get("button", /^Pull requests/));
+  expect(detail()).toBeNull();
+  expect(link(1)).toBeTruthy();
+  expect(() => link(3)).toThrow();
+  const now = later(200_000);
+  await app.refocusWindow();
+  now.mockRestore();
+  expect(reads(app.bridge)).toEqual([3]);
+});
+
+const resolvedThread = {
+  id: "T1",
+  review: null,
+  path: "a.ts",
+  line: 3,
+  startLine: null,
+  originalLine: 3,
+  originalStartLine: null,
+  side: "right" as const,
+  outdated: false,
+  resolved: true,
+  hunk: "no hunk",
+  comments: page([{ id: "TC1", body: "Fixed", by: "sara", at: at(3) }]),
+};
+
+it("keeps what was expanded while another tab shows", async () => {
+  const long = `${`${"Long words. ".repeat(20)}\n\n`.repeat(200)}the end`;
+  const app = await visit({
+    world: ({ host }) =>
+      host.details.set(
+        pullKey("octo/pin", 1),
+        pull(1, { body: long, threads: page([resolvedThread]) }),
+      ),
+  });
+  await open(app, 1);
+  await app.click(get("button", /^Resolved/));
+  await app.click(get("button", "Show all"));
+  await app.click(tab("Checks"));
+  expect(said(), "hidden").not.toBeNull();
+  expect(query("list", "Conversation")).toBeNull();
+  await app.click(tab("Conversation"));
+  expect(get("region", "Thread on a.ts").textContent).toContain("Fixed");
+  expect(get("button", "Show less")).toBeTruthy();
+});
+
+it("keeps each entry when earlier ones go", async () => {
+  const comments = (from: number, to: number) =>
+    Array.from({ length: to - from }, (_, index) => ({
+      id: `K${from + index}`,
+      kind: "comment" as const,
+      body: `Comment ${from + index}`,
+      by: "sara",
+      at: at(2),
+    }));
+  const app = await visit({
+    world: ({ host }) =>
+      host.details.set(
+        pullKey("octo/pin", 1),
+        pull(1, { timeline: page(comments(1, 5), 140) }),
+      ),
+  });
+  await open(app, 1);
+  const entry = () =>
+    [...document.querySelectorAll(".entry")].find(({ textContent }) =>
+      textContent?.includes("Comment 4"),
+    );
+  const before = entry();
+  expect(before).toBeTruthy();
+  app.bridge.world.host.details.set(
+    pullKey("octo/pin", 1),
+    pull(1, { timeline: page(comments(3, 7), 142) }),
+  );
+  await app.click(refresh());
+  expect(said()).toContain("Comment 6");
+  expect(entry()).toBe(before);
+});

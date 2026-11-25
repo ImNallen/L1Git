@@ -188,6 +188,8 @@
   min-width: 0;
   min-height: 0;
 }
+.pull-requests[hidden],
+.pull-panel[hidden],
 .pull-list[hidden] {
   display: none;
 }

@@ -72,8 +72,8 @@ export const Thread = memo(function Thread({
           <>
             {cut && <ThreadHunk path={path} of={cut} />}
             <ul className="thread-comments">
-              {said.items.map(({ by, at, body }, index) => (
-                <li key={index}>
+              {said.items.map(({ id, by, at, body }) => (
+                <li key={id}>
                   <Avatar login={by} />
                   <div className="thread-comment">
                     <p className="thread-by">

@@ -38,6 +38,7 @@ function createReads<Request, T>(
   host: HostReader,
   keyOf: (request: Request) => string,
   ask: (request: Request) => Promise<Answered<T>>,
+  hear: (problem: HostProblem | null, name: string) => void,
 ) {
   const listeners = new Set<() => void>();
   const hold = (
@@ -75,6 +76,7 @@ function createReads<Request, T>(
     const read = ask(request).then((answer) => {
       running.delete(key);
       if (current().running !== running) return;
+      hear(answer.ok ? null : answer.problem, name);
       put(
         key,
         answer.ok
@@ -113,18 +115,30 @@ const named = ({ owner, repo }: GitHubRepository) =>
   `${owner}/${repo}`.toLowerCase();
 
 export function createPullRequests(host: HostReader) {
+  let met: { problem: HostProblem; name: string } | null = null;
+  const hear = (problem: HostProblem | null, name: string) => {
+    if (problem?.kind === "keychain" || problem?.kind === "rateLimited")
+      met = { problem, name };
+    // Any other answer got past the keychain, and only a success past a limit.
+    else if (problem === null || met?.problem.kind === "keychain") met = null;
+  };
   return {
+    /** What keeps every read back, whichever read met it, until one gets past. */
+    met: () =>
+      (met?.name === signIn(host.read().status) ? met : null)?.problem ?? null,
     lists: createReads(
       host,
       (of: { repository: GitHubRepository; list: PullRequestList }) =>
         `${named(of.repository)} ${of.list}`,
       (of) => host.ask({ op: "pullRequests", ...of }),
+      hear,
     ),
     details: createReads(
       host,
       (of: { repository: GitHubRepository; number: number }) =>
         `${named(of.repository)} ${of.number}`,
       (of) => host.ask({ op: "pullRequest", ...of }),
+      hear,
     ),
   };
 }

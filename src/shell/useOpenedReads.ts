@@ -36,7 +36,7 @@ export function useOpenedReads({
   };
   const readOnVisit = useEffectEvent(() => {
     unknownReads.current = 0;
-    if (value === null || !limited()) readNow();
+    if (!limited()) readNow();
   });
   const readInBackground = useEffectEvent(() => {
     if (document.visibilityState === "visible" && !limited() && !locked)

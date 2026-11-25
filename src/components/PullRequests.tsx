@@ -1,4 +1,4 @@
-import { useEffect, useImperativeHandle, useRef } from "react";
+import { memo, useEffect, useImperativeHandle, useRef } from "react";
 import type { Ref } from "react";
 import { GitPullRequest } from "lucide-react";
 import { flushSync } from "react-dom";
@@ -111,8 +111,15 @@ function Body({
   }
 }
 
-export function PullRequests({
+/** Keeps its place while something else is on screen, and waits for its turn. */
+export const PullRequests = memo(
+  Screen,
+  (before, now) => before.hidden && now.hidden,
+);
+
+function Screen({
   ref,
+  hidden,
   status,
   hostProblem,
   onCheckHost,
@@ -125,6 +132,7 @@ export function PullRequests({
   onLeave,
 }: {
   ref: Ref<PullRequestsHandle>;
+  hidden: boolean;
   /** Null until Rust has said whether GitHub is connected. */
   status: HostStatus | null;
   hostProblem: string | null;
@@ -163,6 +171,7 @@ export function PullRequests({
     return true;
   }
   function focus() {
+    if (hidden) return;
     if (detail.current) return detail.current.focus();
     const from = openedFrom.current;
     openedFrom.current = null;
@@ -212,6 +221,7 @@ export function PullRequests({
       ref={region}
       className="pull-requests"
       aria-label="Pull requests"
+      hidden={hidden}
       tabIndex={-1}
       onFocus={({ target }) => {
         focused.current = {

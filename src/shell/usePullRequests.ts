@@ -64,6 +64,8 @@ export type OpenedPullRequest = {
 };
 
 export type PullRequestsState = {
+  /** Whether they were ever on screen. */
+  visited: boolean;
   saved: SavedRepositories;
   model: ListModel;
   notices: readonly Notice[];
@@ -105,7 +107,7 @@ function openedOf(
   { repository, number }: DetailRequest,
   viewer: string,
   read: Read<PullRequest>,
-  locked: HostProblem | null,
+  met: HostProblem | null,
   { body }: ListModel,
   readOf: ReadOf,
 ): OpenedPullRequest {
@@ -123,9 +125,9 @@ function openedOf(
     number,
     summary: listed("recentlyMerged") ?? listed("open") ?? null,
     read:
-      // A read that waits behind a locked keychain never starts.
+      // A read that a locked keychain or a spent limit keeps back never starts.
       read.value === null && read.problem === null && !read.reading
-        ? { ...read, problem: locked }
+        ? { ...read, problem: met }
         : read,
     position: at > 0 ? { at, of: rows.length } : null,
     viewer,
@@ -154,9 +156,17 @@ export function usePullRequests({
   focus: Pick<Focus, "pullRequestsRef">;
   layout: Pick<Layout, "sidebarOpen" | "sidebarToggleRef">;
 }): PullRequestsState {
-  const [{ lists, details }] = useState(() => createPullRequests(host));
+  const [{ lists, details, met }] = useState(() => createPullRequests(host));
   const look = useSyncExternalStore(lists.subscribe, lists.read);
   const lookInto = useSyncExternalStore(details.subscribe, details.read);
+  const subscribe = useCallback(
+    (listener: () => void) => {
+      const stops = [lists.subscribe(listener), details.subscribe(listener)];
+      return () => stops.forEach((stop) => stop());
+    },
+    [lists, details],
+  );
+  const problemMet = useSyncExternalStore(subscribe, met);
   const [asked, setAsked] = useState<DetailRequest | null>(null);
   const [visited, setVisited] = useState(false);
   const [choices, setChoices] = useState(initialChoices);
@@ -211,6 +221,13 @@ export function usePullRequests({
 
   const github = host.status?.github;
   const viewer = github?.kind === "connected" ? github.login : null;
+  // Its repository is no longer saved.
+  if (
+    asked !== null &&
+    !saved.opening &&
+    !listed.some(({ key }) => key === asked.repository.key)
+  )
+    setAsked(null);
   const opened = viewer === null ? null : asked;
   const openedRead = opened
     ? lookInto({ repository: opened.repository.github, number: opened.number })
@@ -219,15 +236,17 @@ export function usePullRequests({
     ...wanted.map(({ repository, list }) => readOf(repository, list)),
     openedRead,
   ];
+  const problems = [problemMet, ...reads.map(({ problem }) => problem)];
   const limited = () =>
-    reads.some(
-      ({ problem }) =>
+    problems.some(
+      (problem) =>
         problem?.kind === "rateLimited" &&
         (problem.resetAt ?? 0) * 1_000 > Date.now(),
     );
   // Asking a locked keychain again takes the user's own step.
   const locked =
-    reads.find(({ problem }) => problem?.kind === "keychain")?.problem ?? null;
+    problems.find((problem) => problem?.kind === "keychain") ?? null;
+  const keptBack = locked ?? problemMet;
   const refreshOnVisit = useEffectEvent(() => {
     if (!limited()) refresh();
   });
@@ -235,7 +254,7 @@ export function usePullRequests({
     if (!limited() && locked === null) refresh();
   });
   const readUnread = useEffectEvent(() => {
-    if (account === null || locked !== null) return;
+    if (account === null || locked !== null || limited()) return;
     const missing = wanted.filter((_, index) => {
       const read = reads[index];
       return read?.value === null && read.problem === null && !read.reading;
@@ -249,7 +268,7 @@ export function usePullRequests({
   });
 
   const readMerged = useEffectEvent(() => {
-    if (account !== null) queue.add(requests("recentlyMerged"));
+    if (account !== null && !limited()) queue.add(requests("recentlyMerged"));
   });
 
   // Ahead of the list's, so a locked keychain asks for what is on screen.
@@ -304,12 +323,16 @@ export function usePullRequests({
     [listed, readOf, choices],
   );
   return {
+    visited,
     saved,
     model,
-    notices: useMemo(
-      () => notices(listed, readOf, choices),
-      [listed, readOf, choices],
-    ),
+    notices: useMemo(() => {
+      const own = notices(listed, readOf, choices);
+      return problemMet === null ||
+        own.some(({ kind }) => kind === "connection")
+        ? own
+        : [...own, { kind: "connection", message: problemMet.message }];
+    }, [listed, readOf, choices, problemMet]),
     choices,
     choose,
     clearFilters: () =>
@@ -325,9 +348,9 @@ export function usePullRequests({
     opened: useMemo(
       () =>
         opened && viewer !== null
-          ? openedOf(opened, viewer, openedRead, locked, model, readOf)
+          ? openedOf(opened, viewer, openedRead, keptBack, model, readOf)
           : null,
-      [opened, viewer, openedRead, locked, model, readOf],
+      [opened, viewer, openedRead, keptBack, model, readOf],
     ),
     open: (pull) => {
       flushSync(() => setAsked(pull));
