@@ -286,6 +286,37 @@ it("says when a pull request has no room for one more draft", async () => {
   expect(await drafts.flush()).toBe(false);
   expect(drafts.read(pull).drafts.at(-1)).toMatchObject({
     text: "One more",
-    save: { kind: "unsaved" },
+    save: {
+      kind: "unsaved",
+      why: "This pull request already has 100 drafts on this computer. Send or delete one to save this.",
+    },
   });
+});
+
+it("says when drafts for one more pull request have no room, and drops none", async () => {
+  const draft = {
+    anchor: conversation,
+    head: HEAD,
+    text: "Kept",
+    writtenAt: 1,
+    savedAt: 1,
+  };
+  for (let number = 1; number <= 100; number += 1)
+    bridge.world.host.drafts.set(`octo octo/pin#${number + 100}`, [draft]);
+  const drafts = window();
+  drafts.type(pull, conversation, HEAD, "New");
+  expect(await drafts.flush()).toBe(false);
+  expect(drafts.read(pull).drafts).toMatchObject([
+    {
+      text: "New",
+      save: {
+        kind: "unsaved",
+        why: "L1 Git keeps drafts for 100 pull requests on this computer. Send or delete the drafts of another pull request to save this.",
+      },
+    },
+  ]);
+  expect(bridge.world.host.drafts.size).toBe(100);
+  bridge.world.host.drafts.delete("octo octo/pin#101");
+  expect(await drafts.flush()).toBe(true);
+  expect(heldTexts()).toEqual(["New"]);
 });

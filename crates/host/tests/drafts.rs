@@ -203,7 +203,7 @@ fn a_write_based_on_a_draft_another_window_changed_is_refused() {
         delete(conversation(), HEAD, one.clone()),
     ] {
         let refused = on(&host, stale);
-        assert_eq!(refused["refused"], "stale");
+        assert_eq!(refused["refused"], json!({"kind": "stale"}));
         assert_eq!(texts(&refused), ["One, two"]);
     }
 
@@ -217,15 +217,15 @@ fn a_write_based_on_a_draft_another_window_changed_is_refused() {
         "deleting a deleted draft is done"
     );
     let sent_elsewhere = on(&host, put(conversation(), HEAD, "Still typing", one));
-    assert_eq!(sent_elsewhere["refused"], "stale");
+    assert_eq!(sent_elsewhere["refused"], json!({"kind": "stale"}));
     assert!(texts(&sent_elsewhere).is_empty());
 }
 
 #[test]
-fn pruning_caps_the_file_by_the_pull_requests_written_longest_ago() {
+fn a_pull_request_past_the_hundredth_is_refused_and_no_draft_is_dropped() {
     let dir = tempfile::tempdir().unwrap();
     let host = host(dir.path());
-    for number in 1..=101 {
+    let hi = |number| {
         ask(
             &host,
             pull(
@@ -235,37 +235,64 @@ fn pruning_caps_the_file_by_the_pull_requests_written_longest_ago() {
                 put(conversation(), HEAD, "Hi", Value::Null),
             ),
         )
-        .unwrap();
+        .unwrap()
+    };
+    for number in 1..=100 {
+        assert_eq!(hi(number)["refused"], Value::Null);
     }
+    let full = hi(101);
+    assert_eq!(
+        full["refused"],
+        json!({"kind": "full", "of": "pullRequests"})
+    );
+    assert!(texts(&full).is_empty());
+    let nothing = ask(
+        &host,
+        pull("octo", "app", 101, delete(conversation(), HEAD, json!(1))),
+    )
+    .unwrap();
+    assert_eq!(
+        nothing["refused"],
+        Value::Null,
+        "deleting nothing needs no room"
+    );
     let file: Value = serde_json::from_slice(&fs::read(drafts_file(dir.path())).unwrap()).unwrap();
     assert_eq!(file["pulls"].as_array().unwrap().len(), 100);
-    assert!(texts(&ask(&host, pull("octo", "app", 1, read())).unwrap()).is_empty());
+    let first = ask(&host, pull("octo", "app", 1, read())).unwrap();
     assert_eq!(
-        texts(&ask(&host, pull("octo", "app", 2, read())).unwrap()),
-        ["Hi"]
+        texts(&first),
+        ["Hi"],
+        "the oldest pull request keeps its words"
+    );
+    let edited = ask(
+        &host,
+        pull(
+            "octo",
+            "app",
+            1,
+            put(conversation(), HEAD, "Hi again", saved_at(&first, 0)),
+        ),
+    )
+    .unwrap();
+    assert_eq!(
+        edited["refused"],
+        Value::Null,
+        "a kept pull request takes edits"
     );
 
+    let second = ask(&host, pull("octo", "app", 2, read())).unwrap();
     let emptied = ask(
         &host,
         pull(
             "octo",
             "app",
             2,
-            delete(
-                conversation(),
-                HEAD,
-                saved_at(&ask(&host, pull("octo", "app", 2, read())).unwrap(), 0),
-            ),
+            delete(conversation(), HEAD, saved_at(&second, 0)),
         ),
     )
     .unwrap();
     assert!(texts(&emptied).is_empty());
-    let file: Value = serde_json::from_slice(&fs::read(drafts_file(dir.path())).unwrap()).unwrap();
-    assert_eq!(
-        file["pulls"].as_array().unwrap().len(),
-        99,
-        "an empty pull request is dropped"
-    );
+    assert_eq!(hi(101)["refused"], Value::Null, "deleting made room");
 }
 
 #[test]
@@ -281,7 +308,7 @@ fn one_pull_request_holds_a_bounded_number_of_drafts() {
         );
     }
     let full = on(&host, put(conversation(), HEAD, "One more", Value::Null));
-    assert_eq!(full["refused"], "full");
+    assert_eq!(full["refused"], json!({"kind": "full", "of": "drafts"}));
     assert_eq!(full["drafts"].as_array().unwrap().len(), 100);
 }
 

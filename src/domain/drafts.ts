@@ -35,8 +35,18 @@ const draftSchema = z.object({
 
 export const pullDraftsSchema = z.object({
   drafts: z.array(draftSchema),
-  /** `stale`: another window wrote since. `full`: no room for one more. */
-  refused: z.enum(["stale", "full"]).nullable(),
+  refused: z
+    .discriminatedUnion("kind", [
+      /** Another window wrote since. */
+      z.object({ kind: z.literal("stale") }),
+      /** No room for one more, in this pull request's drafts or in the pull
+       * requests that have drafts. Nothing is dropped to make room. */
+      z.object({
+        kind: z.literal("full"),
+        of: z.enum(["drafts", "pullRequests"]),
+      }),
+    ])
+    .nullable(),
 });
 
 export type Anchor = z.infer<typeof anchorSchema>;

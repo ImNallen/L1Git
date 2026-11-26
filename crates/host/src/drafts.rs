@@ -18,7 +18,7 @@ use crate::state::unix_millis;
 use crate::wire::{ErrorKind, Failure};
 
 const VERSION: u64 = 1;
-/// The pull request written to longest ago goes first.
+/// Pull requests with drafts, across every account and GitHub.
 const MOST_PULLS: usize = 100;
 const MOST_DRAFTS: usize = 100;
 /// GitHub's limit on a comment's body.
@@ -59,10 +59,27 @@ pub struct PullDrafts {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum Refused {
     Stale,
-    Full,
+    /// Nothing is dropped to make room, so the user chooses what to send or
+    /// delete, and `of` names where.
+    Full {
+        of: Limit,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Limit {
+    /// This pull request's drafts.
+    Drafts,
+    /// The pull requests that have drafts.
+    PullRequests,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -337,7 +354,9 @@ fn apply(drafts: &mut Vec<Draft>, change: Change, now: u64) -> Option<Refused> {
         } => {
             let found = drafts.iter().position(|draft| draft.is_at(&anchor, &head));
             match (found, at) {
-                (None, None) if drafts.len() >= MOST_DRAFTS => Some(Refused::Full),
+                (None, None) if drafts.len() >= MOST_DRAFTS => {
+                    Some(Refused::Full { of: Limit::Drafts })
+                }
                 (None, None) => {
                     drafts.push(Draft {
                         anchor,
@@ -385,12 +404,13 @@ impl Host {
         let mut pulls = load(&path)?;
         let api = self.endpoints.api();
         let is_read = matches!(change, Change::Read {});
-        let mut book = match pulls.iter().position(|book| {
+        let found = pulls.iter().position(|book| {
             &book.api == api
                 && book.login == login
                 && book.repository == repository
                 && book.number == number
-        }) {
+        });
+        let mut book = match found {
             Some(index) => pulls.remove(index),
             None => Book {
                 api: api.clone(),
@@ -400,14 +420,22 @@ impl Host {
                 drafts: Vec::new(),
             },
         };
-        let refused = apply(&mut book.drafts, change, unix_millis());
+        let mut refused = apply(&mut book.drafts, change, unix_millis());
+        if refused.is_none()
+            && found.is_none()
+            && !book.drafts.is_empty()
+            && pulls.len() >= MOST_PULLS
+        {
+            book.drafts.clear();
+            refused = Some(Refused::Full {
+                of: Limit::PullRequests,
+            });
+        }
         let drafts = book.drafts.clone();
         if refused.is_none() && !is_read {
             if !book.drafts.is_empty() {
                 pulls.push(book);
             }
-            let extra = pulls.len().saturating_sub(MOST_PULLS);
-            pulls.drain(..extra);
             save(dir, &path, pulls)?;
         }
         Ok(PullDrafts { drafts, refused })

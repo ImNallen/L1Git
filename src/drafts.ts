@@ -13,8 +13,12 @@ import type { HostClient } from "./host";
  * cross into Rust once per character. */
 const SAVE_AFTER_MS = 400;
 
-const fullMessage =
-  "This pull request already has 100 drafts on this computer. Send or delete one to save this.";
+const fullMessage = {
+  drafts:
+    "This pull request already has 100 drafts on this computer. Send or delete one to save this.",
+  pullRequests:
+    "L1 Git keeps drafts for 100 pull requests on this computer. Send or delete the drafts of another pull request to save this.",
+};
 
 /** One pull request, as one account sees it. */
 export type DraftsOf = {
@@ -176,10 +180,10 @@ export function createDrafts(host: Pick<HostClient, "ask">) {
     const theirs =
       data.drafts.find((draft) => draftKey(draft.anchor, draft.head) === key) ??
       null;
-    if (data.refused === "stale")
+    if (data.refused?.kind === "stale")
       entry.save = { kind: "changedElsewhere", theirs };
-    else if (data.refused === "full")
-      entry.save = { kind: "unsaved", why: fullMessage };
+    else if (data.refused?.kind === "full")
+      entry.save = { kind: "unsaved", why: fullMessage[data.refused.of] };
     else if (entry.text === text && entry.head === head) {
       if (theirs) pull.entries.set(key, settled(theirs));
       else pull.entries.delete(key);
