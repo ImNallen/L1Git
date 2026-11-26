@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { pull } from "../test/pullRequests";
 import type { PullRequest } from "./pullRequest";
-import { pullCheckoutSchema, pullHead } from "./pullRequestCheckout";
+import {
+  pullCheckoutSchema,
+  pullHead,
+  pullKeySchema,
+} from "./pullRequestCheckout";
 
 const oid = "1".repeat(40);
 const head = (fields: Partial<ReturnType<typeof pull>["head"]>) =>
@@ -61,6 +65,20 @@ describe("pullHead", () => {
         }),
       ).from,
     ).toEqual({ kind: "gone" });
+  });
+});
+
+describe("pullKeySchema", () => {
+  it("takes the pull request numbers the core takes", () => {
+    const key = (number: number) =>
+      pullKeySchema.safeParse({ github: { owner: "o", repo: "r" }, number })
+        .success;
+    expect([0, 1, 2 ** 32 - 1, 2 ** 32].map(key)).toEqual([
+      false,
+      true,
+      true,
+      false,
+    ]);
   });
 });
 

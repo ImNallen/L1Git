@@ -11,7 +11,11 @@ import {
 
 export const pullKeySchema = z.strictObject({
   github: githubRepositorySchema,
-  number: z.number().int().positive(),
+  number: z
+    .number()
+    .int()
+    .positive()
+    .max(2 ** 32 - 1),
 });
 export const pullHeadSchema = z.strictObject({
   reference: localRefSchema,
