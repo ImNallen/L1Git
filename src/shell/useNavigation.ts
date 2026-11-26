@@ -61,7 +61,10 @@ export type Navigation = {
   /** Closes after a repository opened, then `focus.fallback()`. */
   finishAdd: () => void;
   addRepository: (path: string, signal: AbortSignal) => Promise<Problem | null>;
-  jumpTo: (root: RepositoryRoot, target: JumpTarget) => void;
+  jumpTo: (
+    root: RepositoryRoot,
+    target: Pick<JumpTarget, "reference" | "oid">,
+  ) => void;
   showInGraph: (root: RepositoryRoot, target: JumpTarget) => void;
   /** After Edit message: select the new HEAD once the settled snapshot has it. */
   selectHeadAfter: (root: RepositoryRoot) => void;
@@ -171,12 +174,18 @@ export function useNavigation({
     expansion.setExpanded(root, true);
     if (root !== snapshot?.root) void app.selectRepository(root);
   }
-  function jumpTo(root: RepositoryRoot, target: JumpTarget) {
+  function jumpTo(
+    root: RepositoryRoot,
+    target: Pick<JumpTarget, "reference" | "oid">,
+  ) {
     app.closeFile();
     const pending = root !== snapshot?.root;
     if (pending) showRepository(root);
-    else if (visibleOids.has(target.oid))
-      app.select({ kind: "commit", oid: target.oid });
+    else {
+      screen.toRepository();
+      if (visibleOids.has(target.oid))
+        app.select({ kind: "commit", oid: target.oid });
+    }
     setSidebarJump({ root, reference: target.reference });
     setLastBranch((previous) => new Map(previous).set(root, target.reference));
     setJump((previous) => ({

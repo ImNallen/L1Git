@@ -9,7 +9,7 @@ export function PublishHost({
   focus,
 }: {
   sync: SyncControls;
-  loop: Pick<WriteLoop, "remoteAdded">;
+  loop: Pick<WriteLoop, "rereadRefs">;
   focus: Pick<Focus, "fallback">;
 }) {
   const root = sync.publishingRoot;
@@ -18,7 +18,7 @@ export function PublishHost({
     <PublishDialog
       key={root}
       root={root}
-      onRemoteAdded={() => loop.remoteAdded(root)}
+      onRemoteAdded={() => loop.rereadRefs(root)}
       onPublish={(intent) => sync.publish(root, intent)}
       onClose={() => {
         sync.closePublish();

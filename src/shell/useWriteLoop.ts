@@ -17,6 +17,7 @@ import type { WorkspaceApi } from "./workspaceView";
  *   write ends     -> refreshLocal(commonDir) -> onRefsChanged
  *   onRefsChanged  -> rereadAll() when the active root changed
  *   ref-moving     -> reread.refs: refreshLocal + rereadOpenRepository
+ *   outside writes -> rereadRefs(root): reread.refs for a write that skipped writes
  *   window focus   -> refreshRepository() + reloadRefs() + probe(), 1 s throttle
  *   merge state    -> observe(active root), so its sidebar pill follows at once
  *
@@ -29,7 +30,7 @@ export type WriteLoop = {
   rereadChanges: () => void;
   /** refreshLocal for the open repository, then rereadAll. */
   refreshRepository: () => Promise<void>;
-  remoteAdded: (root: RepositoryRoot) => void;
+  rereadRefs: (root: RepositoryRoot) => void;
   actions: ActionSlice<"writing">;
 };
 
@@ -129,7 +130,7 @@ export function useWriteLoop({
     writes,
     rereadChanges,
     refreshRepository,
-    remoteAdded: (root) => void rereadRefs(root, root),
+    rereadRefs: (root) => void rereadRefs(root, root),
     actions: defineSlice({
       context: { writing: writes.running !== null },
       commands: {},
