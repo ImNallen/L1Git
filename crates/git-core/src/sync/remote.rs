@@ -4,7 +4,10 @@ use crate::{
     git::{self, Deadline, LocalRead},
 };
 use serde::{Deserialize, Serialize};
-use std::{fmt, path::Path};
+use std::{
+    fmt,
+    path::{Path, PathBuf},
+};
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -58,11 +61,41 @@ impl Coordinator {
         remote: &AddRemote,
         refresh: impl FnOnce() -> Result<PublishOptions, RepositoryError>,
     ) -> Result<AddRemoteReport, RepositoryError> {
+        let root = self.save_remote(path, remote)?;
+        // Independent global, include, and worktree configs cannot share config.lock.
+        let refreshed = verify(
+            &root,
+            remote,
+            &fetch_refspec(remote),
+            self.deadline(LocalRead::BranchStatus),
+        )
+        .and_then(|()| refresh());
+        Ok(AddRemoteReport {
+            name: remote.name.clone(),
+            refresh: match refreshed {
+                Ok(options) => AddRemoteRefresh::Refreshed { options },
+                Err(_) => AddRemoteRefresh::Failed {
+                    message: REFRESH_FAILED.into(),
+                },
+            },
+        })
+    }
+}
+
+impl Coordinator {
+    /// Adds `remote` with Git's default fetch refspec, under the gate and then
+    /// the write lock, and answers the root it was added from. Err means the
+    /// common config rename did not commit.
+    pub(crate) fn save_remote(
+        &self,
+        path: &str,
+        remote: &AddRemote,
+    ) -> Result<PathBuf, RepositoryError> {
         let reads = self.deadline(LocalRead::BranchStatus);
         let repository = read::open(path, reads).map_err(|_| failed())?;
         let locks = self.locks(&repository.common_dir);
         let mut gate = lock_ignoring_poison(&locks.gate);
-        let write = locks.write_lock();
+        let _write = locks.write_lock();
         let reads = reads.renewed();
         validate(&repository.root, remote, reads)?;
         let absent = || remote_absent(&repository.root, &remote.name, reads);
@@ -72,7 +105,7 @@ impl Coordinator {
                 "A remote with this name is already configured. Choose another name.",
             ));
         }
-        let fetch = format!("+refs/heads/*:refs/remotes/{}/*", remote.name);
+        let fetch = fetch_refspec(remote);
         git::install_config_values(
             &repository.root,
             &repository.git_config,
@@ -85,20 +118,12 @@ impl Coordinator {
             SAVE_FAILED,
         )?;
         gate.last_fetch = None;
-        drop(write);
-        // Independent global, include, and worktree configs cannot share config.lock.
-        let refreshed =
-            verify(&repository.root, remote, &fetch, reads.renewed()).and_then(|()| refresh());
-        Ok(AddRemoteReport {
-            name: remote.name.clone(),
-            refresh: match refreshed {
-                Ok(options) => AddRemoteRefresh::Refreshed { options },
-                Err(_) => AddRemoteRefresh::Failed {
-                    message: REFRESH_FAILED.into(),
-                },
-            },
-        })
+        Ok(repository.root)
     }
+}
+
+fn fetch_refspec(remote: &AddRemote) -> String {
+    format!("+refs/heads/*:refs/remotes/{}/*", remote.name)
 }
 
 fn validate(root: &Path, remote: &AddRemote, reads: Deadline) -> Result<(), RepositoryError> {

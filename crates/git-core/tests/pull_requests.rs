@@ -1,0 +1,738 @@
+#![cfg(unix)]
+
+use l1_git_core::{
+    BranchRef, BranchState, Changes, Coordinator, ErrorKind, FetchMode, GitHubRepository, HeadFrom,
+    Limits, NoPush, Oid, PullCheckout, PullHead, PullKey, PushAvailability, PushUnavailable,
+    Pushes, Relation, RepositoryError, StaleReason,
+};
+use std::{
+    fs,
+    num::NonZeroU32,
+    os::unix::fs::PermissionsExt,
+    path::{Path, PathBuf},
+    process::{Command, Stdio},
+};
+use tempfile::TempDir;
+
+const BASE_URL: &str = "https://github.com/octo/app.git";
+const FORK_URL: &str = "https://github.com/maja/app.git";
+
+fn run_git(path: &Path, args: &[&str]) -> (bool, String, String) {
+    let mut command = Command::new("git");
+    for (key, _) in std::env::vars_os() {
+        if key.to_string_lossy().starts_with("GIT_") {
+            command.env_remove(key);
+        }
+    }
+    let output = command
+        .arg("-C")
+        .arg(path)
+        .args(args)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_AUTHOR_NAME", "Ada")
+        .env("GIT_AUTHOR_EMAIL", "ada@example.test")
+        .env("GIT_COMMITTER_NAME", "Ada")
+        .env("GIT_COMMITTER_EMAIL", "ada@example.test")
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    (
+        output.status.success(),
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .trim_end()
+            .to_owned(),
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+    )
+}
+
+fn git(path: &Path, args: &[&str]) -> String {
+    let (ok, stdout, stderr) = run_git(path, args);
+    assert!(ok, "git {args:?}: {stderr}");
+    stdout
+}
+
+fn oid(text: &str) -> Oid {
+    Oid::try_from(text.to_owned()).unwrap()
+}
+
+fn branch(name: &str) -> BranchRef {
+    BranchRef::try_from(format!("refs/heads/{name}")).unwrap()
+}
+
+fn github(owner: &str) -> GitHubRepository {
+    GitHubRepository {
+        owner: owner.into(),
+        repo: "app".into(),
+    }
+}
+
+/// `base.git` and `fork.git` stand in for octo/app and maja/app on GitHub,
+/// reached through their GitHub URLs. The author pushes from `author`. The
+/// user's clone is `repo`, on `main`, with a staged file and a changed file.
+struct World {
+    _directory: TempDir,
+    top: PathBuf,
+    base: PathBuf,
+    fork: PathBuf,
+    author: PathBuf,
+    root: PathBuf,
+    core: Coordinator,
+    main: (String, String, String),
+}
+
+impl World {
+    fn new() -> Self {
+        let directory = tempfile::tempdir().unwrap();
+        let top = directory.path().canonicalize().unwrap();
+        let (base, fork, author, root) = (
+            top.join("base.git"),
+            top.join("fork.git"),
+            top.join("author"),
+            top.join("repo"),
+        );
+        git(&top, &["init", "-q", "--bare", "-b", "main", "base.git"]);
+        git(&top, &["init", "-q", "--bare", "-b", "main", "fork.git"]);
+        git(&top, &["init", "-q", "-b", "main", "author"]);
+        fs::write(author.join("shared.txt"), "shared\n").unwrap();
+        git(&author, &["add", "shared.txt"]);
+        git(&author, &["commit", "-q", "-m", "base"]);
+        for bare in [&base, &fork] {
+            git(&author, &["push", "-q", bare.to_str().unwrap(), "main"]);
+        }
+        git(&top, &["clone", "-q", base.to_str().unwrap(), "repo"]);
+        for (key, value) in [
+            ("user.name", "Ada"),
+            ("user.email", "ada@example.test"),
+            ("commit.gpgSign", "false"),
+            ("core.hooksPath", "/dev/null"),
+            ("remote.origin.url", BASE_URL),
+        ] {
+            git(&root, &["config", key, value]);
+        }
+        for (bare, url) in [(&base, BASE_URL), (&fork, FORK_URL)] {
+            let key = format!("url.{}.insteadOf", bare.display());
+            git(&root, &["config", &key, url]);
+        }
+        fs::write(root.join("staged.txt"), "staged\n").unwrap();
+        git(&root, &["add", "staged.txt"]);
+        fs::write(root.join("shared.txt"), "mine\n").unwrap();
+        let mut world = Self {
+            core: Coordinator::new(Limits::default(), top.join("undo")),
+            _directory: directory,
+            top,
+            base,
+            fork,
+            author,
+            root,
+            main: Default::default(),
+        };
+        world.main = world.main_state();
+        world
+    }
+
+    fn path(&self) -> &str {
+        self.root.to_str().unwrap()
+    }
+
+    fn key(number: u32) -> PullKey {
+        PullKey {
+            github: github("octo"),
+            number: NonZeroU32::new(number).unwrap(),
+        }
+    }
+
+    /// The main worktree's HEAD, index, and the file it changed.
+    fn main_state(&self) -> (String, String, String) {
+        (
+            git(&self.root, &["symbolic-ref", "HEAD"]),
+            git(&self.root, &["ls-files", "--stage"]),
+            fs::read_to_string(self.root.join("shared.txt")).unwrap(),
+        )
+    }
+
+    fn assert_main_untouched(&self) {
+        assert_eq!(self.main_state(), self.main, "the main worktree changed");
+    }
+
+    /// The author commits `file` on `branch`, starting it from `main`.
+    fn commit(&self, branch: &str, file: &str) -> Oid {
+        let exists = run_git(
+            &self.author,
+            &[
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                &format!("refs/heads/{branch}"),
+            ],
+        )
+        .0;
+        if exists {
+            git(&self.author, &["switch", "-q", branch]);
+        } else {
+            git(&self.author, &["switch", "-q", "-c", branch, "main"]);
+        }
+        fs::write(self.author.join(file), format!("{file}\n")).unwrap();
+        git(&self.author, &["add", file]);
+        git(&self.author, &["commit", "-q", "-m", file]);
+        oid(&git(&self.author, &["rev-parse", "HEAD"]))
+    }
+
+    /// The author rewrites `branch` as one new commit on `main`.
+    fn rewrite(&self, branch: &str, file: &str) -> Oid {
+        git(&self.author, &["switch", "-q", "-C", branch, "main"]);
+        self.commit(branch, file)
+    }
+
+    /// Pushes the author's HEAD to each `(repository, ref)`, forced, as
+    /// GitHub moves `refs/pull/<number>/head` after the head branch.
+    fn publish(&self, to: &[(&Path, String)]) {
+        for (bare, reference) in to {
+            let refspec = format!("+HEAD:{reference}");
+            git(
+                &self.author,
+                &["push", "-q", bare.to_str().unwrap(), &refspec],
+            );
+        }
+    }
+
+    fn same(&self, number: u32, name: &str, file: &str) -> PullHead {
+        let head = self.commit(name, file);
+        self.publish(&[
+            (&self.base, format!("refs/heads/{name}")),
+            (&self.base, format!("refs/pull/{number}/head")),
+        ]);
+        PullHead {
+            reference: branch(name),
+            oid: head,
+            from: HeadFrom::Same,
+        }
+    }
+
+    fn forked(&self, number: u32, name: &str, file: &str, edits: bool) -> PullHead {
+        let head = self.commit(name, file);
+        self.publish(&[
+            (&self.fork, format!("refs/heads/{name}")),
+            (&self.base, format!("refs/pull/{number}/head")),
+        ]);
+        PullHead {
+            reference: branch(name),
+            oid: head,
+            from: HeadFrom::Fork {
+                repository: github("maja"),
+                edits,
+            },
+        }
+    }
+
+    fn read(&self, number: u32, head: &PullHead) -> PullCheckout {
+        self.core
+            .pull_request_checkout(self.path(), &Self::key(number), head)
+            .unwrap()
+    }
+
+    fn folder(&self, number: u32) -> PathBuf {
+        self.top
+            .join(".worktrees")
+            .join(format!("repo-pr-{number}"))
+    }
+
+    fn try_at(
+        &self,
+        number: u32,
+        head: &PullHead,
+        folder: &Path,
+    ) -> Result<PullCheckout, RepositoryError> {
+        self.core
+            .try_pull_request(self.path(), &Self::key(number), head, folder)
+    }
+
+    fn tried(&self, number: u32, head: &PullHead) -> PullCheckout {
+        self.try_at(number, head, &self.folder(number)).unwrap()
+    }
+
+    fn update(
+        &self,
+        number: u32,
+        head: &PullHead,
+        seen: &Oid,
+        replace: bool,
+    ) -> Result<PullCheckout, RepositoryError> {
+        self.core
+            .update_pull_request(self.path(), &Self::key(number), head, seen, replace)
+    }
+
+    fn remove(&self, number: u32, head: &PullHead, seen: &Oid) -> PullCheckout {
+        self.core
+            .remove_pull_request(self.path(), &Self::key(number), head, seen)
+            .unwrap()
+    }
+
+    fn tip(&self, name: &str) -> Option<Oid> {
+        let (ok, tip, _) = run_git(
+            &self.root,
+            &[
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                &format!("refs/heads/{name}"),
+            ],
+        );
+        ok.then(|| oid(&tip))
+    }
+
+    fn config(&self, key: &str) -> Option<String> {
+        let (ok, value, _) = run_git(&self.root, &["config", "--get", key]);
+        ok.then_some(value)
+    }
+
+    fn upstream(&self, name: &str) -> String {
+        git(
+            &self.root,
+            &[
+                "for-each-ref",
+                "--format=%(upstream)",
+                &format!("refs/heads/{name}"),
+            ],
+        )
+    }
+
+    fn worktrees(&self) -> usize {
+        git(&self.root, &["worktree", "list", "--porcelain"])
+            .lines()
+            .filter(|line| line.starts_with("worktree "))
+            .count()
+    }
+
+    /// The author's new head, as a fetch of every remote would bring it.
+    fn fetch_all(&self) {
+        git(
+            &self.root,
+            &["fetch", "-q", "origin", "+refs/pull/*:refs/l1test/*"],
+        );
+    }
+}
+
+fn ready(checkout: &PullCheckout) -> (&Oid, &Relation, &Path, &Changes) {
+    match checkout {
+        PullCheckout::Ready {
+            tip,
+            relation,
+            worktree,
+            ..
+        } => (tip, relation, Path::new(&worktree.root), &worktree.changes),
+        other => panic!("not ready: {other:?}"),
+    }
+}
+
+#[test]
+fn an_untried_pull_request_plans_pr_n_beside_the_main_worktree_and_where_pushes_go() {
+    let world = World::new();
+    let refs = git(&world.root, &["for-each-ref"]);
+    let cases = [
+        (
+            1,
+            world.same(1, "feat", "feat.txt"),
+            Pushes::ToPullRequest {
+                remote: "origin".into(),
+                destination: branch("feat"),
+                adds_remote: false,
+            },
+        ),
+        (
+            2,
+            world.forked(2, "fix", "fix.txt", true),
+            Pushes::ToPullRequest {
+                remote: "maja".into(),
+                destination: branch("fix"),
+                adds_remote: true,
+            },
+        ),
+        (
+            3,
+            world.forked(3, "ro", "ro.txt", false),
+            Pushes::Nowhere {
+                why: NoPush::NoEdits,
+            },
+        ),
+    ];
+    for (number, head, pushes) in cases {
+        match world.read(number, &head) {
+            PullCheckout::Absent { branch: pr, plan } => {
+                assert_eq!(pr, branch(&format!("pr/{number}")));
+                assert_eq!(Path::new(&plan.folder), world.folder(number));
+                assert_eq!(plan.pushes, pushes, "#{number}");
+            }
+            other => panic!("#{number} is not absent: {other:?}"),
+        }
+    }
+    let gone = PullHead {
+        from: HeadFrom::Gone,
+        ..world.forked(4, "old", "old.txt", true)
+    };
+    let PullCheckout::Absent { plan, .. } = world.read(4, &gone) else {
+        panic!("#4 is not absent");
+    };
+    assert_eq!(
+        plan.pushes,
+        Pushes::Nowhere {
+            why: NoPush::ForkGone
+        }
+    );
+    git(
+        &world.root,
+        &[
+            "remote",
+            "add",
+            "maja",
+            "https://example.com/maja/other.git",
+        ],
+    );
+    let fork = world.forked(5, "other", "other.txt", true);
+    let PullCheckout::Absent { plan, .. } = world.read(5, &fork) else {
+        panic!("#5 is not absent");
+    };
+    assert_eq!(
+        plan.pushes,
+        Pushes::ToPullRequest {
+            remote: "maja-app".into(),
+            destination: branch("other"),
+            adds_remote: true,
+        }
+    );
+    git(&world.root, &["remote", "remove", "maja"]);
+    assert_eq!(
+        git(&world.root, &["for-each-ref"]),
+        refs,
+        "a read moved a ref"
+    );
+    world.assert_main_untouched();
+}
+
+#[test]
+fn a_same_repository_pull_request_tracks_its_branch_on_the_base_remote() {
+    let world = World::new();
+    let head = world.same(1, "feat", "feat.txt");
+    let tried = world.tried(1, &head);
+    let (tip, relation, root, changes) = ready(&tried);
+    assert_eq!((tip, relation), (&head.oid, &Relation::UpToDate));
+    assert_eq!(
+        (root, changes),
+        (world.folder(1).as_path(), &Changes::Clean)
+    );
+    let PullCheckout::Ready { worktree, .. } = &tried else {
+        unreachable!()
+    };
+    assert!(!worktree.main && worktree.trouble.is_none());
+    assert_eq!(git(root, &["symbolic-ref", "HEAD"]), "refs/heads/pr/1");
+    assert_eq!(world.upstream("pr/1"), "refs/remotes/origin/feat");
+    assert_eq!(
+        world.config("branch.pr/1.remote").as_deref(),
+        Some("origin")
+    );
+    assert_eq!(
+        world.config("branch.pr/1.merge").as_deref(),
+        Some("refs/heads/feat")
+    );
+    assert!(
+        world
+            .core
+            .undo_history(world.path())
+            .unwrap()
+            .undo
+            .is_none()
+    );
+    world.assert_main_untouched();
+}
+
+#[test]
+fn a_fork_that_takes_edits_gets_a_remote_named_for_its_owner() {
+    let world = World::new();
+    let head = world.forked(2, "fix", "fix.txt", true);
+    let tried = world.tried(2, &head);
+    assert_eq!(ready(&tried).1, &Relation::UpToDate);
+    assert_eq!(world.config("remote.maja.url").as_deref(), Some(FORK_URL));
+    assert_eq!(
+        world.config("remote.maja.fetch").as_deref(),
+        Some("+refs/heads/*:refs/remotes/maja/*")
+    );
+    assert_eq!(world.upstream("pr/2"), "refs/remotes/maja/fix");
+    let PullCheckout::Ready { .. } = world.read(2, &head) else {
+        panic!("not ready");
+    };
+    let Ok(PushAvailability::Ready { intent }) =
+        world.core.prepare_push(world.folder(2).to_str().unwrap())
+    else {
+        panic!("Push is not ready for pr/2");
+    };
+    assert_eq!(
+        (intent.remote.as_str(), &intent.destination),
+        ("maja", &branch("fix"))
+    );
+    world.assert_main_untouched();
+}
+
+#[test]
+fn a_read_only_fork_follows_the_pull_ref_and_push_refuses_it() {
+    let world = World::new();
+    let head = world.forked(3, "ro", "ro.txt", false);
+    let remotes = git(&world.root, &["remote"]);
+    let tried = world.tried(3, &head);
+    assert_eq!(ready(&tried).1, &Relation::UpToDate);
+    assert_eq!(git(&world.root, &["remote"]), remotes);
+    assert_eq!(
+        world.config("branch.pr/3.remote").as_deref(),
+        Some("origin")
+    );
+    assert_eq!(
+        world.config("branch.pr/3.merge").as_deref(),
+        Some("refs/pull/3/head")
+    );
+    let overview = world.core.overview(world.path(), FetchMode::Local).unwrap();
+    let row = overview
+        .branches
+        .iter()
+        .find(|row| row.reference == branch("pr/3"))
+        .unwrap();
+    assert!(
+        matches!(row.state, BranchState::Untracked),
+        "{:?}",
+        row.state
+    );
+    assert_eq!(
+        world
+            .core
+            .prepare_push(world.folder(3).to_str().unwrap())
+            .unwrap(),
+        PushAvailability::Unavailable {
+            reason: PushUnavailable::PullRequestHead
+        }
+    );
+    world.assert_main_untouched();
+}
+
+#[test]
+fn a_gone_fork_is_fetched_by_id_from_the_base_and_moves_no_remote_ref() {
+    let world = World::new();
+    let head = PullHead {
+        from: HeadFrom::Gone,
+        ..world.forked(4, "old", "old.txt", true)
+    };
+    fs::remove_dir_all(&world.fork).unwrap();
+    let remote_refs = || git(&world.root, &["for-each-ref", "refs/remotes/"]);
+    let before = remote_refs();
+    let tried = world.tried(4, &head);
+    assert_eq!(ready(&tried).0, &head.oid);
+    assert_eq!(remote_refs(), before);
+    assert_eq!(
+        world.config("branch.pr/4.merge").as_deref(),
+        Some("refs/pull/4/head")
+    );
+    world.assert_main_untouched();
+}
+
+#[test]
+fn trying_twice_answers_the_same_copy() {
+    let world = World::new();
+    let head = world.same(1, "feat", "feat.txt");
+    world.tried(1, &head);
+    let again = world
+        .try_at(1, &head, &world.top.join("elsewhere"))
+        .unwrap();
+    assert_eq!(ready(&again).2, world.folder(1));
+    assert_eq!(world.worktrees(), 2);
+    assert!(!world.top.join("elsewhere").exists());
+}
+
+#[test]
+fn a_kept_branch_is_checked_out_again_at_its_own_tip() {
+    let world = World::new();
+    let head = world.same(1, "feat", "feat.txt");
+    let folder = world.folder(1);
+    world.tried(1, &head);
+    fs::write(folder.join("mine.txt"), "mine\n").unwrap();
+    git(&folder, &["add", "mine.txt"]);
+    git(&folder, &["commit", "-q", "-m", "mine"]);
+    let mine = world.tip("pr/1").unwrap();
+    let PullCheckout::Parked { relation, tip, .. } = world.remove(1, &head, &mine) else {
+        panic!("not parked");
+    };
+    assert_eq!((relation, &tip), (Relation::Ahead { commits: 1 }, &mine));
+    assert!(!folder.exists());
+    let again = world.tried(1, &head);
+    assert_eq!(ready(&again).0, &mine);
+    assert_eq!(world.upstream("pr/1"), "refs/remotes/origin/feat");
+    world.assert_main_untouched();
+}
+
+#[test]
+fn the_authors_push_fast_forwards_the_copy_and_keeps_an_unrelated_change() {
+    let world = World::new();
+    let first = world.same(1, "feat", "feat.txt");
+    let folder = world.folder(1);
+    world.tried(1, &first);
+    fs::write(folder.join("shared.txt"), "edited in the copy\n").unwrap();
+    let pushed = world.same(1, "feat", "more.txt");
+    assert_eq!(
+        ready(&world.read(1, &pushed)).1,
+        &Relation::Unfetched,
+        "a read fetches nothing"
+    );
+    let updated = world.update(1, &pushed, &first.oid, false).unwrap();
+    let (tip, relation, _, changes) = ready(&updated);
+    assert_eq!((tip, relation), (&pushed.oid, &Relation::UpToDate));
+    assert_eq!(changes, &Changes::Uncommitted);
+    assert_eq!(
+        fs::read_to_string(folder.join("shared.txt")).unwrap(),
+        "edited in the copy\n"
+    );
+    assert!(folder.join("more.txt").exists());
+    world.assert_main_untouched();
+}
+
+#[test]
+fn a_force_push_moves_the_copy_only_with_replace_and_the_tip_the_user_saw() {
+    let world = World::new();
+    let first = world.same(1, "feat", "feat.txt");
+    let folder = world.folder(1);
+    world.tried(1, &first);
+    fs::write(folder.join("notes.txt"), "untracked\n").unwrap();
+    let rewritten = world.rewrite("feat", "again.txt");
+    world.publish(&[
+        (&world.base, "refs/heads/feat".into()),
+        (&world.base, "refs/pull/1/head".into()),
+    ]);
+    let head = PullHead {
+        oid: rewritten,
+        ..first.clone()
+    };
+    let refused = world.update(1, &head, &first.oid, false).unwrap_err();
+    assert_eq!(refused.kind, ErrorKind::Conflict, "{refused:?}");
+    assert_eq!(
+        ready(&world.read(1, &head)).1,
+        &Relation::Diverged {
+            ahead: 1,
+            behind: 1
+        }
+    );
+    let stale = world.update(1, &head, &head.oid, true).unwrap_err();
+    assert_eq!(
+        stale.kind,
+        ErrorKind::StaleView {
+            reason: StaleReason::BranchChanged
+        }
+    );
+    assert_eq!(world.tip("pr/1").as_ref(), Some(&first.oid));
+    let replaced = world.update(1, &head, &first.oid, true).unwrap();
+    assert_eq!(ready(&replaced).0, &head.oid);
+    assert_eq!(
+        fs::read_to_string(folder.join("notes.txt")).unwrap(),
+        "untracked\n"
+    );
+    world.assert_main_untouched();
+}
+
+#[test]
+fn a_kept_branch_behind_the_head_moves_by_update_ref() {
+    let world = World::new();
+    let first = world.same(1, "feat", "feat.txt");
+    world.tried(1, &first);
+    git(
+        &world.root,
+        &["worktree", "remove", world.folder(1).to_str().unwrap()],
+    );
+    let pushed = world.same(1, "feat", "more.txt");
+    let PullCheckout::Parked { tip, relation, .. } =
+        world.update(1, &pushed, &first.oid, false).unwrap()
+    else {
+        panic!("not parked");
+    };
+    assert_eq!((tip, relation), (pushed.oid, Relation::UpToDate));
+    world.assert_main_untouched();
+}
+
+#[test]
+fn remove_deletes_a_branch_the_pull_request_holds_all_of() {
+    let world = World::new();
+    let first = world.same(1, "feat", "feat.txt");
+    world.tried(1, &first);
+    let PullCheckout::Absent { .. } = world.remove(1, &first, &first.oid) else {
+        panic!("not absent");
+    };
+    assert_eq!(world.tip("pr/1"), None);
+    assert_eq!(world.config("branch.pr/1.remote"), None);
+    assert_eq!(world.worktrees(), 1);
+    let PullCheckout::Absent { .. } = world.remove(1, &first, &first.oid) else {
+        panic!("a second remove is not absent");
+    };
+
+    world.tried(1, &first);
+    let pushed = world.same(1, "feat", "more.txt");
+    world.fetch_all();
+    assert_eq!(
+        ready(&world.read(1, &pushed)).1,
+        &Relation::Behind { commits: 1 }
+    );
+    let PullCheckout::Absent { .. } = world.remove(1, &pushed, &first.oid) else {
+        panic!("behind is not absent after remove");
+    };
+    assert_eq!(world.tip("pr/1"), None);
+    world.assert_main_untouched();
+}
+
+#[test]
+fn remove_refuses_a_worktree_with_uncommitted_files_and_keeps_everything() {
+    let world = World::new();
+    let head = world.same(1, "feat", "feat.txt");
+    let folder = world.folder(1);
+    world.tried(1, &head);
+    fs::write(folder.join("notes.txt"), "mine\n").unwrap();
+    let refused = world
+        .core
+        .remove_pull_request(world.path(), &World::key(1), &head, &head.oid)
+        .unwrap_err();
+    assert_eq!(refused.kind, ErrorKind::Conflict, "{refused:?}");
+    assert!(folder.join("notes.txt").exists());
+    assert_eq!(world.tip("pr/1"), Some(head.oid));
+}
+
+#[test]
+fn a_worktree_git_cannot_make_leaves_no_branch_behind() {
+    let world = World::new();
+    let head = world.same(1, "feat", "feat.txt");
+    let parent = world.top.join(".worktrees");
+    fs::create_dir(&parent).unwrap();
+    fs::set_permissions(&parent, fs::Permissions::from_mode(0o555)).unwrap();
+    let refused = world.try_at(1, &head, &world.folder(1));
+    fs::set_permissions(&parent, fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(refused.is_err(), "{refused:?}");
+    assert_eq!(world.tip("pr/1"), None);
+    assert_eq!(world.config("branch.pr/1.merge"), None);
+    let PullCheckout::Absent { .. } = world.read(1, &head) else {
+        panic!("not absent");
+    };
+}
+
+#[test]
+fn a_failing_post_checkout_hook_still_answers_the_copy_with_its_trouble() {
+    let world = World::new();
+    let head = world.same(1, "feat", "feat.txt");
+    let hooks = world.top.join("hooks");
+    fs::create_dir(&hooks).unwrap();
+    let hook = hooks.join("post-checkout");
+    fs::write(&hook, "#!/bin/sh\necho no >&2\nexit 1\n").unwrap();
+    fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+    git(
+        &world.root,
+        &["config", "core.hooksPath", hooks.to_str().unwrap()],
+    );
+    let PullCheckout::Ready { worktree, .. } = world.tried(1, &head) else {
+        panic!("not ready");
+    };
+    let trouble = worktree.trouble.unwrap();
+    assert!(
+        matches!(trouble.kind, ErrorKind::AfterHookFailed { ref output } if output.contains("no")),
+        "{trouble:?}"
+    );
+}

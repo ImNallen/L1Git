@@ -56,6 +56,9 @@ pub(crate) enum LocalWrite {
     RefreshIndex,
     CreateWorktree,
     RemoveWorktree,
+    TryPullRequest,
+    UpdatePullRequest,
+    RemovePullRequest,
 }
 
 impl LocalWrite {
@@ -101,7 +104,10 @@ impl LocalWrite {
             | Self::UndoRebase
             | Self::RedoRebase
             | Self::CreateWorktree
-            | Self::RemoveWorktree => 600,
+            | Self::RemoveWorktree
+            | Self::TryPullRequest
+            | Self::UpdatePullRequest
+            | Self::RemovePullRequest => 600,
         })
     }
 
@@ -148,6 +154,9 @@ impl LocalWrite {
             Self::RefreshIndex => "Refreshing the index",
             Self::CreateWorktree => "Creating the worktree",
             Self::RemoveWorktree => "Removing the worktree",
+            Self::TryPullRequest => "Checking out the pull request",
+            Self::UpdatePullRequest => "Updating the pull request's branch",
+            Self::RemovePullRequest => "Removing the pull request's worktree",
         }
     }
 
@@ -194,6 +203,9 @@ impl LocalWrite {
             Self::RefreshIndex => "l1git refresh",
             Self::CreateWorktree => "l1git worktree add",
             Self::RemoveWorktree => "l1git worktree remove",
+            Self::TryPullRequest => "l1git pull request try",
+            Self::UpdatePullRequest => "l1git pull request update",
+            Self::RemovePullRequest => "l1git pull request remove",
         }
     }
 
@@ -237,9 +249,11 @@ impl LocalWrite {
             | Self::RedoStash => {
                 "L1 Git rereads the worktree and the stash list to see what changed."
             }
-            Self::CreateWorktree | Self::RemoveWorktree => {
-                "L1 Git rereads the worktrees to see what changed."
-            }
+            Self::CreateWorktree
+            | Self::RemoveWorktree
+            | Self::TryPullRequest
+            | Self::UpdatePullRequest
+            | Self::RemovePullRequest => "L1 Git rereads the worktrees to see what changed.",
         }
     }
 }
@@ -502,6 +516,14 @@ impl<'a> Write<'a> {
         let mut all = vec!["-c", "core.quotePath=false", "worktree"];
         all.extend(args);
         Self::user(txn.root(), all)
+            .uncapped()
+            .lazy_fetch_unprompted()
+    }
+
+    /// Moves the checked-out branch and carries uncommitted changes that the
+    /// move does not touch. Git refuses the rest and changes nothing.
+    pub(crate) fn reset_keep(txn: &'a RefTxn<'_>, to: &'a crate::Oid) -> Self {
+        Self::user(txn.root(), vec!["reset", "--quiet", "--keep", to.as_str()])
             .uncapped()
             .lazy_fetch_unprompted()
     }

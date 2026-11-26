@@ -184,7 +184,7 @@ pub(super) fn fetch_branch(
     )
 }
 
-fn fetch(
+pub(super) fn fetch(
     root: &Path,
     remote: &str,
     branch: Option<&str>,

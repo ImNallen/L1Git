@@ -21,8 +21,9 @@ pub use read::InProgress;
 pub(crate) use read::{in_progress, pseudoref_exists};
 
 use crate::{
-    Advance, AdvanceOutcome, CommitsFetch, FastForwardReport, FetchMode, FetchOutcome,
-    FetchSummary, GitHubRepository, RepositoryError, RepositoryOverview, SkipReason, WantedCommits,
+    Advance, AdvanceOutcome, BranchRef, CommitsFetch, ErrorKind, FastForwardReport, FetchFailure,
+    FetchMode, FetchOutcome, FetchSummary, GitHubRepository, Oid, RepositoryError,
+    RepositoryOverview, SkipReason, WantedCommits,
     git::{Deadline, LocalRead, LocalWrite, WriteDeadline},
     remotes,
 };
@@ -120,6 +121,14 @@ impl Writers {
         let wanted = || locks.wanted();
         (!wanted()).then(|| work(&wanted))
     }
+}
+
+/// What `fetch_wanted` fetches: a branch by its full name on the remote,
+/// which moves the remote-tracking ref its fetch refspec maps it to, or one
+/// commit by id, which moves no ref.
+pub(crate) enum Wanted<'a> {
+    Branch(&'a BranchRef),
+    Commit(&'a Oid),
 }
 
 #[derive(Default)]
@@ -290,6 +299,49 @@ impl Coordinator {
                 self.limits.fetch_deadline,
             )
         })
+    }
+
+    /// Fetches one thing from `remote` under the gate and a network slot.
+    pub(crate) fn fetch_wanted(
+        &self,
+        path: &str,
+        remote: &str,
+        wanted: Wanted<'_>,
+    ) -> Result<(), RepositoryError> {
+        let reads = self.deadline(LocalRead::BranchStatus);
+        let repository = read::open(path, reads)?;
+        let deadline = self.limits.fetch_deadline;
+        let failure = self.gated(&repository.common_dir, || {
+            let _slot = self.slots.acquire();
+            Ok::<_, RepositoryError>(match wanted {
+                Wanted::Branch(branch) => {
+                    match fetch::fetch(&repository.root, remote, Some(branch.as_str()), deadline)? {
+                        FetchOutcome::Failed { failure, message } => Some((failure, message)),
+                        FetchOutcome::Fetched | FetchOutcome::Skipped => None,
+                    }
+                }
+                Wanted::Commit(oid) => match fetch::fetch_commits(
+                    &repository.root,
+                    remote,
+                    std::slice::from_ref(oid),
+                    deadline,
+                )? {
+                    CommitsFetch::Failed { failure, message } => Some((failure, message)),
+                    CommitsFetch::Done | CommitsFetch::NoRemote => None,
+                },
+            })
+        })?;
+        match failure {
+            None => Ok(()),
+            Some((failure, message)) => Err(RepositoryError::new(
+                if failure == FetchFailure::TimedOut {
+                    ErrorKind::TimedOut
+                } else {
+                    ErrorKind::GitFailed
+                },
+                format!("L1 Git could not fetch from {remote}. {message}"),
+            )),
+        }
     }
 
     /// Fast-forwards each requested branch in order, then rereads the repository

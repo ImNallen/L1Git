@@ -606,6 +606,10 @@ impl<'r> RefTxn<'r> {
         Write::move_tree(self, from, to)
     }
 
+    pub(super) fn reset_keep<'a>(&'a self, to: &'a Oid) -> Write<'a> {
+        Write::reset_keep(self, to)
+    }
+
     pub(super) fn worktree<'a>(&'a self, args: &[&'a str]) -> Write<'a> {
         Write::worktree(self, args)
     }

@@ -37,9 +37,10 @@ pub use sync::{
     PushUnavailable, TrackingOutcome,
 };
 pub use write::{
-    Applied, BranchTip, EntryId, Expect, LinePick, LineSide, MergeAction, MergeAttention,
-    MergeContext, MergeOutcome, MergePlan, MergePrediction, MergeReport, MergeReview,
-    MergeSelection, MergeSession, MergeSource, MergeState, MergeTracking, NewWorktree, Operation,
-    OperationProbe, ReplayKind, ReplayOf, ReplayPrediction, ReplayProgress, ReplayReview, Start,
+    Applied, BranchTip, Changes, CheckedOut, EntryId, Expect, HeadFrom, LinePick, LineSide,
+    MergeAction, MergeAttention, MergeContext, MergeOutcome, MergePlan, MergePrediction,
+    MergeReport, MergeReview, MergeSelection, MergeSession, MergeSource, MergeState, MergeTracking,
+    NewWorktree, NoPush, Operation, OperationProbe, Plan, PullCheckout, PullHead, PullKey, Pushes,
+    Relation, ReplayKind, ReplayOf, ReplayPrediction, ReplayProgress, ReplayReview, Start,
     StashTip, TagTip, UndoHistory, WorktreeBranch, WorktreeReview, WorktreeSource,
 };
