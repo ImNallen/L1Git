@@ -23,6 +23,7 @@ const pushUnavailableSchema = z.enum([
   "mirror",
   "multipleEndpoints",
   "unusableFetchMapping",
+  "pullRequestHead",
 ]);
 export const pushAvailabilitySchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("ready"), intent: pushIntentSchema }),
@@ -133,6 +134,8 @@ const unavailableText: Record<z.infer<typeof pushUnavailableSchema>, string> = {
   multipleEndpoints: "Push requires exactly one effective push URL.",
   unusableFetchMapping:
     "This destination needs one unambiguous fetch mapping to a safe tracking ref and must not be excluded. Check the remote fetch refspecs in Git.",
+  pullRequestHead:
+    "This branch follows a pull request that takes no pushes from you, so its commits stay local.",
 };
 
 function pushDestination(intent: PushIntent): string {
