@@ -123,9 +123,9 @@ impl GitHub<'_> {
     ) -> Written {
         let found = self
             .graphql::<Answer>(HEAD_BRANCH, json!({"pull": pull, "branch": branch}))
-            .and_then(|Reply { data, withheld }| {
-                data.node
-                    .ok_or_else(|| withheld.explain("node", "this pull request".to_owned()))
+            .and_then(|Reply { data, withheld }| match data.node {
+                Some(facts) if withheld.is_empty() => Ok(facts),
+                _ => Err(withheld.explain("node", "this pull request".to_owned())),
             });
         let facts = match found {
             Ok(facts) => facts,

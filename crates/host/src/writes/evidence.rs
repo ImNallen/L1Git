@@ -154,13 +154,19 @@ impl Review {
 }
 
 impl GitHub<'_> {
+    /// A read GitHub failed at in any part is no reading: what it left out
+    /// would read as nothing there.
     fn node<T: for<'de> Deserialize<'de>>(
         &self,
         query: &str,
         variables: Value,
     ) -> Result<Option<T>, ApiError> {
-        self.graphql::<Found<T>>(query, variables)
-            .map(|Reply { data, .. }| data.node)
+        let Reply { data, withheld } = self.graphql::<Found<T>>(query, variables)?;
+        if withheld.is_empty() {
+            Ok(data.node)
+        } else {
+            Err(withheld.explain("node", "what this write names".to_owned()))
+        }
     }
 
     fn reviews(&self, pull: &str, login: &Login) -> Result<Vec<Review>, ApiError> {
@@ -258,16 +264,19 @@ impl GitHub<'_> {
                 }),
             Write::Resolve { thread } | Write::Unresolve { thread } => {
                 let resolved = matches!(write, Write::Resolve { .. });
-                match self.node::<Thread>(THREAD, json!({"id": thread}))? {
-                    Some(found) if found.is_resolved == resolved => landed(Echo::Thread {
+                match self.node::<Thread>(THREAD, json!({"id": thread})) {
+                    Ok(Some(found)) if found.is_resolved == resolved => landed(Echo::Thread {
                         id: Some(thread.as_str().to_owned()),
                         resolved: Some(resolved),
                     }),
-                    Some(_) if resolved => {
+                    Ok(Some(_)) if resolved => {
                         not_landed("GitHub hasn't resolved this thread.".to_owned())
                     }
-                    Some(_) => not_landed("GitHub hasn't unresolved this thread.".to_owned()),
-                    None => not_landed("This thread is gone from GitHub.".to_owned()),
+                    Ok(Some(_)) => not_landed("GitHub hasn't unresolved this thread.".to_owned()),
+                    Ok(None) | Err(ApiError::NotFound { .. }) => {
+                        not_landed("This thread is gone from GitHub.".to_owned())
+                    }
+                    Err(error) => return Err(error),
                 }
             }
             Write::Merge { pull, .. } => match self.node::<PullState>(PULL, json!({"id": pull}))? {

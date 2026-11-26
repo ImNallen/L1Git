@@ -108,6 +108,11 @@ impl Withheld {
         }
     }
 
+    /// Whether GitHub left out anything at all.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.errors.is_empty()
+    }
+
     /// Whether GitHub left out a `field`, anywhere in the answer.
     pub(crate) fn field(&self, field: &str) -> bool {
         self.errors
