@@ -70,7 +70,7 @@ const ThreadChip = memo(function ThreadChip({
   );
 });
 
-/** The threads on one line. */
+/** The threads on one line, in the list of what is on it. */
 export function ThreadChips({
   ids,
   threads,
@@ -85,7 +85,7 @@ export function ThreadChips({
   unfolded: Unfolded;
 }) {
   return (
-    <div className="thread-chips">
+    <>
       {threads
         .filter(({ id }) => ids.includes(id))
         .map((thread) => (
@@ -98,7 +98,7 @@ export function ThreadChips({
             onToggle={unfolded.toggle}
           />
         ))}
-    </div>
+    </>
   );
 }
 
