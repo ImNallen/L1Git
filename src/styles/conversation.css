@@ -279,3 +279,143 @@
 .threads-row-body > .write-notice {
   margin: 0 12px 12px;
 }
+
+.threads-note,
+.threads-nothing {
+  margin: 0 0 16px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.threads-file + .threads-file {
+  margin-top: 18px;
+}
+.threads-path {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  color: var(--text-secondary);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+.threads-path svg,
+.threads-path span {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+.threads-file ul {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.threads-row {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+.threads-row:has(> [aria-expanded="true"]) {
+  border-color: var(--border-strong);
+}
+.threads-row-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 14px;
+  color: var(--text-body);
+  font-size: 12px;
+  text-align: left;
+}
+.threads-row-head > svg {
+  flex-shrink: 0;
+  color: var(--muted);
+  transition: transform 120ms ease;
+}
+.threads-row-head[aria-expanded="true"] > svg {
+  transform: rotate(90deg);
+}
+.threads-place {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.threads-row-head .pull-avatar {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  font-size: 8px;
+}
+.threads-row-head strong {
+  flex-shrink: 0;
+  color: var(--text);
+  font-weight: 500;
+}
+.threads-words {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.threads-replies {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+}
+.threads-pill {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  color: var(--text-body);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 20px;
+  white-space: nowrap;
+}
+.threads-pill.waitingOnYou {
+  background: color-mix(in srgb, var(--blue) 16%, transparent);
+  color: var(--text);
+}
+.threads-pill.outdated {
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+.threads-pill.resolved {
+  background: var(--success-bg);
+  color: var(--success);
+}
+.threads-age {
+  flex-shrink: 0;
+  min-width: 5em;
+  color: var(--muted);
+  text-align: right;
+}
+.threads-row-body {
+  border-top: 1px solid var(--border);
+}
+.threads-hidden {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 16px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.threads-hidden svg {
+  color: var(--success);
+}

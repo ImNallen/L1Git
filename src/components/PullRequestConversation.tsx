@@ -23,9 +23,11 @@ import {
   reviewStateLabels,
   threadsLeftOut,
 } from "../domain/pullRequestDetail";
+import { threadsView } from "../domain/threadStanding";
 import type { Entry } from "../domain/pullRequestDetail";
 import type { PullRequest } from "../domain/pullRequest";
 import { shortOid } from "../domain/shortOid";
+import type { ThreadFilter } from "../domain/threadStanding";
 import { usePullWrites } from "../shell/usePullWriting";
 import type { OpenedPullRequest } from "../shell/usePullRequests";
 import { ConversationBox } from "./ConversationBox";
@@ -38,6 +40,7 @@ import {
 import { Body } from "./PullRequestBody";
 import { Ago, Avatar, OnGitHub } from "./PullRequestParts";
 import { Thread } from "./PullRequestThread";
+import { PullRequestThreads, ThreadFilters } from "./PullRequestThreads";
 import { Turns, TurnsContext } from "./turns";
 
 type EventEntry = Extract<Entry, { kind: "event" }>;
@@ -258,10 +261,13 @@ function Sent({ pull, viewer }: { pull: PullRequest; viewer: string }) {
     ));
 }
 
+type View = "timeline" | "threads";
+
 export function PullRequestConversation({
   pull,
   opened: { writing, viewer, repository, number },
   url,
+  onShowInDiff,
 }: {
   pull: PullRequest;
   opened: Pick<
@@ -269,6 +275,7 @@ export function PullRequestConversation({
     "writing" | "viewer" | "repository" | "number"
   >;
   url: string;
+  onShowInDiff: (path: string) => void;
 }) {
   const earlier = leftOut(pull);
   const threads =
@@ -276,6 +283,8 @@ export function PullRequestConversation({
       ? "Review threads didn't load. GitHub couldn't answer for a pull request this large."
       : threadsLeftOut(pull);
   const [turns] = useState(() => new Turns());
+  const [view, setView] = useState<View>("timeline");
+  const [filter, setFilter] = useState<ThreadFilter>("open");
   const { github } = repository;
   const { id, head } = pull;
   const writes = useMemo(
@@ -287,16 +296,68 @@ export function PullRequestConversation({
     }),
     [writing, viewer, github, number, id, head.oid, url],
   );
+  const items = pull.threads?.items ?? [];
+  const open = items.filter(({ resolved }) => !resolved).length;
+  const counts = threadsView(items, viewer, filter, new Set()).counts;
   return (
     <ConversationWritingContext value={writes}>
       <TurnsContext value={turns}>
-        <Timeline
-          pull={pull}
-          viewer={viewer}
-          url={url}
-          earlier={earlier}
-          threads={threads}
-        />
+        <div className="conversation-bar">
+          <div className="conversation-views" role="group" aria-label="Show">
+            {(["timeline", "threads"] as const).map((each) => (
+              <button
+                key={each}
+                type="button"
+                aria-pressed={view === each}
+                onClick={() => setView(each)}
+              >
+                {each === "timeline" ? "Timeline" : "Threads"}
+                {each === "threads" && pull.threads !== null && (
+                  <>
+                    {" "}
+                    <span className="conversation-views-count">
+                      {open.toLocaleString()} open
+                    </span>
+                  </>
+                )}
+              </button>
+            ))}
+          </div>
+          {view === "threads" && pull.threads !== null && (
+            <>
+              <ThreadFilters
+                counts={counts}
+                filter={filter}
+                onFilter={setFilter}
+              />
+              <span className="conversation-sorted">Sorted by file</span>
+            </>
+          )}
+        </div>
+        {view === "threads" ? (
+          <>
+            {threads !== null && <p className="threads-note">{threads}</p>}
+            {pull.threads !== null && (
+              <PullRequestThreads
+                key={filter}
+                threads={items}
+                viewer={viewer}
+                url={url}
+                filter={filter}
+                onFilter={setFilter}
+                onShowInDiff={onShowInDiff}
+              />
+            )}
+          </>
+        ) : (
+          <Timeline
+            pull={pull}
+            viewer={viewer}
+            url={url}
+            earlier={earlier}
+            threads={threads}
+          />
+        )}
       </TurnsContext>
     </ConversationWritingContext>
   );

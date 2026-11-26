@@ -1,10 +1,12 @@
 import {
   Suspense,
   useEffect,
+  useEffectEvent,
   useId,
   useImperativeHandle,
   useMemo,
   useRef,
+  useState,
 } from "react";
 import type { PullRequestCheckout } from "../shell/usePullRequestCheckout";
 import type { KeyboardEvent, ReactNode, Ref } from "react";
@@ -247,6 +249,23 @@ export function PullRequestDetail({
     flushSync(() => onTab(next));
     document.getElementById(tabId(next))?.focus();
   };
+  // Files changed reads its files once it shows, and then goes to the path.
+  const [inDiff, setInDiff] = useState<string | null>(null);
+  const listed =
+    files.held?.read.kind === "ready" ? files.held.read.files : null;
+  const choose = useEffectEvent((at: number) => files.choose(at));
+  useEffect(() => {
+    if (inDiff === null || listed === null) return;
+    const at = listed.findIndex(
+      ({ path, from }) => path === inDiff || from === inDiff,
+    );
+    if (at >= 0) choose(at);
+    setInDiff(null);
+  }, [inDiff, listed]);
+  const showInDiff = (path: string) => {
+    setInDiff(path);
+    show("files");
+  };
   function steer(event: KeyboardEvent) {
     const at = order.indexOf(tab);
     const next = {
@@ -377,6 +396,7 @@ export function PullRequestDetail({
                     pull={pull}
                     opened={opened}
                     url={url}
+                    onShowInDiff={showInDiff}
                   />
                 ) : of === "commits" ? (
                   <PullRequestCommits pull={pull} viewer={viewer} url={url} />
