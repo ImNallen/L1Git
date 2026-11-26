@@ -123,16 +123,26 @@ L1 Git keeps its copy of the token in the system keychain under the service `dev
 
 This version doesn't write to GitHub yet. These are the rules its writes keep once a button sends one.
 
-A write is one click, made for the account signed in when you click. If L1 Git is signed in as someone else by the time it sends, it sends nothing. L1 Git sends each write once and never sends it again on its own, even when no answer comes back. A pull request takes one write at a time. A second click while one is on its way, or while L1 Git can't tell how one ended, sends nothing.
+A write is one click, made for the account signed in when you click. If L1 Git is signed in as someone else by the time it sends, it sends nothing. L1 Git sends each write once and never sends it again on its own, even when no answer comes back.
+
+Before a write leaves, L1 Git saves a record of it in `drafts.json`, with the drafts it carries, and reads what is already on GitHub where its result would appear, which is your reviews on the pull request, the thread's comments, or the conversation's comments. A pull request takes one write at a time. While a write is on its way, or while L1 Git can't tell how one ended, the pull request takes no other write, from this window, another window, or another copy of L1 Git on the same configuration folder. The record and its drafts stay through a restart, a crash and signing in again, and a draft a write carries can't be sent again or typed over until the write is known.
 
 Each write ends in one of four ways:
 
-- **Done.** GitHub did it. The draft it sent is deleted, and what you wrote shows as sent until L1 Git reads the pull request again and finds it there.
-- **Refused.** GitHub answered and did not do it. L1 Git shows GitHub's reason.
-- **Not sent.** Nothing reached GitHub, for example because L1 Git could not reach it or the sign-in changed. You can send it again.
-- **Unknown.** L1 Git sent it and got no answer it could read, so GitHub may or may not have done it. L1 Git says so and reads the pull request again instead of sending it twice. It trusts only a read asked after the write ended. If that read shows the write, it was done. If it shows the write did not happen, nothing was posted and your draft is still there to send. Until a read can tell, the pull request takes no other write.
+- **Done.** GitHub did it. The drafts it sent are deleted, and what you wrote shows as sent until L1 Git reads the pull request again.
+- **Refused.** GitHub answered and did not do it. L1 Git shows GitHub's reason, and the drafts it carried are drafts again.
+- **Not sent.** Nothing reached GitHub, for example because L1 Git could not reach it, the sign-in changed, or the request never got past L1 Git itself. The drafts it carried are drafts again, and you can send it again.
+- **Unknown.** L1 Git sent it and got no answer it could read, so it may have posted.
 
-A merge names the head you saw, so a push while you confirm makes GitHub refuse it. Before L1 Git deletes a merged pull request's head branch on GitHub, it checks that the branch is still at the merged commit, that it is not in a fork, and that no open pull request has it as its head or its base. A branch that is already gone counts as deleted.
+**May have posted** is what L1 Git says of an unknown write until it knows. Each time L1 Git reads the pull request, it looks again. A write that would post twice if sent again (a comment, a reply, Add single comment, Finish review, or submitting a pending review) counts as posted only when GitHub shows something new since L1 Git's read before sending, made by you, with the same words, and for a review the same verdict and line comments. Seeing nothing never counts as not posted, because GitHub may still be working on it. A resolve, an unresolve, a merge or deleting the head branch can be done twice without harm, so L1 Git settles it from what it reads, such as whether the thread is resolved, the pull request merged, or the branch gone. If GitHub hasn't done it, L1 Git says so, and you can send it again.
+
+Until L1 Git knows, a write that may have posted offers three choices:
+
+- **Open on GitHub** shows the pull request on github.com, so you can check yourself.
+- **Keep as draft** gives its words back to the box as drafts, marked as may have posted, and the pull request takes writes again. Sending them is then up to you.
+- **Send anyway** sends the same write again, and warns that it may post twice. L1 Git reads GitHub first, and if the write is there by then, it sends nothing.
+
+A merge names the head you saw, so a push while you confirm makes GitHub refuse it. Before L1 Git deletes a merged pull request's head branch on GitHub, it checks that the branch is still at the merged commit, that it is not in a fork, and that no open pull request has it as its head or its base. GitHub then deletes the branch only if it still points at that commit, so a push after the check keeps it. A branch that is already gone counts as deleted. Request changes needs a summary, as GitHub requires.
 
 ## Pull requests
 
