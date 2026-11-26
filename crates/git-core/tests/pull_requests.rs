@@ -761,6 +761,63 @@ fn remove_runs_from_the_opened_worktree_when_the_main_one_is_bare() {
 }
 
 #[test]
+fn remove_fetches_the_head_first_and_deletes_a_branch_the_push_holds_all_of() {
+    let world = World::new();
+    for (number, first) in [
+        (1, world.same(1, "feat", "feat.txt")),
+        (3, world.forked(3, "ro", "ro.txt", false)),
+    ] {
+        world.tried(number, &first);
+        let name = first.reference.name().to_owned();
+        let pushed = PullHead {
+            oid: world.commit(&name, &format!("more-{number}.txt")),
+            ..first.clone()
+        };
+        let home = if number == 1 {
+            &world.base
+        } else {
+            &world.fork
+        };
+        world.publish(&[
+            (home, format!("refs/heads/{name}")),
+            (&world.base, format!("refs/pull/{number}/head")),
+        ]);
+        let removed = world.remove(number, &pushed, &first.oid);
+        assert!(
+            matches!(removed, PullCheckout::Absent { .. }),
+            "#{number}: {removed:?}"
+        );
+        assert_eq!(world.tip(&format!("pr/{number}")), None, "#{number}");
+    }
+    world.assert_main_untouched();
+}
+
+#[test]
+fn remove_offline_still_removes_the_worktree_and_keeps_only_a_branch_it_cannot_compare() {
+    let world = World::new();
+    let first = world.same(1, "feat", "feat.txt");
+    world.tried(1, &first);
+    let second = world.same(2, "two", "two.txt");
+    world.tried(2, &second);
+    let pushed = world.same(1, "feat", "more.txt");
+    let offline = world.top.join("offline.git");
+    fs::rename(&world.base, &offline).unwrap();
+    let PullCheckout::Parked { tip, relation, .. } = world.remove(1, &pushed, &first.oid) else {
+        panic!("not parked");
+    };
+    assert_eq!((tip, relation), (first.oid, Relation::Unfetched));
+    assert!(!world.folder(1).exists());
+    let removed = world.remove(2, &second, &second.oid);
+    assert!(
+        matches!(removed, PullCheckout::Absent { .. }),
+        "{removed:?}"
+    );
+    assert!(!world.folder(2).exists());
+    assert_eq!(world.tip("pr/2"), None);
+    world.assert_main_untouched();
+}
+
+#[test]
 fn remove_refuses_a_worktree_with_uncommitted_files_and_keeps_everything() {
     let world = World::new();
     let head = world.same(1, "feat", "feat.txt");

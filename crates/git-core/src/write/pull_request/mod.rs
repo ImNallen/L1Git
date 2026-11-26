@@ -10,7 +10,7 @@ use super::{
 };
 use crate::{
     BranchRef, BranchTip, Coordinator, ErrorKind, GitHubRepository, Head, InProgress, Oid,
-    RepositoryError, StaleReason, directories,
+    RepositoryError, StaleReason, WantedCommits, directories,
     git::{Deadline, LocalRead, LocalWrite, WriteDeadline, Wrote},
     repository::{self, WorktreeRecord},
     sync,
@@ -326,7 +326,9 @@ impl Coordinator {
     /// Remove worktree, run from the main worktree. Then deletes the branch
     /// when it is still at `seen` and every commit on it is in the head, and
     /// keeps it otherwise. Remotes stay. It records no undo entry, and drops
-    /// the entries only that worktree could run.
+    /// the entries only that worktree could run. The head is fetched first by
+    /// its id from the base remote, under the gate. When that fails, it still
+    /// removes the worktree, and keeps a branch it cannot compare.
     pub fn remove_pull_request(
         &self,
         path: &str,
@@ -334,6 +336,8 @@ impl Coordinator {
         head: &PullHead,
         seen: &Oid,
     ) -> Result<PullCheckout, RepositoryError> {
+        let _ = WantedCommits::try_from(vec![head.oid.clone()])
+            .and_then(|wanted| self.fetch_commits(path, &pull.github, &wanted));
         self.unrecorded(
             path,
             LocalWrite::RemovePullRequest,
