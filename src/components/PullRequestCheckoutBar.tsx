@@ -8,7 +8,6 @@ import {
   TriangleAlert,
   X,
 } from "lucide-react";
-import { hookOutputTail } from "../domain/operations";
 import {
   barWords,
   moveOf,
@@ -43,7 +42,6 @@ function Said({
   branch: string;
   onDismiss: (bar: HTMLElement | null) => void;
 }) {
-  const problem = said.kind === "removed" ? null : said.problem;
   return (
     <div
       className={`pull-checkout-said ${said.kind}`}
@@ -57,15 +55,8 @@ function Said({
       <span>
         {said.kind === "removed" &&
           `Removed worktree ${said.name}. Removal cannot be undone.`}
-        {said.kind === "failed" && `${failed[said.write](branch)} `}
-        {problem?.message}
-        {problem &&
-          hookOutputTail(problem).map((line, index) => (
-            <Fragment key={index}>
-              <br />
-              <code>{line}</code>
-            </Fragment>
-          ))}
+        {said.kind === "failed" &&
+          `${failed[said.write](branch)} ${said.problem.message}`}
       </span>
       <button
         type="button"

@@ -266,9 +266,4 @@ export function underHome(path: string, home: string | null) {
 
 /** What a note about the copy describes, so a read that finds it changed
  * can drop the note. */
-export const standing = (checkout: PullCheckout) =>
-  JSON.stringify(
-    checkout.kind === "ready"
-      ? { ...checkout, worktree: { ...checkout.worktree, trouble: null } }
-      : checkout,
-  );
+export const standing = (checkout: PullCheckout) => JSON.stringify(checkout);

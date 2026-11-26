@@ -224,44 +224,6 @@ it("a refusal stays in the popover, on the folder, until the folder changes", as
   expect(query("alert")).toBeNull();
 });
 
-it("a worktree whose post-checkout hook failed is made and kept, and the bar shows the hook's output until dismissed", async () => {
-  const app = await visit({
-    bridge: (bridge) =>
-      bridge.respond("tryPullRequest", (_request, _world, fallback) => {
-        const ready = fallback() as { worktree: object };
-        return {
-          ...ready,
-          worktree: {
-            ...ready.worktree,
-            trouble: {
-              kind: "afterHookFailed",
-              message:
-                "Git made the worktree pin-pr-1, but the post-checkout hook failed. Remove worktree takes it away.",
-              output: "npm ERR! missing script: prepare\n",
-            },
-          },
-        };
-      }),
-  });
-  await open(app, 1);
-  await app.click(tryButton()!);
-  await app.click(get("button", "Create worktree"));
-
-  const said = bar()!.querySelector(".pull-checkout-said")!;
-  expect(said.getAttribute("role")).toBe("status");
-  expect(said.textContent).toBe(
-    "Git made the worktree pin-pr-1, but the post-checkout hook failed. Remove worktree takes it away.npm ERR! missing script: prepare",
-  );
-  expect(sidebarRoots()).toEqual([PIN, OTHER, tried(1)]);
-  await app.refocusWindow();
-  expect(
-    bar()!.querySelector(".pull-checkout-said"),
-    "a reread keeps it",
-  ).not.toBeNull();
-  await app.click(get("button", "Dismiss"));
-  expect(bar()!.querySelector(".pull-checkout-said")).toBeNull();
-});
-
 it("offers a kept branch again, and checks it out at its own tip", async () => {
   const app = await visit({
     world: (world) => holding(world, 1, { ahead: 2, worktree: null }),

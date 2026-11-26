@@ -197,7 +197,7 @@ const ready = (
     branch,
     tip,
     relation,
-    worktree: { root, name: "l1git-pr-128", main, changes, trouble: null },
+    worktree: { root, name: "l1git-pr-128", main, changes },
   }) as HeldCheckout;
 const parked = (relation: HeldCheckout["relation"]) =>
   pullCheckoutSchema.parse({

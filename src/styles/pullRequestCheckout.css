@@ -74,9 +74,6 @@
   flex: 1;
   overflow-wrap: anywhere;
 }
-.pull-checkout-said code {
-  font-family: var(--mono);
-}
 
 .pull-try {
   position: fixed;

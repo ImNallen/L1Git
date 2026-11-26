@@ -40,15 +40,12 @@ export type CheckoutSaid =
       /** `standing` of the copy read after the failure. */
       about: string | null;
     }
-  | { kind: "trouble"; problem: Problem; root: RepositoryRoot }
   | { kind: "removed"; name: string };
 
 function holds(said: CheckoutSaid, checkout: PullCheckout) {
   switch (said.kind) {
     case "failed":
       return said.about === null || said.about === standing(checkout);
-    case "trouble":
-      return checkout.kind === "ready" && checkout.worktree.root === said.root;
     case "removed":
       return checkout.kind !== "ready";
   }
@@ -253,20 +250,11 @@ export function usePullRequestCheckout({
           name: checkout.worktree.name,
         });
       const removed = forget(before, checkout, target.root);
-      const trouble =
-        checkout.kind === "ready" ? checkout.worktree.trouble : null;
       change(of, (was) => ({
         ...was,
         known: { kind: "read", checkout },
         running: null,
-        said:
-          checkout.kind === "ready" && trouble
-            ? {
-                kind: "trouble",
-                problem: trouble,
-                root: checkout.worktree.root,
-              }
-            : removed && { kind: "removed", name: removed.name },
+        said: removed && { kind: "removed", name: removed.name },
       }));
       return { kind: "ready" };
     } catch (error) {
