@@ -119,8 +119,9 @@ export function CommentBox({
         >
           {view.kind === "sending"
             ? "Sending…"
-            : ((writing && saveText(writing.save)) ??
-              "Saved as a draft on this machine")}
+            : view.kind === "unknown"
+              ? "May have posted"
+              : (saveText(view.save) ?? "Saved as a draft on this machine")}
         </span>
         <button
           type="button"

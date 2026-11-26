@@ -245,6 +245,9 @@ it("offers three choices when a comment may have posted, and never sends it agai
   await app.type(words(), "Maybe.");
   await app.click(get("button", "Add single comment"));
   expect(box()?.textContent).toContain("may have posted");
+  expect(box()?.textContent, "its words are not a draft now").not.toContain(
+    "Saved as a draft",
+  );
   expect(get("link", "Open on GitHub", box()!).getAttribute("href")).toBe(
     "https://github.com/octo/pin/pull/1/files",
   );
