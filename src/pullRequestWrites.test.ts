@@ -319,3 +319,42 @@ it("sends nothing while signed out or while an update waits to restart, and keep
   expect(writes.attempts(one), "an old sign-in's answer stays out").toEqual([]);
   expect(mutations()).toBe(1);
 });
+
+it("looks for a kept write as soon as a window learns of it, after its read", async () => {
+  bridge.world.host.writes.push({ kind: "unknown", applied: "later" });
+  const first = await window();
+  await comment(first, "Thanks!");
+  await vi.waitFor(() => expect(asked("check")).toBe(1));
+  applyLater(bridge.world.host);
+  const restarted = await window();
+  expect(restarted.writes.attempts(one)).toEqual([]);
+  await restarted.read(1);
+  await vi.waitFor(() => expect(asked("pullRequest")).toBe(2));
+  await restarted.drafts.load(of);
+  await vi.waitFor(() => expect(kept()).toEqual([]));
+  expect(asked("check")).toBe(2);
+  expect(mutations()).toBe(1);
+});
+
+it("neither loses nor sends again words another window typed into a draft whose write is done", async () => {
+  const first = await window();
+  const second = await window();
+  first.drafts.type(of, conversation, HEAD, "Thanks!");
+  await first.drafts.flush(of);
+  await second.drafts.load(of);
+  const answer = bridge.hold("write");
+  first.writes.send(one, said("Thanks!"), [
+    { anchor: conversation, head: HEAD },
+  ]);
+  await answer.arrived;
+  second.drafts.type(of, conversation, HEAD, "Thanks! And one more");
+  await second.drafts.flush(of);
+  answer.release();
+  await vi.waitFor(() => expect(kept()).toEqual([]));
+  await second.drafts.flush(of);
+  expect(second.drafts.read(of).drafts).toMatchObject([
+    { text: "Thanks! And one more", save: { kind: "changedElsewhere" } },
+  ]);
+  expect(stored(), "nothing is left to send again by accident").toEqual([]);
+  expect(mutations()).toBe(1);
+});

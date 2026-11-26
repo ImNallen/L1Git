@@ -248,7 +248,7 @@ export function createPullRequestWrites(deps: {
 
   /** A read asked after a done write's answer shows it, so its words go;
    * and each fresh read of a pull request with a write that may have posted
-   * looks again. */
+   * looks again, also when the host's record of it arrives after the read. */
   function look() {
     const read = deps.details.read();
     for (const [key, pull] of current().pulls) {
@@ -270,6 +270,7 @@ export function createPullRequestWrites(deps: {
     }
   }
   deps.details.subscribe(look);
+  deps.drafts.subscribe(look);
 
   function start(
     pull: PullOf,
