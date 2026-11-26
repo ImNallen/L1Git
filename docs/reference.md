@@ -170,7 +170,24 @@ Text is Markdown, shown in the app's theme. HTML in it is never rendered, and on
 
 A pull request is read when you open it, when you come back to it, when you return to the window after half a minute, every half minute while a check runs and the window is visible, on the **Background fetch** interval, and when you click the refresh button, which reads the lists too. Nothing is read in the background while the keychain is locked or the hourly limit is used up, whichever read met it, and a pull request you open then says so instead of asking when the limit is used up. When its repository is removed from the sidebar, the pull request closes. When a read fails, what you see stays and a bar says why. GitHub answers with the newest 100 commits and timeline entries, the first 100 threads with 50 comments each, and 100 checks, and a line says what is left out. GitHub gives up on some very large pull requests. L1 Git then reads them without their review threads, which can take more than ten seconds, and says so.
 
-Reading changes nothing on GitHub. L1 Git does not request reviewers or run checks. The only things it changes on your computer are that **Files changed** can fetch commits into your clone, that L1 Git remembers which files you [viewed](#viewed-files), and the copy that [**Try it locally**](#try-a-pull-request-locally) makes when you ask for one.
+Reading changes nothing on GitHub. L1 Git does not request reviewers or run checks. It writes to GitHub only when you click, as [Comment on lines](#comment-on-lines), [Finish review](#finish-review), and [Comment, reply, and resolve](#comment-reply-and-resolve) describe. The only things it changes on your computer are that **Files changed** can fetch commits into your clone, that L1 Git remembers which files you [viewed](#viewed-files), and the copy that [**Try it locally**](#try-a-pull-request-locally) makes when you ask for one.
+
+### Comment, reply, and resolve
+
+The bottom of **Conversation** holds a box that says **Leave a comment. Markdown works here.** **Preview** shows how the Markdown reads. **Comment**, or **Cmd+Enter** on macOS and **Ctrl+Enter** elsewhere, posts it to the pull request's conversation. The box is there on every pull request you can read, your own too, and GitHub decides whether you may comment. When GitHub refuses, its reason shows under the box until you dismiss it, and your words stay. While you type, the words are a [draft](#review-drafts) on this machine, and the line under the box says when it is saved.
+
+Each review thread offers **Reply…**, which opens a box of its own, and **Resolve conversation** or **Unresolve conversation**. Each shows only when GitHub lets you. **Cancel** closes an empty reply box, and **Discard** deletes the words in one. A thread folds once it is resolved.
+
+While a comment or a reply is on its way, its box can't change it. Once GitHub has it, the box empties, and the words show where they went, marked **Sent**, until L1 Git reads the pull request again. GitHub answers with a thread's first 50 comments, so a reply to a longer thread is not in what L1 Git reads. L1 Git then says **Posted. GitHub shows it in the full thread.** and links to the pull request on GitHub. [Writing to GitHub](#writing-to-github) says how a write ends when GitHub refuses it, when it never left, or when it may have posted.
+
+**Timeline** and **Threads** at the top of **Conversation** switch between the conversation as it happened and its review threads. **Threads** lists each thread L1 Git read, by file, one row each. A row says where the thread is, who began it, its first words, how many replied, where it stands, and when it last moved. The filters count their threads:
+
+- **Open** shows every thread that isn't resolved. It is the filter **Threads** starts with.
+- **Waiting on you** shows the open threads whose last reply answers a comment you wrote. L1 Git can tell only for a thread it read whole.
+- **Outdated** shows the open threads on lines that changed since.
+- **Resolved** shows the rest. Under **Open**, a line says how many are hidden, and **Show them** shows them.
+
+Each thread stands one way, so a thread that waits on you counts there and not under **Outdated**. A row opens to its lines and comments, with **Reply…**, **Resolve**, and **Show in diff**, which opens **Files changed** at the thread's file. A thread you reply to or resolve stays in its place until you choose another filter. Opening **Threads** and choosing a filter send nothing to GitHub.
 
 ### Try a pull request locally
 
@@ -225,7 +242,7 @@ Marks stay on this computer, in the app's local storage under `l1git.viewed.v1`.
 
 ### Review drafts
 
-Words typed for a pull request and not sent yet are drafts. L1 Git saves a draft 400 ms after the last keystroke, in `drafts.json` beside `host.json` in the app's configuration folder, and never sends it anywhere by itself. Drafts survive a restart and a crash, which loses at most the last 400 ms of typing. They need no sign-in and no network. Each draft belongs to the account, the GitHub, and the pull request it was written for. A draft on lines belongs to the commit it was written against, and every other draft follows the pull request's head. The [comment box](#comment-on-lines) in **Files changed** writes one.
+Words typed for a pull request and not sent yet are drafts. L1 Git saves a draft 400 ms after the last keystroke, in `drafts.json` beside `host.json` in the app's configuration folder, and never sends it anywhere by itself. Drafts survive a restart and a crash, which loses at most the last 400 ms of typing. They need no sign-in and no network. Each draft belongs to the account, the GitHub, and the pull request it was written for. A draft on lines belongs to the commit it was written against, and every other draft follows the pull request's head. The [comment box](#comment-on-lines) in **Files changed**, the summary in **Finish review**, the conversation's comment box, and each reply box keep their words as drafts.
 
 Two windows, or two copies of L1 Git on one configuration folder, take turns with `drafts.json` through a lock on `drafts.lock` beside it, so neither saves over a change it has not read. When another window changed or deleted a draft after this window read it, this window saves nothing to that draft until you keep your words or take theirs. Deleting the draft deletes their version too.
 
