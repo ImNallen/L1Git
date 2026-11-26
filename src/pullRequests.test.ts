@@ -1,7 +1,7 @@
 import { expect, it, vi } from "vitest";
 import type { HostRequest } from "./domain/host";
 import { createHostClient } from "./host";
-import { createPullRequests } from "./pullRequests";
+import { createPullRequests, stamp } from "./pullRequests";
 
 const signedOut = (revision: number, ended: unknown = null) => ({
   revision,
@@ -84,7 +84,13 @@ const open = (repo: string) => ({
   repository: { owner: "octo", repo },
   list: "open" as const,
 });
-const empty = { value: null, at: null, reading: false, problem: null };
+const empty = {
+  value: null,
+  at: null,
+  askedAt: null,
+  reading: false,
+  problem: null,
+};
 
 function setup() {
   const replies: {
@@ -194,10 +200,30 @@ it("keeps the last value while reading and after a failure, until a success", as
   expect(lists.read()(open("app"))).toEqual({
     value: { items: [], total: 6 },
     at: 12_000,
+    askedAt: expect.any(Number),
     reading: false,
     problem: null,
   });
   now.mockRestore();
+});
+
+it("stamps a value with when its read was asked, and keeps that stamp through a failure", async () => {
+  const { details, replies } = await connected();
+  const of = { repository: { owner: "octo", repo: "app" }, number: 12 };
+  const first = details.refresh(of);
+  const answered = stamp();
+  replies[1]?.resolve(pull(12));
+  await first;
+  const asked = details.read()(of).askedAt ?? Infinity;
+  expect(asked, "asked before the answer it races").toBeLessThan(answered);
+  const failing = details.refresh(of);
+  replies[2]?.reject(new Error("The development bridge is unavailable."));
+  await failing;
+  expect(details.read()(of).askedAt).toBe(asked);
+  const again = details.refresh(of);
+  replies[3]?.resolve(pull(12));
+  await again;
+  expect(details.read()(of).askedAt).toBeGreaterThan(answered);
 });
 
 it("gives a new snapshot only when an answer changes, and tells its listeners", async () => {

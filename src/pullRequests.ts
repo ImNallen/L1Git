@@ -13,15 +13,23 @@ export type Read<T> = {
   value: T | null;
   /** When `value` was answered, in milliseconds. */
   at: number | null;
+  /** The `stamp` taken when the read that answered `value` was asked. */
+  askedAt: number | null;
   reading: boolean;
   problem: HostProblem | null;
 };
 export const unread: Read<never> = {
   value: null,
   at: null,
+  askedAt: null,
   reading: false,
   problem: null,
 };
+
+let stamped = 0;
+/** Milliseconds that never repeat, so of two stamps the later one was taken
+ * later. A read asked after a write's answer has the greater stamp. */
+export const stamp = () => (stamped = Math.max(Date.now(), stamped + 1));
 
 /**
  * Names one sign-in. Two accounts never share a name, so a read that starts and
@@ -73,6 +81,7 @@ function createReads<Request, T>(
     const already = running.get(key);
     if (already) return already;
     const last = look(request);
+    const askedAt = stamp();
     const read = ask(request).then((answer) => {
       running.delete(key);
       if (current().running !== running) return;
@@ -83,6 +92,7 @@ function createReads<Request, T>(
           ? {
               value: answer.reply.data,
               at: Date.now(),
+              askedAt,
               reading: false,
               problem: null,
             }

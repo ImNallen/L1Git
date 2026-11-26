@@ -25,7 +25,23 @@ export function createReadQueue(
 ) {
   const waiting = new Map<string, ReadRequest>();
   const running = new Set<string>();
+  /** Running reads to ask once more when they end. */
+  const again = new Map<string, ReadRequest>();
   let unlocked = false;
+
+  function first(request: ReadRequest) {
+    const rest = [...waiting.values()];
+    waiting.clear();
+    add([request, ...rest]);
+  }
+
+  function add(requests: readonly ReadRequest[]) {
+    for (const request of requests) {
+      const key = keyOf(request);
+      if (!running.has(key)) waiting.set(key, request);
+    }
+    pump();
+  }
 
   function pump() {
     for (const [key, request] of waiting) {
@@ -35,28 +51,33 @@ export function createReadQueue(
       void read(request).then((passed) => {
         running.delete(key);
         unlocked = passed;
+        const more = again.get(key);
+        again.delete(key);
         if (!passed) waiting.clear();
-        pump();
+        if (passed && more) first(more);
+        else pump();
       });
     }
   }
 
   return {
-    add(requests: readonly ReadRequest[]) {
-      for (const request of requests) {
-        const key = keyOf(request);
-        if (!running.has(key)) waiting.set(key, request);
-      }
-      pump();
-    },
-    /** Ahead of everything that waits, for what the user is looking at. */
-    addFirst(request: ReadRequest) {
-      const rest = [...waiting.values()];
-      waiting.clear();
-      this.add([request, ...rest]);
+    add,
+    /**
+     * Ahead of everything that waits, for what the user is looking at. With
+     * `again`, a read of it that already runs is asked once more when it
+     * ends, so the answer is to a question asked after now, as a write's
+     * reread needs.
+     */
+    addFirst(request: ReadRequest, options?: { again: boolean }) {
+      if (options?.again && running.has(keyOf(request)))
+        again.set(keyOf(request), request);
+      else first(request);
     },
     waits: (request: ReadRequest) => waiting.has(keyOf(request)),
     /** Running reads finish, and the rest never start. */
-    close: () => waiting.clear(),
+    close: () => {
+      waiting.clear();
+      again.clear();
+    },
   };
 }
