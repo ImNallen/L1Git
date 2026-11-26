@@ -90,6 +90,15 @@ export const pullRequestSchema = z.object({
   state: stateSchema,
   author: account,
   viewerIsAuthor: z.boolean(),
+  /** The viewer's role in the base repository. */
+  viewerPermission: z.enum([
+    "admin",
+    "maintain",
+    "write",
+    "triage",
+    "read",
+    "unknown",
+  ]),
   base: z.string(),
   baseOid: oidSchema,
   labels: labelsSchema,

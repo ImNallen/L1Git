@@ -14,16 +14,25 @@ pub(crate) fn read(path: &Path, deadline: Deadline) -> Result<Vec<Remote>, Repos
     names(path, deadline)?
         .into_iter()
         .map(|name| {
-            let output = git::run(
-                path,
-                &["config", "--null", "--get", &format!("remote.{name}.url")],
-                deadline,
-            )?;
-            let raw = git::text(output.stdout.strip_suffix(&[0]).unwrap_or(&output.stdout));
-            let (url, github) = display_url(&raw);
+            let (url, github) = display_url(&raw_url(path, &name, deadline)?);
             Ok(Remote { name, url, github })
         })
         .collect()
+}
+
+pub(crate) fn raw_url(
+    path: &Path,
+    name: &str,
+    deadline: Deadline,
+) -> Result<String, RepositoryError> {
+    let output = git::run(
+        path,
+        &["config", "--null", "--get", &format!("remote.{name}.url")],
+        deadline,
+    )?;
+    Ok(git::text(
+        output.stdout.strip_suffix(&[0]).unwrap_or(&output.stdout),
+    ))
 }
 
 /// A fork's pull requests are opened in its `upstream`, and a clone without one
@@ -84,6 +93,28 @@ pub(crate) fn display_url(raw: &str) -> (String, Option<GitHubRepository>) {
     ("Local or unrecognized remote".into(), None)
 }
 
+pub(crate) fn sibling_url(raw: &str, repository: &GitHubRepository) -> Option<String> {
+    display_url(raw).1?;
+    let path = |git: bool| {
+        let suffix = if git { ".git" } else { "" };
+        format!("{}/{}{suffix}", repository.owner, repository.repo)
+    };
+    if !raw.contains("://") {
+        let (host, old) = raw.split_once(':')?;
+        return Some(format!("{host}:{}", path(old.ends_with(".git"))));
+    }
+    let mut url = Url::parse(raw).ok()?;
+    if url.scheme() == "https" {
+        url.set_username("").ok()?;
+    }
+    url.set_password(None).ok()?;
+    url.set_query(None);
+    url.set_fragment(None);
+    let git = url.path().trim_end_matches('/').ends_with(".git");
+    url.set_path(&format!("/{}", path(git)));
+    Some(url.to_string())
+}
+
 fn github_path(path: &str) -> Option<GitHubRepository> {
     let mut parts = path
         .trim_start_matches('/')
@@ -139,5 +170,36 @@ mod tests {
         ] {
             assert!(display_url(raw).1.is_none(), "{raw}");
         }
+    }
+
+    #[test]
+    fn a_sibling_url_keeps_the_transport_and_drops_credentials() {
+        let fork = GitHubRepository {
+            owner: "maja".into(),
+            repo: "app".into(),
+        };
+        for (raw, sibling) in [
+            (
+                "git@github.com:octo/l1git.git",
+                "git@github.com:maja/app.git",
+            ),
+            ("github.com:octo/l1git", "github.com:maja/app"),
+            (
+                "ssh://git@github.com/octo/l1git.git",
+                "ssh://git@github.com/maja/app.git",
+            ),
+            (
+                "https://token:secret@github.com/octo/l1git.git?x=1#y",
+                "https://github.com/maja/app.git",
+            ),
+            (
+                "https://github.com/octo/l1git/",
+                "https://github.com/maja/app",
+            ),
+        ] {
+            assert_eq!(sibling_url(raw, &fork).as_deref(), Some(sibling), "{raw}");
+        }
+        assert_eq!(sibling_url("/srv/octo/l1git.git", &fork), None);
+        assert_eq!(sibling_url("https://example.com/octo/l1git", &fork), None);
     }
 }

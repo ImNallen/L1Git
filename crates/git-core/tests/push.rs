@@ -310,6 +310,11 @@ fn refuses_unsupported_targets_without_publication() {
             "refs/tags/no",
             PushUnavailable::UnsupportedConfiguration,
         ),
+        (
+            "branch.main.merge",
+            "refs/pull/7/head",
+            PushUnavailable::PullRequestHead,
+        ),
     ] {
         let old = git(&world.work, &["config", "--get", key]);
         git(&world.work, &["config", key, value]);

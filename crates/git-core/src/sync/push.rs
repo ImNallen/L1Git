@@ -87,6 +87,9 @@ pub enum PushUnavailable {
     Mirror,
     MultipleEndpoints,
     UnusableFetchMapping,
+    /// The branch follows a pull request's `refs/pull/<number>/head`, which
+    /// takes no push.
+    PullRequestHead,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -309,6 +312,9 @@ fn prepare(
     };
     if remote == "." {
         return Ok(unavailable(PushUnavailable::LocalUpstream));
+    }
+    if merge.starts_with("refs/pull/") {
+        return Ok(unavailable(PushUnavailable::PullRequestHead));
     }
     let Ok(destination) = BranchRef::try_from(merge.clone()) else {
         return Ok(unavailable(PushUnavailable::UnsupportedConfiguration));

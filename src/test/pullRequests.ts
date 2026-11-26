@@ -40,6 +40,7 @@ export function pull(
   const { head: branch, checks: _, ...summary } = row(number);
   return pullRequestSchema.parse({
     ...summary,
+    viewerPermission: "admin",
     body: "Reads **once**.",
     baseOid: "b".repeat(40),
     changedFiles: 2,

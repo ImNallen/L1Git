@@ -118,7 +118,7 @@ fn pull(fields: Value) -> Value {
         "reviewRequests": empty(), "latestReviews": empty(), "latestOpinionatedReviews": empty(),
         "statusCheckRollup": null, "commits": empty(), "timelineItems": empty(), "reviewThreads": empty(),
     });
-    json!({"data": {"repository": {"pullRequest": with(pull, fields)}}})
+    json!({"data": {"repository": {"viewerPermission": null, "pullRequest": with(pull, fields)}}})
 }
 
 fn open(name: &str, rows: Vec<Value>, requested: &[u32]) -> Value {
@@ -590,8 +590,8 @@ fn one_pull_request_answers_in_l1_gits_words() {
     let facts = json!({
         "number": 12, "title": "Read the configuration file once",
         "body": "The file was read for **every** request.",
-        "state": {"kind": "open", "draft": false}, "author": "hubot", "viewerIsAuthor": false, "base": "main",
-        "baseOid": "b".repeat(40),
+        "state": {"kind": "open", "draft": false}, "author": "hubot", "viewerIsAuthor": false,
+        "viewerPermission": "write", "base": "main", "baseOid": "b".repeat(40),
         "labels": {"total": 1, "items": [{"name": "bug", "color": "d73a4a"}]},
         "additions": 80, "deletions": 8, "changedFiles": 3,
         "createdAt": "2026-05-07T21:40:00Z", "updatedAt": "2026-11-24T15:33:39Z",
@@ -791,6 +791,7 @@ fn a_merged_pull_request_tells_how_it_ended() {
         ])
     );
     assert_eq!(data["viewerIsAuthor"], true);
+    assert_eq!(data["viewerPermission"], "admin");
     assert_eq!(data["checks"]["items"][0]["state"], "skipped");
     assert_eq!(data["mergeable"], "unknown");
     assert_eq!(data["mergeState"], "unknown");
@@ -902,6 +903,10 @@ fn checks_claim_the_least() {
 
     let none = world.pulls(pull(json!({})));
     assert_eq!(none["checks"], json!({"items": [], "total": 0}));
+    assert_eq!(
+        none["viewerPermission"], "unknown",
+        "GitHub names none for an app"
+    );
     let mut withheld = pull(json!({}));
     withheld["errors"] = json!([refusal(
         "FORBIDDEN",
@@ -913,18 +918,21 @@ fn checks_claim_the_least() {
 #[test]
 fn a_gone_fork_and_unknown_values_still_read() {
     let world = World::connected();
-    let data = world.pulls(pull(json!({
+    let mut answer = pull(json!({
         "author": null, "headRepository": null, "isCrossRepository": true,
         "mergeStateStatus": "BY_MAGIC", "reviewRequests": null, "latestReviews": null, "latestOpinionatedReviews": null,
         "reviewThreads": {"totalCount": 1, "nodes": [{
             "id": "PRRT_1", "path": "src/main.rs", "line": null, "startLine": null, "originalLine": null, "originalStartLine": null,
             "diffSide": "LEFT", "isOutdated": false, "isResolved": false, "first": {"nodes": []}, "comments": {"totalCount": 0, "nodes": []},
         }]},
-    })));
+    }));
+    answer["data"]["repository"]["viewerPermission"] = json!("BY_MAGIC");
+    let data = world.pulls(answer);
     assert_eq!(data["author"], json!(null));
     assert_eq!(data["head"]["repository"], json!(null));
     assert_eq!(data["head"]["crossRepository"], true);
     assert_eq!(data["mergeState"], "unknown");
+    assert_eq!(data["viewerPermission"], "unknown");
     assert_eq!(data["reviewers"], json!([]));
     assert_eq!(data["threads"]["items"][0]["side"], "left");
     assert_eq!(data["threads"]["items"][0]["hunk"], "");

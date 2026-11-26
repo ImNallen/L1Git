@@ -1,9 +1,11 @@
-use super::{Capped, Deadline, Work, base, execute, text, too_old, without_prompts};
+use super::{
+    Capped, Deadline, HOOK_OFF, NoHooks, Work, base, execute, text, too_old, without_prompts,
+};
 use crate::{
     ErrorKind, RepositoryError, StaleReason, stderr,
     write::{
-        CommitTxn, HOOK_OFF, MergeIndexTxn, MergeTxn, Outside, Published, RebaseTxn, RefTxn,
-        ReplayKind, ReplayOf, ReplayTxn, ScratchIndex, Txn,
+        CommitTxn, MergeIndexTxn, MergeTxn, Outside, Published, RebaseTxn, RefTxn, ReplayKind,
+        ReplayOf, ReplayTxn, ScratchIndex, Txn,
     },
 };
 use std::{
@@ -56,9 +58,21 @@ pub(crate) enum LocalWrite {
     RefreshIndex,
     CreateWorktree,
     RemoveWorktree,
+    TryPullRequest,
+    UpdatePullRequest,
+    RemovePullRequest,
 }
 
 impl LocalWrite {
+    /// A pull request's copy holds the pull request's files, which a hook
+    /// may run, so no write to it runs one.
+    const fn runs_hooks(self) -> bool {
+        !matches!(
+            self,
+            Self::TryPullRequest | Self::UpdatePullRequest | Self::RemovePullRequest
+        )
+    }
+
     pub(crate) const fn budget(self) -> Duration {
         Duration::from_secs(match self {
             Self::SaveConflict
@@ -101,7 +115,10 @@ impl LocalWrite {
             | Self::UndoRebase
             | Self::RedoRebase
             | Self::CreateWorktree
-            | Self::RemoveWorktree => 600,
+            | Self::RemoveWorktree
+            | Self::TryPullRequest
+            | Self::UpdatePullRequest
+            | Self::RemovePullRequest => 600,
         })
     }
 
@@ -148,6 +165,9 @@ impl LocalWrite {
             Self::RefreshIndex => "Refreshing the index",
             Self::CreateWorktree => "Creating the worktree",
             Self::RemoveWorktree => "Removing the worktree",
+            Self::TryPullRequest => "Checking out the pull request",
+            Self::UpdatePullRequest => "Updating the pull request's branch",
+            Self::RemovePullRequest => "Removing the pull request's worktree",
         }
     }
 
@@ -194,6 +214,9 @@ impl LocalWrite {
             Self::RefreshIndex => "l1git refresh",
             Self::CreateWorktree => "l1git worktree add",
             Self::RemoveWorktree => "l1git worktree remove",
+            Self::TryPullRequest => "l1git pull request try",
+            Self::UpdatePullRequest => "l1git pull request update",
+            Self::RemovePullRequest => "l1git pull request remove",
         }
     }
 
@@ -237,9 +260,11 @@ impl LocalWrite {
             | Self::RedoStash => {
                 "L1 Git rereads the worktree and the stash list to see what changed."
             }
-            Self::CreateWorktree | Self::RemoveWorktree => {
-                "L1 Git rereads the worktrees to see what changed."
-            }
+            Self::CreateWorktree
+            | Self::RemoveWorktree
+            | Self::TryPullRequest
+            | Self::UpdatePullRequest
+            | Self::RemovePullRequest => "L1 Git rereads the worktrees to see what changed.",
         }
     }
 }
@@ -506,6 +531,14 @@ impl<'a> Write<'a> {
             .lazy_fetch_unprompted()
     }
 
+    /// Moves the checked-out branch and carries uncommitted changes that the
+    /// move does not touch. Git refuses the rest and changes nothing.
+    pub(crate) fn reset_keep(txn: &'a RefTxn<'_>, to: &'a crate::Oid) -> Self {
+        Self::user(txn.root(), vec!["reset", "--quiet", "--keep", to.as_str()])
+            .uncapped()
+            .lazy_fetch_unprompted()
+    }
+
     pub(crate) fn update_refs(txn: &'a RefTxn<'_>, reflog: &'a str, input: Vec<u8>) -> Self {
         Self::user(txn.root(), vec!["update-ref", "-m", reflog, "--stdin"]).input(input)
     }
@@ -606,6 +639,14 @@ impl<'a> Write<'a> {
             command.env("GIT_REFLOG_ACTION", write.reflog_action());
             command
         };
+        let hooks = if write.runs_hooks() {
+            None
+        } else {
+            Some(NoHooks::of(self.dir, deadline)?)
+        };
+        if let Some(hooks) = &hooks {
+            hooks.apply(&mut command);
+        }
         if self.lazy_fetch {
             without_prompts(&mut command);
         }

@@ -21,9 +21,10 @@ pub use read::InProgress;
 pub(crate) use read::{in_progress, pseudoref_exists};
 
 use crate::{
-    Advance, AdvanceOutcome, CommitsFetch, FastForwardReport, FetchMode, FetchOutcome,
-    FetchSummary, GitHubRepository, RepositoryError, RepositoryOverview, SkipReason, WantedCommits,
-    git::{Deadline, LocalRead, LocalWrite, WriteDeadline},
+    Advance, AdvanceOutcome, BranchRef, CommitsFetch, ErrorKind, FastForwardReport, FetchFailure,
+    FetchMode, FetchOutcome, FetchSummary, GitHubRepository, Oid, RepositoryError,
+    RepositoryOverview, SkipReason, WantedCommits,
+    git::{Deadline, LocalRead, LocalWrite, NoHooks, WriteDeadline},
     remotes,
 };
 use std::{
@@ -31,7 +32,7 @@ use std::{
     num::NonZeroUsize,
     path::{Path, PathBuf},
     sync::{
-        Arc, Condvar, Mutex, MutexGuard, PoisonError,
+        Arc, Condvar, Mutex, MutexGuard, PoisonError, TryLockError,
         atomic::{AtomicBool, Ordering},
     },
     thread,
@@ -42,6 +43,11 @@ use std::{
 pub struct Limits {
     /// How long one remote may take to fetch.
     pub fetch_deadline: Duration,
+    /// How long a fetch that the operation can do without may take, as
+    /// Remove pull request's fetch of the head. One commit by ID needs a few
+    /// seconds even over a slow SSH handshake, and Remove that gives up on
+    /// it only keeps the branch.
+    pub optional_fetch_deadline: Duration,
     /// How long one ordinary push may take.
     pub push_deadline: Duration,
     /// How long a probe, ref move, or worktree fast-forward may take. A partial
@@ -57,6 +63,7 @@ impl Default for Limits {
     fn default() -> Self {
         Self {
             fetch_deadline: Duration::from_secs(300),
+            optional_fetch_deadline: Duration::from_secs(15),
             push_deadline: Duration::from_secs(300),
             local_deadline: Duration::from_secs(120),
             clone_deadline: Duration::from_secs(3600),
@@ -120,6 +127,13 @@ impl Writers {
         let wanted = || locks.wanted();
         (!wanted()).then(|| work(&wanted))
     }
+}
+
+/// A branch fetched by its full name moves the remote-tracking ref its fetch
+/// refspec maps it to. A commit fetched by id moves no ref.
+pub(crate) enum Wanted<'a> {
+    Branch(&'a BranchRef),
+    Commit(&'a Oid),
 }
 
 #[derive(Default)]
@@ -275,21 +289,108 @@ impl Coordinator {
         github: &GitHubRepository,
         commits: &WantedCommits,
     ) -> Result<CommitsFetch, RepositoryError> {
+        self.fetch_commits_by(path, github, commits, None, true)
+    }
+
+    /// `fetch_commits` for a write to a pull request's copy, which goes on
+    /// without the commits. It gives up once `optional_fetch_deadline` has
+    /// passed, the wait for the gate and a network slot included, and runs
+    /// no hook.
+    pub(crate) fn fetch_optional_commits(
+        &self,
+        path: &str,
+        github: &GitHubRepository,
+        commits: &WantedCommits,
+    ) -> Result<CommitsFetch, RepositoryError> {
+        let until = Instant::now() + self.limits.optional_fetch_deadline;
+        self.fetch_commits_by(path, github, commits, Some(until), false)
+    }
+
+    fn fetch_commits_by(
+        &self,
+        path: &str,
+        github: &GitHubRepository,
+        commits: &WantedCommits,
+        until: Option<Instant>,
+        run_hooks: bool,
+    ) -> Result<CommitsFetch, RepositoryError> {
         let reads = self.deadline(LocalRead::BranchStatus);
         let repository = read::open(path, reads)?;
         let remotes = remotes::read(&repository.root, reads)?;
         let Some(remote) = remotes::of_github(remotes, github) else {
             return Ok(CommitsFetch::NoRemote);
         };
-        self.gated(&repository.common_dir, || {
+        let locks = self.locks(&repository.common_dir);
+        let (Some(_gate), Some(_slot)) = (
+            lock_until(&locks.gate, until),
+            self.slots.acquire_until(until),
+        ) else {
+            return Ok(CommitsFetch::Failed {
+                failure: FetchFailure::Busy,
+                message: format!("Another fetch kept {remote} busy."),
+            });
+        };
+        let deadline = until.map_or(self.limits.fetch_deadline, |until| {
+            until.saturating_duration_since(Instant::now())
+        });
+        let hooks = if run_hooks {
+            None
+        } else {
+            Some(NoHooks::of(&repository.root, reads)?)
+        };
+        let oids = commits.oids();
+        fetch::fetch_commits(&repository.root, &remote, oids, deadline, hooks.as_ref())
+    }
+
+    /// Fetches for a write to a pull request's copy, so it runs no hook.
+    pub(crate) fn fetch_wanted(
+        &self,
+        path: &str,
+        remote: &str,
+        wanted: Wanted<'_>,
+    ) -> Result<(), RepositoryError> {
+        let reads = self.deadline(LocalRead::BranchStatus);
+        let repository = read::open(path, reads)?;
+        let deadline = self.limits.fetch_deadline;
+        let hooks = NoHooks::of(&repository.root, reads)?;
+        let failure = self.gated(&repository.common_dir, || {
             let _slot = self.slots.acquire();
-            fetch::fetch_commits(
-                &repository.root,
-                &remote,
-                commits.oids(),
-                self.limits.fetch_deadline,
-            )
-        })
+            Ok::<_, RepositoryError>(match wanted {
+                Wanted::Branch(branch) => {
+                    match fetch::fetch(
+                        &repository.root,
+                        remote,
+                        Some(branch.as_str()),
+                        deadline,
+                        Some(&hooks),
+                    )? {
+                        FetchOutcome::Failed { failure, message } => Some((failure, message)),
+                        FetchOutcome::Fetched | FetchOutcome::Skipped => None,
+                    }
+                }
+                Wanted::Commit(oid) => match fetch::fetch_commits(
+                    &repository.root,
+                    remote,
+                    std::slice::from_ref(oid),
+                    deadline,
+                    Some(&hooks),
+                )? {
+                    CommitsFetch::Failed { failure, message } => Some((failure, message)),
+                    CommitsFetch::Done | CommitsFetch::NoRemote => None,
+                },
+            })
+        })?;
+        match failure {
+            None => Ok(()),
+            Some((failure, message)) => Err(RepositoryError::new(
+                if failure == FetchFailure::TimedOut {
+                    ErrorKind::TimedOut
+                } else {
+                    ErrorKind::GitFailed
+                },
+                format!("L1 Git could not fetch from {remote}. {message}"),
+            )),
+        }
     }
 
     /// Fast-forwards each requested branch in order, then rereads the repository
@@ -352,6 +453,22 @@ fn lock_ignoring_poison<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+/// Waits for `mutex` until `until`, or for as long as it takes without one.
+/// A mutex wakes no waiter at a deadline, so the wait polls.
+fn lock_until<T>(mutex: &Mutex<T>, until: Option<Instant>) -> Option<MutexGuard<'_, T>> {
+    let Some(until) = until else {
+        return Some(lock_ignoring_poison(mutex));
+    };
+    loop {
+        match mutex.try_lock() {
+            Ok(guard) => return Some(guard),
+            Err(TryLockError::Poisoned(poisoned)) => return Some(poisoned.into_inner()),
+            Err(TryLockError::WouldBlock) if Instant::now() >= until => return None,
+            Err(TryLockError::WouldBlock) => thread::sleep(STOP_POLL),
+        }
+    }
+}
+
 const STOP_POLL: Duration = Duration::from_millis(20);
 
 struct Semaphore {
@@ -376,6 +493,27 @@ impl Semaphore {
             .unwrap_or_else(PoisonError::into_inner);
         *free -= 1;
         Permit(self)
+    }
+
+    /// Waits for a slot until `until`, or for as long as it takes without one.
+    fn acquire_until(&self, until: Option<Instant>) -> Option<Permit<'_>> {
+        let Some(until) = until else {
+            return Some(self.acquire());
+        };
+        let mut free = lock_ignoring_poison(&self.free);
+        while *free == 0 {
+            let left = until.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return None;
+            }
+            free = self
+                .released
+                .wait_timeout(free, left)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
+        }
+        *free -= 1;
+        Some(Permit(self))
     }
 
     /// Waits for a slot until `stop` turns true. Setting `stop` wakes nothing,

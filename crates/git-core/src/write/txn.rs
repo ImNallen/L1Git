@@ -13,8 +13,6 @@ use std::{
 
 const PREFIX: &str = "l1git-";
 
-pub(crate) const HOOK_OFF: &str = "L1GIT_HOOK_OFF";
-
 pub(crate) struct Txn<'r> {
     repo: &'r Repo,
     lock: PathBuf,
@@ -26,9 +24,7 @@ pub(crate) struct Txn<'r> {
 }
 
 /// `core.hooksPath` does not turn off a hook that config defines, so each
-/// command of the transaction turns those off by name. The name can hold
-/// `=`, which `-c` would split on, so the value comes from
-/// [`HOOK_OFF`] through `--config-env`, which splits on the last `=`.
+/// command of the transaction turns those off by name.
 struct Hooks {
     file: bool,
     disabled: Vec<String>,
@@ -40,25 +36,9 @@ impl Hooks {
         deadline: WriteDeadline,
         event: Option<&str>,
     ) -> Result<Self, RepositoryError> {
-        let mut args = vec!["config", "-z", "--get-regexp", r"^hook\..*\.event$"];
-        args.extend(event);
-        let found = git::run(&repo.root, &args, deadline.reads())?;
-        let disabled = match found.status.code() {
-            Some(0) => found
-                .stdout
-                .split(|byte| *byte == 0)
-                .filter_map(|record| {
-                    let key = git::text(record.split(|byte| *byte == b'\n').next()?);
-                    let name = key.strip_prefix("hook.")?.strip_suffix(".event")?;
-                    Some(format!("--config-env=hook.{name}.enabled={HOOK_OFF}"))
-                })
-                .collect(),
-            Some(1) => Vec::new(),
-            _ => return Err(git::read_failed()),
-        };
         Ok(Self {
             file: executable(&repo.hook),
-            disabled,
+            disabled: git::defined_hooks(&repo.root, deadline.reads(), event)?,
         })
     }
 
@@ -604,6 +584,10 @@ impl<'r> RefTxn<'r> {
 
     pub(super) fn move_tree<'a>(&'a self, from: &'a Oid, to: &'a Oid) -> Write<'a> {
         Write::move_tree(self, from, to)
+    }
+
+    pub(super) fn reset_keep<'a>(&'a self, to: &'a Oid) -> Write<'a> {
+        Write::reset_keep(self, to)
     }
 
     pub(super) fn worktree<'a>(&'a self, args: &[&'a str]) -> Write<'a> {

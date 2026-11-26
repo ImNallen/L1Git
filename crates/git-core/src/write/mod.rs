@@ -12,6 +12,7 @@ mod files;
 mod index;
 mod merge;
 mod partial;
+mod pull_request;
 mod rebase;
 mod refresh;
 mod refs;
@@ -40,6 +41,9 @@ pub use merge::{
 };
 use partial::{Action, Part, Picks};
 pub use partial::{LinePick, LineSide};
+pub use pull_request::{
+    Changes, CheckedOut, HeadFrom, NoPush, Plan, PullCheckout, PullHead, PullKey, Pushes, Relation,
+};
 pub use replay::{ReplayKind, ReplayOf, ReplayPrediction, ReplayProgress, ReplayReview};
 pub(crate) use resolution::conflict_file_within;
 use serde::{Deserialize, Serialize};
@@ -52,7 +56,7 @@ use std::{
 use store::{EntryObjects, LockedStore, Log, Objects, Position, Step};
 pub use tags::TagTip;
 pub(crate) use txn::{
-    CommitTxn, HOOK_OFF, MergeIndexTxn, MergeTxn, Outside, Published, RebaseTxn, RefTxn, ReplayTxn,
+    CommitTxn, MergeIndexTxn, MergeTxn, Outside, Published, RebaseTxn, RefTxn, ReplayTxn,
     ScratchIndex, Txn,
 };
 pub use worktrees::{NewWorktree, WorktreeBranch, WorktreeReview, WorktreeSource};

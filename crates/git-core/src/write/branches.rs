@@ -79,8 +79,8 @@ pub(super) struct Slot {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct Setting {
-    key: String,
-    value: String,
+    pub(super) key: String,
+    pub(super) value: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -157,6 +157,10 @@ impl Listing {
             config,
             worktrees,
         })
+    }
+
+    pub(super) fn worktrees(&self) -> &[WorktreeRecord] {
+        &self.worktrees
     }
 
     fn listed(&self, branch: &BranchRef) -> Option<&refs::Listed> {

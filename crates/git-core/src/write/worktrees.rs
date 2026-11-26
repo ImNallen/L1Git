@@ -209,14 +209,14 @@ impl Coordinator {
 }
 
 /// The record Git keeps for the folder at `target`, which may be missing.
-fn at<'r>(records: &'r [WorktreeRecord], target: &Path) -> Option<&'r WorktreeRecord> {
+pub(super) fn at<'r>(records: &'r [WorktreeRecord], target: &Path) -> Option<&'r WorktreeRecord> {
     records
         .iter()
         .find(|record| record.root.as_deref().unwrap_or(Path::new(&record.listed)) == target)
 }
 
 /// The record as a finished worktree on `branch`.
-fn finished(record: &WorktreeRecord, branch: &BranchRef) -> Option<NewWorktree> {
+pub(super) fn finished(record: &WorktreeRecord, branch: &BranchRef) -> Option<NewWorktree> {
     let root = record.root.as_ref()?;
     (record.branch() == Some(branch.as_str())
         && !record.prunable
@@ -236,10 +236,11 @@ fn answered(
     branch: &BranchRef,
     folder: &str,
 ) -> Result<NewWorktree, RepositoryError> {
-    if let Some(made) = finished(record, branch) {
-        return Ok(made);
-    }
-    let refused = |message: String| Err(RepositoryError::new(ErrorKind::Conflict, message));
+    finished(record, branch).ok_or_else(|| occupied(record, folder))
+}
+
+pub(super) fn occupied(record: &WorktreeRecord, folder: &str) -> RepositoryError {
+    let refused = |message: String| RepositoryError::new(ErrorKind::Conflict, message);
     if record.locked.as_deref() == Some(INITIALIZING) {
         return refused(format!(
             "Git was stopped while it made the worktree at {folder}. Run git worktree remove --force --force {} in a terminal, then try again.",
@@ -257,7 +258,7 @@ fn answered(
     ))
 }
 
-fn refuse_removal(
+pub(super) fn refuse_removal(
     opened: &Repo,
     record: &WorktreeRecord,
     name: &str,
@@ -324,7 +325,7 @@ fn refuse_removal(
     }
 }
 
-fn removal_refusal(ran: Result<Wrote, RepositoryError>, name: &str) -> RepositoryError {
+pub(super) fn removal_refusal(ran: Result<Wrote, RepositoryError>, name: &str) -> RepositoryError {
     if let Ok(wrote) = &ran
         && wrote
             .stderr()
@@ -341,7 +342,7 @@ fn removal_refusal(ran: Result<Wrote, RepositoryError>, name: &str) -> Repositor
 }
 
 /// `<main parent>/.worktrees/<main folder>-<branch with / as ->`.
-fn default_folder(main: &Path, branch: &BranchRef) -> PathBuf {
+pub(super) fn default_folder(main: &Path, branch: &BranchRef) -> PathBuf {
     main.parent()
         .unwrap_or(main)
         .join(".worktrees")

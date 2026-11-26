@@ -19,6 +19,8 @@ import type {
 } from "../domain/pullRequest";
 import type { GitHubRepository } from "../domain/repository";
 import { rangeFilesSchema, rangePatchesSchema } from "../domain/range";
+import { pullCopyHandlers } from "./fakePullCopies";
+import type { PullCopy } from "./fakePullCopies";
 import { mergeSelectionSchema } from "../domain/merge";
 import { probeOf } from "../domain/inProgress";
 import type { MergeState } from "../domain/merge";
@@ -63,6 +65,13 @@ export type World = {
   merges: Map<RepositoryRoot, MergeState>;
   overviews: Map<RepositoryRoot, RepositoryOverview>;
   pushes: Map<RepositoryRoot, PushAvailability>;
+  /** Each pull request's copy by its repository's main worktree root and
+   * number, as `${root} #${number}`. */
+  pullCopies: Map<string, PullCopy>;
+  /** Commits that sit on top of another, as an author pushes them to a pull
+   * request or you commit in its copy. A fetch of the head brings it and the
+   * commits under it into the clone. Try makes a copy at any head. */
+  pullCommits: Map<string, { parent: string; fetched: boolean }>;
   /** What each typed path lists. An open repository lists itself. */
   directories: Map<string, DirectoryEntry[]>;
   host: {
@@ -83,7 +92,7 @@ const repositoryName = ({ owner, repo }: GitHubRepository) =>
 
 export const FAKE_HOME = "/fixture/home";
 
-const fromHome = (path: string) => path.replace(/^~(?=\/|$)/, FAKE_HOME);
+export const fromHome = (path: string) => path.replace(/^~(?=\/|$)/, FAKE_HOME);
 
 export const folder = (
   path: string,
@@ -115,6 +124,8 @@ export function createWorld(): World {
       [PIN, readyPush()],
       [OTHER, noUpstream()],
     ]),
+    pullCopies: new Map(),
+    pullCommits: new Map(),
     directories: new Map([
       ["~", [folder(`${FAKE_HOME}/Projects`, "folder")]],
       [
@@ -144,18 +155,18 @@ export function createWorld(): World {
   };
 }
 
-type Handler = (request: BridgeRequest, world: World) => unknown;
+export type Handler = (request: BridgeRequest, world: World) => unknown;
 
 const missing = (path: string): Problem => ({
   kind: "missingPath",
   message: `${path} is not in the fake bridge.`,
 });
 
-class Refusal {
+export class Refusal {
   constructor(readonly problem: Problem) {}
 }
 
-function known<T>(map: Map<RepositoryRoot, T>, path: string): T {
+export function known<T>(map: Map<RepositoryRoot, T>, path: string): T {
   const found = map.get(path as RepositoryRoot);
   if (found === undefined) throw new Refusal(missing(path));
   return found;
@@ -343,6 +354,7 @@ const handlers: Record<string, Handler> = {
       request.path as RepositoryRoot,
       request.operation as Applied["operation"],
     ),
+  home: () => FAKE_HOME,
   listDirectories: (request, world) => ({
     entries:
       world.directories.get(request.path) ??
@@ -376,6 +388,7 @@ const handlers: Record<string, Handler> = {
   },
   undo: (request, world) => step(request, world, "undo"),
   redo: (request, world) => step(request, world, "redo"),
+  ...pullCopyHandlers,
 };
 
 class HostRefusal {

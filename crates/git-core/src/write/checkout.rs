@@ -39,8 +39,8 @@ pub(super) enum CheckoutChange {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct NewBranch {
-    branch: BranchRef,
-    before: Vec<Setting>,
+    pub(super) branch: BranchRef,
+    pub(super) before: Vec<Setting>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

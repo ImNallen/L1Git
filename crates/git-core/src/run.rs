@@ -4,10 +4,10 @@ use crate::{
     Expect, FastForwardReport, FetchMode, FilePatch, FileRevision, GitHubRepository, Head,
     LineStats, MergeAction, MergeReport, MergeReview, MergeSelection, MergeState, NewRepository,
     NewWorktree, Oid, Operation, OperationProbe, PatchContext, PublishChoice, PublishOptions,
-    PushAvailability, PushIntent, PushReport, RangeFiles, RangePatch, ReplayOf, ReplayReview,
-    RepositoryError, RepositoryOverview, RepositoryRefs, RepositorySnapshot, Side, UndoHistory,
-    WantedCommits, WholeFileConflict, WorktreePatch, WorktreeReview, WorktreeSource,
-    WorktreeStatus,
+    PullCheckout, PullHead, PullKey, PushAvailability, PushIntent, PushReport, RangeFiles,
+    RangePatch, ReplayOf, ReplayReview, RepositoryError, RepositoryOverview, RepositoryRefs,
+    RepositorySnapshot, Side, UndoHistory, WantedCommits, WholeFileConflict, WorktreePatch,
+    WorktreeReview, WorktreeSource, WorktreeStatus,
     directories::{DirectoryListing, expand_home, home_dir, list_directories},
     file_history::{blame_within, file_history_within},
     git::LocalRead,
@@ -167,6 +167,8 @@ pub enum Request {
     ListDirectories {
         path: String,
     },
+    /// The home folder that `~` names in a typed path.
+    Home,
     CreateRepository {
         path: String,
     },
@@ -191,6 +193,32 @@ pub enum Request {
         path: String,
         /// A root from `snapshot.worktrees`.
         worktree: String,
+    },
+    PullCheckout {
+        path: String,
+        pull: PullKey,
+        head: PullHead,
+    },
+    TryPullRequest {
+        path: String,
+        pull: PullKey,
+        head: PullHead,
+        /// As typed. `~` expands as for CreateRepository.
+        folder: String,
+    },
+    UpdatePullRequest {
+        path: String,
+        pull: PullKey,
+        head: PullHead,
+        /// The tip of `pr/<number>` the user saw.
+        seen: Oid,
+        replace: bool,
+    },
+    RemovePullRequest {
+        path: String,
+        pull: PullKey,
+        head: PullHead,
+        seen: Oid,
     },
 }
 
@@ -231,12 +259,17 @@ pub enum Response {
     UndoHistory(UndoHistory),
     BranchMerged(BranchMerged),
     ListDirectories(DirectoryListing),
+    Home(Option<String>),
     CreateRepository(NewRepository),
     CloneRepository(NewRepository),
     CancelClone,
     WorktreeReview(WorktreeReview),
     CreateWorktree(NewWorktree),
     RemoveWorktree,
+    PullCheckout(PullCheckout),
+    TryPullRequest(PullCheckout),
+    UpdatePullRequest(PullCheckout),
+    RemovePullRequest(PullCheckout),
 }
 
 pub fn run(coordinator: &Coordinator, request: Request) -> Result<Response, RepositoryError> {
@@ -380,6 +413,7 @@ pub fn run(coordinator: &Coordinator, request: Request) -> Result<Response, Repo
         Request::ListDirectories { path } => {
             Response::ListDirectories(list_directories(&path, home_dir().as_deref())?)
         }
+        Request::Home => Response::Home(home_dir().map(|home| home.to_string_lossy().into_owned())),
         Request::CreateRepository { path } => {
             Response::CreateRepository(coordinator.create_repository(&typed(&path)?)?)
         }
@@ -406,5 +440,36 @@ pub fn run(coordinator: &Coordinator, request: Request) -> Result<Response, Repo
             coordinator.remove_worktree(&path, &worktree)?;
             Response::RemoveWorktree
         }
+        Request::PullCheckout { path, pull, head } => {
+            Response::PullCheckout(coordinator.pull_request_checkout(&path, &pull, &head)?)
+        }
+        Request::TryPullRequest {
+            path,
+            pull,
+            head,
+            folder,
+        } => Response::TryPullRequest(coordinator.try_pull_request(
+            &path,
+            &pull,
+            &head,
+            &typed(&folder)?,
+        )?),
+        Request::UpdatePullRequest {
+            path,
+            pull,
+            head,
+            seen,
+            replace,
+        } => Response::UpdatePullRequest(
+            coordinator.update_pull_request(&path, &pull, &head, &seen, replace)?,
+        ),
+        Request::RemovePullRequest {
+            path,
+            pull,
+            head,
+            seen,
+        } => Response::RemovePullRequest(
+            coordinator.remove_pull_request(&path, &pull, &head, &seen)?,
+        ),
     })
 }

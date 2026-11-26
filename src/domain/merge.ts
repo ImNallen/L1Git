@@ -77,23 +77,22 @@ export const mergeStateSchema = z.discriminatedUnion("kind", [
   }),
   z.strictObject({ kind: z.literal("replay"), progress: replayProgressSchema }),
 ]);
+export const operationInProgressSchema = z.enum([
+  "merge",
+  "cherryPick",
+  "revert",
+  "rebase",
+  "rebaseOrAm",
+  "sequence",
+  "bisect",
+]);
 export const operationProbeSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("idle") }),
   z.strictObject({ kind: z.literal("merge"), attention: z.boolean() }),
   z.strictObject({ kind: z.literal("replay"), replay: replayKindSchema }),
   z.strictObject({
     kind: z.literal("external"),
-    operations: z.array(
-      z.enum([
-        "merge",
-        "cherryPick",
-        "revert",
-        "rebase",
-        "rebaseOrAm",
-        "sequence",
-        "bisect",
-      ]),
-    ),
+    operations: z.array(operationInProgressSchema),
   }),
 ]);
 export const mergeActionSchema = z.discriminatedUnion("kind", [
