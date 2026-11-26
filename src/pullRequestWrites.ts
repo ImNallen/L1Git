@@ -45,7 +45,7 @@ export type Attempt = {
 
 type Drafts = Pick<
   ReturnType<typeof createDrafts>,
-  "read" | "load" | "adopt" | "carried" | "keep" | "subscribe"
+  "read" | "load" | "adopt" | "carried" | "keep" | "subscribe" | "hold"
 >;
 
 const none: readonly Attempt[] = [];
@@ -175,9 +175,11 @@ export function createPullRequestWrites(deps: {
     attempt: Attempt,
     wrote: Wrote,
     name: string | null,
+    release: () => void,
   ) {
     const { written, drafts } = wrote;
     const of = draftsOf(pull, attempt.viewer);
+    release();
     if (drafts) deps.drafts.adopt(of, drafts);
     else void deps.drafts.load(of);
     if (current().name !== name) return;
@@ -277,11 +279,13 @@ export function createPullRequestWrites(deps: {
     write: PullWrite,
     send: (id: string, login: string) => Promise<Wrote>,
     id: string,
+    places: readonly DraftRef[] = [],
   ): "started" | "signedOut" | "restarting" {
     const login = viewer();
     if (!login) return "signedOut";
     const finish = deps.task();
     if (!finish) return "restarting";
+    const release = deps.drafts.hold(draftsOf(pull, login), places);
     const { name } = current();
     const attempt: Attempt = {
       id,
@@ -297,7 +301,7 @@ export function createPullRequestWrites(deps: {
     ]);
     void send(id, login).then((wrote) => {
       finish();
-      heard(pull, attempt, wrote, name);
+      heard(pull, attempt, wrote, name, release);
     });
     return "started";
   }
@@ -331,6 +335,7 @@ export function createPullRequestWrites(deps: {
             drafts: carried as Carried[],
           }),
         crypto.randomUUID(),
+        drafts,
       );
     },
     /** Send anyway: sends a write that may have posted once more, unless the

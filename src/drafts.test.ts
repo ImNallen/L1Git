@@ -457,24 +457,82 @@ it("keeps words typed where a write that may have posted holds the place, and sa
       applied: false,
     },
   ]);
-  drafts.type(pull, conversation, HEAD, "Thanks! And");
+  expect(
+    drafts.type(pull, conversation, HEAD, "Thanks! And"),
+    "this window doesn't know yet",
+  ).toBe("typed");
   expect(drafts.carried(pull, conversation, HEAD), "not saved yet").toBe(null);
   expect(await drafts.flush(pull)).toBe(false);
   expect(drafts.read(pull)).toMatchObject({
     drafts: [
       {
         text: "Thanks! And",
-        save: { kind: "unsaved", why: /may have posted/ },
+        save: { kind: "unsaved", why: /saves these once it ends/ },
       },
     ],
     sent: [{ attempt: "a-1", sending: false }],
   });
+  expect(drafts.held(pull, conversation, HEAD)).toBe(true);
+  expect(drafts.type(pull, conversation, HEAD, "Thanks! And more")).toBe(
+    "held",
+  );
+  expect(texts(drafts)).toEqual(["Thanks! And"]);
 
   expect(await drafts.keep(pull, "a-1")).toBe(true);
+  expect(drafts.held(pull, conversation, HEAD)).toBe(false);
   expect(await drafts.flush(pull)).toBe(true);
   expect(drafts.read(pull)).toMatchObject({
     drafts: [{ text: "Thanks! And", mayHavePosted: true }],
     sent: [],
   });
   expect(heldTexts()).toEqual(["Thanks! And"]);
+});
+
+it("answers held to typing where a write holds the place, and changes nothing until it ends", async () => {
+  const drafts = window();
+  drafts.type(pull, conversation, HEAD, "Thanks!");
+  drafts.type(pull, line, HEAD, "Off by one?");
+  await drafts.flush(pull);
+  const [saved, other] = bridge.world.host.drafts.get(stored) ?? [];
+  if (!saved || !other) throw new Error("the drafts were saved");
+  bridge.world.host.drafts.set(stored, [other]);
+  bridge.world.host.sent.set(stored, [
+    {
+      attempt: "a-1",
+      at: 1,
+      write: { kind: "comment", pull: "PR_7" as never, body: "Thanks!" },
+      drafts: [saved],
+      sending: true,
+      applied: false,
+    },
+  ]);
+  await drafts.load(pull);
+  const before = changes().length;
+  expect(drafts.held(pull, conversation, HEAD)).toBe(true);
+  expect(drafts.held(pull, line, HEAD), "another place").toBe(false);
+  expect(drafts.type(pull, conversation, HEAD, "Thanks! And")).toBe("held");
+  expect(await drafts.remove(pull, conversation, HEAD)).toBe(false);
+  expect(drafts.type(pull, line, HEAD, "Off by two?")).toBe("typed");
+  expect(await drafts.flush(pull)).toBe(true);
+  expect(changes().slice(before)).toMatchObject([{ text: "Off by two?" }]);
+  expect(bridge.world.host.sent.get(stored)?.[0]?.drafts).toEqual([saved]);
+
+  bridge.world.host.sent.set(stored, []);
+  await drafts.load(pull);
+  expect(drafts.held(pull, conversation, HEAD)).toBe(false);
+  expect(drafts.type(pull, conversation, HEAD, "Hello")).toBe("typed");
+});
+
+it("holds the places a write this window sends carries until it lets go", () => {
+  const drafts = window();
+  const views: unknown[] = [];
+  drafts.subscribe(() => views.push(drafts.read(pull)));
+  const release = drafts.hold(pull, [{ anchor: conversation, head: HEAD }]);
+  expect(drafts.held(pull, conversation, HEAD)).toBe(true);
+  expect(drafts.type(pull, conversation, HEAD, "Thanks!")).toBe("held");
+  expect(drafts.read(pull).drafts).toEqual([]);
+  release();
+  expect(views.length, "both told").toBe(2);
+  expect(drafts.held(pull, conversation, HEAD)).toBe(false);
+  expect(drafts.type(pull, conversation, HEAD, "Thanks!")).toBe("typed");
 });

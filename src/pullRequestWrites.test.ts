@@ -336,7 +336,7 @@ it("looks for a kept write as soon as a window learns of it, after its read", as
   expect(mutations()).toBe(1);
 });
 
-it("neither loses nor sends again words another window typed into a draft whose write is done", async () => {
+it("keeps words another window typed before it learned a write carries its draft, and saves them once the write is done", async () => {
   const first = await window();
   const second = await window();
   first.drafts.type(of, conversation, HEAD, "Thanks!");
@@ -348,13 +348,70 @@ it("neither loses nor sends again words another window typed into a draft whose 
   ]);
   await answer.arrived;
   second.drafts.type(of, conversation, HEAD, "Thanks! And one more");
-  await second.drafts.flush(of);
+  expect(await second.drafts.flush(of), "not saved while it sends").toBe(false);
+  expect(second.drafts.held(of, conversation, HEAD)).toBe(true);
+  expect(second.drafts.type(of, conversation, HEAD, "Thanks! And")).toBe(
+    "held",
+  );
+  expect(kept()[0]?.drafts, "the words it sends stay as sent").toMatchObject([
+    { text: "Thanks!" },
+  ]);
   answer.release();
   await vi.waitFor(() => expect(kept()).toEqual([]));
-  await second.drafts.flush(of);
+  await second.drafts.load(of);
+  await vi.waitFor(() =>
+    expect(stored()).toMatchObject([
+      { text: "Thanks! And one more", mayHavePosted: false },
+    ]),
+  );
   expect(second.drafts.read(of).drafts).toMatchObject([
-    { text: "Thanks! And one more", save: { kind: "changedElsewhere" } },
+    { text: "Thanks! And one more", save: { kind: "saved" } },
   ]);
-  expect(stored(), "nothing is left to send again by accident").toEqual([]);
   expect(mutations()).toBe(1);
+});
+
+it("holds the box a write carries while it sends, and frees it as the write ends", async () => {
+  const shown = await window();
+  const place = [conversation, HEAD] as const;
+  const answer = bridge.hold("write");
+  expect(await comment(shown, "Thanks!")).toBe("started");
+  expect(shown.drafts.held(of, ...place)).toBe(true);
+  expect(shown.drafts.type(of, ...place, "Thanks! And")).toBe("held");
+  await answer.arrived;
+  expect(shown.drafts.type(of, ...place, "Thanks! And")).toBe("held");
+  expect(kept()[0]?.drafts).toMatchObject([{ text: "Thanks!" }]);
+  answer.release();
+  await vi.waitFor(() => expect(kept()).toEqual([]));
+  await vi.waitFor(() => expect(shown.drafts.held(of, ...place)).toBe(false));
+  expect(stored(), "done: the draft is gone").toEqual([]);
+  expect(shown.drafts.read(of).drafts).toEqual([]);
+
+  bridge.world.host.writes.push({
+    kind: "refused",
+    message: "GitHub didn't do it: Pull request is locked.",
+  });
+  await comment(shown, "Once more");
+  await vi.waitFor(() => expect(state(shown)?.kind).toBe("refused"));
+  expect(shown.drafts.held(of, ...place)).toBe(false);
+  expect(shown.drafts.read(of).drafts).toMatchObject([
+    { text: "Once more", save: { kind: "saved" } },
+  ]);
+  expect(shown.drafts.type(of, ...place, "Once more, please")).toBe("typed");
+  await shown.drafts.flush(of);
+
+  bridge.world.host.writes.push({ kind: "unknown", applied: false });
+  expect(
+    shown.writes.send(one, said("Once more, please"), [
+      { anchor: conversation, head: HEAD },
+    ]),
+  ).toBe("started");
+  await vi.waitFor(() => expect(state(shown)?.kind).toBe("unknown"));
+  expect(shown.drafts.held(of, ...place), "until Keep or Send anyway").toBe(
+    true,
+  );
+  expect(shown.drafts.type(of, ...place, "Again")).toBe("held");
+  const id = shown.writes.attempts(one).at(-1)?.id ?? "";
+  expect(await shown.writes.keep(one, id)).toBe(true);
+  expect(shown.drafts.held(of, ...place)).toBe(false);
+  expect(shown.drafts.type(of, ...place, "Again")).toBe("typed");
 });

@@ -21,8 +21,8 @@ const fullMessage = {
   pullRequests:
     "L1 Git keeps drafts for 100 pull requests on this computer. Send or delete the drafts of another pull request to save this.",
 };
-const heldMessage =
-  "These words went out with a write that may have posted. Choose Keep as draft or Send anyway first.";
+const waitMessage =
+  "A write for this pull request carries the words saved here, so L1 Git saves these once it ends.";
 
 /** One pull request, as one account sees it. */
 export type DraftsOf = {
@@ -78,6 +78,9 @@ type Entry = {
   /** What this window last saw the host hold here. */
   base: Draft | null;
   save: DraftSave;
+  /** Typed before this window learned that a write holds the place. They
+   * save over what the place holds once the write ends. */
+  waits: boolean;
 };
 
 type Pull = {
@@ -86,6 +89,9 @@ type Pull = {
   entries: Map<DraftKey, Entry>;
   timers: Map<DraftKey, ReturnType<typeof setTimeout>>;
   sent: readonly SentWrite[];
+  /** The places of the writes this window is sending, before the host's
+   * answer lists them in `sent`. */
+  holds: Set<Set<DraftKey>>;
   /** Every request for one pull request waits for the one before it. */
   queue: Promise<void>;
   view: DraftsView | null;
@@ -103,6 +109,7 @@ const settled = (draft: Draft): Entry => ({
   text: draft.text,
   base: draft,
   save: saved,
+  waits: false,
 });
 
 const isPending = ({ save }: Entry) =>
@@ -131,6 +138,7 @@ export function createDrafts(host: Pick<HostClient, "ask">) {
       entries: new Map(),
       timers: new Map(),
       sent: [],
+      holds: new Set(),
       queue: Promise.resolve(),
       view: null,
     };
@@ -141,6 +149,14 @@ export function createDrafts(host: Pick<HostClient, "ask">) {
   function changed(pull: Pull) {
     pull.view = null;
     listeners.forEach((listener) => listener());
+  }
+
+  /** Whether a write that left, or may have, carries the draft at `key`. */
+  function isHeld(pull: Pull, key: DraftKey) {
+    for (const places of pull.holds) if (places.has(key)) return true;
+    return pull.sent.some(({ drafts }) =>
+      drafts.some((draft) => draftKey(draft.anchor, draft.head) === key),
+    );
   }
 
   const ask = (pull: Pull, change: DraftChange) =>
@@ -177,11 +193,23 @@ export function createDrafts(host: Pick<HostClient, "ask">) {
       else if (entry.save.kind === "changedElsewhere")
         entry.save = { kind: "changedElsewhere", theirs: draft };
     }
+    for (const [key, entry] of pull.entries) {
+      if (!entry.waits || isHeld(pull, key)) continue;
+      entry.waits = false;
+      entry.base = held.get(key) ?? null;
+      entry.save = saving;
+      void enqueue(pull, () => save(pull, key));
+    }
   }
 
   async function save(pull: Pull, key: DraftKey) {
     const entry = pull.entries.get(key);
     if (!entry || !isPending(entry)) return;
+    if (isHeld(pull, key)) {
+      entry.save = { kind: "unsaved", why: waitMessage };
+      entry.waits = true;
+      return changed(pull);
+    }
     const { anchor, head, text, base } = entry;
     const takes = draftText(text);
     if (takes === "tooLong") {
@@ -219,9 +247,10 @@ export function createDrafts(host: Pick<HostClient, "ask">) {
       entry.save = { kind: "changedElsewhere", theirs };
     else if (data.refused?.kind === "full")
       entry.save = { kind: "unsaved", why: fullMessage[data.refused.of] };
-    else if (data.refused?.kind === "sent")
-      entry.save = { kind: "unsaved", why: heldMessage };
-    else if (entry.text === text && entry.head === head) {
+    else if (data.refused?.kind === "sent") {
+      entry.save = { kind: "unsaved", why: waitMessage };
+      entry.waits = true;
+    } else if (entry.text === text && entry.head === head) {
       if (theirs) pull.entries.set(key, settled(theirs));
       else pull.entries.delete(key);
     } else entry.base = theirs;
@@ -239,17 +268,26 @@ export function createDrafts(host: Pick<HostClient, "ask">) {
     );
   }
 
-  /** Blank text deletes the draft. */
-  function type(of: DraftsOf, given: Anchor, head: Oid, text: string) {
+  /** Blank text deletes the draft. "held" changes nothing: a write that
+   * left, or may have, carries the words saved here, so the box reads only
+   * until it ends. */
+  function type(
+    of: DraftsOf,
+    given: Anchor,
+    head: Oid,
+    text: string,
+  ): "typed" | "held" {
     const anchor = placed(given);
     const pull = pullOf(of);
     const key = draftKey(anchor, head);
+    if (isHeld(pull, key)) return "held";
     const entry = pull.entries.get(key) ?? {
       anchor,
       head,
       text,
       base: null,
       save: saved,
+      waits: false,
     };
     entry.text = text;
     entry.head = head;
@@ -266,6 +304,7 @@ export function createDrafts(host: Pick<HostClient, "ask">) {
       );
     }
     changed(pull);
+    return "typed";
   }
 
   return {
@@ -311,7 +350,9 @@ export function createDrafts(host: Pick<HostClient, "ask">) {
      * another window changed goes with their words too. */
     remove(of: DraftsOf, anchor: Anchor, head: Oid): Promise<boolean> {
       const pull = pullOf(of);
-      const entry = pull.entries.get(draftKey(anchor, head));
+      const key = draftKey(anchor, head);
+      if (isHeld(pull, key)) return Promise.resolve(false);
+      const entry = pull.entries.get(key);
       if (entry?.save.kind === "changedElsewhere") {
         entry.base = entry.save.theirs;
         entry.save = saving;
@@ -325,6 +366,26 @@ export function createDrafts(host: Pick<HostClient, "ask">) {
       const chosen = of ? [pullOf(of)] : [...pulls.values()];
       const done = await Promise.all(chosen.map(flushPull));
       return done.every(Boolean);
+    },
+    /** True while a write that left, or may have, carries the draft at this
+     * place: until it ends, or the user keeps it as a draft, the box reads
+     * only and `type` answers held. */
+    held(of: DraftsOf, anchor: Anchor, head: Oid): boolean {
+      const pull = pulls.get(pullId(of));
+      return pull ? isHeld(pull, draftKey(anchor, head)) : false;
+    },
+    /** Holds the places a write carries from when this window sends it until
+     * the host's answer is taken. Call what it returns to let go. */
+    hold(of: DraftsOf, places: readonly { anchor: Anchor; head: Oid }[]) {
+      const pull = pullOf(of);
+      const held = new Set(
+        places.map(({ anchor, head }) => draftKey(anchor, head)),
+      );
+      pull.holds.add(held);
+      changed(pull);
+      return () => {
+        if (pull.holds.delete(held)) changed(pull);
+      };
     },
     /** Takes what a write's answer says the host holds now. */
     adopt(of: DraftsOf, answer: PullDrafts) {
