@@ -1,8 +1,11 @@
 // @vitest-environment happy-dom
 import { expect, it, vi } from "vitest";
+import type { ReviewThread } from "./domain/pullRequest";
 import { get, installHarness, query, queryAll } from "./test/appHarness";
 import type { Harness } from "./test/appHarness";
-import { open, visit } from "./test/pullRequests";
+import { pullKey } from "./test/fakeBridge";
+import type { World } from "./test/fakeBridge";
+import { at, open, page, pull, visit } from "./test/pullRequests";
 
 installHarness();
 
@@ -20,6 +23,34 @@ async function comment(app: Harness, text: string) {
   await app.type(words(), text);
   await app.click(get("button", "Comment", box()));
 }
+
+const thread = (
+  id: string,
+  fields: Partial<ReviewThread> = {},
+): ReviewThread => ({
+  id,
+  review: null,
+  path: "a.ts",
+  line: 3,
+  startLine: null,
+  originalLine: 3,
+  originalStartLine: null,
+  side: "right",
+  outdated: false,
+  resolved: false,
+  hunk: "",
+  can: { reply: true, resolve: true, unresolve: false },
+  comments: page([{ id: `${id}-1`, body: "Rename it", by: "sara", at: at(3) }]),
+  ...fields,
+});
+const withThreads =
+  (...threads: ReviewThread[]) =>
+  (world: World) =>
+    world.host.details.set(
+      pullKey("octo/pin", 1),
+      pull(1, { threads: page(threads) }),
+    );
+const region = () => get("region", "Thread on a.ts");
 
 it("saves a comment as a draft on this machine, and sends it once with Cmd or Ctrl+Enter", async () => {
   const app = await visit();
@@ -120,5 +151,109 @@ it("says a comment may have posted, offers three choices, and sends nothing by i
   await vi.waitFor(() => expect(words().readOnly).toBe(false));
   expect(words().value).toBe("Thanks!");
   expect(box().textContent).toContain("These words may have posted already.");
+  expect(sent(app)).toHaveLength(1);
+});
+
+it("replies from Reply…, and shows the reply as sent until a read has it", async () => {
+  const app = await visit({ world: withThreads(thread("T1")) });
+  await open(app, 1);
+  await app.click(get("button", "Reply…", region()));
+  const reply = get("textbox", "Reply", region()) as HTMLTextAreaElement;
+  expect(document.activeElement).toBe(reply);
+  const answer = app.bridge.hold("pullRequest");
+  await app.type(reply, "Renamed");
+  await app.click(get("button", "Reply", region()));
+  await vi.waitFor(() =>
+    expect(sent(app)).toEqual([
+      { kind: "reply", thread: "T1", body: "Renamed" },
+    ]),
+  );
+  await answer.arrived;
+  await settled(app);
+  expect(query("textbox", "Reply", region()), "the box closes").toBeNull();
+  expect(region().querySelector(".thread-sent")?.textContent).toMatch(
+    /You SentRenamed$/,
+  );
+  answer.release();
+  await vi.waitFor(() =>
+    expect(region().querySelector(".thread-sent")).toBeNull(),
+  );
+  await settled(app);
+  expect(region().textContent?.match(/Renamed/g)).toHaveLength(1);
+});
+
+it("discards a reply on its button, and Cancel closes an empty one", async () => {
+  const app = await visit({ world: withThreads(thread("T1")) });
+  await open(app, 1);
+  await app.click(get("button", "Reply…", region()));
+  await app.click(get("button", "Cancel", region()));
+  expect(document.activeElement).toBe(get("button", "Reply…", region()));
+  await app.click(get("button", "Reply…", region()));
+  await app.type(get("textbox", "Reply", region()), "Maybe");
+  await vi.waitFor(() => expect(drafts(app)).toHaveLength(1));
+  await app.click(get("button", "Discard", region()));
+  await vi.waitFor(() => expect(drafts(app)).toEqual([]));
+  expect(query("textbox", "Reply", region())).toBeNull();
+  expect(sent(app)).toEqual([]);
+});
+
+it("resolves a thread, folds it, and gives focus to its row", async () => {
+  const app = await visit({ world: withThreads(thread("T1")) });
+  await open(app, 1);
+  await app.click(get("button", "Resolve conversation", region()));
+  await vi.waitFor(() =>
+    expect(get("button", /^Resolved/, region())).toBeTruthy(),
+  );
+  expect(sent(app)).toEqual([{ kind: "resolve", thread: "T1" }]);
+  expect(
+    get("button", /^Resolved/, region()).getAttribute("aria-expanded"),
+  ).toBe("false");
+  expect(document.activeElement).toBe(get("button", /^Resolved/, region()));
+
+  await app.click(get("button", /^Resolved/, region()));
+  await app.click(get("button", "Unresolve conversation", region()));
+  await vi.waitFor(() =>
+    expect(query("button", /^Resolved/, region())).toBeNull(),
+  );
+  expect(sent(app)).toEqual([
+    { kind: "resolve", thread: "T1" },
+    { kind: "unresolve", thread: "T1" },
+  ]);
+});
+
+it("offers only what GitHub lets you do with a thread", async () => {
+  const app = await visit({
+    world: withThreads(
+      thread("T1", { can: { reply: false, resolve: false, unresolve: false } }),
+    ),
+  });
+  await open(app, 1);
+  expect(query("button", "Reply…", region())).toBeNull();
+  expect(query("button", "Resolve conversation", region())).toBeNull();
+});
+
+it("says a reply posted when GitHub's read shows only the start of its thread", async () => {
+  const long = thread("T1", {
+    comments: page(
+      [{ id: "T1-1", body: "Rename it", by: "sara", at: at(3) }],
+      60,
+    ),
+  });
+  const app = await visit({ world: withThreads(long) });
+  await open(app, 1);
+  expect(region().textContent).toContain("59 comments more.");
+  await app.click(get("button", "Reply…", region()));
+  await app.type(get("textbox", "Reply", region()), "Renamed");
+  await app.click(get("button", "Reply", region()));
+  await vi.waitFor(() =>
+    expect(region().textContent).toContain(
+      "Posted. GitHub shows it in the full thread.",
+    ),
+  );
+  await settled(app);
+  expect(region().querySelector(".thread-sent")).toBeNull();
+  expect(region().textContent).toContain(
+    "Posted. GitHub shows it in the full thread.",
+  );
   expect(sent(app)).toHaveLength(1);
 });

@@ -224,3 +224,58 @@
 .write-choices .button {
   height: 28px;
 }
+
+.thread-actions {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--border);
+}
+.thread-actions > .comment-box {
+  flex: 1 1 100%;
+}
+.thread-actions:not(:has(> *)) {
+  display: none;
+}
+.thread-reply {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 10em;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text-faint);
+  font-size: 12px;
+  text-align: left;
+}
+.thread-reply:hover {
+  border-color: var(--border-input);
+  color: var(--muted);
+}
+.thread-buttons {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+.thread-actions > .comment-box + .thread-buttons:empty {
+  display: none;
+}
+.thread-sent .entry-pill {
+  margin-left: 4px;
+}
+.thread-posted {
+  margin: 0;
+  padding: 0 12px 12px 42px;
+  color: var(--text-body);
+  font-size: 12px;
+}
+.thread > div > .write-notice,
+.threads-row-body > .write-notice {
+  margin: 0 12px 12px;
+}
