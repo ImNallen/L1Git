@@ -9,7 +9,8 @@ import type { LinePick, LineSide, WorktreePatch } from "./repository";
 
 export type DiffStyle = "unified" | "split";
 
-type Row = {
+/** One row as Pierre draws it, in a hunk. */
+export type Row = {
   hunk: number;
   deletion?: number;
   addition?: number;
@@ -113,30 +114,39 @@ function reach(rows: Row[], side: LineSide, line: number) {
   };
 }
 
+/** The rows a range covers, top first, and the side each end of it is on. */
+export function rowsOf(
+  file: FileDiffMetadata,
+  style: DiffStyle,
+  range: SelectedLineRange,
+): { rows: Row[]; top: LineSide; bottom: LineSide } {
+  const rows = rowsAsPierreDraws(file, style);
+  const startSide = range.side ?? "additions";
+  const endSide = range.endSide ?? startSide;
+  const start = reach(rows, startSide, range.start);
+  const end = reach(rows, endSide, range.end);
+  const startsOnTop = start.first + start.last <= end.first + end.last;
+  const [top, bottom] = startsOnTop ? [start, end] : [end, start];
+  return {
+    rows: rows.slice(top.first, bottom.last + 1),
+    top: startsOnTop ? startSide : endSide,
+    bottom: startsOnTop ? endSide : startSide,
+  };
+}
+
 export function picksFor(
   file: FileDiffMetadata,
   style: DiffStyle,
   range: SelectedLineRange,
 ): LinePick[] {
-  const rows = rowsAsPierreDraws(file, style);
-  const start = reach(rows, range.side ?? "additions", range.start);
-  const end = reach(
-    rows,
-    range.endSide ?? range.side ?? "additions",
-    range.end,
-  );
-  const [top, bottom] =
-    start.first + start.last <= end.first + end.last
-      ? [start, end]
-      : [end, start];
-  const picks: LinePick[] = [];
-  for (const row of rows.slice(top.first, bottom.last + 1)) {
-    if (row.deletion !== undefined)
-      picks.push({ side: "deletions", line: row.deletion });
-    if (row.addition !== undefined)
-      picks.push({ side: "additions", line: row.addition });
-  }
-  return picks;
+  return rowsOf(file, style, range).rows.flatMap((row) => [
+    ...(row.deletion === undefined
+      ? []
+      : [{ side: "deletions" as const, line: row.deletion }]),
+    ...(row.addition === undefined
+      ? []
+      : [{ side: "additions" as const, line: row.addition }]),
+  ]);
 }
 
 export type HunkBar = { hunk: number };

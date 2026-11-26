@@ -50,14 +50,21 @@ export function firstOf(count: number, is: (index: number) => boolean): number {
  * which takes time to say, `at` is where the view begins, and `most` how far
  * it scrolls. `above` is what to leave over a change.
  */
+type View = { at: number; most: number; above: number };
+
+const scrollFor =
+  (topOf: (change: number) => number, { most, above }: View) =>
+  (change: number) =>
+    Math.min(Math.max(topOf(change) - above, 0), most);
+
 export function nextChange(
   count: number,
   topOf: (change: number) => number,
-  { at, most, above }: { at: number; most: number; above: number },
+  view: View,
   by: 1 | -1,
 ): { change: number; scrollTop: number } | null {
-  const wanted = (change: number) =>
-    Math.min(Math.max(topOf(change) - above, 0), most);
+  const { at } = view;
+  const wanted = scrollFor(topOf, view);
   const found =
     by === 1
       ? firstOf(count, (change) => wanted(change) > at + 1)
@@ -65,4 +72,16 @@ export function nextChange(
   return found < 0 || found >= count
     ? null
     : { change: found, scrollTop: wanted(found) };
+}
+
+/** The change the view is at: the one a step went to, or else the first
+ * below where the view begins. Null when every change is above it. */
+export function changeAt(
+  count: number,
+  topOf: (change: number) => number,
+  view: View,
+): number | null {
+  const wanted = scrollFor(topOf, view);
+  const found = firstOf(count, (change) => wanted(change) >= view.at - 1);
+  return found < count ? found : null;
 }
