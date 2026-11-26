@@ -7,7 +7,7 @@ import type {
   TimelineEvent,
 } from "../domain/pullRequest";
 import type { Echo, PullWrite, Written } from "../domain/pullRequestWrites";
-import { giveBack, viewOf } from "./fakeDrafts";
+import { giveBack, landed, viewOf } from "./fakeDrafts";
 import type { FakeSent, Shelf } from "./fakeDrafts";
 
 /** What the next write answers. A write with none left is done. */
@@ -306,11 +306,7 @@ function send(
   const script = host.writes.shift() ?? { kind: "done" };
   const answer = (written: Written): Wrote => {
     record.sending = false;
-    if (written.kind === "done")
-      host.sent.set(
-        book,
-        (host.sent.get(book) ?? []).filter((sent) => sent !== record),
-      );
+    if (written.kind === "done") landed(host, book, record);
     else if (written.kind !== "unknown" && !again)
       giveBack(host, book, record.attempt, false);
     return { written, drafts: viewOf(host, book) };
@@ -408,10 +404,7 @@ export function sendAgainArrives(
   const shown = seen(record);
   if (shown?.kind === "landed")
     return () => {
-      host.sent.set(
-        book,
-        (host.sent.get(book) ?? []).filter((sent) => sent !== record),
-      );
+      landed(host, book, record);
       return {
         written: { kind: "done", echo: shown.echo },
         drafts: viewOf(host, book),
@@ -428,11 +421,7 @@ export function checkHandler(request: Asked, host: Host) {
     if (record.sending) continue;
     const shown = seen(record);
     if (!shown) continue;
-    if (shown.kind === "landed")
-      host.sent.set(
-        book,
-        (host.sent.get(book) ?? []).filter((sent) => sent !== record),
-      );
+    if (shown.kind === "landed") landed(host, book, record);
     else giveBack(host, book, record.attempt, false);
     settled.push({ attempt: record.attempt, write: record.write, seen: shown });
   }

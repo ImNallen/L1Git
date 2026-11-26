@@ -5,6 +5,7 @@
 
 mod file;
 mod sent;
+mod waiting;
 
 use std::num::NonZeroU32;
 use std::path::Path;
@@ -19,6 +20,7 @@ use crate::wire::Failure;
 use file::Shelf;
 pub(crate) use file::{Gate, Lane};
 pub(crate) use sent::{Carried, Sent, SentView};
+pub(crate) use waiting::Waiting;
 
 /// Pull requests with drafts, across every account and GitHub.
 const MOST_PULLS: usize = 100;
@@ -56,6 +58,12 @@ pub enum Change {
     Keep {
         attempt: AttemptId,
     },
+    /// Drops the words that waited at this place, as picking the other
+    /// window's words does. Forgetting none is done.
+    Forget {
+        anchor: Anchor,
+        head: Oid,
+    },
 }
 
 /// Every answer carries what this pull request holds now, so a window that
@@ -70,6 +78,10 @@ pub struct PullDrafts {
     set_aside: Option<String>,
     /// Writes that left, or may have, with the drafts each carried.
     sent: Vec<SentView>,
+    /// Words typed where a write held the place, until the write ends, or,
+    /// when they were typed on another draft than it carried, until a save
+    /// or `forget` at their place.
+    waiting: Vec<Waiting>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -81,7 +93,7 @@ pub struct PullDrafts {
 pub enum Refused {
     Stale,
     /// A write that left, or may have, holds this place, until it is known
-    /// or the user keeps it as a draft.
+    /// or the user keeps it as a draft. The words wait in `waiting`.
     Sent,
     /// Its write is still sending, so it can't be kept as a draft yet.
     Sending,
@@ -119,11 +131,15 @@ pub struct Draft {
 }
 
 impl Draft {
-    /// A line number means something at one commit only, so a line draft's
-    /// place includes its head. Every other draft follows the head along.
     fn is_at(&self, anchor: &Anchor, head: &Oid) -> bool {
-        self.anchor == *anchor && (!matches!(anchor, Anchor::Line(_)) || self.head == *head)
+        same_place(&self.anchor, &self.head, anchor, head)
     }
+}
+
+/// A line number means something at one commit only, so a line draft's
+/// place includes its head. Every other draft follows the head along.
+fn same_place(anchor: &Anchor, head: &Oid, other: &Anchor, other_head: &Oid) -> bool {
+    anchor == other && (!matches!(anchor, Anchor::Line(_)) || head == other_head)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -277,6 +293,8 @@ pub(crate) struct Book {
     drafts: Vec<Draft>,
     #[serde(default)]
     sent: Vec<Sent>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    waiting: Vec<Waiting>,
 }
 
 /// One pull request, as one account names it on this computer's GitHub.
@@ -293,6 +311,7 @@ impl Book {
             refused: None,
             set_aside,
             sent: self.sent.iter().map(|sent| sent.view(sending)).collect(),
+            waiting: self.waiting.clone(),
         }
     }
 }
@@ -300,9 +319,37 @@ impl Book {
 /// `None` when the change is done, and `book` is then what to save. `room`
 /// says whether a book that was not there before may be kept.
 fn apply(book: &mut Book, change: Change, now: u64, room: bool, gate: &Gate) -> Option<Refused> {
+    let place = match &change {
+        Change::Put { anchor, head, .. } | Change::Delete { anchor, head, .. } => {
+            Some((anchor.clone(), head.clone()))
+        }
+        _ => None,
+    };
+    let refused = apply_change(book, change, now, room, gate);
+    if let (None, Some((anchor, head))) = (refused, place) {
+        book.unwait(&anchor, &head);
+    }
+    refused
+}
+
+fn apply_change(
+    book: &mut Book,
+    change: Change,
+    now: u64,
+    room: bool,
+    gate: &Gate,
+) -> Option<Refused> {
     match change {
         Change::Read {} => None,
-        Change::Put { anchor, head, .. } if book.holds(&anchor, &head) => Some(Refused::Sent),
+        Change::Put {
+            anchor,
+            head,
+            text,
+            at,
+        } if book.holds(&anchor, &head) => {
+            book.wait(anchor, head, text, at);
+            Some(Refused::Sent)
+        }
         Change::Put {
             anchor,
             head,
@@ -355,6 +402,10 @@ fn apply(book: &mut Book, change: Change, now: u64, room: bool, gate: &Gate) -> 
             book.give_back(&attempt, true);
             None
         }
+        Change::Forget { anchor, head } => {
+            book.unwait(&anchor, &head);
+            None
+        }
     }
 }
 
@@ -394,7 +445,8 @@ impl Host {
         let is_read = matches!(change, Change::Read {});
         let (refused, view) = self.gated(key, |book, room, gate| {
             let refused = apply(book, change, unix_millis(), room, gate);
-            (refused, refused.is_none() && !is_read)
+            let waits = refused == Some(Refused::Sent);
+            (refused, (refused.is_none() || waits) && !is_read)
         })?;
         Ok(PullDrafts { refused, ..view })
     }

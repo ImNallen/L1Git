@@ -78,8 +78,9 @@ type Entry = {
   /** What this window last saw the host hold here. */
   base: Draft | null;
   save: DraftSave;
-  /** Typed before this window learned that a write holds the place, on the
-   * draft saved at `on`. Once the write ends they save over what it gives
+  /** Typed before this window, or one closed since, learned that a write
+   * holds the place, on the draft saved at `on`. The host keeps them in
+   * drafts.json meanwhile. Once the write ends they save over what it gives
    * back only if it `carried` that same draft; else both stay to pick from. */
   waits: { on: number | null; carried: number | null } | null;
 };
@@ -206,6 +207,23 @@ export function createDrafts(host: Pick<HostClient, "ask">) {
       else if (entry.save.kind === "changedElsewhere")
         entry.save = { kind: "changedElsewhere", theirs: draft };
     }
+    for (const { anchor, head, text, on } of answer.waiting) {
+      const key = draftKey(anchor, head);
+      const known = pull.entries.get(key);
+      if (key === skip || (known && known.save.kind !== "saved")) continue;
+      const theirs = held.get(key) ?? null;
+      const waits = isHeld(pull, key);
+      pull.entries.set(key, {
+        anchor,
+        head,
+        text,
+        base: theirs,
+        save: waits
+          ? { kind: "unsaved", why: waitMessage }
+          : { kind: "changedElsewhere", theirs },
+        waits: waits ? { on, carried: null } : null,
+      });
+    }
     for (const [key, entry] of pull.entries) {
       if (!entry.waits) continue;
       entry.waits.carried =
@@ -225,8 +243,9 @@ export function createDrafts(host: Pick<HostClient, "ask">) {
   async function save(pull: Pull, key: DraftKey) {
     const entry = pull.entries.get(key);
     if (!entry || !isPending(entry)) return;
-    if (isHeld(pull, key)) {
-      wait(pull, key, entry);
+    // The host keeps words that wait, so it hears each first.
+    if (entry.waits && isHeld(pull, key)) {
+      entry.save = { kind: "unsaved", why: waitMessage };
       return changed(pull);
     }
     const { anchor, head, text, base } = entry;
@@ -241,7 +260,8 @@ export function createDrafts(host: Pick<HostClient, "ask">) {
         entry.save = saved;
         return changed(pull);
       }
-      change = { kind: "put", anchor, head, text, at: base?.savedAt ?? null };
+      const at = entry.waits ? entry.waits.on : (base?.savedAt ?? null);
+      change = { kind: "put", anchor, head, text, at };
     } else if (base)
       change = { kind: "delete", anchor, head, at: base.savedAt };
     else {
@@ -446,8 +466,16 @@ export function createDrafts(host: Pick<HostClient, "ask">) {
         entry.base = theirs;
         entry.save = saving;
         void enqueue(pull, () => save(pull, key));
-      } else if (theirs) pull.entries.set(key, settled(theirs));
-      else pull.entries.delete(key);
+      } else {
+        if (theirs) pull.entries.set(key, settled(theirs));
+        else pull.entries.delete(key);
+        const { anchor, head } = entry;
+        void enqueue(pull, async () => {
+          const answer = await ask(pull, { kind: "forget", anchor, head });
+          if (answer.ok) adopt(pull, answer.reply.data, null);
+          changed(pull);
+        });
+      }
       changed(pull);
     },
   };

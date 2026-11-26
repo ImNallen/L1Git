@@ -26,7 +26,7 @@ import type { FakeSent } from "./fakeDrafts";
 import { checkHandler, sendAgainArrives, writeArrives } from "./fakeWrites";
 import type { WriteScript } from "./fakeWrites";
 import type { PullWrite } from "../domain/pullRequestWrites";
-import type { Draft } from "../domain/drafts";
+import type { Draft, Waiting } from "../domain/drafts";
 import type { Wrote } from "../domain/host";
 import type { PullCopy } from "./fakePullCopies";
 import { mergeSelectionSchema } from "../domain/merge";
@@ -95,6 +95,7 @@ export type World = {
     /** The writes drafts.json keeps from before each leaves until its outcome
      * is known, by login and `pullKey`, with the drafts they carry. */
     sent: Map<string, FakeSent[]>;
+    waiting: Map<string, Waiting[]>;
     /** What the next writes answer, in order. A write with none left is done
      * and changes `details` as GitHub would. */
     writes: WriteScript[];
@@ -172,6 +173,7 @@ export function createWorld(): World {
       details: new Map(),
       drafts: new Map(),
       sent: new Map(),
+      waiting: new Map(),
       writes: [],
       mutations: [],
     },

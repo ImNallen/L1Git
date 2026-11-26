@@ -50,6 +50,15 @@ const sentSchema = z.object({
   sending: z.boolean(),
 });
 
+/** Words typed where a write held the place, kept by the host so a close
+ * can't lose them. `on` is the `savedAt` they were typed on. */
+const waitingSchema = z.object({
+  anchor: anchorSchema,
+  head: oidSchema,
+  text: z.string(),
+  on: z.number().int().nonnegative().nullable(),
+});
+
 export const pullDraftsSchema = z.object({
   drafts: z.array(draftSchema),
   refused: z
@@ -73,12 +82,16 @@ export const pullDraftsSchema = z.object({
    * aside. The drafts started again without it. */
   setAside: z.string().nullable(),
   sent: z.array(sentSchema),
+  /** Until the write ends, or, when typed on another draft than it
+   * carried, until a put, delete or forget at their place. */
+  waiting: z.array(waitingSchema),
 });
 
 export type Anchor = z.infer<typeof anchorSchema>;
 export type Draft = z.infer<typeof draftSchema>;
 export type PullDrafts = z.infer<typeof pullDraftsSchema>;
 export type SentWrite = z.infer<typeof sentSchema>;
+export type Waiting = z.infer<typeof waitingSchema>;
 
 export type DraftChange =
   | { kind: "read" }
@@ -92,7 +105,9 @@ export type DraftChange =
     }
   | { kind: "delete"; anchor: Anchor; head: Oid; at: number }
   /** Keep as draft: gives back a write's drafts, marked as may have posted. */
-  | { kind: "keep"; attempt: string };
+  | { kind: "keep"; attempt: string }
+  /** Drops the words that waited at this place. */
+  | { kind: "forget"; anchor: Anchor; head: Oid };
 
 /** GitHub's limit on a comment's body. The host counts Unicode scalar
  * values, so an emoji is one. */

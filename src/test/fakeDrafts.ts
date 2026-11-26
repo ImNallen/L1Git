@@ -5,6 +5,7 @@ import type {
   DraftChange,
   PullDrafts,
   SentWrite,
+  Waiting,
 } from "../domain/drafts";
 import type { Oid } from "../domain/repository";
 
@@ -20,6 +21,7 @@ export type FakeSent = SentWrite & { applied: boolean | "later" };
 export type Shelf = {
   drafts: Map<string, Draft[]>;
   sent: Map<string, FakeSent[]>;
+  waiting: Map<string, Waiting[]>;
 };
 
 export function viewOf(
@@ -40,11 +42,72 @@ export function viewOf(
         sending,
       }),
     ),
+    waiting: shelf.waiting.get(pull) ?? [],
   };
 }
 
-const at = (anchor: Anchor, head: Oid) => (draft: Draft) =>
-  draftKey(draft.anchor, draft.head) === draftKey(anchor, head);
+const at =
+  (anchor: Anchor, head: Oid) => (draft: Pick<Draft, "anchor" | "head">) =>
+    draftKey(draft.anchor, draft.head) === draftKey(anchor, head);
+
+function unwait(shelf: Shelf, pull: string, anchor: Anchor, head: Oid) {
+  shelf.waiting.set(
+    pull,
+    (shelf.waiting.get(pull) ?? []).filter(
+      (waiting) => !at(anchor, head)(waiting),
+    ),
+  );
+}
+
+/** A write that carried `carried` ended, as waiting.rs's `ended`. */
+function ended(shelf: Shelf, pull: string, carried: readonly Draft[]) {
+  const now = Date.now();
+  for (const draft of carried) {
+    const waiting = (shelf.waiting.get(pull) ?? []).find(
+      (each) => at(draft.anchor, draft.head)(each) && each.on === draft.savedAt,
+    );
+    if (!waiting) continue;
+    unwait(shelf, pull, waiting.anchor, waiting.head);
+    const drafts = shelf.drafts.get(pull) ?? [];
+    const kept = drafts.find(at(waiting.anchor, waiting.head));
+    const { anchor, head, text } = waiting;
+    shelf.drafts.set(
+      pull,
+      kept
+        ? drafts.map((each) =>
+            each === kept
+              ? {
+                  ...kept,
+                  head,
+                  text,
+                  writtenAt: now,
+                  savedAt: Math.max(now, kept.savedAt + 1),
+                }
+              : each,
+          )
+        : [
+            ...drafts,
+            {
+              anchor,
+              head,
+              text,
+              writtenAt: now,
+              savedAt: now,
+              mayHavePosted: false,
+            },
+          ],
+    );
+  }
+}
+
+/** GitHub has a write the host kept, as drafts.rs's `landed`. */
+export function landed(shelf: Shelf, pull: string, record: FakeSent) {
+  shelf.sent.set(
+    pull,
+    (shelf.sent.get(pull) ?? []).filter((sent) => sent !== record),
+  );
+  ended(shelf, pull, record.drafts);
+}
 
 /** Gives a write's drafts back to typing, as drafts.rs's `give_back`. */
 export function giveBack(
@@ -67,6 +130,7 @@ export function giveBack(
       mayHavePosted: draft.mayHavePosted || mayHavePosted,
     })),
   ]);
+  ended(shelf, pull, record.drafts);
 }
 
 /** The host's drafts op for one pull request, by drafts.rs's rules. */
@@ -79,6 +143,10 @@ export function draftsHandler(
   const answer = (refused: PullDrafts["refused"] = null) =>
     viewOf(shelf, pull, refused);
   if (change.kind === "read") return answer();
+  if (change.kind === "forget") {
+    unwait(shelf, pull, change.anchor, change.head);
+    return answer();
+  }
   if (change.kind === "keep") {
     const record = shelf.sent
       .get(pull)
@@ -94,12 +162,21 @@ export function draftsHandler(
       pull,
       drafts.filter((draft) => draft !== found),
     );
+    unwait(shelf, pull, change.anchor, change.head);
     return answer();
   }
   const held = (shelf.sent.get(pull) ?? []).some(({ drafts }) =>
     drafts.some(at(change.anchor, change.head)),
   );
-  if (held) return answer({ kind: "sent" });
+  if (held) {
+    unwait(shelf, pull, change.anchor, change.head);
+    const { anchor, head, text } = change;
+    shelf.waiting.set(pull, [
+      ...(shelf.waiting.get(pull) ?? []),
+      { anchor, head, text, on: change.at },
+    ]);
+    return answer({ kind: "sent" });
+  }
   if ((found?.savedAt ?? null) !== change.at) return answer({ kind: "stale" });
   if (!found && drafts.length >= MOST_DRAFTS)
     return answer({ kind: "full", of: "drafts" });
@@ -135,5 +212,6 @@ export function draftsHandler(
           },
         ],
   );
+  unwait(shelf, pull, change.anchor, change.head);
   return answer();
 }

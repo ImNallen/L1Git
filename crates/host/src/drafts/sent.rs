@@ -6,6 +6,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::{Anchor, AttemptId, Book, Draft, Oid};
+use crate::state::unix_millis;
 use crate::writes::Write;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -113,9 +114,12 @@ impl Book {
 
     /// GitHub has it, so its drafts are done.
     pub(crate) fn landed(&mut self, attempt: &AttemptId) -> bool {
-        let before = self.sent.len();
-        self.sent.retain(|sent| sent.attempt != *attempt);
-        self.sent.len() != before
+        let Some(index) = self.sent.iter().position(|sent| sent.attempt == *attempt) else {
+            return false;
+        };
+        let sent = self.sent.remove(index);
+        self.ended(&sent.drafts, unix_millis());
+        true
     }
 
     /// Its drafts return to typing. `may_have_posted` marks words GitHub may
@@ -126,10 +130,11 @@ impl Book {
         };
         let sent = self.sent.remove(index);
         self.drafts
-            .extend(sent.drafts.into_iter().map(|draft| Draft {
+            .extend(sent.drafts.iter().cloned().map(|draft| Draft {
                 may_have_posted: draft.may_have_posted || may_have_posted,
                 ..draft
             }));
+        self.ended(&sent.drafts, unix_millis());
         true
     }
 

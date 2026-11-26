@@ -79,6 +79,7 @@ impl Shelf {
                     number: key.number,
                     drafts: Vec::new(),
                     sent: Vec::new(),
+                    waiting: Vec::new(),
                 },
                 self.pulls.len() < super::MOST_PULLS,
             ),
@@ -100,7 +101,7 @@ impl Shelf {
     /// Fails only when `drafts.json` still holds what it held before. A book
     /// with nothing in it is left out.
     pub(super) fn save(mut self, book: Book) -> Result<(), Failure> {
-        if !book.drafts.is_empty() || !book.sent.is_empty() {
+        if !book.drafts.is_empty() || !book.sent.is_empty() || !book.waiting.is_empty() {
             self.pulls.push(book);
         }
         save(&self.dir, self.pulls)
