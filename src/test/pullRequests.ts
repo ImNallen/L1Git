@@ -17,7 +17,6 @@ export function row(number: number, fields: Partial<PullRequestSummary> = {}) {
     state: { kind: "open" as const, draft: false },
     author: "maja",
     viewerIsAuthor: false,
-    viewerPermission: "admin",
     head: `branch-${number}`,
     base: "main",
     labels: page([]),
@@ -41,6 +40,7 @@ export function pull(
   const { head: branch, checks: _, ...summary } = row(number);
   return pullRequestSchema.parse({
     ...summary,
+    viewerPermission: "admin",
     body: "Reads **once**.",
     baseOid: "b".repeat(40),
     changedFiles: 2,
