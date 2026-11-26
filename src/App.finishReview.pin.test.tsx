@@ -358,3 +358,48 @@ it("counts a new comment only once Start a review keeps it", async () => {
   await app.click(get("button", "Add review comment"));
   expect(finish().textContent).toBe("Finish review · 2");
 });
+
+it("offers the choices of a review that may have posted from before a restart", async () => {
+  const lost = draft(11, "Sent before the restart");
+  const summary = { ...draft(0, "Looks good"), anchor: { kind: "summary" } };
+  const app = await openFiles({
+    world: (world) =>
+      world.host.sent.set(book, [
+        {
+          attempt: "before",
+          at: 1,
+          write: {
+            kind: "submitReview",
+            pull: "PR_1" as never,
+            commit: head,
+            event: "comment",
+            body: "Looks good",
+            threads: [
+              {
+                lines: {
+                  path: "src/a.ts",
+                  side: "right",
+                  line: 11,
+                  start: null,
+                },
+                body: lost.text,
+              },
+            ],
+          },
+          drafts: [lost, summary as Draft],
+          sending: false,
+          applied: false,
+        },
+      ]),
+  });
+  const shown = await openPopover(app);
+  expect(shown.textContent).toContain("may have posted");
+  expect(shown.textContent).toContain("Sent before the restart");
+  const words = get("textbox", "Summary", shown) as HTMLTextAreaElement;
+  expect(words.readOnly, "the host holds the summary").toBe(true);
+  expect(submit().getAttribute("aria-disabled")).toBe("true");
+  await app.click(get("button", "Keep as draft", shown));
+  expect(words.readOnly).toBe(false);
+  expect(kept(app).sort()).toEqual(["Looks good", "Sent before the restart"]);
+  expect(mutations(app)).toEqual([]);
+});

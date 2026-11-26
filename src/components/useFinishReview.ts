@@ -85,10 +85,18 @@ export function useFinishReview({
   const summary = summaryDraft?.text ?? "";
   const events = eventsFor(pull);
   const event = events.includes(chosen) ? chosen : "comment";
+  // Else a review the host keeps that another window, or this one before a
+  // restart, sent, so its choices are here too.
   const attempt =
     sending.kind === "sent"
       ? (writes.attempts.find(({ id }) => id === sending.attempt) ?? null)
-      : null;
+      : sending.kind === "idle"
+        ? (writes.attempts.findLast(
+            (each) =>
+              isReview(each) &&
+              (each.state.kind === "sending" || each.state.kind === "unknown"),
+          ) ?? null)
+        : null;
   if (attempt?.state.kind === "done") {
     setSending(idle);
     setOpen(false);
