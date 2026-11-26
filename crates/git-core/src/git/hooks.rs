@@ -31,9 +31,9 @@ pub(crate) fn defined(
     }
 }
 
-/// Keeps Git from running any hook: those config defines, and those in a
-/// hooks folder, which `core.hooksPath` on the command line moves to an
-/// empty folder that outranks every config file. On Windows Git reads
+/// Keeps Git from running any hook or a file system monitor, which config
+/// can point at a tracked script. `core.hooksPath` on the command line moves
+/// the hooks folder to an empty one, and outranks every config file. On Windows Git reads
 /// `/dev/null` as a folder at the root of the drive, which another user can
 /// make, so the folder is a new one in the user's own temporary folder.
 pub(crate) struct NoHooks {
@@ -65,6 +65,7 @@ impl NoHooks {
         command
             .arg("-c")
             .arg(path)
+            .args(["-c", "core.fsmonitor=false"])
             .args(&self.defined)
             .env(HOOK_OFF, "false");
     }

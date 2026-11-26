@@ -177,7 +177,9 @@ impl World {
         } else {
             git(&self.author, &["switch", "-q", "-c", branch, "main"]);
         }
-        fs::write(self.author.join(file), format!("{file}\n")).unwrap();
+        let path = self.author.join(file);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, format!("{file}\n")).unwrap();
         git(&self.author, &["add", file]);
         git(&self.author, &["commit", "-q", "-m", file]);
         oid(&git(&self.author, &["rev-parse", "HEAD"]))
@@ -786,6 +788,35 @@ fn replace_onto_an_ignored_file_the_pull_request_tracks_names_it_and_keeps_it() 
         fs::read_to_string(folder.join("secret.txt")).unwrap(),
         "mine\n"
     );
+}
+
+#[test]
+fn replace_refuses_when_the_pull_request_turns_an_ignored_file_into_a_folder_or_back() {
+    for (ignore, ignored, adds) in [
+        (".env\n", ".env", ".env/y"),
+        ("build/\n", "build/a", "build"),
+    ] {
+        let world = World::new();
+        let first = world.same(1, "feat", "feat.txt");
+        let folder = world.folder(1);
+        world.tried(1, &first);
+        let rewritten = PullHead {
+            oid: world.rewrite("feat", adds),
+            ..first.clone()
+        };
+        world.publish(&[
+            (&world.base, "refs/heads/feat".into()),
+            (&world.base, "refs/pull/1/head".into()),
+        ]);
+        fs::write(folder.join(".gitignore"), ignore).unwrap();
+        let file = folder.join(ignored);
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(&file, "SECRET=1\n").unwrap();
+        let refused = world.update(1, &rewritten, &first.oid, true).unwrap_err();
+        assert_eq!(refused.kind, ErrorKind::Conflict, "{ignored}: {refused:?}");
+        assert_eq!(world.tip("pr/1"), Some(first.oid));
+        assert_eq!(fs::read_to_string(&file).unwrap(), "SECRET=1\n");
+    }
 }
 
 #[test]

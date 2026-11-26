@@ -211,6 +211,29 @@ fn try_runs_no_post_checkout_hook_from_the_hooks_folder_or_config() {
 }
 
 #[test]
+fn try_and_update_run_no_file_system_monitor_from_config() {
+    let world = World::new(false);
+    let monitor = world.root.join("fsmonitor.sh");
+    fs::write(&monitor, script(&world.marker, "fsmonitor")).unwrap();
+    fs::set_permissions(&monitor, fs::Permissions::from_mode(0o755)).unwrap();
+    git(
+        &world.root,
+        &["config", "core.fsmonitor", monitor.to_str().unwrap()],
+    );
+    let first = world.push("feat.txt", false);
+    world.tried(&first);
+    let pushed = world.push("more.txt", false);
+    world.update(&world.root, &pushed, &first.oid, false);
+    assert_eq!(world.ran(), "", "a file system monitor ran");
+    assert!(world.copy.join("more.txt").exists());
+    git(&world.copy, &["status", "--porcelain"]);
+    assert!(
+        world.ran().contains("fsmonitor"),
+        "plain Git runs the monitor"
+    );
+}
+
+#[test]
 fn update_runs_no_post_merge_hook_from_the_hooks_folder_or_config() {
     let world = World::new(false);
     let first = world.push("feat.txt", false);

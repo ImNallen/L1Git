@@ -179,7 +179,15 @@ fn refuse_lost_on_replace(
     let reads = deadline.reads();
     let staged = paths(&git::read(
         &worktree.root,
-        &["diff", "--cached", "--name-only", "-z", "--no-renames"],
+        &[
+            "-c",
+            "core.fsmonitor=false",
+            "diff",
+            "--cached",
+            "--name-only",
+            "-z",
+            "--no-renames",
+        ],
         reads,
     )?);
     if !staged.is_empty() {
@@ -209,6 +217,8 @@ fn refuse_lost_on_replace(
     let listed = paths(&git::read(
         &worktree.root,
         &[
+            "-c",
+            "core.fsmonitor=false",
             "ls-files",
             "-z",
             "--others",
@@ -221,11 +231,14 @@ fn refuse_lost_on_replace(
     let ignored: Vec<String> = moved
         .into_iter()
         .filter(|path| {
-            listed.iter().any(|entry| match entry.strip_suffix('/') {
-                Some(folder) => path
-                    .strip_prefix(folder)
-                    .is_some_and(|rest| rest.starts_with('/')),
-                None => entry == path,
+            listed.iter().any(|entry| {
+                let entry = entry.strip_suffix('/').unwrap_or(entry);
+                let under = |inner: &str, outer: &str| {
+                    inner
+                        .strip_prefix(outer)
+                        .is_some_and(|rest| rest.starts_with('/'))
+                };
+                entry == path || under(path, entry) || under(entry, path)
             })
         })
         .collect();

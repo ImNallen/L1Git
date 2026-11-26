@@ -183,7 +183,17 @@ fn changes(root: &Path, reads: Deadline) -> Result<Changes, RepositoryError> {
             operation: *operation,
         });
     }
-    let status = git::read(root, &["status", "--porcelain=v1", "-z"], reads)?;
+    let status = git::read(
+        root,
+        &[
+            "-c",
+            "core.fsmonitor=false",
+            "status",
+            "--porcelain=v1",
+            "-z",
+        ],
+        reads,
+    )?;
     Ok(if status.is_empty() {
         Changes::Clean
     } else {
