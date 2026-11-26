@@ -8,6 +8,7 @@ import type {
   ThreadFilter,
   ThreadRow,
 } from "../domain/threadStanding";
+import { useThreadWaits } from "./conversationWriting";
 import { Ago, Avatar } from "./PullRequestParts";
 import { ThreadBody, useFold } from "./PullRequestThread";
 
@@ -21,7 +22,7 @@ const standingLabels: Record<Standing | ThreadFilter, string> = {
 const nothing: Record<ThreadFilter, string> = {
   open: "No thread is open.",
   waitingOnYou: "No thread waits on you.",
-  outdated: "No open thread is outdated.",
+  outdated: "No thread shows as outdated.",
   resolved: "No thread is resolved.",
 };
 
@@ -76,15 +77,18 @@ function Row({
     if (!fold.expanded) setOpened(false);
   }
   const content = useId();
+  // A write that waits here stays in sight.
+  const waits = useThreadWaits(thread.id);
+  const shown = opened || waits;
   return (
     <li className="threads-row">
       <button
         ref={fold.toggle}
         type="button"
         className="threads-row-head"
-        aria-expanded={opened}
+        aria-expanded={shown}
         aria-controls={content}
-        onClick={() => setOpened(!opened)}
+        onClick={() => setOpened(!shown)}
       >
         <ChevronRight size={14} aria-hidden="true" />
         <span className="threads-place">{place}</span>
@@ -114,8 +118,8 @@ function Row({
           </span>
         )}
       </button>
-      <div id={content} className="threads-row-body" hidden={!opened}>
-        {opened && (
+      <div id={content} className="threads-row-body" hidden={!shown}>
+        {shown && (
           <ThreadBody
             thread={thread}
             viewer={viewer}

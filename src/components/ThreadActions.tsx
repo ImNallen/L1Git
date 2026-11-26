@@ -15,6 +15,7 @@ import {
   ConversationWritingContext,
   doneAt,
   madeId,
+  readShowsReply,
   waitingAt,
   wordsOf,
 } from "./conversationWriting";
@@ -70,18 +71,23 @@ function Actions({
   const [asked, setAsked] = useState(false);
   const [refused, setRefused] = useState<Unsent | null>(null);
   const replyButton = useRef<HTMLButtonElement>(null);
+  const flipButton = useRef<HTMLButtonElement>(null);
+  const home = () => replyButton.current ?? flipButton.current;
   const resolving = waitingAt(writes.attempts, resolve);
   const replying = waitingAt(writes.attempts, reply);
-  const boxShown = can.reply && (asked || drafted || replying !== null);
+  const boxShown = replying !== null || (can.reply && (asked || drafted));
   const cancelled = useRef(false);
+  // The box goes once its reply posts, and focus with it.
   useLayoutEffect(() => {
-    if (boxShown || !cancelled.current) return;
+    if (boxShown) return;
+    if (cancelled.current || document.activeElement === document.body)
+      replyButton.current?.focus();
     cancelled.current = false;
-    replyButton.current?.focus();
   }, [boxShown]);
 
-  // A thread GitHub cut short gets a reply at its end, past what was read.
-  const whole = comments.items.length >= comments.total;
+  // A read doesn't hold a reply past a thread's first comments, so GitHub
+  // shows it and L1 Git can't.
+  const shows = readShowsReply(comments);
   const read = new Set(comments.items.map((comment) => comment.id));
   const posted = doneAt(writes.attempts, reply);
   const sent = posted.filter((attempt) => !read.has(madeId(attempt) ?? ""));
@@ -90,14 +96,17 @@ function Actions({
   const last = posted.at(-1);
   if (last && last.id !== seen) {
     setSeen(last.id);
-    if (!whole) setPostedPast(true);
+    if (!shows) setPostedPast(true);
   }
 
   const canFlip = resolved ? can.unresolve : can.resolve;
-  const flipping = resolving?.state.kind === "sending";
+  const flipped = doneAt(writes.attempts, resolve).at(-1);
+  // Done waits for the read that shows it, so a second click sends nothing.
+  const flipping = resolving?.state.kind === "sending" || flipped !== undefined;
   async function flip() {
     if (flipping) return;
     setRefused(null);
+    if (resolving !== null) writes.dismiss(resolving.id);
     const kind = resolved ? "unresolve" : "resolve";
     const answer = await writes.send({ kind, thread: id });
     if (answer === "started") onAct?.(kind);
@@ -106,7 +115,7 @@ function Actions({
 
   return (
     <>
-      {whole && sent.length > 0 && (
+      {shows && sent.length > 0 && (
         <ul className="thread-comments thread-sent">
           {sent.map(({ id: attempt, write }) => (
             <li key={attempt}>
@@ -141,6 +150,7 @@ function Actions({
             onCancel={() => {
               cancelled.current = true;
               setAsked(false);
+              if (replying !== null) writes.dismiss(replying.id);
               void drafts.remove(of, anchorOf(reply), writing.head);
             }}
           />
@@ -172,6 +182,7 @@ function Actions({
           )}
           {canFlip && (
             <button
+              ref={flipButton}
               type="button"
               className="button secondary"
               aria-disabled={flipping}
@@ -189,12 +200,32 @@ function Actions({
         </div>
       </div>
       <span className="visually-hidden" role="status">
-        {flipping ? (resolved ? "Unresolving…" : "Resolving…") : ""}
+        {flipped
+          ? flipped.write.kind === "resolve"
+            ? "Resolved."
+            : "Unresolved."
+          : flipping
+            ? resolved
+              ? "Unresolving…"
+              : "Resolving…"
+            : shows && sent.length > 0
+              ? "Posted your reply."
+              : ""}
       </span>
       {refused !== null && (
-        <Problem text={unsent[refused]} onDismiss={() => setRefused(null)} />
+        <Problem
+          text={unsent[refused]}
+          onDismiss={() => setRefused(null)}
+          home={home}
+        />
       )}
-      {resolving !== null && <WriteNotice attempt={resolving} />}
+      {resolving !== null && (
+        <WriteNotice
+          key={resolving.id}
+          attempt={resolving}
+          home={() => flipButton.current ?? home()}
+        />
+      )}
     </>
   );
 }

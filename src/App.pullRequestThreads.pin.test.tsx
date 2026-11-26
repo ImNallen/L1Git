@@ -165,7 +165,9 @@ it("opens a row to its comments, Reply, Show in diff and Resolve, and keeps it f
     queryAll("button", undefined, body).map((button) => button.textContent),
   ).toEqual(["Reply…", "Show in diff", "Resolve"]);
 
-  await app.click(get("button", "Resolve", body));
+  const resolve = get("button", "Resolve", body);
+  resolve.focus();
+  await app.click(resolve);
   await vi.waitFor(() =>
     expect(row("Says T1").textContent).toContain("Resolved"),
   );

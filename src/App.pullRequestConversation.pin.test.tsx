@@ -200,7 +200,9 @@ it("discards a reply on its button, and Cancel closes an empty one", async () =>
 it("resolves a thread, folds it, and gives focus to its row", async () => {
   const app = await visit({ world: withThreads(thread("T1")) });
   await open(app, 1);
-  await app.click(get("button", "Resolve conversation", region()));
+  const resolve = get("button", "Resolve conversation", region());
+  resolve.focus();
+  await app.click(resolve);
   await vi.waitFor(() =>
     expect(get("button", /^Resolved/, region())).toBeTruthy(),
   );
@@ -256,4 +258,71 @@ it("says a reply posted when GitHub's read shows only the start of its thread", 
     "Posted. GitHub shows it in the full thread.",
   );
   expect(sent(app)).toHaveLength(1);
+});
+
+it("drops an earlier failure once the next comment posts, and sends once for two quick presses", async () => {
+  const app = await visit();
+  await open(app, 1);
+  app.bridge.world.host.writes.push({ kind: "notSent" });
+  await comment(app, "Thanks!");
+  await vi.waitFor(() => expect(get("alert", undefined, box())).toBeTruthy());
+  expect(sent(app)).toEqual([]);
+  await app.press("Enter", { target: words(), ctrlKey: true });
+  await app.press("Enter", { target: words(), ctrlKey: true });
+  await vi.waitFor(() => expect(words().value).toBe(""));
+  await settled(app);
+  expect(sent(app)).toHaveLength(1);
+  expect(query("alert", undefined, box())).toBeNull();
+});
+
+it("gives focus back to Reply… once a reply posts", async () => {
+  const app = await visit({ world: withThreads(thread("T1")) });
+  await open(app, 1);
+  await app.click(get("button", "Reply…", region()));
+  const reply = get("textbox", "Reply", region());
+  await app.type(reply, "Renamed");
+  await app.press("Enter", { target: reply, metaKey: true });
+  await vi.waitFor(() =>
+    expect(query("textbox", "Reply", region())).toBeNull(),
+  );
+  expect(document.activeElement).toBe(get("button", "Reply…", region()));
+});
+
+it("says a reply posted to a thread whose read already holds 50 comments", async () => {
+  const fifty = Array.from({ length: 50 }, (_, index) => ({
+    id: `T1-${index}`,
+    body: `Round ${index}`,
+    by: "sara",
+    at: at(3),
+  }));
+  const app = await visit({
+    world: withThreads(thread("T1", { comments: page(fifty) })),
+  });
+  await open(app, 1);
+  await app.click(get("button", "Reply…", region()));
+  await app.type(get("textbox", "Reply", region()), "Renamed");
+  await app.click(get("button", "Reply", region()));
+  await vi.waitFor(() =>
+    expect(region().textContent).toContain(
+      "Posted. GitHub shows it in the full thread.",
+    ),
+  );
+  expect(region().querySelector(".thread-sent")).toBeNull();
+});
+
+it("resolves once, even when clicked again before the read shows it", async () => {
+  const app = await visit({ world: withThreads(thread("T1")) });
+  await open(app, 1);
+  const reread = app.bridge.hold("pullRequest");
+  await app.click(get("button", "Resolve conversation", region()));
+  await reread.arrived;
+  await settled(app);
+  const resolve = get("button", "Resolve conversation", region());
+  expect(resolve.getAttribute("aria-disabled")).toBe("true");
+  await app.click(resolve);
+  reread.release();
+  await vi.waitFor(() =>
+    expect(get("button", /^Resolved/, region())).toBeTruthy(),
+  );
+  expect(sent(app)).toEqual([{ kind: "resolve", thread: "T1" }]);
 });

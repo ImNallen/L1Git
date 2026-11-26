@@ -1,4 +1,4 @@
-import { use, useId, useState } from "react";
+import { use, useId, useRef, useState } from "react";
 import { draftKey, draftText, mostDraftChars } from "../domain/drafts";
 import { mac } from "../repositories";
 import { usePullDrafts, usePullWrites } from "../shell/usePullWriting";
@@ -50,7 +50,12 @@ export function ConversationBox({
   const writes = usePullWrites(writing.opened);
   const [preview, setPreview] = useState(false);
   const [refused, setRefused] = useState<Unsent | null>(null);
+  /** From the click until the writes store answers, while drafts save. */
+  const [starting, setStarting] = useState(false);
   const status = useId();
+  const words = useRef<HTMLTextAreaElement>(null);
+  const group = useRef<HTMLDivElement>(null);
+  const home = () => words.current ?? group.current;
   const anchor = anchorOf(place);
   const key = draftKey(anchor, writing.head);
   const draft = drafts.drafts.find(
@@ -58,10 +63,11 @@ export function ConversationBox({
   );
   const waiting = waitingAt(writes.attempts, place);
   const sending = waiting?.state.kind === "sending";
-  const held =
+  const kept =
     waiting !== null &&
     (sending || (waiting.state.kind === "unknown" && waiting.state.kept));
-  const text = held ? wordsOf(waiting.write) : (draft?.text ?? "");
+  const held = starting || kept;
+  const text = kept ? wordsOf(waiting.write) : (draft?.text ?? "");
   const takes = draftText(text);
   const ready = !held && takes === "takes";
   const verb = verbs[place.kind];
@@ -71,40 +77,48 @@ export function ConversationBox({
   async function send() {
     if (!ready) return;
     setRefused(null);
+    setStarting(true);
+    // The last write's message goes, so it doesn't come back once this one posts.
+    if (waiting !== null) writes.dismiss(waiting.id);
     const body = text;
     const write =
       place.kind === "comment"
         ? { kind: "comment" as const, pull, body }
         : { kind: "reply" as const, thread: place.thread, body };
-    const answer = await writes.send(write, [{ anchor, head }]);
+    const answer = await writes
+      .send(write, [{ anchor, head }])
+      .finally(() => setStarting(false));
     if (answer === "started") onStarted?.();
     else setRefused(answer);
   }
 
   const save = draft?.save;
   const shortcut = `${mac ? "⌘" : "Ctrl+"}Enter to ${verb.button.toLowerCase()}`;
-  const line = sending
-    ? "Sending…"
-    : held
-      ? "May have posted."
-      : save?.kind === "unsaved"
-        ? `Not saved. ${save.why}`
-        : takes === "tooLong"
-          ? `Too long to save or send. GitHub takes at most ${mostDraftChars.toLocaleString()} characters.`
-          : save?.kind === "changedElsewhere"
-            ? "Another window changed this draft."
-            : takes === "blank"
-              ? shortcut
-              : save?.kind === "saving"
-                ? `${shortcut} · Saving…`
-                : `${shortcut} · Saved as a draft on this machine`;
+  const line =
+    sending || starting
+      ? "Sending…"
+      : kept
+        ? "May have posted."
+        : save?.kind === "unsaved"
+          ? `Not saved. ${save.why}`
+          : takes === "tooLong"
+            ? `Too long to save or send. GitHub takes at most ${mostDraftChars.toLocaleString()} characters.`
+            : save?.kind === "changedElsewhere"
+              ? "Another window changed this draft."
+              : takes === "blank"
+                ? shortcut
+                : save?.kind === "saving"
+                  ? `${shortcut} · Saving…`
+                  : `${shortcut} · Saved as a draft on this machine`;
 
   return (
     <div
+      ref={group}
       className="comment-box"
       role="group"
       aria-label={label}
-      aria-busy={sending}
+      aria-busy={sending || starting}
+      tabIndex={-1}
     >
       <div className="comment-box-modes">
         <button
@@ -132,6 +146,7 @@ export function ConversationBox({
         </div>
       ) : (
         <textarea
+          ref={words}
           className="comment-box-text"
           aria-label={verb.button}
           aria-describedby={status}
@@ -198,12 +213,18 @@ export function ConversationBox({
         </button>
       </div>
       <span className="visually-hidden" role="status">
-        {sending ? verb.sending : posted ? "Posted." : ""}
+        {sending || starting ? verb.sending : posted ? "Posted." : ""}
       </span>
       {refused !== null && (
-        <Problem text={unsent[refused]} onDismiss={() => setRefused(null)} />
+        <Problem
+          text={unsent[refused]}
+          onDismiss={() => setRefused(null)}
+          home={home}
+        />
       )}
-      {waiting !== null && <WriteNotice attempt={waiting} />}
+      {waiting !== null && (
+        <WriteNotice key={waiting.id} attempt={waiting} home={home} />
+      )}
     </div>
   );
 }

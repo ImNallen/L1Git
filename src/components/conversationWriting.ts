@@ -1,6 +1,6 @@
-import { createContext } from "react";
+import { createContext, use, useSyncExternalStore } from "react";
 import type { Anchor } from "../domain/drafts";
-import type { PullRequest } from "../domain/pullRequest";
+import type { PullRequest, ReviewThread } from "../domain/pullRequest";
 import type { PullWrite } from "../domain/pullRequestWrites";
 import type { Oid } from "../domain/repository";
 import type { Attempt } from "../pullRequestWrites";
@@ -37,6 +37,36 @@ function isAt(write: PullWrite, place: WritePlace): boolean {
         write.thread === place.thread
       );
   }
+}
+
+/** A thread's comments a read holds, as detail.graphql asks for them. */
+const COMMENTS_READ = 50;
+
+/** Whether the next read of a thread shows a reply posted to it now. */
+export const readShowsReply = ({ items, total }: ReviewThread["comments"]) =>
+  items.length === total && total < COMMENTS_READ;
+
+const quiet = () => () => {};
+
+/** Whether a reply or a resolve of `thread` is sending, or ended in a way
+ * the thread has to show, so it stays open. */
+export function useThreadWaits(thread: string): boolean {
+  const writing = use(ConversationWritingContext);
+  const writes = writing?.opened.writing.writes;
+  const github = writing?.opened.repository.github;
+  const number = writing?.opened.number;
+  return useSyncExternalStore(writes?.subscribe ?? quiet, () =>
+    writes && github && number !== undefined
+      ? writes
+          .attempts({ repository: github, number })
+          .some(
+            ({ write, state }) =>
+              state.kind !== "done" &&
+              (isAt(write, { kind: "reply", thread }) ||
+                isAt(write, { kind: "resolve", thread })),
+          )
+      : false,
+  );
 }
 
 /** The newest write at `place` that hasn't posted: it is sending, or it

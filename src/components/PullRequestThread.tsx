@@ -17,6 +17,7 @@ import type { ReviewThread } from "../domain/pullRequest";
 import { turnsIn } from "../markdown/runs";
 import { Hunk } from "../shell/lazyViews";
 import { Body, Plainly } from "./PullRequestBody";
+import { useThreadWaits } from "./conversationWriting";
 import { Ago, Avatar, OnGitHub } from "./PullRequestParts";
 import { ThreadActions } from "./ThreadActions";
 import { useTurn } from "./useTurn";
@@ -131,9 +132,11 @@ export function useFold(resolved: boolean) {
   const toggle = useRef<HTMLButtonElement>(null);
   const resolving = useRef(false);
   useLayoutEffect(() => {
-    if (!resolved || !resolving.current) return;
+    const asked = resolving.current;
     resolving.current = false;
-    toggle.current?.focus({ preventScroll: true });
+    // Only when the Resolve button that had focus went with the fold.
+    if (resolved && asked && document.activeElement === document.body)
+      toggle.current?.focus({ preventScroll: true });
   }, [resolved]);
   return {
     expanded,
@@ -157,7 +160,8 @@ export const Thread = memo(function Thread({
 }) {
   const { path, outdated, resolved, comments: said } = thread;
   const { expanded, setExpanded, toggle, onAct } = useFold(resolved);
-  const open = expanded || !resolved;
+  const waits = useThreadWaits(thread.id);
+  const open = expanded || !resolved || waits;
   const content = useId();
   return (
     <section className="thread" aria-label={`Thread on ${path}`}>

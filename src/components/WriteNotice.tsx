@@ -19,15 +19,25 @@ export type Unsent = keyof typeof unsent;
 export function Problem({
   text,
   onDismiss,
+  home,
 }: {
   text: string;
   onDismiss: () => void;
+  /** Where focus goes once the message is gone. */
+  home: () => HTMLElement | null;
 }) {
   return (
     <div className="write-notice" role="alert">
       <TriangleAlert size={14} aria-hidden="true" />
       <p>{text}</p>
-      <button type="button" className="pull-link" onClick={onDismiss}>
+      <button
+        type="button"
+        className="pull-link"
+        onClick={() => {
+          onDismiss();
+          home()?.focus();
+        }}
+      >
         Dismiss
       </button>
     </div>
@@ -39,7 +49,13 @@ export function Problem({
  * may have posted offers Open on GitHub, Keep as draft and Send anyway, and
  * never goes again by itself.
  */
-export function WriteNotice({ attempt }: { attempt: Attempt }) {
+export function WriteNotice({
+  attempt,
+  home,
+}: {
+  attempt: Attempt;
+  home: () => HTMLElement | null;
+}) {
   const writing = use(ConversationWritingContext);
   if (writing === null) throw new Error("A write notice needs its writing.");
   const writes = usePullWrites(writing.opened);
@@ -48,7 +64,11 @@ export function WriteNotice({ attempt }: { attempt: Attempt }) {
   if (state.kind === "sending" || state.kind === "done") return null;
   if (state.kind !== "unknown")
     return (
-      <Problem text={state.message} onDismiss={() => writes.dismiss(id)} />
+      <Problem
+        text={state.message}
+        onDismiss={() => writes.dismiss(id)}
+        home={home}
+      />
     );
   const harmless = write.kind === "resolve" || write.kind === "unresolve";
   return (
@@ -73,7 +93,8 @@ export function WriteNotice({ attempt }: { attempt: Attempt }) {
               className="button secondary"
               onClick={() =>
                 void writes.keep(id).then((kept) => {
-                  if (!kept)
+                  if (kept) home()?.focus();
+                  else
                     setFailed(
                       "L1 Git couldn't keep it as a draft yet. Try again in a moment.",
                     );
@@ -90,6 +111,7 @@ export function WriteNotice({ attempt }: { attempt: Attempt }) {
               onClick={() => {
                 const sent = writes.sendAnyway(id);
                 setFailed(sent === "started" ? null : unsent[sent]);
+                if (sent === "started") home()?.focus();
               }}
             >
               Send anyway
@@ -98,7 +120,10 @@ export function WriteNotice({ attempt }: { attempt: Attempt }) {
             <button
               type="button"
               className="button secondary"
-              onClick={() => writes.dismiss(id)}
+              onClick={() => {
+                writes.dismiss(id);
+                home()?.focus();
+              }}
             >
               Dismiss
             </button>
