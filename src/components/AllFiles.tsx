@@ -35,6 +35,7 @@ import { reviewMetrics } from "./useDiffSteps";
 import type { DiffSteps } from "./useDiffSteps";
 import { entryId, fileOfDiff, useFileItems } from "./useFileItems";
 import type { FileNote } from "./useFileItems";
+import { useRedraws } from "./useRedraws";
 import { useSteady } from "./useSteady";
 
 /** Above this many lines, a file is drawn without colors, which takes Pierre too long. */
@@ -108,6 +109,7 @@ export function AllFiles({
   const isReady = count > begins;
 
   const [appearances, setAppearances] = useState(0);
+  const drawn = useRedraws();
   const latestWhole = useRef(whole);
   latestWhole.current = whole;
   const options = useMemo(() => {
@@ -128,14 +130,17 @@ export function AllFiles({
         // Other metrics that mean the same make Pierre measure all anew.
         ...(appearances % 2 === 1 && { hunkSeparatorHeight: undefined }),
       },
-      onPostRender: (node: HTMLElement) => keyExpanders(node),
+      onPostRender: (node: HTMLElement) => {
+        keyExpanders(node);
+        drawn(node);
+      },
       loadDiffFiles: async (diff: FileDiffMetadata) => {
         const file = fileOfDiff(diff);
         if (!file) throw new Error("The diff is of no file.");
         return sidesFor(diff, await latestWhole.current(file));
       },
     } as const;
-  }, [theme, painted, diffStyle, appearances]);
+  }, [theme, painted, diffStyle, appearances, drawn]);
 
   const known = { entries, folded, contentMissing, onAt, onRead };
   const [keeper] = useState(() => new AllFilesKeeper(viewer, known));
