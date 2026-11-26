@@ -272,8 +272,9 @@ export function createPullRequestWrites(deps: {
       if (waits && askedAt > (current().checked.get(key) ?? 0)) check(pull);
     }
   }
-  deps.details.subscribe(look);
-  deps.drafts.subscribe(look);
+  /** Stops listening to the reads and the drafts. Set only while something
+   * listens to this store, so one dropped with its sign-in holds nothing. */
+  let watching: (() => void) | null = null;
 
   function start(
     pull: PullOf,
@@ -390,16 +391,29 @@ export function createPullRequestWrites(deps: {
       if (kept.length !== local.length) put(pull, kept);
     },
     /** Also tells of a sign-in change, which shows another sign-in's lanes,
-     * and of the host's kept writes changing. */
+     * and of the host's kept writes changing. A done write's notice clears,
+     * and a kept write is looked for, only while something listens. */
     subscribe(listener: () => void) {
       const heard = () => listener();
       listeners.add(heard);
       const stopHost = deps.host.subscribe(heard);
       const stopDrafts = deps.drafts.subscribe(heard);
+      if (!watching) {
+        const stops = [
+          deps.details.subscribe(look),
+          deps.drafts.subscribe(look),
+        ];
+        watching = () => stops.forEach((stop) => stop());
+        look();
+      }
       return () => {
         listeners.delete(heard);
         stopHost();
         stopDrafts();
+        if (listeners.size === 0) {
+          watching?.();
+          watching = null;
+        }
       };
     },
   };

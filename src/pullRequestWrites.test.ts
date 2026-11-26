@@ -84,9 +84,11 @@ async function window(task: () => (() => void) | null = () => () => {}) {
   });
   const read = (number: number) =>
     queue.addFirst({ repository: listed, number });
-  // A screen builds each write from the pull request's read.
+  // A screen builds each write from the pull request's read, and shows its
+  // writes while it is open.
   await details.refresh(one);
   await details.refresh(two);
+  writes.subscribe(() => {});
   return { host, details, drafts, writes, read };
 }
 type Window = Awaited<ReturnType<typeof window>>;
@@ -471,4 +473,33 @@ it("sends only what names this pull request, its threads and its pending review,
   expect(writes.send(one, pending)).toBe("started");
   expect(writes.send(two, said("Hi", 2))).toBe("started");
   await vi.waitFor(() => expect(asked("write")).toBe(3));
+});
+
+it("listens to the reads and the drafts only while something listens to it", async () => {
+  const { host, details, drafts } = await window();
+  let listening = 0;
+  const counted =
+    (subscribe: (listener: () => void) => () => void) =>
+    (listener: () => void) => {
+      listening += 1;
+      const stop = subscribe(listener);
+      return () => {
+        listening -= 1;
+        stop();
+      };
+    };
+  const writes = createPullRequestWrites({
+    host,
+    details: { read: details.read, subscribe: counted(details.subscribe) },
+    reread: () => {},
+    drafts: { ...drafts, subscribe: counted(drafts.subscribe) },
+    task: () => () => {},
+  });
+  expect(listening, "a store nobody shows").toBe(0);
+  const stop = writes.subscribe(() => {});
+  const also = writes.subscribe(() => {});
+  expect(listening).toBeGreaterThan(0);
+  stop();
+  also();
+  expect(listening, "a store dropped with its sign-in").toBe(0);
 });
