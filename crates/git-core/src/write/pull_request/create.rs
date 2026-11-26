@@ -21,7 +21,8 @@ impl Coordinator {
     /// exists. A kept branch is checked out at its own tip. The head is
     /// fetched first, under the gate. Git runs as the user, so hooks run. It
     /// records no undo entry and never forces, and when Git fails to make the
-    /// worktree it deletes the branch it made.
+    /// worktree it deletes the branch it made, or puts back the settings of
+    /// the branch it kept.
     pub fn try_pull_request(
         &self,
         path: &str,
@@ -80,8 +81,13 @@ impl Coordinator {
                 }
                 return Ok(answer);
             }
-            if let Some(created) = created {
-                created.forget(&txn.renewed()?, &repo, &head.oid)?;
+            let txn = txn.renewed()?;
+            match created {
+                Some(created) => created.forget(&txn, &repo, &head.oid)?,
+                None => {
+                    let now = Listing::read(&repo, reads)?.slot(&branch)?.config;
+                    branches::set_config(&txn, &branch, &now, &slot.config)?;
+                }
             }
             Err(checkout::refusal(ran))
         })

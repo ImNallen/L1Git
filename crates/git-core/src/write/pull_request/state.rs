@@ -140,7 +140,7 @@ pub(super) fn read(
     })
 }
 
-fn plan(
+pub(super) fn plan(
     repo: &Repo,
     records: &[WorktreeRecord],
     branch: &BranchRef,

@@ -1073,6 +1073,60 @@ fn a_worktree_git_cannot_make_leaves_no_branch_behind() {
 }
 
 #[test]
+fn a_try_git_cannot_make_puts_a_kept_branchs_settings_back() {
+    let world = World::new();
+    let head = world.same(1, "feat", "feat.txt");
+    world.tried(1, &head);
+    let folder = world.folder(1);
+    fs::write(folder.join("mine.txt"), "mine\n").unwrap();
+    git(&folder, &["add", "mine.txt"]);
+    git(&folder, &["commit", "-q", "-m", "mine"]);
+    let mine = world.tip("pr/1").unwrap();
+    world.remove(1, &head, &mine);
+    git(
+        &world.root,
+        &["config", "branch.pr/1.merge", "refs/heads/mine"],
+    );
+    let parent = world.top.join(".worktrees");
+    fs::set_permissions(&parent, fs::Permissions::from_mode(0o555)).unwrap();
+    let refused = world.try_at(1, &head, &folder);
+    fs::set_permissions(&parent, fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(refused.is_err(), "{refused:?}");
+    assert_eq!(world.tip("pr/1"), Some(mine));
+    assert_eq!(
+        world.config("branch.pr/1.merge").as_deref(),
+        Some("refs/heads/mine")
+    );
+    assert_eq!(
+        world.config("branch.pr/1.remote").as_deref(),
+        Some("origin")
+    );
+}
+
+#[test]
+fn a_branch_remove_cannot_delete_after_the_worktree_went_answers_it_kept() {
+    let world = World::new();
+    let head = world.same(1, "feat", "feat.txt");
+    world.tried(1, &head);
+    let lock = world.root.join(".git/refs/heads/pr/1.lock");
+    fs::write(&lock, "").unwrap();
+    let removed = world
+        .core
+        .remove_pull_request(world.path(), &World::key(1), &head, &head.oid);
+    fs::remove_file(&lock).unwrap();
+    let Ok(PullCheckout::Parked { tip, relation, .. }) = removed else {
+        panic!("not parked: {removed:?}");
+    };
+    assert_eq!((tip, relation), (head.oid.clone(), Relation::UpToDate));
+    assert!(!world.folder(1).exists());
+    assert_eq!(world.worktrees(), 1);
+    let PullCheckout::Absent { .. } = world.remove(1, &head, &head.oid) else {
+        panic!("a second remove is not absent");
+    };
+    assert_eq!(world.tip("pr/1"), None);
+}
+
+#[test]
 fn a_failing_post_checkout_hook_still_answers_the_copy_with_its_trouble() {
     let world = World::new();
     let head = world.same(1, "feat", "feat.txt");

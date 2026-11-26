@@ -1,9 +1,13 @@
 use super::{PullCheckout, PullHead, PullKey, Relation, seen_at, state, state::holder};
 use crate::{
-    BranchTip, Coordinator, Oid, RepositoryError, WantedCommits,
+    BranchRef, BranchTip, Coordinator, Oid, RepositoryError, WantedCommits,
     git::{Deadline, LocalWrite},
     repository::{self, WorktreeRecord},
-    write::{RefTxn, Repo, branches, branches::Listing, worktrees},
+    write::{
+        RefTxn, Repo, branches,
+        branches::{Listing, Setting},
+        worktrees,
+    },
 };
 use std::path::Path;
 
@@ -41,36 +45,51 @@ impl Coordinator {
                     return state::read(&main, pull, head, reads);
                 }
                 let tip = seen_at(&listing, &branch, seen)?;
-                let txn = RefTxn::begin(&main, deadline)?;
-                if let Some(record) = holder(listing.worktrees(), &branch) {
-                    let name = record.name();
-                    worktrees::refuse_removal(&main, record, &name, reads)?;
-                    let ran = txn.worktree(&["remove", &record.listed]).run(deadline);
-                    let reads = deadline.renewed().reads();
-                    let listed = |found: &WorktreeRecord| found.listed == record.listed;
-                    if repository::worktree_records(&main.root, reads)?
-                        .iter()
-                        .any(listed)
-                    {
-                        return Err(worktrees::removal_refusal(ran, &name));
-                    }
-                    let root = record.root.as_deref().unwrap_or(Path::new(&record.listed));
-                    store.forget_worktree(&log, &root.to_string_lossy())?;
-                }
-                let reads = deadline.renewed().reads();
                 let relation = state::compare(&main.root, &tip, &head.oid, reads)?;
-                if matches!(relation, Relation::UpToDate | Relation::Behind { .. }) {
-                    let txn = txn.renewed()?;
-                    branches::run_delete(
-                        &txn,
-                        &BranchTip {
-                            reference: branch.clone(),
-                            oid: tip,
-                        },
-                    )?;
-                    branches::set_config(&txn, &branch, &slot.config, &[])?;
-                }
-                state::read(&main, pull, head, deadline.renewed().reads())
+                let plan = state::plan(&main, listing.worktrees(), &branch, pull, head, reads)?;
+                let txn = RefTxn::begin(&main, deadline)?;
+                let removed = match holder(listing.worktrees(), &branch) {
+                    None => false,
+                    Some(record) => {
+                        let name = record.name();
+                        worktrees::refuse_removal(&main, record, &name, reads)?;
+                        let ran = txn.worktree(&["remove", &record.listed]).run(deadline);
+                        let reads = deadline.renewed().reads();
+                        let listed = |found: &WorktreeRecord| found.listed == record.listed;
+                        let stays = repository::worktree_records(&main.root, reads).map_or_else(
+                            |_| !ran.as_ref().is_ok_and(|ran| ran.code() == Some(0)),
+                            |records| records.iter().any(listed),
+                        );
+                        if stays {
+                            return Err(worktrees::removal_refusal(ran, &name));
+                        }
+                        let root = record.root.as_deref().unwrap_or(Path::new(&record.listed));
+                        // Once the worktree is gone, Remove answers the copy
+                        // as it is, so a step that fails from here on keeps
+                        // what it would have tidied away.
+                        let _ = store.forget_worktree(&log, &root.to_string_lossy());
+                        true
+                    }
+                };
+                let deleted = matches!(relation, Relation::UpToDate | Relation::Behind { .. })
+                    && match txn
+                        .renewed()
+                        .and_then(|txn| delete(&txn, &branch, &tip, &slot.config))
+                    {
+                        Ok(()) => true,
+                        Err(error) if !removed => return Err(error),
+                        Err(_) => false,
+                    };
+                Ok(if deleted {
+                    PullCheckout::Absent { branch, plan }
+                } else {
+                    PullCheckout::Parked {
+                        branch,
+                        tip,
+                        relation,
+                        plan,
+                    }
+                })
             },
         )
     }
@@ -91,4 +110,23 @@ fn main_worktree(
         Some(main) if main != opened.root => opened.worktree(&main.to_string_lossy(), reads),
         Some(_) | None => Ok(opened),
     }
+}
+
+/// Deletes `branch` at `tip`. A section of settings that Git fails to drop
+/// stays behind for a branch that no longer exists.
+fn delete(
+    txn: &RefTxn<'_>,
+    branch: &BranchRef,
+    tip: &Oid,
+    config: &[Setting],
+) -> Result<(), RepositoryError> {
+    branches::run_delete(
+        txn,
+        &BranchTip {
+            reference: branch.clone(),
+            oid: tip.clone(),
+        },
+    )?;
+    let _ = branches::set_config(txn, branch, config, &[]);
+    Ok(())
 }
