@@ -18,7 +18,7 @@ const atOnce = 4;
  * Runs at most four reads at a time, in the order they were asked. The first
  * one runs alone, so a locked keychain asks once. `read` answers whether the
  * keychain let it through. While it has not, the rest are dropped instead of
- * asking again.
+ * asking again, except a write's reread, which waits for the next read.
  */
 export function createReadQueue(
   read: (request: ReadRequest) => Promise<boolean>,
@@ -53,8 +53,12 @@ export function createReadQueue(
         unlocked = passed;
         const more = again.get(key);
         again.delete(key);
-        if (!passed) waiting.clear();
-        if (passed && more) first(more);
+        if (!passed) {
+          waiting.clear();
+          // A write's reread still has to happen, after the next read gets
+          // past the keychain.
+          if (more) waiting.set(key, more);
+        } else if (more) first(more);
         else pump();
       });
     }

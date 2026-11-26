@@ -83,12 +83,16 @@ it("asks a running read once more when a write needs a fresh answer", async () =
   ]);
 });
 
-it("asks a locked keychain once, even for a read to ask again", async () => {
+it("asks a locked keychain once, and keeps a read to ask again for the next read", async () => {
   const { queue, started, end } = setup();
-  queue.add(all("a"));
+  queue.add(all("a", "b"));
   queue.addFirst(open("a"), { again: true });
   await end("a", false);
   expect(started).toEqual(["a"]);
+  queue.add(all("c"));
+  expect(started, "the write's reread comes first").toEqual(["a", "a"]);
+  await end("a");
+  expect(started).toEqual(["a", "a", "c"]);
 });
 
 it("starts nothing more once it is closed", async () => {
