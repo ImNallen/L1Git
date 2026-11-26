@@ -3,6 +3,8 @@ import { ChevronDown, MessageSquare } from "lucide-react";
 import type { ReviewThread } from "../domain/pullRequest";
 import { lineLabel } from "../domain/pullRequestDetail";
 import { chipOf, elsewhereLabel } from "../domain/reviewThreads";
+import type { Elsewhere } from "../domain/reviewThreads";
+import { CommentsElsewhere } from "./LineComments";
 import { Avatar } from "./PullRequestParts";
 import { Thread, ThreadComments } from "./PullRequestThread";
 
@@ -100,16 +102,17 @@ export function ThreadChips({
   );
 }
 
-/** The threads of a file that have no line in what is shown of it. */
+/** The threads and comments of a file that have no line in what is shown
+ * of it. */
 export function ThreadsElsewhere({
   path,
-  threads,
+  elsewhere,
   viewer,
   url,
   unfolded,
 }: {
   path: string;
-  threads: readonly ReviewThread[];
+  elsewhere: Elsewhere;
   viewer: string;
   url: string;
   unfolded: Unfolded;
@@ -127,14 +130,28 @@ export function ThreadsElsewhere({
         onClick={() => unfolded.toggle(id)}
       >
         <MessageSquare size={14} aria-hidden="true" />
-        {elsewhereLabel(threads)}
+        {elsewhereLabel(elsewhere)}
         <ChevronDown size={14} aria-hidden="true" />
       </button>
       <div id={content} className="threads-elsewhere-list" hidden={!open}>
-        {open &&
-          threads.map((thread) => (
-            <Thread key={thread.id} thread={thread} viewer={viewer} url={url} />
-          ))}
+        {open && (
+          <>
+            <CommentsElsewhere
+              drafts={elsewhere.drafts}
+              sent={elsewhere.sent}
+              viewer={viewer}
+              url={url}
+            />
+            {elsewhere.threads.map((thread) => (
+              <Thread
+                key={thread.id}
+                thread={thread}
+                viewer={viewer}
+                url={url}
+              />
+            ))}
+          </>
+        )}
       </div>
     </section>
   );

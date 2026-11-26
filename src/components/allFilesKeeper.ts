@@ -447,6 +447,19 @@ export class AllFilesKeeper {
     return furtherStep(after, inView, by);
   }
 
+  /** The change a step last went to, or else the first of the file at the
+   * top of the view. */
+  stopHere(): { id: string; stop: ChangeStop } | null {
+    const { cursor } = this;
+    const stepped = cursor && this.files.entries.get(cursor.id);
+    const went = stepped && stopsOf(stepped)[cursor.change];
+    if (stepped && went) return { id: stepped.id, stop: went };
+    const place = this.hereInFile();
+    const entry = place && this.files.entries.get(place.id);
+    const first = entry && stopsOf(entry)[0];
+    return entry && first ? { id: entry.id, stop: first } : null;
+  }
+
   step(by: 1 | -1) {
     const viewer = this.shown;
     // Pierre reckons with what it was last told.

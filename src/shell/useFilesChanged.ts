@@ -49,6 +49,7 @@ export type FilesChangedState = {
     | "nextChange"
     | "previousChange"
     | "toggleViewed"
+    | "commentOnChange"
   >;
 };
 
@@ -148,6 +149,10 @@ export function useFilesChanged({
         previousFile: () => store.go(now() - 1),
         nextChange: () => change(1),
         previousChange: () => change(-1),
+        commentOnChange: () => {
+          ref.current?.tell?.();
+          ref.current?.comment?.();
+        },
         toggleViewed: () => {
           const current = files[now()];
           if (current) mark(current, !viewed.has(current));

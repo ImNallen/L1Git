@@ -4,6 +4,7 @@ import { partialClone, pathLabel } from "../domain/filesChanged";
 import type { RangeFile } from "../domain/range";
 import { FileTotals, Moved, StatusPill, ViewedBox } from "./FileParts";
 import { ThreadsElsewhere } from "./ReviewThreads";
+import { isElsewhere } from "./useFileItems";
 import type { Unfolded } from "./ReviewThreads";
 import type { FileEntry } from "./useFileItems";
 
@@ -134,10 +135,10 @@ export function OverLines({
           some changed lines can look identical.
         </p>
       )}
-      {elsewhere.length > 0 && (
+      {isElsewhere(elsewhere) && (
         <ThreadsElsewhere
           path={file.path}
-          threads={elsewhere}
+          elsewhere={elsewhere}
           viewer={viewer}
           url={url}
           unfolded={unfolded}

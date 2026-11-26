@@ -66,6 +66,7 @@ function commands(): Commands {
     nextChange: vi.fn(),
     previousChange: vi.fn(),
     toggleViewed: vi.fn(),
+    commentOnChange: vi.fn(),
     toggleSidebar: vi.fn(),
     toggleInspector: vi.fn(),
     fetch: vi.fn(),
@@ -764,13 +765,14 @@ describe("staging and undo", () => {
     const pressed = (context: ActionContext, letter: string, init = {}) =>
       shortcutAction(context, key(letter, init), true)?.id ?? null;
     expect(
-      ["j", "k", "n", "p", "v"].map((each) => pressed(files, each)),
+      ["j", "k", "n", "p", "v", "c"].map((each) => pressed(files, each)),
     ).toEqual([
       "nextFile",
       "previousFile",
       "nextChange",
       "previousChange",
       "toggleViewed",
+      "commentOnChange",
     ]);
     const at = (at: number) => ({
       ...files,

@@ -15,6 +15,7 @@
 @import "./styles/pullRequestCheckout.css";
 @import "./styles/filesChanged.css";
 @import "./styles/viewedFiles.css";
+@import "./styles/lineComments.css";
 
 :root {
   font-family: "InterVariable", Inter, sans-serif;

@@ -8,9 +8,11 @@ import {
   commentsIn,
   elsewhereLabel,
   firstWords,
-  placeThreads,
+  placeNotes,
   threadsByFile,
 } from "./reviewThreads";
+import type { Notes } from "./reviewThreads";
+import { draftKey } from "./drafts";
 
 const at = "2026-11-24T10:00:00Z";
 const said = (by: string | null, body = "Why?") => ({ id: "C", by, at, body });
@@ -100,17 +102,42 @@ index 0000000..2222222
 \\ No newline at end of file
 `);
 
-describe("placeThreads", () => {
-  const places = (threads: ReviewThread[], of = patch) => {
-    const { onLines, elsewhere } = placeThreads(threads, of);
+const head = oidSchema.parse("1".repeat(40));
+const older = oidSchema.parse("0".repeat(40));
+const anchor = (line: number, side: "left" | "right" = "right") => ({
+  kind: "line" as const,
+  path: "src/a.ts",
+  side,
+  line,
+  start: null,
+});
+const key = (line: number, at = head) => draftKey(anchor(line), at);
+const nothing: Notes = { threads: [], drafts: [], sent: [], box: null };
+
+describe("placeNotes", () => {
+  const places = (notes: Partial<Notes>, of = patch) => {
+    const { onLines, elsewhere } = placeNotes(
+      { ...nothing, ...notes },
+      head,
+      of,
+    );
     return {
       lines: onLines.map((lines) =>
         lines.map(
-          ({ side, lineNumber, metadata }) =>
-            `${side} ${lineNumber}: ${metadata.join()}`,
+          ({ side, lineNumber, metadata: { threads, drafts, sent, box } }) =>
+            `${side} ${lineNumber}: ${[
+              ...threads,
+              ...drafts.map(() => "draft"),
+              ...sent,
+              ...(box ? ["box"] : []),
+            ].join()}`,
         ),
       ),
-      elsewhere: elsewhere.map(({ id }) => id).join(),
+      elsewhere: [
+        ...elsewhere.threads.map(({ id }) => id),
+        ...elsewhere.drafts.map(() => "draft"),
+        ...elsewhere.sent,
+      ].join(),
     };
   };
 
@@ -130,7 +157,7 @@ describe("placeThreads", () => {
     ["an outdated line", { line: 21, outdated: true }, null],
     ["the whole file", { line: null }, null],
   ])("places a thread on %s", (_, fields, expected) => {
-    expect(places([thread("t", fields)])).toEqual(
+    expect(places({ threads: [thread("t", fields)] })).toEqual(
       expected === null
         ? { lines: [[]], elsewhere: "t" }
         : { lines: [[`${expected}: t`]], elsewhere: "" },
@@ -139,22 +166,26 @@ describe("placeThreads", () => {
 
   it("keeps threads on one line together, in their order", () => {
     expect(
-      places([
-        thread("1", { line: 22 }),
-        thread("2", { line: 11, side: "left" }),
-        thread("3", { line: 22 }),
-      ]).lines,
+      places({
+        threads: [
+          thread("1", { line: 22 }),
+          thread("2", { line: 11, side: "left" }),
+          thread("3", { line: 22 }),
+        ],
+      }).lines,
     ).toEqual([["additions 22: 1,3", "deletions 11: 2"]]);
   });
 
   it("finds the part of a changed type that has the line", () => {
     expect(
       places(
-        [
-          thread("old", { line: 2, side: "left" }),
-          thread("new", { line: 1 }),
-          thread("none", { line: 2 }),
-        ],
+        {
+          threads: [
+            thread("old", { line: 2, side: "left" }),
+            thread("new", { line: 1 }),
+            thread("none", { line: 2 }),
+          ],
+        },
         typeChange,
       ),
     ).toEqual({
@@ -164,7 +195,60 @@ describe("placeThreads", () => {
   });
 
   it("has no place in a file without lines", () => {
-    expect(places([thread("t")], [])).toEqual({ lines: [], elsewhere: "t" });
+    expect(places({ threads: [thread("t")] }, [])).toEqual({
+      lines: [],
+      elsewhere: "t",
+    });
+  });
+
+  it.each<[string, Partial<Notes>, ReturnType<typeof places>]>([
+    [
+      "a pending comment on its last line, after the threads there",
+      {
+        threads: [thread("t", { line: 22 })],
+        drafts: [{ key: key(22), anchor: anchor(22), head }],
+      },
+      { lines: [["additions 22: t,draft"]], elsewhere: "" },
+    ],
+    [
+      "a pending comment of an older head elsewhere, though its line is drawn",
+      { drafts: [{ key: key(22, older), anchor: anchor(22), head: older }] },
+      { lines: [[]], elsewhere: "draft" },
+    ],
+    [
+      "a pending comment on a line that isn't drawn elsewhere",
+      { drafts: [{ key: key(40), anchor: anchor(40), head }] },
+      { lines: [[]], elsewhere: "draft" },
+    ],
+    [
+      "a sent comment on its line, and one sent at another commit elsewhere",
+      {
+        sent: [
+          { id: "now", lines: anchor(21), commit: head },
+          { id: "then", lines: anchor(21), commit: older },
+        ],
+      },
+      { lines: [["additions 21: now"]], elsewhere: "then" },
+    ],
+    [
+      "the box under its range, holding its own words and its own send",
+      {
+        drafts: [{ key: key(22), anchor: anchor(22), head }],
+        sent: [{ id: "mine", lines: anchor(22), commit: head }],
+        box: { anchor: anchor(22), attempt: "mine" },
+      },
+      { lines: [["additions 22: box"]], elsewhere: "" },
+    ],
+    [
+      "the box beside another pending comment on its line",
+      {
+        drafts: [{ key: key(11), anchor: anchor(11, "left"), head }],
+        box: { anchor: anchor(22), attempt: null },
+      },
+      { lines: [["deletions 11: draft", "additions 22: box"]], elsewhere: "" },
+    ],
+  ])("places %s", (_, notes, expected) => {
+    expect(places(notes)).toEqual(expected);
   });
 });
 
@@ -175,12 +259,17 @@ describe("what a thread says", () => {
       thread("2"),
     ];
     expect(commentsIn(threads)).toBe(71);
-    expect(elsewhereLabel(threads)).toBe(
+    const none = { threads: [], drafts: [], sent: [] };
+    expect(elsewhereLabel({ ...none, threads })).toBe(
       "71 comments that aren't on a line here",
     );
-    expect(elsewhereLabel([thread("2")])).toBe(
+    expect(elsewhereLabel({ ...none, threads: [thread("2")] })).toBe(
       "1 comment that isn't on a line here",
     );
+    expect(
+      elsewhereLabel({ threads: [], drafts: [key(2)], sent: ["sent"] }),
+      "a pending comment and a sent one count too",
+    ).toBe("2 comments that aren't on a line here");
   });
 
   it.each([

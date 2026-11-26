@@ -9,14 +9,15 @@ import type {
 import { inPlaceOfLines, modeChange, shownPath } from "../domain/filesChanged";
 import type { ReviewThread } from "../domain/pullRequest";
 import type { RangeFile } from "../domain/range";
-import type { FilePatch } from "../domain/repository";
-import { placeThreads } from "../domain/reviewThreads";
+import type { FilePatch, Oid } from "../domain/repository";
+import { placeNotes } from "../domain/reviewThreads";
+import type { Elsewhere, LineNote, Notes } from "../domain/reviewThreads";
 import type { FilesChanged, PatchRead } from "../filesChanged";
 
 const TURN_MS = 8;
 
-/** The threads on a line, or what there is to say over a file's lines. */
-export type FileNote = readonly string[] | "file";
+/** What is on a line, or what there is to say over a file's lines. */
+export type FileNote = LineNote | "file";
 type Note = DiffLineAnnotation<FileNote>;
 
 /** A file, or one of the two parts of a file whose type changed. */
@@ -32,7 +33,7 @@ export type FileEntry = {
   words: string | null;
   /** Undefined until it was asked for. */
   read: PatchRead | undefined;
-  elsewhere: readonly ReviewThread[];
+  elsewhere: Elsewhere;
   mode: string | null;
   lossy: boolean;
   /** Whether a line may be taller than the others. */
@@ -91,15 +92,20 @@ function useParsed(
   return contentMissing ? files.length : count;
 }
 
+const nowhere: Elsewhere = { threads: [], drafts: [], sent: [] };
+export const isElsewhere = ({ threads, drafts, sent }: Elsewhere) =>
+  threads.length + drafts.length + sent.length > 0;
+
 function entriesOf(
   at: number,
   file: RangeFile,
   read: PatchRead | undefined,
-  threads: readonly ReviewThread[],
+  notes: Notes,
+  head: Oid,
 ) {
   const patch = read?.kind === "ready" ? read.patch : null;
   const diffs = patch ? partsOf(file, patch) : [];
-  const { onLines, elsewhere } = placeThreads(threads, diffs);
+  const { onLines, elsewhere } = placeNotes(notes, head, diffs);
   const whole: FileEntry = {
     id: entryId(at),
     at,
@@ -120,7 +126,7 @@ function entriesOf(
       id: entryId(at, index + 1),
       part: index + 1,
       diff,
-      elsewhere: [],
+      elsewhere: nowhere,
     }),
   );
   return [whole, ...rest].map((entry) => ({
@@ -150,7 +156,7 @@ const hasNote = (entry: FileEntry) =>
     (entry.file.from !== null ||
       entry.mode !== null ||
       entry.lossy ||
-      entry.elsewhere.length > 0));
+      isElsewhere(entry.elsewhere)));
 
 function itemOf(
   entry: FileEntry,
@@ -192,6 +198,8 @@ export function useFileItems(
   contentMissing: boolean,
   threads: ReadonlyMap<RangeFile, readonly ReviewThread[]>,
   folded: ReadonlySet<RangeFile>,
+  head: Oid,
+  notesOf: (file: RangeFile) => Omit<Notes, "threads">,
 ) {
   const count = useParsed(files, patches, contentMissing);
   const before = useRef<ReadonlyMap<string, Made>>(new Map());
@@ -203,7 +211,8 @@ export function useFileItems(
         at,
         file,
         patches?.get(file),
-        threads.get(file) ?? [],
+        { threads: threads.get(file) ?? [], ...notesOf(file) },
+        head,
       )) {
         const collapsed = folded.has(file);
         const like = JSON.stringify([collapsed, hasNote(entry), onLines]);
@@ -224,6 +233,14 @@ export function useFileItems(
       }
     before.current = made;
     const items = [...made.values()].map(({ item }) => item);
-    return { items, entries, count };
-  }, [files, count, patches, threads, folded]);
+    const boxAt =
+      items.find(
+        (item) =>
+          item.type === "diff" &&
+          item.annotations?.some(
+            ({ metadata }) => metadata !== "file" && metadata.box,
+          ),
+      )?.id ?? null;
+    return { items, entries, count, boxAt };
+  }, [files, count, patches, threads, folded, head, notesOf]);
 }

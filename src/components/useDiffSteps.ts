@@ -9,7 +9,8 @@ import type { Ref, RefObject } from "react";
 import { keyExpanders } from "./expanders";
 import { VirtualizedFileDiff } from "@pierre/diffs";
 import type { FileDiffMetadata, VirtualFileMetrics } from "@pierre/diffs";
-import { changeStops, nextChange } from "../domain/changeStops";
+import { changeAt, changeStops, nextChange } from "../domain/changeStops";
+import type { ChangeStop } from "../domain/changeStops";
 import type { RangeFile } from "../domain/range";
 
 const LINE = 22;
@@ -68,6 +69,9 @@ export type DiffSteps = {
   tell?: () => void;
   /** Keeps the reader's place when marking a file folds or unfolds it. */
   beforeMark?: (file: RangeFile, isViewed: boolean) => void;
+  /** Opens the comment box on the change the view is at. False when there
+   * is none to comment on. */
+  comment?: () => boolean;
 };
 
 export function useDiffSteps(
@@ -76,12 +80,13 @@ export function useDiffSteps(
   patch: readonly FileDiffMetadata[],
   parts: () => DrawnPart[],
   startsAtEnd: boolean,
+  onComment?: (stop: ChangeStop) => boolean,
 ) {
   const stops = useMemo(() => changeStops(patch), [patch]);
-  const scroll = useCallback(
-    (by: 1 | -1, from?: number): boolean => {
+  const measure = useCallback(
+    (from?: number) => {
       const scroller = scrollerIn(body);
-      if (!scroller) return false;
+      if (!scroller) return null;
       const origin = scroller.getBoundingClientRect().top - scroller.scrollTop;
       const drawn = parts().map(({ node, instance }) => ({
         instance,
@@ -102,19 +107,35 @@ export function useDiffSteps(
         most: scroller.scrollHeight - scroller.clientHeight,
         above: ABOVE_CHANGE,
       };
+      return { scroller, topOf, view };
+    },
+    [body, stops, parts],
+  );
+  const scroll = useCallback(
+    (by: 1 | -1, from?: number): boolean => {
+      const measured = measure(from);
+      if (!measured) return false;
+      const { scroller, topOf, view } = measured;
       const to = nextChange(stops.length, topOf, view, by);
       if (to) scroller.scrollTop = to.scrollTop;
       return to !== null;
     },
-    [body, stops, parts],
+    [measure, stops],
   );
   useImperativeHandle(
     ref,
     () => ({
       step: (by) => scroll(by),
       toStart: () => scrollerIn(body)?.scrollTo({ top: 0 }),
+      comment: () => {
+        const measured = measure();
+        const at =
+          measured && changeAt(stops.length, measured.topOf, measured.view);
+        const stop = at === null ? undefined : stops[at];
+        return stop !== undefined && onComment !== undefined && onComment(stop);
+      },
     }),
-    [scroll, body],
+    [scroll, body, measure, stops, onComment],
   );
   useEffect(() => {
     if (startsAtEnd) scroll(-1, Infinity);
