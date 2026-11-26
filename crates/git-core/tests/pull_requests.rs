@@ -207,7 +207,7 @@ impl World {
         PullHead {
             reference: branch(name),
             oid: head,
-            from: HeadFrom::Same,
+            from: HeadFrom::Same { edits: true },
         }
     }
 
@@ -356,6 +356,16 @@ fn an_untried_pull_request_plans_pr_n_beside_the_main_worktree_and_where_pushes_
                 why: NoPush::NoEdits,
             },
         ),
+        (
+            6,
+            PullHead {
+                from: HeadFrom::Same { edits: false },
+                ..world.same(6, "read", "read.txt")
+            },
+            Pushes::Nowhere {
+                why: NoPush::ReadOnly,
+            },
+        ),
     ];
     for (number, head, pushes) in cases {
         match world.read(number, &head) {
@@ -443,6 +453,32 @@ fn a_same_repository_pull_request_tracks_its_branch_on_the_base_remote() {
             .undo
             .is_none()
     );
+    world.assert_main_untouched();
+}
+
+#[test]
+fn a_same_repository_pull_request_you_cannot_push_to_still_tracks_its_branch() {
+    let world = World::new();
+    let head = PullHead {
+        from: HeadFrom::Same { edits: false },
+        ..world.same(1, "feat", "feat.txt")
+    };
+    world.tried(1, &head);
+    assert_eq!(world.upstream("pr/1"), "refs/remotes/origin/feat");
+    let pushed = PullHead {
+        oid: world.commit("feat", "more.txt"),
+        ..head.clone()
+    };
+    world.publish(&[(&world.base, "refs/heads/feat".into())]);
+    let updated = world.update(1, &pushed, &head.oid, false).unwrap();
+    assert_eq!(ready(&updated).0, &pushed.oid);
+    assert!(matches!(
+        world
+            .core
+            .prepare_push(world.folder(1).to_str().unwrap())
+            .unwrap(),
+        PushAvailability::Ready { .. }
+    ));
     world.assert_main_untouched();
 }
 

@@ -388,7 +388,7 @@ function relationOf(world: World, tip: string, head: string) {
 
 function pushesOf(head: PullHead) {
   const { from } = head;
-  if (from.kind === "same")
+  if (from.kind === "same" && from.edits)
     return {
       kind: "toPullRequest",
       remote: "origin",
@@ -404,7 +404,7 @@ function pushesOf(head: PullHead) {
     };
   return {
     kind: "nowhere",
-    why: from.kind === "fork" ? "noEdits" : "forkGone",
+    why: { same: "readOnly", fork: "noEdits", gone: "forkGone" }[from.kind],
   };
 }
 

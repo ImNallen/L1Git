@@ -2239,7 +2239,7 @@ describe("real Rust writes, undo, and redo", () => {
     const head = {
       reference: "refs/heads/feat/history",
       oid,
-      from: { kind: "same" },
+      from: { kind: "same", edits: true },
     };
     const copy = async (op: string, fields: Record<string, unknown> = {}) =>
       answer(op, pullCheckoutSchema)

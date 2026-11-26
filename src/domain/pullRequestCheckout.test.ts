@@ -16,8 +16,37 @@ describe("pullHead", () => {
     expect(pullHead(head({}))).toEqual({
       reference: "refs/heads/feat/replay-ui",
       oid,
-      from: { kind: "same" },
+      from: { kind: "same", edits: true },
     });
+  });
+
+  it("says the base repository takes your pushes when you can write to it, or, with no role GitHub names, when you wrote the pull request", () => {
+    const edits = (
+      viewerIsAuthor: boolean,
+      viewerPermission: PullRequest["viewerPermission"],
+    ) => {
+      const { from } = pullHead({
+        ...head({}),
+        viewerIsAuthor,
+        viewerPermission,
+      });
+      return from.kind === "same" && from.edits;
+    };
+    for (const [viewerIsAuthor, permission, expected] of [
+      [false, "admin", true],
+      [false, "maintain", true],
+      [false, "write", true],
+      [false, "triage", false],
+      [false, "read", false],
+      [false, "unknown", false],
+      [true, "read", false],
+      [true, "write", true],
+      [true, "unknown", true],
+    ] as const)
+      expect(
+        edits(viewerIsAuthor, permission),
+        `${viewerIsAuthor} ${permission}`,
+      ).toBe(expected);
   });
 
   it("says a fork takes your pushes when it is yours, or its author allows edits and you can push to the base", () => {
@@ -116,7 +145,7 @@ describe("pullCheckoutSchema", () => {
   });
 
   it("reads each reason pushes go nowhere", () => {
-    for (const why of ["noEdits", "forkGone", "noRemote"] as const)
+    for (const why of ["noEdits", "forkGone", "noRemote", "readOnly"] as const)
       expect(
         pullCheckoutSchema.parse({
           kind: "absent",

@@ -9,7 +9,7 @@ const pull = { github: { owner: "octo", repo: "pin" }, number: 7 };
 const head = (oid: string) => ({
   reference: "refs/heads/feat",
   oid,
-  from: { kind: "same" },
+  from: { kind: "same", edits: true },
 });
 
 function bridge() {
@@ -45,6 +45,18 @@ describe("the fake bridge's pull request copies, as the core keeps them", () => 
       head: head(A),
     });
     expect(read.data).toMatchObject({ kind: "ready", worktree });
+  });
+
+  it("plans pushes to the head branch only for a viewer the repository takes them from", async () => {
+    const { run } = bridge();
+    const pushes = async (edits: boolean) =>
+      (
+        (await run("pullCheckout", {
+          head: { ...head(A), from: { kind: "same", edits } },
+        })) as unknown as { data: { plan: { pushes: unknown } } }
+      ).data.plan.pushes;
+    expect(await pushes(true)).toMatchObject({ kind: "toPullRequest" });
+    expect(await pushes(false)).toEqual({ kind: "nowhere", why: "readOnly" });
   });
 
   it("compares the copy with the head on each read, and Update fetches what the author pushed", async () => {

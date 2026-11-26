@@ -54,7 +54,8 @@ pub struct PullHead {
     deny_unknown_fields
 )]
 pub enum HeadFrom {
-    Same,
+    /// `edits` when the repository takes pushes from you.
+    Same { edits: bool },
     /// `edits` when the fork takes pushes from you.
     Fork {
         repository: GitHubRepository,
@@ -130,6 +131,9 @@ pub enum NoPush {
     /// No remote of the repository is the pull request's, so Try cannot
     /// fetch it.
     NoRemote,
+    /// The repository takes no push from you. The branch follows the head
+    /// branch, so pulling still works.
+    ReadOnly,
 }
 
 #[derive(Debug, Clone, Serialize)]

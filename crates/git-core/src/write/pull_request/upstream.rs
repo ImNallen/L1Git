@@ -6,10 +6,12 @@ use crate::{
 use std::path::Path;
 
 pub(super) enum Upstream {
+    /// The head branch on `remote`, which takes your pushes when `edits`.
     Branch {
         remote: String,
         merge: BranchRef,
         adds: Option<AddRemote>,
+        edits: bool,
     },
     /// `refs/pull/<number>/head` on the base remote, which GitHub keeps
     /// after a fork is gone and which takes no push.
@@ -62,11 +64,12 @@ impl Upstream {
         };
         let merge = head.reference.clone();
         let fork = match &head.from {
-            HeadFrom::Same => {
+            HeadFrom::Same { edits } => {
                 return Ok(Some(Self::Branch {
                     remote: base,
                     merge,
                     adds: None,
+                    edits: *edits,
                 }));
             }
             HeadFrom::Fork { edits: false, .. } => {
@@ -91,6 +94,7 @@ impl Upstream {
                 remote,
                 merge,
                 adds: None,
+                edits: true,
             }));
         }
         let url = remotes::sibling_url(&remotes::raw_url(root, &base, reads)?, fork).ok_or_else(
@@ -109,6 +113,7 @@ impl Upstream {
             remote: name.clone(),
             merge,
             adds: Some(AddRemote { name, url }),
+            edits: true,
         }))
     }
 
@@ -153,10 +158,14 @@ impl Upstream {
 
     fn pushes(&self) -> Pushes {
         match self {
+            Self::Branch { edits: false, .. } => Pushes::Nowhere {
+                why: NoPush::ReadOnly,
+            },
             Self::Branch {
                 remote,
                 merge,
                 adds,
+                edits: true,
             } => Pushes::ToPullRequest {
                 remote: remote.clone(),
                 destination: merge.clone(),

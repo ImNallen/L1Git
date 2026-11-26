@@ -21,7 +21,11 @@ export const pullHeadSchema = z.strictObject({
   reference: localRefSchema,
   oid: oidSchema,
   from: z.discriminatedUnion("kind", [
-    z.strictObject({ kind: z.literal("same") }),
+    z.strictObject({
+      kind: z.literal("same"),
+      /** The repository takes your pushes. */
+      edits: z.boolean(),
+    }),
     z.strictObject({
       kind: z.literal("fork"),
       repository: githubRepositorySchema,
@@ -52,7 +56,7 @@ const planSchema = z.strictObject({
     z.strictObject({
       kind: z.literal("nowhere"),
       /** `noRemote`: no remote of the repository is the pull request's, so Try cannot fetch it. */
-      why: z.enum(["noEdits", "forkGone", "noRemote"]),
+      why: z.enum(["noEdits", "forkGone", "noRemote", "readOnly"]),
     }),
   ]),
 });
@@ -94,9 +98,9 @@ export type PullKey = z.infer<typeof pullKeySchema>;
 export type PullHead = z.infer<typeof pullHeadSchema>;
 export type PullCheckout = z.infer<typeof pullCheckoutSchema>;
 
-/** GitHub lets a maintainer push to a fork that allows edits, and anyone
- * with write access to the base repository counts as one. */
-const pushesToForks = new Set<PullRequest["viewerPermission"]>([
+/** The roles that can push to the base repository. GitHub lets them push to
+ * a fork that allows edits too, as maintainers. */
+const writers = new Set<PullRequest["viewerPermission"]>([
   "admin",
   "maintain",
   "write",
@@ -105,14 +109,17 @@ const pushesToForks = new Set<PullRequest["viewerPermission"]>([
 export function pullHead(pull: PullRequest): PullHead {
   const { branch, oid, repository, crossRepository, maintainerCanModify } =
     pull.head;
-  const edits =
-    pull.viewerIsAuthor ||
-    (maintainerCanModify && pushesToForks.has(pull.viewerPermission));
+  const { viewerIsAuthor, viewerPermission } = pull;
+  const writes = writers.has(viewerPermission);
+  /** An author can lose write access to the base, so a role GitHub names
+   * decides. Without one, the author once pushed the head branch there. */
+  const writesBase = viewerPermission === "unknown" ? viewerIsAuthor : writes;
+  const edits = viewerIsAuthor || (maintainerCanModify && writes);
   return pullHeadSchema.parse({
     reference: `refs/heads/${branch}`,
     oid,
     from: !crossRepository
-      ? { kind: "same" }
+      ? { kind: "same", edits: writesBase }
       : repository === null
         ? { kind: "gone" }
         : {
