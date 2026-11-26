@@ -28,7 +28,8 @@ pub struct SentView {
     at: u64,
     write: Write,
     drafts: Vec<Draft>,
-    /// This process is sending it now. Otherwise its outcome is unknown.
+    /// An L1 Git on this folder is sending it now. Otherwise its outcome is
+    /// unknown.
     sending: bool,
 }
 
@@ -42,13 +43,13 @@ pub struct Carried {
 }
 
 impl Sent {
-    pub(super) fn view(&self, sending: Option<&AttemptId>) -> SentView {
+    pub(super) fn view(&self, sending: bool) -> SentView {
         SentView {
             attempt: self.attempt.clone(),
             at: self.at,
             write: self.write.clone(),
             drafts: self.drafts.clone(),
-            sending: sending == Some(&self.attempt),
+            sending,
         }
     }
 }

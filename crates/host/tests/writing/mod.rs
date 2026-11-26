@@ -53,6 +53,10 @@ impl World {
         })
     }
 
+    pub fn gh(&self) -> std::path::PathBuf {
+        self.gh.path()
+    }
+
     /// Another L1 Git on the same folder, signed in again: the app after a
     /// restart, or a second process.
     pub fn restarted(&self) -> Host {

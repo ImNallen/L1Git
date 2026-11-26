@@ -31,7 +31,6 @@ use github::Http;
 use state::{Saved, State, Unreadable, unix_millis};
 use vault::{MemoryVault, SystemVault, Vault};
 use wire::Failure;
-use writes::Lanes;
 
 pub use device::ClientId;
 pub use github::{Endpoints, Login};
@@ -75,7 +74,6 @@ pub struct Host {
     client_id: Option<ClientId>,
     writer: Mutex<()>,
     state: Mutex<State>,
-    lanes: Lanes,
 }
 
 impl Host {
@@ -112,7 +110,6 @@ impl Host {
             vault,
             client_id: None,
             writer: Mutex::new(()),
-            lanes: Lanes::default(),
             state: Mutex::new(State {
                 revision: unix_millis(),
                 saved,

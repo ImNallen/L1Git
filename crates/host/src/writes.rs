@@ -14,8 +14,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::drafts::{AttemptId, Lines, MOST_CHARS, NodeId, Oid, PullDrafts};
 
-pub(crate) use ledger::Lanes;
-
 const UNKNOWN: &str = "L1 Git sent this to GitHub and got no answer it could read, so GitHub may or may not have done it. L1 Git looks again each time it reads this pull request.";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

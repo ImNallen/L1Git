@@ -1,4 +1,5 @@
 use std::io::Write;
+use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::{fs, io, process};
@@ -84,6 +85,18 @@ impl Shelf {
         }
     }
 
+    /// The way to the lane of the pull request `name` names.
+    pub(super) fn gate(&self, name: &str) -> Gate<'_> {
+        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+        for byte in name.bytes() {
+            hash = (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3);
+        }
+        Gate {
+            path: self.dir.join(format!("drafts.lane.{hash:016x}.lock")),
+            _shelf: PhantomData,
+        }
+    }
+
     /// Fails only when `drafts.json` still holds what it held before. A book
     /// with nothing in it is left out.
     pub(super) fn save(mut self, book: Book) -> Result<(), Failure> {
@@ -91,6 +104,58 @@ impl Shelf {
             self.pulls.push(book);
         }
         save(&self.dir, self.pulls)
+    }
+}
+
+/// A pull request's lane: the write that holds it is sending, in this L1 Git
+/// or another on this folder, from the read before it leaves until its
+/// record is updated. The system lets go of it when the process ends, however
+/// it ends, so a write cut short reads as unknown.
+pub(crate) struct Lane {
+    _file: fs::File,
+    path: PathBuf,
+}
+
+/// Only while the shelf is open, so a look at a lane never makes a write
+/// that takes it fail, and no one is between opening a lane and locking it
+/// when its file goes.
+pub(crate) struct Gate<'a> {
+    path: PathBuf,
+    _shelf: PhantomData<&'a Shelf>,
+}
+
+impl Gate<'_> {
+    /// `None` while another write holds it.
+    pub(crate) fn take(&self) -> Result<Option<Lane>, Failure> {
+        let file = fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&self.path)
+            .map_err(|_| unwritable())?;
+        match file.try_lock() {
+            Ok(()) => Ok(Some(Lane {
+                _file: file,
+                path: self.path.clone(),
+            })),
+            Err(fs::TryLockError::WouldBlock) => Ok(None),
+            Err(fs::TryLockError::Error(_)) => Err(unwritable()),
+        }
+    }
+
+    /// Whether a write holds it now. A lane L1 Git can't look at counts as
+    /// held, so nothing is kept or sent again while it may be sending.
+    pub(crate) fn held(&self) -> bool {
+        match fs::File::open(&self.path) {
+            Ok(file) => file.try_lock().is_err(),
+            Err(error) => error.kind() != io::ErrorKind::NotFound,
+        }
+    }
+
+    pub(crate) fn free(&self, lane: Lane) {
+        let Lane { _file: file, path } = lane;
+        drop(file);
+        let _ = fs::remove_file(path);
     }
 }
 

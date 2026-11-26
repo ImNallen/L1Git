@@ -17,6 +17,7 @@ use crate::pulls::Repository;
 use crate::state::unix_millis;
 use crate::wire::Failure;
 use file::Shelf;
+pub(crate) use file::{Gate, Lane};
 pub(crate) use sent::{Carried, Sent, SentView};
 
 /// Pull requests with drafts, across every account and GitHub.
@@ -286,7 +287,7 @@ pub(crate) struct BookKey {
 }
 
 impl Book {
-    fn view(&self, set_aside: Option<String>, sending: Option<&AttemptId>) -> PullDrafts {
+    fn view(&self, set_aside: Option<String>, sending: bool) -> PullDrafts {
         PullDrafts {
             drafts: self.drafts.clone(),
             refused: None,
@@ -298,13 +299,7 @@ impl Book {
 
 /// `None` when the change is done, and `book` is then what to save. `room`
 /// says whether a book that was not there before may be kept.
-fn apply(
-    book: &mut Book,
-    change: Change,
-    now: u64,
-    room: bool,
-    sending: Option<&AttemptId>,
-) -> Option<Refused> {
+fn apply(book: &mut Book, change: Change, now: u64, room: bool, gate: &Gate) -> Option<Refused> {
     match change {
         Change::Read {} => None,
         Change::Put { anchor, head, .. } if book.holds(&anchor, &head) => Some(Refused::Sent),
@@ -355,7 +350,7 @@ fn apply(
                 Some(_) => Some(Refused::Stale),
             }
         }
-        Change::Keep { attempt } if sending == Some(&attempt) => Some(Refused::Sending),
+        Change::Keep { .. } if gate.held() => Some(Refused::Sending),
         Change::Keep { attempt } => {
             book.give_back(&attempt, true);
             None
@@ -372,10 +367,23 @@ impl Host {
         key: &BookKey,
         change: impl FnOnce(&mut Book, bool) -> (R, bool),
     ) -> Result<(R, PullDrafts), Failure> {
+        self.gated(key, |book, room, _| change(book, room))
+    }
+
+    /// `shelved`, with the way to the pull request's lane. A lane freed here
+    /// is free to others only once the book is saved, since they look under
+    /// the same lock.
+    pub(crate) fn gated<R>(
+        &self,
+        key: &BookKey,
+        change: impl FnOnce(&mut Book, bool, &Gate) -> (R, bool),
+    ) -> Result<(R, PullDrafts), Failure> {
         let mut shelf = Shelf::open(self.file.parent().unwrap_or(Path::new(".")))?;
         let (mut book, room) = shelf.take(self.endpoints.api(), key);
-        let (answer, save) = change(&mut book, room);
-        let view = book.view(shelf.set_aside.clone(), self.sending(key).as_ref());
+        let gate = shelf.gate(&self.lane_name(key));
+        let (answer, save) = change(&mut book, room, &gate);
+        let sending = !book.sent.is_empty() && gate.held();
+        let view = book.view(shelf.set_aside.clone(), sending);
         if save {
             shelf.save(book)?;
         }
@@ -383,10 +391,9 @@ impl Host {
     }
 
     pub(crate) fn drafts(&self, key: &BookKey, change: Change) -> Result<PullDrafts, Failure> {
-        let sending = self.sending(key);
         let is_read = matches!(change, Change::Read {});
-        let (refused, view) = self.shelved(key, |book, room| {
-            let refused = apply(book, change, unix_millis(), room, sending.as_ref());
+        let (refused, view) = self.gated(key, |book, room, gate| {
+            let refused = apply(book, change, unix_millis(), room, gate);
             (refused, refused.is_none() && !is_read)
         })?;
         Ok(PullDrafts { refused, ..view })

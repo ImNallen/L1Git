@@ -1,60 +1,22 @@
 //! One write at a time per pull request. A write takes its pull request's
-//! lane in this process first, reads what is already where its result would
-//! appear, is recorded in `drafts.json` with the drafts it carries, and only
-//! then leaves. Its record goes once GitHub's answer, or a later read, says
-//! what happened.
-
-use std::collections::HashMap;
-use std::sync::{Mutex, MutexGuard, PoisonError};
+//! lane first, an OS lock in the configuration folder that every L1 Git on
+//! it shares, reads what is already where its result would appear, is
+//! recorded in `drafts.json` with the drafts it carries, and only then
+//! leaves. Its record goes once GitHub's answer, or a later read, says what
+//! happened, and the lane goes with that update.
 
 use super::{Checked, Seen, Settled, Write, Written, Wrote, not_sent};
 use crate::Host;
-use crate::drafts::{AttemptId, BookKey, Carried};
+use crate::drafts::{AttemptId, BookKey, Carried, Lane};
 use crate::github::{ApiError, Login};
 use crate::state::{CommitId, unix_millis};
 use crate::wire::{ErrorKind, Failure};
 
 const BUSY: &str = "Another write for this pull request is still sending, so L1 Git sent nothing.";
-
-/// The pull requests this process is sending a write for, and which write
-/// once it has left. Every window of this process shares them.
-#[derive(Default)]
-pub(crate) struct Lanes(Mutex<HashMap<String, Option<AttemptId>>>);
-
-struct Lane<'a> {
-    lanes: &'a Lanes,
-    key: String,
-}
-
-impl Lanes {
-    fn lock(&self) -> MutexGuard<'_, HashMap<String, Option<AttemptId>>> {
-        self.0.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-
-    fn take(&self, key: String) -> Option<Lane<'_>> {
-        let mut held = self.lock();
-        if held.contains_key(&key) {
-            return None;
-        }
-        held.insert(key.clone(), None);
-        Some(Lane { lanes: self, key })
-    }
-}
-
-impl Lane<'_> {
-    fn sends(&self, attempt: Option<&AttemptId>) {
-        self.lanes.lock().insert(self.key.clone(), attempt.cloned());
-    }
-}
-
-impl Drop for Lane<'_> {
-    fn drop(&mut self) {
-        self.lanes.lock().remove(&self.key);
-    }
-}
+const ELSEWHERE: &str = "Another L1 Git window is sending this. L1 Git sent nothing.";
 
 impl Host {
-    fn lane_key(&self, key: &BookKey) -> String {
+    pub(crate) fn lane_name(&self, key: &BookKey) -> String {
         format!(
             "{} {} {}#{}",
             self.endpoints.api().as_str(),
@@ -63,15 +25,6 @@ impl Host {
             key.number
         )
         .to_lowercase()
-    }
-
-    /// The write this process is sending for `key`'s pull request.
-    pub(crate) fn sending(&self, key: &BookKey) -> Option<AttemptId> {
-        self.lanes
-            .lock()
-            .get(&self.lane_key(key))
-            .cloned()
-            .flatten()
     }
 
     /// Sent only as `as_login`, so a click made for one account never posts
@@ -105,19 +58,30 @@ impl Host {
             Ok(generation) => generation,
             Err(message) => return Wrote::alone(not_sent(message)),
         };
-        let Some(lane) = self.lanes.take(self.lane_key(key)) else {
-            return Wrote::alone(not_sent(BUSY));
-        };
-        match self.shelved(key, |book, _| (book.held(), false)) {
-            Ok((Ok(()), _)) => {}
-            Ok((Err(problem), drafts)) => {
+        let taken = self.gated(key, |book, _, gate| {
+            let lane = match gate.take() {
+                Ok(Some(lane)) => match book.held() {
+                    Ok(()) => Ok(lane),
+                    Err(problem) => {
+                        gate.free(lane);
+                        Err(not_sent(problem))
+                    }
+                },
+                Ok(None) => Err(not_sent(BUSY)),
+                Err(failure) => Err(unrecorded(failure)),
+            };
+            (lane, false)
+        });
+        let lane = match taken {
+            Ok((Ok(lane), _)) => lane,
+            Ok((Err(written), drafts)) => {
                 return Wrote {
-                    written: not_sent(problem),
+                    written,
                     drafts: Some(drafts),
                 };
             }
             Err(failure) => return Wrote::alone(unrecorded(failure)),
-        }
+        };
         self.as_connection(generation, |github| {
             let before = match github.before(&write, &key.login) {
                 Ok(before) => before,
@@ -144,10 +108,8 @@ impl Host {
                 }
                 Err(failure) => return Wrote::alone(unrecorded(failure)),
             }
-            lane.sends(Some(&attempt));
             let written = github.write(&write);
-            lane.sends(None);
-            self.finish(key, &attempt, written)
+            self.finish(key, &attempt, written, lane)
         })
         .unwrap_or_else(|failure| Wrote::alone(not_sent(failure.message)))
     }
@@ -159,28 +121,33 @@ impl Host {
             Ok(generation) => generation,
             Err(message) => return Wrote::alone(not_sent(message)),
         };
-        let Some(lane) = self.lanes.take(self.lane_key(key)) else {
-            return Wrote::alone(not_sent(BUSY));
-        };
         let gone = "This write isn't waiting anymore, so L1 Git sent nothing.";
-        self.as_connection(generation, |github| {
-            let found = self.shelved(key, |book, _| {
-                let found = book.sent().iter().find(|sent| sent.attempt == *attempt);
-                (found.cloned(), false)
-            });
-            let sent = match found {
-                Ok((Some(sent), _)) => sent,
-                Ok((None, drafts)) => {
-                    return Wrote {
-                        written: not_sent(gone),
-                        drafts: Some(drafts),
-                    };
-                }
-                Err(failure) => return Wrote::alone(not_sent(failure.message)),
+        let taken = self.gated(key, |book, _, gate| {
+            let found = book.sent().iter().find(|sent| sent.attempt == *attempt);
+            let taken = match found {
+                None => Err(not_sent(gone)),
+                Some(sent) => match gate.take() {
+                    Ok(Some(lane)) => Ok((lane, sent.clone())),
+                    Ok(None) => Err(not_sent(ELSEWHERE)),
+                    Err(failure) => Err(unrecorded(failure)),
+                },
             };
+            (taken, false)
+        });
+        let (lane, sent) = match taken {
+            Ok((Ok(taken), _)) => taken,
+            Ok((Err(written), drafts)) => {
+                return Wrote {
+                    written,
+                    drafts: Some(drafts),
+                };
+            }
+            Err(failure) => return Wrote::alone(not_sent(failure.message)),
+        };
+        self.as_connection(generation, |github| {
             match github.seen(&sent.write, &sent.before, &key.login) {
                 Ok(Some(Seen::Landed { echo })) => {
-                    return self.finish(key, attempt, Written::Done { echo });
+                    return self.finish(key, attempt, Written::Done { echo }, lane);
                 }
                 Ok(_) => {}
                 Err(error) => return Wrote::alone(github.unread(error)),
@@ -202,10 +169,8 @@ impl Host {
                 }
                 Err(failure) => return Wrote::alone(unrecorded(failure)),
             }
-            lane.sends(Some(attempt));
             let written = github.write(&sent.write);
-            lane.sends(None);
-            self.finish(key, attempt, written)
+            self.finish(key, attempt, written, lane)
         })
         .unwrap_or_else(|failure| Wrote::alone(not_sent(failure.message)))
     }
@@ -213,13 +178,14 @@ impl Host {
     /// Done drops the drafts the write carried, an answer that GitHub didn't
     /// do it gives them back, and unknown keeps the record for a read to
     /// settle. A record that can't be updated stays, and a read settles it.
-    fn finish(&self, key: &BookKey, attempt: &AttemptId, written: Written) -> Wrote {
-        let finished = self.shelved(key, |book, _| {
+    fn finish(&self, key: &BookKey, attempt: &AttemptId, written: Written, lane: Lane) -> Wrote {
+        let finished = self.gated(key, |book, _, gate| {
             let changed = match &written {
                 Written::Done { .. } => book.landed(attempt),
                 Written::NotSent { .. } | Written::Refused { .. } => book.give_back(attempt, false),
                 Written::Unknown { .. } => false,
             };
+            gate.free(lane);
             ((), changed)
         });
         Wrote {
@@ -234,14 +200,12 @@ impl Host {
         let generation = self
             .signed_in_as(&key.login)
             .map_err(|message| Failure::new(ErrorKind::NotConnected, message))?;
-        let sending = self.sending(key);
-        let (waiting, mut drafts) = self.shelved(key, |book, _| {
-            let waiting: Vec<_> = book
-                .sent()
-                .iter()
-                .filter(|sent| Some(&sent.attempt) != sending.as_ref())
-                .cloned()
-                .collect();
+        let (waiting, mut drafts) = self.gated(key, |book, _, gate| {
+            let waiting = if book.sent().is_empty() || gate.held() {
+                Vec::new()
+            } else {
+                book.sent().to_vec()
+            };
             (waiting, false)
         })?;
         if waiting.is_empty() {
@@ -267,15 +231,15 @@ impl Host {
         })?;
         let mut settled = Vec::new();
         if !seen.is_empty() {
-            let sending = self.sending(key);
-            (settled, drafts) = self.shelved(key, |book, _| {
+            (settled, drafts) = self.gated(key, |book, _, gate| {
                 let mut settled = Vec::new();
+                let sending = gate.held();
                 for (sent, seen) in seen {
                     let unchanged = book
                         .sent()
                         .iter()
                         .any(|now| now.attempt == sent.attempt && now.at == sent.at);
-                    if !unchanged || sending.as_ref() == Some(&sent.attempt) {
+                    if !unchanged || sending {
                         continue;
                     }
                     match seen {
