@@ -6,11 +6,11 @@ import {
   moveOf,
   pullCheckoutSchema,
   pullHead,
-  pullHeadSchema,
   pullKeySchema,
   pushesWords,
   removable,
   replaceWords,
+  underHome,
 } from "./pullRequestCheckout";
 import type { HeldCheckout, Plan } from "./pullRequestCheckout";
 import type { Oid } from "./repository";
@@ -232,7 +232,7 @@ describe("barWords", () => {
       "at 9c2e1b4, the pull request has new commits on GitHub",
     ],
   ] as const)("says where a worktree stands: %j", (relation, state) => {
-    expect(barWords(ready(relation))).toEqual({
+    expect(barWords(ready(relation), null)).toEqual({
       lead: "Checked out locally in",
       place: root,
       state,
@@ -244,13 +244,19 @@ describe("barWords", () => {
     [{ kind: "inProgress", operation: "rebase" }, "with a rebase in progress"],
     [{ kind: "missing" }, "but its folder is missing"],
   ] as const)("notes what the worktree holds: %j", (changes, noted) => {
-    expect(barWords(ready({ kind: "upToDate" }, changes)).state).toBe(
+    expect(barWords(ready({ kind: "upToDate" }, changes), null).state).toBe(
       `at 9c2e1b4, up to date, ${noted}`,
     );
   });
 
+  it("writes the folder with ~ when it is under the home folder", () => {
+    expect(barWords(ready({ kind: "upToDate" }), "/u").place).toBe(
+      "~/src/.worktrees/l1git-pr-128",
+    );
+  });
+
   it("names the branch it kept when no worktree has it", () => {
-    expect(barWords(parked({ kind: "ahead", commits: 2 }))).toEqual({
+    expect(barWords(parked({ kind: "ahead", commits: 2 }), null)).toEqual({
       lead: "Kept locally as",
       place: "pr/128",
       state: "at 9c2e1b4, 2 commits ahead of the pull request, not checked out",
@@ -311,9 +317,14 @@ describe("replaceWords", () => {
 
 describe("pushesWords", () => {
   const destination = "refs/heads/feat/replay-ui";
-  const of = (from: unknown) =>
-    pullHeadSchema.parse({ reference: destination, oid, from });
   const maja = { owner: "maja", repo: "l1git" };
+  const of = (crossRepository: boolean, maintainerCanModify = false) =>
+    head({
+      crossRepository,
+      repository: crossRepository ? maja : { owner: "octo", repo: "l1git" },
+      maintainerCanModify,
+    }).head;
+  const stays = "so commits you make there stay local.";
   it.each([
     [
       {
@@ -322,35 +333,58 @@ describe("pushesWords", () => {
         destination,
         addsRemote: false,
       },
-      { kind: "same", edits: true },
+      of(false),
       "Tracks origin/feat/replay-ui. Pushing from there updates the pull request.",
     ],
     [
       { kind: "nowhere", why: "readOnly" },
-      { kind: "same", edits: false },
-      "You can't push to this repository, so commits you make there stay local.",
+      of(false),
+      "Pulling from there brings the author's pushes. You can't push to this repository, so GitHub refuses a push from there.",
     ],
     [
       { kind: "nowhere", why: "noRemote" },
-      { kind: "same", edits: true },
+      of(false),
       "No remote of this clone is the pull request's repository on GitHub, so L1 Git can't fetch the pull request.",
     ],
     [
       { kind: "toPullRequest", remote: "maja", destination, addsRemote: true },
-      { kind: "fork", repository: maja, edits: true },
+      of(true, true),
       "Tracks maja/feat/replay-ui, on a remote L1 Git adds for maja's fork. Pushing from there updates the pull request.",
     ],
     [
       { kind: "nowhere", why: "noEdits" },
-      { kind: "fork", repository: maja, edits: false },
-      "The author doesn't allow edits from maintainers, so commits you make there stay local.",
+      of(true),
+      `The author doesn't allow edits from maintainers, ${stays}`,
+    ],
+    [
+      { kind: "nowhere", why: "noEdits" },
+      of(true, true),
+      `The author allows edits from maintainers, but you can't push to this repository, ${stays}`,
     ],
     [
       { kind: "nowhere", why: "forkGone" },
-      { kind: "gone" },
-      "The fork this pull request came from is gone, so commits you make there stay local.",
+      { ...of(true), repository: null },
+      `The fork this pull request came from is gone, ${stays}`,
     ],
   ] as const)("says where pushes go: %j", (pushes, from, said) => {
-    expect(pushesWords(pushes as Plan["pushes"], of(from))).toBe(said);
+    expect(pushesWords(pushes as Plan["pushes"], from)).toBe(said);
+  });
+});
+
+describe("underHome", () => {
+  it.each([
+    [
+      "/Users/ada/src/.worktrees/l1git-pr-128",
+      "/Users/ada",
+      "~/src/.worktrees/l1git-pr-128",
+    ],
+    ["/Users/ada", "/Users/ada/", "~"],
+    ["/Users/adam/src", "/Users/ada", "/Users/adam/src"],
+    ["/srv/l1git-pr-128", "/Users/ada", "/srv/l1git-pr-128"],
+    ["/Users/ada/src", null, "/Users/ada/src"],
+    ["/srv/x", "/", "/srv/x"],
+    ["C:\\Users\\ada\\src", "C:\\Users\\ada", "~\\src"],
+  ])("writes %s under %s as %s", (path, home, written) => {
+    expect(underHome(path, home)).toBe(written);
   });
 });

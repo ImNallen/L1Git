@@ -10,7 +10,7 @@ import {
   refRow,
   selectedRow,
 } from "./test/appHarness";
-import { pullKey } from "./test/fakeBridge";
+import { pullKey, Refusal } from "./test/fakeBridge";
 import type { World } from "./test/fakeBridge";
 import {
   C6,
@@ -31,7 +31,7 @@ import {
   tried,
   tryButton,
 } from "./test/pullRequestCheckouts";
-import { open, pull, visit } from "./test/pullRequests";
+import { open, pull, refresh, visit } from "./test/pullRequests";
 
 installHarness();
 
@@ -188,9 +188,13 @@ it("Remove keeps a branch with commits the head lacks, and the bar says so", asy
   expect(barText()).toBe(
     "Kept locally as pr/1 · at a1a1a1a, 2 commits ahead of the pull request, not checked out",
   );
+  expect(get("status", /^Removed worktree/).textContent).toBe(
+    "Removed worktree pin-pr-1. Removal cannot be undone.",
+  );
   expect(barButtons()).toEqual([
     "Replace with the pull request…",
     "Show in history",
+    "",
   ]);
   expect(tryButton()).not.toBeNull();
 });
@@ -206,6 +210,85 @@ it("a refused Remove says why in the bar and keeps the worktree", async () => {
     `${where} · at 1111111, up to date, with uncommitted changes`,
   );
   expect(barButtons()).toContain("Remove worktree");
+});
+
+it("a refused Remove's note goes once the copy no longer stands as it said", async () => {
+  const app = await visit({ world: holds({ worktree: "uncommitted" }) });
+  await open(app, 1);
+  await app.click(get("button", "Remove worktree"));
+  expect(get("alert").textContent).toContain("Could not remove the worktree.");
+  const status = app.bridge.world.statuses.get(tried(1))!;
+  app.bridge.world.statuses.set(tried(1), { ...status, entries: [] });
+  await app.refocusWindow();
+  expect(barText()).toBe(`${where} · at 1111111, up to date`);
+  expect(query("alert")).toBeNull();
+});
+
+it("Remove of the repository you have open opens the pull request's repository in its place, and says it removed the worktree", async () => {
+  const app = await visit({
+    world: holds({}),
+    saved: { entries: [PIN, OTHER, tried(1)], lastRoot: tried(1) },
+  });
+  expect(activeRoot()).toBe(tried(1));
+  await open(app, 1);
+  await app.click(get("button", "Remove worktree"));
+  expect(get("status", /^Removed worktree/).textContent).toBe(
+    "Removed worktree pin-pr-1. Removal cannot be undone.",
+  );
+  await app.click(get("button", /^Back to history/));
+  expect(activeRoot()).toBe(PIN);
+  expect(get("status", /^Removed worktree/).textContent).toContain(
+    "Removed worktree pin-pr-1.",
+  );
+});
+
+it("a Remove that fails after Git took the worktree away still drops its sidebar row", async () => {
+  const app = await visit({
+    world: holds({}),
+    saved: { entries: [PIN, OTHER, tried(1)], lastRoot: PIN },
+    bridge: (bridge) =>
+      bridge.respond("removePullRequest", (_request, _world, fallback) => {
+        fallback();
+        throw new Refusal({
+          kind: "lockHeld",
+          message: "Another Git process is changing a branch.",
+        });
+      }),
+  });
+  const listed = () =>
+    document.querySelector(`.repository-open[title="${tried(1)}"]`);
+  expect(listed()).not.toBeNull();
+  await open(app, 1);
+  await app.click(get("button", "Remove worktree"));
+  expect(get("alert").textContent).toContain("Could not remove the worktree.");
+  expect(listed()).toBeNull();
+  expect(tryButton()).not.toBeNull();
+});
+
+it("dismissing a note leaves focus on the bar", async () => {
+  const app = await visit({ world: holds({ worktree: "uncommitted" }) });
+  await open(app, 1);
+  await app.click(get("button", "Remove worktree"));
+  await app.act(() => get("button", "Dismiss").focus());
+  await app.click(get("button", "Dismiss"));
+  expect(query("alert")).toBeNull();
+  expect(focused()).toBe("group Local copy");
+});
+
+it("reads the copy again when the pull request is read again, as when your role in it changed", async () => {
+  const app = await visit();
+  await open(app, 1);
+  const reads = app.bridge.count("pullCheckout");
+  app.bridge.world.host.details.set(
+    pullKey("octo/pin", 1),
+    pull(1, { viewerPermission: "read" }),
+  );
+  await app.click(refresh());
+  expect(app.bridge.count("pullCheckout")).toBe(reads + 1);
+  await app.click(tryButton()!);
+  expect(document.querySelector(".pull-try-pushes")!.textContent).toContain(
+    "You can't push to this repository",
+  );
 });
 
 it("runs one write at a time: the bar's moves wait while one runs", async () => {

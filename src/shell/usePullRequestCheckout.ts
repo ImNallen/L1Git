@@ -1,6 +1,8 @@
 import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
+import { busyProblem } from "../components/Dialog";
 import { beginDraftTask } from "../draftProtection";
-import { pullHead } from "../domain/pullRequestCheckout";
+import type { PullRequest } from "../domain/pullRequest";
+import { pullHead, standing } from "../domain/pullRequestCheckout";
 import type {
   HeldCheckout,
   Plan,
@@ -12,6 +14,7 @@ import { problemFrom } from "../domain/repository";
 import type { FullRef, Problem, RepositoryRoot } from "../domain/repository";
 import type { OverviewView } from "../overview";
 import * as repositories from "../repositories";
+import type { WritesView } from "../useWrites";
 import type { Focus } from "./useFocus";
 import type { Navigation } from "./useNavigation";
 import type { OpenedPullRequest } from "./usePullRequests";
@@ -28,9 +31,28 @@ type KnownCheckout =
   | { kind: "unreadable"; problem: Problem }
   | { kind: "read"; checkout: PullCheckout };
 
+/** A note under the bar, kept while the copy still stands as it describes. */
 export type CheckoutSaid =
-  | { kind: "failed"; write: Exclude<CheckoutWrite, "try">; problem: Problem }
-  | { kind: "trouble"; problem: Problem };
+  | {
+      kind: "failed";
+      write: Exclude<CheckoutWrite, "try">;
+      problem: Problem;
+      /** `standing` of the copy read after the failure. */
+      about: string | null;
+    }
+  | { kind: "trouble"; problem: Problem; root: RepositoryRoot }
+  | { kind: "removed"; name: string };
+
+function holds(said: CheckoutSaid, checkout: PullCheckout) {
+  switch (said.kind) {
+    case "failed":
+      return said.about === null || said.about === standing(checkout);
+    case "trouble":
+      return checkout.kind === "ready" && checkout.worktree.root === said.root;
+    case "removed":
+      return checkout.kind !== "ready";
+  }
+}
 
 type Copy = {
   key: string | null;
@@ -45,12 +67,17 @@ export type TryOutcome =
   | { kind: "busy" };
 
 export type PullRequestCheckout = Omit<Copy, "key"> & {
-  offer: { plan: Plan; branch: FullRef; head: PullHead } | null;
+  offer: { plan: Plan; branch: FullRef; head: PullRequest["head"] } | null;
+  /** Another pull request's copy is changing, so this one's writes wait. */
+  waiting: boolean;
+  /** The home folder, which the bar and the popover write as `~`. */
+  home: string | null;
   tryLocally: (folder: string) => Promise<TryOutcome>;
   update: () => void;
   replace: () => void;
   remove: () => void;
   showInHistory: () => void;
+  reread: () => void;
   dismiss: () => void;
 };
 
@@ -67,6 +94,7 @@ export function usePullRequestCheckout({
   overview,
   historyRoot,
   saved,
+  writes,
   loop,
   nav,
   focus,
@@ -75,7 +103,8 @@ export function usePullRequestCheckout({
   screen: Pick<ScreenState, "place">;
   overview: Pick<OverviewView, "roots">;
   historyRoot: RepositoryRoot | null;
-  saved: Pick<WorkspaceApi, "keepRepository">;
+  saved: Pick<WorkspaceApi, "keepRepository" | "selectRepository">;
+  writes: Pick<WritesView, "post">;
   loop: Pick<WriteLoop, "rereadRefs">;
   nav: Pick<Navigation, "showBranch" | "sidebar">;
   focus: Pick<Focus, "refocusIfLost">;
@@ -99,29 +128,45 @@ export function usePullRequestCheckout({
   useEffect(() => {
     current.current = key;
   }, [key]);
-  const turn = useRef(0);
-  const writing = useRef(false);
+  const turns = useRef(new Map<string, number>());
+  const turn = (of: string) => {
+    const next = (turns.current.get(of) ?? 0) + 1;
+    turns.current.set(of, next);
+    return next;
+  };
+  const writing = useRef<string | null>(null);
+  const [writingKey, setWritingKey] = useState<string | null>(null);
   const rereadAfterWrite = useRef(false);
   const [asked, setAsked] = useState(0);
   const askRead = () => setAsked((count) => count + 1);
+  const [home, setHome] = useState<string | null>(null);
 
-  const change = (of: string | null, next: (copy: Copy) => Copy) => {
+  const change = (of: string, next: (copy: Copy) => Copy) => {
     if (of !== current.current) return;
     setStored((previous) => next(previous.key === of ? previous : fresh(of)));
   };
+  const settle = (of: string, checkout: PullCheckout) =>
+    change(of, (was) => ({
+      ...was,
+      known: { kind: "read", checkout },
+      said: was.said && holds(was.said, checkout) ? was.said : null,
+    }));
 
   const read = useEffectEvent(() => {
-    if (writing.current) rereadAfterWrite.current = true;
-    if (at === null || writing.current) return;
-    const mine = ++turn.current;
+    if (at === null || key === null) return;
+    if (writing.current === key) {
+      rereadAfterWrite.current = true;
+      return;
+    }
     const of = key;
+    const mine = turn(of);
+    const latest = () => mine === turns.current.get(of);
     repositories.pullCheckout(at.root, at.pull, at.head).then(
       (checkout) => {
-        if (mine === turn.current)
-          change(of, (was) => ({ ...was, known: { kind: "read", checkout } }));
+        if (latest()) settle(of, checkout);
       },
       (error: unknown) => {
-        if (mine === turn.current)
+        if (latest())
           change(of, (was) => ({
             ...was,
             known: { kind: "unreadable", problem: problemFrom(error) },
@@ -129,10 +174,9 @@ export function usePullRequestCheckout({
       },
     );
   });
-  const headOid = head?.oid ?? null;
   useEffect(() => {
     if (visit !== null) read();
-  }, [visit, root, headOid, asked]);
+  }, [visit, root, pull, asked]);
   const visited = visit !== null;
   useEffect(() => {
     if (!visited) return;
@@ -145,6 +189,29 @@ export function usePullRequestCheckout({
     window.addEventListener("focus", reread);
     return () => window.removeEventListener("focus", reread);
   }, [visited]);
+  const homeAsked = useRef(false);
+  useEffect(() => {
+    if (!visited || homeAsked.current) return;
+    homeAsked.current = true;
+    repositories.home().then(setHome, () => {});
+  }, [visited]);
+
+  /** Drops the sidebar row of a worktree that `after` no longer has, and
+   * opens the pull request's repository in place of it. */
+  const forget = (
+    before: KnownCheckout,
+    after: PullCheckout,
+    target: RepositoryRoot,
+  ) => {
+    if (before.kind !== "read" || before.checkout.kind !== "ready") return null;
+    const { worktree } = before.checkout;
+    if (after.kind === "ready" && after.worktree.root === worktree.root)
+      return null;
+    nav.sidebar.onRemove(worktree.root);
+    if (historyRoot === worktree.root) void saved.selectRepository(target);
+    writes.post(target, { kind: "removedWorktree", name: worktree.name });
+    return worktree;
+  };
 
   async function write(
     kind: CheckoutWrite,
@@ -154,54 +221,84 @@ export function usePullRequestCheckout({
       head: PullHead;
     }) => Promise<PullCheckout>,
   ): Promise<TryOutcome> {
-    if (at === null || writing.current) return { kind: "busy" };
-    const finish = beginDraftTask();
-    if (!finish) return { kind: "busy" };
-    writing.current = true;
-    turn.current += 1;
+    const finish =
+      at !== null && key !== null && writing.current === null
+        ? beginDraftTask()
+        : null;
+    if (!finish || at === null || key === null) {
+      if (key !== null && kind !== "try")
+        change(key, (was) => ({
+          ...was,
+          said: {
+            kind: "failed",
+            write: kind,
+            problem: busyProblem,
+            about: null,
+          },
+        }));
+      return { kind: "busy" };
+    }
     const of = key;
+    const target = at;
+    writing.current = of;
+    setWritingKey(of);
+    turn(of);
     const before = copy.known;
     change(of, (was) => ({ ...was, running: kind, said: null }));
     try {
-      const checkout = await run(at);
+      const checkout = await run(target);
       if (kind === "try" && checkout.kind === "ready")
         saved.keepRepository({
           root: checkout.worktree.root,
           name: checkout.worktree.name,
         });
-      if (
-        before.kind === "read" &&
-        before.checkout.kind === "ready" &&
-        (checkout.kind !== "ready" ||
-          checkout.worktree.root !== before.checkout.worktree.root)
-      )
-        nav.sidebar.onRemove(before.checkout.worktree.root);
+      const removed = forget(before, checkout, target.root);
       const trouble =
         checkout.kind === "ready" ? checkout.worktree.trouble : null;
       change(of, (was) => ({
         ...was,
         known: { kind: "read", checkout },
         running: null,
-        said: trouble && { kind: "trouble", problem: trouble },
+        said:
+          checkout.kind === "ready" && trouble
+            ? {
+                kind: "trouble",
+                problem: trouble,
+                root: checkout.worktree.root,
+              }
+            : removed && { kind: "removed", name: removed.name },
       }));
       return { kind: "ready" };
     } catch (error) {
       const problem = problemFrom(error);
+      const after = await repositories
+        .pullCheckout(target.root, target.pull, target.head)
+        .catch(() => null);
+      if (after) forget(before, after, target.root);
       change(of, (was) => ({
         ...was,
+        known: after ? { kind: "read", checkout: after } : was.known,
         running: null,
-        said: kind === "try" ? null : { kind: "failed", write: kind, problem },
+        said:
+          kind === "try"
+            ? null
+            : {
+                kind: "failed",
+                write: kind,
+                problem,
+                about: after && standing(after),
+              },
       }));
-      rereadAfterWrite.current = true;
       return { kind: "failed", problem };
     } finally {
-      writing.current = false;
+      writing.current = null;
+      setWritingKey(null);
       if (rereadAfterWrite.current) {
         rereadAfterWrite.current = false;
         askRead();
       }
       finish();
-      loop.rereadRefs(at.root);
+      loop.rereadRefs(target.root);
     }
   }
 
@@ -221,11 +318,12 @@ export function usePullRequestCheckout({
     known,
     running: copy.running,
     said: copy.said,
+    waiting: writingKey !== null && writingKey !== key,
+    home,
     offer:
       pull?.state.kind === "open" &&
-      head &&
       (checkout?.kind === "absent" || checkout?.kind === "parked")
-        ? { plan: checkout.plan, branch: checkout.branch, head }
+        ? { plan: checkout.plan, branch: checkout.branch, head: pull.head }
         : null,
     tryLocally: (folder) =>
       write("try", ({ root, pull, head }) =>
@@ -255,6 +353,9 @@ export function usePullRequestCheckout({
       });
       focus.refocusIfLost();
     },
-    dismiss: () => change(key, (was) => ({ ...was, said: null })),
+    reread: askRead,
+    dismiss: () => {
+      if (key !== null) change(key, (was) => ({ ...was, said: null }));
+    },
   };
 }

@@ -1,6 +1,7 @@
 import { Fragment, useState } from "react";
 import type { Ref } from "react";
 import {
+  FolderGit2,
   GitBranchPlus,
   LoaderCircle,
   RefreshCcw,
@@ -40,30 +41,39 @@ function Said({
 }: {
   said: CheckoutSaid;
   branch: string;
-  onDismiss: () => void;
+  onDismiss: (bar: HTMLElement | null) => void;
 }) {
-  const { problem } = said;
+  const problem = said.kind === "removed" ? null : said.problem;
   return (
     <div
       className={`pull-checkout-said ${said.kind}`}
       role={said.kind === "failed" ? "alert" : "status"}
     >
-      <TriangleAlert size={14} aria-hidden="true" />
+      {said.kind === "removed" ? (
+        <FolderGit2 size={14} aria-hidden="true" />
+      ) : (
+        <TriangleAlert size={14} aria-hidden="true" />
+      )}
       <span>
+        {said.kind === "removed" &&
+          `Removed worktree ${said.name}. Removal cannot be undone.`}
         {said.kind === "failed" && `${failed[said.write](branch)} `}
-        {problem.message}
-        {hookOutputTail(problem).map((line, index) => (
-          <Fragment key={index}>
-            <br />
-            <code>{line}</code>
-          </Fragment>
-        ))}
+        {problem?.message}
+        {problem &&
+          hookOutputTail(problem).map((line, index) => (
+            <Fragment key={index}>
+              <br />
+              <code>{line}</code>
+            </Fragment>
+          ))}
       </span>
       <button
         type="button"
         className="notice-dismiss"
         aria-label="Dismiss"
-        onClick={onDismiss}
+        onClick={(event) =>
+          onDismiss(event.currentTarget.closest(".pull-checkout-bar"))
+        }
       >
         <X size={13} />
       </button>
@@ -74,12 +84,14 @@ function Said({
 function Action({
   write,
   running,
+  waiting,
   className,
   onClick,
   children,
 }: {
   write: CheckoutWrite;
   running: CheckoutWrite | null;
+  waiting: boolean;
   className: string;
   onClick: () => void;
   children: string;
@@ -88,7 +100,7 @@ function Action({
     <button
       type="button"
       className={`button ${className}`}
-      aria-disabled={running !== null}
+      aria-disabled={running !== null || waiting}
       onClick={() => {
         if (running === null) onClick();
       }}
@@ -111,7 +123,11 @@ export function PullRequestCheckoutBar({
   head: Oid;
 }) {
   const [replacing, setReplacing] = useState(false);
-  const { known, running, said, dismiss } = checkout;
+  const { known, running, waiting, said, home } = checkout;
+  const dismiss = (bar: HTMLElement | null) => {
+    checkout.dismiss();
+    bar?.focus();
+  };
   if (known.kind === "unreadable")
     return (
       <div ref={ref} className="pull-checkout-bar failed" tabIndex={-1}>
@@ -121,6 +137,13 @@ export function PullRequestCheckoutBar({
             Could not read this pull request's local copy.{" "}
             {known.problem.message}
           </span>
+          <button
+            type="button"
+            className="button secondary"
+            onClick={checkout.reread}
+          >
+            Try again
+          </button>
         </p>
       </div>
     );
@@ -128,8 +151,21 @@ export function PullRequestCheckoutBar({
     known.kind === "read" && known.checkout.kind !== "absent"
       ? known.checkout
       : null;
-  if (!held) return null;
-  const words = barWords(held);
+  if (!held)
+    return (
+      said && (
+        <div className="pull-checkout-bar">
+          <Said
+            said={said}
+            branch={shortBranch(
+              known.kind === "read" ? known.checkout.branch : "",
+            )}
+            onDismiss={() => checkout.dismiss()}
+          />
+        </div>
+      )
+    );
+  const words = barWords(held, home);
   const move = moveOf(held);
   const branch = shortBranch(held.branch);
   const replace =
@@ -162,6 +198,7 @@ export function PullRequestCheckoutBar({
             <Action
               write="update"
               running={running}
+              waiting={waiting}
               className="primary"
               onClick={checkout.update}
             >
@@ -172,6 +209,7 @@ export function PullRequestCheckoutBar({
             <Action
               write="replace"
               running={running}
+              waiting={waiting}
               className="secondary"
               onClick={() => setReplacing(true)}
             >
@@ -192,6 +230,7 @@ export function PullRequestCheckoutBar({
             <Action
               write="remove"
               running={running}
+              waiting={waiting}
               className="secondary"
               onClick={checkout.remove}
             >

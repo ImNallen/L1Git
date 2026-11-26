@@ -187,6 +187,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     overview: overview.view,
     historyRoot: view.snapshot?.root ?? null,
     saved: app,
+    writes,
     loop,
     nav,
     focus,

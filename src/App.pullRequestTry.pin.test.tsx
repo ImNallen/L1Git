@@ -8,7 +8,7 @@ import {
   query,
 } from "./test/appHarness";
 import { OTHER, PIN } from "./test/fixtures";
-import { pullKey } from "./test/fakeBridge";
+import { FAKE_HOME, pullKey, pullsKey } from "./test/fakeBridge";
 import {
   bar,
   barText,
@@ -19,7 +19,7 @@ import {
   tried,
   tryButton,
 } from "./test/pullRequestCheckouts";
-import { open, pull, visit } from "./test/pullRequests";
+import { open, page, pull, row, visit } from "./test/pullRequests";
 
 installHarness();
 
@@ -109,6 +109,87 @@ it("Escape and Cancel close the popover, change nothing, and give focus back to 
   expect(dialogs()).toEqual([]);
   expect(focused()).toBe("button Try it locally");
   expect(checkoutWrites(app.bridge)).toEqual([]);
+});
+
+it("Escape, Cancel and the backdrop leave the popover open while Create runs, so its failure shows there, on the folder", async () => {
+  const app = await visit();
+  await open(app, 1);
+  app.bridge.fail("tryPullRequest", {
+    kind: "conflict",
+    message: `${tried(1)} is not empty, so Git cannot make a worktree there.`,
+  });
+  const held = app.bridge.hold("tryPullRequest");
+  await app.click(tryButton()!);
+  await app.click(get("button", "Create worktree"));
+  await held.arrived;
+  expect(popover().getAttribute("aria-busy")).toBe("true");
+  await app.press("Escape");
+  expect(get("button", "Cancel").getAttribute("aria-disabled")).toBe("true");
+  await app.click(get("button", "Cancel"));
+  await app.click(popover());
+  expect(dialogs()).toEqual(["Try #1 locally"]);
+  held.release();
+  await app.settle();
+  expect(dialogs()).toEqual(["Try #1 locally"]);
+  expect(get("alert").textContent).toBe(
+    `${tried(1)} is not empty, so Git cannot make a worktree there.`,
+  );
+  expect(focused()).toBe("textbox Folder");
+});
+
+it("offers no Create worktree when no remote of the clone is the pull request's repository", async () => {
+  const app = await visit({
+    bridge: (bridge) =>
+      bridge.respond("pullCheckout", (_request, _world, fallback) => {
+        const absent = fallback() as { plan: object };
+        return {
+          ...absent,
+          plan: {
+            ...absent.plan,
+            pushes: { kind: "nowhere", why: "noRemote" },
+          },
+        };
+      }),
+  });
+  await open(app, 1);
+  await app.click(tryButton()!);
+  const create = get("button", "Create worktree");
+  expect(create.getAttribute("aria-disabled")).toBe("true");
+  expect(create.getAttribute("aria-describedby")).toBe(
+    popover().querySelector(".pull-try-pushes")!.id,
+  );
+  await app.click(create);
+  expect(checkoutWrites(app.bridge)).toEqual([]);
+});
+
+it("writes a folder under the home folder with ~, and sends it as written", async () => {
+  const folder = `${FAKE_HOME}/src/.worktrees/pin-pr-1`;
+  const app = await visit({
+    bridge: (bridge) =>
+      bridge.respond("pullCheckout", (_request, _world, fallback) => {
+        const copy = fallback() as { kind: string; plan: object };
+        return copy.kind === "absent"
+          ? { ...copy, plan: { ...copy.plan, folder } }
+          : copy;
+      }),
+  });
+  await open(app, 1);
+  await app.click(tryButton()!);
+  expect((get("textbox", "Folder") as HTMLInputElement).value).toBe(
+    "~/src/.worktrees/pin-pr-1",
+  );
+  await app.click(get("button", "Create worktree"));
+  expect(checkoutWrites(app.bridge)).toEqual([
+    {
+      op: "tryPullRequest",
+      path: PIN,
+      ...sent(1),
+      folder: "~/src/.worktrees/pin-pr-1",
+    },
+  ]);
+  expect(barText()).toBe(
+    "Checked out locally in ~/src/.worktrees/pin-pr-1 · at 1111111, up to date",
+  );
 });
 
 it("an empty folder creates nothing", async () => {
@@ -213,6 +294,14 @@ it("says where pushes go for a fork, and when they go nowhere", async () => {
       world.host.details.set(pullKey("octo/pin", 1), fork(1, true));
       world.host.details.set(pullKey("octo/pin", 2), fork(2, false));
       world.host.details.set(pullKey("octo/pin", 5), fork(5, true));
+      world.host.pulls.set(
+        pullsKey("octo/pin", "open"),
+        page([row(1), row(2), row(4), row(5)]),
+      );
+      world.host.details.set(pullKey("octo/pin", 4), {
+        ...fork(4, true),
+        viewerPermission: "read",
+      });
     },
   });
   const said = async (number: number) => {
@@ -229,12 +318,15 @@ it("says where pushes go for a fork, and when they go nowhere", async () => {
   expect(await said(2)).toBe(
     "The author doesn't allow edits from maintainers, so commits you make there stay local.",
   );
+  expect(await said(4)).toBe(
+    "The author allows edits from maintainers, but you can't push to this repository, so commits you make there stay local.",
+  );
   expect(await said(5)).toBe(
     "The fork this pull request came from is gone, so commits you make there stay local.",
   );
 });
 
-it("says that commits stay local when you can't push to the repository", async () => {
+it("says that GitHub refuses a push when you can't push to the repository", async () => {
   const app = await visit({
     world: (world) =>
       world.host.details.set(
@@ -245,7 +337,7 @@ it("says that commits stay local when you can't push to the repository", async (
   await open(app, 1);
   await app.click(tryButton()!);
   expect(popover().querySelector(".pull-try-pushes")!.textContent).toBe(
-    "You can't push to this repository, so commits you make there stay local.",
+    "Pulling from there brings the author's pushes. You can't push to this repository, so GitHub refuses a push from there.",
   );
 });
 

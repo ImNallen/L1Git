@@ -166,7 +166,7 @@ function changesWords(changes: Changes) {
   }
 }
 
-export function barWords(copy: HeldCheckout) {
+export function barWords(copy: HeldCheckout, home: string | null) {
   const at = [`at ${shortOid(copy.tip)}`, relationWords(copy.relation)];
   if (copy.kind === "parked")
     return {
@@ -176,7 +176,7 @@ export function barWords(copy: HeldCheckout) {
     };
   return {
     lead: "Checked out locally in",
-    place: copy.worktree.root,
+    place: underHome(copy.worktree.root, home),
     state: [...at, ...changesWords(copy.worktree.changes)].join(", "),
   };
 }
@@ -223,27 +223,52 @@ export function replaceWords(copy: HeldCheckout, leaving: number, head: Oid) {
   };
 }
 
-const nowhere: Record<
-  Extract<Plan["pushes"], { kind: "nowhere" }>["why"],
-  string
-> = {
-  readOnly:
-    "You can't push to this repository, so commits you make there stay local.",
-  noEdits:
-    "The author doesn't allow edits from maintainers, so commits you make there stay local.",
-  forkGone:
-    "The fork this pull request came from is gone, so commits you make there stay local.",
-  noRemote:
-    "No remote of this clone is the pull request's repository on GitHub, so L1 Git can't fetch the pull request.",
-};
+const stays = "so commits you make there stay local.";
 
-export function pushesWords(pushes: Plan["pushes"], head: PullHead) {
-  if (pushes.kind === "nowhere") return nowhere[pushes.why];
+function nowhere(
+  why: Extract<Plan["pushes"], { kind: "nowhere" }>["why"],
+  head: PullRequest["head"],
+) {
+  switch (why) {
+    case "readOnly":
+      return "Pulling from there brings the author's pushes. You can't push to this repository, so GitHub refuses a push from there.";
+    case "noEdits":
+      return head.maintainerCanModify
+        ? `The author allows edits from maintainers, but you can't push to this repository, ${stays}`
+        : `The author doesn't allow edits from maintainers, ${stays}`;
+    case "forkGone":
+      return `The fork this pull request came from is gone, ${stays}`;
+    case "noRemote":
+      return "No remote of this clone is the pull request's repository on GitHub, so L1 Git can't fetch the pull request.";
+  }
+}
+
+export function pushesWords(pushes: Plan["pushes"], head: PullRequest["head"]) {
+  if (pushes.kind === "nowhere") return nowhere(pushes.why, head);
   const tracks = `${pushes.remote}/${shortBranch(pushes.destination)}`;
   const owner =
-    head.from.kind === "fork" ? head.from.repository.owner : pushes.remote;
+    head.crossRepository && head.repository
+      ? head.repository.owner
+      : pushes.remote;
   const updates = "Pushing from there updates the pull request.";
   return pushes.addsRemote
     ? `Tracks ${tracks}, on a remote L1 Git adds for ${owner}'s fork. ${updates}`
     : `Tracks ${tracks}. ${updates}`;
 }
+
+/** `path` with `~` for `home` when it is under it, as a typed path takes it. */
+export function underHome(path: string, home: string | null) {
+  const base = home?.replace(/[/\\]+$/, "");
+  if (!base || !path.startsWith(base)) return path;
+  const rest = path.slice(base.length);
+  return rest === "" || /^[/\\]/.test(rest) ? `~${rest}` : path;
+}
+
+/** What a note about the copy describes, so a read that finds it changed
+ * can drop the note. */
+export const standing = (checkout: PullCheckout) =>
+  JSON.stringify(
+    checkout.kind === "ready"
+      ? { ...checkout, worktree: { ...checkout.worktree, trouble: null } }
+      : checkout,
+  );

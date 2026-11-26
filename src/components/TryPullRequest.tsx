@@ -1,7 +1,7 @@
-import { useId, useLayoutEffect, useState } from "react";
+import { useId, useLayoutEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 import { Folder, GitBranchPlus, LoaderCircle } from "lucide-react";
-import { pushesWords } from "../domain/pullRequestCheckout";
+import { pushesWords, underHome } from "../domain/pullRequestCheckout";
 import { shortBranch } from "../domain/refs";
 import type { Problem } from "../domain/repository";
 import type {
@@ -41,35 +41,46 @@ function TryPopover({
   anchor,
   number,
   offer,
+  home,
   onCreate,
   onClose,
 }: {
   anchor: RefObject<HTMLElement | null>;
   number: number;
   offer: Offer;
+  home: string | null;
   onCreate: (folder: string) => Promise<TryOutcome>;
   onClose: () => void;
 }) {
   const id = useId();
-  const [folder, setFolder] = useState(offer.plan.folder);
+  const [folder, setFolder] = useState(underHome(offer.plan.folder, home));
   const [form, setForm] = useState<
     { kind: "editing"; failure: Problem | null } | { kind: "creating" }
   >({ kind: "editing", failure: null });
+  const creating = form.kind === "creating";
   const { ref, close, onCancel } = useModalDialog(onClose);
+  const field = useRef<HTMLInputElement>(null);
   const at = useBelow(anchor);
+  useLayoutEffect(() => {
+    const input = field.current;
+    if (input && at) input.scrollLeft = input.scrollWidth;
+  }, [at]);
   const failure = form.kind === "editing" ? form.failure : null;
-  const ready = form.kind === "editing" && folder.trim() !== "";
+  const fetchable = !(
+    offer.plan.pushes.kind === "nowhere" && offer.plan.pushes.why === "noRemote"
+  );
+  const ready = fetchable && !creating && folder.trim() !== "";
 
   async function create() {
     if (!ready) return;
     setForm({ kind: "creating" });
     const outcome = await onCreate(folder);
-    if (outcome.kind === "ready") close();
-    else
-      setForm({
-        kind: "editing",
-        failure: outcome.kind === "busy" ? busyProblem : outcome.problem,
-      });
+    if (outcome.kind === "ready") return close();
+    setForm({
+      kind: "editing",
+      failure: outcome.kind === "busy" ? busyProblem : outcome.problem,
+    });
+    field.current?.focus();
   }
 
   return (
@@ -78,10 +89,14 @@ function TryPopover({
       className="pull-try"
       aria-labelledby={`${id}-title`}
       aria-describedby={`${id}-about`}
+      aria-busy={creating}
       style={at ? { ...at, width: WIDTH } : undefined}
-      onCancel={onCancel}
+      onCancel={(event) => {
+        if (creating) event.preventDefault();
+        else onCancel(event);
+      }}
       onClick={(event) => {
-        if (event.target === event.currentTarget) close();
+        if (event.target === event.currentTarget && !creating) close();
       }}
     >
       <form
@@ -106,13 +121,14 @@ function TryPopover({
           <div className="pull-try-field">
             <Folder size={14} aria-hidden="true" />
             <input
+              ref={field}
               id={`${id}-folder`}
               autoFocus
               autoComplete="off"
               autoCapitalize="off"
               spellCheck={false}
               value={folder}
-              readOnly={form.kind === "creating"}
+              readOnly={creating}
               onFocus={({ currentTarget: input }) => {
                 const end = input.value.length;
                 input.setSelectionRange(end, end);
@@ -146,15 +162,23 @@ function TryPopover({
         </section>
         <footer>
           <span>Remove it any time from this pull request.</span>
-          <button type="button" className="button ghost" onClick={close}>
+          <button
+            type="button"
+            className="button ghost"
+            aria-disabled={creating}
+            onClick={() => {
+              if (!creating) close();
+            }}
+          >
             Cancel
           </button>
           <button
             type="submit"
             className="button primary"
             aria-disabled={!ready}
+            aria-describedby={fetchable ? undefined : `${id}-pushes`}
           >
-            {form.kind === "creating" && (
+            {creating && (
               <LoaderCircle size={14} className="spin" aria-hidden="true" />
             )}
             Create worktree
@@ -169,11 +193,13 @@ export function TryPullRequest({
   ref: button,
   number,
   offer,
+  home,
   onCreate,
 }: {
   ref: RefObject<HTMLButtonElement | null>;
   number: number;
   offer: Offer;
+  home: string | null;
   onCreate: (folder: string) => Promise<TryOutcome>;
 }) {
   const [open, setOpen] = useState(false);
@@ -195,6 +221,7 @@ export function TryPullRequest({
           anchor={button}
           number={number}
           offer={offer}
+          home={home}
           onCreate={onCreate}
           onClose={() => {
             setOpen(false);

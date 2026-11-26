@@ -287,6 +287,7 @@ export function PullRequestDetail({
               ref={tryButton}
               number={number}
               offer={checkout.offer}
+              home={checkout.home}
               onCreate={checkout.tryLocally}
             />
           )}
