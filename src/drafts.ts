@@ -53,6 +53,9 @@ type DraftsView = {
     | { kind: "ready" }
     | { kind: "unreadable"; why: string };
   drafts: readonly ShownDraft[];
+  /** Where the host moved an unreadable drafts file, for every pull request,
+   * since all of them were in it. */
+  setAside: string | null;
 };
 
 type Entry = {
@@ -76,7 +79,6 @@ type Pull = {
 
 const saved: DraftSave = { kind: "saved" };
 const saving: DraftSave = { kind: "saving" };
-const unread: DraftsView = { read: { kind: "unread" }, drafts: [] };
 
 const pullId = ({ login, repository, number }: DraftsOf) =>
   `${login} ${repository.owner}/${repository.repo}#${number}`.toLowerCase();
@@ -97,6 +99,12 @@ const isPending = ({ save }: Entry) =>
 export function createDrafts(host: Pick<HostClient, "ask">) {
   const pulls = new Map<string, Pull>();
   const listeners = new Set<() => void>();
+  let setAside: string | null = null;
+  let unread: DraftsView = {
+    read: { kind: "unread" },
+    drafts: [],
+    setAside,
+  };
 
   function pullOf(of: DraftsOf): Pull {
     const id = pullId(of);
@@ -104,7 +112,7 @@ export function createDrafts(host: Pick<HostClient, "ask">) {
     if (known) return known;
     const pull: Pull = {
       of,
-      read: unread.read,
+      read: { kind: "unread" },
       entries: new Map(),
       timers: new Map(),
       queue: Promise.resolve(),
@@ -130,6 +138,11 @@ export function createDrafts(host: Pick<HostClient, "ask">) {
   /** Takes what the host holds, except over words this window has not saved. */
   function adopt(pull: Pull, answer: PullDrafts, skip: DraftKey | null) {
     pull.read = { kind: "ready" };
+    if (answer.setAside) {
+      setAside = answer.setAside;
+      unread = { ...unread, setAside };
+      pulls.forEach((other) => (other.view = null));
+    }
     const held = new Map(
       answer.drafts.map((draft) => [draftKey(draft.anchor, draft.head), draft]),
     );
@@ -242,6 +255,7 @@ export function createDrafts(host: Pick<HostClient, "ask">) {
       const pull = pulls.get(pullId(of));
       if (!pull) return unread;
       pull.view ??= {
+        setAside,
         read: pull.read,
         drafts: [...pull.entries].map(([key, entry]) => ({
           key,

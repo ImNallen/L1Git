@@ -47,6 +47,9 @@ export const pullDraftsSchema = z.object({
       }),
     ])
     .nullable(),
+  /** Where an unreadable drafts file went, on the one answer that moved it
+   * aside. The drafts started again without it. */
+  setAside: z.string().nullable(),
 });
 
 export type Anchor = z.infer<typeof anchorSchema>;

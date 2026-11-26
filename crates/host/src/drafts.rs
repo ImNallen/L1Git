@@ -53,9 +53,13 @@ pub enum Change {
 /// Every answer carries what this pull request holds now, so a window that
 /// was refused shows the other window's words.
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PullDrafts {
     drafts: Vec<Draft>,
     refused: Option<Refused>,
+    /// Where an unreadable `drafts.json` went, on the one answer that moved
+    /// it.
+    set_aside: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -252,22 +256,48 @@ struct Version {
     version: u64,
 }
 
-fn load(path: &Path) -> Result<Vec<Book>, Failure> {
+struct Loaded {
+    pulls: Vec<Book>,
+    set_aside: Option<String>,
+}
+
+/// An unreadable file, such as one a power loss emptied, would refuse every
+/// save after it. It moves aside instead, kept for whoever wants to look,
+/// and the drafts start again.
+fn load(dir: &Path, path: &Path) -> Result<Loaded, Failure> {
     let bytes = match fs::read(path) {
         Ok(bytes) => bytes,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return Ok(Loaded {
+                pulls: Vec::new(),
+                set_aside: None,
+            });
+        }
         Err(_) => return Err(unreadable()),
     };
     match serde_json::from_slice::<Version>(&bytes) {
-        Ok(Version { version }) if version > VERSION => Err(Failure::new(
-            ErrorKind::Storage,
-            "A newer version of L1 Git saved the drafts on this computer. L1 Git left them as they are; update it to see them.",
-        )),
-        Ok(Version { version: VERSION }) => serde_json::from_slice::<File>(&bytes)
-            .map(|file| file.pulls)
-            .map_err(|_| unreadable()),
-        _ => Err(unreadable()),
+        Ok(Version { version }) if version > VERSION => {
+            return Err(Failure::new(
+                ErrorKind::Storage,
+                "A newer version of L1 Git saved the drafts on this computer. L1 Git left them as they are; update it to see them.",
+            ));
+        }
+        Ok(Version { version: VERSION }) => {
+            if let Ok(file) = serde_json::from_slice::<File>(&bytes) {
+                return Ok(Loaded {
+                    pulls: file.pulls,
+                    set_aside: None,
+                });
+            }
+        }
+        _ => {}
     }
+    let aside = dir.join(format!("drafts.corrupt-{}.json", unix_millis()));
+    fs::rename(path, &aside).map_err(|_| unreadable())?;
+    Ok(Loaded {
+        pulls: Vec::new(),
+        set_aside: Some(aside.display().to_string()),
+    })
 }
 
 fn unreadable() -> Failure {
@@ -401,7 +431,10 @@ impl Host {
         let dir = self.file.parent().unwrap_or(Path::new("."));
         let _only = lock(dir)?;
         let path = dir.join("drafts.json");
-        let mut pulls = load(&path)?;
+        let Loaded {
+            mut pulls,
+            set_aside,
+        } = load(dir, &path)?;
         let api = self.endpoints.api();
         let is_read = matches!(change, Change::Read {});
         let found = pulls.iter().position(|book| {
@@ -438,6 +471,10 @@ impl Host {
             }
             save(dir, &path, pulls)?;
         }
-        Ok(PullDrafts { drafts, refused })
+        Ok(PullDrafts {
+            drafts,
+            refused,
+            set_aside,
+        })
     }
 }

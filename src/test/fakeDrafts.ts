@@ -14,6 +14,7 @@ export function draftsHandler(
   const answer = (refused: PullDrafts["refused"]): PullDrafts => ({
     drafts: books.get(pull) ?? [],
     refused,
+    setAside: null,
   });
   if (change.kind === "read") return answer(null);
   const slot = draftKey(change.anchor, change.head);

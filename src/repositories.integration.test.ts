@@ -4348,6 +4348,18 @@ describe("real Rust host contract", () => {
       "Off by two?",
       "Looks good",
     ]);
+
+    writeFileSync(join(fixture.root, "host", "drafts.json"), "");
+    const three = window();
+    await three.load(pull);
+    const { setAside, drafts } = three.read(pull);
+    expect(drafts).toEqual([]);
+    expect(setAside).toMatch(/[/\\]drafts\.corrupt-\d+\.json$/);
+    expect(readFileSync(setAside ?? "", "utf8")).toBe("");
+    three.type(pull, anchor, head, "Typed again");
+    expect(await three.flush()).toBe(true);
+    await two.load(pull);
+    expect(two.read(pull).setAside).toBeNull();
     expect(seen).toEqual([]);
   });
 

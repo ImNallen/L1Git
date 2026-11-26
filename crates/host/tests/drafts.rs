@@ -91,6 +91,7 @@ fn a_draft_survives_a_restart_without_a_sign_in() {
     let first = host(dir.path());
     let saved = on(&first, put(line(), HEAD, "Off by one?", Value::Null));
     assert_eq!(saved["refused"], Value::Null);
+    assert_eq!(saved["setAside"], Value::Null);
     let draft = &saved["drafts"][0];
     assert_eq!(draft["anchor"], line());
     assert_eq!(draft["head"], HEAD);
@@ -163,24 +164,28 @@ fn a_file_from_a_newer_l1_git_is_refused_and_left_as_it_is() {
 }
 
 #[test]
-fn an_unreadable_file_is_refused_and_left_as_it_is() {
-    let dir = tempfile::tempdir().unwrap();
-    let broken = "{\"version\": 1, \"pulls\": [{]}";
-    fs::write(drafts_file(dir.path()), broken).unwrap();
-    let host = host(dir.path());
-    assert!(matches!(
-        ask(
-            &host,
-            pull(
-                "octo",
-                "app",
-                1,
-                put(conversation(), HEAD, "Mine", Value::Null)
-            )
-        ),
-        Err(ErrorKind::Storage)
-    ));
-    assert_eq!(fs::read_to_string(drafts_file(dir.path())).unwrap(), broken);
+fn an_unreadable_file_is_set_aside_once_and_drafts_start_again() {
+    for broken in ["{\"version\": 1, \"pulls\": [{]}", "", "[1, 2]"] {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(drafts_file(dir.path()), broken).unwrap();
+        let host = host(dir.path());
+
+        let saved = on(&host, put(conversation(), HEAD, "Mine", Value::Null));
+        assert_eq!(saved["refused"], Value::Null);
+        assert_eq!(texts(&saved), ["Mine"]);
+        let aside = PathBuf::from(saved["setAside"].as_str().expect("says where it went"));
+        assert_eq!(aside.parent(), Some(dir.path()));
+        let name = aside.file_name().unwrap().to_str().unwrap();
+        assert!(
+            name.starts_with("drafts.corrupt-") && name.ends_with(".json"),
+            "{name}"
+        );
+        assert_eq!(fs::read_to_string(&aside).unwrap(), broken);
+
+        let again = on(&host, read());
+        assert_eq!(again["setAside"], Value::Null, "only once");
+        assert_eq!(texts(&again), ["Mine"]);
+    }
 }
 
 #[test]
