@@ -31,6 +31,7 @@ import { markdownReader } from "../markdown/markdownReader";
 import { INSPECTOR_WIDTH } from "../shell/useLayout";
 import type { Layout } from "../shell/useLayout";
 import { FilesChanged } from "../shell/lazyViews";
+import { FilesBoundary } from "./FilesBoundary";
 import type { FilesChangedState } from "../shell/useFilesChanged";
 import type {
   OpenedPullRequest,
@@ -412,18 +413,20 @@ export function PullRequestDetail({
                 ) : of === "commits" ? (
                   <PullRequestCommits pull={pull} viewer={viewer} url={url} />
                 ) : of === "files" ? (
-                  <Suspense fallback={<ReadingFiles />}>
-                    {files.held && (
-                      <FilesChanged
-                        isShown={isShown && of === tab}
-                        files={files}
-                        held={files.held}
-                        pull={pull}
-                        viewer={viewer}
-                        url={`${url}/files`}
-                      />
-                    )}
-                  </Suspense>
+                  <FilesBoundary url={`${url}/files`}>
+                    <Suspense fallback={<ReadingFiles />}>
+                      {files.held && (
+                        <FilesChanged
+                          isShown={isShown && of === tab}
+                          files={files}
+                          held={files.held}
+                          pull={pull}
+                          viewer={viewer}
+                          url={`${url}/files`}
+                        />
+                      )}
+                    </Suspense>
+                  </FilesBoundary>
                 ) : (
                   <PullRequestChecks pull={pull} url={url} />
                 )}

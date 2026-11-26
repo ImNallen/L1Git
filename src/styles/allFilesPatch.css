@@ -1,0 +1,4 @@
+/* The one line of a file without lines, which Pierre needs for its note. */
+[data-file] :is([data-line], [data-column-number]) {
+  display: none;
+}

@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
+import { VirtualizedFileDiff } from "@pierre/diffs";
 import type { PullRequest, ReviewThread } from "./domain/pullRequest";
 import type { RangeFile } from "./domain/range";
 import { oidSchema } from "./domain/repository";
@@ -257,7 +258,7 @@ it("keeps Unified or Split for the next time", async () => {
   expect(get("button", "Unified").getAttribute("aria-pressed")).toBe("true");
   await app.click(get("button", "Split"));
   expect(localStorage.getItem("l1git.filesChanged.v1")).toBe(
-    '{"version":1,"diffStyle":"split"}',
+    '{"version":1,"diffStyle":"split","view":"one"}',
   );
   for (const [stored, expected] of [
     ['{"version":1,"diffStyle":"split"}', "Split"],
@@ -380,9 +381,15 @@ it("says when GitHub counts otherwise, and shows the diff", async () => {
     "https://github.com/octo/pin/pull/1/files",
   );
   expect(place()).toBe("1 of 3");
-  app.bridge.world.host.details.set(pullKey("octo/pin", 1), pull(1));
+  const { details } = app.bridge.world.host;
+  details.set(pullKey("octo/pin", 1), pull(1));
   await app.click(refresh());
-  expect(panel().querySelector(".files-counts"), "it is pinned").not.toBeNull();
+  expect(panel().querySelector(".files-counts")).toBeNull();
+  details.set(pullKey("octo/pin", 1), pull(1, { changedFiles: 14 }));
+  await app.click(refresh());
+  expect(panel().querySelector(".files-counts")?.textContent).toMatch(
+    /^GitHub/,
+  );
 });
 
 it("shows no diff of a shallow clone that GitHub counts otherwise", async () => {
@@ -652,6 +659,57 @@ it("lists the files beside them, and goes to the one that is chosen", async () =
   expect(row("src/z.png").getAttribute("aria-selected")).toBe("false");
   await app.click(tab("Checks"));
   expect(inspector.textContent).toContain("Merges into");
+});
+
+it("goes back to the beginning of the file that is chosen again", async () => {
+  const app = await openFiles();
+  const tree = get(
+    "complementary",
+    "Pull request details",
+  ).querySelector<HTMLElement>("file-tree-container")!;
+  const row = () =>
+    tree.shadowRoot!.querySelector<HTMLElement>(
+      '[data-item-path="src/new.ts"]',
+    )!;
+  await app.click(row());
+  expect(place()).toBe("2 of 3");
+  const scrollTo = vi.spyOn(HTMLElement.prototype, "scrollTo");
+  // As a click on the row is outside of the shadow.
+  tree.click = () => {
+    const click = new MouseEvent("click", { bubbles: true });
+    const path = click.composedPath.bind(click);
+    click.composedPath = () => [row(), ...path()];
+    tree.dispatchEvent(click);
+  };
+  await app.click(tree);
+  expect(scrollTo).toHaveBeenCalledWith({ top: 0 });
+  expect(place()).toBe("2 of 3");
+  scrollTo.mockRestore();
+});
+
+it("shows a message when drawing a file fails, and draws it when asked", async () => {
+  const app = await openFiles();
+  const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+  const draw = vi.spyOn(VirtualizedFileDiff.prototype, "render");
+  try {
+    draw.mockImplementation(() => {
+      throw new Error("not this one");
+    });
+    await app.press("j");
+    expect(panel().textContent).toContain("Couldn't show the changes");
+    expect(get("link", "Open on GitHub", panel()).getAttribute("href")).toBe(
+      "https://github.com/octo/pin/pull/1/files",
+    );
+    draw.mockRestore();
+    await app.click(get("button", "Try again", panel()));
+    expect(panel().textContent).not.toContain("Couldn't show");
+    expect(focused()).toBe("region src/new.ts");
+    await app.press("k");
+    expect(place()).toBe("1 of 3");
+  } finally {
+    draw.mockRestore();
+    logged.mockRestore();
+  }
 });
 
 it("shows nothing to the next sign-in, and reads nothing for it", async () => {

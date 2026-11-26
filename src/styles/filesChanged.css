@@ -118,6 +118,54 @@
   flex-shrink: 0;
   margin-left: auto;
 }
+.files-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  color: var(--text);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.files-all strong {
+  font-weight: 600;
+}
+.files-views {
+  display: flex;
+  flex-shrink: 0;
+  padding: 2px;
+  border: 1px solid var(--border-control);
+  border-radius: 6px;
+}
+.files-views button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 4px;
+  color: var(--text-icon);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.files-views button[aria-pressed="true"] {
+  background: var(--segment-selected);
+  color: var(--text-strong);
+}
+@container (max-width: 760px) {
+  .files-views button > span {
+    display: none;
+  }
+}
+@container (max-width: 560px) {
+  .files-toolbar > :is(.files-status, .line-totals) {
+    display: none;
+  }
+  .file-diff.files-changed .diff-style button {
+    width: auto;
+    padding: 0 6px;
+  }
+}
 .file-diff.files-changed .diff-style {
   gap: 6px;
 }
@@ -125,6 +173,7 @@
   width: 64px;
 }
 .file-diff.files-changed {
+  container-type: inline-size;
   position: relative;
 }
 .files-notices {
@@ -172,6 +221,74 @@
   font-size: 11px;
 }
 
+/* The line over a pinned header is the toolbar's. */
+.files-all-scroll {
+  margin-top: -1px;
+}
+.files-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  box-sizing: border-box;
+  height: 40px;
+  padding: 0 20px 0 12px;
+  border-block: 1px solid var(--border);
+  background: var(--panel);
+  font-size: 12px;
+}
+.files-header > button {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+  color: var(--text-secondary);
+}
+.files-header > button:hover {
+  background: var(--control-hover);
+}
+.files-header > button > svg {
+  transition: transform 160ms ease-out;
+}
+.files-header > button[aria-expanded="false"] > svg {
+  transform: rotate(-90deg);
+}
+.files-header .file-diff-path {
+  flex: 0 1 auto;
+  color: var(--text);
+  font-family: var(--mono);
+}
+.files-header .line-totals {
+  font-family: var(--mono);
+}
+.files-part {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+.files-words {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 18px 20px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.files-words > svg {
+  flex-shrink: 0;
+}
+.files-words > .button {
+  flex-shrink: 0;
+}
+.files-note {
+  font-family: "InterVariable", Inter, sans-serif;
+  white-space: normal;
+  user-select: text;
+}
+
 .files-lineless {
   display: flex;
   flex-direction: column;
@@ -185,7 +302,7 @@
   padding: 16px 20px 24px;
 }
 /* Room for the notices over it. */
-.files-changed .file-diff-scroll::after {
+.files-changed .file-diff-scroll:not(.files-all-scroll)::after {
   content: "";
   display: block;
   flex-shrink: 0;
@@ -336,7 +453,8 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .threads-elsewhere-row svg:last-child,
-  .thread-chip-row > svg {
+  .thread-chip-row > svg,
+  .files-header > button > svg {
     transition: none;
   }
 }

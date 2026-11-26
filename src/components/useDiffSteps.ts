@@ -9,7 +9,7 @@ import type { Ref, RefObject } from "react";
 import { keyExpanders } from "./expanders";
 import { VirtualizedFileDiff } from "@pierre/diffs";
 import type { FileDiffMetadata, VirtualFileMetrics } from "@pierre/diffs";
-import { changeStops, scrollToChange } from "../domain/changeStops";
+import { changeStops, nextChange } from "../domain/changeStops";
 
 const LINE = 22;
 /** What Pierre reckons with until it has measured, as the stylesheet has it. */
@@ -22,7 +22,8 @@ export const reviewMetrics: VirtualFileMetrics = {
   spacing: 0,
 };
 
-const ABOVE_CHANGE = 3 * LINE;
+/** What to leave over a change. */
+export const ABOVE_CHANGE = 3 * LINE;
 
 export type DrawnPart = {
   node: HTMLElement;
@@ -60,6 +61,10 @@ export function useDrawnParts() {
 export type DiffSteps = {
   /** Scrolls to the next change or the one before. False when there is none. */
   step: (by: 1 | -1) => boolean;
+  /** Scrolls to where the current file begins. */
+  toStart: (at: number) => void;
+  /** Says which file is current, if it knows better. */
+  tell?: () => void;
 };
 
 export function useDiffSteps(
@@ -94,13 +99,20 @@ export function useDiffSteps(
         most: scroller.scrollHeight - scroller.clientHeight,
         above: ABOVE_CHANGE,
       };
-      const to = scrollToChange(stops.length, topOf, view, by);
-      if (to !== null) scroller.scrollTop = to;
+      const to = nextChange(stops.length, topOf, view, by);
+      if (to) scroller.scrollTop = to.scrollTop;
       return to !== null;
     },
     [body, stops, parts],
   );
-  useImperativeHandle(ref, () => ({ step: (by) => scroll(by) }), [scroll]);
+  useImperativeHandle(
+    ref,
+    () => ({
+      step: (by) => scroll(by),
+      toStart: () => scrollerIn(body)?.scrollTo({ top: 0 }),
+    }),
+    [scroll, body],
+  );
   useEffect(() => {
     if (startsAtEnd) scroll(-1, Infinity);
   }, [startsAtEnd, scroll]);

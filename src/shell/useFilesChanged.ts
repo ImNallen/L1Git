@@ -17,16 +17,25 @@ const LOOK_KEY = "l1git.filesChanged.v1";
 const lookSchema = z.object({
   version: z.literal(1),
   diffStyle: z.enum(["unified", "split"]),
+  view: z.enum(["one", "all"]).default("one"),
 });
+type Look = Omit<z.infer<typeof lookSchema>, "version">;
+/** Whether one file shows at a time, or each after the other. */
+export type FilesView = Look["view"];
 
 export type FilesChangedState = {
   /** Null until the open pull request's tab was opened. */
   held: FilesChanged | null;
   diffStyle: DiffStyle;
-  setDiffStyle: (style: DiffStyle) => void;
+  view: FilesView;
+  setLook: (look: Partial<Look>) => void;
   go: (at: number) => void;
+  /** As `go`, and back to its beginning when it is the current one. */
+  choose: (at: number) => void;
   showNewest: () => void;
   retry: () => void;
+  readFile: (file: RangeFile) => void;
+  readFileAgain: (file: RangeFile) => void;
   whole: (file: RangeFile) => Promise<string>;
   ref: RefObject<DiffSteps | null>;
   persistenceError: string | null;
@@ -49,10 +58,12 @@ export function useFilesChanged({
 }): FilesChangedState {
   const [store] = useState(() => createFilesChanged(repositories));
   const latest = useSyncExternalStore(store.subscribe, store.read);
-  const [diffStyle, setStyle] = useState<DiffStyle>(
+  const [{ diffStyle, view }, setLook] = useState<Look>(
     () =>
-      readStored(browserStorage(), LOOK_KEY, lookSchema)?.diffStyle ??
-      "unified",
+      readStored(browserStorage(), LOOK_KEY, lookSchema) ?? {
+        diffStyle: "unified",
+        view: "one",
+      },
   );
   const [persistenceError, setPersistenceError] = useState<string | null>(null);
   const ref = useRef<DiffSteps>(null);
@@ -71,27 +82,40 @@ export function useFilesChanged({
   const held = latest !== null && latest.of === id ? latest : null;
   const count = held?.read.kind === "ready" ? held.read.files.length : 0;
   const at = held?.at ?? 0;
+  /** The current file as it is when a key is pressed. */
+  const now = () => {
+    ref.current?.tell?.();
+    return store.read()?.at ?? 0;
+  };
   const change = (by: 1 | -1) => {
     if (ref.current?.step(by) === true) return;
-    store.go(at + by, by === 1 ? "start" : "end");
+    store.go(now() + by, by === 1 ? "start" : "end");
   };
   return {
     held,
     diffStyle,
-    setDiffStyle: (style) => {
-      setStyle(style);
+    view,
+    setLook: (look) => {
+      const next = { diffStyle, view, ...look };
+      setLook(next);
       setPersistenceError(
         writeStored(
           browserStorage(),
           LOOK_KEY,
-          { version: 1, diffStyle: style },
+          { version: 1, ...next },
           "The diff layout changed for this session. Could not save it.",
         ),
       );
     },
     go: store.go,
+    choose: (to) => {
+      if (to === now()) ref.current?.toStart(to);
+      else store.go(to);
+    },
     showNewest: store.showNewest,
     retry: store.retry,
+    readFile: store.readFile,
+    readFileAgain: store.readFileAgain,
     whole: store.whole,
     ref,
     persistenceError,
@@ -103,8 +127,8 @@ export function useFilesChanged({
             : null,
       },
       commands: {
-        nextFile: () => store.go(at + 1),
-        previousFile: () => store.go(at - 1),
+        nextFile: () => store.go(now() + 1),
+        previousFile: () => store.go(now() - 1),
         nextChange: () => change(1),
         previousChange: () => change(-1),
       },

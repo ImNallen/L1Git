@@ -111,7 +111,7 @@ function setup(deps: Partial<Deps> = {}) {
       const held = store.read();
       if (held?.read.kind !== "ready") return null;
       const current = held.read.files[held.at];
-      const read = current && held.patches.get(current);
+      const read = current && held.patches?.get(current);
       return read?.kind === "ready" && read.patch.kind === "text"
         ? read.patch.patch
         : (read?.kind ?? null);
@@ -219,7 +219,9 @@ describe("reading a range", () => {
 
   it("says why a file can't be read, and reads it again when asked", async () => {
     let fails = true;
+    const files = [file("b.ts"), file("a.ts")];
     const { store, patch, filePatch } = setup({
+      rangeFiles: async () => ready(files),
       rangePatches: async () => [],
       filePatch: vi.fn<Deps["filePatch"]>(async () => {
         if (fails) throw new Error("no");
@@ -232,7 +234,7 @@ describe("reading a range", () => {
     await settle();
     expect(filePatch).toHaveBeenCalledTimes(1);
     fails = false;
-    store.retry();
+    store.readFileAgain(files[1]!);
     await settle();
     expect(patch()).toBe("at last");
   });
@@ -306,16 +308,30 @@ describe("a range that is not what GitHub counts", () => {
     return { store, read: store.read()?.read };
   }
 
-  it("shows with a notice, from the read it was pinned from", async () => {
-    expect((await read(ready([file("a.ts")]), counted)).read).toMatchObject({
-      counts: null,
-    });
+  it("is judged by the newest read of the same head and base", async () => {
     const { store } = await read(ready([file("a.ts")]), otherwise);
+    const of = () => store.read()?.counted.additions;
+    expect(of()).toBe(7);
     store.see("me one", repository, pull("1", counted), false);
-    expect(store.read()?.read).toMatchObject({
-      kind: "ready",
-      counts: "GitHub counts 1 file, +7 −1. This shows 1 file, +1 −1.",
-    });
+    expect(of()).toBe(1);
+    const elsewhere = pull("1", { ...otherwise, base: "next" });
+    store.see("me one", repository, elsewhere, false);
+    expect(of(), "of another base").toBe(1);
+    expect(store.read()?.pull).toBe(elsewhere);
+    store.see("me one", repository, pull("2", otherwise), false);
+    expect(of(), "of another head").toBe(1);
+    store.showNewest();
+    expect(of()).toBe(7);
+  });
+
+  it("is judged by what came while it was read", async () => {
+    const answer = deferred<ReturnType<typeof ready>>();
+    const { store } = setup({ rangeFiles: () => answer.promise });
+    store.see("me one", repository, pull("1", otherwise), false);
+    store.see("me one", repository, pull("1", counted), false);
+    answer.resolve(ready([file("a.ts")], { shallow: true }));
+    await settle();
+    expect(store.read()?.read.kind).toBe("ready");
   });
 
   it("does not show in a shallow clone, where it may start elsewhere", async () => {

@@ -1,6 +1,6 @@
 import { parsePatchFiles } from "@pierre/diffs";
 import { describe, expect, it, vi } from "vitest";
-import { changeStops, scrollToChange } from "./changeStops";
+import { changeStops, nextChange } from "./changeStops";
 
 const stops = (patch: string) =>
   changeStops(parsePatchFiles(patch).flatMap(({ files }) => files)).map(
@@ -34,6 +34,26 @@ describe("changeStops", () => {
     ]);
   });
 
+  it("stops once at a run whose lines Pierre pairs", () => {
+    const [file] = parsePatchFiles(`--- a/a
++++ b/a
+@@ -1,2 +1,3 @@
+ const ok = 1;
+-const x = 2;
++if (x) { begin }
++const z = 2;
+`)[0]!.files;
+    const [hunk] = file!.hunks;
+    expect(hunk!.hunkContent.map(({ type }) => type)).toEqual([
+      "context",
+      "change",
+      "change",
+    ]);
+    expect(changeStops([file!])).toEqual([
+      { part: 0, side: "additions", line: 2 },
+    ]);
+  });
+
   it("counts both parts of a changed type", () => {
     expect(
       stops(`diff --git a/link b/link
@@ -55,13 +75,14 @@ index 0000000..2222222
   });
 });
 
-describe("scrollToChange", () => {
+describe("nextChange", () => {
   const tops = [66, 500, 900, 1960, 2000];
   const to = (
     of: readonly number[],
-    view: Parameters<typeof scrollToChange>[2],
+    view: Parameters<typeof nextChange>[2],
     by: 1 | -1,
-  ) => scrollToChange(of.length, (change) => of[change]!, view, by);
+  ) =>
+    nextChange(of.length, (change) => of[change]!, view, by)?.scrollTop ?? null;
   const view = (at: number) => ({ at, most: 1500, above: 66 });
   it.each([
     ["next", 0, 1, 434],
@@ -86,8 +107,11 @@ describe("scrollToChange", () => {
   it("asks for few of many places", () => {
     const topOf = vi.fn((change: number) => 100 + change * 50);
     const end = { at: 100_000, most: 300_000, above: 66 };
-    expect(scrollToChange(4_000, topOf, end, 1)).toBe(100_034);
-    expect(scrollToChange(4_000, topOf, end, -1)).toBe(99_984);
+    expect(nextChange(4_000, topOf, end, 1)).toEqual({
+      change: 2_000,
+      scrollTop: 100_034,
+    });
+    expect(nextChange(4_000, topOf, end, -1)?.scrollTop).toBe(99_984);
     expect(topOf.mock.calls.length).toBeLessThan(40);
   });
 });

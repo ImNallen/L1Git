@@ -1,107 +1,28 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import type { RefObject } from "react";
+import { RefreshCw, TriangleAlert, X } from "lucide-react";
 import {
-  ChevronLeft,
-  ChevronRight,
-  RefreshCw,
-  TriangleAlert,
-  X,
-} from "lucide-react";
-import {
+  countsNotice,
   newerThan,
   pathLabel,
-  statusWord,
   stopText,
 } from "../domain/filesChanged";
 import type { Stop } from "../domain/filesChanged";
-import type { DiffStyle } from "../domain/lineSelection";
 import type { PullRequest, ReviewThread } from "../domain/pullRequest";
 import type { RangeFile } from "../domain/range";
 import { problemFrom } from "../domain/repository";
 import { threadsByFile } from "../domain/reviewThreads";
 import { clampMessage } from "../domain/worktree";
 import type { FilesChanged as Held } from "../filesChanged";
-import type { FilesChangedState } from "../shell/useFilesChanged";
+import type { FilesChangedState, FilesView } from "../shell/useFilesChanged";
+import { AllFiles } from "./AllFiles";
 import { FileChanged } from "./FileChanged";
-import type { Unfolded } from "./FileChanged";
+import { FilesBoundary } from "./FilesBoundary";
 import { FilesState, ReadingFiles } from "./FilesState";
-import { LineTotals } from "./LineTotals";
+import { FilesToolbar } from "./FilesToolbar";
+import type { LinePlace } from "./KeepDiffPlace";
+import type { Unfolded } from "./ReviewThreads";
 import { OnGitHub } from "./PullRequestParts";
-
-const styles: { style: DiffStyle; label: string }[] = [
-  { style: "unified", label: "Unified" },
-  { style: "split", label: "Split" },
-];
-
-function Toolbar({
-  file,
-  at,
-  count,
-  diffStyle,
-  onGo,
-  onDiffStyle,
-}: {
-  file: RangeFile;
-  at: number;
-  count: number;
-  diffStyle: DiffStyle;
-  onGo: (at: number) => void;
-  onDiffStyle: (style: DiffStyle) => void;
-}) {
-  const word = statusWord(file);
-  const label = pathLabel(file);
-  return (
-    <header className="file-diff-toolbar files-toolbar">
-      <div className="files-steps" role="group" aria-label="Files">
-        <button
-          type="button"
-          aria-label="Previous file"
-          title="Previous file (K)"
-          aria-disabled={at === 0}
-          onClick={() => onGo(at - 1)}
-        >
-          <ChevronLeft size={14} aria-hidden="true" />
-        </button>
-        <span className="files-position">
-          {(at + 1).toLocaleString()} of {count.toLocaleString()}
-        </span>
-        <button
-          type="button"
-          aria-label="Next file"
-          title="Next file (J)"
-          aria-disabled={at === count - 1}
-          onClick={() => onGo(at + 1)}
-        >
-          <ChevronRight size={14} aria-hidden="true" />
-        </button>
-      </div>
-      <span className="file-diff-path" title={label}>
-        <bdi>{label}</bdi>
-      </span>
-      {word && <span className={`files-status ${word.tone}`}>{word.word}</span>}
-      {file.added !== null && file.added + (file.deleted ?? 0) > 0 && (
-        <LineTotals added={file.added} deleted={file.deleted} />
-      )}
-      <div
-        className="diff-style"
-        data-view={diffStyle}
-        role="group"
-        aria-label="Diff layout"
-      >
-        {styles.map(({ style, label }) => (
-          <button
-            key={style}
-            type="button"
-            aria-pressed={diffStyle === style}
-            onClick={() => onDiffStyle(style)}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-    </header>
-  );
-}
 
 function Stopped({
   stop,
@@ -196,26 +117,37 @@ function Notices({
 
 const none: ReviewThread[] = [];
 
+/** Where one of the two views was left, for the other. */
+type Left = { view: FilesView; at: number; line: LinePlace };
+
 function Shown({
   pane,
   holdsFocus,
+  left,
   unfolded,
+  folded,
+  onFold,
   isShown,
   held,
-  files: { ref, diffStyle, go },
+  files: { ref, diffStyle, view, go, readFile },
   whole,
   onRetry,
+  onRetryFile,
   viewer,
   url,
 }: {
   pane: RefObject<HTMLElement | null>;
   holdsFocus: RefObject<boolean>;
+  left: RefObject<Left | null>;
   unfolded: Unfolded;
+  folded: ReadonlySet<RangeFile>;
+  onFold: (file: RangeFile) => void;
   isShown: boolean;
   held: Held;
   files: FilesChangedState;
   whole: (file: RangeFile) => Promise<string>;
   onRetry: () => void;
+  onRetryFile: (file: RangeFile) => void;
   viewer: string;
   url: string;
 }) {
@@ -224,6 +156,7 @@ function Shown({
     at,
     enter,
     patches,
+    range,
     pull: { threads: page },
   } = held;
   const changed = read.kind === "ready" ? read.files : null;
@@ -247,25 +180,58 @@ function Shown({
     case "ready": {
       const file = read.files[at];
       if (!file) return <FilesState title="No changes." url={url} />;
-      return (
+      const startsAt = () => {
+        const { current: last } = left;
+        // It is for this switch only.
+        requestAnimationFrame(() => {
+          if (left.current === last) left.current = null;
+        });
+        return last && last.view !== view && last.at === at ? last.line : null;
+      };
+      const onLeave = (of: number, line: LinePlace) => {
+        left.current = { view, at: of, line };
+      };
+      const shared = {
+        ref,
+        pane,
+        holdsFocus,
+        startsAt,
+        unfolded,
+        isShown,
+        diffStyle,
+        viewer,
+        url,
+      };
+      return view === "all" ? (
+        <AllFiles
+          key={`${range.head} ${read.mergeBase}`}
+          {...shared}
+          files={read.files}
+          contentMissing={read.contentMissing}
+          patches={patches}
+          at={at}
+          threads={threads}
+          folded={folded}
+          onFold={onFold}
+          whole={whole}
+          onAt={go}
+          onRead={readFile}
+          onReadAgain={onRetryFile}
+          onLeave={onLeave}
+        />
+      ) : (
         <FileChanged
-          key={`${held.range.head} ${read.mergeBase} ${at}`}
-          ref={ref}
-          pane={pane}
-          holdsFocus={holdsFocus}
-          unfolded={unfolded}
-          isShown={isShown}
+          key={`${range.head} ${read.mergeBase} ${at}`}
+          {...shared}
           file={file}
           enter={enter}
-          patch={read.contentMissing ? null : (patches.get(file) ?? null)}
+          patch={patches?.get(file) ?? null}
           contentMissing={read.contentMissing}
           threads={threads.get(file) ?? none}
-          diffStyle={diffStyle}
-          viewer={viewer}
-          url={url}
           whole={() => whole(file)}
-          onRetry={onRetry}
+          onRetry={() => onRetryFile(file)}
           onNext={at + 1 < read.files.length ? () => go(at + 1) : null}
+          onLeave={(line) => onLeave(at, line)}
         />
       );
     }
@@ -274,6 +240,20 @@ function Shown({
       return exhaustive;
     }
   }
+}
+
+function useToggled<T>(): [ReadonlySet<T>, (each: T) => void] {
+  const [toggled, setToggled] = useState<ReadonlySet<T>>(new Set());
+  const toggle = useCallback(
+    (each: T) =>
+      setToggled((before) => {
+        const next = new Set(before);
+        if (!next.delete(each)) next.add(each);
+        return next;
+      }),
+    [],
+  );
+  return [toggled, toggle];
 }
 
 export function FilesChanged({
@@ -296,18 +276,15 @@ export function FilesChanged({
 }) {
   const pane = useRef<HTMLElement>(null);
   const holdsFocus = useRef(false);
-  const [threads, setThreads] = useState<ReadonlySet<string>>(new Set());
-  const toggle = useCallback(
-    (thread: string) =>
-      setThreads((open) => {
-        const next = new Set(open);
-        if (!next.delete(thread)) next.add(thread);
-        return next;
-      }),
-    [],
+  const left = useRef<Left | null>(null);
+  const [ids, toggle] = useToggled<string>();
+  const [folded, fold] = useToggled<RangeFile>();
+  const unfolded = useMemo(() => ({ ids, toggle }), [ids, toggle]);
+  const { range, read, at, counted } = held;
+  const counts = useMemo(
+    () => (read.kind === "ready" ? countsNotice(read, counted) : null),
+    [read, counted],
   );
-  const unfolded = useMemo(() => ({ threads, toggle }), [threads, toggle]);
-  const { range, read, at } = held;
   const file = read.kind === "ready" ? read.files[at] : undefined;
   const newer = read.kind === "reading" ? null : newerThan(range, pull, viewer);
   const [problem, setProblem] = useState<{
@@ -332,38 +309,50 @@ export function FilesChanged({
       tabIndex={-1}
     >
       {file && read.kind === "ready" && (
-        <Toolbar
-          file={file}
+        <FilesToolbar
+          files={read.files}
+          contentMissing={read.contentMissing}
           at={at}
-          count={read.files.length}
-          diffStyle={files.diffStyle}
-          onGo={files.go}
-          onDiffStyle={files.setDiffStyle}
+          state={files}
         />
       )}
-      {read.kind === "ready" && read.counts !== null && (
+      {counts !== null && (
         <p className="files-counts">
-          {read.counts} <OnGitHub url={url} />
+          {counts} <OnGitHub url={url} />
         </p>
       )}
       <span className="visually-hidden" role="status">
         {said(held)}
       </span>
-      <Shown
-        pane={pane}
-        holdsFocus={holdsFocus}
-        unfolded={unfolded}
-        isShown={isShown}
-        held={held}
-        files={files}
-        whole={whole}
-        onRetry={keepingFocus(files.retry)}
-        viewer={viewer}
+      <FilesBoundary
+        key={`${files.view} ${files.view === "one" ? at : ""} ${range.head}`}
         url={url}
-      />
+        onRetry={keepingFocus(() => {})}
+      >
+        <Shown
+          pane={pane}
+          holdsFocus={holdsFocus}
+          left={left}
+          unfolded={unfolded}
+          folded={folded}
+          onFold={fold}
+          isShown={isShown}
+          held={held}
+          files={files}
+          whole={whole}
+          onRetry={keepingFocus(files.retry)}
+          onRetryFile={(of) => keepingFocus(() => files.readFileAgain(of))()}
+          viewer={viewer}
+          url={url}
+        />
+      </FilesBoundary>
       <Notices
         newer={newer}
-        problem={problem?.file === file ? (problem?.message ?? null) : null}
+        problem={
+          problem && (files.view === "all" || problem.file === file)
+            ? problem.message
+            : null
+        }
         onShow={keepingFocus(files.showNewest)}
         onDismiss={keepingFocus(() => setProblem(null))}
       />

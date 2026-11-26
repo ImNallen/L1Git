@@ -51,6 +51,8 @@ type Props = {
   files: readonly { path: string; status: GitStatus }[];
   selectedPath: string | null;
   onSelectFile: (path: string) => void;
+  /** The one that is selected was chosen again. */
+  onSelectAgain?: (path: string) => void;
   maxRows?: number;
   actions?: readonly RowAction[];
   refocusPath?: string | null;
@@ -91,6 +93,7 @@ export function ChangedFileTree({
   files,
   selectedPath,
   onSelectFile,
+  onSelectAgain,
   maxRows,
   actions = [],
   refocusPath = null,
@@ -215,7 +218,18 @@ ${treeStyles}`,
   const tree = (
     <FileTree
       model={model}
-      onClickCapture={prepareMotion}
+      onClickCapture={(event) => {
+        prepareMotion(event);
+        const row = event.nativeEvent
+          .composedPath()
+          .find((each) => each instanceof HTMLElement && each.dataset.itemPath);
+        if (
+          selectedPath !== null &&
+          row instanceof HTMLElement &&
+          row.dataset.itemPath === treePath(selectedPath)
+        )
+          onSelectAgain?.(selectedPath);
+      }}
       onKeyDownCapture={prepareMotion}
       className="changed-file-tree"
       onFocus={(event) => {

@@ -15,40 +15,16 @@ import { placeThreads } from "../domain/reviewThreads";
 import type { ThreadsOnLine } from "../domain/reviewThreads";
 import type { FilesChanged, PatchRead } from "../filesChanged";
 import { Diff } from "./FilePatchView";
+import { Moved } from "./FileParts";
 import { FilesState, ReadingFiles } from "./FilesState";
+import type { LinePlace } from "./KeepDiffPlace";
 import { SurroundingsContext } from "./pullRequestText";
-import { ThreadChip, ThreadsElsewhere } from "./ReviewThreads";
+import { ThreadChips, ThreadsElsewhere } from "./ReviewThreads";
+import type { Unfolded } from "./ReviewThreads";
 import { hasSelection } from "./selection";
 import { Turns, TurnsContext } from "./turns";
 import type { DiffSteps } from "./useDiffSteps";
 import { useSteady } from "./useSteady";
-
-/** What changed besides lines. */
-function Moved({
-  file: { from, similarity },
-  mode,
-}: {
-  file: RangeFile;
-  mode: string | null;
-}) {
-  if (from === null && mode === null) return null;
-  return (
-    <p className="files-moved">
-      {from !== null && (
-        <>
-          Moved from{" "}
-          <code>
-            <bdi>{shownPath(from)}</bdi>
-          </code>
-          {similarity !== null && similarity < 100 && (
-            <span> · {similarity}% the same.</span>
-          )}{" "}
-        </>
-      )}
-      {mode}
-    </p>
-  );
-}
 
 /** A file without lines to draw, in the place where its lines would scroll. */
 function Lineless({
@@ -71,11 +47,6 @@ function Lineless({
   );
 }
 
-export type Unfolded = {
-  threads: ReadonlySet<string>;
-  toggle: (thread: string) => void;
-};
-
 /** One file of a pull request. It is another one, with a place of its own, for each file. */
 export function FileChanged({
   ref,
@@ -83,6 +54,7 @@ export function FileChanged({
   holdsFocus,
   file,
   enter,
+  startsAt,
   patch,
   contentMissing,
   threads: newest,
@@ -94,6 +66,7 @@ export function FileChanged({
   whole,
   onRetry,
   onNext,
+  onLeave,
 }: {
   ref: Ref<DiffSteps>;
   pane: RefObject<HTMLElement | null>;
@@ -101,6 +74,7 @@ export function FileChanged({
   holdsFocus: RefObject<boolean>;
   file: RangeFile;
   enter: FilesChanged["enter"];
+  startsAt: () => LinePlace | null;
   /** Null until it was asked for. */
   patch: PatchRead | null;
   contentMissing: boolean;
@@ -113,6 +87,7 @@ export function FileChanged({
   whole: () => Promise<string>;
   onRetry: () => void;
   onNext: (() => void) | null;
+  onLeave: (place: LinePlace) => void;
 }) {
   const { theme, painted } = use(SurroundingsContext);
   const [turns] = useState(() => new Turns());
@@ -137,20 +112,13 @@ export function FileChanged({
   );
   const renderThreads = useCallback(
     (ids: readonly string[]) => (
-      <div className="thread-chips">
-        {threads
-          .filter(({ id }) => ids.includes(id))
-          .map((thread) => (
-            <ThreadChip
-              key={thread.id}
-              thread={thread}
-              viewer={viewer}
-              url={url}
-              open={unfolded.threads.has(thread.id)}
-              onToggle={unfolded.toggle}
-            />
-          ))}
-      </div>
+      <ThreadChips
+        ids={ids}
+        threads={threads}
+        viewer={viewer}
+        url={url}
+        unfolded={unfolded}
+      />
     ),
     [threads, viewer, url, unfolded],
   );
@@ -184,7 +152,13 @@ export function FileChanged({
   );
 
   const above = elsewhere.length > 0 && (
-    <ThreadsElsewhere threads={elsewhere} viewer={viewer} url={url} />
+    <ThreadsElsewhere
+      path={file.path}
+      threads={elsewhere}
+      viewer={viewer}
+      url={url}
+      unfolded={unfolded}
+    />
   );
   const below = onNext && (
     <div className="files-next">
@@ -238,6 +212,8 @@ export function FileChanged({
         review={{
           ref,
           startsAtEnd: enter === "end",
+          startsAt,
+          onLeave,
           isShown,
           above,
           below,
