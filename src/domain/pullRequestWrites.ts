@@ -97,10 +97,10 @@ const sameText = (a: string, b: string) => {
 
 type Said = { body: string; by: string | null; at: string };
 /** Words by `viewer` that GitHub made no earlier than `since` allows. */
-const said = (body: string, since: number, viewer: string) => (said: Said) =>
-  sameText(said.body, body) &&
-  said.by?.toLowerCase() === viewer.toLowerCase() &&
-  Date.parse(said.at) >= since - CLOCK_SKEW_MS;
+const said = (body: string, since: number, viewer: string) => (words: Said) =>
+  sameText(words.body, body) &&
+  words.by?.toLowerCase() === viewer.toLowerCase() &&
+  Date.parse(words.at) >= since - CLOCK_SKEW_MS;
 
 /** A page GitHub cut short may hold what was asked about past its end. */
 const complete = (page: { items: readonly unknown[]; total: number }) =>
