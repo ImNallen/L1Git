@@ -69,7 +69,7 @@ import {
   hostResponseSchema,
 } from "./domain/host";
 import { pullCheckoutSchema } from "./domain/pullRequestCheckout";
-import { requestOps } from "./repositories";
+import { requestOps } from "./repositoryWire";
 
 const fixtureSchema = z.object({
   root: z.string(),
