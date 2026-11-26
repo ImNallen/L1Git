@@ -197,6 +197,11 @@ impl Coordinator {
     ) -> Result<PullCheckout, RepositoryError> {
         let typed = folder.to_str().ok_or_else(directories::unusable_location)?;
         let target = directories::resolved_target(folder);
+        let reads = self.deadline(LocalRead::PullCheckout);
+        let records = repository::worktree_records(&Repo::open(path, reads)?.root, reads)?;
+        if holder(&records, &pull.branch()?).is_none() {
+            usable(&records, &target, folder, typed)?;
+        }
         self.fetch_head(path, pull, head)?;
         self.unrecorded(path, LocalWrite::TryPullRequest, |repo, _, _, deadline| {
             let reads = deadline.reads();
@@ -207,10 +212,7 @@ impl Coordinator {
             if holder(listing.worktrees(), &branch).is_some() {
                 return state::read(&repo, pull, head, reads);
             }
-            if let Some(record) = worktrees::at(listing.worktrees(), &target) {
-                return Err(worktrees::occupied(record, typed));
-            }
-            directories::vacant(folder)?;
+            usable(listing.worktrees(), &target, folder, typed)?;
             let slot = listing.slot(&branch)?;
             let txn = RefTxn::begin(&repo, deadline)?;
             let created = match slot.tip {
@@ -436,6 +438,19 @@ fn create(
     )
 }
 
+/// A missing or empty folder that is no worktree of the repository.
+fn usable(
+    records: &[WorktreeRecord],
+    target: &Path,
+    folder: &Path,
+    typed: &str,
+) -> Result<(), RepositoryError> {
+    if let Some(record) = worktrees::at(records, target) {
+        return Err(worktrees::occupied(record, typed));
+    }
+    directories::vacant(folder).map(drop)
+}
+
 fn tracking(config: &[Setting], upstream: [Setting; 2]) -> Vec<Setting> {
     let ours = |setting: &&Setting| matches!(setting.key.as_str(), "remote" | "merge");
     if config.iter().filter(ours).eq(upstream.iter()) {
@@ -517,15 +532,19 @@ fn in_progress(operation: InProgress, name: &str) -> RepositoryError {
 }
 
 /// `reset --keep` names each file whose uncommitted change it would
-/// overwrite.
+/// overwrite, and each untracked file at a path the head adds.
 fn reset_refusal(ran: Wrote) -> RepositoryError {
     let paths: Vec<String> = ran
         .stderr()
         .lines()
         .filter_map(|line| {
-            line.strip_prefix("error: Entry '")?
-                .strip_suffix("' not uptodate. Cannot merge.")
-                .map(str::to_owned)
+            let changed = line
+                .strip_prefix("error: Entry '")
+                .and_then(|rest| rest.strip_suffix("' not uptodate. Cannot merge."));
+            let untracked = line
+                .strip_prefix("error: Untracked working tree file '")
+                .and_then(|rest| rest.strip_suffix("' would be overwritten by merge."));
+            changed.or(untracked).map(str::to_owned)
         })
         .collect();
     if paths.is_empty() {
@@ -534,7 +553,7 @@ fn reset_refusal(ran: Wrote) -> RepositoryError {
     RepositoryError::new(
         ErrorKind::Conflict,
         format!(
-            "The pull request changes files you changed and did not commit: {}. Commit, discard, or move them first.",
+            "The pull request changes files you changed or added and did not commit: {}. Commit, discard, or move them first.",
             paths.join(", ")
         ),
     )

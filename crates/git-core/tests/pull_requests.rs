@@ -539,6 +539,41 @@ fn a_gone_fork_is_fetched_by_id_from_the_base_and_moves_no_remote_ref() {
 }
 
 #[test]
+fn a_try_refused_for_its_folder_adds_no_remote() {
+    let world = World::new();
+    let head = world.forked(2, "fix", "fix.txt", true);
+    let folder = world.folder(2);
+    fs::create_dir_all(&folder).unwrap();
+    fs::write(folder.join("here.txt"), "here\n").unwrap();
+    let config = fs::read_to_string(world.root.join(".git/config")).unwrap();
+    let refused = world.try_at(2, &head, &folder).unwrap_err();
+    assert_ne!(refused.kind, ErrorKind::GitFailed, "{refused:?}");
+    assert_eq!(
+        fs::read_to_string(world.root.join(".git/config")).unwrap(),
+        config
+    );
+    let worktree = world.top.join("other");
+    git(
+        &world.root,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "other",
+            worktree.to_str().unwrap(),
+        ],
+    );
+    let config = fs::read_to_string(world.root.join(".git/config")).unwrap();
+    world.try_at(2, &head, &worktree).unwrap_err();
+    assert_eq!(
+        fs::read_to_string(world.root.join(".git/config")).unwrap(),
+        config
+    );
+    assert_eq!(world.tip("pr/2"), None);
+}
+
+#[test]
 fn trying_twice_answers_the_same_copy() {
     let world = World::new();
     let head = world.same(1, "feat", "feat.txt");
@@ -637,6 +672,31 @@ fn a_force_push_moves_the_copy_only_with_replace_and_the_tip_the_user_saw() {
         "untracked\n"
     );
     world.assert_main_untouched();
+}
+
+#[test]
+fn replace_onto_an_untracked_file_the_pull_request_adds_names_it() {
+    let world = World::new();
+    let first = world.same(1, "feat", "feat.txt");
+    let folder = world.folder(1);
+    world.tried(1, &first);
+    let rewritten = PullHead {
+        oid: world.rewrite("feat", "collide.txt"),
+        ..first.clone()
+    };
+    world.publish(&[
+        (&world.base, "refs/heads/feat".into()),
+        (&world.base, "refs/pull/1/head".into()),
+    ]);
+    fs::write(folder.join("collide.txt"), "mine\n").unwrap();
+    let refused = world.update(1, &rewritten, &first.oid, true).unwrap_err();
+    assert_eq!(refused.kind, ErrorKind::Conflict, "{refused:?}");
+    assert!(refused.message.contains("collide.txt"), "{refused:?}");
+    assert_eq!(world.tip("pr/1"), Some(first.oid));
+    assert_eq!(
+        fs::read_to_string(folder.join("collide.txt")).unwrap(),
+        "mine\n"
+    );
 }
 
 #[test]
