@@ -1,0 +1,3 @@
+query($id: ID!) {
+  node(id: $id) { ... on PullRequest { merged mergeCommit { oid } headRef { id } } }
+}

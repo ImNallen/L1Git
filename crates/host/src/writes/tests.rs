@@ -1,6 +1,7 @@
 use serde_json::json;
 
 use super::{Write, Written};
+use crate::drafts::{AttemptId, BookKey};
 use crate::github::{Endpoints, Verified};
 use crate::support::{FakeGh, FakeGitHub};
 use crate::vault::MemoryVault;
@@ -36,7 +37,7 @@ fn a_write_never_leaves_once_its_connection_ended() {
     let written = host
         .as_connection(generation, |github| {
             drop(run(&host, Request::Disconnect {}).unwrap());
-            github.write(comment())
+            github.write(&comment())
         })
         .unwrap();
     assert!(matches!(written, Written::NotSent { .. }), "{written:?}");
@@ -52,9 +53,14 @@ fn a_github_nobody_listens_on_is_not_sent() {
         .port();
     let gh = FakeGh::new("signed-in");
     let (_dir, host) = signed_in(&format!("http://127.0.0.1:{port}/"), &gh);
-    let login = host.connection().unwrap().1;
+    let key = BookKey {
+        login: host.connection().unwrap().1,
+        repository: serde_json::from_value(json!({"owner": "octo", "repo": "app"})).unwrap(),
+        number: 1,
+    };
+    let attempt = AttemptId::try_from("a".to_owned()).unwrap();
     assert!(matches!(
-        host.write(&login, comment()),
+        host.write(&key, attempt, comment(), &[]).written,
         Written::NotSent { .. }
     ));
 }

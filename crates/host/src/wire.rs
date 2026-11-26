@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::Login;
-use crate::drafts::{Change, PullDrafts};
+use crate::drafts::{AttemptId, Carried, Change, PullDrafts};
 use crate::pulls::{PullRequest, PullRequestList, PullRequests, Repository};
-use crate::writes::{Write, Written};
+use crate::writes::{Checked, Write, Wrote};
 
 /// Variants without fields are empty structs, because serde ignores unknown
 /// fields on an internally tagged unit variant.
@@ -50,13 +50,31 @@ pub enum Request {
         number: u32,
         change: Change,
     },
-    /// Changes something on GitHub for `asLogin`, never for another account.
-    /// It is sent at most once, never merged with another request, and it
-    /// answers `write` with a `Written` however it ends.
+    /// Changes GitHub as `asLogin` only, at most once and never merged, kept in
+    /// drafts.json as `attempt` with its `drafts` until its outcome is known.
+    #[serde(rename_all = "camelCase")]
     Write {
-        #[serde(rename = "asLogin")]
         as_login: Login,
+        repository: Repository,
+        number: u32,
+        attempt: AttemptId,
         write: Write,
+        drafts: Vec<Carried>,
+    },
+    /// Send anyway: `attempt`'s write again, unless a read shows it landed.
+    #[serde(rename_all = "camelCase")]
+    SendAgain {
+        as_login: Login,
+        repository: Repository,
+        number: u32,
+        attempt: AttemptId,
+    },
+    /// Reads what happened to the writes whose outcome is unknown.
+    #[serde(rename_all = "camelCase")]
+    Check {
+        as_login: Login,
+        repository: Repository,
+        number: u32,
     },
 }
 
@@ -82,7 +100,9 @@ pub enum Answer {
     PullRequests(PullRequests),
     PullRequest(Box<PullRequest>),
     Drafts(PullDrafts),
-    Write(Written),
+    Write(Wrote),
+    SendAgain(Wrote),
+    Check(Checked),
 }
 
 /// Everything the webview knows about the host side. No field can hold a
@@ -446,7 +466,7 @@ mod tests {
         ));
         assert!(parse(pulls("octo", "app-2.x_y", "recentlyMerged")).is_ok());
         assert!(matches!(
-            parse(json!({"op": "write", "asLogin": "octo", "write": {"kind": "unresolve", "thread": "T_1"}})),
+            parse(json!({"op": "write", "asLogin": "octo", "repository": {"owner": "octo", "repo": "app"}, "number": 1, "attempt": "a-1", "write": {"kind": "unresolve", "thread": "T_1"}, "drafts": []})),
             Ok(Request::Write { as_login, .. }) if as_login.as_str() == "octo"
         ));
         for refused in [
@@ -466,10 +486,12 @@ mod tests {
             json!({"op": "pullRequest", "repository": {"owner": "octo", "repo": "app"}, "number": -1}),
             json!({"op": "pullRequest", "repository": {"owner": "octo", "repo": "app"}, "number": "1"}),
             json!({"op": "pullRequests", "repository": {"owner": "octo", "repo": "app", "extra": 1}, "list": "open"}),
-            json!({"op": "write", "as_login": "octo", "write": {"kind": "resolve", "thread": "T_1"}}),
-            json!({"op": "write", "asLogin": "octo", "write": {"kind": "resolve", "thread": "T_1", "extra": 1}}),
-            json!({"op": "write", "asLogin": "octo", "write": {"kind": "mutation", "query": "mutation { x }"}}),
-            json!({"op": "write", "asLogin": "octo", "write": {"kind": "merge", "pull": "PR_1", "expectedHead": "main", "method": "squash", "headline": null, "body": null}}),
+            json!({"op": "write", "as_login": "octo", "repository": {"owner": "octo", "repo": "app"}, "number": 1, "attempt": "a-1", "write": {"kind": "resolve", "thread": "T_1"}, "drafts": []}),
+            json!({"op": "write", "asLogin": "octo", "repository": {"owner": "octo", "repo": "app"}, "number": 1, "attempt": "a-1", "write": {"kind": "resolve", "thread": "T_1", "extra": 1}, "drafts": []}),
+            json!({"op": "write", "asLogin": "octo", "repository": {"owner": "octo", "repo": "app"}, "number": 1, "attempt": "a-1", "write": {"kind": "mutation", "query": "mutation { x }"}, "drafts": []}),
+            json!({"op": "write", "asLogin": "octo", "repository": {"owner": "octo", "repo": "app"}, "number": 1, "attempt": "a-1", "write": {"kind": "merge", "pull": "PR_1", "expectedHead": "main", "method": "squash", "headline": null, "body": null}, "drafts": []}),
+            json!({"op": "write", "asLogin": "octo", "repository": {"owner": "octo", "repo": "app"}, "number": 1, "attempt": "a 1", "write": {"kind": "resolve", "thread": "T_1"}, "drafts": []}),
+            json!({"op": "check", "asLogin": "octo", "repository": {"owner": "octo", "repo": "app"}, "number": 1, "attempt": "a-1"}),
         ] {
             assert!(parse(refused.clone()).is_err(), "{refused}");
         }

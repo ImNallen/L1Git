@@ -2,8 +2,8 @@ query($pull: ID!, $branch: String!) {
   node(id: $pull) {
     ... on PullRequest {
       merged headRefName isCrossRepository
-      headRef { id target { oid } associatedPullRequests(states: OPEN, first: 1) { totalCount } }
-      headRepository { basedOn: pullRequests(baseRefName: $branch, states: OPEN, first: 1) { totalCount } }
+      headRef { target { oid } associatedPullRequests(states: OPEN, first: 1) { totalCount } }
+      headRepository { id basedOn: pullRequests(baseRefName: $branch, states: OPEN, first: 1) { totalCount } }
     }
   }
 }

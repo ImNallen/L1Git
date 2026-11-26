@@ -4,30 +4,21 @@
 //! land twice.
 
 mod branch;
+mod evidence;
+mod ledger;
+mod send;
 #[cfg(all(test, unix))]
 mod tests;
 
-use reqwest::header::{ACCEPT, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value, json};
 
-use crate::Host;
-use crate::drafts::{Lines, MOST_CHARS, NodeId, Oid, Side};
-use crate::github::{ApiError, GitHub, Login, api_failure};
-use crate::graphql::gave_up;
+use crate::drafts::{AttemptId, Lines, MOST_CHARS, NodeId, Oid, PullDrafts};
 
-const ADD_REVIEW: &str = include_str!("writes/add_review.graphql");
-const SUBMIT_REVIEW: &str = include_str!("writes/submit_review.graphql");
-const REPLY: &str = include_str!("writes/reply.graphql");
-const RESOLVE: &str = include_str!("writes/resolve.graphql");
-const UNRESOLVE: &str = include_str!("writes/unresolve.graphql");
-const COMMENT: &str = include_str!("writes/comment.graphql");
-const MERGE: &str = include_str!("writes/merge.graphql");
-const DELETE_REF: &str = include_str!("writes/delete_ref.graphql");
+pub(crate) use ledger::Lanes;
 
-const UNKNOWN: &str = "L1 Git sent this to GitHub and got no answer it could read, so GitHub may or may not have done it. L1 Git reads the pull request again to find out.";
+const UNKNOWN: &str = "L1 Git sent this to GitHub and got no answer it could read, so GitHub may or may not have done it. L1 Git looks again each time it reads this pull request.";
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(
     tag = "kind",
     rename_all = "camelCase",
@@ -91,14 +82,14 @@ pub enum Write {
     },
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Thread {
     lines: Lines,
     body: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Event {
     Comment,
@@ -106,7 +97,7 @@ pub enum Event {
     RequestChanges,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Method {
     Merge,
@@ -136,6 +127,54 @@ pub enum Written {
     Unknown {
         message: String,
     },
+}
+
+/// A write's answer, with what the pull request's drafts and writes hold
+/// after it, when L1 Git got as far as reading them.
+#[derive(Debug, Serialize)]
+pub struct Wrote {
+    written: Written,
+    drafts: Option<PullDrafts>,
+}
+
+impl Wrote {
+    fn alone(written: Written) -> Wrote {
+        Wrote {
+            written,
+            drafts: None,
+        }
+    }
+}
+
+/// What a read showed of the writes whose outcome was unknown. The ones it
+/// could not tell about are still in `drafts.sent`.
+#[derive(Debug, Serialize)]
+pub struct Checked {
+    settled: Vec<Settled>,
+    drafts: PullDrafts,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Settled {
+    attempt: AttemptId,
+    write: Write,
+    seen: Seen,
+}
+
+#[derive(Debug, PartialEq, Serialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum Seen {
+    /// GitHub has it: a read shows what it made.
+    Landed { echo: Echo },
+    /// A read shows GitHub hasn't done it. Only a write GitHub can do twice
+    /// without harm, such as resolve or merge, settles this way; it can be
+    /// sent again.
+    NotLanded { message: String },
 }
 
 /// What GitHub says it made, by its own ids.
@@ -200,8 +239,12 @@ impl Write {
             } => (
                 fits(body)
                     && threads.iter().all(|thread| said(&thread.body))
-                    && (*event != Event::Comment || said(body) || !threads.is_empty()),
-                "A review needs a summary or a comment, and each holds at most 65,536 characters.",
+                    && match event {
+                        Event::Approve => true,
+                        Event::Comment => said(body) || !threads.is_empty(),
+                        Event::RequestChanges => said(body),
+                    },
+                "A review needs a summary or a comment, Request changes needs a summary, and each holds at most 65,536 characters.",
             ),
             Write::SubmitPending { body, .. } => {
                 (fits(body), "A summary holds at most 65,536 characters.")
@@ -216,267 +259,5 @@ impl Write {
             Write::Resolve { .. } | Write::Unresolve { .. } => (true, ""),
         };
         if ok { Ok(()) } else { Err(problem) }
-    }
-}
-
-impl Host {
-    /// Sent only as `as_login`, so a click made for one account never posts
-    /// as another.
-    pub(crate) fn write(&self, as_login: &Login, write: Write) -> Written {
-        if let Err(problem) = write.check() {
-            return not_sent(format!("L1 Git sent nothing. {problem}"));
-        }
-        let Some((generation, login)) = self.connection() else {
-            return not_sent(
-                "L1 Git is not connected to GitHub, so it sent nothing. Sign in from Settings › Hosts.",
-            );
-        };
-        if login != *as_login {
-            return not_sent(format!(
-                "L1 Git is signed in to GitHub as {login}, not {as_login}, so it sent nothing."
-            ));
-        }
-        self.as_connection(generation, |github| github.write(write))
-            .unwrap_or_else(|failure| not_sent(failure.message))
-    }
-}
-
-impl GitHub<'_> {
-    fn write(&self, write: Write) -> Written {
-        match write {
-            Write::SingleComment {
-                pull,
-                commit,
-                lines,
-                body,
-            } => self.mutate(
-                ADD_REVIEW,
-                "addPullRequestReview",
-                json!({
-                    "pullRequestId": pull, "commitOID": commit, "event": "COMMENT",
-                    "threads": [thread(&lines, &body)],
-                }),
-                review,
-            ),
-            Write::SubmitReview {
-                pull,
-                commit,
-                event,
-                body,
-                threads,
-            } => self.mutate(
-                ADD_REVIEW,
-                "addPullRequestReview",
-                json!({
-                    "pullRequestId": pull, "commitOID": commit, "event": event.github(), "body": body,
-                    "threads": threads.iter().map(|each| thread(&each.lines, &each.body)).collect::<Vec<_>>(),
-                }),
-                review,
-            ),
-            Write::SubmitPending {
-                review: id,
-                event,
-                body,
-            } => self.mutate(
-                SUBMIT_REVIEW,
-                "submitPullRequestReview",
-                json!({"pullRequestReviewId": id, "event": event.github(), "body": body}),
-                review,
-            ),
-            Write::Reply { thread, body } => self.mutate(
-                REPLY,
-                "addPullRequestReviewThreadReply",
-                json!({"pullRequestReviewThreadId": thread, "body": body}),
-                |payload| Echo::Comment {
-                    id: text_at(payload, "/comment/id"),
-                },
-            ),
-            Write::Resolve { thread } => self.mutate(
-                RESOLVE,
-                "resolveReviewThread",
-                json!({"threadId": thread}),
-                resolved,
-            ),
-            Write::Unresolve { thread } => self.mutate(
-                UNRESOLVE,
-                "unresolveReviewThread",
-                json!({"threadId": thread}),
-                resolved,
-            ),
-            Write::Comment { pull, body } => self.mutate(
-                COMMENT,
-                "addComment",
-                json!({"subjectId": pull, "body": body}),
-                |payload| Echo::Comment {
-                    id: text_at(payload, "/commentEdge/node/id"),
-                },
-            ),
-            Write::Merge {
-                pull,
-                expected_head,
-                method,
-                headline,
-                body,
-            } => self.mutate(
-                MERGE,
-                "mergePullRequest",
-                drop_nulls(json!({
-                    "pullRequestId": pull, "expectedHeadOid": expected_head, "mergeMethod": method.github(),
-                    "commitHeadline": headline, "commitBody": body,
-                })),
-                |payload| Echo::Merged {
-                    commit: text_at(payload, "/pullRequest/mergeCommit/oid"),
-                },
-            ),
-            Write::DeleteHeadBranch {
-                pull,
-                branch,
-                expected_head,
-            } => self.delete_head_branch(&pull, &branch, &expected_head),
-        }
-    }
-
-    /// One POST of one mutation. Its outcome is final.
-    fn mutate(
-        &self,
-        document: &str,
-        field: &str,
-        input: Value,
-        echo: fn(&Value) -> Echo,
-    ) -> Written {
-        let Ok(url) = self.url("graphql") else {
-            return not_sent("L1 Git could not make GitHub's address, so it sent nothing.");
-        };
-        let request = self
-            .http
-            .post(url)
-            .header(ACCEPT, "application/json")
-            .header(CONTENT_TYPE, "application/json")
-            .body(json!({"query": document, "variables": {"input": input}}).to_string());
-        match self.send(request) {
-            Ok((_, body)) => judge(&body, field, echo),
-            Err(error) => self.missed(error),
-        }
-    }
-
-    /// What a failed send says about whether GitHub did it.
-    fn missed(&self, error: ApiError) -> Written {
-        match error {
-            ApiError::Ended => not_sent("L1 Git's GitHub sign-in changed, so it sent nothing."),
-            ApiError::Unreachable => not_sent(api_failure(error).message),
-            ApiError::Unauthorized => refused(self.signed_out().message),
-            ApiError::Status(400..=499)
-            | ApiError::RateLimited { .. }
-            | ApiError::Forbidden { .. }
-            | ApiError::SsoRequired { .. }
-            | ApiError::NotFound { .. } => refused(api_failure(error).message),
-            ApiError::Status(_)
-            | ApiError::Unanswered
-            | ApiError::TooLarge
-            | ApiError::Unfinished { .. }
-            | ApiError::Unexpected => unknown(),
-        }
-    }
-}
-
-/// A payload means GitHub did it, whatever else the answer says. Without one,
-/// only typed errors are refusals; GitHub leaves untyped what it failed at.
-fn judge(body: &[u8], field: &str, echo: fn(&Value) -> Echo) -> Written {
-    #[derive(Deserialize)]
-    struct Answered {
-        data: Option<Map<String, Value>>,
-        #[serde(default)]
-        errors: Vec<Problem>,
-    }
-    #[derive(Deserialize)]
-    struct Problem {
-        #[serde(rename = "type")]
-        kind: Option<String>,
-        message: String,
-    }
-    let Ok(Answered { data, errors }) = serde_json::from_slice::<Answered>(body) else {
-        return unknown();
-    };
-    if let Some(payload) = data
-        .as_ref()
-        .and_then(|data| data.get(field))
-        .filter(|payload| payload.is_object())
-    {
-        return Written::Done {
-            echo: echo(payload),
-        };
-    }
-    let typed = |problem: &Problem| problem.kind.as_deref().is_some_and(|kind| !gave_up(kind));
-    match errors.first() {
-        Some(first) if errors.iter().all(typed) => {
-            refused(format!("GitHub didn't do it: {}", first.message))
-        }
-        _ => unknown(),
-    }
-}
-
-fn thread(lines: &Lines, body: &str) -> Value {
-    drop_nulls(json!({
-        "path": lines.path, "line": lines.line, "side": side(lines.side), "body": body,
-        "startLine": lines.start.map(|start| start.line),
-        "startSide": lines.start.map(|start| side(start.side)),
-    }))
-}
-
-fn side(side: Side) -> &'static str {
-    match side {
-        Side::Left => "LEFT",
-        Side::Right => "RIGHT",
-    }
-}
-
-impl Event {
-    fn github(self) -> &'static str {
-        match self {
-            Event::Comment => "COMMENT",
-            Event::Approve => "APPROVE",
-            Event::RequestChanges => "REQUEST_CHANGES",
-        }
-    }
-}
-
-impl Method {
-    fn github(self) -> &'static str {
-        match self {
-            Method::Merge => "MERGE",
-            Method::Squash => "SQUASH",
-            Method::Rebase => "REBASE",
-        }
-    }
-}
-
-/// In GraphQL a field given null is set to null. Only one left out takes
-/// GitHub's default.
-fn drop_nulls(mut input: Value) -> Value {
-    if let Some(fields) = input.as_object_mut() {
-        fields.retain(|_, value| !value.is_null());
-    }
-    input
-}
-
-fn text_at(payload: &Value, pointer: &str) -> Option<String> {
-    payload
-        .pointer(pointer)
-        .and_then(Value::as_str)
-        .map(str::to_owned)
-}
-
-fn review(payload: &Value) -> Echo {
-    Echo::Review {
-        id: text_at(payload, "/pullRequestReview/id"),
-    }
-}
-
-fn resolved(payload: &Value) -> Echo {
-    Echo::Thread {
-        id: text_at(payload, "/thread/id"),
-        resolved: payload
-            .pointer("/thread/isResolved")
-            .and_then(Value::as_bool),
     }
 }

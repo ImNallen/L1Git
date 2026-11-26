@@ -1,12 +1,13 @@
 use serde::Deserialize;
 use serde_json::json;
 
-use super::{DELETE_REF, Echo, Written, not_sent, refused};
+use super::{Echo, Written, not_sent, refused};
 use crate::drafts::{NodeId, Oid};
 use crate::github::{ApiError, GitHub, api_failure};
 use crate::graphql::Reply;
 
 const HEAD_BRANCH: &str = include_str!("head_branch.graphql");
+const UPDATE_REFS: &str = include_str!("update_refs.graphql");
 
 #[derive(Default, Deserialize)]
 struct Answer {
@@ -26,7 +27,6 @@ struct Facts {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct HeadRef {
-    id: String,
     target: Option<Target>,
     associated_pull_requests: Count,
 }
@@ -39,6 +39,7 @@ struct Target {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct HeadRepository {
+    id: String,
     based_on: Count,
 }
 
@@ -50,9 +51,15 @@ struct Count {
 
 #[derive(Debug, PartialEq)]
 enum Plan {
-    Delete { id: String },
+    /// The repository's id: GitHub deletes the branch there only while it is
+    /// still at the merged head.
+    Delete {
+        repository: String,
+    },
     Gone,
-    Keep { why: String },
+    Keep {
+        why: String,
+    },
 }
 
 /// The merged pull request is never open, so every open one counted here is
@@ -86,11 +93,18 @@ fn plan(facts: Facts, branch: &str, expected_head: &Oid) -> Plan {
             "L1 Git kept {branch}, because it has a new commit since the merge."
         ));
     }
-    let based_on = facts
-        .head_repository
-        .map_or(0, |repository| repository.based_on.total_count);
-    match (head.associated_pull_requests.total_count, based_on) {
-        (0, 0) => Plan::Delete { id: head.id },
+    let Some(repository) = facts.head_repository else {
+        return keep(format!(
+            "L1 Git kept {branch}, because GitHub didn't say which repository it is in."
+        ));
+    };
+    match (
+        head.associated_pull_requests.total_count,
+        repository.based_on.total_count,
+    ) {
+        (0, 0) => Plan::Delete {
+            repository: repository.id,
+        },
         (0, open) => keep(format!(
             "L1 Git kept {branch}, because {open} open pull request(s) merge into it."
         )),
@@ -128,11 +142,19 @@ impl GitHub<'_> {
                 echo: Echo::BranchDeleted {},
             },
             Plan::Keep { why } => refused(why),
-            Plan::Delete { id } => {
-                self.mutate(DELETE_REF, "deleteRef", json!({"refId": id}), |_| {
-                    Echo::BranchDeleted {}
-                })
-            }
+            Plan::Delete { repository } => self.mutate(
+                UPDATE_REFS,
+                "updateRefs",
+                json!({
+                    "repositoryId": repository,
+                    "refUpdates": [{
+                        "name": format!("refs/heads/{branch}"),
+                        "beforeOid": expected_head,
+                        "afterOid": "0".repeat(expected_head.as_str().len()),
+                    }],
+                }),
+                |_| Echo::BranchDeleted {},
+            ),
         }
     }
 }
@@ -151,13 +173,13 @@ mod tests {
             head_ref_name: "fix".to_owned(),
             is_cross_repository: false,
             head_ref: head.map(|(oid, open)| HeadRef {
-                id: "REF_1".to_owned(),
                 target: Some(Target {
                     oid: oid.to_owned(),
                 }),
                 associated_pull_requests: Count { total_count: open },
             }),
             head_repository: Some(HeadRepository {
+                id: "REPO_1".to_owned(),
                 based_on: Count {
                     total_count: based_on,
                 },
@@ -172,7 +194,7 @@ mod tests {
         assert_eq!(
             plan(facts(Some((&head, 0)), 0)),
             Plan::Delete {
-                id: "REF_1".to_owned()
+                repository: "REPO_1".to_owned()
             }
         );
         assert_eq!(plan(facts(None, 3)), Plan::Gone, "gone is done");

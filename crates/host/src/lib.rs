@@ -25,11 +25,13 @@ mod tests;
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
+use drafts::BookKey;
 use gh::Gh;
 use github::Http;
 use state::{Saved, State, Unreadable, unix_millis};
 use vault::{MemoryVault, SystemVault, Vault};
 use wire::Failure;
+use writes::Lanes;
 
 pub use device::ClientId;
 pub use github::{Endpoints, Login};
@@ -73,6 +75,7 @@ pub struct Host {
     client_id: Option<ClientId>,
     writer: Mutex<()>,
     state: Mutex<State>,
+    lanes: Lanes,
 }
 
 impl Host {
@@ -109,6 +112,7 @@ impl Host {
             vault,
             client_id: None,
             writer: Mutex::new(()),
+            lanes: Lanes::default(),
             state: Mutex::new(State {
                 revision: unix_millis(),
                 saved,
@@ -161,9 +165,54 @@ pub fn run(host: &Host, request: Request) -> Result<Response, HostError> {
             number,
             change,
         } => host
-            .drafts(login, repository, number, change)
+            .drafts(
+                &BookKey {
+                    login,
+                    repository,
+                    number,
+                },
+                change,
+            )
             .map(Answer::Drafts),
-        Request::Write { as_login, write } => Ok(Answer::Write(host.write(&as_login, write))),
+        Request::Write {
+            as_login,
+            repository,
+            number,
+            attempt,
+            write,
+            drafts,
+        } => {
+            let key = BookKey {
+                login: as_login,
+                repository,
+                number,
+            };
+            Ok(Answer::Write(host.write(&key, attempt, write, &drafts)))
+        }
+        Request::SendAgain {
+            as_login,
+            repository,
+            number,
+            attempt,
+        } => {
+            let key = BookKey {
+                login: as_login,
+                repository,
+                number,
+            };
+            Ok(Answer::SendAgain(host.send_again(&key, &attempt)))
+        }
+        Request::Check {
+            as_login,
+            repository,
+            number,
+        } => host
+            .check(&BookKey {
+                login: as_login,
+                repository,
+                number,
+            })
+            .map(Answer::Check),
     };
     let status = host.status();
     match outcome {

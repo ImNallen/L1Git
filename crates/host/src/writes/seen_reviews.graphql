@@ -1,0 +1,10 @@
+query($id: ID!, $login: String!) {
+  node(id: $id) {
+    ... on PullRequest {
+      reviews(author: $login, last: 100) { nodes {
+        id state body
+        comments(first: 100) { nodes { path line originalLine startLine originalStartLine body } }
+      } }
+    }
+  }
+}
