@@ -1,7 +1,9 @@
 import { parsePatchFiles } from "@pierre/diffs";
 import type { SelectedLineRange } from "@pierre/diffs";
 import { describe, expect, it } from "vitest";
-import { linesLabel, placeOf, rangeOf, runAt } from "./lineComments";
+import { draftKey } from "./drafts";
+import { carriedBy, linesLabel, placeOf, rangeOf, runAt } from "./lineComments";
+import { oidSchema } from "./repository";
 import type { DiffStyle } from "./lineSelection";
 
 const [file] = parsePatchFiles(`diff --git a/src/a.ts b/src/a.ts
@@ -120,4 +122,30 @@ it("names the lines of a comment", () => {
   expect(linesLabel({ line: 102, start: { side: "right", line: 100 } })).toBe(
     "lines 100–102",
   );
+});
+
+it("names the drafts a write carries, at the commit it is about", () => {
+  const commit = oidSchema.parse("1".repeat(40));
+  const lines = {
+    path: "a.ts",
+    side: "right" as const,
+    line: 12,
+    start: { side: "right" as const, line: 10 },
+  };
+  const key = draftKey({ kind: "line", ...lines }, commit);
+  const pull = "PR_1" as never;
+  expect(
+    carriedBy({ kind: "singleComment", pull, commit, lines, body: "a" }),
+  ).toEqual([key]);
+  expect(
+    carriedBy({
+      kind: "submitReview",
+      pull,
+      commit,
+      event: "comment",
+      body: "",
+      threads: [{ lines, body: "a" }],
+    }),
+  ).toEqual([key]);
+  expect(carriedBy({ kind: "comment", pull, body: "a" })).toEqual([]);
 });

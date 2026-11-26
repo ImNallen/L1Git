@@ -365,3 +365,17 @@ it("comments on lines in All files too", async () => {
     "OYou on line 12PendingEditDeleteHere as well",
   ]);
 });
+
+it("shows a comment on its way once, from its own card, when the box moves on", async () => {
+  const app = await openFiles();
+  await choose(app, 12);
+  await app.type(words(), "On its way");
+  const held = app.bridge.hold("write");
+  await app.click(get("button", "Add single comment"));
+  await choose(app, 13, 13, "context");
+  expect(await pending(app), "its words are not pending now").toEqual([]);
+  expect(get("region", "Single comment").textContent).toContain("Sending…");
+  held.release();
+  await app.settle();
+  expect(app.bridge.world.host.mutations).toHaveLength(1);
+});

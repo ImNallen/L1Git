@@ -1,5 +1,7 @@
 import type { FileDiffMetadata, SelectedLineRange } from "@pierre/diffs";
-import { placed } from "./drafts";
+import { draftKey, placed } from "./drafts";
+import type { DraftKey } from "./drafts";
+import type { PullWrite } from "./pullRequestWrites";
 import type { Anchor } from "./drafts";
 import { rowsOf } from "./lineSelection";
 import type { DiffStyle, Row } from "./lineSelection";
@@ -102,4 +104,19 @@ export function runAt(
 /** "line 11", or "lines 10–12". */
 export function linesLabel({ line, start }: Pick<Lines, "line" | "start">) {
   return start === null ? `line ${line}` : `lines ${start.line}–${line}`;
+}
+
+/** The line drafts a write carries, which its own card shows while it is on
+ * its way: the host has them, and this window learns so when it answers. */
+export function carriedBy(write: PullWrite): DraftKey[] {
+  switch (write.kind) {
+    case "singleComment":
+      return [draftKey({ kind: "line", ...write.lines }, write.commit)];
+    case "submitReview":
+      return write.threads.map(({ lines }) =>
+        draftKey({ kind: "line", ...lines }, write.commit),
+      );
+    default:
+      return [];
+  }
 }

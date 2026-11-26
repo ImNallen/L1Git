@@ -1,6 +1,7 @@
 import { createContext, useMemo, useState } from "react";
 import { draftKey, draftText } from "../domain/drafts";
 import type { DraftKey } from "../domain/drafts";
+import { carriedBy } from "../domain/lineComments";
 import type { LineAnchor, Lines } from "../domain/lineComments";
 import type { PullRequest } from "../domain/pullRequest";
 import type { PullWrite } from "../domain/pullRequestWrites";
@@ -96,7 +97,17 @@ export function useLineComments({
   /** Why chosen lines opened no box. */
   const [notice, setNotice] = useState<string | null>(null);
   const box = held?.head === head ? held : null;
-  const lineDrafts = useMemo(() => drafts.drafts.filter(isLine), [drafts]);
+  const lineDrafts = useMemo(() => {
+    const carried = new Set(
+      writes.attempts.flatMap(({ write, state }) =>
+        state.kind === "sending" ? carriedBy(write) : [],
+      ),
+    );
+    return drafts.drafts.filter(
+      (draft): draft is ShownDraft & { anchor: LineAnchor } =>
+        isLine(draft) && !carried.has(draft.key),
+    );
+  }, [drafts, writes.attempts]);
   const sent = useMemo(
     () => writes.attempts.filter((attempt) => sentLines(attempt) !== null),
     [writes.attempts],
