@@ -6,6 +6,7 @@ import {
 import type {
   Applied,
   FullRef,
+  Oid,
   Problem,
   RepositoryRoot,
   RepositorySnapshot,
@@ -70,7 +71,13 @@ export type World = {
   merges: Map<RepositoryRoot, MergeState>;
   overviews: Map<RepositoryRoot, RepositoryOverview>;
   pushes: Map<RepositoryRoot, PushAvailability>;
-  pullCheckouts: Map<string, PullCheckout>;
+  /** Each pull request's copy by its repository's main worktree root and
+   * number, as `${root} #${number}`. */
+  pullCopies: Map<string, PullCopy>;
+  /** Commits that sit on top of another, as an author pushes them to a pull
+   * request or you commit in its copy. A fetch of the head brings it and the
+   * commits under it into the clone. Try makes a copy at any head. */
+  pullCommits: Map<string, { parent: string; fetched: boolean }>;
   /** What each typed path lists. An open repository lists itself. */
   directories: Map<string, DirectoryEntry[]>;
   host: {
@@ -81,6 +88,21 @@ export type World = {
     /** Each pull request by `pullKey`. */
     details: Map<string, PullRequest>;
   };
+};
+
+type Operation = Extract<
+  Extract<PullCheckout, { kind: "ready" }>["worktree"]["changes"],
+  { kind: "inProgress" }
+>["operation"];
+
+/** `pr/<number>` at `tip`, and the worktree that has it checked out. */
+type PullCopy = {
+  tip: string;
+  worktree: {
+    root: RepositoryRoot;
+    main: boolean;
+    operation?: Operation;
+  } | null;
 };
 
 export const pullsKey = (name: string, list: PullRequestList) =>
@@ -123,7 +145,8 @@ export function createWorld(): World {
       [PIN, readyPush()],
       [OTHER, noUpstream()],
     ]),
-    pullCheckouts: new Map(),
+    pullCopies: new Map(),
+    pullCommits: new Map(),
     directories: new Map([
       ["~", [folder(`${FAKE_HOME}/Projects`, "folder")]],
       [
@@ -247,39 +270,120 @@ function worktreeReview(request: BridgeRequest, world: World) {
 function pullCopy(request: BridgeRequest, world: World) {
   const pull = pullKeySchema.parse(request.pull);
   const head = pullHeadSchema.parse(request.head);
-  const key = `${request.path} #${pull.number}`;
+  const opened = known(world.snapshots, request.path);
+  const main = opened.worktrees.find((worktree) => worktree.main) ?? opened;
+  const key = `${main.root} #${pull.number}`;
   const name = `pr/${pull.number}`;
-  const absent = () => {
-    const snapshot = known(world.snapshots, request.path);
-    const main =
-      snapshot.worktrees.find((worktree) => worktree.main) ?? snapshot;
+  const answer = (): PullCheckout => {
+    const branch = `refs/heads/${name}`;
     const parent = main.root.split("/").slice(0, -1).join("/");
-    const [absentSchema] = pullCheckoutSchema.options;
-    return absentSchema.parse({
-      kind: "absent",
-      branch: `refs/heads/${name}`,
-      plan: {
-        folder: `${parent}/.worktrees/${main.name}-pr-${pull.number}`,
-        pushes: pushesOf(head),
+    const plan = {
+      folder: `${parent}/.worktrees/${main.name}-pr-${pull.number}`,
+      pushes: pushesOf(head),
+    };
+    const copy = world.pullCopies.get(key);
+    if (!copy)
+      return pullCheckoutSchema.parse({ kind: "absent", branch, plan });
+    const { tip, worktree } = copy;
+    const relation = relationOf(world, tip, head.oid);
+    if (!worktree)
+      return pullCheckoutSchema.parse({
+        kind: "parked",
+        branch,
+        tip,
+        relation,
+        plan,
+      });
+    const { root, operation } = worktree;
+    const entries = world.statuses.get(root)?.entries;
+    return pullCheckoutSchema.parse({
+      kind: "ready",
+      branch,
+      tip,
+      relation,
+      worktree: {
+        root,
+        name: root.split("/").at(-1),
+        main: worktree.main,
+        changes: !entries
+          ? { kind: "missing" }
+          : operation
+            ? { kind: "inProgress", operation }
+            : { kind: entries.length > 0 ? "uncommitted" : "clean" },
+        trouble: null,
       },
     });
   };
-  const current = world.pullCheckouts.get(key) ?? absent();
-  const keep = (checkout: PullCheckout | null) => {
-    if (checkout) world.pullCheckouts.set(key, checkout);
-    else world.pullCheckouts.delete(key);
-    return checkout ?? absent();
+  const keep = (copy: PullCopy | null) => {
+    for (const [root, snapshot] of world.snapshots)
+      if (snapshot.worktrees.some((worktree) => worktree.root === main.root))
+        world.snapshots.set(root, {
+          ...snapshot,
+          branches: [
+            ...snapshot.branches.filter((listed) => listed.name !== name),
+            ...(copy
+              ? [
+                  {
+                    kind: "local" as const,
+                    reference: `refs/heads/${name}` as FullRef,
+                    name,
+                    oid: copy.tip as Oid,
+                    upstream: null,
+                  },
+                ]
+              : []),
+          ],
+        });
+    if (copy) world.pullCopies.set(key, copy);
+    else world.pullCopies.delete(key);
+    return answer();
   };
-  const seen = (tip: unknown) => {
-    if (current.kind === "absent" || current.tip !== tip)
+  const seen = () => {
+    const copy = world.pullCopies.get(key);
+    if (!copy || copy.tip !== request.seen)
       throw new Refusal({
         kind: "staleView",
         reason: "branchChanged",
         message: `${name} is no longer at the commit L1 Git showed, so nothing changed. Refresh and try again.`,
       });
-    return current;
+    return copy;
   };
-  return { head, name, current, absent, keep, seen };
+  const fetch = () => {
+    let at: string | undefined = head.oid;
+    while (at !== undefined) {
+      const commit = world.pullCommits.get(at);
+      if (!commit || commit.fetched) break;
+      world.pullCommits.set(at, { ...commit, fetched: true });
+      at = commit.parent;
+    }
+  };
+  const copy = world.pullCopies.get(key);
+  return { head, name, copy, answer, keep, seen, fetch };
+}
+
+/** How `tip` stands against `head`, walking each down `pullCommits`. */
+function relationOf(world: World, tip: string, head: string) {
+  const line = (oid: string) => {
+    const commits = [oid];
+    for (
+      let at = world.pullCommits.get(oid)?.parent;
+      at !== undefined && !commits.includes(at);
+      at = world.pullCommits.get(at)?.parent
+    )
+      commits.push(at);
+    return commits;
+  };
+  const mine = line(tip);
+  if (!mine.includes(head) && !world.pullCommits.get(head)?.fetched)
+    return { kind: "unfetched" };
+  const theirs = line(head);
+  const base = theirs.findIndex((oid) => mine.includes(oid));
+  const ahead = base === -1 ? mine.length : mine.indexOf(theirs[base]!);
+  const behind = base === -1 ? theirs.length : base;
+  if (ahead > 0 && behind > 0) return { kind: "diverged", ahead, behind };
+  if (ahead > 0) return { kind: "ahead", commits: ahead };
+  if (behind > 0) return { kind: "behind", commits: behind };
+  return { kind: "upToDate" };
 }
 
 function pushesOf(head: PullHead) {
@@ -445,70 +549,69 @@ const handlers: Record<string, Handler> = {
   },
   undo: (request, world) => step(request, world, "undo"),
   redo: (request, world) => step(request, world, "redo"),
-  pullCheckout: (request, world) => pullCopy(request, world).current,
+  pullCheckout: (request, world) => pullCopy(request, world).answer(),
   tryPullRequest: (request, world) => {
-    const { head, name, current, keep } = pullCopy(request, world);
-    if (current.kind === "ready") return current;
+    const { head, name, copy, answer, keep, fetch } = pullCopy(request, world);
+    fetch();
+    if (copy?.worktree) return answer();
     const root = fromHome(String(request.folder)) as RepositoryRoot;
-    const from = request.path as RepositoryRoot;
-    const tip = current.kind === "parked" ? current.tip : head.oid;
-    const snapshot = known(world.snapshots, from);
-    world.snapshots.set(from, {
-      ...snapshot,
-      branches: [
-        ...snapshot.branches.filter((listed) => listed.name !== name),
-        {
-          kind: "local",
-          reference: `refs/heads/${name}` as FullRef,
-          name,
-          oid: tip,
-          upstream: null,
-        },
-      ],
-    });
-    addLinkedWorktree(world, from, root, name);
-    return keep({
-      kind: "ready",
-      branch: current.branch,
-      tip,
-      relation:
-        current.kind === "parked" ? current.relation : { kind: "upToDate" },
-      worktree: {
-        root,
-        name: root.split("/").at(-1) ?? root,
-        main: false,
-        changes: { kind: "clean" },
-        trouble: null,
-      },
-    });
+    keep({ tip: copy?.tip ?? head.oid, worktree: { root, main: false } });
+    addLinkedWorktree(world, request.path as RepositoryRoot, root, name);
+    return answer();
   },
   updatePullRequest: (request, world) => {
-    const { head, name, seen, keep } = pullCopy(request, world);
-    const copy = seen(request.seen);
-    if (copy.relation.kind === "ahead" && request.replace !== true) return copy;
-    if (copy.relation.kind === "diverged" && request.replace !== true)
+    const { head, name, answer, keep, seen, fetch } = pullCopy(request, world);
+    fetch();
+    const copy = seen();
+    const relation = relationOf(world, copy.tip, head.oid);
+    if (relation.kind === "unfetched")
+      throw new Refusal({
+        kind: "staleView",
+        reason: "branchChanged",
+        message:
+          "The pull request changed on GitHub since L1 Git read it, so nothing changed. Refresh it and try again.",
+      });
+    if (relation.kind === "diverged" && request.replace !== true)
       throw new Refusal({
         kind: "conflict",
-        message: `${name} has ${copy.relation.ahead} commits the pull request does not, so L1 Git did not move it. Replace it with the pull request to leave them behind.`,
+        message: `${name} has ${relation.ahead === 1 ? "1 commit" : `${relation.ahead} commits`} the pull request does not, so L1 Git did not move it. Replace it with the pull request to leave them behind.`,
       });
-    return keep({ ...copy, tip: head.oid, relation: { kind: "upToDate" } });
+    if (relation.kind === "ahead" && request.replace !== true) return answer();
+    return keep({ ...copy, tip: head.oid });
   },
   removePullRequest: (request, world) => {
-    const { current, name, absent, seen, keep } = pullCopy(request, world);
-    if (current.kind === "absent") return current;
-    const copy = seen(request.seen);
-    if (copy.kind === "ready") removeLinkedWorktree(world, copy.worktree.root);
-    if (copy.relation.kind === "upToDate" || copy.relation.kind === "behind") {
-      const from = request.path as RepositoryRoot;
-      const snapshot = known(world.snapshots, from);
-      world.snapshots.set(from, {
-        ...snapshot,
-        branches: snapshot.branches.filter((listed) => listed.name !== name),
-      });
-      return keep(null);
+    const { head, copy, answer, keep, seen, fetch } = pullCopy(request, world);
+    fetch();
+    if (!copy) return answer();
+    seen();
+    const ready = answer();
+    if (ready.kind === "ready") {
+      const { root, name, main, changes } = ready.worktree;
+      const refused = (kind: "conflict" | "unsupportedPath", message: string) =>
+        new Refusal({ kind, message });
+      if (main)
+        throw refused(
+          "unsupportedPath",
+          `${name} is this repository's main worktree, and Git removes only linked worktrees.`,
+        );
+      if (changes.kind === "inProgress")
+        throw refused(
+          "conflict",
+          `An operation is in progress in ${name}. Finish or abort it there, then remove the worktree.`,
+        );
+      if (changes.kind === "uncommitted")
+        throw refused(
+          "conflict",
+          `${name} has uncommitted or untracked files. Commit, stash, or discard them there, then remove the worktree.`,
+        );
+      removeLinkedWorktree(world, root as RepositoryRoot);
     }
-    const { branch, tip, relation } = copy;
-    return keep({ kind: "parked", branch, tip, relation, plan: absent().plan });
+    const { kind } = relationOf(world, copy.tip, head.oid);
+    return keep(
+      kind === "upToDate" || kind === "behind"
+        ? null
+        : { ...copy, worktree: null },
+    );
   },
 };
 
