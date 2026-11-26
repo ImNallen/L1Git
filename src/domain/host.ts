@@ -74,6 +74,7 @@ export const hostErrorSchema = z.discriminatedUnion("kind", [
     ...failure,
   }),
   z.object({ kind: z.literal("unreachable"), ...failure }),
+  z.object({ kind: z.literal("unanswered"), ...failure }),
   z.object({
     kind: z.literal("gitHubFailed"),
     httpStatus: z.number().int(),

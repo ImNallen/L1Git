@@ -168,6 +168,10 @@ describe("the notice", () => {
       { kind: "offline", at: 5 },
     ],
     [
+      { kind: "unanswered", ...failure },
+      { kind: "offline", at: 5 },
+    ],
+    [
       { kind: "transport", message: "It failed." },
       { kind: "offline", at: 5 },
     ],

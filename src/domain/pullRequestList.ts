@@ -538,8 +538,9 @@ const withheld = (problem: HostProblem) =>
   problem.kind === "ssoRequired" ||
   (problem.kind === "gitHubFailed" && problem.httpStatus === 403);
 
+/** For a read, a question GitHub never answered is as good as one never sent. */
 export const offline = ({ kind }: HostProblem) =>
-  kind === "unreachable" || kind === "transport";
+  kind === "unreachable" || kind === "unanswered" || kind === "transport";
 
 /** These come from the connection, so every repository would say the same. */
 const shared = ({ kind }: HostProblem) =>

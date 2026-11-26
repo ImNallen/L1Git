@@ -629,7 +629,7 @@ describe("the notices", () => {
       told({
         app: { ...holds(), at: 1_000, ...unreachable },
         site: { ...holds(), at: 5_000, ...failing("transport") },
-        api: unreachable,
+        api: failing("unanswered"),
       }),
     ).toEqual([{ kind: "offline", at: 5_000 }]);
     expect(
