@@ -167,6 +167,8 @@ pub(super) fn judge(body: &[u8], field: &str, echo: fn(&Value) -> Echo) -> Writt
         message: String,
         #[serde(default)]
         locations: Vec<Value>,
+        #[serde(default)]
+        path: Vec<Value>,
         extensions: Option<Extensions>,
     }
     #[derive(Deserialize)]
@@ -191,8 +193,16 @@ pub(super) fn judge(body: &[u8], field: &str, echo: fn(&Value) -> Echo) -> Writt
         .and_then(|errors| serde_json::from_value::<Vec<Problem>>(errors).ok())
         .unwrap_or_default();
     let typed = |problem: &Problem| problem.kind.as_deref().is_some_and(|kind| !gave_up(kind));
+    // GitHub's validation errors name a place in the document, which starts
+    // with the operation. Any other path is in the answer, so the field ran.
+    let in_document = |problem: &Problem| match problem.path.first() {
+        None => true,
+        Some(Value::String(first)) => first.split(' ').next() == Some("mutation"),
+        Some(_) => false,
+    };
     let in_query = |problem: &Problem| {
         problem.kind.is_none()
+            && in_document(problem)
             && (!problem.locations.is_empty()
                 || problem
                     .extensions

@@ -407,6 +407,11 @@ fn a_write_with_no_answer_it_can_read_is_unknown_and_never_sent_again() {
             {"type": "RESOURCE_LIMITS_EXCEEDED", "path": ["addComment"], "message": "Too much."},
         ]})),
         Reply::graphql(json!({"data": {"addComment": null}})),
+        Reply::graphql(json!({"errors": [{
+            "locations": [{"line": 2, "column": 3}],
+            "path": ["addComment"],
+            "message": "Something went wrong while executing your query.",
+        }]})),
     ] {
         let world = World::connected();
         world
