@@ -132,6 +132,10 @@ it("opens a box under chosen lines, and keeps its words as a pending comment", a
   const app = await openFiles();
   await choose(app, 11, 12);
   expect(box()?.getAttribute("aria-label")).toBe("Comment on lines 11–12");
+  // As a click on a line number does, after the box mounts.
+  panel().querySelector<HTMLElement>(".file-diff-scroll")!.focus();
+  await app.flushFrames();
+  expect(document.activeElement, "the words take the focus").toBe(words());
   expect(box()?.textContent).toContain("Saved as a draft on this machine");
   expect(get("button", "Start a review").getAttribute("aria-disabled")).toBe(
     "true",

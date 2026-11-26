@@ -22,7 +22,8 @@ export type DraftSave = ShownDraft["save"];
  * or one attempt whose outcome shows in the box. */
 type Sending =
   | { kind: "idle"; problem: string | null }
-  | { kind: "starting" }
+  /** Saving its words, until the writes store holds `write`. */
+  | { kind: "starting"; write: PullWrite }
   | { kind: "sent"; attempt: string };
 
 /** The one comment box. Its words are the draft at its place, never here. */
@@ -104,18 +105,22 @@ export function useLineComments({
     const key = draftKey(anchor, at);
     return lineDrafts.find((draft) => draft.key === key) ?? null;
   };
-  const sentId = box?.sending.kind === "sent" ? box.sending.attempt : null;
+  const sending = box?.sending;
+  // From the moment the store holds it, so its line never shows it twice.
   const boxAttempt =
-    sentId === null
-      ? null
-      : (writes.attempts.find(({ id }) => id === sentId) ?? null);
+    sending?.kind === "sent"
+      ? (writes.attempts.find(({ id }) => id === sending.attempt) ?? null)
+      : sending?.kind === "starting"
+        ? (writes.attempts.findLast(({ write }) => write === sending.write) ??
+          null)
+        : null;
   // A single comment GitHub has is shown on its line until a read has it.
   if (box && boxAttempt?.state.kind === "done") setBox(null);
 
   const view = ((): BoxView | null => {
     if (!box) return null;
     const { sending } = box;
-    if (sending.kind === "starting")
+    if (sending.kind === "starting" && !boxAttempt)
       return { kind: "sending", text: draftAt(box.anchor, head)?.text ?? "" };
     const state = boxAttempt?.state;
     const body =
@@ -141,10 +146,7 @@ export function useLineComments({
   const places = JSON.stringify([
     lineDrafts.map(({ key, anchor, head: at }) => [key, anchor, at]),
     sent.map(({ id, write }) => [id, write]),
-    box && [
-      box.anchor,
-      box.sending.kind === "sent" ? box.sending.attempt : null,
-    ],
+    box && [box.anchor, boxAttempt?.id ?? null],
   ]);
   /** Ids and places only, the same object while they stay, so typing draws
    * no line again. */
@@ -195,7 +197,7 @@ export function useLineComments({
       lines: linesOf(anchor),
       body: text,
     };
-    change({ sending: { kind: "starting" } });
+    change({ sending: { kind: "starting", write } });
     const started = await writes.send(write, [{ anchor, head }]);
     const attempt = opened.writing.writes
       .attempts({ repository: opened.repository.github, number: opened.number })

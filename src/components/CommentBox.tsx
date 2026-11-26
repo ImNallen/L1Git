@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { draftText } from "../domain/drafts";
 import { linesLabel } from "../domain/lineComments";
 import type { Lines } from "../domain/lineComments";
@@ -29,6 +29,18 @@ export function CommentBox({
   comments: LineComments;
 }) {
   const [tab, setTab] = useState<"write" | "preview">("write");
+  const words = useRef<HTMLTextAreaElement>(null);
+  // A click on a line number, or on the gutter plus that goes away, moves the
+  // focus after the box mounts, so the words take it a frame later.
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      const box = words.current;
+      if (!box) return;
+      box.focus({ preventScroll: true });
+      box.setSelectionRange(box.value.length, box.value.length);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, []);
   const id = useId();
   const label = `Comment on ${linesLabel(lines)}`;
   const writing = view.kind === "writing" ? view : null;
@@ -68,6 +80,7 @@ export function CommentBox({
       >
         {tab === "write" ? (
           <textarea
+            ref={words}
             className="line-comment-text"
             aria-label={label}
             placeholder="Leave a comment. Markdown works here."
@@ -170,7 +183,7 @@ export function CommentBox({
           </>
         )}
       </footer>
-      {comments.isBehind && (
+      {comments.isBehind && !isEdit && (
         <p id={`${id}-behind`} className="line-comment-note">
           New commits were pushed. A review goes with the newest commit, so show
           them to add this to your review.
