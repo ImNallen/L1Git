@@ -251,6 +251,38 @@ it("sends anyway only when asked, and not at all once a read shows it landed", a
   expect(stored()).toEqual([]);
 });
 
+it("still shows a write that may have posted, with why, when Send anyway sends nothing", async () => {
+  const shown = await window();
+  bridge.world.host.writes.push(
+    { kind: "unknown", applied: false },
+    {
+      kind: "notSent",
+      message:
+        "L1 Git could not read the pull request first, so it sent nothing.",
+    },
+  );
+  await comment(shown, "Thanks!");
+  await vi.waitFor(() => expect(asked("check")).toBe(1));
+  const id = shown.writes.attempts(one)[0]?.id ?? "";
+  expect(shown.writes.sendAnyway(one, id)).toBe("started");
+  await vi.waitFor(() => expect(asked("sendAgain")).toBe(1));
+  await vi.waitFor(() =>
+    expect(shown.writes.attempts(one)).toMatchObject([
+      {
+        id,
+        state: { kind: "unknown", kept: true, message: /could not read/ },
+      },
+    ]),
+  );
+  expect(shown.writes.busy(one)).toBe(true);
+  await shown.read(1);
+  await vi.waitFor(() => expect(asked("check")).toBe(2));
+
+  expect(shown.writes.sendAnyway(one, id), "its choices stay").toBe("started");
+  await vi.waitFor(() => expect(kept()).toEqual([]));
+  expect(mutations()).toBe(2);
+});
+
 it("settles a lost merge from whether it merged, so it can be sent again", async () => {
   const shown = await window();
   bridge.world.host.writes.push({ kind: "unknown", applied: false });
