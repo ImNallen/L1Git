@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { singleCommit } from "./domain/comparison";
 import {
+  localRefSchema,
   oidSchema,
   problemFrom,
   refSchema,
@@ -546,4 +547,73 @@ it("sends Try it locally's review, create, and remove and validates their answer
   await expect(
     createWorktree(root, { ...source, kind: "commit" } as never, "/x"),
   ).rejects.toHaveProperty("issues");
+});
+
+it("sends a pull request's copy requests and validates their answers", async () => {
+  const { pullCheckout, removePullRequest, tryPullRequest, updatePullRequest } =
+    await load(true);
+  const pull = { github: { owner: "octo", repo: "l1git" }, number: 7 };
+  const head = {
+    reference: localRefSchema.parse("refs/heads/feat/x"),
+    oid,
+    from: { kind: "fork" as const, repository: pull.github, edits: false },
+  };
+  const plan = {
+    folder: "/work/.worktrees/l1-demo-pr-7",
+    pushes: { kind: "nowhere", why: "noEdits" },
+  };
+  const absent = { kind: "absent", branch: "refs/heads/pr/7", plan };
+  const ready = {
+    kind: "ready",
+    branch: "refs/heads/pr/7",
+    tip: oid,
+    relation: { kind: "upToDate" },
+    worktree: {
+      root: plan.folder,
+      name: "l1-demo-pr-7",
+      main: false,
+      changes: { kind: "clean" },
+      trouble: null,
+    },
+  };
+  const sent = () => invoke.mock.lastCall?.[1].request;
+  invoke.mockResolvedValueOnce({ op: "pullCheckout", data: absent });
+  expect(await pullCheckout(root, pull, head)).toEqual(absent);
+  expect(sent()).toEqual({ op: "pullCheckout", path: root, pull, head });
+  invoke.mockResolvedValueOnce({ op: "tryPullRequest", data: ready });
+  expect(await tryPullRequest(root, pull, head, "~/pr")).toEqual(ready);
+  expect(sent()).toEqual({
+    op: "tryPullRequest",
+    path: root,
+    pull,
+    head,
+    folder: "~/pr",
+  });
+  invoke.mockResolvedValueOnce({ op: "updatePullRequest", data: ready });
+  expect(await updatePullRequest(root, pull, head, oid, true)).toEqual(ready);
+  expect(sent()).toEqual({
+    op: "updatePullRequest",
+    path: root,
+    pull,
+    head,
+    seen: oid,
+    replace: true,
+  });
+  invoke.mockResolvedValueOnce({ op: "removePullRequest", data: absent });
+  expect(await removePullRequest(root, pull, head, oid)).toEqual(absent);
+  expect(sent()).toEqual({
+    op: "removePullRequest",
+    path: root,
+    pull,
+    head,
+    seen: oid,
+  });
+  await expect(
+    pullCheckout(root, { ...pull, number: 0 }, head),
+  ).rejects.toHaveProperty("issues");
+  invoke.mockResolvedValueOnce({
+    op: "pullCheckout",
+    data: { ...ready, relation: { kind: "rewritten" } },
+  });
+  await expect(pullCheckout(root, pull, head)).rejects.toHaveProperty("issues");
 });

@@ -5,6 +5,7 @@ import {
 } from "../domain/repository";
 import type {
   Applied,
+  FullRef,
   Problem,
   RepositoryRoot,
   RepositorySnapshot,
@@ -19,6 +20,12 @@ import type {
 } from "../domain/pullRequest";
 import type { GitHubRepository } from "../domain/repository";
 import { rangeFilesSchema, rangePatchesSchema } from "../domain/range";
+import {
+  pullCheckoutSchema,
+  pullHeadSchema,
+  pullKeySchema,
+} from "../domain/pullRequestCheckout";
+import type { PullCheckout, PullHead } from "../domain/pullRequestCheckout";
 import { mergeSelectionSchema } from "../domain/merge";
 import { probeOf } from "../domain/inProgress";
 import type { MergeState } from "../domain/merge";
@@ -63,6 +70,8 @@ export type World = {
   merges: Map<RepositoryRoot, MergeState>;
   overviews: Map<RepositoryRoot, RepositoryOverview>;
   pushes: Map<RepositoryRoot, PushAvailability>;
+  /** The copy of each pull request, by repository root and number. */
+  pullCheckouts: Map<string, PullCheckout>;
   /** What each typed path lists. An open repository lists itself. */
   directories: Map<string, DirectoryEntry[]>;
   host: {
@@ -115,6 +124,7 @@ export function createWorld(): World {
       [PIN, readyPush()],
       [OTHER, noUpstream()],
     ]),
+    pullCheckouts: new Map(),
     directories: new Map([
       ["~", [folder(`${FAKE_HOME}/Projects`, "folder")]],
       [
@@ -232,6 +242,67 @@ function worktreeReview(request: BridgeRequest, world: World) {
       ? { kind: "existing", reference }
       : { kind: "new", reference, upstream: source.reference },
     name,
+  };
+}
+
+/** A pull request's copy, as the core keeps it: Try makes `pr/<number>` in a linked worktree, Update moves it to the head, and Remove deletes it unless it holds commits of yours. */
+function pullCopy(request: BridgeRequest, world: World) {
+  const pull = pullKeySchema.parse(request.pull);
+  const head = pullHeadSchema.parse(request.head);
+  const key = `${request.path} #${pull.number}`;
+  const name = `pr/${pull.number}`;
+  const absent = () => {
+    const snapshot = known(world.snapshots, request.path);
+    const main =
+      snapshot.worktrees.find((worktree) => worktree.main) ?? snapshot;
+    const parent = main.root.split("/").slice(0, -1).join("/");
+    const [absentSchema] = pullCheckoutSchema.options;
+    return absentSchema.parse({
+      kind: "absent",
+      branch: `refs/heads/${name}`,
+      plan: {
+        folder: `${parent}/.worktrees/${main.name}-pr-${pull.number}`,
+        pushes: pushesOf(head),
+      },
+    });
+  };
+  const current = world.pullCheckouts.get(key) ?? absent();
+  const keep = (checkout: PullCheckout | null) => {
+    if (checkout) world.pullCheckouts.set(key, checkout);
+    else world.pullCheckouts.delete(key);
+    return checkout ?? absent();
+  };
+  const seen = (tip: unknown) => {
+    if (current.kind === "absent" || current.tip !== tip)
+      throw new Refusal({
+        kind: "staleView",
+        reason: "branchChanged",
+        message: `${name} is no longer at the commit L1 Git showed, so nothing changed. Refresh and try again.`,
+      });
+    return current;
+  };
+  return { head, name, current, absent, keep, seen };
+}
+
+function pushesOf(head: PullHead) {
+  const { from } = head;
+  if (from.kind === "same")
+    return {
+      kind: "toPullRequest",
+      remote: "origin",
+      destination: head.reference,
+      addsRemote: false,
+    };
+  if (from.kind === "fork" && from.edits)
+    return {
+      kind: "toPullRequest",
+      remote: from.repository.owner,
+      destination: head.reference,
+      addsRemote: true,
+    };
+  return {
+    kind: "nowhere",
+    why: from.kind === "fork" ? "noEdits" : "forkGone",
   };
 }
 
@@ -376,6 +447,70 @@ const handlers: Record<string, Handler> = {
   },
   undo: (request, world) => step(request, world, "undo"),
   redo: (request, world) => step(request, world, "redo"),
+  pullCheckout: (request, world) => pullCopy(request, world).current,
+  tryPullRequest: (request, world) => {
+    const { head, name, current, keep } = pullCopy(request, world);
+    if (current.kind === "ready") return current;
+    const root = fromHome(String(request.folder)) as RepositoryRoot;
+    const from = request.path as RepositoryRoot;
+    const tip = current.kind === "parked" ? current.tip : head.oid;
+    const snapshot = known(world.snapshots, from);
+    world.snapshots.set(from, {
+      ...snapshot,
+      branches: [
+        ...snapshot.branches.filter((listed) => listed.name !== name),
+        {
+          kind: "local",
+          reference: `refs/heads/${name}` as FullRef,
+          name,
+          oid: tip,
+          upstream: null,
+        },
+      ],
+    });
+    addLinkedWorktree(world, from, root, name);
+    return keep({
+      kind: "ready",
+      branch: current.branch,
+      tip,
+      relation:
+        current.kind === "parked" ? current.relation : { kind: "upToDate" },
+      worktree: {
+        root,
+        name: root.split("/").at(-1) ?? root,
+        main: false,
+        changes: { kind: "clean" },
+        trouble: null,
+      },
+    });
+  },
+  updatePullRequest: (request, world) => {
+    const { head, name, seen, keep } = pullCopy(request, world);
+    const copy = seen(request.seen);
+    if (copy.relation.kind === "diverged" && request.replace !== true)
+      throw new Refusal({
+        kind: "conflict",
+        message: `${name} has ${copy.relation.ahead} commits the pull request does not, so L1 Git did not move it. Replace it with the pull request to leave them behind.`,
+      });
+    return keep({ ...copy, tip: head.oid, relation: { kind: "upToDate" } });
+  },
+  removePullRequest: (request, world) => {
+    const { current, name, absent, seen, keep } = pullCopy(request, world);
+    if (current.kind === "absent") return current;
+    const copy = seen(request.seen);
+    if (copy.kind === "ready") removeLinkedWorktree(world, copy.worktree.root);
+    if (copy.relation.kind === "upToDate" || copy.relation.kind === "behind") {
+      const from = request.path as RepositoryRoot;
+      const snapshot = known(world.snapshots, from);
+      world.snapshots.set(from, {
+        ...snapshot,
+        branches: snapshot.branches.filter((listed) => listed.name !== name),
+      });
+      return keep(null);
+    }
+    const { branch, tip, relation } = copy;
+    return keep({ kind: "parked", branch, tip, relation, plan: absent().plan });
+  },
 };
 
 class HostRefusal {

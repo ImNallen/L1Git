@@ -68,6 +68,7 @@ import {
   hostRequestOps,
   hostResponseSchema,
 } from "./domain/host";
+import { pullCheckoutSchema } from "./domain/pullRequestCheckout";
 import { requestOps } from "./repositories";
 
 const fixtureSchema = z.object({
@@ -2226,6 +2227,76 @@ describe("real Rust writes, undo, and redo", () => {
     expect(git(path, "rev-parse", "refs/heads/feat/history").trim()).toBe(
       history,
     );
+  });
+
+  it("tries a pull request on pr/<number> in a worktree of its own, then removes both", async () => {
+    const path = clone();
+    const url = "https://github.com/octo/app.git";
+    git(path, "config", "remote.origin.url", url);
+    git(path, "config", `url.${fixture.repository}.insteadOf`, url);
+    const oid = git(path, "rev-parse", "origin/feat/history").trim();
+    const pull = { github: { owner: "octo", repo: "app" }, number: 7 };
+    const head = {
+      reference: "refs/heads/feat/history",
+      oid,
+      from: { kind: "same" },
+    };
+    const copy = async (op: string, fields: Record<string, unknown> = {}) =>
+      answer(op, pullCheckoutSchema)
+        .strict()
+        .parse(await (await post({ op, path, pull, head, ...fields })).json())
+        .data;
+    const folder = join(
+      path,
+      "..",
+      ".worktrees",
+      `${path.split("/").at(-1)}-pr-7`,
+    );
+    const absent = await copy("pullCheckout");
+    expect(absent).toEqual({
+      kind: "absent",
+      branch: "refs/heads/pr/7",
+      plan: {
+        folder,
+        pushes: {
+          kind: "toPullRequest",
+          remote: "origin",
+          destination: "refs/heads/feat/history",
+          addsRemote: false,
+        },
+      },
+    });
+
+    expect(await copy("tryPullRequest", { folder })).toEqual({
+      kind: "ready",
+      branch: "refs/heads/pr/7",
+      tip: oid,
+      relation: { kind: "upToDate" },
+      worktree: {
+        root: folder,
+        name: folder.split("/").at(-1),
+        main: false,
+        changes: { kind: "clean" },
+        trouble: null,
+      },
+    });
+    expect(git(folder, "rev-parse", "--abbrev-ref", "@{upstream}").trim()).toBe(
+      "origin/feat/history",
+    );
+    expect(git(path, "symbolic-ref", "HEAD").trim()).toBe("refs/heads/main");
+    expect(readFileSync(join(path, "README.md"), "utf8")).toBe(
+      "# L1 demo\n\nEdited.\n",
+    );
+
+    expect(await copy("removePullRequest", { seen: oid })).toEqual(absent);
+    expect(existsSync(folder)).toBe(false);
+    expect(
+      spawnSync(
+        "git",
+        ["-C", path, "rev-parse", "--verify", "--quiet", "refs/heads/pr/7"],
+        { env },
+      ).status,
+    ).not.toBe(0);
   });
 
   it("discards a tracked and an untracked file, undoes them byte for byte, and redoes them", async () => {

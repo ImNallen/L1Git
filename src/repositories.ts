@@ -23,6 +23,12 @@ import {
 } from "./domain/push";
 import type { AddRemoteInput, PublishChoice, PushIntent } from "./domain/push";
 import { fastForwardReportSchema, overviewSchema } from "./domain/overview";
+import {
+  pullCheckoutSchema,
+  pullHeadSchema,
+  pullKeySchema,
+} from "./domain/pullRequestCheckout";
+import type { PullHead, PullKey } from "./domain/pullRequestCheckout";
 import type { Comparison } from "./domain/comparison";
 import {
   commitsFetchSchema,
@@ -134,7 +140,30 @@ type RepositoryRequest =
       source: WorktreeSource;
       folder: string;
     }
-  | { op: "removeWorktree"; path: RepositoryRoot; worktree: RepositoryRoot };
+  | { op: "removeWorktree"; path: RepositoryRoot; worktree: RepositoryRoot }
+  | { op: "pullCheckout"; path: RepositoryRoot; pull: PullKey; head: PullHead }
+  | {
+      op: "tryPullRequest";
+      path: RepositoryRoot;
+      pull: PullKey;
+      head: PullHead;
+      folder: string;
+    }
+  | {
+      op: "updatePullRequest";
+      path: RepositoryRoot;
+      pull: PullKey;
+      head: PullHead;
+      seen: Oid;
+      replace: boolean;
+    }
+  | {
+      op: "removePullRequest";
+      path: RepositoryRoot;
+      pull: PullKey;
+      head: PullHead;
+      seen: Oid;
+    };
 
 const responseSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("mergeReview"), data: mergeReviewSchema }),
@@ -180,6 +209,10 @@ const responseSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("worktreeReview"), data: worktreeReviewSchema }),
   z.object({ op: z.literal("createWorktree"), data: newWorktreeSchema }),
   z.object({ op: z.literal("removeWorktree") }),
+  z.object({ op: z.literal("pullCheckout"), data: pullCheckoutSchema }),
+  z.object({ op: z.literal("tryPullRequest"), data: pullCheckoutSchema }),
+  z.object({ op: z.literal("updatePullRequest"), data: pullCheckoutSchema }),
+  z.object({ op: z.literal("removePullRequest"), data: pullCheckoutSchema }),
 ]);
 export const requestOps = responseSchema.options.map(
   (option) => option.shape.op.value,
@@ -397,6 +430,77 @@ export async function removeWorktree(
   worktree: RepositoryRoot,
 ) {
   await run({ op: "removeWorktree", path, worktree });
+}
+
+/** The local copy of `pull`: the branch `pr/<number>` and the worktree that has it checked out. */
+export async function pullCheckout(
+  path: RepositoryRoot,
+  pull: PullKey,
+  head: PullHead,
+) {
+  return (
+    await run({
+      op: "pullCheckout",
+      path,
+      pull: pullKeySchema.parse(pull),
+      head: pullHeadSchema.parse(head),
+    })
+  ).data;
+}
+
+/** `folder` as typed. The core expands `~`. */
+export async function tryPullRequest(
+  path: RepositoryRoot,
+  pull: PullKey,
+  head: PullHead,
+  folder: string,
+) {
+  return (
+    await run({
+      op: "tryPullRequest",
+      path,
+      pull: pullKeySchema.parse(pull),
+      head: pullHeadSchema.parse(head),
+      folder,
+    })
+  ).data;
+}
+
+/** `seen` is the tip of `pr/<number>` the user saw. Without `replace`, only a branch behind the head moves. */
+export async function updatePullRequest(
+  path: RepositoryRoot,
+  pull: PullKey,
+  head: PullHead,
+  seen: Oid,
+  replace: boolean,
+) {
+  return (
+    await run({
+      op: "updatePullRequest",
+      path,
+      pull: pullKeySchema.parse(pull),
+      head: pullHeadSchema.parse(head),
+      seen,
+      replace,
+    })
+  ).data;
+}
+
+export async function removePullRequest(
+  path: RepositoryRoot,
+  pull: PullKey,
+  head: PullHead,
+  seen: Oid,
+) {
+  return (
+    await run({
+      op: "removePullRequest",
+      path,
+      pull: pullKeySchema.parse(pull),
+      head: pullHeadSchema.parse(head),
+      seen,
+    })
+  ).data;
 }
 
 export async function preparePush(path: RepositoryRoot) {
