@@ -156,9 +156,11 @@
 }
 
 .finish-sent {
+  flex-shrink: 0;
   margin-left: auto;
   color: var(--muted);
   font-size: 12px;
+  white-space: nowrap;
 }
 .finish-sent:empty {
   margin-left: auto;

@@ -3,7 +3,13 @@ import { expect, it } from "vitest";
 import type { Draft } from "./domain/drafts";
 import type { PullRequest, ReviewThread } from "./domain/pullRequest";
 import { oidSchema } from "./domain/repository";
-import { focused, get, installHarness, query } from "./test/appHarness";
+import {
+  focused,
+  get,
+  installHarness,
+  query,
+  queryAll,
+} from "./test/appHarness";
 import type { Harness } from "./test/appHarness";
 import { pullKey } from "./test/fakeBridge";
 import type { Bridge, World } from "./test/fakeBridge";
@@ -171,6 +177,12 @@ it("sends nothing while a review is on its way, and shows it as sending", async 
   await app.click(submit());
   expect(shown.getAttribute("aria-busy")).toBe("true");
   expect(get("status", "Sending your review…", shown)).toBeTruthy();
+  for (let frame = 0; frame < 5; frame += 1) await app.flushFrames();
+  expect(
+    queryAll("region", "Pending comment"),
+    "its comments show once, as on their way",
+  ).toEqual([]);
+  expect(get("region", "Review comment").textContent).toContain("Sending…");
   await app.click(submit());
   await app.press("Enter", { ctrlKey: true });
   held.release();
