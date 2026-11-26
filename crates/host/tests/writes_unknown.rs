@@ -200,6 +200,36 @@ fn an_earlier_review_with_the_same_words_never_settles_a_lost_one() {
 }
 
 #[test]
+fn a_lost_approval_github_dismissed_before_the_read_still_settles() {
+    let world = World::connected();
+    let approve = json!({"kind": "submitReview", "pull": "PR_1", "commit": oid('1'), "event": "approve", "body": "Ship it", "threads": []});
+    world.github.graphql([reviews(&[]), Reply::unanswered()]);
+    assert_eq!(world.write(approve)["kind"], "unknown");
+    world
+        .github
+        .graphql([reviews(&[("PRR_7", "DISMISSED", "Ship it", &[])])]);
+    let checked = world.check();
+    assert_eq!(
+        checked["settled"][0]["seen"]["echo"]["id"], "PRR_7",
+        "{checked}"
+    );
+
+    let pending =
+        json!({"kind": "submitPending", "review": "PRR_8", "event": "approve", "body": ""});
+    world.github.graphql([Reply::unanswered()]);
+    assert_eq!(world.write(pending)["kind"], "unknown");
+    world.github.graphql([Reply::graphql(
+        json!({"data": {"node": {"state": "DISMISSED"}}}),
+    )]);
+    let checked = world.check();
+    assert_eq!(
+        checked["settled"][0]["seen"]["echo"]["id"], "PRR_8",
+        "{checked}"
+    );
+    assert_eq!(world.mutations().len(), 2);
+}
+
+#[test]
 fn a_lost_reply_or_single_comment_needs_a_new_id_too() {
     let world = World::connected();
     let reply = json!({"kind": "reply", "thread": "PRRT_1", "body": "Done"});

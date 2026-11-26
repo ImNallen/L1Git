@@ -113,12 +113,16 @@ fn same_text(a: &str, b: &str) -> bool {
     plain(a).trim() == plain(b).trim()
 }
 
-fn verdict(event: Event) -> &'static str {
-    match event {
-        Event::Comment => "COMMENTED",
-        Event::Approve => "APPROVED",
-        Event::RequestChanges => "CHANGES_REQUESTED",
-    }
+/// A review dismissed since it landed, as a push dismissing stale approvals
+/// does, still shows that it landed.
+fn is_verdict(state: &str, event: Event) -> bool {
+    state == "DISMISSED"
+        || state
+            == match event {
+                Event::Comment => "COMMENTED",
+                Event::Approve => "APPROVED",
+                Event::RequestChanges => "CHANGES_REQUESTED",
+            }
 }
 
 impl LineComment {
@@ -213,11 +217,11 @@ impl GitHub<'_> {
                 })
                 .and_then(|said| landed(Echo::Comment { id: Some(said.id) }))
         };
-        let reviewed = |pull: &str, state: &str, body: &str, threads: &[(&Lines, &str)]| {
+        let reviewed = |pull: &str, event: Event, body: &str, threads: &[(&Lines, &str)]| {
             Ok::<_, ApiError>(self.reviews(pull, login)?.into_iter().find_map(|review| {
                 let id = review.id.clone();
                 (new(&id)
-                    && review.state == state
+                    && is_verdict(&review.state, event)
                     && same_text(&review.body, body)
                     && review.holds(threads))
                 .then_some(Seen::Landed {
@@ -230,7 +234,7 @@ impl GitHub<'_> {
             Write::Reply { thread, body } => posted(self.replies(thread.as_str())?, body),
             Write::SingleComment {
                 pull, lines, body, ..
-            } => reviewed(pull.as_str(), "COMMENTED", "", &[(lines, body)])?,
+            } => reviewed(pull.as_str(), Event::Comment, "", &[(lines, body)])?,
             Write::SubmitReview {
                 pull,
                 event,
@@ -242,11 +246,11 @@ impl GitHub<'_> {
                     .iter()
                     .map(|thread| (&thread.lines, thread.body.as_str()))
                     .collect();
-                reviewed(pull.as_str(), verdict(*event), body, &threads)?
+                reviewed(pull.as_str(), *event, body, &threads)?
             }
             Write::SubmitPending { review, event, .. } => self
                 .node::<ReviewState>(REVIEW, json!({"id": review}))?
-                .filter(|found| found.state == verdict(*event))
+                .filter(|found| is_verdict(&found.state, *event))
                 .and_then(|_| {
                     landed(Echo::Review {
                         id: Some(review.as_str().to_owned()),
