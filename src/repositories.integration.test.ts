@@ -645,7 +645,7 @@ describe("real Rust transport contract", () => {
         .parse(await run({ op: "listDirectories", path: "relative" })).error
         .kind,
     ).toBe("unsupportedPath");
- 
+
     expect(await run({ op: "home" })).toEqual({
       ok: true,
       op: "home",
