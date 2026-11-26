@@ -76,7 +76,7 @@ async function show(github?: HostStatus["github"]) {
 
 const text = () => container.textContent?.replace(/\s+/g, " ") ?? "";
 const promise =
-  "L1 Git reads pull requests. It writes to GitHub only when you click: a comment, a reply, a resolved thread, a review you submit, a merge, or a branch you chose to delete. It never writes in the background.";
+  "L1 Git reads pull requests. This version doesn't write to GitHub yet. When it does, it writes only when you click, and never in the background.";
 const dialog = () => container.querySelector("dialog[open]");
 const ops = () => sent.map((request) => request.op);
 
