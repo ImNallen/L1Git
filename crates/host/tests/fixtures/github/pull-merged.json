@@ -1,6 +1,7 @@
 {
   "data": {
     "repository": {
+      "viewerPermission": "ADMIN",
       "pullRequest": {
         "number": 10,
         "title": "Cache the parsed theme",

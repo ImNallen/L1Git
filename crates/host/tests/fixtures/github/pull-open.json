@@ -1,6 +1,7 @@
 {
   "data": {
     "repository": {
+      "viewerPermission": "WRITE",
       "pullRequest": {
         "number": 12,
         "title": "Read the configuration file once",

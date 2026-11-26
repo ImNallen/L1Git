@@ -46,6 +46,7 @@ function pull(fields: Partial<PullRequest> = {}): PullRequest {
     state: { kind: "open", draft: false },
     author: "maja",
     viewerIsAuthor: false,
+    viewerPermission: "write",
     base: "main",
     baseOid: oid("b"),
     labels: page([]),

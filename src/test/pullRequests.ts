@@ -17,6 +17,7 @@ export function row(number: number, fields: Partial<PullRequestSummary> = {}) {
     state: { kind: "open" as const, draft: false },
     author: "maja",
     viewerIsAuthor: false,
+    viewerPermission: "admin",
     head: `branch-${number}`,
     base: "main",
     labels: page([]),

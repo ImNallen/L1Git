@@ -89,10 +89,20 @@ export type PullKey = z.infer<typeof pullKeySchema>;
 export type PullHead = z.infer<typeof pullHeadSchema>;
 export type PullCheckout = z.infer<typeof pullCheckoutSchema>;
 
+/** GitHub lets a maintainer push to a fork that allows edits, and anyone
+ * with write access to the base repository counts as one. */
+const pushesToForks = new Set<PullRequest["viewerPermission"]>([
+  "admin",
+  "maintain",
+  "write",
+]);
+
 export function pullHead(pull: PullRequest): PullHead {
   const { branch, oid, repository, crossRepository, maintainerCanModify } =
     pull.head;
-  const forkIsYours = pull.viewerIsAuthor;
+  const edits =
+    pull.viewerIsAuthor ||
+    (maintainerCanModify && pushesToForks.has(pull.viewerPermission));
   return pullHeadSchema.parse({
     reference: `refs/heads/${branch}`,
     oid,
@@ -103,7 +113,7 @@ export function pullHead(pull: PullRequest): PullHead {
         : {
             kind: "fork",
             repository,
-            edits: maintainerCanModify || forkIsYours,
+            edits,
           },
   });
 }

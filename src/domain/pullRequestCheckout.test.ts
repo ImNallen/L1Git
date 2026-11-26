@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { pull } from "../test/pullRequests";
+import type { PullRequest } from "./pullRequest";
 import { pullCheckoutSchema, pullHead } from "./pullRequestCheckout";
 
 const oid = "1".repeat(40);
@@ -15,32 +16,39 @@ describe("pullHead", () => {
     });
   });
 
-  it("says a fork takes your pushes when its author allows edits or it is yours", () => {
+  it("says a fork takes your pushes when it is yours, or its author allows edits and you can push to the base", () => {
     const maja = { owner: "maja", repo: "pin" };
-    const fork = (maintainerCanModify: boolean, viewerIsAuthor: boolean) =>
-      pullHead({
+    const edits = (
+      maintainerCanModify: boolean,
+      viewerIsAuthor: boolean,
+      viewerPermission: PullRequest["viewerPermission"],
+    ) => {
+      const { from } = pullHead({
         ...head({
           crossRepository: true,
           repository: maja,
           maintainerCanModify,
         }),
         viewerIsAuthor,
-      }).from;
-    expect(fork(true, false)).toEqual({
-      kind: "fork",
-      repository: maja,
-      edits: true,
-    });
-    expect(fork(false, true)).toEqual({
-      kind: "fork",
-      repository: maja,
-      edits: true,
-    });
-    expect(fork(false, false)).toEqual({
-      kind: "fork",
-      repository: maja,
-      edits: false,
-    });
+        viewerPermission,
+      });
+      return from.kind === "fork" && from.edits;
+    };
+    for (const [maintainerCanModify, viewerIsAuthor, permission, expected] of [
+      [true, false, "admin", true],
+      [true, false, "maintain", true],
+      [true, false, "write", true],
+      [true, false, "triage", false],
+      [true, false, "read", false],
+      [true, false, "unknown", false],
+      [false, false, "admin", false],
+      [false, true, "read", true],
+      [true, true, "unknown", true],
+    ] as const)
+      expect(
+        edits(maintainerCanModify, viewerIsAuthor, permission),
+        `${maintainerCanModify} ${viewerIsAuthor} ${permission}`,
+      ).toBe(expected);
   });
 
   it("says a fork is gone when GitHub no longer names its repository", () => {

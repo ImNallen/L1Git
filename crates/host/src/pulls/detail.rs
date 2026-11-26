@@ -21,6 +21,7 @@ pub struct PullRequest {
     state: State,
     author: Option<String>,
     viewer_is_author: bool,
+    viewer_permission: Permission,
     base: String,
     base_oid: String,
     head: Head,
@@ -40,6 +41,20 @@ pub struct PullRequest {
     threads: Option<Page<Thread>>,
     mergeable: Mergeability,
     merge_state: MergeState,
+}
+
+/// The viewer's role in the base repository. GitHub names none for a
+/// GitHub App's sign-in.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "SCREAMING_SNAKE_CASE"))]
+enum Permission {
+    Admin,
+    Maintain,
+    Write,
+    Triage,
+    Read,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Serialize)]
@@ -185,6 +200,7 @@ struct Answer {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Found {
+    viewer_permission: Option<Permission>,
     pull_request: Option<Node>,
 }
 
@@ -415,11 +431,12 @@ impl GitHub<'_> {
             let what = format!("pull request #{number} in {repository}");
             return Err(withheld.explain("repository", what));
         };
-        Ok(parse(node, withheld.field(CHECKS)))
+        let permission = found.viewer_permission.unwrap_or(Permission::Unknown);
+        Ok(parse(node, permission, withheld.field(CHECKS)))
     }
 }
 
-fn parse(node: Node, checks_withheld: bool) -> PullRequest {
+fn parse(node: Node, viewer_permission: Permission, checks_withheld: bool) -> PullRequest {
     PullRequest {
         reviewers: reviewers(
             node.author.as_ref(),
@@ -433,6 +450,7 @@ fn parse(node: Node, checks_withheld: bool) -> PullRequest {
         state: State::new(node.is_draft, node.merged_at, node.closed_at),
         author: login(node.author),
         viewer_is_author: node.viewer_did_author,
+        viewer_permission,
         base: node.base_ref_name,
         base_oid: node.base_ref_oid,
         head: Head {

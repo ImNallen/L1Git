@@ -1,5 +1,6 @@
 query($owner: String!, $repo: String!, $number: Int!, $threads: Boolean!) {
   repository(owner: $owner, name: $repo) {
+    viewerPermission
     pullRequest(number: $number) {
       number title body isDraft mergedAt closedAt createdAt updatedAt
       author { login } viewerDidAuthor

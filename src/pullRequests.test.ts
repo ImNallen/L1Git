@@ -43,6 +43,7 @@ const pull = (number: number) => ({
     state: { kind: "open", draft: false },
     author: "hubot",
     viewerIsAuthor: false,
+    viewerPermission: "write",
     base: "main",
     baseOid: "b".repeat(40),
     labels: { items: [], total: 0 },
