@@ -45,6 +45,9 @@ const reads = (bridge: Bridge) =>
   bridge.hostLog.flatMap(({ op, number }) =>
     op === "pullRequest" ? [Number(number)] : [],
   );
+/** Drafts are on this computer, so reading them asks GitHub nothing. */
+const asksOfGitHub = (bridge: Bridge) =>
+  bridge.hostLog.filter(({ op }) => op !== "drafts");
 
 it("opens a row in the app, and shows it whole", async () => {
   const app = await visit();
@@ -484,13 +487,15 @@ it("leaves a locked keychain and a spent limit alone in the background", async (
     app.bridge.failHost(problem, pullKey("octo/pin", 1));
     await app.click(refresh());
     expect(notices()).toEqual([`${problem.message}Try again`]);
-    const asked = app.bridge.hostLog.length;
+    const asked = asksOfGitHub(app.bridge).length;
     const now = later(120_000);
     await app.refocusWindow();
     now.mockRestore();
-    expect(app.bridge.hostLog, "neither it nor the list").toHaveLength(asked);
+    expect(asksOfGitHub(app.bridge), "neither it nor the list").toHaveLength(
+      asked,
+    );
     await app.click(get("button", "Try again"));
-    expect(app.bridge.hostLog.length).toBeGreaterThan(asked);
+    expect(asksOfGitHub(app.bridge).length).toBeGreaterThan(asked);
   }
 });
 
@@ -597,16 +602,16 @@ it("shows the limit instead of asking for one it never read", async () => {
   await app.refocusWindow();
   now.mockRestore();
   await app.click(get("button", "Pull requests"));
-  const asked = app.bridge.hostLog.length;
+  const asked = asksOfGitHub(app.bridge).length;
   await open(app, 2);
-  expect(app.bridge.hostLog).toHaveLength(asked);
+  expect(asksOfGitHub(app.bridge)).toHaveLength(asked);
   expect(get("heading", "Couldn't read #2 in pin")).toBeTruthy();
   expect(get("region", "Pull requests").textContent).toContain(
     "The limit is used up.",
   );
   await app.click(get("button", "Pull requests"));
   await app.click(get("button", /^Recently merged/));
-  expect(app.bridge.hostLog, "nor for a list").toHaveLength(asked);
+  expect(asksOfGitHub(app.bridge), "nor for a list").toHaveLength(asked);
 
   recover();
   await app.click(get("button", /^All open/));

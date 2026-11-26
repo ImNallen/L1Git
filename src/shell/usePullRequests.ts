@@ -46,6 +46,8 @@ import type { ActionSlice } from "./actionSlices";
 import type { Focus } from "./useFocus";
 import type { Layout } from "./useLayout";
 import { useOpenedReads } from "./useOpenedReads";
+import { usePullWriting } from "./usePullWriting";
+import type { PullWriting } from "./usePullWriting";
 import type { ScreenState } from "./useScreen";
 
 const FOCUS_REFRESH_MS = 60_000;
@@ -68,6 +70,7 @@ export type OpenedPullRequest = {
   position: { at: number; of: number } | null;
   /** The login whose reads these are. */
   viewer: string;
+  writing: PullWriting;
 };
 
 export type PullRequestsState = {
@@ -118,7 +121,7 @@ function openedOf(
   met: HostProblem | null,
   { body }: ListModel,
   readOf: ReadOf,
-): Omit<OpenedPullRequest, "id" | "tab" | "isComing"> {
+): Omit<OpenedPullRequest, "id" | "tab" | "isComing" | "writing"> {
   const key = `${repository.key}#${number}`;
   const rows =
     body.kind === "rows" ? body.groups.flatMap((group) => group.rows) : [];
@@ -240,6 +243,25 @@ export function usePullRequests({
   if (asked !== null && now && now.root !== asked.repository.root)
     setAsked({ ...asked, repository: now });
   const opened = viewer === null ? null : asked;
+  const writing = usePullWriting({
+    host,
+    details,
+    account,
+    reread: ({ repository, number }) => {
+      const key = `${repository.owner}/${repository.repo}`.toLowerCase();
+      const listing = listed.find((each) => each.key === key);
+      if (listing)
+        queue.addFirst({ repository: listing, number }, { again: true });
+    },
+    opened:
+      opened && viewer !== null
+        ? {
+            login: viewer,
+            repository: opened.repository.github,
+            number: opened.number,
+          }
+        : null,
+  });
   const id = opened && `${account} ${opened.repository.key}#${opened.number}`;
   const tab = chosen !== null && chosen.id === id ? chosen.tab : "conversation";
   const openedRead = opened
@@ -359,15 +381,27 @@ export function usePullRequests({
     waiting: useMemo(() => waiting(listed, readOf), [listed, readOf]),
     opened: useMemo(
       () =>
-        opened && id !== null && viewer !== null
+        opened && id !== null && viewer !== null && writing !== null
           ? {
               id,
               tab,
               isComing,
+              writing,
               ...openedOf(opened, viewer, openedRead, keptBack, model, readOf),
             }
           : null,
-      [opened, id, tab, isComing, viewer, openedRead, keptBack, model, readOf],
+      [
+        opened,
+        id,
+        tab,
+        isComing,
+        writing,
+        viewer,
+        openedRead,
+        keptBack,
+        model,
+        readOf,
+      ],
     ),
     open: (pull) => {
       flushSync(() => {
