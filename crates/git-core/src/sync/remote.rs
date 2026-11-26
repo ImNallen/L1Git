@@ -83,9 +83,7 @@ impl Coordinator {
 }
 
 impl Coordinator {
-    /// Adds `remote` with Git's default fetch refspec, under the gate and then
-    /// the write lock, and answers the root it was added from. Err means the
-    /// common config rename did not commit.
+    /// Err means the common config rename did not commit.
     pub(crate) fn save_remote(
         &self,
         path: &str,

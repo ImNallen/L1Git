@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { externalOperationSchema } from "./merge";
+import { operationInProgressSchema } from "./merge";
 import type { PullRequest } from "./pullRequest";
 import {
   githubRepositorySchema,
@@ -75,7 +75,7 @@ export const pullCheckoutSchema = z.discriminatedUnion("kind", [
         z.strictObject({ kind: z.literal("uncommitted") }),
         z.strictObject({
           kind: z.literal("inProgress"),
-          operation: externalOperationSchema,
+          operation: operationInProgressSchema,
         }),
         z.strictObject({ kind: z.literal("missing") }),
       ]),
@@ -89,10 +89,10 @@ export type PullKey = z.infer<typeof pullKeySchema>;
 export type PullHead = z.infer<typeof pullHeadSchema>;
 export type PullCheckout = z.infer<typeof pullCheckoutSchema>;
 
-/** Where GitHub's flags say the head lives. A fork takes your pushes when its author lets maintainers edit, or when it is your own. */
 export function pullHead(pull: PullRequest): PullHead {
   const { branch, oid, repository, crossRepository, maintainerCanModify } =
     pull.head;
+  const forkIsYours = pull.viewerIsAuthor;
   return pullHeadSchema.parse({
     reference: `refs/heads/${branch}`,
     oid,
@@ -103,7 +103,7 @@ export function pullHead(pull: PullRequest): PullHead {
         : {
             kind: "fork",
             repository,
-            edits: maintainerCanModify || pull.viewerIsAuthor,
+            edits: maintainerCanModify || forkIsYours,
           },
   });
 }

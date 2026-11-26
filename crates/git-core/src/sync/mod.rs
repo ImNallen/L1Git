@@ -123,9 +123,8 @@ impl Writers {
     }
 }
 
-/// What `fetch_wanted` fetches: a branch by its full name on the remote,
-/// which moves the remote-tracking ref its fetch refspec maps it to, or one
-/// commit by id, which moves no ref.
+/// A branch fetched by its full name moves the remote-tracking ref its fetch
+/// refspec maps it to. A commit fetched by id moves no ref.
 pub(crate) enum Wanted<'a> {
     Branch(&'a BranchRef),
     Commit(&'a Oid),
@@ -301,7 +300,6 @@ impl Coordinator {
         })
     }
 
-    /// Fetches one thing from `remote` under the gate and a network slot.
     pub(crate) fn fetch_wanted(
         &self,
         path: &str,

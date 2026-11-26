@@ -5,20 +5,14 @@ use crate::{
 };
 use std::path::Path;
 
-/// What `pr/<number>` follows, by where the head lives.
 pub(super) enum Upstream {
-    /// The head branch on `remote`, fetched by name, so the branch tracks
-    /// its remote-tracking ref and Push reaches the pull request. A fork
-    /// that takes your pushes gets a named remote, because Push refuses a
-    /// URL. `adds` is that remote when no remote is the fork yet.
     Branch {
         remote: String,
         merge: BranchRef,
         adds: Option<AddRemote>,
     },
     /// `refs/pull/<number>/head` on the base remote, which GitHub keeps
-    /// after a fork is gone, which `git pull` follows, and which takes no
-    /// push. The head commit is fetched by id.
+    /// after a fork is gone and which takes no push.
     PullRef { remote: String, why: NoPush },
 }
 
@@ -91,7 +85,6 @@ impl Upstream {
         })
     }
 
-    /// `of` under the write lock, after the fetch added any remote it needs.
     pub(super) fn settled(
         root: &Path,
         pull: &PullKey,
@@ -146,7 +139,6 @@ impl Upstream {
         }
     }
 
-    /// `branch.pr/<number>.remote` and `.merge`.
     pub(super) fn settings(&self, pull: &PullKey) -> [Setting; 2] {
         let (remote, merge) = match self {
             Self::Branch { remote, merge, .. } => (remote, merge.as_str().to_owned()),
@@ -165,9 +157,8 @@ impl Upstream {
     }
 }
 
-/// The fork owner's login, else `<owner>-<repo>`, else that with a number,
-/// whichever no remote has. Case is ignored, because a disk that folds case
-/// would put two such remotes' refs in one folder.
+/// Case is ignored because a disk that folds case would put two such
+/// remotes' refs in one folder.
 fn free_name(remotes: &[Remote], fork: &GitHubRepository) -> String {
     let taken = |name: &str| {
         remotes

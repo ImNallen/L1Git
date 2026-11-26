@@ -20,7 +20,6 @@ pub(crate) fn read(path: &Path, deadline: Deadline) -> Result<Vec<Remote>, Repos
         .collect()
 }
 
-/// `remote.<name>.url` as the config holds it, credentials and all.
 pub(crate) fn raw_url(
     path: &Path,
     name: &str,
@@ -94,8 +93,6 @@ pub(crate) fn display_url(raw: &str) -> (String, Option<GitHubRepository>) {
     ("Local or unrecognized remote".into(), None)
 }
 
-/// `raw`, the URL of a remote on GitHub, pointed at `repository` instead, so
-/// SSH stays SSH. Credentials, a query, and a fragment are dropped.
 pub(crate) fn sibling_url(raw: &str, repository: &GitHubRepository) -> Option<String> {
     display_url(raw).1?;
     let path = |git: bool| {

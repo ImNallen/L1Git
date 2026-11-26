@@ -70,7 +70,6 @@ export type World = {
   merges: Map<RepositoryRoot, MergeState>;
   overviews: Map<RepositoryRoot, RepositoryOverview>;
   pushes: Map<RepositoryRoot, PushAvailability>;
-  /** The copy of each pull request, by repository root and number. */
   pullCheckouts: Map<string, PullCheckout>;
   /** What each typed path lists. An open repository lists itself. */
   directories: Map<string, DirectoryEntry[]>;
@@ -245,7 +244,6 @@ function worktreeReview(request: BridgeRequest, world: World) {
   };
 }
 
-/** A pull request's copy, as the core keeps it: Try makes `pr/<number>` in a linked worktree, Update moves it to the head, and Remove deletes it unless it holds commits of yours. */
 function pullCopy(request: BridgeRequest, world: World) {
   const pull = pullKeySchema.parse(request.pull);
   const head = pullHeadSchema.parse(request.head);

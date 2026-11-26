@@ -432,7 +432,6 @@ export async function removeWorktree(
   await run({ op: "removeWorktree", path, worktree });
 }
 
-/** The local copy of `pull`: the branch `pr/<number>` and the worktree that has it checked out. */
 export async function pullCheckout(
   path: RepositoryRoot,
   pull: PullKey,

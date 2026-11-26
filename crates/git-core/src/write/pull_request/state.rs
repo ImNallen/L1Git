@@ -9,7 +9,6 @@ use crate::{
 use serde::Serialize;
 use std::path::Path;
 
-/// `pr/<number>` against the pull request's head.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(
     tag = "kind",
@@ -35,7 +34,6 @@ pub enum Relation {
     Unfetched,
 }
 
-/// What the worktree holds beside its branch.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(
     tag = "kind",
@@ -53,26 +51,32 @@ pub enum Changes {
     Missing,
 }
 
-/// `counts` is `(ahead, behind)` of the branch against the head, or `None`
-/// when this repository lacks the head.
-pub(super) const fn relation(counts: Option<(u32, u32)>) -> Relation {
-    match counts {
-        None => Relation::Unfetched,
-        Some((0, 0)) => Relation::UpToDate,
-        Some((0, behind)) => Relation::Behind { commits: behind },
-        Some((ahead, 0)) => Relation::Ahead { commits: ahead },
-        Some((ahead, behind)) => Relation::Diverged { ahead, behind },
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Apart {
+    pub(super) ahead: u32,
+    pub(super) behind: u32,
+}
+
+pub(super) const fn relation(apart: Apart) -> Relation {
+    match apart {
+        Apart {
+            ahead: 0,
+            behind: 0,
+        } => Relation::UpToDate,
+        Apart { ahead: 0, behind } => Relation::Behind { commits: behind },
+        Apart { ahead, behind: 0 } => Relation::Ahead { commits: ahead },
+        Apart { ahead, behind } => Relation::Diverged { ahead, behind },
     }
 }
 
-pub(super) fn counts(
+pub(super) fn compare(
     root: &Path,
     tip: &Oid,
     head: &Oid,
     reads: Deadline,
-) -> Result<Option<(u32, u32)>, RepositoryError> {
+) -> Result<Relation, RepositoryError> {
     if !has_commit(root, head, reads)? {
-        return Ok(None);
+        return Ok(Relation::Unfetched);
     }
     let range = format!("{}...{}", tip.as_str(), head.as_str());
     let counted = git::line(&git::read(
@@ -80,10 +84,12 @@ pub(super) fn counts(
         &["rev-list", "--left-right", "--count", &range],
         reads,
     )?);
-    let parsed = counted
-        .split_once('\t')
-        .and_then(|(ahead, behind)| Some((ahead.parse().ok()?, behind.parse().ok()?)));
-    parsed.map(Some).ok_or_else(git::malformed)
+    let (ahead, behind) = counted.split_once('\t').ok_or_else(git::malformed)?;
+    let count = |side: &str| side.parse().map_err(|_| git::malformed());
+    Ok(relation(Apart {
+        ahead: count(ahead)?,
+        behind: count(behind)?,
+    }))
 }
 
 pub(super) fn has_commit(root: &Path, oid: &Oid, reads: Deadline) -> Result<bool, RepositoryError> {
@@ -93,7 +99,6 @@ pub(super) fn has_commit(root: &Path, oid: &Oid, reads: Deadline) -> Result<bool
         .success())
 }
 
-/// The worktree that has `branch` checked out.
 pub(super) fn holder<'r>(
     records: &'r [WorktreeRecord],
     branch: &BranchRef,
@@ -118,7 +123,7 @@ pub(super) fn read(
             branch,
         });
     };
-    let relation = relation(counts(&repo.root, &tip, &head.oid, reads)?);
+    let relation = compare(&repo.root, &tip, &head.oid, reads)?;
     Ok(match holder(listing.worktrees(), &branch) {
         Some(record) => PullCheckout::Ready {
             worktree: checked_out(record, reads)?,
@@ -193,20 +198,19 @@ mod tests {
 
     #[test]
     fn the_relation_names_which_side_moved() {
-        for (counts, expected) in [
-            (None, Relation::Unfetched),
-            (Some((0, 0)), Relation::UpToDate),
-            (Some((0, 3)), Relation::Behind { commits: 3 }),
-            (Some((2, 0)), Relation::Ahead { commits: 2 }),
+        for ((ahead, behind), expected) in [
+            ((0, 0), Relation::UpToDate),
+            ((0, 3), Relation::Behind { commits: 3 }),
+            ((2, 0), Relation::Ahead { commits: 2 }),
             (
-                Some((2, 1)),
+                (2, 1),
                 Relation::Diverged {
                     ahead: 2,
                     behind: 1,
                 },
             ),
         ] {
-            assert_eq!(relation(counts), expected, "{counts:?}");
+            assert_eq!(relation(Apart { ahead, behind }), expected);
         }
     }
 }

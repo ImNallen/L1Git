@@ -239,8 +239,6 @@ fn answered(
     finished(record, branch).ok_or_else(|| occupied(record, folder))
 }
 
-/// Why a create cannot use `folder`, which Git registers as a worktree that
-/// is not the one it wants.
 pub(super) fn occupied(record: &WorktreeRecord, folder: &str) -> RepositoryError {
     let refused = |message: String| RepositoryError::new(ErrorKind::Conflict, message);
     if record.locked.as_deref() == Some(INITIALIZING) {

@@ -9,10 +9,11 @@ use super::{
     worktrees,
 };
 use crate::{
-    BranchRef, BranchTip, Coordinator, ErrorKind, GitHubRepository, InProgress, Oid,
+    BranchRef, BranchTip, Coordinator, ErrorKind, GitHubRepository, Head, InProgress, Oid,
     RepositoryError, StaleReason, directories,
-    git::{LocalRead, LocalWrite, WriteDeadline, Wrote},
+    git::{Deadline, LocalRead, LocalWrite, WriteDeadline, Wrote},
     repository::{self, WorktreeRecord},
+    sync,
     write::MergeTxn,
 };
 use serde::{Deserialize, Serialize};
@@ -22,7 +23,6 @@ use upstream::Upstream;
 
 pub use state::{Changes, Relation};
 
-/// One pull request, as GitHub names it.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PullKey {
@@ -31,7 +31,6 @@ pub struct PullKey {
 }
 
 impl PullKey {
-    /// `pr/<number>`. The branch of that name is this pull request's copy.
     fn branch(&self) -> Result<BranchRef, RepositoryError> {
         BranchRef::try_from(format!("refs/heads/pr/{}", self.number))
     }
@@ -47,7 +46,6 @@ pub struct PullHead {
     pub from: HeadFrom,
 }
 
-/// Where the head lives.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(
     tag = "kind",
@@ -99,7 +97,6 @@ pub enum PullCheckout {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Plan {
-    /// `<main parent>/.worktrees/<main folder>-pr-<number>`.
     pub folder: String,
     pub pushes: Pushes,
 }
@@ -142,20 +139,22 @@ pub struct CheckedOut {
     pub trouble: Option<RepositoryError>,
 }
 
-/// What an update does with `pr/<number>`, by its relation to the head.
 enum Step {
-    Stay,
     FastForward,
     Replace,
 }
 
 impl Step {
-    fn of(branch: &BranchRef, relation: &Relation, replace: bool) -> Result<Self, RepositoryError> {
+    fn of(
+        branch: &BranchRef,
+        relation: &Relation,
+        replace: bool,
+    ) -> Result<Option<Self>, RepositoryError> {
         Ok(match relation {
-            Relation::UpToDate => Self::Stay,
-            Relation::Behind { .. } => Self::FastForward,
-            Relation::Ahead { .. } | Relation::Diverged { .. } if replace => Self::Replace,
-            Relation::Ahead { .. } => Self::Stay,
+            Relation::UpToDate => None,
+            Relation::Behind { .. } => Some(Self::FastForward),
+            Relation::Ahead { .. } | Relation::Diverged { .. } if replace => Some(Self::Replace),
+            Relation::Ahead { .. } => None,
             Relation::Diverged { ahead, .. } => {
                 return Err(RepositoryError::new(
                     ErrorKind::Conflict,
@@ -277,11 +276,10 @@ impl Coordinator {
                 let listing = Listing::read(&repo, reads)?;
                 listing.refuse_symbolic(&branch)?;
                 let tip = seen_at(&listing, &branch, seen)?;
-                let relation = state::relation(state::counts(&repo.root, &tip, &head.oid, reads)?);
-                let step = Step::of(&branch, &relation, replace)?;
-                if matches!(step, Step::Stay) {
+                let relation = state::compare(&repo.root, &tip, &head.oid, reads)?;
+                let Some(step) = Step::of(&branch, &relation, replace)? else {
                     return state::read(&repo, pull, head, reads);
-                }
+                };
                 match holder(listing.worktrees(), &branch) {
                     None => {
                         let txn = RefTxn::begin(&repo, deadline)?;
@@ -315,7 +313,6 @@ impl Coordinator {
                                     return Err(reset_refusal(ran));
                                 }
                             }
-                            Step::Stay => {}
                         }
                     }
                 }
@@ -344,7 +341,7 @@ impl Coordinator {
                 let reads = deadline.reads();
                 let branch = pull.branch()?;
                 let listing = Listing::read(&opened, reads)?;
-                let main = main_worktree(&opened, listing.worktrees(), reads)?;
+                let main = main_worktree(opened, listing.worktrees(), reads)?;
                 listing.refuse_symbolic(&branch)?;
                 let slot = listing.slot(&branch)?;
                 if slot.tip.is_none() && holder(listing.worktrees(), &branch).is_none() {
@@ -368,7 +365,7 @@ impl Coordinator {
                     store.forget_worktree(&log, &root.to_string_lossy())?;
                 }
                 let reads = deadline.renewed().reads();
-                let relation = state::relation(state::counts(&main.root, &tip, &head.oid, reads)?);
+                let relation = state::compare(&main.root, &tip, &head.oid, reads)?;
                 if matches!(relation, Relation::UpToDate | Relation::Behind { .. }) {
                     let txn = txn.renewed()?;
                     branches::run_delete(
@@ -385,9 +382,6 @@ impl Coordinator {
         )
     }
 
-    /// Fetches what `pr/<number>` follows under the gate, so the write that
-    /// follows never waits on the network. Adding the fork's remote takes
-    /// the write lock only for that config write.
     fn fetch_head(
         &self,
         path: &str,
@@ -404,7 +398,6 @@ impl Coordinator {
     }
 }
 
-/// Creates `branch` at the head, which must be here by now.
 fn create(
     repo: &Repo,
     txn: &RefTxn<'_>,
@@ -412,7 +405,7 @@ fn create(
     branch: &BranchRef,
     head: &PullHead,
     pull: &PullKey,
-    reads: crate::git::Deadline,
+    reads: Deadline,
 ) -> Result<(), RepositoryError> {
     listing.refuse_clash(repo, branch, None)?;
     if let Some(root) = listing.slot(branch)?.heads.first() {
@@ -439,8 +432,6 @@ fn create(
     )
 }
 
-/// `config` with `upstream` as its remote and merge, and every other setting
-/// kept. Unchanged when it already has them.
 fn tracking(config: &[Setting], upstream: [Setting; 2]) -> Vec<Setting> {
     let ours = |setting: &&Setting| matches!(setting.key.as_str(), "remote" | "merge");
     if config.iter().filter(ours).eq(upstream.iter()) {
@@ -454,7 +445,6 @@ fn tracking(config: &[Setting], upstream: [Setting; 2]) -> Vec<Setting> {
         .collect()
 }
 
-/// The tip of `branch`, when it is the one the user saw.
 fn seen_at(listing: &Listing, branch: &BranchRef, seen: &Oid) -> Result<Oid, RepositoryError> {
     match listing.slot(branch)?.tip {
         Some(tip) if tip == *seen => Ok(tip),
@@ -462,7 +452,6 @@ fn seen_at(listing: &Listing, branch: &BranchRef, seen: &Oid) -> Result<Oid, Rep
     }
 }
 
-/// The worktree that has `branch` checked out at `tip`, opened to move it.
 fn movable(
     repo: &Repo,
     record: &WorktreeRecord,
@@ -481,12 +470,12 @@ fn movable(
         ));
     };
     let worktree = repo.worktree(&root.to_string_lossy(), reads)?;
-    if let Some(operation) = crate::sync::in_progress(&worktree.root, reads)?.first() {
+    if let Some(operation) = sync::in_progress(&worktree.root, reads)?.first() {
         return Err(in_progress(*operation, &name));
     }
     let head = repository::head(&worktree.root, reads)?;
     if head
-        != (crate::Head::Attached {
+        != (Head::Attached {
             reference: branch.as_str().to_owned(),
             oid: tip.as_str().to_owned(),
         })
@@ -496,12 +485,10 @@ fn movable(
     Ok(worktree)
 }
 
-/// The main worktree, where Remove runs so that removing the worktree the
-/// request names still leaves a repository to read.
 fn main_worktree(
-    opened: &Repo,
+    opened: Repo,
     records: &[WorktreeRecord],
-    reads: crate::git::Deadline,
+    reads: Deadline,
 ) -> Result<Repo, RepositoryError> {
     match records
         .iter()
@@ -509,7 +496,7 @@ fn main_worktree(
         .and_then(|record| record.root.as_deref())
     {
         Some(main) if main != opened.root => opened.worktree(&main.to_string_lossy(), reads),
-        Some(_) | None => Repo::open(&opened.root(), reads),
+        Some(_) | None => Ok(opened),
     }
 }
 
