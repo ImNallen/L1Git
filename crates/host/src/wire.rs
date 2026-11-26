@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::Login;
+use crate::drafts::{Change, PullDrafts};
 use crate::pulls::{PullRequest, PullRequestList, PullRequests, Repository};
 
 /// Variants without fields are empty structs, because serde ignores unknown
@@ -39,6 +40,15 @@ pub enum Request {
         repository: Repository,
         number: u32,
     },
+    /// Reads or changes the drafts on this computer for one pull request of
+    /// `login`'s. It never asks GitHub, so it works signed out and offline.
+    /// Every change replaces a whole draft, so sending one twice is safe.
+    Drafts {
+        login: Login,
+        repository: Repository,
+        number: u32,
+        change: Change,
+    },
 }
 
 /// `{op, data?, status}`.
@@ -62,6 +72,7 @@ pub enum Answer {
     DeviceCancel,
     PullRequests(PullRequests),
     PullRequest(Box<PullRequest>),
+    Drafts(PullDrafts),
 }
 
 /// Everything the webview knows about the host side. No field can hold a
@@ -241,7 +252,8 @@ pub enum ErrorKind {
     SsoRequired {
         url: String,
     },
-    /// `host.json` could not be written.
+    /// `host.json` could not be written, or `drafts.json` could not be read
+    /// or written.
     Storage,
     /// The task running the request died, or its sign-in ended, before GitHub
     /// answered.

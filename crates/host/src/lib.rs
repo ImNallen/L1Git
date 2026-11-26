@@ -4,6 +4,7 @@
 
 mod connect;
 mod device;
+mod drafts;
 mod gh;
 mod github;
 mod graphql;
@@ -70,6 +71,8 @@ pub struct Host {
     http: Http,
     client_id: Option<ClientId>,
     writer: Mutex<()>,
+    /// Held for each read-change-save of `drafts.json`.
+    drafting: Mutex<()>,
     state: Mutex<State>,
 }
 
@@ -107,6 +110,7 @@ impl Host {
             vault,
             client_id: None,
             writer: Mutex::new(()),
+            drafting: Mutex::new(()),
             state: Mutex::new(State {
                 revision: unix_millis(),
                 saved,
@@ -153,6 +157,14 @@ pub fn run(host: &Host, request: Request) -> Result<Response, HostError> {
         Request::PullRequest { repository, number } => host
             .with_github(|github| github.pull_request(&repository, number))
             .map(|read| Answer::PullRequest(Box::new(read.value))),
+        Request::Drafts {
+            login,
+            repository,
+            number,
+            change,
+        } => host
+            .drafts(login, repository, number, change)
+            .map(Answer::Drafts),
     };
     let status = host.status();
     match outcome {
