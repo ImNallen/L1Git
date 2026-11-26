@@ -137,7 +137,6 @@ describe("pullCheckoutSchema", () => {
           name: "l1git-pr-7",
           main: false,
           changes: { kind: "inProgress", operation: "rebase" },
-          trouble: null,
         },
       },
     ])

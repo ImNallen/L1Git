@@ -19,10 +19,10 @@ impl Coordinator {
     /// Makes `pr/<number>` at the head and checks it out in a linked worktree
     /// at `folder`, missing or empty, or answers the copy that already
     /// exists. A kept branch is checked out at its own tip. The head is
-    /// fetched first, under the gate. Git runs as the user, so hooks run. It
-    /// records no undo entry and never forces, and when Git fails to make the
-    /// worktree it deletes the branch it made, or puts back the settings of
-    /// the branch it kept.
+    /// fetched first, under the gate. Git runs no hook. It records no undo
+    /// entry and never forces, and when Git fails to make the worktree it
+    /// deletes the branch it made, or puts back the settings of the branch it
+    /// kept.
     pub fn try_pull_request(
         &self,
         path: &str,
@@ -67,19 +67,11 @@ impl Coordinator {
             });
             let reads = deadline.renewed().reads();
             let made = repository::worktree_records(&repo.root, reads)?;
-            if let Some(record) = worktrees::at(&made, &target)
-                && let Some(worktree) = worktrees::finished(record, &branch)
+            if worktrees::at(&made, &target)
+                .and_then(|record| worktrees::finished(record, &branch))
+                .is_some()
             {
-                let trouble = checkout::hook_trouble(
-                    ran,
-                    &format!("Git made the worktree {}", worktree.name),
-                    "Remove worktree takes it away.",
-                );
-                let mut answer = state::read(&repo, pull, head, reads)?;
-                if let PullCheckout::Ready { worktree, .. } = &mut answer {
-                    worktree.trouble = trouble;
-                }
-                return Ok(answer);
+                return state::read(&repo, pull, head, reads);
             }
             let txn = txn.renewed()?;
             match created {

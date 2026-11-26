@@ -51,8 +51,8 @@ impl Coordinator {
     /// only with `replace`, which leaves them behind and keeps uncommitted
     /// changes the move does not touch. In a worktree that runs
     /// `merge --ff-only` or `reset --keep` there, and a kept branch moves by
-    /// `update-ref`. The head is fetched first, under the gate. It records no
-    /// undo entry and never forces.
+    /// `update-ref`. The head is fetched first, under the gate. Git runs no
+    /// hook. It records no undo entry and never forces.
     pub fn update_pull_request(
         &self,
         path: &str,

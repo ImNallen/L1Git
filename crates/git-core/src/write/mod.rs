@@ -56,7 +56,7 @@ use std::{
 use store::{EntryObjects, LockedStore, Log, Objects, Position, Step};
 pub use tags::TagTip;
 pub(crate) use txn::{
-    CommitTxn, HOOK_OFF, MergeIndexTxn, MergeTxn, Outside, Published, RebaseTxn, RefTxn, ReplayTxn,
+    CommitTxn, MergeIndexTxn, MergeTxn, Outside, Published, RebaseTxn, RefTxn, ReplayTxn,
     ScratchIndex, Txn,
 };
 pub use worktrees::{NewWorktree, WorktreeBranch, WorktreeReview, WorktreeSource};

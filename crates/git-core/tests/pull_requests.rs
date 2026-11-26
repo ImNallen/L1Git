@@ -435,7 +435,7 @@ fn a_same_repository_pull_request_tracks_its_branch_on_the_base_remote() {
     let PullCheckout::Ready { worktree, .. } = &tried else {
         unreachable!()
     };
-    assert!(!worktree.main && worktree.trouble.is_none());
+    assert!(!worktree.main);
     assert_eq!(git(root, &["symbolic-ref", "HEAD"]), "refs/heads/pr/1");
     assert_eq!(world.upstream("pr/1"), "refs/remotes/origin/feat");
     assert_eq!(
@@ -1200,27 +1200,4 @@ fn a_branch_remove_cannot_delete_after_the_worktree_went_answers_it_kept() {
         panic!("a second remove is not absent");
     };
     assert_eq!(world.tip("pr/1"), None);
-}
-
-#[test]
-fn a_failing_post_checkout_hook_still_answers_the_copy_with_its_trouble() {
-    let world = World::new();
-    let head = world.same(1, "feat", "feat.txt");
-    let hooks = world.top.join("hooks");
-    fs::create_dir(&hooks).unwrap();
-    let hook = hooks.join("post-checkout");
-    fs::write(&hook, "#!/bin/sh\necho no >&2\nexit 1\n").unwrap();
-    fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
-    git(
-        &world.root,
-        &["config", "core.hooksPath", hooks.to_str().unwrap()],
-    );
-    let PullCheckout::Ready { worktree, .. } = world.tried(1, &head) else {
-        panic!("not ready");
-    };
-    let trouble = worktree.trouble.unwrap();
-    assert!(
-        matches!(trouble.kind, ErrorKind::AfterHookFailed { ref output } if output.contains("no")),
-        "{trouble:?}"
-    );
 }

@@ -2283,7 +2283,6 @@ describe("real Rust writes, undo, and redo", () => {
         name: folder.split("/").at(-1),
         main: false,
         changes: { kind: "clean" },
-        trouble: null,
       },
     });
     expect(git(folder, "rev-parse", "--abbrev-ref", "@{upstream}").trim()).toBe(

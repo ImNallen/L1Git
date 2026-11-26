@@ -24,7 +24,7 @@ use crate::{
     Advance, AdvanceOutcome, BranchRef, CommitsFetch, ErrorKind, FastForwardReport, FetchFailure,
     FetchMode, FetchOutcome, FetchSummary, GitHubRepository, Oid, RepositoryError,
     RepositoryOverview, SkipReason, WantedCommits,
-    git::{Deadline, LocalRead, LocalWrite, WriteDeadline},
+    git::{Deadline, LocalRead, LocalWrite, NoHooks, WriteDeadline},
     remotes,
 };
 use std::{
@@ -289,12 +289,13 @@ impl Coordinator {
         github: &GitHubRepository,
         commits: &WantedCommits,
     ) -> Result<CommitsFetch, RepositoryError> {
-        self.fetch_commits_by(path, github, commits, None)
+        self.fetch_commits_by(path, github, commits, None, true)
     }
 
-    /// `fetch_commits` for an operation that goes on without the commits. It
-    /// gives up once `optional_fetch_deadline` has passed, the wait for the
-    /// gate and a network slot included.
+    /// `fetch_commits` for a write to a pull request's copy, which goes on
+    /// without the commits. It gives up once `optional_fetch_deadline` has
+    /// passed, the wait for the gate and a network slot included, and runs
+    /// no hook.
     pub(crate) fn fetch_optional_commits(
         &self,
         path: &str,
@@ -302,7 +303,7 @@ impl Coordinator {
         commits: &WantedCommits,
     ) -> Result<CommitsFetch, RepositoryError> {
         let until = Instant::now() + self.limits.optional_fetch_deadline;
-        self.fetch_commits_by(path, github, commits, Some(until))
+        self.fetch_commits_by(path, github, commits, Some(until), false)
     }
 
     fn fetch_commits_by(
@@ -311,6 +312,7 @@ impl Coordinator {
         github: &GitHubRepository,
         commits: &WantedCommits,
         until: Option<Instant>,
+        run_hooks: bool,
     ) -> Result<CommitsFetch, RepositoryError> {
         let reads = self.deadline(LocalRead::BranchStatus);
         let repository = read::open(path, reads)?;
@@ -331,9 +333,16 @@ impl Coordinator {
         let deadline = until.map_or(self.limits.fetch_deadline, |until| {
             until.saturating_duration_since(Instant::now())
         });
-        fetch::fetch_commits(&repository.root, &remote, commits.oids(), deadline)
+        let hooks = if run_hooks {
+            None
+        } else {
+            Some(NoHooks::of(&repository.root, reads)?)
+        };
+        let oids = commits.oids();
+        fetch::fetch_commits(&repository.root, &remote, oids, deadline, hooks.as_ref())
     }
 
+    /// Fetches for a write to a pull request's copy, so it runs no hook.
     pub(crate) fn fetch_wanted(
         &self,
         path: &str,
@@ -343,11 +352,18 @@ impl Coordinator {
         let reads = self.deadline(LocalRead::BranchStatus);
         let repository = read::open(path, reads)?;
         let deadline = self.limits.fetch_deadline;
+        let hooks = NoHooks::of(&repository.root, reads)?;
         let failure = self.gated(&repository.common_dir, || {
             let _slot = self.slots.acquire();
             Ok::<_, RepositoryError>(match wanted {
                 Wanted::Branch(branch) => {
-                    match fetch::fetch(&repository.root, remote, Some(branch.as_str()), deadline)? {
+                    match fetch::fetch(
+                        &repository.root,
+                        remote,
+                        Some(branch.as_str()),
+                        deadline,
+                        Some(&hooks),
+                    )? {
                         FetchOutcome::Failed { failure, message } => Some((failure, message)),
                         FetchOutcome::Fetched | FetchOutcome::Skipped => None,
                     }
@@ -357,6 +373,7 @@ impl Coordinator {
                     remote,
                     std::slice::from_ref(oid),
                     deadline,
+                    Some(&hooks),
                 )? {
                     CommitsFetch::Failed { failure, message } => Some((failure, message)),
                     CommitsFetch::Done | CommitsFetch::NoRemote => None,

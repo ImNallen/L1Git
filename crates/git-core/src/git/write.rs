@@ -1,9 +1,11 @@
-use super::{Capped, Deadline, Work, base, execute, text, too_old, without_prompts};
+use super::{
+    Capped, Deadline, HOOK_OFF, NoHooks, Work, base, execute, text, too_old, without_prompts,
+};
 use crate::{
     ErrorKind, RepositoryError, StaleReason, stderr,
     write::{
-        CommitTxn, HOOK_OFF, MergeIndexTxn, MergeTxn, Outside, Published, RebaseTxn, RefTxn,
-        ReplayKind, ReplayOf, ReplayTxn, ScratchIndex, Txn,
+        CommitTxn, MergeIndexTxn, MergeTxn, Outside, Published, RebaseTxn, RefTxn, ReplayKind,
+        ReplayOf, ReplayTxn, ScratchIndex, Txn,
     },
 };
 use std::{
@@ -62,6 +64,15 @@ pub(crate) enum LocalWrite {
 }
 
 impl LocalWrite {
+    /// A pull request's copy holds the pull request's files, which a hook
+    /// may run, so no write to it runs one.
+    const fn runs_hooks(self) -> bool {
+        !matches!(
+            self,
+            Self::TryPullRequest | Self::UpdatePullRequest | Self::RemovePullRequest
+        )
+    }
+
     pub(crate) const fn budget(self) -> Duration {
         Duration::from_secs(match self {
             Self::SaveConflict
@@ -628,6 +639,14 @@ impl<'a> Write<'a> {
             command.env("GIT_REFLOG_ACTION", write.reflog_action());
             command
         };
+        let hooks = if write.runs_hooks() {
+            None
+        } else {
+            Some(NoHooks::of(self.dir, deadline)?)
+        };
+        if let Some(hooks) = &hooks {
+            hooks.apply(&mut command);
+        }
         if self.lazy_fetch {
             without_prompts(&mut command);
         }

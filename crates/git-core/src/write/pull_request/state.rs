@@ -174,7 +174,6 @@ fn checked_out(record: &WorktreeRecord, reads: Deadline) -> Result<CheckedOut, R
         name: record.name(),
         main: record.main,
         changes,
-        trouble: None,
     })
 }
 

@@ -5,7 +5,6 @@ import {
   githubRepositorySchema,
   localRefSchema,
   oidSchema,
-  repositoryErrorSchema,
   rootSchema,
 } from "./repository";
 
@@ -88,8 +87,6 @@ export const pullCheckoutSchema = z.discriminatedUnion("kind", [
         }),
         z.strictObject({ kind: z.literal("missing") }),
       ]),
-      /** Git made the worktree, but its post-checkout hook failed or was stopped. */
-      trouble: repositoryErrorSchema.nullable(),
     }),
   }),
 ]);

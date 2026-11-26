@@ -135,9 +135,6 @@ pub struct CheckedOut {
     /// The main worktree, which Remove refuses.
     pub main: bool,
     pub changes: Changes,
-    /// Git made the worktree, but its `post-checkout` hook failed or was
-    /// stopped. Only the answer to the Try that made it carries it.
-    pub trouble: Option<RepositoryError>,
 }
 
 impl Coordinator {

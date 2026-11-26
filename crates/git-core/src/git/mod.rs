@@ -1,7 +1,9 @@
+mod hooks;
 #[cfg(windows)]
 mod windows;
 mod write;
 
+pub(crate) use hooks::{HOOK_OFF, NoHooks, defined as defined_hooks};
 pub(crate) use write::{
     LocalWrite, Write, WriteDeadline, Wrote, install_config_values, install_tracking,
 };
@@ -831,7 +833,21 @@ pub(crate) fn mutate(
     mutation: Mutation<'_>,
     deadline: Duration,
 ) -> Result<Finished, RepositoryError> {
-    Ok(match capture_mutation(path, mutation, deadline)? {
+    mutate_with(path, mutation, deadline, None)
+}
+
+pub(crate) fn mutate_with(
+    path: &Path,
+    mutation: Mutation<'_>,
+    deadline: Duration,
+    hooks: Option<&NoHooks>,
+) -> Result<Finished, RepositoryError> {
+    let never = AtomicBool::new(false);
+    let captured = match capture(path, mutation, deadline, &never, hooks)? {
+        Stoppable::Ran(captured) => captured,
+        Stoppable::Stopped => Captured::TimedOut,
+    };
+    Ok(match captured {
         Captured::Completed { success: true, .. } => Finished::Succeeded,
         Captured::Completed { stderr, .. } => Finished::Failed { stderr },
         Captured::TimedOut => Finished::TimedOut,
@@ -871,9 +887,22 @@ pub(crate) fn capture_until(
     deadline: Duration,
     stop: &AtomicBool,
 ) -> Result<Stoppable, RepositoryError> {
+    capture(path, mutation, deadline, stop, None)
+}
+
+fn capture(
+    path: &Path,
+    mutation: Mutation<'_>,
+    deadline: Duration,
+    stop: &AtomicBool,
+    hooks: Option<&NoHooks>,
+) -> Result<Stoppable, RepositoryError> {
     let merge = matches!(mutation, Mutation::MergeFastForward { .. });
     let push = matches!(mutation, Mutation::Push { .. });
     let mut command = base(path, merge);
+    if let Some(hooks) = hooks {
+        hooks.apply(&mut command);
+    }
     if merge {
         command.env("GIT_REFLOG_ACTION", "l1git fast-forward");
     }

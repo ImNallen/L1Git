@@ -573,7 +573,6 @@ it("sends a pull request's copy requests and validates their answers", async () 
       name: "l1-demo-pr-7",
       main: false,
       changes: { kind: "clean" },
-      trouble: null,
     },
   };
   const sent = () => invoke.mock.lastCall?.[1].request;

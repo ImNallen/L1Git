@@ -1,7 +1,7 @@
 use crate::{
     CommitsFetch, ErrorKind, FetchBranch, FetchFailure, FetchOutcome, FetchSummary, Oid,
     RemoteFetch, RepositoryError,
-    git::{self, Deadline, Finished, Mutation},
+    git::{self, Deadline, Finished, Mutation, NoHooks},
     remotes, stderr,
 };
 use std::{
@@ -24,7 +24,7 @@ pub(super) fn fetch_all(
             let outcome = if skipped.contains(remote.as_str()) {
                 FetchOutcome::Skipped
             } else {
-                fetch(root, &remote, None, deadline)?
+                fetch(root, &remote, None, deadline, None)?
             };
             Ok(RemoteFetch { remote, outcome })
         })
@@ -172,7 +172,7 @@ pub(super) fn fetch_branch(
     reads: Deadline,
 ) -> Result<FetchSummary, RepositoryError> {
     let before = tips(root, reads)?;
-    let outcome = fetch(root, &source.remote, Some(&source.branch), deadline)?;
+    let outcome = fetch(root, &source.remote, Some(&source.branch), deadline, None)?;
     summary(
         root,
         &before,
@@ -189,8 +189,9 @@ pub(super) fn fetch(
     remote: &str,
     branch: Option<&str>,
     deadline: Duration,
+    hooks: Option<&NoHooks>,
 ) -> Result<FetchOutcome, RepositoryError> {
-    let finished = git::mutate(root, Mutation::Fetch { remote, branch }, deadline)?;
+    let finished = git::mutate_with(root, Mutation::Fetch { remote, branch }, deadline, hooks)?;
     Ok(match failed(finished, remote, deadline) {
         None => FetchOutcome::Fetched,
         Some((failure, message)) => FetchOutcome::Failed { failure, message },
@@ -203,8 +204,10 @@ pub(super) fn fetch_commits(
     remote: &str,
     oids: &[Oid],
     deadline: Duration,
+    hooks: Option<&NoHooks>,
 ) -> Result<CommitsFetch, RepositoryError> {
-    let finished = git::mutate(root, Mutation::FetchCommits { remote, oids }, deadline)?;
+    let mutation = Mutation::FetchCommits { remote, oids };
+    let finished = git::mutate_with(root, mutation, deadline, hooks)?;
     Ok(match failed(finished, remote, deadline) {
         None => CommitsFetch::Done,
         Some((failure, message)) => CommitsFetch::Failed { failure, message },

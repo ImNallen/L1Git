@@ -67,7 +67,6 @@ function pullCopy(request: BridgeRequest, world: World) {
           : operation
             ? { kind: "inProgress", operation }
             : { kind: entries.length > 0 ? "uncommitted" : "clean" },
-        trouble: null,
       },
     });
   };
