@@ -738,6 +738,31 @@ fn replace_onto_an_untracked_file_the_pull_request_adds_names_it() {
 }
 
 #[test]
+fn replace_during_a_merge_in_the_copy_says_to_finish_it_and_moves_nothing() {
+    let world = World::new();
+    let head = world.same(1, "feat", "feat.txt");
+    world.tried(1, &head);
+    let folder = world.folder(1);
+    fs::write(folder.join("shared.txt"), "mine\n").unwrap();
+    git(&folder, &["commit", "-q", "-am", "mine"]);
+    let mine = world.tip("pr/1").unwrap();
+    git(&folder, &["switch", "-q", "-c", "theirs", "main"]);
+    fs::write(folder.join("shared.txt"), "theirs\n").unwrap();
+    git(&folder, &["commit", "-q", "-am", "theirs"]);
+    git(&folder, &["switch", "-q", "pr/1"]);
+    assert!(
+        !run_git(&folder, &["merge", "-q", "theirs"]).0,
+        "the merge conflicts"
+    );
+    let refused = world.update(1, &head, &mine, true).unwrap_err();
+    assert_eq!(
+        refused.message,
+        "A merge is in progress in repo-pr-1. Finish or abort it there, then try again."
+    );
+    assert_eq!(world.tip("pr/1"), Some(mine));
+}
+
+#[test]
 fn a_kept_branch_behind_the_head_moves_by_update_ref() {
     let world = World::new();
     let first = world.same(1, "feat", "feat.txt");

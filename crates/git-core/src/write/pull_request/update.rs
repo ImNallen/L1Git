@@ -154,7 +154,7 @@ fn in_progress(operation: InProgress, name: &str) -> RepositoryError {
     RepositoryError::new(
         ErrorKind::Conflict,
         format!(
-            "{} is in progress in {name}. Finish or abort it there, then update.",
+            "{} is in progress in {name}. Finish or abort it there, then try again.",
             capitalized(operation.name())
         ),
     )
