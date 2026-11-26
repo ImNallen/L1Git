@@ -3,6 +3,8 @@ import { busyProblem } from "../components/Dialog";
 import { beginDraftTask } from "../draftProtection";
 import type { PullRequest } from "../domain/pullRequest";
 import { pullHead, standing } from "../domain/pullRequestCheckout";
+import { localDelete } from "../domain/pullRequestMerge";
+import type { LocalDelete } from "../domain/pullRequestMerge";
 import type {
   HeldCheckout,
   Plan,
@@ -11,7 +13,12 @@ import type {
   PullKey,
 } from "../domain/pullRequestCheckout";
 import { problemFrom } from "../domain/repository";
-import type { FullRef, Problem, RepositoryRoot } from "../domain/repository";
+import type {
+  BranchTip,
+  FullRef,
+  Problem,
+  RepositoryRoot,
+} from "../domain/repository";
 import type { OverviewView } from "../overview";
 import * as repositories from "../repositories";
 import type { WritesView } from "../useWrites";
@@ -76,6 +83,11 @@ export type PullRequestCheckout = Omit<Copy, "key"> & {
   showInHistory: () => void;
   reread: () => void;
   dismiss: () => void;
+  /** The local branch that tracks the pull request. */
+  local: LocalDelete;
+  /** Deletes `branch` while it is still at its tip, as an undoable write.
+   * Null once deleted. */
+  deleteLocal: (branch: BranchTip) => Promise<Problem | null>;
 };
 
 const fresh = (key: string | null): Copy => ({
@@ -98,7 +110,7 @@ export function usePullRequestCheckout({
 }: {
   opened: OpenedPullRequest | null;
   screen: Pick<ScreenState, "place">;
-  overview: Pick<OverviewView, "roots">;
+  overview: Pick<OverviewView, "roots" | "repositories">;
   historyRoot: RepositoryRoot | null;
   saved: Pick<WorkspaceApi, "catalog" | "keepRepository" | "selectRepository">;
   writes: Pick<WritesView, "post">;
@@ -323,6 +335,10 @@ export function usePullRequestCheckout({
       );
   };
   const checkout = known.kind === "read" ? known.checkout : null;
+  const branches =
+    overview.repositories.find(
+      (each) => root !== null && each.roots.includes(root),
+    )?.overview.branches ?? [];
   return {
     known,
     running: copy.running,
@@ -365,6 +381,27 @@ export function usePullRequestCheckout({
     reread: askRead,
     dismiss: () => {
       if (key !== null) change(key, (was) => ({ ...was, said: null }));
+    },
+    local: localDelete(checkout, branches),
+    deleteLocal: async (branch) => {
+      if (root === null) return null;
+      const finish = beginDraftTask();
+      if (!finish) return busyProblem;
+      try {
+        const { head } = await repositories.refs(root);
+        await repositories.write(
+          root,
+          { kind: "deleteBranch", branch },
+          { head },
+        );
+        return null;
+      } catch (error) {
+        return problemFrom(error);
+      } finally {
+        finish();
+        loop.rereadRefs(root);
+        askRead();
+      }
     },
   };
 }

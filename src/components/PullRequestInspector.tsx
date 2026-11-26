@@ -1,78 +1,20 @@
 import type { ReactNode } from "react";
 import {
-  CircleAlert,
-  CircleCheck,
-  CircleDashed,
-  CircleHelp,
-  CircleX,
-  Eye,
-  GitCompareArrows,
-  GitMerge,
-  GitPullRequestClosed,
-  GitPullRequestDraft,
-  LoaderCircle,
-} from "lucide-react";
-import type { LucideIcon } from "lucide-react";
-import {
   checkGroups,
   checksSummary,
   headName,
-  mergeBox,
   reviewers,
 } from "../domain/pullRequestDetail";
-import type { MergeBox } from "../domain/pullRequestDetail";
 import { pullRequestUrl } from "../domain/pullRequestList";
-import { relativeTime } from "../domain/time";
 import type { OpenedPullRequest } from "../shell/usePullRequests";
 import type { FilesChangedState } from "../shell/useFilesChanged";
+import type { PullRequestCheckout } from "../shell/usePullRequestCheckout";
 import { ChangedFilesSection } from "./ChangedFilesSection";
 import { CheckIcon, CheckTime } from "./PullRequestChecks";
+import { PullRequestMerge } from "./PullRequestMerge";
 import { Ago, Avatar, Bars } from "./PullRequestParts";
 
 const FEW_CHECKS = 4;
-
-const mergeIcons: Record<MergeBox["kind"], [LucideIcon, string]> = {
-  merged: [GitMerge, "merged"],
-  merging: [LoaderCircle, "waiting"],
-  failed: [CircleX, "bad"],
-  checking: [CircleHelp, "waiting"],
-  closed: [GitPullRequestClosed, "bad"],
-  draft: [GitPullRequestDraft, ""],
-  readOnly: [Eye, ""],
-  conflicts: [CircleX, "bad"],
-  changesRequested: [CircleX, "bad"],
-  reviewRequired: [Eye, "waiting"],
-  requiredFailing: [CircleX, "bad"],
-  behind: [GitCompareArrows, "waiting"],
-  blocked: [CircleAlert, "waiting"],
-  failing: [CircleX, "bad"],
-  running: [CircleDashed, "waiting"],
-  ready: [CircleCheck, "good"],
-  unknown: [CircleHelp, ""],
-};
-
-function Merging({ box, url }: { box: MergeBox; url: string }) {
-  const [Icon, tone] = mergeIcons[box.kind];
-  return (
-    <section className="merge-box" aria-label="Merging">
-      <Icon className={`merge-icon ${tone}`} size={16} aria-hidden="true" />
-      <div>
-        <h3>{box.title}</h3>
-        <p>{box.text}</p>
-      </div>
-      {box.action.kind === "openOnGitHub" && (
-        <a
-          className="button secondary"
-          href={url}
-          target="_blank"
-          rel="noreferrer"
-        >
-          Open on GitHub
-        </a>
-      )}
-    </section>
-  );
-}
 
 function Fact({ name, children }: { name: string; children: ReactNode }) {
   return (
@@ -229,11 +171,15 @@ function ChecksAndDetails({
 export function PullRequestInspector({
   opened,
   files,
+  checkout,
   onShowChecks,
+  onShowCommits,
 }: {
   opened: OpenedPullRequest;
   files: Pick<FilesChangedState, "held" | "viewed" | "choose">;
+  checkout: Pick<PullRequestCheckout, "local" | "deleteLocal">;
   onShowChecks: () => void;
+  onShowCommits: () => void;
 }) {
   const { repository, number, tab, read, viewer } = opened;
   const { value: pull, problem } = read;
@@ -285,20 +231,13 @@ export function PullRequestInspector({
           <ChecksAndDetails opened={opened} onShowChecks={onShowChecks} />
         )}
       </div>
-      {pull ? (
-        <Merging
-          box={mergeBox(pull, viewer, (at) =>
-            relativeTime(Date.parse(at) / 1_000),
-          )}
-          url={url}
-        />
-      ) : (
-        loading && (
-          <div className="merge-box">
-            <Bars count={2} />
-          </div>
-        )
-      )}
+      <PullRequestMerge
+        key={opened.id}
+        opened={opened}
+        checkout={checkout}
+        url={url}
+        onShowCommits={onShowCommits}
+      />
     </aside>
   );
 }
