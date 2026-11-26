@@ -1,12 +1,17 @@
 import { z } from "zod";
+import { operationNoun } from "./inProgress";
 import { operationInProgressSchema } from "./merge";
 import type { PullRequest } from "./pullRequest";
+import { counted } from "./pullRequestDetail";
+import { shortBranch } from "./refs";
 import {
   githubRepositorySchema,
   localRefSchema,
   oidSchema,
   rootSchema,
 } from "./repository";
+import type { Oid } from "./repository";
+import { shortOid } from "./shortOid";
 
 export const pullKeySchema = z.strictObject({
   github: githubRepositorySchema,
@@ -94,6 +99,10 @@ export const pullCheckoutSchema = z.discriminatedUnion("kind", [
 export type PullKey = z.infer<typeof pullKeySchema>;
 export type PullHead = z.infer<typeof pullHeadSchema>;
 export type PullCheckout = z.infer<typeof pullCheckoutSchema>;
+export type HeldCheckout = Exclude<PullCheckout, { kind: "absent" }>;
+export type Plan = z.infer<typeof planSchema>;
+type Relation = HeldCheckout["relation"];
+type Changes = Extract<PullCheckout, { kind: "ready" }>["worktree"]["changes"];
 
 /** The roles that can push to the base repository. GitHub lets them push to
  * a fork that allows edits too, as maintainers. */
@@ -125,4 +134,116 @@ export function pullHead(pull: PullRequest): PullHead {
             edits,
           },
   });
+}
+
+const commits = (count: number) => counted(count, "commit");
+
+function relationWords(relation: Relation) {
+  switch (relation.kind) {
+    case "upToDate":
+      return "up to date";
+    case "behind":
+      return `${commits(relation.commits)} behind the pull request`;
+    case "ahead":
+      return `${commits(relation.commits)} ahead of the pull request`;
+    case "diverged":
+      return `${commits(relation.ahead)} ahead of the pull request and ${relation.behind.toLocaleString()} behind it`;
+    case "unfetched":
+      return "the pull request has new commits on GitHub";
+  }
+}
+
+function changesWords(changes: Changes) {
+  switch (changes.kind) {
+    case "clean":
+      return [];
+    case "uncommitted":
+      return ["with uncommitted changes"];
+    case "inProgress":
+      return [`with ${operationNoun(changes.operation)} in progress`];
+    case "missing":
+      return ["but its folder is missing"];
+  }
+}
+
+export function barWords(copy: HeldCheckout) {
+  const at = [`at ${shortOid(copy.tip)}`, relationWords(copy.relation)];
+  if (copy.kind === "parked")
+    return {
+      lead: "Kept locally as",
+      place: shortBranch(copy.branch),
+      state: [...at, "not checked out"].join(", "),
+    };
+  return {
+    lead: "Checked out locally in",
+    place: copy.worktree.root,
+    state: [...at, ...changesWords(copy.worktree.changes)].join(", "),
+  };
+}
+
+export type Move = { kind: "update" } | { kind: "replace"; leaving: number };
+
+export function moveOf(copy: HeldCheckout): Move | null {
+  if (copy.kind === "ready" && copy.worktree.changes.kind === "missing")
+    return null;
+  const { relation } = copy;
+  switch (relation.kind) {
+    case "upToDate":
+      return null;
+    case "behind":
+    case "unfetched":
+      return { kind: "update" };
+    case "ahead":
+      return { kind: "replace", leaving: relation.commits };
+    case "diverged":
+      return { kind: "replace", leaving: relation.ahead };
+  }
+}
+
+export const removable = (copy: HeldCheckout) =>
+  copy.kind === "ready" && !copy.worktree.main;
+
+export function replaceWords(copy: HeldCheckout, leaving: number, head: Oid) {
+  const branch = shortBranch(copy.branch);
+  const left =
+    leaving === 1
+      ? `The commit on ${branch} that isn't in the pull request leaves the branch`
+      : `The ${leaving.toLocaleString()} commits on ${branch} that aren't in the pull request leave the branch`;
+  return {
+    title: `Replace ${branch} with the pull request?`,
+    body: [
+      `${branch} moves to the pull request's head, ${shortOid(head)}.`,
+      `${left}, and L1 Git can't undo that.`,
+      ...(copy.kind === "ready"
+        ? [
+            "Uncommitted changes stay, and if the pull request changes the same files, nothing moves.",
+          ]
+        : []),
+    ].join(" "),
+  };
+}
+
+const nowhere: Record<
+  Extract<Plan["pushes"], { kind: "nowhere" }>["why"],
+  string
+> = {
+  readOnly:
+    "You can't push to this repository, so commits you make there stay local.",
+  noEdits:
+    "The author doesn't allow edits from maintainers, so commits you make there stay local.",
+  forkGone:
+    "The fork this pull request came from is gone, so commits you make there stay local.",
+  noRemote:
+    "No remote of this clone is the pull request's repository on GitHub, so L1 Git can't fetch the pull request.",
+};
+
+export function pushesWords(pushes: Plan["pushes"], head: PullHead) {
+  if (pushes.kind === "nowhere") return nowhere[pushes.why];
+  const tracks = `${pushes.remote}/${shortBranch(pushes.destination)}`;
+  const owner =
+    head.from.kind === "fork" ? head.from.repository.owner : pushes.remote;
+  const updates = "Pushing from there updates the pull request.";
+  return pushes.addsRemote
+    ? `Tracks ${tracks}, on a remote L1 Git adds for ${owner}'s fork. ${updates}`
+    : `Tracks ${tracks}. ${updates}`;
 }
