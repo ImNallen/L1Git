@@ -111,8 +111,8 @@ export function pullHead(pull: PullRequest): PullHead {
     pull.head;
   const { viewerIsAuthor, viewerPermission } = pull;
   const writes = writers.has(viewerPermission);
-  /** An author can lose write access to the base, so a role GitHub names
-   * decides. Without one, the author once pushed the head branch there. */
+  // An author can lose write access to the base, so a role GitHub names
+  // decides. Without one, the author once pushed the head branch there.
   const writesBase = viewerPermission === "unknown" ? viewerIsAuthor : writes;
   const edits = viewerIsAuthor || (maintainerCanModify && writes);
   return pullHeadSchema.parse({

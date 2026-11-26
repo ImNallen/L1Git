@@ -3,7 +3,7 @@ import { mergeActionSchema } from "./domain/merge";
 import { native } from "./transport";
 import { addRemoteInputSchema } from "./domain/push";
 import type { AddRemoteInput, PublishChoice, PushIntent } from "./domain/push";
-import { pullHeadSchema, pullKeySchema } from "./domain/pullRequestCheckout";
+import { pullKeySchema } from "./domain/pullRequestCheckout";
 import type { PullHead, PullKey } from "./domain/pullRequestCheckout";
 import type { Comparison } from "./domain/comparison";
 import type { Advance, FetchMode } from "./domain/overview";
@@ -222,7 +222,7 @@ export async function pullCheckout(
       op: "pullCheckout",
       path,
       pull: pullKeySchema.parse(pull),
-      head: pullHeadSchema.parse(head),
+      head,
     })
   ).data;
 }
@@ -239,7 +239,7 @@ export async function tryPullRequest(
       op: "tryPullRequest",
       path,
       pull: pullKeySchema.parse(pull),
-      head: pullHeadSchema.parse(head),
+      head,
       folder,
     })
   ).data;
@@ -258,7 +258,7 @@ export async function updatePullRequest(
       op: "updatePullRequest",
       path,
       pull: pullKeySchema.parse(pull),
-      head: pullHeadSchema.parse(head),
+      head,
       seen,
       replace,
     })
@@ -276,7 +276,7 @@ export async function removePullRequest(
       op: "removePullRequest",
       path,
       pull: pullKeySchema.parse(pull),
-      head: pullHeadSchema.parse(head),
+      head,
       seen,
     })
   ).data;
