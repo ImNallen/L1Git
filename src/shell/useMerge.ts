@@ -74,6 +74,7 @@ const unsent = {
   unsaved: "a draft it carries wasn't saved",
   signedOut: "L1 Git isn't signed in to GitHub",
   restarting: "L1 Git is restarting to update",
+  notInRead: "its latest read of this pull request doesn't match the merge",
 };
 
 /**

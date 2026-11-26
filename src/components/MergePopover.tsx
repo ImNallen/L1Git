@@ -23,6 +23,8 @@ const unsent: Record<Exclude<Started, "started">, string> = {
   signedOut: "L1 Git isn't signed in to GitHub, so it sent nothing.",
   restarting:
     "L1 Git is restarting to update, so it sent nothing. Merge after it restarts.",
+  notInRead:
+    "L1 Git's latest read of this pull request doesn't match this merge, so it sent nothing. Refresh the pull request and try again.",
 };
 
 /** Above the merge box, at the inspector's right edge. */
