@@ -11,6 +11,7 @@ use std::{
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    time::{Duration, Instant},
 };
 use tempfile::TempDir;
 
@@ -874,6 +875,42 @@ fn remove_offline_still_removes_the_worktree_and_keeps_only_a_branch_it_cannot_c
     );
     assert!(!world.folder(2).exists());
     assert_eq!(world.tip("pr/2"), None);
+    world.assert_main_untouched();
+}
+
+#[test]
+fn remove_waits_for_a_remote_that_never_answers_only_as_long_as_a_fetch_it_can_do_without() {
+    let world = World::new();
+    let first = world.same(1, "feat", "feat.txt");
+    world.tried(1, &first);
+    let pushed = world.same(1, "feat", "more.txt");
+    git(
+        &world.root,
+        &[
+            "config",
+            "remote.origin.url",
+            "ssh://git@github.com/octo/app.git",
+        ],
+    );
+    git(&world.root, &["config", "core.sshCommand", "sleep 30;:"]);
+    let core = Coordinator::new(
+        Limits {
+            optional_fetch_deadline: Duration::from_secs(1),
+            ..Limits::default()
+        },
+        world.top.join("undo"),
+    );
+    let started = Instant::now();
+    let removed = core
+        .remove_pull_request(world.path(), &World::key(1), &pushed, &first.oid)
+        .unwrap();
+    let took = started.elapsed();
+    assert!(took < Duration::from_secs(10), "Remove took {took:?}");
+    let PullCheckout::Parked { tip, relation, .. } = removed else {
+        panic!("not parked: {removed:?}");
+    };
+    assert_eq!((tip, relation), (first.oid, Relation::Unfetched));
+    assert!(!world.folder(1).exists());
     world.assert_main_untouched();
 }
 

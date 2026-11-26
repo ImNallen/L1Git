@@ -43,6 +43,11 @@ use std::{
 pub struct Limits {
     /// How long one remote may take to fetch.
     pub fetch_deadline: Duration,
+    /// How long a fetch that the operation can do without may take, as
+    /// Remove pull request's fetch of the head. One commit by ID needs a few
+    /// seconds even over a slow SSH handshake, and Remove that gives up on
+    /// it only keeps the branch.
+    pub optional_fetch_deadline: Duration,
     /// How long one ordinary push may take.
     pub push_deadline: Duration,
     /// How long a probe, ref move, or worktree fast-forward may take. A partial
@@ -58,6 +63,7 @@ impl Default for Limits {
     fn default() -> Self {
         Self {
             fetch_deadline: Duration::from_secs(300),
+            optional_fetch_deadline: Duration::from_secs(15),
             push_deadline: Duration::from_secs(300),
             local_deadline: Duration::from_secs(120),
             clone_deadline: Duration::from_secs(3600),
@@ -283,6 +289,27 @@ impl Coordinator {
         github: &GitHubRepository,
         commits: &WantedCommits,
     ) -> Result<CommitsFetch, RepositoryError> {
+        self.fetch_commits_within(path, github, commits, self.limits.fetch_deadline)
+    }
+
+    /// `fetch_commits` within `optional_fetch_deadline`, for an operation
+    /// that goes on without the commits.
+    pub(crate) fn fetch_optional_commits(
+        &self,
+        path: &str,
+        github: &GitHubRepository,
+        commits: &WantedCommits,
+    ) -> Result<CommitsFetch, RepositoryError> {
+        self.fetch_commits_within(path, github, commits, self.limits.optional_fetch_deadline)
+    }
+
+    fn fetch_commits_within(
+        &self,
+        path: &str,
+        github: &GitHubRepository,
+        commits: &WantedCommits,
+        deadline: Duration,
+    ) -> Result<CommitsFetch, RepositoryError> {
         let reads = self.deadline(LocalRead::BranchStatus);
         let repository = read::open(path, reads)?;
         let remotes = remotes::read(&repository.root, reads)?;
@@ -291,12 +318,7 @@ impl Coordinator {
         };
         self.gated(&repository.common_dir, || {
             let _slot = self.slots.acquire();
-            fetch::fetch_commits(
-                &repository.root,
-                &remote,
-                commits.oids(),
-                self.limits.fetch_deadline,
-            )
+            fetch::fetch_commits(&repository.root, &remote, commits.oids(), deadline)
         })
     }
 

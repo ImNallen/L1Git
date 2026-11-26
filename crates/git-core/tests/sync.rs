@@ -149,6 +149,7 @@ fn limits() -> Limits {
     Limits {
         clone_deadline: Duration::from_secs(30),
         fetch_deadline: Duration::from_secs(2),
+        optional_fetch_deadline: Duration::from_secs(2),
         push_deadline: Duration::from_secs(2),
         local_deadline: Duration::from_secs(30),
         network_slots: NonZeroUsize::new(4).unwrap(),
