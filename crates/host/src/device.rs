@@ -153,7 +153,7 @@ impl Host {
             .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
             .body(body)
             .send()
-            .map_err(|_| api_failure(ApiError::Unreachable))?;
+            .map_err(|error| api_failure(github::reaching(&error)))?;
         let status = response.status().as_u16();
         let bytes = read_body(response).map_err(api_failure)?;
         match serde_json::from_slice(&bytes) {
