@@ -87,6 +87,18 @@
   background: var(--blue);
   mask: url("/assets/inspector/Comment.svg") center / contain no-repeat;
 }
+[data-type="item"] [style*="--viewed"] {
+  width: 14px;
+  height: 14px;
+  background: var(--trees-fg-muted);
+  mask: url("/assets/inspector/Viewed.svg") center / contain no-repeat;
+  overflow: hidden;
+  text-indent: 14px;
+}
+[data-type="item"]:not([aria-selected="true"]):has([style*="--viewed"])
+  > [data-item-section="content"] {
+  color: var(--trees-fg-muted);
+}
 [data-type="item"] {
   transition:
     background-color 120ms ease-out,

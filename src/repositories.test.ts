@@ -418,6 +418,8 @@ it("sends a range's reads and its fetch and validates their answers", async () =
     deleted: 1,
     oldBlob: oid,
     newBlob: head,
+    oldMode: "100644",
+    newMode: "100644",
     submodule: false,
   };
   const ready = {
@@ -434,6 +436,7 @@ it("sends a range's reads and its fetch and validates their answers", async () =
         added: null,
         deleted: null,
         oldBlob: null,
+        oldMode: null,
       },
     ],
     contentMissing: false,

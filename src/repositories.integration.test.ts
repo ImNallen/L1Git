@@ -1125,7 +1125,15 @@ describe("real Rust transport contract", () => {
           deleted: 0,
           submodule: false,
         },
-        { path: "new.txt", status: "A", from: null, added: 1, oldBlob: null },
+        {
+          path: "new.txt",
+          status: "A",
+          from: null,
+          added: 1,
+          oldBlob: null,
+          oldMode: null,
+          newMode: "100644",
+        },
       ],
     });
     const patches = answer("rangePatches", rangePatchesSchema).parse(

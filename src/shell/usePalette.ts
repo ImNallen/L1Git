@@ -111,7 +111,7 @@ export function useShortcuts(
       );
       if (action === null) return;
       event.preventDefault();
-      action.run(commands);
+      if (!(event.repeat && action.once)) action.run(commands);
     }
     window.addEventListener("keydown", keyboard);
     return () => window.removeEventListener("keydown", keyboard);

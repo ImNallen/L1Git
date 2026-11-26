@@ -12,6 +12,7 @@ import { defineSlice } from "./actionSlices";
 import type { ActionSlice } from "./actionSlices";
 import type { OpenedPullRequest } from "./usePullRequests";
 import type { ScreenState } from "./useScreen";
+import { useViewedFiles } from "./useViewedFiles";
 
 const LOOK_KEY = "l1git.filesChanged.v1";
 const lookSchema = z.object({
@@ -29,6 +30,8 @@ export type FilesChangedState = {
   diffStyle: DiffStyle;
   view: FilesView;
   setLook: (look: Partial<Look>) => void;
+  viewed: ReadonlySet<RangeFile>;
+  mark: (file: RangeFile, isViewed: boolean) => void;
   go: (at: number) => void;
   /** As `go`, and back to its beginning when it is the current one. */
   choose: (at: number) => void;
@@ -41,7 +44,11 @@ export type FilesChangedState = {
   persistenceError: string | null;
   actions: ActionSlice<
     "filesChanged",
-    "nextFile" | "previousFile" | "nextChange" | "previousChange"
+    | "nextFile"
+    | "previousFile"
+    | "nextChange"
+    | "previousChange"
+    | "toggleViewed"
   >;
 };
 
@@ -80,12 +87,20 @@ export function useFilesChanged({
   }, [store, id, isShown, repository, pull, isComing]);
 
   const held = latest !== null && latest.of === id ? latest : null;
-  const count = held?.read.kind === "ready" ? held.read.files.length : 0;
+  const { viewed, ...marks } = useViewedFiles(held);
+  const files = held?.read.kind === "ready" ? held.read.files : [];
+  const count = files.length;
   const at = held?.at ?? 0;
   /** The current file as it is when a key is pressed. */
   const now = () => {
     ref.current?.tell?.();
     return store.read()?.at ?? 0;
+  };
+  const file = files[at];
+  const isViewed = file !== undefined && viewed.has(file);
+  const mark = (of: RangeFile, next: boolean) => {
+    ref.current?.beforeMark?.(of, next);
+    marks.mark(of, next);
   };
   const change = (by: 1 | -1) => {
     if (ref.current?.step(by) === true) return;
@@ -107,6 +122,8 @@ export function useFilesChanged({
         ),
       );
     },
+    viewed,
+    mark,
     go: store.go,
     choose: (to) => {
       if (to === now()) ref.current?.toStart(to);
@@ -118,12 +135,12 @@ export function useFilesChanged({
     readFileAgain: store.readFileAgain,
     whole: store.whole,
     ref,
-    persistenceError,
+    persistenceError: persistenceError ?? marks.persistenceError,
     actions: defineSlice({
       context: {
         filesChanged:
           screen === "pullRequests" && isShown && count > 0
-            ? { at, count }
+            ? { at, count, isViewed }
             : null,
       },
       commands: {
@@ -131,6 +148,10 @@ export function useFilesChanged({
         previousFile: () => store.go(now() - 1),
         nextChange: () => change(1),
         previousChange: () => change(-1),
+        toggleViewed: () => {
+          const current = files[now()];
+          if (current) mark(current, !viewed.has(current));
+        },
       },
     }),
   };

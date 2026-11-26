@@ -5,6 +5,7 @@ import type { PullRequest } from "../domain/pullRequest";
 import { threadsLeftOut } from "../domain/pullRequestDetail";
 import type { RangeFile } from "../domain/range";
 import { commentsIn, threadsByFile } from "../domain/reviewThreads";
+import { viewedCount } from "../domain/viewedFiles";
 import type { FilesChanged } from "../filesChanged";
 import { ChangedFileTree } from "./ChangedFileTree";
 import type { RowLabel } from "./ChangedFileTree";
@@ -22,11 +23,13 @@ const gitStatuses: Record<RangeFile["status"], GitStatus> = {
 function Tree({
   files,
   at,
+  viewed,
   threads,
   onGo,
 }: {
   files: readonly RangeFile[];
   at: number;
+  viewed: ReadonlySet<RangeFile>;
   threads: PullRequest["threads"];
   onGo: (at: number) => void;
 }) {
@@ -60,6 +63,10 @@ function Tree({
   );
   const choose = (path: string) =>
     onGo(files.findIndex((file) => shownPath(file.path) === path));
+  const viewedPaths = useMemo(
+    () => new Set([...viewed].map(({ path }) => shownPath(path))),
+    [viewed],
+  );
   return (
     <ChangedFileTree
       files={named.map(({ path, status }) => ({
@@ -68,6 +75,14 @@ function Tree({
       }))}
       labels={labels}
       comments={comments}
+      viewed={viewedPaths}
+      overTree={
+        <div className="files-progress">
+          <span>Viewed</span>
+          <span>{viewedCount(viewed.size, files.length)}</span>
+          <progress aria-hidden="true" value={viewed.size} max={files.length} />
+        </div>
+      }
       selectedPath={selected ? shownPath(selected.path) : null}
       onSelectFile={choose}
       onSelectAgain={choose}
@@ -78,11 +93,13 @@ function Tree({
 /** The files of the Files changed tab. `held` is null until they were asked for. */
 export function ChangedFilesSection({
   held,
+  viewed,
   pull,
   url,
   onGo,
 }: {
   held: FilesChanged | null;
+  viewed: ReadonlySet<RangeFile>;
   pull: PullRequest | null;
   url: string;
   onGo: (at: number) => void;
@@ -126,6 +143,7 @@ export function ChangedFilesSection({
           key={`${read.mergeBase} ${held?.range.head}`}
           files={read.files}
           at={held?.at ?? 0}
+          viewed={viewed}
           threads={held?.pull.threads ?? null}
           onGo={onGo}
         />

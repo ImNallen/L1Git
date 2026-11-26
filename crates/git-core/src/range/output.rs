@@ -33,6 +33,10 @@ impl Side {
             .then(|| Oid::try_from(git::text(&self.oid)).map_err(|_| git::malformed()))
             .transpose()
     }
+
+    pub(super) fn mode(&self) -> Option<String> {
+        self.exists().then(|| git::text(&self.mode))
+    }
 }
 
 impl Change {

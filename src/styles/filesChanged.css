@@ -116,7 +116,6 @@
 }
 .files-toolbar .diff-style {
   flex-shrink: 0;
-  margin-left: auto;
 }
 .files-all {
   display: inline-flex;
@@ -298,7 +297,11 @@
 }
 .files-next {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
   padding: 16px 20px 24px;
 }
 /* Room for the notices over it. */

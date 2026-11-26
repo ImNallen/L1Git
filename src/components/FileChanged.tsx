@@ -1,6 +1,6 @@
 import { use, useCallback, useLayoutEffect, useMemo, useState } from "react";
 import type { ReactNode, Ref, RefObject } from "react";
-import { ChevronRight, FileX2 } from "lucide-react";
+import { FileX2 } from "lucide-react";
 import {
   inPlaceOfLines,
   modeChange,
@@ -65,7 +65,7 @@ export function FileChanged({
   url,
   whole,
   onRetry,
-  onNext,
+  below,
   onLeave,
 }: {
   ref: Ref<DiffSteps>;
@@ -86,7 +86,8 @@ export function FileChanged({
   url: string;
   whole: () => Promise<string>;
   onRetry: () => void;
-  onNext: (() => void) | null;
+  /** At the end of the file. */
+  below: ReactNode;
   onLeave: (place: LinePlace) => void;
 }) {
   const { theme, painted } = use(SurroundingsContext);
@@ -159,19 +160,6 @@ export function FileChanged({
       url={url}
       unfolded={unfolded}
     />
-  );
-  const below = onNext && (
-    <div className="files-next">
-      <button
-        type="button"
-        className="button secondary"
-        title="Next file (J)"
-        onClick={onNext}
-      >
-        Next file
-        <ChevronRight size={14} aria-hidden="true" />
-      </button>
-    </div>
   );
   const body = () => {
     if (contentMissing)

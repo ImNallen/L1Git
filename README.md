@@ -17,7 +17,7 @@ A desktop Git client for macOS, Linux, and Windows. Browse your repositories, re
 - Cherry-pick or revert one commit from the history menu or the command palette, after reviewing what it will do. A clean result commits straight away, and a conflict opens the resolver with Finish and Abort. Undo removes the new commit and its file changes.
 - Undo and redo local edits made through the app, including commits and discarded changes, from the notice that a commit, a discard, or another history change shows, or from the **More** menu.
 - See the open and recently merged pull requests of all your saved GitHub repositories in one list. Filter, sort, and search it.
-- Read a pull request: its conversation and review threads, commits, changed files, checks, reviewers, and whether it can merge. The diff comes from your own clone.
+- Read a pull request: its conversation and review threads, commits, changed files, checks, reviewers, and whether it can merge. The diff comes from your own clone. Mark the files you have viewed. The marks stay on your computer, and GitHub doesn't know them.
 - Choose light or dark themes, create your own, or import themes from VS Code and Open VSX.
 
 L1 Git does not force-push, and it does not resolve rebase conflicts. A Pull (Rebase) that hits a conflict is aborted and changes nothing. Fetch, fast-forward, push, remote setup, and merge Start, Finish, and Abort have no Undo entry. Creating and removing a worktree have no Undo entry either, and removing one drops the Undo entries made in it. The fetch and fast-forward that a pull runs have no Undo entry either. Pull (Rebase) has Undo and Redo. Merge resolution edits have Undo and Redo until you finish or abort.

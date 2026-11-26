@@ -42,6 +42,8 @@ function file(path: string, from: string | null = null): RangeFile {
     deleted: 1,
     oldBlob: oidSchema.parse("1".repeat(40)),
     newBlob: oidSchema.parse("2".repeat(40)),
+    oldMode: "100644",
+    newMode: "100644",
     submodule: false,
   };
 }

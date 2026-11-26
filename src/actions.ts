@@ -37,7 +37,7 @@ export type ActionContext = {
   /** Whether one pull request shows in place of the list. */
   pullRequestOpen: boolean;
   /** Where the Files changed tab is among its files, while it shows one. */
-  filesChanged: { at: number; count: number } | null;
+  filesChanged: { at: number; count: number; isViewed: boolean } | null;
   push: PushControl | null;
   repository: {
     fetching: boolean;
@@ -91,6 +91,7 @@ export type Commands = {
   previousFile: () => void;
   nextChange: () => void;
   previousChange: () => void;
+  toggleViewed: () => void;
   toggleSidebar: () => void;
   toggleInspector: () => void;
   fetch: () => void;
@@ -197,6 +198,7 @@ export type ActionId =
   | "previousFile"
   | "nextChange"
   | "previousChange"
+  | "toggleViewed"
   | "toggleSidebar"
   | "toggleInspector"
   | "openSettings"
@@ -209,6 +211,8 @@ type Action = {
   /** What the action would do, or why it is unavailable. */
   detail?: (context: ActionContext) => string;
   shortcut?: Shortcut;
+  /** Whether a key that is held down runs it once. */
+  once?: true;
   available: (context: ActionContext) => boolean;
   run: (commands: Commands) => void;
 };
@@ -671,6 +675,17 @@ export const actions: readonly Action[] = [
     shortcut: letter("p"),
     available: onFilesChanged,
     run: (commands) => commands.previousChange(),
+  },
+  {
+    id: "toggleViewed",
+    title: (context) =>
+      context.filesChanged?.isViewed === true
+        ? "Mark file unviewed"
+        : "Mark file viewed",
+    shortcut: letter("v"),
+    once: true,
+    available: onFilesChanged,
+    run: (commands) => commands.toggleViewed(),
   },
   {
     id: "showHistory",

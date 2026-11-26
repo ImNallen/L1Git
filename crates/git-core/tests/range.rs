@@ -297,8 +297,16 @@ fn lists_every_kind_of_change_in_gits_order() {
         let text = |blob: &Option<Oid>| blob.as_ref().map(|oid| oid.as_str().to_owned());
         (text(&file.old_blob), text(&file.new_blob))
     };
+    let modes = |path: &str| {
+        let file = files.iter().find(|file| file.path == path).unwrap();
+        (file.old_mode.as_deref(), file.new_mode.as_deref())
+    };
     let (old, new) = blobs("dir/mode");
     assert_eq!(old, new);
+    assert_eq!(modes("dir/mode"), (Some(FILE), Some(EXECUTABLE)));
+    assert_eq!(modes("empty"), (None, Some(FILE)));
+    assert_eq!(modes("gone"), (Some(FILE), None));
+    assert_eq!(modes("module to file"), (Some(SUBMODULE), Some(FILE)));
     assert_eq!(blobs("gone").1, None);
     assert_eq!(blobs("empty").0, None);
     assert_eq!(blobs("module"), (Some(PINNED.into()), Some(MOVED.into())));

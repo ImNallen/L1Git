@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { afterMove, currentFile, viewAt } from "./filesView";
+import { afterMove, currentFile, viewAt, viewToMark } from "./filesView";
 import type { FilesPlace, FilesView } from "./filesView";
 
 const line = (number: number, below: number, id = "3.0"): FilesPlace => ({
@@ -63,4 +63,78 @@ describe("afterMove", () => {
       expect(afterMove(scrollTop, wanted, last)).toBe(expected);
     },
   );
+});
+
+describe("viewToMark", () => {
+  const here = line(40, 60);
+  const mark = {
+    at: 3,
+    isViewed: true,
+    isFolded: false,
+    here,
+    own: top("3.0"),
+    below: -500,
+    next: top("4.0"),
+  };
+  const marked: FilesView = {
+    kind: "marked",
+    place: top("4.0"),
+    file: 3,
+    of: 3,
+    back: here,
+  };
+  it.each<[string, FilesView, Partial<typeof mark>, FilesView | null]>([
+    ["brings the next file to a pinned header", free, {}, marked],
+    [
+      "keeps a pinned header with the focus, and the last",
+      free,
+      { next: null as never },
+      { ...marked, place: top("3.0") },
+    ],
+    [
+      "leaves a header in the view where it is",
+      free,
+      { below: 0 },
+      { ...marked, place: here, file: null },
+    ],
+    [
+      "leaves another file current",
+      put(top("2.0"), 2),
+      { below: 80, here: top("2.0") },
+      { ...marked, place: top("2.0"), file: 2, back: top("2.0") },
+    ],
+    [
+      "leaves the one a step went to current under another's header",
+      put(line(1, 106, "4.0"), 4),
+      {},
+      { ...marked, file: 4 },
+    ],
+    ["moves nothing for a file that is folded", free, { isFolded: true }, null],
+    [
+      "moves nothing for a viewed file that a hand unfolded",
+      free,
+      { isViewed: false },
+      null,
+    ],
+    [
+      "goes back to where it was marked",
+      marked,
+      { isViewed: false, isFolded: true },
+      put(here, 3),
+    ],
+    [
+      "begins at the top of a file that was marked before",
+      { ...marked, of: 2 },
+      { isViewed: false, isFolded: true, below: -40 },
+      put(top("3.0"), 3),
+    ],
+    [
+      "unfolds a header in the view where it is",
+      free,
+      { isViewed: false, isFolded: true, below: 0 },
+      null,
+    ],
+  ])("%s", (_, view, fields, expected) => {
+    expect(viewToMark(view, { ...mark, ...fields })).toEqual(expected);
+  });
 });

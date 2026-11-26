@@ -4,7 +4,12 @@ import { changeStops } from "../domain/changeStops";
 import type { ChangeStop } from "../domain/changeStops";
 import { furtherStep, stepFrom, stepInView } from "../domain/fileSteps";
 import type { FileStep } from "../domain/fileSteps";
-import { afterMove, currentFile, viewAt } from "../domain/filesView";
+import {
+  afterMove,
+  currentFile,
+  viewAt,
+  viewToMark,
+} from "../domain/filesView";
 import type { FilesPlace, FilesView } from "../domain/filesView";
 import type { RangeFile } from "../domain/range";
 import { ABOVE_CHANGE } from "./useDiffSteps";
@@ -339,6 +344,36 @@ export class AllFilesKeeper {
     // Nothing will be where the view is in it.
     if (below < 0) this.put(fileTop(id), at);
     else this.touch();
+  }
+
+  /** Marking a file folds or unfolds it. `focused` is to stay in the view. */
+  beforeMark(at: number, isViewed: boolean, focused: Element | null) {
+    const viewer = this.shown;
+    const here = this.here();
+    const id = entryId(at);
+    const top = viewer?.getTopForItem(id);
+    const entry = this.files.entries.get(id);
+    if (!viewer || !here || !entry || top === undefined) return;
+    const next = entryId(at + 1);
+    const isFocused = viewer
+      .getRenderedItems()
+      .some(
+        (each) =>
+          this.files.entries.get(each.id)?.at === at &&
+          each.element.contains(focused),
+      );
+    const view = viewToMark(this.view, {
+      at,
+      isViewed,
+      isFolded: this.files.folded.has(entry.file),
+      here,
+      own: fileTop(id),
+      below: top - viewer.getScrollTop(),
+      next: isFocused || !this.files.entries.has(next) ? null : fileTop(next),
+    });
+    if (!view) return this.touch();
+    this.cursor = null;
+    this.set(view);
   }
 
   /** The file is read again, and is there for as long. */

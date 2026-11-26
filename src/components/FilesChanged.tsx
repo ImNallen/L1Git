@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from "react";
-import type { RefObject } from "react";
+import type { ReactNode, RefObject } from "react";
 import { RefreshCw, TriangleAlert, X } from "lucide-react";
 import {
   countsNotice,
@@ -12,17 +12,20 @@ import type { PullRequest, ReviewThread } from "../domain/pullRequest";
 import type { RangeFile } from "../domain/range";
 import { problemFrom } from "../domain/repository";
 import { threadsByFile } from "../domain/reviewThreads";
+import { nextUnviewed } from "../domain/viewedFiles";
 import { clampMessage } from "../domain/worktree";
 import type { FilesChanged as Held } from "../filesChanged";
 import type { FilesChangedState, FilesView } from "../shell/useFilesChanged";
 import { AllFiles } from "./AllFiles";
 import { FileChanged } from "./FileChanged";
+import { EndOfOne } from "./FileEnd";
 import { FilesBoundary } from "./FilesBoundary";
 import { FilesState, ReadingFiles } from "./FilesState";
 import { FilesToolbar } from "./FilesToolbar";
 import type { LinePlace } from "./KeepDiffPlace";
 import type { Unfolded } from "./ReviewThreads";
 import { OnGitHub } from "./PullRequestParts";
+import { useFolded } from "./useFolded";
 
 function Stopped({
   stop,
@@ -74,33 +77,54 @@ function said({ read, at }: Held): string {
   }
 }
 
+function Warning({
+  children,
+  onDismiss,
+}: {
+  children: ReactNode;
+  onDismiss: () => void;
+}) {
+  return (
+    <div className="notice warning-notice" role="status">
+      <TriangleAlert size={14} aria-hidden="true" />
+      <span>{children}</span>
+      <button
+        type="button"
+        className="notice-dismiss"
+        aria-label="Dismiss"
+        onClick={onDismiss}
+      >
+        <X size={14} aria-hidden="true" />
+      </button>
+    </div>
+  );
+}
+
 /** Over the end of the diff, which stays where it is. */
 function Notices({
   newer,
+  unsaved,
   problem,
   onShow,
+  onDismissUnsaved,
   onDismiss,
 }: {
   newer: ReturnType<typeof newerThan>;
+  unsaved: string | null;
   problem: string | null;
   onShow: () => void;
+  onDismissUnsaved: () => void;
   onDismiss: () => void;
 }) {
   return (
     <div className="files-notices">
+      {unsaved !== null && (
+        <Warning onDismiss={onDismissUnsaved}>{unsaved}</Warning>
+      )}
       {problem !== null && (
-        <div className="notice warning-notice" role="status">
-          <TriangleAlert size={14} aria-hidden="true" />
-          <span>Couldn&apos;t show more lines. {problem}</span>
-          <button
-            type="button"
-            className="notice-dismiss"
-            aria-label="Dismiss"
-            onClick={onDismiss}
-          >
-            <X size={14} aria-hidden="true" />
-          </button>
-        </div>
+        <Warning onDismiss={onDismiss}>
+          Couldn&apos;t show more lines. {problem}
+        </Warning>
       )}
       {newer && (
         <div className="notice info-notice" role="status">
@@ -129,7 +153,7 @@ function Shown({
   onFold,
   isShown,
   held,
-  files: { ref, diffStyle, view, go, readFile },
+  files: { ref, diffStyle, view, viewed, mark, go, readFile },
   whole,
   onRetry,
   onRetryFile,
@@ -188,6 +212,7 @@ function Shown({
         });
         return last && last.view !== view && last.at === at ? last.line : null;
       };
+      const next = nextUnviewed(read.files, viewed, at);
       const onLeave = (of: number, line: LinePlace) => {
         left.current = { view, at: of, line };
       };
@@ -211,6 +236,8 @@ function Shown({
           patches={patches}
           at={at}
           threads={threads}
+          viewed={viewed}
+          onMark={mark}
           folded={folded}
           onFold={onFold}
           whole={whole}
@@ -230,7 +257,14 @@ function Shown({
           threads={threads.get(file) ?? none}
           whole={() => whole(file)}
           onRetry={() => onRetryFile(file)}
-          onNext={at + 1 < read.files.length ? () => go(at + 1) : null}
+          below={
+            <EndOfOne
+              isViewed={viewed.has(file)}
+              onMark={(isViewed) => mark(file, isViewed)}
+              onNextUnviewed={next === null ? null : () => go(next)}
+              onNext={at + 1 < read.files.length ? () => go(at + 1) : null}
+            />
+          }
           onLeave={(line) => onLeave(at, line)}
         />
       );
@@ -242,13 +276,13 @@ function Shown({
   }
 }
 
-function useToggled<T>(): [ReadonlySet<T>, (each: T) => void] {
-  const [toggled, setToggled] = useState<ReadonlySet<T>>(new Set());
+function useToggled(): [ReadonlySet<string>, (id: string) => void] {
+  const [toggled, setToggled] = useState<ReadonlySet<string>>(new Set());
   const toggle = useCallback(
-    (each: T) =>
+    (id: string) =>
       setToggled((before) => {
         const next = new Set(before);
-        if (!next.delete(each)) next.add(each);
+        if (!next.delete(id)) next.add(id);
         return next;
       }),
     [],
@@ -277,8 +311,8 @@ export function FilesChanged({
   const pane = useRef<HTMLElement>(null);
   const holdsFocus = useRef(false);
   const left = useRef<Left | null>(null);
-  const [ids, toggle] = useToggled<string>();
-  const [folded, fold] = useToggled<RangeFile>();
+  const [ids, toggle] = useToggled();
+  const [folded, fold] = useFolded(files.viewed);
   const unfolded = useMemo(() => ({ ids, toggle }), [ids, toggle]);
   const { range, read, at, counted } = held;
   const counts = useMemo(
@@ -291,6 +325,9 @@ export function FilesChanged({
     file: RangeFile;
     message: string;
   } | null>(null);
+  const { persistenceError } = files;
+  const [seen, setSeen] = useState<string | null>(null);
+  if (persistenceError === null && seen !== null) setSeen(null);
   const whole = (of: RangeFile) =>
     files.whole(of).catch((error: unknown) => {
       setProblem({ file: of, message: problemFrom(error).message });
@@ -348,12 +385,14 @@ export function FilesChanged({
       </FilesBoundary>
       <Notices
         newer={newer}
+        unsaved={persistenceError === seen ? null : persistenceError}
         problem={
           problem && (files.view === "all" || problem.file === file)
             ? problem.message
             : null
         }
         onShow={keepingFocus(files.showNewest)}
+        onDismissUnsaved={keepingFocus(() => setSeen(persistenceError))}
         onDismiss={keepingFocus(() => setProblem(null))}
       />
     </section>

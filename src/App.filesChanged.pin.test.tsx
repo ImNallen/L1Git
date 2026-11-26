@@ -38,6 +38,8 @@ const file = (path: string, fields: Partial<RangeFile> = {}): RangeFile => ({
   deleted: 1,
   oldBlob: oid("1"),
   newBlob: oid("2"),
+  oldMode: "100644",
+  newMode: "100644",
   submodule: false,
   ...fields,
 });
@@ -193,10 +195,9 @@ it("goes to the next file from the end of one, and keeps the focus in it", async
   const app = await openFiles();
   const end = get(
     "button",
-    "Next file",
+    "Mark viewed, next file",
     document.querySelector(".files-next")!,
   );
-  expect(end.title).toBe("Next file (J)");
   end.focus();
   await app.click(end);
   expect(path()).toBe("src/{old.ts → new.ts}");

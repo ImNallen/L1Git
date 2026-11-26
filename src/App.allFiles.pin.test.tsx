@@ -37,6 +37,8 @@ const file = (path: string, fields: Partial<RangeFile> = {}): RangeFile => ({
   deleted: 1,
   oldBlob: oid("1"),
   newBlob: oid("2"),
+  oldMode: "100644",
+  newMode: "100644",
   submodule: false,
   ...fields,
 });
@@ -128,9 +130,9 @@ const fold = (path: string | RegExp) => get("button", path, panel());
 it("shows each file after the other, and keeps the choice", async () => {
   const app = await openAll();
   expect(headers()).toEqual([
-    "src/a.ts+2−1",
-    "src/{old.ts → new.ts}Renamed+2−1",
-    "src/z.png",
+    "src/a.ts+2−1Viewed",
+    "src/{old.ts → new.ts}Renamed+2−1Viewed",
+    "src/z.pngViewed",
   ]);
   expect(panel().querySelector(".files-toolbar")?.textContent).toMatch(
     /^3 files\+4−2/,

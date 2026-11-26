@@ -20,6 +20,7 @@ import type { FilesChanged } from "../filesChanged";
 import allFilesStyles from "../styles/allFilesPatch.css?inline";
 import { AllFilesKeeper, HEADER, layout } from "./allFilesKeeper";
 import { keyExpanders } from "./expanders";
+import { EndOfEach, holdEnd } from "./FileEnd";
 import { FileHeader, OverLines } from "./FileNotes";
 import { ReadingFiles } from "./FilesState";
 import { KeepAllFilesPlace } from "./KeepAllFilesPlace";
@@ -38,6 +39,8 @@ import type { FileNote } from "./useFileItems";
 import { useRedraws } from "./useRedraws";
 import { useSteady } from "./useSteady";
 
+/** As the stylesheets have it. */
+const END = 48;
 /** Above this many lines, a file is drawn without colors, which takes Pierre too long. */
 const MOST_COLORED = 3_000;
 
@@ -53,6 +56,8 @@ export function AllFiles({
   at,
   threads: newest,
   unfolded,
+  viewed,
+  onMark,
   folded,
   onFold,
   isShown,
@@ -76,6 +81,8 @@ export function AllFiles({
   at: number;
   threads: ReadonlyMap<RangeFile, readonly ReviewThread[]>;
   unfolded: Unfolded;
+  viewed: ReadonlySet<RangeFile>;
+  onMark: (file: RangeFile, isViewed: boolean) => void;
   folded: ReadonlySet<RangeFile>;
   onFold: (file: RangeFile) => void;
   isShown: boolean;
@@ -127,11 +134,13 @@ export function AllFiles({
       itemMetrics: {
         ...reviewMetrics,
         diffHeaderHeight: HEADER,
+        paddingBottom: END,
         // Other metrics that mean the same make Pierre measure all anew.
         ...(appearances % 2 === 1 && { hunkSeparatorHeight: undefined }),
       },
       onPostRender: (node: HTMLElement) => {
         keyExpanders(node);
+        holdEnd(node);
         drawn(node);
       },
       loadDiffFiles: async (diff: FileDiffMetadata) => {
@@ -206,6 +215,25 @@ export function AllFiles({
     };
   }, [isReady, pane, holdsFocus, keeper]);
 
+  const beforeMark = (file: RangeFile, isViewed: boolean) => {
+    // Its button goes away, and the focus would go with it.
+    const was = document.activeElement;
+    if (isViewed && was?.closest(".files-end"))
+      scroller.current?.focus({ preventScroll: true });
+    if (isViewed && was?.closest(".files-annotation"))
+      was
+        .closest("diffs-container")
+        ?.querySelector<HTMLElement>(".files-header > button")
+        ?.focus({ preventScroll: true });
+    const { activeElement: focused } = document;
+    const isFocusSeen =
+      focused?.matches(".files-header :focus-visible") === true;
+    keeper.beforeMark(
+      files.indexOf(file),
+      isViewed,
+      isFocusSeen ? focused : null,
+    );
+  };
   useImperativeHandle(ref, () => ({
     step: (by) => {
       keeper.step(by);
@@ -213,6 +241,7 @@ export function AllFiles({
     },
     toStart: (of) => keeper.toStart(of),
     tell: keeper.tell,
+    beforeMark,
   }));
 
   if (!isReady) return <ReadingFiles />;
@@ -235,17 +264,29 @@ export function AllFiles({
           onScroll={keeper.onScroll}
           renderCustomHeader={({ id }) => {
             const entry = entries.get(id);
+            if (!entry) return undefined;
+            const { file, part, parts } = entry;
+            const isFolded = folded.has(file);
+            const marking = {
+              isCurrent: entry.at === at,
+              isViewed: viewed.has(file),
+              onMark: (isViewed: boolean) => onMark(file, isViewed),
+            };
             return (
-              entry && (
+              <>
                 <FileHeader
+                  {...marking}
                   entry={entry}
-                  folded={folded.has(entry.file)}
+                  folded={isFolded}
                   onFold={() => {
                     keeper.beforeFold(id);
-                    onFold(entry.file);
+                    onFold(file);
                   }}
                 />
-              )
+                {!isFolded && part + 1 >= parts && (
+                  <EndOfEach file={file} {...marking} />
+                )}
+              </>
             );
           }}
           renderAnnotation={(...[note, , { id }]) => {
