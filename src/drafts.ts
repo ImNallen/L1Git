@@ -78,9 +78,10 @@ type Entry = {
   /** What this window last saw the host hold here. */
   base: Draft | null;
   save: DraftSave;
-  /** Typed before this window learned that a write holds the place. They
-   * save over what the place holds once the write ends. */
-  waits: boolean;
+  /** Typed before this window learned that a write holds the place, on the
+   * draft saved at `on`. Once the write ends they save over what it gives
+   * back only if it `carried` that same draft; else both stay to pick from. */
+  waits: { on: number | null; carried: number | null } | null;
 };
 
 type Pull = {
@@ -109,7 +110,7 @@ const settled = (draft: Draft): Entry => ({
   text: draft.text,
   base: draft,
   save: saved,
-  waits: false,
+  waits: null,
 });
 
 const isPending = ({ save }: Entry) =>
@@ -151,12 +152,24 @@ export function createDrafts(host: Pick<HostClient, "ask">) {
     listeners.forEach((listener) => listener());
   }
 
+  /** The draft at `key` a write that left, or may have, carries. */
+  const carriedAt = (pull: Pull, key: DraftKey) =>
+    pull.sent
+      .flatMap(({ drafts }) => drafts)
+      .find((draft) => draftKey(draft.anchor, draft.head) === key);
+
   /** Whether a write that left, or may have, carries the draft at `key`. */
   function isHeld(pull: Pull, key: DraftKey) {
     for (const places of pull.holds) if (places.has(key)) return true;
-    return pull.sent.some(({ drafts }) =>
-      drafts.some((draft) => draftKey(draft.anchor, draft.head) === key),
-    );
+    return carriedAt(pull, key) !== undefined;
+  }
+
+  function wait(pull: Pull, key: DraftKey, entry: Entry) {
+    entry.save = { kind: "unsaved", why: waitMessage };
+    entry.waits ??= {
+      on: entry.base?.savedAt ?? null,
+      carried: carriedAt(pull, key)?.savedAt ?? null,
+    };
   }
 
   const ask = (pull: Pull, change: DraftChange) =>
@@ -194,11 +207,18 @@ export function createDrafts(host: Pick<HostClient, "ask">) {
         entry.save = { kind: "changedElsewhere", theirs: draft };
     }
     for (const [key, entry] of pull.entries) {
-      if (!entry.waits || isHeld(pull, key)) continue;
-      entry.waits = false;
-      entry.base = held.get(key) ?? null;
-      entry.save = saving;
-      void enqueue(pull, () => save(pull, key));
+      if (!entry.waits) continue;
+      entry.waits.carried =
+        carriedAt(pull, key)?.savedAt ?? entry.waits.carried;
+      if (isHeld(pull, key)) continue;
+      const { on, carried } = entry.waits;
+      const theirs = held.get(key) ?? null;
+      entry.waits = null;
+      if (on === (carried ?? theirs?.savedAt ?? null)) {
+        entry.base = theirs;
+        entry.save = saving;
+        void enqueue(pull, () => save(pull, key));
+      } else entry.save = { kind: "changedElsewhere", theirs };
     }
   }
 
@@ -206,8 +226,7 @@ export function createDrafts(host: Pick<HostClient, "ask">) {
     const entry = pull.entries.get(key);
     if (!entry || !isPending(entry)) return;
     if (isHeld(pull, key)) {
-      entry.save = { kind: "unsaved", why: waitMessage };
-      entry.waits = true;
+      wait(pull, key, entry);
       return changed(pull);
     }
     const { anchor, head, text, base } = entry;
@@ -247,10 +266,8 @@ export function createDrafts(host: Pick<HostClient, "ask">) {
       entry.save = { kind: "changedElsewhere", theirs };
     else if (data.refused?.kind === "full")
       entry.save = { kind: "unsaved", why: fullMessage[data.refused.of] };
-    else if (data.refused?.kind === "sent") {
-      entry.save = { kind: "unsaved", why: waitMessage };
-      entry.waits = true;
-    } else if (entry.text === text && entry.head === head) {
+    else if (data.refused?.kind === "sent") wait(pull, key, entry);
+    else if (entry.text === text && entry.head === head) {
       if (theirs) pull.entries.set(key, settled(theirs));
       else pull.entries.delete(key);
     } else entry.base = theirs;
@@ -287,7 +304,7 @@ export function createDrafts(host: Pick<HostClient, "ask">) {
       text,
       base: null,
       save: saved,
-      waits: false,
+      waits: null,
     };
     entry.text = text;
     entry.head = head;
