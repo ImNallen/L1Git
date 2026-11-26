@@ -30,8 +30,10 @@ export function CommentBox({
 }) {
   const [tab, setTab] = useState<"write" | "preview">("write");
   const words = useRef<HTMLTextAreaElement>(null);
+  const place = JSON.stringify(lines);
   // A click on a line number, or on the gutter plus that goes away, moves the
-  // focus after the box mounts, so the words take it a frame later.
+  // focus after the box mounts, and Pierre keeps the box when it moves to
+  // other lines, so the words take the focus a frame after each.
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
       const box = words.current;
@@ -40,7 +42,7 @@ export function CommentBox({
       box.setSelectionRange(box.value.length, box.value.length);
     });
     return () => cancelAnimationFrame(frame);
-  }, []);
+  }, [place]);
   const id = useId();
   const label = `Comment on ${linesLabel(lines)}`;
   const writing = view.kind === "writing" ? view : null;
@@ -86,7 +88,6 @@ export function CommentBox({
             placeholder="Leave a comment. Markdown works here."
             value={view.text}
             readOnly={writing === null}
-            autoFocus
             onChange={(event) => comments.type(event.target.value)}
           />
         ) : (

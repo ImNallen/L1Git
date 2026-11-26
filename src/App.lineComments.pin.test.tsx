@@ -156,6 +156,12 @@ it("opens a box under chosen lines, and keeps its words as a pending comment", a
   await choose(app, 13, 13, "context");
   expect(box()?.getAttribute("aria-label")).toBe("Comment on line 13");
   expect(get("button", "Add review comment")).toBeTruthy();
+  await choose(app, 11, 12);
+  panel().querySelector<HTMLElement>(".file-diff-scroll")!.focus();
+  await app.flushFrames();
+  expect(document.activeElement, "the words take it where the box moves").toBe(
+    words(),
+  );
 });
 
 it("keeps pending comments for the next time, and edits and deletes them", async () => {
@@ -344,6 +350,7 @@ it("comments on the change the view is at with C", async () => {
   const app = await openFiles();
   await app.press("c");
   expect(box()?.getAttribute("aria-label")).toBe("Comment on lines 11–12");
+  await app.flushFrames();
   expect(document.activeElement).toBe(words());
 });
 
