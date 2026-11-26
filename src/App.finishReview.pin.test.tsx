@@ -228,7 +228,7 @@ it("says when you have a review in progress on GitHub, and submits that one as i
     "You have a review in progress on GitHub with 2 comments. GitHub takes one review at a time, so L1 Git can't add to it.",
   );
   expect(shown.textContent).toContain(
-    "Your 1 pending comment here stay on this computer.",
+    "Your 1 pending comment here stays on this computer.",
   );
   expect(get("link", "Open it on GitHub", shown).getAttribute("href")).toBe(
     "https://github.com/octo/pin/pull/1/files",

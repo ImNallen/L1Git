@@ -365,3 +365,13 @@ button.finish-comment:hover {
   padding: 0 12px;
   font-size: 12px;
 }
+
+/* Room for the path beside Finish review in a narrow pane. */
+.files-toolbar {
+  container-type: inline-size;
+}
+@container (max-width: 960px) {
+  .files-views button span {
+    display: none;
+  }
+}

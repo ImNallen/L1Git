@@ -187,8 +187,8 @@ function FinishReviewPopover({
           </p>
           {current.length > 0 && (
             <p>
-              Your {counted(current.length, "pending comment")} here stay on
-              this computer.
+              Your {counted(current.length, "pending comment")} here{" "}
+              {current.length === 1 ? "stays" : "stay"} on this computer.
             </p>
           )}
         </section>
