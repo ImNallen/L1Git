@@ -7,11 +7,13 @@ import {
   get,
   installHarness,
   query,
+  refRow,
   selectedRow,
 } from "./test/appHarness";
 import { pullKey } from "./test/fakeBridge";
 import type { World } from "./test/fakeBridge";
 import {
+  C6,
   noUpstream,
   OTHER,
   OTHER_TIP,
@@ -234,6 +236,41 @@ it("Show in history leaves the pull request and selects the copy's tip", async (
   expect(query("region", "Pull requests")).toBeNull();
   expect(selectedRow()).toMatch(/^First/);
   expect(focused(), "keys move from the selected row").toBe("grid Commits");
+});
+
+it("Show in history reveals a tip that a solo rule hides, and selects it", async () => {
+  const app = await visit({
+    world: (world) => {
+      world.host.details.set(pullKey("octo/pin", 1), {
+        ...pull(1),
+        head: { ...pull(1).head, oid: C6 },
+      });
+      holding(world, 1, {}, { head: C6 });
+    },
+  });
+  await app.click(get("button", /^Back to history/));
+  await app.click(refRow("refs/heads/main")!);
+  await app.runPaletteItem("Solo main");
+  await app.click(get("button", /^Pull requests/));
+  await open(app, 1);
+  await app.click(get("button", "Show in history"));
+  await app.flushFrames();
+  expect(query("status", /soloed/)).toBeNull();
+  expect(selectedRow()).toBe("Topic work, Pin Author, 6666666");
+});
+
+it("Show in history waits while Remove runs", async () => {
+  const app = await visit({ world: holds({}) });
+  await open(app, 1);
+  const held = app.bridge.hold("removePullRequest");
+  await app.click(get("button", "Remove worktree"));
+  await held.arrived;
+  const show = get("button", "Show in history");
+  expect(show.getAttribute("aria-disabled")).toBe("true");
+  await app.click(show);
+  expect(query("region", "Pull requests")).not.toBeNull();
+  held.release();
+  await app.settle();
 });
 
 it("Show in history stays in the open worktree when it shares the pull request's repository", async () => {

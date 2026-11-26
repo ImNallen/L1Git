@@ -181,7 +181,10 @@ export function PullRequestCheckoutBar({
           <button
             type="button"
             className="button ghost"
-            onClick={checkout.showInHistory}
+            aria-disabled={running === "remove"}
+            onClick={() => {
+              if (running !== "remove") checkout.showInHistory();
+            }}
           >
             Show in history
           </button>

@@ -66,6 +66,12 @@ export type Navigation = {
     target: Pick<JumpTarget, "reference" | "oid">,
   ) => void;
   showInGraph: (root: RepositoryRoot, target: JumpTarget) => void;
+  /** Leaves for the history of `root` and selects the branch's tip there,
+   * revealing it past a rule that hides it. */
+  showBranch: (
+    root: RepositoryRoot,
+    target: Pick<JumpTarget, "reference" | "oid">,
+  ) => void;
   /** After Edit message: select the new HEAD once the settled snapshot has it. */
   selectHeadAfter: (root: RepositoryRoot) => void;
   /** After an undo, redo, or tag delete moved a ref: wait for the sidebar refs, then jump to it and focus its row. */
@@ -167,25 +173,26 @@ export function useNavigation({
     gridFocus.current?.cancel.abort();
     gridFocus.current = null;
   }
-  function showRepository(root: RepositoryRoot) {
+  function openRepository(root: RepositoryRoot) {
     cancelGridFocus();
     setSidebarJump(null);
-    screen.toRepository();
     expansion.setExpanded(root, true);
     if (root !== snapshot?.root) void app.selectRepository(root);
   }
-  function jumpTo(
+  function showRepository(root: RepositoryRoot) {
+    screen.toRepository();
+    openRepository(root);
+  }
+  /** Stays on the screen it is on, which can be the pull requests. */
+  function jumpHere(
     root: RepositoryRoot,
     target: Pick<JumpTarget, "reference" | "oid">,
   ) {
     app.closeFile();
     const pending = root !== snapshot?.root;
-    if (pending) showRepository(root);
-    else {
-      screen.toRepository();
-      if (visibleOids.has(target.oid))
-        app.select({ kind: "commit", oid: target.oid });
-    }
+    if (pending) openRepository(root);
+    else if (visibleOids.has(target.oid))
+      app.select({ kind: "commit", oid: target.oid });
     setSidebarJump({ root, reference: target.reference });
     setLastBranch((previous) => new Map(previous).set(root, target.reference));
     setJump((previous) => ({
@@ -194,6 +201,22 @@ export function useNavigation({
       seq: (previous?.seq ?? 0) + 1,
       pending,
     }));
+  }
+  function jumpTo(
+    root: RepositoryRoot,
+    target: Pick<JumpTarget, "reference" | "oid">,
+  ) {
+    screen.toRepository();
+    jumpHere(root, target);
+  }
+  function showBranch(
+    root: RepositoryRoot,
+    target: Pick<JumpTarget, "reference" | "oid">,
+  ) {
+    visibility.reveal(root, target.reference);
+    jumpTo(root, target);
+    if (root === snapshot?.root)
+      app.select({ kind: "commit", oid: target.oid });
   }
   function select(next: Selection) {
     setSidebarJump(null);
@@ -244,7 +267,7 @@ export function useNavigation({
     }
     return added.kind === "failed" ? added.problem : null;
   }
-  const jumpToStepped = useEffectEvent(jumpTo);
+  const jumpToStepped = useEffectEvent(jumpHere);
   const focusJumpedBranch = useEffectEvent(focusNamedBranch);
   useEffect(() => {
     if (steppedRef === null) return;
@@ -361,6 +384,7 @@ export function useNavigation({
     addRepository,
     jumpTo,
     showInGraph,
+    showBranch,
     selectHeadAfter: setHeadOf,
     followRefStep: setSteppedRef,
     actions: defineSlice({

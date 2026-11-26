@@ -77,7 +77,7 @@ export function usePullRequestCheckout({
   historyRoot: RepositoryRoot | null;
   saved: Pick<WorkspaceApi, "keepRepository">;
   loop: Pick<WriteLoop, "rereadRefs">;
-  nav: Pick<Navigation, "jumpTo" | "sidebar">;
+  nav: Pick<Navigation, "showBranch" | "sidebar">;
   focus: Pick<Focus, "refocusIfLost">;
 }): PullRequestCheckout {
   const pull = opened?.read.value ?? null;
@@ -249,7 +249,7 @@ export function usePullRequestCheckout({
         historyRoot !== null &&
         commonDir(root) !== null &&
         commonDir(historyRoot) === commonDir(root);
-      nav.jumpTo(shared ? historyRoot : root, {
+      nav.showBranch(shared ? historyRoot : root, {
         reference: held.branch,
         oid: held.tip,
       });

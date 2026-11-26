@@ -237,3 +237,19 @@ it("Discard all replaces the write notice with its own Undo", async () => {
 it.todo(
   "a lost-focus check and a step reveal in one commit keep today's winner: the write's idle update and the step's steppedRef never share a commit under act(), so the fixture cannot race them",
 );
+
+it("a branch an undo restores while the pull requests open is followed there, and they stay open", async () => {
+  const app = await mountApp({ bridge: restoreGoneOnUndo });
+  const refs = app.bridge.hold("snapshot", PIN);
+  void app.press("z", { ctrlKey: true });
+  await refs.arrived;
+  await app.click(get("button", /^Pull requests/));
+  await app.act(() => (document.activeElement as HTMLElement | null)?.blur());
+  refs.release();
+  await app.settle();
+  await app.flushFrames();
+  expect(query("region", "Pull requests")).not.toBeNull();
+  await app.click(get("button", /^Back to history/));
+  expect(refRow("refs/heads/gone")?.getAttribute("aria-current")).toBe("true");
+  expect(selectedRow()).toBe("Second, Pin Author, 2222222");
+});
