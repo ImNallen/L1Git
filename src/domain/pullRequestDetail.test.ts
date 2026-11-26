@@ -40,6 +40,8 @@ const page = <T>(items: T[], total = items.length) => ({ items, total });
 
 function pull(fields: Partial<PullRequest> = {}): PullRequest {
   return pullRequestSchema.parse({
+    id: "PR_128",
+    repositoryId: "R_1",
     number: 128,
     title: "Review a replay",
     body: "",
@@ -61,6 +63,7 @@ function pull(fields: Partial<PullRequest> = {}): PullRequest {
       repository: { owner: "octo", repo: "app" },
       crossRepository: false,
       maintainerCanModify: false,
+      ref: { id: "REF_1", othersOpen: 0, viewerCanDelete: true },
     },
     reviewers: [],
     checks: page([]),
@@ -69,6 +72,13 @@ function pull(fields: Partial<PullRequest> = {}): PullRequest {
     threads: page([]),
     mergeable: "mergeable",
     mergeState: "clean",
+    decision: null,
+    merge: {
+      allowed: { merge: true, squash: true, rebase: true },
+      preferred: "merge",
+      deletesBranch: false,
+    },
+    pending: { kind: "none" },
     ...fields,
   });
 }
@@ -122,6 +132,7 @@ function thread(
     outdated: false,
     resolved: false,
     hunk: "",
+    can: { reply: true, resolve: true, unresolve: false },
     comments: page([
       { id: `${id}-1`, body: "Why?", by: "sara", at: at(minute) },
     ]),

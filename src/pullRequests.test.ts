@@ -37,6 +37,8 @@ const rows = (total: number, status: unknown = signedIn(1)) => ({
 const pull = (number: number) => ({
   op: "pullRequest",
   data: {
+    id: `PR_${number}`,
+    repositoryId: "R_1",
     number,
     title: "Fix it",
     body: "",
@@ -58,6 +60,7 @@ const pull = (number: number) => ({
       repository: null,
       crossRepository: false,
       maintainerCanModify: false,
+      ref: null,
     },
     reviewers: [],
     checks: null,
@@ -66,6 +69,13 @@ const pull = (number: number) => ({
     threads: { items: [], total: 0 },
     mergeable: "unknown",
     mergeState: "unknown",
+    decision: null,
+    merge: {
+      allowed: { merge: true, squash: false, rebase: false },
+      preferred: "merge",
+      deletesBranch: false,
+    },
+    pending: { kind: "unknown" },
   },
   status: signedIn(1),
 });

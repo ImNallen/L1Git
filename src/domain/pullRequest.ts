@@ -7,6 +7,8 @@ const time = z.iso.datetime();
 const account = z.string().nullable();
 const count = z.number().int().nonnegative();
 const line = z.number().int().nullable();
+/** GitHub's own id for a node, which a write names. */
+const nodeId = <Brand extends string>() => z.string().min(1).brand<Brand>();
 
 const stateSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("open"), draft: z.boolean() }),
@@ -16,6 +18,7 @@ const stateSchema = z.discriminatedUnion("kind", [
 const labelsSchema = page(z.object({ name: z.string(), color: z.string() }));
 const mergeableSchema = z.enum(["mergeable", "conflicting", "unknown"]);
 const checkStateSchema = z.enum(["passed", "failed", "skipped", "running"]);
+const decisionSchema = z.enum(["approved", "changesRequested", "required"]);
 const reviewStateSchema = z.enum([
   "requested",
   "approved",
@@ -36,7 +39,7 @@ export const pullRequestsSchema = page(
     labels: labelsSchema,
     comments: count,
     reviewRequested: z.boolean(),
-    review: z.enum(["approved", "changesRequested", "required"]).nullable(),
+    review: decisionSchema.nullable(),
     checks: z
       .object({ passed: count, failed: count, skipped: count, running: count })
       .nullable(),
@@ -84,6 +87,8 @@ const eventSchema = z.discriminatedUnion("kind", [
 ]);
 
 export const pullRequestSchema = z.object({
+  id: nodeId<"PullId">(),
+  repositoryId: nodeId<"RepositoryId">(),
   number: z.number().int().positive(),
   title: z.string(),
   body: z.string(),
@@ -113,6 +118,15 @@ export const pullRequestSchema = z.object({
     repository: githubRepositorySchema.nullable(),
     crossRepository: z.boolean(),
     maintainerCanModify: z.boolean(),
+    /** Null once the branch is deleted. */
+    ref: z
+      .object({
+        id: nodeId<"RefId">(),
+        /** Other open pull requests whose head it is. Ones based on it are not counted. */
+        othersOpen: count,
+        viewerCanDelete: z.boolean(),
+      })
+      .nullable(),
   }),
   reviewers: z.array(z.object({ login: account, state: reviewStateSchema })),
   checks: page(
@@ -144,6 +158,11 @@ export const pullRequestSchema = z.object({
       resolved: z.boolean(),
       hunk: z.string(),
       comments: page(z.object({ body: z.string(), ...entry })),
+      can: z.object({
+        reply: z.boolean(),
+        resolve: z.boolean(),
+        unresolve: z.boolean(),
+      }),
     }),
   ).nullable(),
   mergeable: mergeableSchema,
@@ -155,6 +174,30 @@ export const pullRequestSchema = z.object({
     "hasHooks",
     "unstable",
     "unknown",
+  ]),
+  /** GitHub's own, which it makes only where a rule asks for reviews. */
+  decision: decisionSchema.nullable(),
+  merge: z.object({
+    allowed: z.object({
+      merge: z.boolean(),
+      squash: z.boolean(),
+      rebase: z.boolean(),
+    }),
+    /** The method GitHub preselects for the viewer. */
+    preferred: z.enum(["merge", "squash", "rebase"]),
+    /** GitHub deletes the head branch itself once it merges. */
+    deletesBranch: z.boolean(),
+  }),
+  /** The viewer's review started on github.com and not submitted yet. */
+  pending: z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("none") }),
+    /** GitHub left it out, so there may be one. */
+    z.object({ kind: z.literal("unknown") }),
+    z.object({
+      kind: z.literal("review"),
+      id: nodeId<"ReviewId">(),
+      comments: page(z.object({ path: z.string() })),
+    }),
   ]),
 });
 

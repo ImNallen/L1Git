@@ -81,6 +81,7 @@ function pull(base: string, head: string, events: TimelineEvent[] = []) {
       repository: github,
       crossRepository: false,
       maintainerCanModify: false,
+      ref: null,
     },
     timeline: { items: events, total: events.length },
   };

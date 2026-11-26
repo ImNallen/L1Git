@@ -92,6 +92,7 @@ const thread = (
   outdated: false,
   resolved: false,
   hunk: "",
+  can: { reply: true, resolve: true, unresolve: false },
   comments: page([
     { id: `${id}-1`, by: "sara", at: at(2), body: `Says ${id}` },
   ]),

@@ -342,6 +342,7 @@ it("keeps the focus on the header of a file that V folds from a note", async () 
     outdated: false,
     resolved: false,
     hunk: "",
+    can: { reply: true, resolve: true, unresolve: false },
     comments: page([{ id: "one-1", by: "sara", at: at(2), body: "Says one" }]),
   };
   const app = await openFiles("all", {}, () => {}, {

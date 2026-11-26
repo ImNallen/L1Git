@@ -27,6 +27,7 @@ function thread(id: string, fields: Partial<ReviewThread> = {}): ReviewThread {
     outdated: false,
     resolved: false,
     hunk: "",
+    can: { reply: true, resolve: true, unresolve: false },
     comments: { items: [said("sara")], total: 1 },
     ...fields,
   };
