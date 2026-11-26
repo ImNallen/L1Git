@@ -157,7 +157,7 @@ export function useFinishReview({
     choose,
     summary,
     typeSummary: (text: string) => {
-      if (send.kind !== "sending") drafts.type(summaryAnchor, head, text);
+      if (send.kind === "idle") drafts.type(summaryAnchor, head, text);
     },
     summarySave: summaryDraft?.save ?? null,
     reason,

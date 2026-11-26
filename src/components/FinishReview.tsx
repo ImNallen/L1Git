@@ -147,6 +147,8 @@ function FinishReviewPopover({
   }, [under]);
   const { send, pending, current, older, events, event, reason } = finish;
   const isSending = send.kind === "sending";
+  /** The host holds the words while a send is out or may have posted. */
+  const isHeld = send.kind !== "idle";
   const reminders = remindersOf({ files, viewed, threads });
   const shownThreads = reminders.unresolved.slice(0, MOST_THREADS);
   const go = (act: () => void) => () => {
@@ -300,12 +302,12 @@ function FinishReviewPopover({
           aria-label="Summary"
           placeholder={`Summary${author && author !== viewer ? ` for ${author}` : ""} (optional). Markdown works here.`}
           value={finish.summary}
-          readOnly={isSending}
+          readOnly={isHeld}
           onChange={(change) => finish.typeSummary(change.target.value)}
         />
         {summaryWords && <Problem>{summaryWords}</Problem>}
       </section>
-      <fieldset className="finish-section finish-events" disabled={isSending}>
+      <fieldset className="finish-section finish-events" disabled={isHeld}>
         <legend className="visually-hidden">Your review</legend>
         {events.map((each) => (
           <label key={each} className="finish-event">
@@ -368,7 +370,7 @@ function FinishReviewPopover({
         <button
           type="button"
           className="button primary"
-          aria-disabled={isSending || reason !== null}
+          aria-disabled={isHeld || reason !== null}
           onClick={() => void finish.submit()}
         >
           {pending ? "Submit it as it is" : "Submit review"}

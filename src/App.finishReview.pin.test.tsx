@@ -272,7 +272,10 @@ it("offers three choices when the review may have posted, and sends it again onl
   await app.click(submit());
   expect(shown.textContent).toContain("may have posted");
   expect(get("link", "Open on GitHub", shown)).toBeTruthy();
+  const summary = () => get("textbox", "Summary", shown) as HTMLTextAreaElement;
+  expect(summary().readOnly, "the host holds the words").toBe(true);
   await app.click(get("button", "Keep as draft", shown));
+  expect(summary().readOnly).toBe(false);
   expect(mutations(app)).toHaveLength(1);
   expect(
     app.bridge.world.host.drafts
