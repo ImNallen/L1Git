@@ -2,8 +2,8 @@
 
 use l1_git_core::{
     BranchRef, BranchState, Changes, Coordinator, ErrorKind, FetchMode, GitHubRepository, HeadFrom,
-    Limits, NoPush, Oid, PullCheckout, PullHead, PullKey, PushAvailability, PushUnavailable,
-    Pushes, Relation, RepositoryError, StaleReason,
+    Limits, NoPush, Oid, PublishOptions, PullCheckout, PullHead, PullKey, PushAvailability,
+    PushUnavailable, Pushes, Relation, RepositoryError, StaleReason,
 };
 use std::{
     fs,
@@ -68,9 +68,13 @@ fn github(owner: &str) -> GitHubRepository {
     }
 }
 
-/// `base.git` and `fork.git` stand in for octo/app and maja/app on GitHub,
-/// reached through their GitHub URLs. The author pushes from `author`. The
-/// user's clone is `repo`, on `main`, with a staged file and a changed file.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct Main {
+    head: String,
+    index: String,
+    changed: String,
+}
+
 struct World {
     _directory: TempDir,
     top: PathBuf,
@@ -79,7 +83,7 @@ struct World {
     author: PathBuf,
     root: PathBuf,
     core: Coordinator,
-    main: (String, String, String),
+    main: Main,
 }
 
 impl World {
@@ -143,20 +147,18 @@ impl World {
         }
     }
 
-    /// The main worktree's HEAD, index, and the file it changed.
-    fn main_state(&self) -> (String, String, String) {
-        (
-            git(&self.root, &["symbolic-ref", "HEAD"]),
-            git(&self.root, &["ls-files", "--stage"]),
-            fs::read_to_string(self.root.join("shared.txt")).unwrap(),
-        )
+    fn main_state(&self) -> Main {
+        Main {
+            head: git(&self.root, &["symbolic-ref", "HEAD"]),
+            index: git(&self.root, &["ls-files", "--stage"]),
+            changed: fs::read_to_string(self.root.join("shared.txt")).unwrap(),
+        }
     }
 
     fn assert_main_untouched(&self) {
         assert_eq!(self.main_state(), self.main, "the main worktree changed");
     }
 
-    /// The author commits `file` on `branch`, starting it from `main`.
     fn commit(&self, branch: &str, file: &str) -> Oid {
         let exists = run_git(
             &self.author,
@@ -179,14 +181,12 @@ impl World {
         oid(&git(&self.author, &["rev-parse", "HEAD"]))
     }
 
-    /// The author rewrites `branch` as one new commit on `main`.
     fn rewrite(&self, branch: &str, file: &str) -> Oid {
         git(&self.author, &["switch", "-q", "-C", branch, "main"]);
         self.commit(branch, file)
     }
 
-    /// Pushes the author's HEAD to each `(repository, ref)`, forced, as
-    /// GitHub moves `refs/pull/<number>/head` after the head branch.
+    /// Forced, as GitHub moves `refs/pull/<number>/head` after the head branch.
     fn publish(&self, to: &[(&Path, String)]) {
         for (bare, reference) in to {
             let refspec = format!("+HEAD:{reference}");
@@ -305,8 +305,7 @@ impl World {
             .count()
     }
 
-    /// The author's new head, as a fetch of every remote would bring it.
-    fn fetch_all(&self) {
+    fn fetch_heads(&self) {
         git(
             &self.root,
             &["fetch", "-q", "origin", "+refs/pull/*:refs/l1test/*"],
@@ -509,6 +508,13 @@ fn a_read_only_fork_follows_the_pull_ref_and_push_refuses_it() {
             reason: PushUnavailable::PullRequestHead
         }
     );
+    assert!(matches!(
+        world
+            .core
+            .publish_options(world.folder(3).to_str().unwrap())
+            .unwrap(),
+        PublishOptions::Unavailable { .. }
+    ));
     world.assert_main_untouched();
 }
 
@@ -669,7 +675,7 @@ fn remove_deletes_a_branch_the_pull_request_holds_all_of() {
 
     world.tried(1, &first);
     let pushed = world.same(1, "feat", "more.txt");
-    world.fetch_all();
+    world.fetch_heads();
     assert_eq!(
         ready(&world.read(1, &pushed)).1,
         &Relation::Behind { commits: 1 }
@@ -678,6 +684,24 @@ fn remove_deletes_a_branch_the_pull_request_holds_all_of() {
         panic!("behind is not absent after remove");
     };
     assert_eq!(world.tip("pr/1"), None);
+    world.assert_main_untouched();
+}
+
+#[test]
+fn remove_asked_from_the_copy_itself_runs_from_the_main_worktree() {
+    let world = World::new();
+    let head = world.same(1, "feat", "feat.txt");
+    world.tried(1, &head);
+    let folder = world.folder(1);
+    let removed = world
+        .core
+        .remove_pull_request(folder.to_str().unwrap(), &World::key(1), &head, &head.oid)
+        .unwrap();
+    assert!(
+        matches!(removed, PullCheckout::Absent { .. }),
+        "{removed:?}"
+    );
+    assert!(!folder.exists());
     world.assert_main_untouched();
 }
 
