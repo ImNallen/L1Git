@@ -372,6 +372,16 @@ describe("what the merge box offers", () => {
     });
   });
 
+  it("says the read shows the head branch deleted", () => {
+    const merged = pull({
+      state: { kind: "merged", at },
+      head: { ...pull().head, ref: null },
+    });
+    expect(shownBox(merged, "adam", ago, idle, tracked).text).toBe(
+      "Merged just now. fix/sync-stall was deleted on GitHub. Your local branch pr/127 is still here.",
+    );
+  });
+
   it("names why a merge didn't happen, and lets the user move on", () => {
     expect(
       shownBox(

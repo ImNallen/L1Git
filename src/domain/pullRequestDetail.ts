@@ -572,8 +572,12 @@ export function commitDays(
 
 type MergeKind =
   | "merged"
+  | "merging"
+  | "failed"
+  | "checking"
   | "closed"
   | "draft"
+  | "readOnly"
   | "conflicts"
   | "changesRequested"
   | "reviewRequired"
@@ -584,13 +588,34 @@ type MergeKind =
   | "running"
   | "ready"
   | "unknown";
+/** The one button the merge box shows. */
+type MergeAction =
+  | { kind: "none" }
+  /** Someone has to act on GitHub before it can merge. */
+  | { kind: "openOnGitHub" }
+  /** `anyway` when a check failed that isn't required. */
+  | { kind: "merge"; anyway: boolean }
+  | { kind: "merging" }
+  /** Puts away what the last merge said. */
+  | { kind: "retry" }
+  | { kind: "deleteLocal" };
 export type MergeBox = {
   kind: MergeKind;
   title: string;
   text: string;
-  /** Whether someone has to act on GitHub before it can merge. */
-  act: boolean;
+  action: MergeAction;
 };
+
+const roles: Partial<Record<PullRequest["viewerPermission"], string>> = {
+  read: "Read",
+  triage: "Triage",
+};
+
+/** GitHub lets these roles merge where no rule stands in the way. */
+const canMerge = ({ viewerPermission }: PullRequest) =>
+  viewerPermission === "admin" ||
+  viewerPermission === "maintain" ||
+  viewerPermission === "write";
 
 /**
  * Whether it can merge and what stands in the way. The first that applies
@@ -620,6 +645,10 @@ export function mergeBox(
       mergeState === "unstable" ||
       mergeState === "hasHooks");
   const unsaid = "GitHub hasn't said yet whether this can merge.";
+  const none: MergeAction = { kind: "none" };
+  const onGitHub: MergeAction = { kind: "openOnGitHub" };
+  const merges = (anyway: boolean): MergeAction =>
+    canMerge(pull) ? { kind: "merge", anyway } : none;
   // A login keeps its own letters, at the start of a sentence too.
   const sentence = (text: string) =>
     /^(?:a team|you|approved|all|the)\b/.test(text)
@@ -634,7 +663,7 @@ export function mergeBox(
       text: merged?.oid
         ? `Merged as ${shortOid(merged.oid)} ${ago(state.at)}.`
         : `Merged ${ago(state.at)}.`,
-      act: false,
+      action: none,
     };
   }
   if (state.kind === "closed")
@@ -642,21 +671,29 @@ export function mergeBox(
       kind: "closed",
       title: "Closed",
       text: `Closed without merging ${ago(state.at)}.`,
-      act: false,
+      action: none,
     };
   if (state.draft)
     return {
       kind: "draft",
       title: "Draft",
       text: "Code owners aren't asked to review yet. It can't merge while it's a draft.",
-      act: true,
+      action: onGitHub,
+    };
+  const role = roles[pull.viewerPermission];
+  if (role)
+    return {
+      kind: "readOnly",
+      title: "You can't merge here",
+      text: `Your role in this repository is ${role}. Someone with Write access can merge.`,
+      action: none,
     };
   if (mergeable === "conflicting" || mergeState === "dirty")
     return {
       kind: "conflicts",
       title: `Conflicts with ${base}`,
       text: "The conflicts have to be resolved before this can merge.",
-      act: true,
+      action: onGitHub,
     };
   const refusing = people("changesRequested");
   if (refusing.length > 0)
@@ -666,7 +703,7 @@ export function mergeBox(
       text: sentence(
         `${named(refusing)} asked for changes${blocked ? ", and GitHub is blocking the merge" : ""}.`,
       ),
-      act: true,
+      action: onGitHub,
     };
   const requiredFailed = required("failed");
   const requiredRunning = required("running");
@@ -683,21 +720,21 @@ export function mergeBox(
       kind: "reviewRequired",
       title: "Review required",
       text: `GitHub is blocking the merge. Waiting for ${named(asked)} to review.`,
-      act: true,
+      action: onGitHub,
     };
   if (requiredFailed.length > 0)
     return {
       kind: "requiredFailing",
       title: `${counted(requiredFailed.length, "required check is", "required checks are")} failing`,
       text: `${named(requiredFailed.map(({ name }) => name))} must pass before this can merge.`,
-      act: true,
+      action: onGitHub,
     };
   if (mergeState === "behind")
     return {
       kind: "behind",
       title: `Behind ${base}`,
       text: `${base} only accepts branches that are up to date with it.`,
-      act: true,
+      action: onGitHub,
     };
   if (blocked && requiredRunning.length === 0)
     return {
@@ -707,7 +744,7 @@ export function mergeBox(
         approved.length === 0
           ? "GitHub is blocking the merge, and nobody has approved this yet."
           : "GitHub is blocking the merge and doesn't tell L1 Git which rule asks for more.",
-      act: true,
+      action: onGitHub,
     };
   const waits = (otherwise: string) => {
     if (requiredRunning.length > 0)
@@ -723,7 +760,7 @@ export function mergeBox(
           ? `None of them is required on ${base}, so this can still merge.`
           : "This can still merge.",
       ),
-      act: false,
+      action: open && requiredRunning.length === 0 ? merges(true) : none,
     };
   if (running > 0)
     return {
@@ -736,14 +773,14 @@ export function mergeBox(
           ? "None of the others is required, so this can merge now."
           : "This can merge now.",
       ),
-      act: false,
+      action: open && requiredRunning.length === 0 ? merges(false) : none,
     };
   if (open && mergeState === "unstable" && !whole)
     return {
       kind: "unknown",
       title: "A check hasn't passed",
       text: "It isn't required, so this can still merge. L1 Git can't see which one it is.",
-      act: false,
+      action: merges(true),
     };
   if (open) {
     const all =
@@ -759,13 +796,13 @@ export function mergeBox(
       text: sentence(
         `${by && all ? `${by}, and ${all}` : (by ?? all ?? "GitHub finds nothing that stops it")}.`,
       ),
-      act: false,
+      action: merges(false),
     };
   }
   return {
     kind: "unknown",
     title: "Can't tell yet",
     text: unsaid,
-    act: false,
+    action: none,
   };
 }

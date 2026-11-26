@@ -10,6 +10,7 @@ import {
   GitMerge,
   GitPullRequestClosed,
   GitPullRequestDraft,
+  LoaderCircle,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -32,8 +33,12 @@ const FEW_CHECKS = 4;
 
 const mergeIcons: Record<MergeBox["kind"], [LucideIcon, string]> = {
   merged: [GitMerge, "merged"],
+  merging: [LoaderCircle, "waiting"],
+  failed: [CircleX, "bad"],
+  checking: [CircleHelp, "waiting"],
   closed: [GitPullRequestClosed, "bad"],
   draft: [GitPullRequestDraft, ""],
+  readOnly: [Eye, ""],
   conflicts: [CircleX, "bad"],
   changesRequested: [CircleX, "bad"],
   reviewRequired: [Eye, "waiting"],
@@ -55,7 +60,7 @@ function Merging({ box, url }: { box: MergeBox; url: string }) {
         <h3>{box.title}</h3>
         <p>{box.text}</p>
       </div>
-      {box.act && (
+      {box.action.kind === "openOnGitHub" && (
         <a
           className="button secondary"
           href={url}
