@@ -485,6 +485,7 @@ const handlers: Record<string, Handler> = {
   updatePullRequest: (request, world) => {
     const { head, name, seen, keep } = pullCopy(request, world);
     const copy = seen(request.seen);
+    if (copy.relation.kind === "ahead" && request.replace !== true) return copy;
     if (copy.relation.kind === "diverged" && request.replace !== true)
       throw new Refusal({
         kind: "conflict",
