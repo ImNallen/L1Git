@@ -126,6 +126,7 @@ it("saves waiting drafts as soon as the window loses focus", async () => {
 });
 
 it("saves the drafts a write carries before it sends them", async () => {
+  await act(() => details.refresh({ repository, number: 1 }));
   await act(async () => screen?.drafts.type(conversation, HEAD, "Thanks!"));
   let sent: string | undefined;
   await act(async () => {

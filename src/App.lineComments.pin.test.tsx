@@ -379,3 +379,71 @@ it("shows a comment on its way once, from its own card, when the box moves on", 
   await app.settle();
   expect(app.bridge.world.host.mutations).toHaveLength(1);
 });
+
+it("reads only where another write carries the words, until it ends", async () => {
+  const carried = draft(12, "Sent with the review");
+  const lines = {
+    path: "src/a.ts",
+    side: "right" as const,
+    line: 12,
+    start: null,
+  };
+  const review = {
+    kind: "submitReview" as const,
+    pull: "PR_1" as never,
+    commit: head,
+    event: "comment" as const,
+    body: "",
+    threads: [{ lines, body: carried.text }],
+  };
+  const app = await openFiles({
+    world: (world) =>
+      world.host.sent.set(book, [
+        {
+          attempt: "elsewhere",
+          at: 1,
+          write: review,
+          drafts: [carried],
+          sending: true,
+          applied: false,
+        },
+      ]),
+  });
+  await choose(app, 12);
+  expect(words().readOnly).toBe(true);
+  expect(words().value).toBe("Sent with the review");
+  expect(get("status", "Sending…", box()!)).toBeTruthy();
+  expect(box()?.textContent).toContain("You can change them once it ends.");
+  expect(
+    get("button", "Add single comment").getAttribute("aria-disabled"),
+  ).toBe("true");
+  await app.click(get("button", "Cancel"));
+  expect(box()).toBeNull();
+  expect(kept(app.bridge)).toEqual([]);
+  expect(app.bridge.world.host.mutations).toEqual([]);
+});
+
+it("keeps a comment's may have posted choices in the box when Send anyway sends nothing", async () => {
+  const app = await openFiles({
+    world: (world) => {
+      world.host.writes = [
+        { kind: "unknown", applied: false },
+        {
+          kind: "notSent",
+          message:
+            "L1 Git could not read the pull request first, so it sent nothing.",
+        },
+      ];
+    },
+  });
+  await choose(app, 12);
+  await app.type(words(), "Twice?");
+  await app.click(get("button", "Add single comment"));
+  await app.click(get("button", "Send anyway"));
+  expect(box()?.textContent).toContain("could not read the pull request");
+  expect(box()?.textContent).toContain("May have posted");
+  expect(get("button", "Keep as draft", box()!)).toBeTruthy();
+  expect(get("button", "Send anyway", box()!)).toBeTruthy();
+  expect(words().readOnly).toBe(true);
+  expect(app.bridge.world.host.mutations).toHaveLength(1);
+});

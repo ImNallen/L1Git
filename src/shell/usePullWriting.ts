@@ -109,6 +109,7 @@ export function usePullDrafts({
     ...view,
     type: (anchor: Anchor, head: Oid, text: string) =>
       drafts.type(of, anchor, head, text),
+    held: (anchor: Anchor, head: Oid) => drafts.held(of, anchor, head),
     remove: (anchor: Anchor, head: Oid) => drafts.remove(of, anchor, head),
     flush: () => drafts.flush(of),
     settle: (key: DraftKey, pick: "mine" | "theirs") =>

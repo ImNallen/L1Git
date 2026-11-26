@@ -46,6 +46,8 @@ export function CommentBox({
   const id = useId();
   const label = `Comment on ${linesLabel(lines)}`;
   const writing = view.kind === "writing" ? view : null;
+  const isSending =
+    view.kind === "sending" || (view.kind === "held" && view.isSending);
   const hasWords = draftText(view.text) === "takes";
   const isOff = writing === null || !hasWords;
   const tabs = (
@@ -69,7 +71,7 @@ export function CommentBox({
     <section
       className="line-comment line-comment-box"
       aria-label={label}
-      aria-busy={view.kind === "sending"}
+      aria-busy={isSending}
     >
       <Header viewer={viewer} aside={tabs}>
         {label}
@@ -123,17 +125,24 @@ export function CommentBox({
       {writing?.problem && (
         <Problem onDismiss={comments.clearProblem}>{writing.problem}</Problem>
       )}
+      {view.kind === "held" && (
+        <p className="line-comment-note">
+          {view.isSending
+            ? "These words are on their way to GitHub with another write. You can change them once it ends."
+            : "Another write carried these words and may have posted. Choose Keep as draft or Send anyway on it to change them."}
+        </p>
+      )}
       {view.kind === "unknown" && (
         <Unknown attempt={view.attempt} url={url} comments={comments} />
       )}
       <footer className="line-comment-footer">
         <span
           className="line-comment-saved"
-          role={view.kind === "sending" ? "status" : undefined}
+          role={isSending ? "status" : undefined}
         >
-          {view.kind === "sending"
+          {isSending
             ? "Sending…"
-            : view.kind === "unknown"
+            : view.kind === "unknown" || view.kind === "held"
               ? "May have posted"
               : (saveText(view.save) ?? "Saved as a draft on this machine")}
         </span>

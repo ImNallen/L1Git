@@ -49,6 +49,9 @@ export type BoxView =
     }
   /** Read-only: the host holds its words until GitHub answers. */
   | { kind: "sending"; text: string }
+  /** Read-only: another write, such as a review or another window's
+   * comment, carries the words saved here until it ends. */
+  | { kind: "held"; text: string; isSending: boolean }
   | { kind: "unknown"; text: string; attempt: Attempt };
 
 const sendProblems = {
@@ -57,6 +60,8 @@ const sendProblems = {
     "L1 Git couldn't save these words on this computer, so it sent nothing.",
   signedOut: "L1 Git isn't signed in to GitHub, so it sent nothing.",
   restarting: "L1 Git is restarting to update, so it sent nothing.",
+  notInRead:
+    "L1 Git's latest read of this pull request doesn't match this comment, so it sent nothing. Refresh the pull request and try again.",
 } as const;
 
 const idle: Sending = { kind: "idle", problem: null };
@@ -71,6 +76,16 @@ const linesOf = ({ path, side, line, start }: LineAnchor): Lines => ({
 const isLine = (
   draft: ShownDraft,
 ): draft is ShownDraft & { anchor: LineAnchor } => draft.anchor.kind === "line";
+
+/** The words a write carries for the draft at `key`. */
+function wordsAt(write: PullWrite, key: DraftKey): string {
+  if (write.kind === "singleComment") return write.body;
+  if (write.kind !== "submitReview") return "";
+  const thread = write.threads.find(
+    ({ lines }) => draftKey({ kind: "line", ...lines }, write.commit) === key,
+  );
+  return thread?.body ?? "";
+}
 
 const sentLines = (attempt: Attempt) =>
   attempt.write.kind === "singleComment" ? attempt.write : null;
@@ -139,6 +154,19 @@ export function useLineComments({
     if (state?.kind === "sending") return { kind: "sending", text: body };
     if (state?.kind === "unknown" && boxAttempt)
       return { kind: "unknown", text: body, attempt: boxAttempt };
+    if (drafts.held(box.anchor, head)) {
+      const key = draftKey(box.anchor, head);
+      const holder = writes.attempts.find(
+        ({ write, state }) =>
+          (state.kind === "sending" || state.kind === "unknown") &&
+          carriedBy(write).includes(key),
+      );
+      return {
+        kind: "held",
+        text: holder ? wordsAt(holder.write, key) : "",
+        isSending: holder?.state.kind !== "unknown",
+      };
+    }
     const draft = draftAt(box.anchor, head);
     return {
       kind: "writing",
