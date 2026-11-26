@@ -12,6 +12,7 @@ import type {
   WorktreeStatus,
 } from "../domain/repository";
 import type { GhProbe, HostProblem, HostStatus } from "../domain/host";
+import type { DraftChange } from "../domain/drafts";
 import type {
   PullRequest,
   PullRequestList,
@@ -20,6 +21,8 @@ import type {
 import type { GitHubRepository } from "../domain/repository";
 import { rangeFilesSchema, rangePatchesSchema } from "../domain/range";
 import { pullCopyHandlers } from "./fakePullCopies";
+import { draftsHandler } from "./fakeDrafts";
+import type { Draft } from "../domain/drafts";
 import type { PullCopy } from "./fakePullCopies";
 import { mergeSelectionSchema } from "../domain/merge";
 import { probeOf } from "../domain/inProgress";
@@ -81,6 +84,9 @@ export type World = {
     pulls: Map<string, PullRequests>;
     /** Each pull request by `pullKey`. */
     details: Map<string, PullRequest>;
+    /** The drafts on this computer, by login and `pullKey`, as the host keeps
+     * them in drafts.json. */
+    drafts: Map<string, Draft[]>;
   };
 };
 
@@ -151,6 +157,7 @@ export function createWorld(): World {
       },
       pulls: new Map(),
       details: new Map(),
+      drafts: new Map(),
     },
   };
 }
@@ -446,6 +453,12 @@ const hostHandlers: Record<
       message: `L1 Git can't find ${key} on GitHub.`,
     });
   },
+  drafts: (request, host) =>
+    draftsHandler(
+      `${String(request.login)} ${pullKey(String(hostPath(request)), Number(request.number))}`.toLowerCase(),
+      request.change as DraftChange,
+      host.drafts,
+    ),
   disconnect: (_, host) => {
     host.status = {
       ...host.status,

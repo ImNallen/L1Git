@@ -3,6 +3,7 @@ import { hostErrorSchema, hostResponseSchema, hostRoute } from "./domain/host";
 import type {
   GhProbe,
   HostCommand,
+  HostDrafts,
   HostProblem,
   HostRead,
   HostRequest,
@@ -130,11 +131,13 @@ export function createHostClient(transport: HostTransport) {
   }
 
   /**
-   * Asks GitHub through Rust. It leaves `busy` and `problem` to the sign-in
-   * screen, but takes the status like any request, so a token GitHub refuses
-   * here signs that screen out too.
+   * Asks GitHub, or the drafts on this computer, through Rust. It leaves
+   * `busy` and `problem` to the sign-in screen, but takes the status like any
+   * request, so a token GitHub refuses here signs that screen out too.
    */
-  async function ask<R extends HostRead>(request: R): Promise<Exchanged<R>> {
+  async function ask<R extends HostRead | HostDrafts>(
+    request: R,
+  ): Promise<Exchanged<R>> {
     const exchanged = await exchange(request);
     if (view.status?.revision !== announced) update({});
     return exchanged;
