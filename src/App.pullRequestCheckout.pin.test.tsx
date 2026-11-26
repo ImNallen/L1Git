@@ -242,6 +242,38 @@ it("Remove of the repository you have open opens the pull request's repository i
   );
 });
 
+it.each([
+  ["no other clone of it is saved", [OTHER, tried(1)], undefined],
+  ["another clone of it is saved", [OTHER, tried(1), PIN], PIN],
+] as const)(
+  "Remove of the copy that is the pull request's repository reads nothing of it afterwards, when %s",
+  async (_, entries, opens) => {
+    const app = await visit({
+      world: holds({}),
+      saved: { entries: [...entries], lastRoot: tried(1) },
+    });
+    expect(activeRoot()).toBe(tried(1));
+    await open(app, 1);
+    app.bridge.reset();
+    await app.click(get("button", "Remove worktree"));
+    await app.refocusWindow();
+    // The overview store lets go of a folder only once the sidebar's next
+    // render stops tracking it, so its local refresh may still try it.
+    const reads = app.bridge.log.filter(
+      ({ op, path }) =>
+        path === tried(1) && op !== "removePullRequest" && op !== "overview",
+    );
+    expect(reads, "nothing reads the removed folder").toEqual([]);
+    expect(app.bridge.unexpected).toEqual([]);
+    expect(activeRoot()).toBe(opens);
+    expect(
+      [tryButton() !== null, query("tab", /^Conversation/) !== null],
+      "the pull request reads from the clone left, or closes",
+    ).toEqual([opens !== undefined, opens !== undefined]);
+    expect(bar()).toBeNull();
+  },
+);
+
 it("a Remove that fails after Git took the worktree away still drops its sidebar row", async () => {
   const app = await visit({
     world: holds({}),

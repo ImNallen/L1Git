@@ -100,7 +100,7 @@ export function usePullRequestCheckout({
   screen: Pick<ScreenState, "place">;
   overview: Pick<OverviewView, "roots">;
   historyRoot: RepositoryRoot | null;
-  saved: Pick<WorkspaceApi, "keepRepository" | "selectRepository">;
+  saved: Pick<WorkspaceApi, "catalog" | "keepRepository" | "selectRepository">;
   writes: Pick<WritesView, "post">;
   loop: Pick<WriteLoop, "rereadRefs">;
   nav: Pick<Navigation, "showBranch" | "sidebar">;
@@ -194,7 +194,9 @@ export function usePullRequestCheckout({
   }, [visited]);
 
   /** Drops the sidebar row of a worktree that `after` no longer has, and
-   * opens the pull request's repository in place of it. */
+   * opens the pull request's repository in place of it. When that worktree
+   * was the pull request's repository, another saved worktree of it stands
+   * in, or none does. */
   const forget = (
     before: KnownCheckout,
     after: PullCheckout,
@@ -204,10 +206,26 @@ export function usePullRequestCheckout({
     const { worktree } = before.checkout;
     if (after.kind === "ready" && after.worktree.root === worktree.root)
       return null;
+    const commonDir = (of: RepositoryRoot) => {
+      const state = overview.roots.get(of);
+      return state?.kind === "open" ? state.commonDir : null;
+    };
+    const shared = commonDir(worktree.root);
+    const home =
+      target !== worktree.root
+        ? target
+        : (saved.catalog.entries.find(
+            ({ root }) =>
+              root !== worktree.root &&
+              shared !== null &&
+              commonDir(root) === shared,
+          )?.root ?? null);
     nav.sidebar.onRemove(worktree.root);
-    if (historyRoot === worktree.root) void saved.selectRepository(target);
-    writes.post(target, { kind: "removedWorktree", name: worktree.name });
-    return worktree;
+    if (home !== null) {
+      if (historyRoot === worktree.root) void saved.selectRepository(home);
+      writes.post(home, { kind: "removedWorktree", name: worktree.name });
+    }
+    return { name: worktree.name, home };
   };
 
   async function write(
@@ -241,6 +259,7 @@ export function usePullRequestCheckout({
     setWritingKey(of);
     turn(of);
     const before = copy.known;
+    let reread: RepositoryRoot | null = target.root;
     change(of, (was) => ({ ...was, running: kind, said: null }));
     try {
       const checkout = await run(target);
@@ -250,6 +269,7 @@ export function usePullRequestCheckout({
           name: checkout.worktree.name,
         });
       const removed = forget(before, checkout, target.root);
+      if (removed) reread = removed.home;
       change(of, (was) => ({
         ...was,
         known: { kind: "read", checkout },
@@ -262,7 +282,8 @@ export function usePullRequestCheckout({
       const after = await repositories
         .pullCheckout(target.root, target.pull, target.head)
         .catch(() => null);
-      if (after) forget(before, after, target.root);
+      const removed = after && forget(before, after, target.root);
+      if (removed) reread = removed.home;
       change(of, (was) => ({
         ...was,
         known: after ? { kind: "read", checkout: after } : was.known,
@@ -286,7 +307,7 @@ export function usePullRequestCheckout({
         askRead();
       }
       finish();
-      loop.rereadRefs(target.root);
+      if (reread !== null) loop.rereadRefs(reread);
     }
   }
 

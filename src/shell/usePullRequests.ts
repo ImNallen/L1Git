@@ -233,13 +233,12 @@ export function usePullRequests({
 
   const github = host.status?.github;
   const viewer = github?.kind === "connected" ? github.login : null;
-  // Its repository is no longer saved.
-  if (
-    asked !== null &&
-    !saved.opening &&
-    !listed.some(({ key }) => key === asked.repository.key)
-  )
-    setAsked(null);
+  // Its repository is no longer saved, or another of its saved clones now
+  // comes first, as after its first one was removed.
+  const now = asked && listed.find(({ key }) => key === asked.repository.key);
+  if (asked !== null && !saved.opening && !now) setAsked(null);
+  if (asked !== null && now && now.root !== asked.repository.root)
+    setAsked({ ...asked, repository: now });
   const opened = viewer === null ? null : asked;
   const id = opened && `${account} ${opened.repository.key}#${opened.number}`;
   const tab = chosen !== null && chosen.id === id ? chosen.tab : "conversation";
