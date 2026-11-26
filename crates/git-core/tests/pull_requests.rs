@@ -738,6 +738,57 @@ fn replace_onto_an_untracked_file_the_pull_request_adds_names_it() {
 }
 
 #[test]
+fn replace_with_staged_changes_names_them_and_moves_nothing() {
+    let world = World::new();
+    let first = world.same(1, "feat", "feat.txt");
+    let folder = world.folder(1);
+    world.tried(1, &first);
+    let rewritten = PullHead {
+        oid: world.rewrite("feat", "again.txt"),
+        ..first.clone()
+    };
+    world.publish(&[
+        (&world.base, "refs/heads/feat".into()),
+        (&world.base, "refs/pull/1/head".into()),
+    ]);
+    let before = fs::read_to_string(folder.join("shared.txt")).unwrap();
+    fs::write(folder.join("shared.txt"), "staged\n").unwrap();
+    git(&folder, &["add", "shared.txt"]);
+    fs::write(folder.join("shared.txt"), &before).unwrap();
+    let refused = world.update(1, &rewritten, &first.oid, true).unwrap_err();
+    assert_eq!(refused.kind, ErrorKind::Conflict, "{refused:?}");
+    assert!(refused.message.contains("shared.txt"), "{refused:?}");
+    assert_eq!(world.tip("pr/1"), Some(first.oid));
+    assert_eq!(git(&folder, &["show", ":shared.txt"]).trim_end(), "staged");
+}
+
+#[test]
+fn replace_onto_an_ignored_file_the_pull_request_tracks_names_it_and_keeps_it() {
+    let world = World::new();
+    let first = world.same(1, "feat", "feat.txt");
+    let folder = world.folder(1);
+    world.tried(1, &first);
+    let rewritten = PullHead {
+        oid: world.rewrite("feat", "secret.txt"),
+        ..first.clone()
+    };
+    world.publish(&[
+        (&world.base, "refs/heads/feat".into()),
+        (&world.base, "refs/pull/1/head".into()),
+    ]);
+    fs::write(folder.join(".gitignore"), "secret.txt\n").unwrap();
+    fs::write(folder.join("secret.txt"), "mine\n").unwrap();
+    let refused = world.update(1, &rewritten, &first.oid, true).unwrap_err();
+    assert_eq!(refused.kind, ErrorKind::Conflict, "{refused:?}");
+    assert!(refused.message.contains("secret.txt"), "{refused:?}");
+    assert_eq!(world.tip("pr/1"), Some(first.oid));
+    assert_eq!(
+        fs::read_to_string(folder.join("secret.txt")).unwrap(),
+        "mine\n"
+    );
+}
+
+#[test]
 fn replace_during_a_merge_in_the_copy_says_to_finish_it_and_moves_nothing() {
     let world = World::new();
     let head = world.same(1, "feat", "feat.txt");

@@ -3,7 +3,7 @@ use super::{
 };
 use crate::{
     BranchRef, Coordinator, ErrorKind, Head, InProgress, Oid, RepositoryError,
-    git::{LocalWrite, WriteDeadline, Wrote},
+    git::{self, LocalWrite, WriteDeadline, Wrote},
     repository::{self, WorktreeRecord},
     sync,
     write::{
@@ -101,6 +101,13 @@ impl Coordinator {
                                 }
                             }
                             Step::Replace => {
+                                refuse_lost_on_replace(
+                                    &worktree,
+                                    &record.name(),
+                                    &tip,
+                                    &head.oid,
+                                    deadline,
+                                )?;
                                 let ran = RefTxn::begin(&worktree, deadline)?
                                     .reset_keep(&head.oid)
                                     .run(deadline)?;
@@ -158,6 +165,88 @@ fn in_progress(operation: InProgress, name: &str) -> RepositoryError {
             capitalized(operation.name())
         ),
     )
+}
+
+/// `reset --keep` keeps neither the staged version of a file nor an ignored
+/// file at a path the head tracks, and says nothing about either.
+fn refuse_lost_on_replace(
+    worktree: &Repo,
+    name: &str,
+    tip: &Oid,
+    head: &Oid,
+    deadline: WriteDeadline,
+) -> Result<(), RepositoryError> {
+    let reads = deadline.reads();
+    let staged = paths(&git::read(
+        &worktree.root,
+        &["diff", "--cached", "--name-only", "-z", "--no-renames"],
+        reads,
+    )?);
+    if !staged.is_empty() {
+        return Err(RepositoryError::new(
+            ErrorKind::Conflict,
+            format!(
+                "Replace would not keep what you staged in {name}: {}. Commit it first, or unstage it.",
+                staged.join(", ")
+            ),
+        ));
+    }
+    let moved = paths(&git::read(
+        &worktree.root,
+        &[
+            "diff",
+            "--name-only",
+            "-z",
+            "--no-renames",
+            tip.as_str(),
+            head.as_str(),
+        ],
+        reads,
+    )?);
+    if moved.is_empty() {
+        return Ok(());
+    }
+    let listed = paths(&git::read(
+        &worktree.root,
+        &[
+            "ls-files",
+            "-z",
+            "--others",
+            "--ignored",
+            "--exclude-standard",
+            "--directory",
+        ],
+        reads,
+    )?);
+    let ignored: Vec<String> = moved
+        .into_iter()
+        .filter(|path| {
+            listed.iter().any(|entry| match entry.strip_suffix('/') {
+                Some(folder) => path
+                    .strip_prefix(folder)
+                    .is_some_and(|rest| rest.starts_with('/')),
+                None => entry == path,
+            })
+        })
+        .collect();
+    if ignored.is_empty() {
+        return Ok(());
+    }
+    Err(RepositoryError::new(
+        ErrorKind::Conflict,
+        format!(
+            "The pull request tracks files that are ignored in {name}, and Replace would overwrite them: {}. Move them first.",
+            ignored.join(", ")
+        ),
+    ))
+}
+
+fn paths(output: &[u8]) -> Vec<String> {
+    output
+        .split(|byte| *byte == 0)
+        .filter(|path| !path.is_empty())
+        .map(|path| String::from_utf8_lossy(path).into_owned())
+        .collect()
 }
 
 /// `reset --keep` names each file whose uncommitted change it would
