@@ -31,7 +31,7 @@ it("signs in to GitHub from Settings › Hosts and disconnects again", async () 
   await app.click(get("button", "Sign in as @octo"));
   expect(dialogs()).toEqual(["Settings"]);
   expect(github()).toContain(
-    "@octogithub.com · Reads private and public repositories.",
+    "@octogithub.com · Private and public repositories.",
   );
   expect(app.bridge.hostLog).toEqual([
     { op: "status" },

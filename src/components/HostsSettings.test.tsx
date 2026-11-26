@@ -75,6 +75,8 @@ async function show(github?: HostStatus["github"]) {
 }
 
 const text = () => container.textContent?.replace(/\s+/g, " ") ?? "";
+const promise =
+  "L1 Git reads pull requests. It writes to GitHub only when you click: a comment, a reply, a resolved thread, a review you submit, a merge, or a branch you chose to delete. It never writes in the background.";
 const dialog = () => container.querySelector("dialog[open]");
 const ops = () => sent.map((request) => request.op);
 
@@ -182,15 +184,17 @@ it("asks consent for the probed account and connects as that account", async () 
   await click("Sign in to GitHub");
   const consent = dialog()?.textContent?.replace(/\s+/g, " ");
   expect(consent).toContain(
-    "L1 Git will copy the GitHub CLI's sign-in for @hubot into the system keychain. L1 Git only reads from GitHub. Disconnecting later does not sign the GitHub CLI out.",
+    `L1 Git will copy the GitHub CLI's sign-in for @hubot into the system keychain. ${promise} Disconnecting later does not sign the GitHub CLI out.`,
   );
   expect(consent).toContain("/opt/homebrew/bin/gh");
-  expect(consent).toContain("gh auth refresh -h github.com -s repo");
+  expect(consent).toContain(
+    "This sign-in covers public repositories only. To add private ones, cancel, run gh auth refresh -h github.com -s repo in a terminal, then sign in again.",
+  );
   await click("Sign in as @hubot");
   expect(sent.at(-1)).toEqual({ op: "connectGh", login: "hubot" });
   expect(dialog()).toBeNull();
   expect(row()).toBe(
-    "@octogithub.com · Reads public repositories only.GitHub accepted this sign-in just now.Check connectionDisconnect",
+    "@octogithub.com · Public repositories only.GitHub accepted this sign-in just now.Check connectionDisconnect",
   );
 });
 
@@ -234,12 +238,22 @@ it("says nothing was accepted when a check fails", async () => {
 });
 
 it.each([
-  ["private", "Reads private and public repositories."],
-  ["publicOnly", "Reads public repositories only."],
-  ["perRepository", "Reads the repositories this token allows."],
-] as const)("names what a %s connection reads", async (access, words) => {
-  await show(connected(access));
-  expect(row()).toContain(`github.com · ${words}`);
+  ["private", "Private and public repositories."],
+  ["publicOnly", "Public repositories only."],
+  ["perRepository", "The repositories this token allows."],
+] as const)(
+  "names the repositories a %s connection covers",
+  async (access, words) => {
+    await show(connected(access));
+    expect(row()).toContain(`github.com · ${words}`);
+  },
+);
+
+it("says what L1 Git writes to GitHub, connected or not", async () => {
+  await show({ kind: "notConnected", ended: null });
+  expect(text()).toContain(promise);
+  await show(connected());
+  expect(text()).toContain(promise);
 });
 
 it("checks the connection, and disconnects only after confirming", async () => {
@@ -294,6 +308,9 @@ it("signs in through a browser when the GitHub CLI is missing", async () => {
   await click("Sign in with a browser");
   expect(sent.at(-1)).toEqual({ op: "deviceStart" });
   expect(dialog()?.querySelector("output")?.textContent).toBe("WDJB-MJHT");
+  expect(dialog()?.textContent?.replace(/\s+/g, " ")).toContain(
+    `Enter this code on GitHub to connect L1 Git. L1 Git keeps the sign-in in the system keychain. ${promise}`,
+  );
   const open = [...(dialog()?.querySelectorAll("a") ?? [])].find(
     (link) => link.textContent === "Open GitHub",
   );

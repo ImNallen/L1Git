@@ -3,6 +3,7 @@ import { GitPullRequest, LoaderCircle } from "lucide-react";
 import type { GhProbe, HostStatus } from "../domain/host";
 import type { Host } from "../host";
 import { DialogHeader, PathList, useModalDialog } from "./Dialog";
+import { githubPromise } from "./githubPromise";
 
 function Guidance({ probe }: { probe: Exclude<GhProbe, { kind: "ready" }> }) {
   switch (probe.kind) {
@@ -63,8 +64,8 @@ function DeviceCode({ prompt }: { prompt: Prompt }) {
   return (
     <>
       <p>
-        Enter this code on GitHub to let L1 Git read your repositories. L1 Git
-        keeps the sign-in in the system keychain and only reads from GitHub.
+        Enter this code on GitHub to connect L1 Git. L1 Git keeps the sign-in in
+        the system keychain. {githubPromise}
       </p>
       <div className="device-code">
         <output aria-label="Sign-in code">{prompt.userCode}</output>
@@ -166,13 +167,13 @@ export function GitHubSignInDialog({
         <>
           <p>
             L1 Git will copy the GitHub CLI's sign-in for @{probe.login} into
-            the system keychain. L1 Git only reads from GitHub. Disconnecting
-            later does not sign the GitHub CLI out.
+            the system keychain. {githubPromise} Disconnecting later does not
+            sign the GitHub CLI out.
           </p>
           <PathList paths={[probe.path]} label="GitHub CLI" />
           {probe.access === "publicOnly" && (
             <p>
-              This sign-in reads public repositories only. To read private ones,
+              This sign-in covers public repositories only. To add private ones,
               cancel, run <code>gh auth refresh -h github.com -s repo</code> in
               a terminal, then sign in again.
             </p>
