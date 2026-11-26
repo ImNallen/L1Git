@@ -97,6 +97,7 @@ describe("shell boundaries", () => {
       "useMergePanel",
       "useResolutionDrafts",
       "useUndoSteps",
+      "usePullRequestCheckout",
       "useShortcuts",
       "usePrefetchLazyViews",
       "useLaunchSplash",

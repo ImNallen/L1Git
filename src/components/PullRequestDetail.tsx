@@ -6,6 +6,7 @@ import {
   useMemo,
   useRef,
 } from "react";
+import type { PullRequestCheckout } from "../shell/usePullRequestCheckout";
 import type { KeyboardEvent, ReactNode, Ref } from "react";
 import {
   ArrowLeft,
@@ -47,9 +48,12 @@ import { PullRequestCommits } from "./PullRequestCommits";
 import { PullRequestFailure } from "./PullRequestFailure";
 import { PullRequestConversation } from "./PullRequestConversation";
 import { PullRequestInspector } from "./PullRequestInspector";
+import { PullRequestCheckoutBar } from "./PullRequestCheckoutBar";
 import { PullRequestNotice } from "./PullRequestNotice";
 import { Ago } from "./PullRequestParts";
 import { SurroundingsContext } from "./pullRequestText";
+import { TryPullRequest } from "./TryPullRequest";
+import { useRefocusWhenWriteEnds } from "./useRefocusWhenWriteEnds";
 
 const tabs = {
   conversation: { label: "Conversation", count: conversationCount },
@@ -190,6 +194,7 @@ export function PullRequestDetail({
   isShown,
   opened,
   files,
+  checkout,
   layout,
   theme,
   painted,
@@ -202,6 +207,7 @@ export function PullRequestDetail({
   isShown: boolean;
   opened: OpenedPullRequest;
   files: FilesChangedState;
+  checkout: PullRequestCheckout;
   layout: Pick<
     Layout,
     "inspectorOpen" | "paneWidths" | "resizePane" | "savePaneWidth"
@@ -220,6 +226,13 @@ export function PullRequestDetail({
     focus: () => title.current?.focus({ preventScroll: true }),
   }));
   useEffect(() => markdownReader.warm(), []);
+  const bar = useRef<HTMLDivElement>(null);
+  const tryButton = useRef<HTMLButtonElement>(null);
+  useRefocusWhenWriteEnds(
+    checkout.running,
+    isShown,
+    () => bar.current ?? tryButton.current ?? title.current,
+  );
   const url = pullRequestUrl(repository.github, number);
   const { owner, repo } = repository.github;
   const notice = detailNotice(read, repository);
@@ -269,6 +282,14 @@ export function PullRequestDetail({
               {position.at.toLocaleString()} of {position.of.toLocaleString()}
             </span>
           )}
+          {checkout.offer && (
+            <TryPullRequest
+              ref={tryButton}
+              number={number}
+              offer={checkout.offer}
+              onCreate={checkout.tryLocally}
+            />
+          )}
           <a
             className="button secondary"
             href={tab === "files" ? `${url}/files` : url}
@@ -280,6 +301,13 @@ export function PullRequestDetail({
           </a>
         </header>
         <Header opened={opened} titleId={`${id}-title`} titleRef={title} />
+        {pull && (
+          <PullRequestCheckoutBar
+            ref={bar}
+            checkout={checkout}
+            head={pull.head.oid}
+          />
+        )}
         <span className="visually-hidden" role="status">
           {loading ? "Loading pull request…" : ""}
         </span>
