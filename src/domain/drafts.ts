@@ -104,7 +104,14 @@ export function draftKey(given: Anchor, head: Oid): DraftKey {
   const anchor = placed(given);
   return JSON.stringify(
     anchor.kind === "line"
-      ? [anchor.kind, head, anchor.path, anchor.side, anchor.line, anchor.start]
+      ? [
+          anchor.kind,
+          head,
+          anchor.path,
+          anchor.side,
+          anchor.line,
+          anchor.start && [anchor.start.side, anchor.start.line],
+        ]
       : anchor.kind === "reply"
         ? [anchor.kind, anchor.thread]
         : [anchor.kind],
