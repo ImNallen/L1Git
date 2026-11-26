@@ -2,13 +2,21 @@ query($owner: String!, $repo: String!, $number: Int!, $threads: Boolean!) {
   repository(owner: $owner, name: $repo) {
     viewerPermission
     pullRequest(number: $number) {
-      number title body isDraft mergedAt closedAt createdAt updatedAt
+      id number title body isDraft mergedAt closedAt createdAt updatedAt
       author { login } viewerDidAuthor
       additions deletions changedFiles
       labels(first: 20) { totalCount nodes { name color } }
       baseRefName baseRefOid headRefName headRefOid isCrossRepository maintainerCanModify
       headRepository { name owner { login } }
-      mergeable mergeStateStatus
+      mergeable mergeStateStatus reviewDecision
+      baseRepository {
+        id mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed viewerDefaultMergeMethod deleteBranchOnMerge
+      }
+      headRef { id associatedPullRequests(states: OPEN, first: 1) { totalCount } }
+      viewerCanDeleteHeadRef
+      viewerPending: reviews(states: PENDING, first: 1) { totalCount nodes {
+        id comments(first: 100) { totalCount nodes { path } }
+      } }
       reviewRequests(first: 100) { nodes { requestedReviewer {
         ... on User { login } ... on Bot { login } ... on Mannequin { login }
       } } }
@@ -38,6 +46,7 @@ query($owner: String!, $repo: String!, $number: Int!, $threads: Boolean!) {
       }
       reviewThreads(first: 100) @include(if: $threads) { totalCount nodes {
         id path line startLine originalLine originalStartLine diffSide isOutdated isResolved
+        viewerCanReply viewerCanResolve viewerCanUnresolve
         first: comments(first: 1) { nodes { diffHunk pullRequestReview { id } } }
         comments(first: 50) { totalCount nodes { id author { login } at: createdAt body } }
       } }

@@ -4,13 +4,18 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use super::{
-    Actor, CHECKS, CheckState, Label, Mergeability, Nodes, Page, Repository, State, items, login,
+    Actor, CHECKS, CheckState, Label, Mergeability, Nodes, Page, Repository, Review as Decision,
+    State, items, login,
 };
 use crate::github::{ApiError, GitHub};
 use crate::graphql::Reply;
 
+mod merge;
+mod pending;
 mod timeline;
 
+use merge::{HeadRef, Merge, RefNode, Settings};
+use pending::{Pending, ReviewNode};
 use timeline::{Event, Item, event};
 
 const DETAIL: &str = include_str!("detail.graphql");
@@ -18,6 +23,8 @@ const DETAIL: &str = include_str!("detail.graphql");
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PullRequest {
+    id: String,
+    repository_id: String,
     number: u32,
     title: String,
     /// Markdown.
@@ -45,6 +52,10 @@ pub struct PullRequest {
     threads: Option<Page<Thread>>,
     mergeable: Mergeability,
     merge_state: MergeState,
+    /// GitHub's own, which it makes only where a rule asks for reviews.
+    decision: Option<Decision>,
+    merge: Merge,
+    pending: Pending,
 }
 
 /// The viewer's role in the base repository. GitHub names none for a
@@ -70,6 +81,8 @@ struct Head {
     repository: Option<Repository>,
     cross_repository: bool,
     maintainer_can_modify: bool,
+    /// None once the branch is deleted.
+    r#ref: Option<HeadRef>,
 }
 
 #[derive(Debug, Serialize)]
@@ -141,6 +154,14 @@ struct Thread {
     resolved: bool,
     hunk: String,
     comments: Page<Comment>,
+    can: Can,
+}
+
+#[derive(Debug, Serialize)]
+struct Can {
+    reply: bool,
+    resolve: bool,
+    unresolve: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -172,8 +193,16 @@ struct Found {
 }
 
 #[derive(Deserialize)]
+struct Base {
+    id: String,
+    #[serde(flatten)]
+    settings: Settings,
+}
+
+#[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Node {
+    id: String,
     number: u32,
     title: String,
     body: String,
@@ -197,6 +226,11 @@ struct Node {
     head_repository: Option<HeadRepository>,
     mergeable: Mergeability,
     merge_state_status: MergeState,
+    review_decision: Option<Decision>,
+    base_repository: Option<Base>,
+    head_ref: Option<RefNode>,
+    viewer_can_delete_head_ref: bool,
+    viewer_pending: Option<Nodes<ReviewNode>>,
     review_requests: Option<Nodes<ReviewRequest>>,
     latest_reviews: Option<Nodes<Review>>,
     latest_opinionated_reviews: Option<Nodes<Review>>,
@@ -298,6 +332,9 @@ struct ThreadNode {
     is_resolved: bool,
     first: Nodes<Opening>,
     comments: Nodes<CommentNode>,
+    viewer_can_reply: bool,
+    viewer_can_resolve: bool,
+    viewer_can_unresolve: bool,
 }
 
 #[derive(Deserialize)]
@@ -345,17 +382,27 @@ impl GitHub<'_> {
         let Some(found) = found else {
             return Err(withheld.explain("repository", repository.to_string()));
         };
-        let Some(node) = found.pull_request else {
+        let Some(mut node) = found.pull_request else {
             let what = format!("pull request #{number} in {repository}");
             return Err(withheld.explain("repository", what));
         };
+        let base = node.base_repository.take().ok_or(ApiError::Unexpected)?;
         let permission = found.viewer_permission.unwrap_or(Permission::Unknown);
-        Ok(parse(node, permission, withheld.field(CHECKS)))
+        Ok(parse(node, base, permission, withheld.field(CHECKS)))
     }
 }
 
-fn parse(node: Node, viewer_permission: Permission, checks_withheld: bool) -> PullRequest {
+fn parse(
+    node: Node,
+    base: Base,
+    viewer_permission: Permission,
+    checks_withheld: bool,
+) -> PullRequest {
+    let state = State::new(node.is_draft, node.merged_at, node.closed_at);
+    let open = matches!(state, State::Open { .. });
     PullRequest {
+        id: node.id,
+        repository_id: base.id,
         reviewers: reviewers(
             node.author.as_ref(),
             node.latest_reviews,
@@ -365,7 +412,7 @@ fn parse(node: Node, viewer_permission: Permission, checks_withheld: bool) -> Pu
         number: node.number,
         title: node.title,
         body: node.body,
-        state: State::new(node.is_draft, node.merged_at, node.closed_at),
+        state,
         author: login(node.author),
         viewer_is_author: node.viewer_did_author,
         viewer_permission,
@@ -379,6 +426,9 @@ fn parse(node: Node, viewer_permission: Permission, checks_withheld: bool) -> Pu
                 .and_then(|head| Repository::parse(&format!("{}/{}", head.owner.login, head.name))),
             cross_repository: node.is_cross_repository,
             maintainer_can_modify: node.maintainer_can_modify,
+            r#ref: node
+                .head_ref
+                .map(|head| HeadRef::new(head, open, node.viewer_can_delete_head_ref)),
         },
         labels: node
             .labels
@@ -399,6 +449,9 @@ fn parse(node: Node, viewer_permission: Permission, checks_withheld: bool) -> Pu
             .map(|threads| threads.page(|thread| Some(self::thread(thread)))),
         mergeable: node.mergeable,
         merge_state: node.merge_state_status,
+        decision: node.review_decision,
+        merge: base.settings.into(),
+        pending: Pending::new(node.viewer_pending),
     }
 }
 
@@ -517,5 +570,10 @@ fn thread(node: ThreadNode) -> Thread {
                 })
             },
         ),
+        can: Can {
+            reply: node.viewer_can_reply,
+            resolve: node.viewer_can_resolve,
+            unresolve: node.viewer_can_unresolve,
+        },
     }
 }
