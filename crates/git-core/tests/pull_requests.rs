@@ -7,10 +7,11 @@ use l1_git_core::{
 };
 use std::{
     fs,
-    num::NonZeroU32,
+    num::{NonZeroU32, NonZeroUsize},
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    thread,
     time::{Duration, Instant},
 };
 use tempfile::TempDir;
@@ -948,6 +949,56 @@ fn remove_waits_for_a_remote_that_never_answers_only_as_long_as_a_fetch_it_can_d
     assert_eq!((tip, relation), (first.oid, Relation::Unfetched));
     assert!(!world.folder(1).exists());
     world.assert_main_untouched();
+}
+
+#[test]
+fn remove_skips_the_fetch_when_a_fetch_it_would_wait_for_holds_the_repository_or_the_last_slot() {
+    let busy = World::new();
+    let other = World::new();
+    let first = busy.same(1, "feat", "feat.txt");
+    busy.tried(1, &first);
+    let pushed = busy.same(1, "feat", "more.txt");
+    for world in [&busy, &other] {
+        git(
+            &world.root,
+            &[
+                "config",
+                "remote.origin.url",
+                "ssh://git@github.com/octo/app.git",
+            ],
+        );
+        git(&world.root, &["config", "core.sshCommand", "sleep 4;:"]);
+    }
+    let core = Coordinator::new(
+        Limits {
+            optional_fetch_deadline: Duration::from_secs(1),
+            network_slots: NonZeroUsize::new(1).unwrap(),
+            ..Limits::default()
+        },
+        busy.top.join("undo"),
+    );
+    let folder = busy.folder(1);
+    for fetching in [&busy, &other] {
+        thread::scope(|scope| {
+            scope.spawn(|| core.overview(fetching.path(), FetchMode::Remote));
+            thread::sleep(Duration::from_millis(500));
+            let started = Instant::now();
+            let removed = core
+                .remove_pull_request(busy.path(), &World::key(1), &pushed, &first.oid)
+                .unwrap();
+            let took = started.elapsed();
+            assert!(took < Duration::from_millis(2500), "Remove took {took:?}");
+            let PullCheckout::Parked { relation, .. } = removed else {
+                panic!("not parked: {removed:?}");
+            };
+            assert_eq!(relation, Relation::Unfetched);
+            assert!(!folder.exists());
+        });
+        git(
+            &busy.root,
+            &["worktree", "add", "-q", folder.to_str().unwrap(), "pr/1"],
+        );
+    }
 }
 
 #[test]

@@ -32,7 +32,7 @@ use std::{
     num::NonZeroUsize,
     path::{Path, PathBuf},
     sync::{
-        Arc, Condvar, Mutex, MutexGuard, PoisonError,
+        Arc, Condvar, Mutex, MutexGuard, PoisonError, TryLockError,
         atomic::{AtomicBool, Ordering},
     },
     thread,
@@ -289,26 +289,28 @@ impl Coordinator {
         github: &GitHubRepository,
         commits: &WantedCommits,
     ) -> Result<CommitsFetch, RepositoryError> {
-        self.fetch_commits_within(path, github, commits, self.limits.fetch_deadline)
+        self.fetch_commits_by(path, github, commits, None)
     }
 
-    /// `fetch_commits` within `optional_fetch_deadline`, for an operation
-    /// that goes on without the commits.
+    /// `fetch_commits` for an operation that goes on without the commits. It
+    /// gives up once `optional_fetch_deadline` has passed, the wait for the
+    /// gate and a network slot included.
     pub(crate) fn fetch_optional_commits(
         &self,
         path: &str,
         github: &GitHubRepository,
         commits: &WantedCommits,
     ) -> Result<CommitsFetch, RepositoryError> {
-        self.fetch_commits_within(path, github, commits, self.limits.optional_fetch_deadline)
+        let until = Instant::now() + self.limits.optional_fetch_deadline;
+        self.fetch_commits_by(path, github, commits, Some(until))
     }
 
-    fn fetch_commits_within(
+    fn fetch_commits_by(
         &self,
         path: &str,
         github: &GitHubRepository,
         commits: &WantedCommits,
-        deadline: Duration,
+        until: Option<Instant>,
     ) -> Result<CommitsFetch, RepositoryError> {
         let reads = self.deadline(LocalRead::BranchStatus);
         let repository = read::open(path, reads)?;
@@ -316,10 +318,20 @@ impl Coordinator {
         let Some(remote) = remotes::of_github(remotes, github) else {
             return Ok(CommitsFetch::NoRemote);
         };
-        self.gated(&repository.common_dir, || {
-            let _slot = self.slots.acquire();
-            fetch::fetch_commits(&repository.root, &remote, commits.oids(), deadline)
-        })
+        let locks = self.locks(&repository.common_dir);
+        let (Some(_gate), Some(_slot)) = (
+            lock_until(&locks.gate, until),
+            self.slots.acquire_until(until),
+        ) else {
+            return Ok(CommitsFetch::Failed {
+                failure: FetchFailure::Busy,
+                message: format!("Another fetch kept {remote} busy."),
+            });
+        };
+        let deadline = until.map_or(self.limits.fetch_deadline, |until| {
+            until.saturating_duration_since(Instant::now())
+        });
+        fetch::fetch_commits(&repository.root, &remote, commits.oids(), deadline)
     }
 
     pub(crate) fn fetch_wanted(
@@ -424,6 +436,22 @@ fn lock_ignoring_poison<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+/// Waits for `mutex` until `until`, or for as long as it takes without one.
+/// A mutex wakes no waiter at a deadline, so the wait polls.
+fn lock_until<T>(mutex: &Mutex<T>, until: Option<Instant>) -> Option<MutexGuard<'_, T>> {
+    let Some(until) = until else {
+        return Some(lock_ignoring_poison(mutex));
+    };
+    loop {
+        match mutex.try_lock() {
+            Ok(guard) => return Some(guard),
+            Err(TryLockError::Poisoned(poisoned)) => return Some(poisoned.into_inner()),
+            Err(TryLockError::WouldBlock) if Instant::now() >= until => return None,
+            Err(TryLockError::WouldBlock) => thread::sleep(STOP_POLL),
+        }
+    }
+}
+
 const STOP_POLL: Duration = Duration::from_millis(20);
 
 struct Semaphore {
@@ -448,6 +476,27 @@ impl Semaphore {
             .unwrap_or_else(PoisonError::into_inner);
         *free -= 1;
         Permit(self)
+    }
+
+    /// Waits for a slot until `until`, or for as long as it takes without one.
+    fn acquire_until(&self, until: Option<Instant>) -> Option<Permit<'_>> {
+        let Some(until) = until else {
+            return Some(self.acquire());
+        };
+        let mut free = lock_ignoring_poison(&self.free);
+        while *free == 0 {
+            let left = until.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return None;
+            }
+            free = self
+                .released
+                .wait_timeout(free, left)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
+        }
+        *free -= 1;
+        Some(Permit(self))
     }
 
     /// Waits for a slot until `stop` turns true. Setting `stop` wakes nothing,

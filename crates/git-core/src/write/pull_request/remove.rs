@@ -15,8 +15,9 @@ impl Coordinator {
     /// keeps it otherwise. Remotes stay. It records no undo entry, and drops
     /// the entries only that worktree could run. The head is fetched first by
     /// its id from the base remote, under the gate, within the short
-    /// `optional_fetch_deadline`. When that fails, it still removes the
-    /// worktree, and keeps a branch it cannot compare.
+    /// `optional_fetch_deadline`, the wait for the gate included. When that
+    /// fails, it still removes the worktree, and keeps a branch it cannot
+    /// compare.
     pub fn remove_pull_request(
         &self,
         path: &str,
