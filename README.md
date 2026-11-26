@@ -33,7 +33,7 @@ Select a branch to browse its history. Double-click a branch to check it out. Se
 
 L1 Git fetches saved repositories at startup and every 15 minutes by default. To change the interval, open **Settings**, then **General**, and set **Background fetch** under **Fetching**. Remote operations use your existing Git credentials and SSH agent, with interactive prompts disabled.
 
-To connect GitHub, open **Settings**, then **Hosts**, and click **Sign in to GitHub**. With your consent, L1 Git copies the [GitHub CLI](https://cli.github.com)'s sign-in into your system keychain and uses it to read pull requests. This version doesn't write to GitHub yet. When it does, it writes only when you click. **Disconnect** deletes that copy and leaves the GitHub CLI signed in.
+To connect GitHub, open **Settings**, then **Hosts**, and click **Sign in to GitHub**. With your consent, L1 Git copies the [GitHub CLI](https://cli.github.com)'s sign-in into your system keychain and uses it to read pull requests and to write to them. It writes only when you click. **Disconnect** deletes that copy and leaves the GitHub CLI signed in.
 
 To see pull requests, click **Pull requests** beside **Settings** at the bottom of the sidebar. Click a row to read that pull request. Press **Esc** to go back to the list, and again to go back to the history.
 

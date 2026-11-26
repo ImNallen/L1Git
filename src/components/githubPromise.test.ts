@@ -33,10 +33,10 @@ it("never again promises that L1 Git only reads from GitHub", () => {
   expect(promising).toEqual([]);
 });
 
-it("says what the docs say about writing to GitHub", () => {
-  const notYet = "This version doesn't write to GitHub yet.";
+it("no longer says that L1 Git doesn't write to GitHub yet", () => {
+  const notYet = /doesn't write to GitHub yet|has no box that writes/;
   const docs = ["README.md", "docs/reference.md"];
-  expect(docs.filter((file) => read(file).includes(notYet))).toEqual(
-    githubPromise.includes(notYet) ? docs : [],
-  );
+  expect(docs.filter((file) => notYet.test(read(file)))).toEqual([]);
+  expect(githubPromise).not.toMatch(notYet);
+  expect(githubPromise).toContain("only when you click");
 });
