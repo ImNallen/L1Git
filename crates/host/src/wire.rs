@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::Login;
 use crate::drafts::{Change, PullDrafts};
 use crate::pulls::{PullRequest, PullRequestList, PullRequests, Repository};
+use crate::writes::{Write, Written};
 
 /// Variants without fields are empty structs, because serde ignores unknown
 /// fields on an internally tagged unit variant.
@@ -49,6 +50,14 @@ pub enum Request {
         number: u32,
         change: Change,
     },
+    /// Changes something on GitHub for `asLogin`, never for another account.
+    /// It is sent at most once, never merged with another request, and it
+    /// answers `write` with a `Written` however it ends.
+    Write {
+        #[serde(rename = "asLogin")]
+        as_login: Login,
+        write: Write,
+    },
 }
 
 /// `{op, data?, status}`.
@@ -73,6 +82,7 @@ pub enum Answer {
     PullRequests(PullRequests),
     PullRequest(Box<PullRequest>),
     Drafts(PullDrafts),
+    Write(Written),
 }
 
 /// Everything the webview knows about the host side. No field can hold a
@@ -435,6 +445,10 @@ mod tests {
             Ok(Request::DevicePoll { session }) if session == "1"
         ));
         assert!(parse(pulls("octo", "app-2.x_y", "recentlyMerged")).is_ok());
+        assert!(matches!(
+            parse(json!({"op": "write", "asLogin": "octo", "write": {"kind": "unresolve", "thread": "T_1"}})),
+            Ok(Request::Write { as_login, .. }) if as_login.as_str() == "octo"
+        ));
         for refused in [
             json!({"op": "status", "extra": 1}),
             json!({"op": "connectGh", "login": "-x"}),
@@ -452,6 +466,10 @@ mod tests {
             json!({"op": "pullRequest", "repository": {"owner": "octo", "repo": "app"}, "number": -1}),
             json!({"op": "pullRequest", "repository": {"owner": "octo", "repo": "app"}, "number": "1"}),
             json!({"op": "pullRequests", "repository": {"owner": "octo", "repo": "app", "extra": 1}, "list": "open"}),
+            json!({"op": "write", "as_login": "octo", "write": {"kind": "resolve", "thread": "T_1"}}),
+            json!({"op": "write", "asLogin": "octo", "write": {"kind": "resolve", "thread": "T_1", "extra": 1}}),
+            json!({"op": "write", "asLogin": "octo", "write": {"kind": "mutation", "query": "mutation { x }"}}),
+            json!({"op": "write", "asLogin": "octo", "write": {"kind": "merge", "pull": "PR_1", "expectedHead": "main", "method": "squash", "headline": null, "body": null}}),
         ] {
             assert!(parse(refused.clone()).is_err(), "{refused}");
         }

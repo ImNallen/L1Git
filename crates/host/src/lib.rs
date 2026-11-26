@@ -13,6 +13,7 @@ mod pulls;
 mod state;
 mod vault;
 mod wire;
+mod writes;
 
 #[cfg(all(test, unix))]
 #[path = "../tests/support/mod.rs"]
@@ -162,6 +163,7 @@ pub fn run(host: &Host, request: Request) -> Result<Response, HostError> {
         } => host
             .drafts(login, repository, number, change)
             .map(Answer::Drafts),
+        Request::Write { as_login, write } => Ok(Answer::Write(host.write(&as_login, write))),
     };
     let status = host.status();
     match outcome {

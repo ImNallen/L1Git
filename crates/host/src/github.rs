@@ -337,6 +337,15 @@ impl GitHub<'_> {
         }
     }
 
+    /// For GitHub's 401 to this token. It forgets the connection, as a read
+    /// does.
+    pub(crate) fn signed_out(&self) -> Failure {
+        match self.connection {
+            Some((host, generation)) => host.revoked(generation),
+            None => api_failure(ApiError::Unauthorized),
+        }
+    }
+
     fn get(&self, path: &str) -> Result<(HeaderMap, Vec<u8>), ApiError> {
         self.send(
             self.http

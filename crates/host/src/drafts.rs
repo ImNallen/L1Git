@@ -22,7 +22,7 @@ const VERSION: u64 = 1;
 const MOST_PULLS: usize = 100;
 const MOST_DRAFTS: usize = 100;
 /// GitHub's limit on a comment's body.
-const MOST_CHARS: usize = 65_536;
+pub(crate) const MOST_CHARS: usize = 65_536;
 
 #[derive(Debug, Deserialize)]
 #[serde(
@@ -130,10 +130,10 @@ pub enum Anchor {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "RawLines")]
 pub struct Lines {
-    path: FilePath,
-    side: Side,
-    line: NonZeroU32,
-    start: Option<LinePoint>,
+    pub(crate) path: FilePath,
+    pub(crate) side: Side,
+    pub(crate) line: NonZeroU32,
+    pub(crate) start: Option<LinePoint>,
 }
 
 #[derive(Deserialize)]
@@ -167,8 +167,8 @@ impl TryFrom<RawLines> for Lines {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LinePoint {
-    side: Side,
-    line: NonZeroU32,
+    pub(crate) side: Side,
+    pub(crate) line: NonZeroU32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -200,6 +200,13 @@ macro_rules! checked_string {
         impl From<$name> for String {
             fn from(value: $name) -> String {
                 value.0
+            }
+        }
+
+        impl $name {
+            #[allow(dead_code, reason = "not every checked string is read back")]
+            pub(crate) fn as_str(&self) -> &str {
+                &self.0
             }
         }
     };

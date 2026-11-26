@@ -1,0 +1,3 @@
+mutation($input: SubmitPullRequestReviewInput!) {
+  submitPullRequestReview(input: $input) { pullRequestReview { id } }
+}

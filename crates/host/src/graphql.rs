@@ -84,7 +84,7 @@ fn decode<T: Default + DeserializeOwned>(
     })
 }
 
-fn gave_up(kind: &str) -> bool {
+pub(crate) fn gave_up(kind: &str) -> bool {
     matches!(kind, "RESOURCE_LIMITS_EXCEEDED" | "SERVICE_UNAVAILABLE")
         || kind.contains("TIMEOUT")
         || kind.contains("TIMED_OUT")
