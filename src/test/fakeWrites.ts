@@ -294,8 +294,15 @@ function signedIn(host: Host, asLogin: string): string | Written {
 const alone = (written: Written): Wrote => ({ written, drafts: null });
 const held = (message: string): Written => ({ kind: "notSent", message });
 
-/** Sends `record`'s write, now that it is kept, and answers by `script`. */
-function send(host: Host, book: string, record: FakeSent, by: string) {
+/** Sends `record`'s write, now that it is kept, and answers by `script`.
+ * Only a first send that GitHub didn't do gives its drafts back. */
+function send(
+  host: Host,
+  book: string,
+  record: FakeSent,
+  by: string,
+  again = false,
+) {
   const script = host.writes.shift() ?? { kind: "done" };
   const answer = (written: Written): Wrote => {
     record.sending = false;
@@ -304,7 +311,7 @@ function send(host: Host, book: string, record: FakeSent, by: string) {
         book,
         (host.sent.get(book) ?? []).filter((sent) => sent !== record),
       );
-    else if (written.kind !== "unknown")
+    else if (written.kind !== "unknown" && !again)
       giveBack(host, book, record.attempt, false);
     return { written, drafts: viewOf(host, book) };
   };
@@ -410,7 +417,7 @@ export function sendAgainArrives(
         drafts: viewOf(host, book),
       };
     };
-  return () => send(host, book, record, by);
+  return () => send(host, book, record, by, true);
 }
 
 /** The host's check op: settles what a read shows, keeps the rest. */

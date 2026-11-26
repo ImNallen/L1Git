@@ -5,7 +5,7 @@
 //! leaves. Its record goes once GitHub's answer, or a later read, says what
 //! happened, and the lane goes with that update.
 
-use super::{Checked, Seen, Settled, Write, Written, Wrote, not_sent};
+use super::{Checked, Seen, Settled, Write, Written, Wrote, not_sent, refused};
 use crate::Host;
 use crate::drafts::{AttemptId, BookKey, Carried, Lane};
 use crate::github::{ApiError, Login};
@@ -14,6 +14,15 @@ use crate::wire::{ErrorKind, Failure};
 
 const BUSY: &str = "Another write for this pull request is still sending, so L1 Git sent nothing.";
 const ELSEWHERE: &str = "Another L1 Git window is sending this. L1 Git sent nothing.";
+const FIRST: &str = "The first send may still have posted.";
+
+/// Which send of a write an answer is for. Only the first send's refusal
+/// shows that GitHub never had it.
+#[derive(Clone, Copy, PartialEq)]
+enum Sending {
+    First,
+    Again,
+}
 
 impl Host {
     pub(crate) fn lane_name(&self, key: &BookKey) -> String {
@@ -109,13 +118,14 @@ impl Host {
                 Err(failure) => return Wrote::alone(unrecorded(failure)),
             }
             let written = github.write(&write);
-            self.finish(key, &attempt, written, lane)
+            self.finish(key, &attempt, written, lane, Sending::First)
         })
         .unwrap_or_else(|failure| Wrote::alone(not_sent(failure.message)))
     }
 
     /// Send anyway: the user knows it may post twice. A read first may still
-    /// show that it landed, and then nothing leaves.
+    /// show that it landed, and then nothing leaves. Whatever stops or
+    /// refuses this send says nothing of the first, which stays unknown.
     pub(crate) fn send_again(&self, key: &BookKey, attempt: &AttemptId) -> Wrote {
         let generation = match self.signed_in_as(&key.login) {
             Ok(generation) => generation,
@@ -144,46 +154,73 @@ impl Host {
             }
             Err(failure) => return Wrote::alone(not_sent(failure.message)),
         };
-        self.as_connection(generation, |github| {
-            match github.seen(&sent.write, &sent.before, &key.login) {
-                Ok(Some(Seen::Landed { echo })) => {
-                    return self.finish(key, attempt, Written::Done { echo }, lane);
+        let wrote = self
+            .as_connection(generation, |github| {
+                match github.seen(&sent.write, &sent.before, &key.login) {
+                    Ok(Some(Seen::Landed { echo })) => {
+                        return self.finish(
+                            key,
+                            attempt,
+                            Written::Done { echo },
+                            lane,
+                            Sending::Again,
+                        );
+                    }
+                    Ok(_) => {}
+                    Err(error) => return Wrote::alone(github.unread(error)),
                 }
-                Ok(_) => {}
-                Err(error) => return Wrote::alone(github.unread(error)),
-            }
-            let before = match github.before(&sent.write, &key.login) {
-                Ok(before) => before,
-                Err(error) => return Wrote::alone(github.unread(error)),
-            };
-            match self.shelved(key, |book, _| {
-                let found = book.resend(attempt, before, unix_millis());
-                (found, found)
-            }) {
-                Ok((true, _)) => {}
-                Ok((false, drafts)) => {
-                    return Wrote {
-                        written: not_sent(gone),
-                        drafts: Some(drafts),
-                    };
+                let before = match github.before(&sent.write, &key.login) {
+                    Ok(before) => before,
+                    Err(error) => return Wrote::alone(github.unread(error)),
+                };
+                match self.shelved(key, |book, _| {
+                    let found = book.resend(attempt, before, unix_millis());
+                    (found, found)
+                }) {
+                    Ok((true, _)) => {}
+                    Ok((false, drafts)) => {
+                        return Wrote {
+                            written: not_sent(gone),
+                            drafts: Some(drafts),
+                        };
+                    }
+                    Err(failure) => return Wrote::alone(unrecorded(failure)),
                 }
-                Err(failure) => return Wrote::alone(unrecorded(failure)),
-            }
-            let written = github.write(&sent.write);
-            self.finish(key, attempt, written, lane)
-        })
-        .unwrap_or_else(|failure| Wrote::alone(not_sent(failure.message)))
+                let written = github.write(&sent.write);
+                self.finish(key, attempt, written, lane, Sending::Again)
+            })
+            .unwrap_or_else(|failure| Wrote::alone(not_sent(failure.message)));
+        let written = match wrote.written {
+            Written::NotSent { message } => not_sent(format!("{message} {FIRST}")),
+            Written::Refused { message } => refused(format!(
+                "{message} That answer is for sending it again. {FIRST}"
+            )),
+            written => written,
+        };
+        Wrote { written, ..wrote }
     }
 
     /// Done drops the drafts the write carried, an answer that GitHub didn't
-    /// do it gives them back, and unknown keeps the record for a read to
-    /// settle. A record that can't be updated stays, and a read settles it.
-    fn finish(&self, key: &BookKey, attempt: &AttemptId, written: Written, lane: Lane) -> Wrote {
+    /// do its first send gives them back, and anything else keeps the record
+    /// for a read to settle. A record that can't be updated stays, and a read
+    /// settles it.
+    fn finish(
+        &self,
+        key: &BookKey,
+        attempt: &AttemptId,
+        written: Written,
+        lane: Lane,
+        sending: Sending,
+    ) -> Wrote {
         let finished = self.gated(key, |book, _, gate| {
             let changed = match &written {
                 Written::Done { .. } => book.landed(attempt),
-                Written::NotSent { .. } | Written::Refused { .. } => book.give_back(attempt, false),
-                Written::Unknown { .. } => false,
+                Written::NotSent { .. } | Written::Refused { .. } if sending == Sending::First => {
+                    book.give_back(attempt, false)
+                }
+                Written::NotSent { .. } | Written::Refused { .. } | Written::Unknown { .. } => {
+                    false
+                }
             };
             gate.free(lane);
             ((), changed)

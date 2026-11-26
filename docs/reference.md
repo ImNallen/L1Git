@@ -140,7 +140,7 @@ Until L1 Git knows, a write that may have posted offers three choices:
 
 - **Open on GitHub** shows the pull request on github.com, so you can check yourself.
 - **Keep as draft** gives its words back to the box as drafts, marked as may have posted, and the pull request takes writes again. Sending them is then up to you.
-- **Send anyway** sends the same write again, and warns that it may post twice. L1 Git reads GitHub first, and if the write is there by then, it sends nothing.
+- **Send anyway** sends the same write again, and warns that it may post twice. L1 Git reads GitHub first, and if the write is there by then, it sends nothing. If GitHub refuses the second send, or L1 Git can't send it, that says nothing of the first, so the write still shows as may have posted, with these choices.
 
 A merge names the head you saw, so a push while you confirm makes GitHub refuse it. Before L1 Git deletes a merged pull request's head branch on GitHub, it checks that the branch is still at the merged commit, that it is not in a fork, and that no open pull request has it as its head or its base. GitHub then deletes the branch only if it still points at that commit, so a push after the check keeps it. A branch that is already gone counts as deleted. Request changes needs a summary, as GitHub requires.
 
@@ -366,24 +366,24 @@ L1GIT_DEV_PORT=1423 L1GIT_BRIDGE_PORT=9418 pnpm dev
 
 Every read and every write has a deadline. When the deadline passes, L1 Git stops Git and every process Git started, such as a clean filter, and the request returns a `timedOut` error that names it and asks you to retry. A stopped write also says what it left behind. The inspector shows it with **Retry details**. A history read that times out shows it with **Try again**, above the last history it read or in place of a history it never read. Each deadline is about 100 times or more the read's run time on the `pnpm fixture:large` repository:
 
-| Read or write                                                                         | Deadline                                                      |
-| ------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
-| `snapshot`                                                                            | 120 s                                                         |
-| `refs`, `lineStats`, `worktreeStatus`, `worktreePatch`, `branchMerged` | 30 s                                                          |
-| The index refresh after `worktreeStatus`                                              | 30 s                                                          |
-| `commitDetail`, `filePatch`                                                           | 20 s                                                          |
-| `fileHistory`, `blame`, `rangeFiles`, `rangePatches`, `filePatch` with a `from`       | 60 s                                                          |
-| Branch status in `overview` and `fastForward`                                         | 60 s                                                          |
-| `write` of `checkout`, and `undo` or `redo` of a checkout                             | 600 s, because `post-checkout` and lazy fetches run inside it |
-| `write` of `stageFiles` or `unstageFiles`, `undo`, `redo`, `undoHistory`                             | 120 s                                                         |
-| `write` of `createBranch`, `renameBranch`, or `deleteBranch`                          | 120 s                                                         |
-| `write` of `createTag` or `deleteTag`                                                 | 120 s                                                         |
-| `write` of `discard`                                                                  | 300 s, because filters and lazy fetches run inside it         |
-| `write` of a hunk or line write                                                       | 120 s                                                         |
-| `write` of `commit`, `amend`, or `editMessage`                                        | 600 s, because hooks run inside it                            |
-| `mergeReview`, `mergeState`, `merge` | 600 s, including hooks and post-command observation |
-| `replayReview` | 600 s, because merge drivers run inside it |
-| `write` of `replay` or `finishReplay`, `replayAbort`, and `undo` or `redo` of a finished cherry-pick or revert | 600 s, because hooks run inside it |
+| Read or write                                                                                                  | Deadline                                                      |
+| -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| `snapshot`                                                                                                     | 120 s                                                         |
+| `refs`, `lineStats`, `worktreeStatus`, `worktreePatch`, `branchMerged`                                         | 30 s                                                          |
+| The index refresh after `worktreeStatus`                                                                       | 30 s                                                          |
+| `commitDetail`, `filePatch`                                                                                    | 20 s                                                          |
+| `fileHistory`, `blame`, `rangeFiles`, `rangePatches`, `filePatch` with a `from`                                | 60 s                                                          |
+| Branch status in `overview` and `fastForward`                                                                  | 60 s                                                          |
+| `write` of `checkout`, and `undo` or `redo` of a checkout                                                      | 600 s, because `post-checkout` and lazy fetches run inside it |
+| `write` of `stageFiles` or `unstageFiles`, `undo`, `redo`, `undoHistory`                                       | 120 s                                                         |
+| `write` of `createBranch`, `renameBranch`, or `deleteBranch`                                                   | 120 s                                                         |
+| `write` of `createTag` or `deleteTag`                                                                          | 120 s                                                         |
+| `write` of `discard`                                                                                           | 300 s, because filters and lazy fetches run inside it         |
+| `write` of a hunk or line write                                                                                | 120 s                                                         |
+| `write` of `commit`, `amend`, or `editMessage`                                                                 | 600 s, because hooks run inside it                            |
+| `mergeReview`, `mergeState`, `merge`                                                                           | 600 s, including hooks and post-command observation           |
+| `replayReview`                                                                                                 | 600 s, because merge drivers run inside it                    |
+| `write` of `replay` or `finishReplay`, `replayAbort`, and `undo` or `redo` of a finished cherry-pick or revert | 600 s, because hooks run inside it                            |
 
 A deadline covers all of a read's or a write's Git commands. A write's deadline starts again once it holds its locks. Branch status is the exception. Its deadline starts again after each fetch, checkout probe, branch move, or fast-forward merge, because those commands have their own deadlines, and after waiting for another fetch or fast-forward of the same repository to finish.
 
