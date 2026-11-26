@@ -14,7 +14,7 @@ import type { PullOf } from "./pullRequestWrites";
 import { createBridge, pullKey } from "./test/fakeBridge";
 import type { Bridge } from "./test/fakeBridge";
 import { applyLater } from "./test/fakeWrites";
-import { pull } from "./test/pullRequests";
+import { page, pull } from "./test/pullRequests";
 import { send } from "./transport";
 
 const HEAD = "1".repeat(40) as Oid;
@@ -23,9 +23,9 @@ const one: PullOf = { repository, number: 1 };
 const two: PullOf = { repository, number: 2 };
 const of = { login: "octo", ...one };
 const conversation: Anchor = { kind: "conversation" };
-const said = (body: string): PullWrite => ({
+const said = (body: string, number = 1): PullWrite => ({
   kind: "comment",
-  pull: pull(1).id,
+  pull: pull(number).id,
   body,
 });
 const merge: PullWrite = {
@@ -84,6 +84,9 @@ async function window(task: () => (() => void) | null = () => () => {}) {
   });
   const read = (number: number) =>
     queue.addFirst({ repository: listed, number });
+  // A screen builds each write from the pull request's read.
+  await details.refresh(one);
+  await details.refresh(two);
   return { host, details, drafts, writes, read };
 }
 type Window = Awaited<ReturnType<typeof window>>;
@@ -109,7 +112,9 @@ it("sends one write per pull request at a time and answers busy to the next", as
   const answer = bridge.hold("write");
   expect(writes.send(one, said("First"))).toBe("started");
   expect(writes.send(one, said("Second"))).toBe("busy");
-  expect(writes.send(two, said("Elsewhere")), "its own lane").toBe("started");
+  expect(writes.send(two, said("Elsewhere", 2)), "its own lane").toBe(
+    "started",
+  );
   await answer.arrived;
   expect(writes.busy(one)).toBe(true);
   answer.release();
@@ -288,8 +293,8 @@ it("tells refused from not sent, rereads only after GitHub answered, and clears 
     },
     { kind: "notSent", message: "L1 Git sent nothing." },
   );
-  const reads = () =>
-    bridge.hostLog.filter(({ op }) => op === "pullRequest").length;
+  const preloaded = asked("pullRequest");
+  const reads = () => asked("pullRequest") - preloaded;
   writes.send(one, said("One"));
   await vi.waitFor(() => expect(state(shown)?.kind).toBe("refused"));
   expect(state(shown)).toMatchObject({ message: /locked/ });
@@ -327,9 +332,10 @@ it("looks for a kept write as soon as a window learns of it, after its read", as
   await vi.waitFor(() => expect(asked("check")).toBe(1));
   applyLater(bridge.world.host);
   const restarted = await window();
+  const preloaded = asked("pullRequest");
   expect(restarted.writes.attempts(one)).toEqual([]);
   await restarted.read(1);
-  await vi.waitFor(() => expect(asked("pullRequest")).toBe(2));
+  await vi.waitFor(() => expect(asked("pullRequest")).toBe(preloaded + 1));
   await restarted.drafts.load(of);
   await vi.waitFor(() => expect(kept()).toEqual([]));
   expect(asked("check")).toBe(2);
@@ -414,4 +420,55 @@ it("holds the box a write carries while it sends, and frees it as the write ends
   expect(await shown.writes.keep(one, id)).toBe(true);
   expect(shown.drafts.held(of, ...place)).toBe(false);
   expect(shown.drafts.type(of, ...place, "Again")).toBe("typed");
+});
+
+it("sends only what names this pull request, its threads and its pending review, as its read shows them", async () => {
+  const thread = {
+    id: "PRRT_1",
+    review: null,
+    path: "a.rs",
+    line: 3,
+    startLine: null,
+    originalLine: 3,
+    originalStartLine: null,
+    side: "right" as const,
+    outdated: false,
+    resolved: false,
+    hunk: "@@ -1 +1 @@",
+    comments: page([]),
+    can: { reply: true, resolve: true, unresolve: false },
+  };
+  bridge.world.host.details.set(pullKey("octo/pin", 1), {
+    ...pull(1),
+    threads: page([thread]),
+    pending: { kind: "review", id: "PRR_1" as never, comments: page([]) },
+  });
+  bridge.world.host.details.set(pullKey("octo/pin", 2), {
+    ...pull(2),
+    threads: page([{ ...thread, id: "PRRT_2" }]),
+  });
+  const { writes } = await window();
+  const three: PullOf = { repository, number: 3 };
+  const pending: PullWrite = {
+    kind: "submitPending",
+    review: "PRR_1" as never,
+    event: "approve",
+    body: "",
+  };
+  for (const [at, write] of [
+    [one, { kind: "comment", pull: pull(2).id, body: "Hi" }],
+    [one, { kind: "reply", thread: "PRRT_2", body: "Hi" }],
+    [one, { kind: "resolve", thread: "PRRT_2" }],
+    [two, pending],
+    [three, { kind: "comment", pull: "PR_3" as never, body: "Hi" }],
+  ] as const)
+    expect(writes.send(at, write), JSON.stringify(write)).toBe("notInRead");
+  expect(asked("write")).toBe(0);
+  expect(writes.send(one, { kind: "resolve", thread: "PRRT_1" })).toBe(
+    "started",
+  );
+  await vi.waitFor(() => expect(writes.busy(one)).toBe(false));
+  expect(writes.send(one, pending)).toBe("started");
+  expect(writes.send(two, said("Hi", 2))).toBe("started");
+  await vi.waitFor(() => expect(asked("write")).toBe(3));
 });

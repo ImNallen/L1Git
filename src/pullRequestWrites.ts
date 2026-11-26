@@ -1,6 +1,7 @@
 import type { Anchor, SentWrite } from "./domain/drafts";
 import type { Carried, Wrote } from "./domain/host";
 import type { PullRequest } from "./domain/pullRequest";
+import { namedIn } from "./domain/pullRequestWrites";
 import type { Echo, PullWrite } from "./domain/pullRequestWrites";
 import type { GitHubRepository, Oid } from "./domain/repository";
 import type { createDrafts, DraftsOf } from "./drafts";
@@ -309,15 +310,25 @@ export function createPullRequestWrites(deps: {
   return {
     /** "busy" sends nothing: a write of this pull request is sending or may
      * have posted. "unsaved" sends nothing: a draft it carries has words the
-     * host hasn't saved, so `flush` the drafts first. */
+     * host hasn't saved, so `flush` the drafts first. "notInRead" sends
+     * nothing: the write names a pull request, thread or review that this
+     * pull request's latest read doesn't show. */
     send(
       pull: PullOf,
       write: PullWrite,
       drafts: readonly DraftRef[] = [],
-    ): "started" | "busy" | "unsaved" | "signedOut" | "restarting" {
+    ):
+      | "started"
+      | "busy"
+      | "unsaved"
+      | "notInRead"
+      | "signedOut"
+      | "restarting" {
       const login = viewer();
       if (!login) return "signedOut";
       if (attempts(pull).some(holds)) return "busy";
+      const read = deps.details.read()(pull).value;
+      if (!read || !namedIn(write, read)) return "notInRead";
       const of = draftsOf(pull, login);
       const carried = drafts.map(({ anchor, head }) =>
         deps.drafts.carried(of, anchor, head),

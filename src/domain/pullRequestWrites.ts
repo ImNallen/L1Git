@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { PullRequest } from "./pullRequest";
 import { oidSchema } from "./repository";
 
 const nodeId = <Brand extends string>() => z.string().min(1).brand<Brand>();
@@ -61,6 +62,21 @@ export const pullWriteSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 export type PullWrite = z.infer<typeof pullWriteSchema>;
+
+/** Whether `pull`'s read shows every node `write` names, so a write never
+ * reaches another pull request's thread or review. */
+export function namedIn(write: PullWrite, pull: PullRequest): boolean {
+  switch (write.kind) {
+    case "reply":
+    case "resolve":
+    case "unresolve":
+      return pull.threads?.items.some(({ id }) => id === write.thread) ?? false;
+    case "submitPending":
+      return pull.pending.kind === "review" && pull.pending.id === write.review;
+    default:
+      return write.pull === pull.id;
+  }
+}
 
 const id = z.string().nullable();
 const echoSchema = z.discriminatedUnion("kind", [
