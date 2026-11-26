@@ -398,3 +398,40 @@ it("keeps polling a browser sign-in when a read delivers a newer status", async 
     session: "s1",
   });
 });
+
+it("sends every write on its own, and calls one Rust never answered unknown", async () => {
+  const { host, transport, replies } = client();
+  const write = {
+    asLogin: "octo",
+    write: { kind: "resolve", thread: "T_1" },
+  } as const;
+  const first = host.write(write);
+  const second = host.write(write);
+  await Promise.resolve();
+  expect(transport, "never joined like runOnce").toHaveBeenCalledTimes(2);
+  expect(transport.mock.calls[0]?.[0]).toEqual({ op: "write", ...write });
+  replies[0]?.resolve({
+    op: "write",
+    data: {
+      kind: "done",
+      echo: { kind: "thread", id: "T_1", resolved: true },
+    },
+    status: connected(2),
+  });
+  replies[1]?.reject(new Error("The development bridge is unavailable."));
+  expect(await first).toEqual({
+    kind: "done",
+    echo: { kind: "thread", id: "T_1", resolved: true },
+  });
+  expect(await second).toMatchObject({ kind: "unknown" });
+  expect(host.read().status).toEqual(connected(2));
+  const interrupted = host.write(write);
+  await Promise.resolve();
+  replies[2]?.reject({
+    kind: "interrupted",
+    message: "L1 Git stopped before GitHub answered.",
+    status: connected(2),
+  });
+  expect(await interrupted).toMatchObject({ kind: "unknown" });
+  expect(transport).toHaveBeenCalledTimes(3);
+});

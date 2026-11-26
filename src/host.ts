@@ -9,7 +9,9 @@ import type {
   HostRequest,
   HostResponse,
   HostStatus,
+  HostWrite,
 } from "./domain/host";
+import type { Written } from "./domain/pullRequestWrites";
 import { send } from "./transport";
 
 type Op = HostCommand["op"];
@@ -41,6 +43,9 @@ const transportProblem = (error: unknown) =>
       : "L1 Git could not reach its GitHub connection. Try again.";
 
 const unreachableRetryMs = 5_000;
+
+const unheard =
+  "L1 Git sent this to its GitHub connection and did not hear back, so GitHub may or may not have done it. L1 Git reads the pull request again to find out.";
 
 export function createHostClient(transport: HostTransport) {
   let view: HostView = {
@@ -143,6 +148,20 @@ export function createHostClient(transport: HostTransport) {
     return exchanged;
   }
 
+  /**
+   * Sends one write to GitHub through Rust. Unlike `ask` and `runOnce`, it
+   * never joins another request, and nothing here sends it again. An answer
+   * that never came back from Rust may follow GitHub doing it, so it is
+   * unknown.
+   */
+  async function write(request: Omit<HostWrite, "op">): Promise<Written> {
+    const exchanged = await exchange<HostWrite>({ op: "write", ...request });
+    if (view.status?.revision !== announced) update({});
+    return exchanged.ok
+      ? exchanged.reply.data
+      : { kind: "unknown", message: unheard };
+  }
+
   function cancelDevice(): Promise<boolean> {
     const starting = running.get("deviceStart");
     if (starting) return starting.then(cancelDevice);
@@ -161,6 +180,7 @@ export function createHostClient(transport: HostTransport) {
       };
     },
     ask,
+    write,
     refresh: () => runOnce({ op: "status" }),
     probeGh: () => runOnce({ op: "probeGh" }),
     connectGh: (login: string) => runOnce({ op: "connectGh", login }),

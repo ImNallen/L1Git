@@ -22,6 +22,9 @@ import type { GitHubRepository } from "../domain/repository";
 import { rangeFilesSchema, rangePatchesSchema } from "../domain/range";
 import { pullCopyHandlers } from "./fakePullCopies";
 import { draftsHandler } from "./fakeDrafts";
+import { writeHandler } from "./fakeWrites";
+import type { WriteScript } from "./fakeWrites";
+import type { PullWrite } from "../domain/pullRequestWrites";
 import type { Draft } from "../domain/drafts";
 import type { PullCopy } from "./fakePullCopies";
 import { mergeSelectionSchema } from "../domain/merge";
@@ -87,6 +90,9 @@ export type World = {
     /** The drafts on this computer, by login and `pullKey`, as the host keeps
      * them in drafts.json. */
     drafts: Map<string, Draft[]>;
+    /** What the next writes answer, in order. A write with none left is done
+     * and changes `details` as GitHub would. */
+    writes: WriteScript[];
   };
 };
 
@@ -158,6 +164,7 @@ export function createWorld(): World {
       pulls: new Map(),
       details: new Map(),
       drafts: new Map(),
+      writes: [],
     },
   };
 }
@@ -459,6 +466,8 @@ const hostHandlers: Record<
       request.change as DraftChange,
       host.drafts,
     ),
+  write: (request, host) =>
+    writeHandler(String(request.asLogin), request.write as PullWrite, host),
   disconnect: (_, host) => {
     host.status = {
       ...host.status,

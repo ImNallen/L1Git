@@ -4,6 +4,8 @@ import { pullDraftsSchema } from "./drafts";
 import type { DraftChange } from "./drafts";
 import { pullRequestSchema, pullRequestsSchema } from "./pullRequest";
 import type { PullRequestList } from "./pullRequest";
+import { writtenSchema } from "./pullRequestWrites";
+import type { PullWrite } from "./pullRequestWrites";
 import type { GitHubRepository } from "./repository";
 
 const accessSchema = z.enum(["private", "publicOnly", "perRepository"]);
@@ -124,6 +126,11 @@ export const hostResponseSchema = z.discriminatedUnion("op", [
     data: pullDraftsSchema,
     status: hostStatusSchema,
   }),
+  z.object({
+    op: z.literal("write"),
+    data: writtenSchema,
+    status: hostStatusSchema,
+  }),
 ]);
 
 export type HostCommand =
@@ -145,7 +152,10 @@ export type HostDrafts = {
   change: DraftChange;
 };
 
-export type HostRequest = HostCommand | HostRead | HostDrafts;
+/** A change on GitHub for `asLogin` only. Never merged, never sent twice. */
+export type HostWrite = { op: "write"; asLogin: string; write: PullWrite };
+
+export type HostRequest = HostCommand | HostRead | HostDrafts | HostWrite;
 
 export const hostRequestOps = hostResponseSchema.options.map(
   (option) => option.shape.op.value,

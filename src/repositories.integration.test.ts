@@ -4043,7 +4043,15 @@ describe("real Rust host contract", () => {
       number: z.number().optional(),
     }),
   });
+  const mutations: unknown[] = [];
   function answerTo(question: string) {
+    const asked = z.object({ query: z.string() }).parse(JSON.parse(question));
+    if (asked.query.startsWith("mutation")) {
+      mutations.push(JSON.parse(question));
+      return JSON.stringify({
+        data: { addComment: { commentEdge: { node: { id: "IC_1" } } } },
+      });
+    }
     const { variables } = questionSchema.parse(JSON.parse(question));
     const { owner, repo, merged, number } = variables;
     const list = merged ? "merged" : "open";
@@ -4294,6 +4302,29 @@ describe("real Rust host contract", () => {
     });
     expect(seen).toEqual(Array(4).fill(`/graphql Bearer ${token}`));
     await ask({ op: "disconnect" });
+  });
+
+  it("sends a write once as the account it names, and reads how it ended", async () => {
+    const write = (asLogin: string) =>
+      createHostClient(async (request) => {
+        const body: unknown = await (await hostPost(request)).json();
+        return body;
+      }).write({
+        asLogin,
+        write: { kind: "comment", pull: "PR_1" as never, body: "Thanks!" },
+      });
+    await hostPost({ op: "connectGh", login: "octo" });
+    mutations.length = 0;
+    expect(await write("hubot")).toMatchObject({ kind: "notSent" });
+    expect(mutations, "another account sends nothing").toEqual([]);
+    expect(await write("octo")).toEqual({
+      kind: "done",
+      echo: { kind: "comment", id: "IC_1" },
+    });
+    expect(mutations).toMatchObject([
+      { variables: { input: { subjectId: "PR_1", body: "Thanks!" } } },
+    ]);
+    await hostPost({ op: "disconnect" });
   });
 
   it("keeps review drafts beside host.json, signed out and without GitHub", async () => {
