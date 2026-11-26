@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { draftText } from "../domain/drafts";
+import { draftKey, draftText } from "../domain/drafts";
 import type { Anchor } from "../domain/drafts";
 import { byHead, eventsFor, heldBack, reviewOf } from "../domain/finishReview";
 import type { ReviewEvent } from "../domain/finishReview";
@@ -63,7 +63,15 @@ export function useFinishReview({
   const [chosen, choose] = useState<ReviewEvent>("comment");
   const [sending, setSending] = useState<Sending>(idle);
   const head = pull.head.oid;
-  const { current, older } = byHead(comments.drafts, head);
+  // A new comment still in its box is not in the review until Start a review.
+  const writing =
+    comments.box && !comments.box.isEdit
+      ? draftKey(comments.box.anchor, comments.head)
+      : null;
+  const { current, older } = byHead(
+    comments.drafts.filter(({ key }) => key !== writing),
+    head,
+  );
   const summaryDraft =
     drafts.drafts.find(({ anchor }) => anchor.kind === "summary") ?? null;
   const summary = summaryDraft?.text ?? "";

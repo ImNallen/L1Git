@@ -107,6 +107,7 @@ async function openFiles({
 }
 
 const finish = () => get("button", /^Finish review/);
+const panel = () => get("tabpanel", /^Files changed/);
 const popover = () => query("dialog", "Finish your review");
 const mutations = (app: Harness) => app.bridge.world.host.mutations;
 const kept = (app: Harness) =>
@@ -309,4 +310,32 @@ it("goes to a pending comment's file, and closes with Escape back to its button"
   expect(document.querySelector(".file-diff-path")?.textContent).toBe(
     "src/b.ts",
   );
+});
+
+it("counts a new comment only once Start a review keeps it", async () => {
+  const app = await openFiles({ drafts: [draft(11, "Kept one")] });
+  const number = panel()
+    .querySelector("diffs-container")!
+    .shadowRoot!.querySelector<HTMLElement>(
+      '[data-column-number="12"][data-line-type="change-addition"]',
+    )!;
+  await app.act(() => {
+    for (const [target, kind] of [
+      [number, "pointerdown"],
+      [document, "pointerup"],
+    ] as const)
+      target.dispatchEvent(
+        new PointerEvent(kind, {
+          bubbles: true,
+          composed: true,
+          pointerType: "mouse",
+          button: 0,
+          pointerId: 1,
+        }),
+      );
+  });
+  await app.type(get("textbox", "Comment on line 12"), "Half a thought");
+  expect(finish().textContent).toBe("Finish review · 1");
+  await app.click(get("button", "Add review comment"));
+  expect(finish().textContent).toBe("Finish review · 2");
 });
