@@ -102,3 +102,54 @@ it("saves words typed on the very draft a write carried over what it gives back"
   expect(await second.flush(pull)).toBe(true);
   expect(heldTexts()).toEqual(["A B C X"]);
 });
+
+it("keeps words that wait on a write through closing the window", async () => {
+  const first = window();
+  first.type(pull, conversation, HEAD, "A B C");
+  expect(await first.flush(pull)).toBe(true);
+  await first.load(pull);
+  sends();
+  expect(first.type(pull, conversation, HEAD, "A B C X")).toBe("typed");
+  expect(await first.flush(pull)).toBe(false);
+
+  const reopened = window();
+  await reopened.load(pull);
+  expect(reopened.held(pull, conversation, HEAD)).toBe(true);
+  expect(reopened.read(pull).drafts).toMatchObject([
+    { text: "A B C X", save: { kind: "unsaved", why: /once it ends/ } },
+  ]);
+  giveBack(bridge.world.host, stored, "a-1", false);
+  await reopened.load(pull);
+  expect(await reopened.flush(pull)).toBe(true);
+  expect(heldTexts()).toEqual(["A B C X"]);
+});
+
+it("offers both words after a close when they were typed on an older draft, and forgets the ones not picked", async () => {
+  const first = window();
+  first.type(pull, conversation, HEAD, "A B");
+  expect(await first.flush(pull)).toBe(true);
+  const second = window();
+  await second.load(pull);
+  first.type(pull, conversation, HEAD, "A B C");
+  expect(await first.flush(pull)).toBe(true);
+  sends();
+  second.type(pull, conversation, HEAD, "A B X");
+  expect(await second.flush(pull)).toBe(false);
+  giveBack(bridge.world.host, stored, "a-1", false);
+
+  const reopened = window();
+  await reopened.load(pull);
+  expect(reopened.read(pull).drafts).toMatchObject([
+    {
+      text: "A B X",
+      save: { kind: "changedElsewhere", theirs: { text: "A B C" } },
+    },
+  ]);
+  reopened.settle(pull, key, "theirs");
+  expect(await reopened.flush(pull)).toBe(true);
+  const later = window();
+  await later.load(pull);
+  expect(later.read(pull).drafts).toMatchObject([
+    { text: "A B C", save: { kind: "saved" } },
+  ]);
+});
