@@ -135,7 +135,8 @@ export function createPullRequestWrites(deps: {
   }
 
   /** This window's attempts, then each write the host keeps that this
-   * window isn't sending. */
+   * window isn't sending. A notice of this window's for a kept write, such
+   * as a Send anyway that sent nothing, shows on the kept write. */
   function attempts(pull: PullOf): readonly Attempt[] {
     const { shown, pulls } = current();
     const key = keyOf(pull);
@@ -146,15 +147,22 @@ export function createPullRequestWrites(deps: {
     const last = shown.get(key);
     if (last?.local === local && last.sent === sent) return last.all;
     const kept = new Set(sent.map(({ attempt }) => attempt));
-    const tracked = new Set(
-      local.filter(({ state }) => state.kind !== "unknown").map(({ id }) => id),
+    const sending = new Set(
+      local.filter(({ state }) => state.kind === "sending").map(({ id }) => id),
+    );
+    const told = new Map(
+      local.flatMap(({ id, state }) =>
+        state.kind === "notSent" || state.kind === "refused"
+          ? [[id, state.message]]
+          : [],
+      ),
     );
     const all: Attempt[] = [
       ...local.filter(
-        ({ id, state }) => !(state.kind === "unknown" && kept.has(id)),
+        ({ id, state }) => state.kind === "sending" || !kept.has(id),
       ),
       ...sent
-        .filter(({ attempt }) => !tracked.has(attempt))
+        .filter(({ attempt }) => !sending.has(attempt))
         .map(
           ({ attempt, write, sending }): Attempt => ({
             id: attempt,
@@ -162,7 +170,11 @@ export function createPullRequestWrites(deps: {
             viewer: login ?? "",
             state: sending
               ? { kind: "sending" }
-              : { kind: "unknown", message: mayHavePosted, kept: true },
+              : {
+                  kind: "unknown",
+                  message: told.get(attempt) ?? mayHavePosted,
+                  kept: true,
+                },
           }),
         ),
     ];
