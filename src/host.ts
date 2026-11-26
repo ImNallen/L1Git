@@ -2,17 +2,19 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { hostErrorSchema, hostResponseSchema, hostRoute } from "./domain/host";
 import type {
   GhProbe,
+  HostCheck,
   HostCommand,
   HostDrafts,
   HostProblem,
   HostRead,
   HostRequest,
   HostResponse,
+  HostSendAgain,
   HostStatus,
   HostWrite,
+  Wrote,
 } from "./domain/host";
-import type { Written } from "./domain/pullRequestWrites";
-import { send } from "./transport";
+import { Unsent, send } from "./transport";
 
 type Op = HostCommand["op"];
 type Busy = Exclude<Op, "status" | "devicePoll">;
@@ -45,7 +47,7 @@ const transportProblem = (error: unknown) =>
 const unreachableRetryMs = 5_000;
 
 const unheard =
-  "L1 Git sent this to its GitHub connection and did not hear back, so GitHub may or may not have done it. L1 Git reads the pull request again to find out.";
+  "L1 Git sent this to its GitHub connection and did not hear back, so GitHub may or may not have done it.";
 
 export function createHostClient(transport: HostTransport) {
   let view: HostView = {
@@ -102,7 +104,11 @@ export function createHostClient(transport: HostTransport) {
       if (!failure.success)
         return {
           ok: false,
-          problem: { kind: "transport", message: transportProblem(error) },
+          problem: {
+            kind: "transport",
+            message: transportProblem(error),
+            ...(error instanceof Unsent && { unsent: true }),
+          },
         };
       accept(failure.data.status);
       return { ok: false, problem: failure.data };
@@ -140,7 +146,7 @@ export function createHostClient(transport: HostTransport) {
    * `busy` and `problem` to the sign-in screen, but takes the status like any
    * request, so a token GitHub refuses here signs that screen out too.
    */
-  async function ask<R extends HostRead | HostDrafts>(
+  async function ask<R extends HostRead | HostDrafts | HostCheck>(
     request: R,
   ): Promise<Exchanged<R>> {
     const exchanged = await exchange(request);
@@ -152,14 +158,23 @@ export function createHostClient(transport: HostTransport) {
    * Sends one write to GitHub through Rust. Unlike `ask` and `runOnce`, it
    * never joins another request, and nothing here sends it again. An answer
    * that never came back from Rust may follow GitHub doing it, so it is
-   * unknown.
+   * unknown, unless the request never got to Rust.
    */
-  async function write(request: Omit<HostWrite, "op">): Promise<Written> {
-    const exchanged = await exchange<HostWrite>({ op: "write", ...request });
+  async function write(request: HostWrite | HostSendAgain): Promise<Wrote> {
+    const exchanged = await exchange<HostWrite | HostSendAgain>(request);
     if (view.status?.revision !== announced) update({});
-    return exchanged.ok
-      ? exchanged.reply.data
-      : { kind: "unknown", message: unheard };
+    if (exchanged.ok) return exchanged.reply.data;
+    const { problem } = exchanged;
+    const unsent = problem.kind === "transport" && problem.unsent;
+    return {
+      written: unsent
+        ? {
+            kind: "notSent",
+            message: `L1 Git sent nothing. ${problem.message}`,
+          }
+        : { kind: "unknown", message: unheard },
+      drafts: null,
+    };
   }
 
   function cancelDevice(): Promise<boolean> {
@@ -180,7 +195,10 @@ export function createHostClient(transport: HostTransport) {
       };
     },
     ask,
-    write,
+    write: (request: Omit<HostWrite, "op">) =>
+      write({ op: "write", ...request }),
+    sendAgain: (request: Omit<HostSendAgain, "op">) =>
+      write({ op: "sendAgain", ...request }),
     refresh: () => runOnce({ op: "status" }),
     probeGh: () => runOnce({ op: "probeGh" }),
     connectGh: (login: string) => runOnce({ op: "connectGh", login }),

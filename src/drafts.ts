@@ -5,7 +5,9 @@ import type {
   DraftChange,
   DraftKey,
   PullDrafts,
+  SentWrite,
 } from "./domain/drafts";
+import type { Carried } from "./domain/host";
 import type { GitHubRepository, Oid } from "./domain/repository";
 import type { HostClient } from "./host";
 
@@ -19,6 +21,8 @@ const fullMessage = {
   pullRequests:
     "L1 Git keeps drafts for 100 pull requests on this computer. Send or delete the drafts of another pull request to save this.",
 };
+const heldMessage =
+  "These words went out with a write that may have posted. Choose Keep as draft or Send anyway first.";
 
 /** One pull request, as one account sees it. */
 export type DraftsOf = {
@@ -47,6 +51,9 @@ type ShownDraft = {
   text: string;
   /** Null until the host has saved it once. */
   writtenAt: number | null;
+  /** A write carried these words and its answer was lost: sending them again
+   * may post them twice. */
+  mayHavePosted: boolean;
   save: DraftSave;
 };
 
@@ -56,6 +63,9 @@ type DraftsView = {
     | { kind: "ready" }
     | { kind: "unreadable"; why: string };
   drafts: readonly ShownDraft[];
+  /** Writes that left, or may have, with the drafts each carried. The host
+   * keeps them until their outcome is known. */
+  sent: readonly SentWrite[];
   /** Where the host moved an unreadable drafts file, for every pull request,
    * since all of them were in it. */
   setAside: string | null;
@@ -75,6 +85,7 @@ type Pull = {
   read: DraftsView["read"];
   entries: Map<DraftKey, Entry>;
   timers: Map<DraftKey, ReturnType<typeof setTimeout>>;
+  sent: readonly SentWrite[];
   /** Every request for one pull request waits for the one before it. */
   queue: Promise<void>;
   view: DraftsView | null;
@@ -106,6 +117,7 @@ export function createDrafts(host: Pick<HostClient, "ask">) {
   let unread: DraftsView = {
     read: { kind: "unread" },
     drafts: [],
+    sent: [],
     setAside,
   };
 
@@ -118,6 +130,7 @@ export function createDrafts(host: Pick<HostClient, "ask">) {
       read: { kind: "unread" },
       entries: new Map(),
       timers: new Map(),
+      sent: [],
       queue: Promise.resolve(),
       view: null,
     };
@@ -141,6 +154,7 @@ export function createDrafts(host: Pick<HostClient, "ask">) {
   /** Takes what the host holds, except over words this window has not saved. */
   function adopt(pull: Pull, answer: PullDrafts, skip: DraftKey | null) {
     pull.read = { kind: "ready" };
+    pull.sent = answer.sent;
     if (answer.setAside) {
       setAside = answer.setAside;
       unread = { ...unread, setAside };
@@ -205,6 +219,8 @@ export function createDrafts(host: Pick<HostClient, "ask">) {
       entry.save = { kind: "changedElsewhere", theirs };
     else if (data.refused?.kind === "full")
       entry.save = { kind: "unsaved", why: fullMessage[data.refused.of] };
+    else if (data.refused?.kind === "sent")
+      entry.save = { kind: "unsaved", why: heldMessage };
     else if (entry.text === text && entry.head === head) {
       if (theirs) pull.entries.set(key, settled(theirs));
       else pull.entries.delete(key);
@@ -266,12 +282,14 @@ export function createDrafts(host: Pick<HostClient, "ask">) {
       pull.view ??= {
         setAside,
         read: pull.read,
+        sent: pull.sent,
         drafts: [...pull.entries].map(([key, entry]) => ({
           key,
           anchor: entry.anchor,
           head: entry.head,
           text: entry.text,
           writtenAt: entry.base?.writtenAt ?? null,
+          mayHavePosted: entry.base?.mayHavePosted ?? false,
           save: entry.save,
         })),
       };
@@ -307,6 +325,37 @@ export function createDrafts(host: Pick<HostClient, "ask">) {
       const chosen = of ? [pullOf(of)] : [...pulls.values()];
       const done = await Promise.all(chosen.map(flushPull));
       return done.every(Boolean);
+    },
+    /** Takes what a write's answer says the host holds now. */
+    adopt(of: DraftsOf, answer: PullDrafts) {
+      const pull = pullOf(of);
+      adopt(pull, answer, null);
+      changed(pull);
+    },
+    /** How a write carries the draft at `anchor`: as the host saved it. Null
+     * while this window has words the host has not saved, so `flush` first. */
+    carried(of: DraftsOf, anchor: Anchor, head: Oid): Carried | null {
+      const entry = pulls.get(pullId(of))?.entries.get(draftKey(anchor, head));
+      if (entry?.save.kind !== "saved" || !entry.base) return null;
+      return {
+        anchor: entry.base.anchor,
+        head: entry.base.head,
+        at: entry.base.savedAt,
+      };
+    },
+    /** Keep as draft: the host gives back the drafts of a write that may have
+     * posted, marked so, and the pull request is free to write again. False
+     * while that write is still sending or the host can't be asked. */
+    keep(of: DraftsOf, attempt: string): Promise<boolean> {
+      const pull = pullOf(of);
+      let kept = false;
+      return enqueue(pull, async () => {
+        const answer = await ask(pull, { kind: "keep", attempt });
+        if (!answer.ok) return;
+        adopt(pull, answer.reply.data, null);
+        kept = answer.reply.data.refused === null;
+        changed(pull);
+      }).then(() => kept);
     },
     /** Ends `changedElsewhere`: keep this window's words over theirs, or
      * take theirs. */

@@ -337,6 +337,7 @@ it("says when drafts for one more pull request have no room, and drops none", as
     text: "Kept",
     writtenAt: 1,
     savedAt: 1,
+    mayHavePosted: false,
   };
   for (let number = 1; number <= 100; number += 1)
     bridge.world.host.drafts.set(`octo octo/pin#${number + 100}`, [draft]);
@@ -432,4 +433,48 @@ it("sends a range of one line with no start, and a range dragged upward in order
   ]);
   drafts.type(pull, at(9, 3), HEAD, "Upward, edited");
   expect(texts(drafts)).toEqual(["One line", "Upward, edited"]);
+});
+
+it("keeps words typed where a write that may have posted holds the place, and saves them once it is kept", async () => {
+  const drafts = window();
+  drafts.type(pull, conversation, HEAD, "Thanks!");
+  await drafts.flush(pull);
+  const [saved] = bridge.world.host.drafts.get(stored) ?? [];
+  if (!saved) throw new Error("the draft was saved");
+  expect(drafts.carried(pull, conversation, HEAD)).toEqual({
+    anchor: conversation,
+    head: HEAD,
+    at: saved.savedAt,
+  });
+  bridge.world.host.drafts.set(stored, []);
+  bridge.world.host.sent.set(stored, [
+    {
+      attempt: "a-1",
+      at: 1,
+      write: { kind: "comment", pull: "PR_7" as never, body: "Thanks!" },
+      drafts: [saved],
+      sending: false,
+      applied: false,
+    },
+  ]);
+  drafts.type(pull, conversation, HEAD, "Thanks! And");
+  expect(drafts.carried(pull, conversation, HEAD), "not saved yet").toBe(null);
+  expect(await drafts.flush(pull)).toBe(false);
+  expect(drafts.read(pull)).toMatchObject({
+    drafts: [
+      {
+        text: "Thanks! And",
+        save: { kind: "unsaved", why: /may have posted/ },
+      },
+    ],
+    sent: [{ attempt: "a-1", sending: false }],
+  });
+
+  expect(await drafts.keep(pull, "a-1")).toBe(true);
+  expect(await drafts.flush(pull)).toBe(true);
+  expect(drafts.read(pull)).toMatchObject({
+    drafts: [{ text: "Thanks! And", mayHavePosted: true }],
+    sent: [],
+  });
+  expect(heldTexts()).toEqual(["Thanks! And"]);
 });

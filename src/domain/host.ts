@@ -1,12 +1,16 @@
 import { z } from "zod";
 import type { Route } from "../transport";
 import { pullDraftsSchema } from "./drafts";
-import type { DraftChange } from "./drafts";
+import type { Anchor, DraftChange } from "./drafts";
 import { pullRequestSchema, pullRequestsSchema } from "./pullRequest";
 import type { PullRequestList } from "./pullRequest";
-import { writtenSchema } from "./pullRequestWrites";
+import {
+  pullWriteSchema,
+  seenSchema,
+  writtenSchema,
+} from "./pullRequestWrites";
 import type { PullWrite } from "./pullRequestWrites";
-import type { GitHubRepository } from "./repository";
+import type { GitHubRepository, Oid } from "./repository";
 
 const accessSchema = z.enum(["private", "publicOnly", "perRepository"]);
 
@@ -98,6 +102,23 @@ export const hostErrorSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("deviceDenied"), ...failure }),
 ]);
 
+/** A write's answer, with what the pull request's drafts and writes hold
+ * after it, when the host got as far as reading them. */
+const wroteSchema = z.object({
+  written: writtenSchema,
+  drafts: pullDraftsSchema.nullable(),
+});
+export type Wrote = z.infer<typeof wroteSchema>;
+
+/** What a read showed of the writes whose outcome was unknown. Those it
+ * couldn't tell about are still in `drafts.sent`. */
+const checkedSchema = z.object({
+  settled: z.array(
+    z.object({ attempt: z.string(), write: pullWriteSchema, seen: seenSchema }),
+  ),
+  drafts: pullDraftsSchema,
+});
+
 export const hostResponseSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("status"), status: hostStatusSchema }),
   z.object({
@@ -128,7 +149,17 @@ export const hostResponseSchema = z.discriminatedUnion("op", [
   }),
   z.object({
     op: z.literal("write"),
-    data: writtenSchema,
+    data: wroteSchema,
+    status: hostStatusSchema,
+  }),
+  z.object({
+    op: z.literal("sendAgain"),
+    data: wroteSchema,
+    status: hostStatusSchema,
+  }),
+  z.object({
+    op: z.literal("check"),
+    data: checkedSchema,
     status: hostStatusSchema,
   }),
 ]);
@@ -152,10 +183,40 @@ export type HostDrafts = {
   change: DraftChange;
 };
 
-/** A change on GitHub for `asLogin` only. Never merged, never sent twice. */
-export type HostWrite = { op: "write"; asLogin: string; write: PullWrite };
+type PullAs = {
+  asLogin: string;
+  repository: GitHubRepository;
+  number: number;
+};
 
-export type HostRequest = HostCommand | HostRead | HostDrafts | HostWrite;
+/** A draft a write carries, as saved at `at`. */
+export type Carried = { anchor: Anchor; head: Oid; at: number };
+
+/** A change on GitHub for `asLogin` only. Never merged, never sent twice.
+ * The host keeps it as `attempt`, with the `drafts` it carries, from before
+ * it leaves until its outcome is known. */
+export type HostWrite = PullAs & {
+  op: "write";
+  attempt: string;
+  write: PullWrite;
+  drafts: readonly Carried[];
+};
+
+/** Send anyway: `attempt`'s write once more, unless a read first shows it
+ * landed. */
+export type HostSendAgain = PullAs & { op: "sendAgain"; attempt: string };
+
+/** Reads what happened to the pull request's writes whose outcome is
+ * unknown. It sends nothing. */
+export type HostCheck = PullAs & { op: "check" };
+
+export type HostRequest =
+  | HostCommand
+  | HostRead
+  | HostDrafts
+  | HostWrite
+  | HostSendAgain
+  | HostCheck;
 
 export const hostRequestOps = hostResponseSchema.options.map(
   (option) => option.shape.op.value,
@@ -168,10 +229,11 @@ export const hostRoute: Route = {
 };
 
 export type HostResponse = z.infer<typeof hostResponseSchema>;
-/** `transport` is a failure to reach Rust at all, so it carries no status. */
+/** `transport` is a failure to reach Rust at all, so it carries no status.
+ * `unsent` says the request never got to Rust, so nothing it asks for ran. */
 export type HostProblem =
   | z.infer<typeof hostErrorSchema>
-  | { kind: "transport"; message: string };
+  | { kind: "transport"; message: string; unsent?: true };
 export type HostStatus = z.infer<typeof hostStatusSchema>;
 export type GhProbe = z.infer<typeof ghProbeSchema>;
 export type Access = z.infer<typeof accessSchema>;

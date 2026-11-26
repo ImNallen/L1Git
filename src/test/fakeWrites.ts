@@ -1,23 +1,31 @@
-import type { HostStatus } from "../domain/host";
+import type { Carried, HostStatus, Wrote } from "../domain/host";
+import { draftKey } from "../domain/drafts";
+import type { Draft, PullDrafts } from "../domain/drafts";
 import type {
   PullRequest,
   ReviewThread,
   TimelineEvent,
 } from "../domain/pullRequest";
-import type { PullWrite, Written } from "../domain/pullRequestWrites";
+import type { Echo, PullWrite, Written } from "../domain/pullRequestWrites";
+import { giveBack, viewOf } from "./fakeDrafts";
+import type { FakeSent, Shelf } from "./fakeDrafts";
 
 /** What the next write answers. A write with none left is done. */
 export type WriteScript =
   | { kind: "done" }
   | { kind: "refused"; message?: string }
   | { kind: "notSent"; message?: string }
-  /** Sent with no answer; `applied` says whether GitHub did it anyway. */
-  | { kind: "unknown"; applied: boolean };
+  /** Sent with no answer. `applied` says whether GitHub did it anyway, and
+   * "later" holds it back until `applyLater`, as a GitHub still working on
+   * it when the answer was lost. */
+  | { kind: "unknown"; applied: boolean | "later" };
 
-type Host = {
+type Host = Shelf & {
   status: HostStatus;
   details: Map<string, PullRequest>;
   writes: WriteScript[];
+  /** Every write that reached GitHub, in order. */
+  mutations: PullWrite[];
 };
 
 type Commented = Pick<
@@ -25,9 +33,7 @@ type Commented = Pick<
   "lines" | "body"
 >;
 
-type Change =
-  | { next: PullRequest; echo: Extract<Written, { kind: "done" }>["echo"] }
-  | { refused: string };
+type Change = { next: PullRequest; echo: Echo } | { refused: string };
 
 let made = 0;
 const fresh = (prefix: string) => `${prefix}_fake${(made += 1)}`;
@@ -206,12 +212,71 @@ function change(write: PullWrite, pull: PullRequest, by: string): Change {
   }
 }
 
-/** The host's write op, by writes.rs's rules, over `host.details`. */
-export function writeHandler(
-  asLogin: string,
-  write: PullWrite,
-  host: Host,
-): Written {
+/** A write GitHub can do twice without harm settles from state. */
+const harmless = new Set<PullWrite["kind"]>([
+  "resolve",
+  "unresolve",
+  "merge",
+  "deleteHeadBranch",
+]);
+
+/** Changes `details` as GitHub would for `write`, or says why it wouldn't. */
+function apply(host: Host, write: PullWrite, by: string): Change {
+  const found = find(host.details, write);
+  if (!found)
+    return { refused: "GitHub didn't do it: Could not resolve to a node." };
+  const [key, pull] = found;
+  const changed = change(write, pull, by);
+  if ("next" in changed) host.details.set(key, changed.next);
+  return changed;
+}
+
+/** What a read shows of a write the host kept, as writes/evidence.rs reads
+ * GitHub. */
+function seen(record: FakeSent) {
+  if (record.applied === true)
+    return { kind: "landed" as const, echo: echoOf(record.write) };
+  if (!harmless.has(record.write.kind)) return null;
+  return {
+    kind: "notLanded" as const,
+    message: "GitHub hasn't done it.",
+  };
+}
+
+function echoOf(write: PullWrite): Echo {
+  switch (write.kind) {
+    case "resolve":
+    case "unresolve":
+      return {
+        kind: "thread",
+        id: write.thread,
+        resolved: write.kind === "resolve",
+      };
+    case "merge":
+      return { kind: "merged", commit: "9".repeat(40) };
+    case "deleteHeadBranch":
+      return { kind: "branchDeleted" };
+    case "submitPending":
+      return { kind: "review", id: write.review };
+    case "singleComment":
+    case "submitReview":
+      return { kind: "review", id: null };
+    case "reply":
+    case "comment":
+      return { kind: "comment", id: null };
+  }
+}
+
+type Asked = {
+  asLogin: string;
+  repository: { owner: string; repo: string };
+  number: number;
+};
+
+const bookOf = ({ asLogin, repository, number }: Asked) =>
+  `${asLogin} ${repository.owner}/${repository.repo}#${number}`.toLowerCase();
+
+function signedIn(host: Host, asLogin: string): string | Written {
   const { github } = host.status;
   if (github.kind !== "connected")
     return {
@@ -223,26 +288,158 @@ export function writeHandler(
       kind: "notSent",
       message: `L1 Git is signed in to GitHub as ${github.login}, not ${asLogin}, so it sent nothing.`,
     };
+  return github.login;
+}
+
+const alone = (written: Written): Wrote => ({ written, drafts: null });
+const held = (message: string): Written => ({ kind: "notSent", message });
+
+/** Sends `record`'s write, now that it is kept, and answers by `script`. */
+function send(host: Host, book: string, record: FakeSent, by: string) {
   const script = host.writes.shift() ?? { kind: "done" };
+  const answer = (written: Written): Wrote => {
+    record.sending = false;
+    if (written.kind === "done")
+      host.sent.set(
+        book,
+        (host.sent.get(book) ?? []).filter((sent) => sent !== record),
+      );
+    else if (written.kind !== "unknown")
+      giveBack(host, book, record.attempt, false);
+    return { written, drafts: viewOf(host, book) };
+  };
   if (script.kind === "notSent" || script.kind === "refused")
-    return {
+    return answer({
       kind: script.kind,
       message: script.message ?? `The fake answers ${script.kind}.`,
-    };
-  const found = find(host.details, write);
-  if (!found)
-    return {
-      kind: "refused",
-      message: "GitHub didn't do it: Could not resolve to a node.",
-    };
-  const [key, pull] = found;
-  const changed = change(write, pull, github.login);
-  if ("refused" in changed)
-    return { kind: "refused", message: changed.refused };
-  if (script.kind === "done") {
-    host.details.set(key, changed.next);
-    return { kind: "done", echo: changed.echo };
+    });
+  host.mutations.push(record.write);
+  if (script.kind === "unknown") {
+    if (script.applied === true) apply(host, record.write, by);
+    record.applied = script.applied;
+    return answer({ kind: "unknown", message: "The fake heard no answer." });
   }
-  if (script.applied) host.details.set(key, changed.next);
-  return { kind: "unknown", message: "The fake heard no answer." };
+  const changed = apply(host, record.write, by);
+  if ("refused" in changed)
+    return answer({ kind: "refused", message: changed.refused });
+  return answer({ kind: "done", echo: changed.echo });
+}
+
+/**
+ * The host's write op, by writes.rs's rules: on arrival, before the bridge
+ * holds it, it takes the pull request and keeps the write with its drafts;
+ * the answer it gives when released sends it.
+ */
+export function writeArrives(
+  request: Asked & { attempt: string; write: PullWrite; drafts: Carried[] },
+  host: Host,
+): () => Wrote {
+  const by = signedIn(host, request.asLogin);
+  if (typeof by !== "string") return () => alone(by);
+  const book = bookOf(request);
+  const view = (): PullDrafts => viewOf(host, book);
+  if ((host.sent.get(book) ?? []).length > 0)
+    return () => ({
+      written: held(
+        "Another write for this pull request is sending, or may have posted, so L1 Git sent nothing.",
+      ),
+      drafts: view(),
+    });
+  const drafts = host.drafts.get(book) ?? [];
+  const taken: Draft[] = [];
+  for (const { anchor, head, at } of request.drafts) {
+    const found = drafts.find(
+      (draft) =>
+        draftKey(draft.anchor, draft.head) === draftKey(anchor, head) &&
+        draft.savedAt === at,
+    );
+    if (!found)
+      return () => ({
+        written: held(
+          "A draft changed or went away since this window read it, so L1 Git sent nothing.",
+        ),
+        drafts: view(),
+      });
+    taken.push(found);
+  }
+  host.drafts.set(
+    book,
+    drafts.filter((draft) => !taken.includes(draft)),
+  );
+  const record: FakeSent = {
+    attempt: request.attempt,
+    at: Date.now(),
+    write: request.write,
+    drafts: taken,
+    sending: true,
+    applied: false,
+  };
+  host.sent.set(book, [record]);
+  return () => send(host, book, record, by);
+}
+
+/** Send anyway, by writes.rs's rules: a write GitHub shows already is done
+ * without sending. */
+export function sendAgainArrives(
+  request: Asked & { attempt: string },
+  host: Host,
+): () => Wrote {
+  const by = signedIn(host, request.asLogin);
+  if (typeof by !== "string") return () => alone(by);
+  const book = bookOf(request);
+  const record = host.sent
+    .get(book)
+    ?.find(({ attempt }) => attempt === request.attempt);
+  if (!record || record.sending)
+    return () => ({
+      written: held(
+        "This write isn't waiting anymore, so L1 Git sent nothing.",
+      ),
+      drafts: viewOf(host, book),
+    });
+  record.sending = true;
+  const shown = seen(record);
+  if (shown?.kind === "landed")
+    return () => {
+      host.sent.set(
+        book,
+        (host.sent.get(book) ?? []).filter((sent) => sent !== record),
+      );
+      return {
+        written: { kind: "done", echo: shown.echo },
+        drafts: viewOf(host, book),
+      };
+    };
+  return () => send(host, book, record, by);
+}
+
+/** The host's check op: settles what a read shows, keeps the rest. */
+export function checkHandler(request: Asked, host: Host) {
+  const book = bookOf(request);
+  const settled = [];
+  for (const record of host.sent.get(book) ?? []) {
+    if (record.sending) continue;
+    const shown = seen(record);
+    if (!shown) continue;
+    if (shown.kind === "landed")
+      host.sent.set(
+        book,
+        (host.sent.get(book) ?? []).filter((sent) => sent !== record),
+      );
+    else giveBack(host, book, record.attempt, false);
+    settled.push({ attempt: record.attempt, write: record.write, seen: shown });
+  }
+  return { settled, drafts: viewOf(host, book) };
+}
+
+/** GitHub finishes every write it heard and held back. */
+export function applyLater(host: Host) {
+  const { github } = host.status;
+  const by = github.kind === "connected" ? github.login : "octo";
+  for (const records of host.sent.values())
+    for (const record of records)
+      if (record.applied === "later") {
+        apply(host, record.write, by);
+        record.applied = true;
+      }
 }
