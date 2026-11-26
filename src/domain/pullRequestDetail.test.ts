@@ -1043,10 +1043,10 @@ describe("the merge box", () => {
 
   it("asks for a step on GitHub only when one is needed", () => {
     const acts = (fields: Partial<PullRequest>) =>
-      mergeBox(pull(fields), null, () => "").act;
-    expect(acts({ mergeable: "conflicting" })).toBe(true);
-    expect(acts({ state: { kind: "open", draft: true } })).toBe(true);
-    expect(acts({})).toBe(false);
-    expect(acts({ mergeState: "unknown" })).toBe(false);
+      mergeBox(pull(fields), null, () => "").action.kind;
+    expect(acts({ mergeable: "conflicting" })).toBe("openOnGitHub");
+    expect(acts({ state: { kind: "open", draft: true } })).toBe("openOnGitHub");
+    expect(acts({})).toBe("merge");
+    expect(acts({ mergeState: "unknown" })).toBe("none");
   });
 });
