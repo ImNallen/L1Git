@@ -11,6 +11,8 @@ export const unsent = {
     "L1 Git couldn't save your words first, so it sent nothing. The line under the box says why.",
   signedOut: "L1 Git isn't signed in to GitHub, so it sent nothing.",
   restarting: "L1 Git is restarting for an update, so it sent nothing.",
+  notInRead:
+    "L1 Git's latest read of this pull request doesn't show this, so it sent nothing. Refresh the pull request and try again.",
   gone: "That write isn't waiting anymore, so L1 Git sent nothing.",
 } as const;
 export type Unsent = keyof typeof unsent;

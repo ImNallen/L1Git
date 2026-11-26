@@ -1,4 +1,4 @@
-import { use, useMemo, useState } from "react";
+import { use, useState } from "react";
 import type { ReactNode } from "react";
 import {
   CircleCheck,
@@ -25,7 +25,7 @@ import {
 } from "../domain/pullRequestDetail";
 import { threadsView } from "../domain/threadStanding";
 import type { Entry } from "../domain/pullRequestDetail";
-import type { PullRequest } from "../domain/pullRequest";
+import type { PullRequest, ReviewThread } from "../domain/pullRequest";
 import { shortOid } from "../domain/shortOid";
 import type { ThreadFilter } from "../domain/threadStanding";
 import { usePullWrites } from "../shell/usePullWriting";
@@ -33,6 +33,7 @@ import type { OpenedPullRequest } from "../shell/usePullRequests";
 import { ConversationBox } from "./ConversationBox";
 import {
   ConversationWritingContext,
+  useConversationWriting,
   doneAt,
   madeId,
   wordsOf,
@@ -275,7 +276,7 @@ export function PullRequestConversation({
     "writing" | "viewer" | "repository" | "number"
   >;
   url: string;
-  onShowInDiff: (path: string) => void;
+  onShowInDiff: (thread: ReviewThread) => void;
 }) {
   const earlier = leftOut(pull);
   const threads =
@@ -285,16 +286,10 @@ export function PullRequestConversation({
   const [turns] = useState(() => new Turns());
   const [view, setView] = useState<View>("timeline");
   const [filter, setFilter] = useState<ThreadFilter>("open");
-  const { github } = repository;
-  const { id, head } = pull;
-  const writes = useMemo(
-    () => ({
-      opened: { writing, viewer, repository: { github }, number },
-      pull: id,
-      head: head.oid,
-      url,
-    }),
-    [writing, viewer, github, number, id, head.oid, url],
+  const writes = useConversationWriting(
+    { writing, viewer, repository, number },
+    pull,
+    url,
   );
   const items = pull.threads?.items ?? [];
   const open = items.filter(({ resolved }) => !resolved).length;

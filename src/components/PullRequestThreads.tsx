@@ -65,7 +65,7 @@ function Row({
   row: ThreadRow;
   viewer: string;
   url: string;
-  onShowInDiff: (path: string) => void;
+  onShowInDiff: (thread: ReviewThread) => void;
   onAct: (thread: string) => void;
 }) {
   const fold = useFold(thread.resolved);
@@ -155,7 +155,7 @@ export function PullRequestThreads({
   url: string;
   filter: ThreadFilter;
   onFilter: (filter: ThreadFilter) => void;
-  onShowInDiff: (path: string) => void;
+  onShowInDiff: (thread: ReviewThread) => void;
 }) {
   const [kept, setKept] = useState<ReadonlySet<string>>(new Set());
   const { groups, hidden } = threadsView(threads, viewer, filter, kept);

@@ -1,7 +1,6 @@
 import {
   Suspense,
   useEffect,
-  useEffectEvent,
   useId,
   useImperativeHandle,
   useMemo,
@@ -20,7 +19,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { flushSync } from "react-dom";
-import type { PullRequest } from "../domain/pullRequest";
+import type { PullRequest, ReviewThread } from "../domain/pullRequest";
 import {
   conversationCount,
   detailNotice,
@@ -249,21 +248,10 @@ export function PullRequestDetail({
     flushSync(() => onTab(next));
     document.getElementById(tabId(next))?.focus();
   };
-  // Files changed reads its files once it shows, and then goes to the path.
-  const [inDiff, setInDiff] = useState<string | null>(null);
-  const listed =
-    files.held?.read.kind === "ready" ? files.held.read.files : null;
-  const choose = useEffectEvent((at: number) => files.choose(at));
-  useEffect(() => {
-    if (inDiff === null || listed === null) return;
-    const at = listed.findIndex(
-      ({ path, from }) => path === inDiff || from === inDiff,
-    );
-    if (at >= 0) choose(at);
-    setInDiff(null);
-  }, [inDiff, listed]);
-  const showInDiff = (path: string) => {
-    setInDiff(path);
+  // Files changed goes to the thread once it has read its files.
+  const [inDiff, setInDiff] = useState<ReviewThread | null>(null);
+  const showInDiff = (thread: ReviewThread) => {
+    setInDiff(thread);
     show("files");
   };
   function steer(event: KeyboardEvent) {
@@ -411,6 +399,8 @@ export function PullRequestDetail({
                           pull={pull}
                           opened={opened}
                           url={`${url}/files`}
+                          showing={inDiff}
+                          onShown={() => setInDiff(null)}
                         />
                       )}
                     </Suspense>

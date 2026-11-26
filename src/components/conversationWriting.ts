@@ -1,10 +1,11 @@
-import { createContext, use, useSyncExternalStore } from "react";
+import { createContext, use, useMemo, useSyncExternalStore } from "react";
 import type { Anchor } from "../domain/drafts";
 import type { PullRequest, ReviewThread } from "../domain/pullRequest";
 import type { PullWrite } from "../domain/pullRequestWrites";
 import type { Oid } from "../domain/repository";
 import type { Attempt } from "../pullRequestWrites";
 import type { usePullWrites } from "../shell/usePullWriting";
+import type { OpenedPullRequest } from "../shell/usePullRequests";
 
 /** What the conversation's boxes and buttons need to write to GitHub. */
 export type ConversationWriting = {
@@ -14,9 +15,32 @@ export type ConversationWriting = {
   url: string;
 };
 
-/** Null where nothing writes, as in Files changed. */
+/** Null where nothing writes. */
 export const ConversationWritingContext =
   createContext<ConversationWriting | null>(null);
+
+/** The same object while what it holds stays, for the conversation and for
+ * the threads in Files changed. */
+export function useConversationWriting(
+  {
+    writing,
+    viewer,
+    repository: { github },
+    number,
+  }: Pick<OpenedPullRequest, "writing" | "viewer" | "repository" | "number">,
+  { id, head }: PullRequest,
+  url: string,
+): ConversationWriting {
+  return useMemo(
+    () => ({
+      opened: { writing, viewer, repository: { github }, number },
+      pull: id,
+      head: head.oid,
+      url,
+    }),
+    [writing, viewer, github, number, id, head.oid, url],
+  );
+}
 
 /** Where a write shows: the conversation's box, a thread's reply box, or a
  * thread's Resolve button. */

@@ -29,7 +29,7 @@ type Props = {
   thread: ReviewThread;
   /** "Resolve" instead of "Resolve conversation", where a row is narrow. */
   short?: boolean;
-  onShowInDiff?: (path: string) => void;
+  onShowInDiff?: (thread: ReviewThread) => void;
   /** A reply, a resolve or an unresolve was sent from here. */
   onAct?: (kind: "reply" | "resolve" | "unresolve") => void;
 };
@@ -175,7 +175,7 @@ function Actions({
             <button
               type="button"
               className="button secondary"
-              onClick={() => onShowInDiff(thread.path)}
+              onClick={() => onShowInDiff(thread)}
             >
               Show in diff
             </button>

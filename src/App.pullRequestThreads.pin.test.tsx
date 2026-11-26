@@ -195,6 +195,40 @@ it("shows a thread's file in Files changed", async () => {
   expect(document.querySelector(".files-position")?.textContent).toBe("2 of 3");
 });
 
+it("shows a thread on its line in Files changed, open, where Reply and Resolve write too", async () => {
+  const app = await visit({ world, bridge: answer });
+  await threadsOf(app);
+  await app.click(row("Does this run on every render"));
+  await app.click(get("button", "Show in diff"));
+  expect(tab("Files changed").getAttribute("aria-selected")).toBe("true");
+  const chip = () =>
+    queryAll("region", "Thread").find((each) =>
+      each.textContent.includes("Moved it."),
+    );
+  // Pierre draws the line's threads a few frames after the file.
+  for (let frame = 0; frame < 20 && !chip(); frame += 1)
+    await app.flushFrames();
+  expect(document.querySelector(".file-diff-path")?.textContent).toBe(
+    "src/a.ts",
+  );
+  expect(
+    get("button", /2 comments/, chip()).getAttribute("aria-expanded"),
+    "the thread is open on its line",
+  ).toBe("true");
+  expect(
+    queryAll("button", undefined, chip()).map((button) => button.textContent),
+  ).toEqual([expect.stringMatching(/2 comments/), "Reply…", "Resolve"]);
+
+  await app.click(get("button", "Reply…", chip()));
+  await app.type(get("textbox", "Reply", chip()), "Yes, it works.");
+  await app.click(get("button", "Reply", chip()));
+  await vi.waitFor(() =>
+    expect(app.bridge.world.host.mutations).toEqual([
+      { kind: "reply", thread: "T2", body: "Yes, it works." },
+    ]),
+  );
+});
+
 it("says when GitHub left the threads out", async () => {
   const app = await visit({
     world: ({ host }) =>
