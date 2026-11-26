@@ -1,12 +1,13 @@
 //! Words typed for a pull request and not sent yet. They are the user's work,
-//! so they live in `drafts.json` beside `host.json` and are written the same
-//! way, and never need GitHub to be reachable. Preferences go in the webview's
-//! `localStorage`; work goes here.
+//! so they live in `drafts.json` beside `host.json`, and never need GitHub to
+//! be reachable. Preferences go in the webview's `localStorage`; work goes
+//! here.
 
+use std::io::Write;
 use std::num::NonZeroU32;
 use std::path::Path;
-use std::sync::PoisonError;
-use std::{fs, io};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::{fs, io, process};
 
 use serde::{Deserialize, Serialize};
 
@@ -259,27 +260,69 @@ fn unreadable() -> Failure {
     )
 }
 
-fn save(path: &Path, pulls: Vec<Book>) -> Result<(), Failure> {
-    let write = || -> io::Result<()> {
-        if let Some(dir) = path.parent() {
-            fs::create_dir_all(dir)?;
-        }
-        let temporary = path.with_extension("tmp");
-        fs::write(
-            &temporary,
-            serde_json::to_vec(&File {
-                version: VERSION,
-                pulls,
-            })?,
-        )?;
-        fs::rename(temporary, path)
+fn unwritable() -> Failure {
+    Failure::new(
+        ErrorKind::Storage,
+        "L1 Git could not save this draft. Check that its configuration folder is writable.",
+    )
+}
+
+/// Held from the read to the save, so another L1 Git on this folder never
+/// saves over a change it didn't read. The system lets go of it when the
+/// process ends, however it ends.
+fn lock(dir: &Path) -> Result<fs::File, Failure> {
+    let open = || -> io::Result<fs::File> {
+        fs::create_dir_all(dir)?;
+        let file = fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(dir.join("drafts.lock"))?;
+        file.lock()?;
+        Ok(file)
     };
-    write().map_err(|_| {
-        Failure::new(
-            ErrorKind::Storage,
-            "L1 Git could not save this draft. Check that its configuration folder is writable.",
-        )
-    })
+    open().map_err(|_| unwritable())
+}
+
+/// Every save writes a file of its own, so no other save can rename it away.
+static SAVES: AtomicU64 = AtomicU64::new(0);
+
+/// Fails only when `drafts.json` still holds what it held before.
+fn save(dir: &Path, path: &Path, pulls: Vec<Book>) -> Result<(), Failure> {
+    for entry in fs::read_dir(dir).into_iter().flatten().flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with("drafts.") && name.ends_with(".tmp") {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
+    let temporary = dir.join(format!(
+        "drafts.{}.{}.tmp",
+        process::id(),
+        SAVES.fetch_add(1, Ordering::Relaxed)
+    ));
+    let write = || -> io::Result<()> {
+        let bytes = serde_json::to_vec(&File {
+            version: VERSION,
+            pulls,
+        })?;
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)?;
+        file.write_all(&bytes)?;
+        file.sync_all()?;
+        fs::rename(&temporary, path)
+    };
+    if write().is_err() {
+        let _ = fs::remove_file(&temporary);
+        return Err(unwritable());
+    }
+    // The rename saved it. Syncing the folder keeps the rename through a
+    // power loss, and failing to doesn't undo it.
+    #[cfg(unix)]
+    let _ = fs::File::open(dir).and_then(|folder| folder.sync_all());
+    Ok(())
 }
 
 /// `None` when the change is done, and `drafts` is then what to save.
@@ -336,8 +379,9 @@ impl Host {
         number: u32,
         change: Change,
     ) -> Result<PullDrafts, Failure> {
-        let _only = self.drafting.lock().unwrap_or_else(PoisonError::into_inner);
-        let path = self.file.with_file_name("drafts.json");
+        let dir = self.file.parent().unwrap_or(Path::new("."));
+        let _only = lock(dir)?;
+        let path = dir.join("drafts.json");
         let mut pulls = load(&path)?;
         let api = self.endpoints.api();
         let is_read = matches!(change, Change::Read {});
@@ -364,7 +408,7 @@ impl Host {
             }
             let extra = pulls.len().saturating_sub(MOST_PULLS);
             pulls.drain(..extra);
-            save(&path, pulls)?;
+            save(dir, &path, pulls)?;
         }
         Ok(PullDrafts { drafts, refused })
     }

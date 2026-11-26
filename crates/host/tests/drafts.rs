@@ -114,7 +114,9 @@ fn a_tmp_left_behind_by_a_crash_is_ignored() {
         &host(dir.path()),
         put(conversation(), HEAD, "Kept", Value::Null),
     );
-    fs::write(dir.path().join("drafts.tmp"), "{\"version\": 1, \"pul").unwrap();
+    for left in ["drafts.tmp", "drafts.4242.0.tmp"] {
+        fs::write(dir.path().join(left), "{\"version\": 1, \"pul").unwrap();
+    }
 
     let host = host(dir.path());
     assert_eq!(texts(&on(&host, read())), ["Kept"]);
@@ -122,6 +124,16 @@ fn a_tmp_left_behind_by_a_crash_is_ignored() {
     assert_eq!(texts(&more), ["Kept", "And this"]);
     let file: Value = serde_json::from_slice(&fs::read(drafts_file(dir.path())).unwrap()).unwrap();
     assert_eq!(file["version"], 1);
+    let left: Vec<_> = fs::read_dir(dir.path())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .filter(|name| name.ends_with(".tmp"))
+        .collect();
+    assert_eq!(
+        left,
+        Vec::<String>::new(),
+        "a save clears what a crash left"
+    );
 }
 
 #[test]

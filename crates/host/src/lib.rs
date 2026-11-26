@@ -71,8 +71,6 @@ pub struct Host {
     http: Http,
     client_id: Option<ClientId>,
     writer: Mutex<()>,
-    /// Held for each read-change-save of `drafts.json`.
-    drafting: Mutex<()>,
     state: Mutex<State>,
 }
 
@@ -110,7 +108,6 @@ impl Host {
             vault,
             client_id: None,
             writer: Mutex::new(()),
-            drafting: Mutex::new(()),
             state: Mutex::new(State {
                 revision: unix_millis(),
                 saved,
