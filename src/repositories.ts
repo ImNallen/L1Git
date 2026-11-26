@@ -155,6 +155,12 @@ export async function listDirectories(path: string) {
   return (await run({ op: "listDirectories", path })).data;
 }
 
+/** The home folder that `~` names in a typed path, or null when the core
+ * cannot find one. */
+export async function home() {
+  return (await run({ op: "home" })).data;
+}
+
 export async function createRepository(path: string) {
   return (await run({ op: "createRepository", path })).data;
 }

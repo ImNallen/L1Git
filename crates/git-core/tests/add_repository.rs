@@ -496,3 +496,13 @@ fn cancelling_nothing_is_fine() {
         );
     }
 }
+
+#[test]
+fn home_answers_the_home_folder_that_a_typed_tilde_names() {
+    let (_directory, base) = base();
+    let answer = run(&coordinator(&base), Request::Home).unwrap();
+    assert_eq!(
+        serde_json::to_value(answer).unwrap(),
+        serde_json::json!({ "op": "home", "data": std::env::var("HOME").ok() })
+    );
+}

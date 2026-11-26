@@ -167,6 +167,8 @@ pub enum Request {
     ListDirectories {
         path: String,
     },
+    /// The home folder that `~` names in a typed path.
+    Home,
     CreateRepository {
         path: String,
     },
@@ -257,6 +259,7 @@ pub enum Response {
     UndoHistory(UndoHistory),
     BranchMerged(BranchMerged),
     ListDirectories(DirectoryListing),
+    Home(Option<String>),
     CreateRepository(NewRepository),
     CloneRepository(NewRepository),
     CancelClone,
@@ -410,6 +413,7 @@ pub fn run(coordinator: &Coordinator, request: Request) -> Result<Response, Repo
         Request::ListDirectories { path } => {
             Response::ListDirectories(list_directories(&path, home_dir().as_deref())?)
         }
+        Request::Home => Response::Home(home_dir().map(|home| home.to_string_lossy().into_owned())),
         Request::CreateRepository { path } => {
             Response::CreateRepository(coordinator.create_repository(&typed(&path)?)?)
         }

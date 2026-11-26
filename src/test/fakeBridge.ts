@@ -354,6 +354,7 @@ const handlers: Record<string, Handler> = {
       request.path as RepositoryRoot,
       request.operation as Applied["operation"],
     ),
+  home: () => FAKE_HOME,
   listDirectories: (request, world) => ({
     entries:
       world.directories.get(request.path) ??
