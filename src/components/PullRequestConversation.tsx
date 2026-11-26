@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { use, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import {
   CircleCheck,
@@ -26,6 +26,15 @@ import {
 import type { Entry } from "../domain/pullRequestDetail";
 import type { PullRequest } from "../domain/pullRequest";
 import { shortOid } from "../domain/shortOid";
+import { usePullWrites } from "../shell/usePullWriting";
+import type { OpenedPullRequest } from "../shell/usePullRequests";
+import { ConversationBox } from "./ConversationBox";
+import {
+  ConversationWritingContext,
+  doneAt,
+  madeId,
+  wordsOf,
+} from "./conversationWriting";
 import { Body } from "./PullRequestBody";
 import { Ago, Avatar, OnGitHub } from "./PullRequestParts";
 import { Thread } from "./PullRequestThread";
@@ -224,13 +233,41 @@ function LeftOut({ text, url }: { text: string; url: string }) {
   );
 }
 
+/** Comments GitHub took that no read has shown yet. */
+function Sent({ pull, viewer }: { pull: PullRequest; viewer: string }) {
+  const writing = use(ConversationWritingContext);
+  if (writing === null) throw new Error("Sent comments need their writing.");
+  const { attempts } = usePullWrites(writing.opened);
+  const read = new Set(pull.timeline.items.map(({ id }) => id));
+  return doneAt(attempts, { kind: "comment" })
+    .filter((attempt) => !read.has(madeId(attempt) ?? ""))
+    .map((attempt) => (
+      <li className="entry" key={attempt.id}>
+        <Card
+          by={viewer}
+          viewer={viewer}
+          at={new Date(
+            attempt.state.kind === "done" ? attempt.state.answeredAt : 0,
+          ).toISOString()}
+          verb="commented"
+          pill={<span className="entry-pill">Sent</span>}
+        >
+          <Body text={wordsOf(attempt.write)} />
+        </Card>
+      </li>
+    ));
+}
+
 export function PullRequestConversation({
   pull,
-  viewer,
+  opened: { writing, viewer, repository, number },
   url,
 }: {
   pull: PullRequest;
-  viewer: string;
+  opened: Pick<
+    OpenedPullRequest,
+    "writing" | "viewer" | "repository" | "number"
+  >;
   url: string;
 }) {
   const earlier = leftOut(pull);
@@ -239,8 +276,47 @@ export function PullRequestConversation({
       ? "Review threads didn't load. GitHub couldn't answer for a pull request this large."
       : threadsLeftOut(pull);
   const [turns] = useState(() => new Turns());
+  const { github } = repository;
+  const { id, head } = pull;
+  const writes = useMemo(
+    () => ({
+      opened: { writing, viewer, repository: { github }, number },
+      pull: id,
+      head: head.oid,
+      url,
+    }),
+    [writing, viewer, github, number, id, head.oid, url],
+  );
   return (
-    <TurnsContext value={turns}>
+    <ConversationWritingContext value={writes}>
+      <TurnsContext value={turns}>
+        <Timeline
+          pull={pull}
+          viewer={viewer}
+          url={url}
+          earlier={earlier}
+          threads={threads}
+        />
+      </TurnsContext>
+    </ConversationWritingContext>
+  );
+}
+
+function Timeline({
+  pull,
+  viewer,
+  url,
+  earlier,
+  threads,
+}: {
+  pull: PullRequest;
+  viewer: string;
+  url: string;
+  earlier: string | null;
+  threads: string | null;
+}) {
+  return (
+    <>
       <ol className="conversation" aria-label="Conversation">
         <li className="entry">
           <Card
@@ -264,7 +340,16 @@ export function PullRequestConversation({
             <Shown entry={entry} pull={pull} viewer={viewer} url={url} />
           </li>
         ))}
+        <Sent pull={pull} viewer={viewer} />
       </ol>
-    </TurnsContext>
+      <div className="conversation-compose">
+        <Avatar login={viewer} />
+        <ConversationBox
+          place={{ kind: "comment" }}
+          label="Comment on this pull request"
+          placeholder="Leave a comment. Markdown works here."
+        />
+      </div>
+    </>
   );
 }

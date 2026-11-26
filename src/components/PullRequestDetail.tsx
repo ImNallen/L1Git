@@ -375,7 +375,7 @@ export function PullRequestDetail({
                 ) : of === "conversation" ? (
                   <PullRequestConversation
                     pull={pull}
-                    viewer={viewer}
+                    opened={opened}
                     url={url}
                   />
                 ) : of === "commits" ? (
