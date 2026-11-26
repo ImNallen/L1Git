@@ -119,6 +119,21 @@ L1 Git keeps its copy of the token in the system keychain under the service `dev
 
 **Check connection** asks GitHub who the saved token belongs to, and updates the login and what it can read. When GitHub accepts the token, the row says so under the login. A new sign-in shows the same line. If GitHub no longer accepts the token, or the keychain no longer holds it, L1 Git forgets the connection and says why above **Sign in to GitHub**. **Disconnect** asks first, then removes the record from `host.json` and the token from the keychain. It does not revoke the token on GitHub, so `gh` stays signed in. Signing out of `gh` later does not disconnect L1 Git either.
 
+### Writing to GitHub
+
+This version doesn't write to GitHub yet. These are the rules its writes keep once a button sends one.
+
+A write is one click, made for the account signed in when you click. If L1 Git is signed in as someone else by the time it sends, it sends nothing. L1 Git sends each write once and never sends it again on its own, even when no answer comes back. A pull request takes one write at a time. A second click while one is on its way, or while L1 Git can't tell how one ended, sends nothing.
+
+Each write ends in one of four ways:
+
+- **Done.** GitHub did it. The draft it sent is deleted, and what you wrote shows as sent until L1 Git reads the pull request again and finds it there.
+- **Refused.** GitHub answered and did not do it. L1 Git shows GitHub's reason.
+- **Not sent.** Nothing reached GitHub, for example because L1 Git could not reach it or the sign-in changed. You can send it again.
+- **Unknown.** L1 Git sent it and got no answer it could read, so GitHub may or may not have done it. L1 Git says so and reads the pull request again instead of sending it twice. It trusts only a read asked after the write ended. If that read shows the write, it was done. If it shows the write did not happen, nothing was posted and your draft is still there to send. Until a read can tell, the pull request takes no other write.
+
+A merge names the head you saw, so a push while you confirm makes GitHub refuse it. Before L1 Git deletes a merged pull request's head branch on GitHub, it checks that the branch is still at the merged commit, that it is not in a fork, and that no open pull request has it as its head or its base. A branch that is already gone counts as deleted.
+
 ## Pull requests
 
 Click **Pull requests** beside **Settings** at the bottom of the sidebar, or run **Show pull requests** from the command palette. The list covers every saved repository that is on GitHub. A repository counts as the one its `upstream` remote names when that is on github.com, else its `origin`, else its first remote that is. Several clones or worktrees of one GitHub repository are one entry, named like the first of them in the sidebar. Saved repositories that are not on GitHub are left out, and a line under the list says how many there are.
