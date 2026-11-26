@@ -161,6 +161,41 @@ it("takes the other window's words, or their deletion, when asked", async () => 
   expect(heldTexts()).toEqual([]);
 });
 
+it("deletes a draft another window changed, theirs too", async () => {
+  const one = window();
+  const two = window();
+  one.type(pull, conversation, HEAD, "First");
+  await one.flush();
+  await two.load(pull);
+  one.type(pull, conversation, HEAD, "First, edited");
+  await one.flush();
+  two.type(pull, conversation, HEAD, "Second");
+  expect(await two.flush()).toBe(false);
+  expect(two.read(pull).drafts[0]?.save.kind).toBe("changedElsewhere");
+
+  expect(await two.remove(pull, conversation, HEAD)).toBe(true);
+  expect(two.read(pull).drafts).toEqual([]);
+  expect(heldTexts()).toEqual([]);
+});
+
+it("deletes a draft another window deleted first", async () => {
+  const one = window();
+  const two = window();
+  one.type(pull, conversation, HEAD, "First");
+  await one.flush();
+  await two.load(pull);
+  await one.remove(pull, conversation, HEAD);
+  two.type(pull, conversation, HEAD, "Second");
+  await two.flush();
+  expect(two.read(pull).drafts[0]?.save).toEqual({
+    kind: "changedElsewhere",
+    theirs: null,
+  });
+
+  expect(await two.remove(pull, conversation, HEAD)).toBe(true);
+  expect(two.read(pull).drafts).toEqual([]);
+});
+
 it("keeps words typed and not saved yet when it reads the host again", async () => {
   const one = window();
   const two = window();

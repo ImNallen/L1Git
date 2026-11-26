@@ -289,10 +289,17 @@ export function createDrafts(host: Pick<HostClient, "ask">) {
       });
     },
     type,
-    /** Deletes now, as the Delete button and a sent review do. */
+    /** Deletes now, as the Delete button and a sent review do. A draft
+     * another window changed goes with their words too. */
     remove(of: DraftsOf, anchor: Anchor, head: Oid): Promise<boolean> {
+      const pull = pullOf(of);
+      const entry = pull.entries.get(draftKey(anchor, head));
+      if (entry?.save.kind === "changedElsewhere") {
+        entry.base = entry.save.theirs;
+        entry.save = saving;
+      }
       type(of, anchor, head, "");
-      return flushPull(pullOf(of));
+      return flushPull(pull);
     },
     /** Saves every waiting draft now, on blur, close and before a submit.
      * True once every draft is saved. */
