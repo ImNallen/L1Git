@@ -337,6 +337,9 @@ const externalWords: Record<
   bisect: { doing: "Bisecting", noun: "a bisect" },
 };
 
+export const operationNoun = (operation: ExternalOperation) =>
+  externalWords[operation].noun;
+
 const openToFinish = "Open the repository to finish or abort it.";
 
 export function operationBadge(

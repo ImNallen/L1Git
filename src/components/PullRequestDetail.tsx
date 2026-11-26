@@ -6,6 +6,7 @@ import {
   useMemo,
   useRef,
 } from "react";
+import type { PullRequestCheckout } from "../shell/usePullRequestCheckout";
 import type { KeyboardEvent, ReactNode, Ref } from "react";
 import {
   ArrowLeft,
@@ -44,11 +45,15 @@ import { KeepPlace } from "./KeepPlace";
 import { PaneDivider } from "./PaneDivider";
 import { PullRequestChecks } from "./PullRequestChecks";
 import { PullRequestCommits } from "./PullRequestCommits";
+import { PullRequestFailure } from "./PullRequestFailure";
 import { PullRequestConversation } from "./PullRequestConversation";
 import { PullRequestInspector } from "./PullRequestInspector";
+import { PullRequestCheckoutBar } from "./PullRequestCheckoutBar";
 import { PullRequestNotice } from "./PullRequestNotice";
 import { Ago } from "./PullRequestParts";
 import { SurroundingsContext } from "./pullRequestText";
+import { TryPullRequest } from "./TryPullRequest";
+import { useRefocusWhenWriteEnds } from "./useRefocusWhenWriteEnds";
 
 const tabs = {
   conversation: { label: "Conversation", count: conversationCount },
@@ -145,68 +150,6 @@ function Skeleton() {
   );
 }
 
-function Failure({
-  opened: { read, repository, number },
-  url,
-  onBack,
-  onRefresh,
-}: {
-  opened: OpenedPullRequest;
-  url: string;
-  onBack: () => void;
-  onRefresh: (() => void) | null;
-}) {
-  const { problem } = read;
-  if (problem === null) return null;
-  const gone = problem.kind === "notFound";
-  return (
-    <div className="pull-empty">
-      <span className="no-host-glyph">
-        <GitPullRequest size={16} />
-      </span>
-      <h3>
-        {gone
-          ? "Couldn't find this pull request"
-          : `Couldn't read #${number} in ${repository.name}`}
-      </h3>
-      <p role="status">{problem.message}</p>
-      <div className="pull-empty-actions">
-        {problem.kind === "ssoRequired" && (
-          <a
-            className="button secondary"
-            href={problem.url}
-            target="_blank"
-            rel="noreferrer"
-          >
-            Authorize on GitHub
-          </a>
-        )}
-        {gone ? (
-          <button type="button" className="button secondary" onClick={onBack}>
-            Back to pull requests
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="button secondary"
-            onClick={onRefresh ?? undefined}
-          >
-            Try again
-          </button>
-        )}
-        <a
-          className="button secondary"
-          href={url}
-          target="_blank"
-          rel="noreferrer"
-        >
-          Open on GitHub
-        </a>
-      </div>
-    </div>
-  );
-}
-
 function Panel({
   id,
   of,
@@ -251,6 +194,7 @@ export function PullRequestDetail({
   isShown,
   opened,
   files,
+  checkout,
   layout,
   theme,
   painted,
@@ -263,6 +207,7 @@ export function PullRequestDetail({
   isShown: boolean;
   opened: OpenedPullRequest;
   files: FilesChangedState;
+  checkout: PullRequestCheckout;
   layout: Pick<
     Layout,
     "inspectorOpen" | "paneWidths" | "resizePane" | "savePaneWidth"
@@ -281,6 +226,13 @@ export function PullRequestDetail({
     focus: () => title.current?.focus({ preventScroll: true }),
   }));
   useEffect(() => markdownReader.warm(), []);
+  const bar = useRef<HTMLDivElement>(null);
+  const tryButton = useRef<HTMLButtonElement>(null);
+  useRefocusWhenWriteEnds(
+    checkout.running,
+    isShown,
+    () => bar.current ?? tryButton.current ?? title.current,
+  );
   const url = pullRequestUrl(repository.github, number);
   const { owner, repo } = repository.github;
   const notice = detailNotice(read, repository);
@@ -330,6 +282,15 @@ export function PullRequestDetail({
               {position.at.toLocaleString()} of {position.of.toLocaleString()}
             </span>
           )}
+          {checkout.offer && (
+            <TryPullRequest
+              ref={tryButton}
+              number={number}
+              offer={checkout.offer}
+              home={checkout.home}
+              onCreate={checkout.tryLocally}
+            />
+          )}
           <a
             className="button secondary"
             href={tab === "files" ? `${url}/files` : url}
@@ -341,6 +302,13 @@ export function PullRequestDetail({
           </a>
         </header>
         <Header opened={opened} titleId={`${id}-title`} titleRef={title} />
+        {pull && (
+          <PullRequestCheckoutBar
+            ref={bar}
+            checkout={checkout}
+            head={pull.head.oid}
+          />
+        )}
         <span className="visually-hidden" role="status">
           {loading ? "Loading pull request…" : ""}
         </span>
@@ -397,7 +365,7 @@ export function PullRequestDetail({
                   loading ? (
                     <Skeleton />
                   ) : (
-                    <Failure
+                    <PullRequestFailure
                       opened={opened}
                       url={url}
                       onBack={onBack}

@@ -50,6 +50,7 @@ import { useMergePanel } from "./shell/useMergePanel";
 import { useResolutionDrafts } from "./shell/useResolutionDrafts";
 import { useNavigation } from "./shell/useNavigation";
 import { usePalette, useShortcuts } from "./shell/usePalette";
+import { usePullRequestCheckout } from "./shell/usePullRequestCheckout";
 import { usePullRequests } from "./shell/usePullRequests";
 import { useRefWrites, useUndoSteps } from "./shell/useRefWrites";
 import { useScreen } from "./shell/useScreen";
@@ -180,6 +181,17 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     selectRepository: app.selectRepository,
   });
   const undo = useUndoSteps({ writes, nav, focus });
+  const checkout = usePullRequestCheckout({
+    opened: pulls.opened,
+    screen,
+    overview: overview.view,
+    historyRoot: view.snapshot?.root ?? null,
+    saved: app,
+    writes,
+    loop,
+    nav,
+    focus,
+  });
   const actions = composeActions(
     screen.actions,
     pulls.actions,
@@ -252,6 +264,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
             onCheckHost={() => void host.refresh()}
             state={pulls}
             files={files}
+            checkout={checkout}
             layout={layout}
             theme={appearance.variant.appearance}
             painted={isPainted(appearance.variant)}

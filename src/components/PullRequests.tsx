@@ -8,6 +8,7 @@ import type { ListModel, Row } from "../domain/pullRequestList";
 import { mac } from "../repositories";
 import { focusIsShown } from "../shell/dom";
 import type { FilesChangedState } from "../shell/useFilesChanged";
+import type { PullRequestCheckout } from "../shell/usePullRequestCheckout";
 import type { Layout } from "../shell/useLayout";
 import type { PullRequestsState } from "../shell/usePullRequests";
 import type { Appearance } from "../themes/palette";
@@ -126,6 +127,7 @@ function Screen({
   onCheckHost,
   state,
   files,
+  checkout,
   layout,
   theme,
   painted,
@@ -141,6 +143,7 @@ function Screen({
   onCheckHost: () => void;
   state: PullRequestsState;
   files: FilesChangedState;
+  checkout: PullRequestCheckout;
   layout: Layout;
   theme: Appearance;
   painted: boolean;
@@ -348,6 +351,7 @@ function Screen({
           isShown={!hidden}
           opened={opened}
           files={files}
+          checkout={checkout}
           layout={layout}
           theme={theme}
           painted={painted}

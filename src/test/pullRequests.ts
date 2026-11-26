@@ -3,7 +3,7 @@ import type { PullRequest, PullRequestSummary } from "../domain/pullRequest";
 import { get, mountApp } from "./appHarness";
 import type { Harness } from "./appHarness";
 import { pullKey, pullsKey } from "./fakeBridge";
-import type { Bridge, World } from "./fakeBridge";
+import type { World } from "./fakeBridge";
 import { OTHER, PIN } from "./fixtures";
 
 export const at = (hour: number) =>
@@ -102,13 +102,7 @@ function world(world: World) {
   };
 }
 
-export async function visit(
-  more: {
-    world?: (world: World) => void;
-    bridge?: (bridge: Bridge) => void;
-    stored?: Record<string, string>;
-  } = {},
-) {
+export async function visit(more: Parameters<typeof mountApp>[0] = {}) {
   const app = await mountApp({
     ...more,
     world: (each) => {
