@@ -68,6 +68,7 @@ fn decode<T: Default + DeserializeOwned>(
     {
         return Err(ApiError::RateLimited {
             reset_at: reset_at(headers, now),
+            secondary: false,
         });
     }
     let data = match data {

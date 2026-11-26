@@ -265,6 +265,9 @@ pub(crate) enum ApiError {
     Unauthorized,
     RateLimited {
         reset_at: Option<u64>,
+        /// GitHub's secondary limit, on how fast requests come rather than
+        /// how many an hour.
+        secondary: bool,
     },
     Forbidden {
         message: String,
@@ -410,6 +413,7 @@ fn classify(status: u16, headers: &HeaderMap, body: &[u8], now: u64) -> Option<A
         401 => Some(ApiError::Unauthorized),
         403 | 429 if limited => Some(ApiError::RateLimited {
             reset_at: reset_at(headers, now),
+            secondary: header(headers, "x-ratelimit-remaining") != Some("0"),
         }),
         403 => {
             #[derive(Deserialize)]
@@ -526,16 +530,21 @@ pub(crate) fn api_failure(error: ApiError) -> Failure {
             ErrorKind::Rejected,
             "GitHub did not accept the GitHub CLI's sign-in. Run gh auth login, then try again.",
         ),
-        ApiError::RateLimited { reset_at } => {
+        ApiError::RateLimited {
+            reset_at,
+            secondary,
+        } => {
             let wait = match reset_at.map(|at| at.saturating_sub(unix_secs()).div_ceil(60).max(1)) {
                 Some(1) => "Try again in a minute.".to_owned(),
                 Some(minutes) => format!("Try again in {minutes} minutes."),
                 None => "Try again in a few minutes.".to_owned(),
             };
-            Failure::new(
-                ErrorKind::RateLimited { reset_at },
-                format!("GitHub's rate limit for your account is used up. {wait}"),
-            )
+            let why = if secondary {
+                "GitHub asked L1 Git to slow down, because this account sent many requests in a short time."
+            } else {
+                "GitHub's rate limit for your account is used up."
+            };
+            Failure::new(ErrorKind::RateLimited { reset_at }, format!("{why} {wait}"))
         }
         ApiError::Forbidden { message } => Failure::new(
             ErrorKind::GitHubFailed { http_status: 403 },
@@ -599,6 +608,23 @@ mod tests {
     fn kind(status: u16, pairs: &[(&'static str, &str)], body: &str) -> Option<ErrorKind> {
         classify(status, &headers(pairs), body.as_bytes(), 1_000)
             .map(|error| api_failure(error).kind)
+    }
+
+    #[test]
+    fn a_secondary_rate_limit_asks_to_slow_down() {
+        let said = |pairs: &[(&'static str, &str)]| {
+            classify(403, &headers(pairs), b"{}", 1_000)
+                .map(|error| api_failure(error).message)
+                .unwrap()
+        };
+        let secondary = said(&[("retry-after", "60"), ("x-ratelimit-remaining", "4000")]);
+        assert!(
+            secondary.starts_with("GitHub asked L1 Git to slow down"),
+            "{secondary}"
+        );
+        assert!(secondary.ends_with("Try again in a minute."), "{secondary}");
+        let primary = said(&[("x-ratelimit-remaining", "0")]);
+        assert!(primary.contains("used up"), "{primary}");
     }
 
     #[test]
