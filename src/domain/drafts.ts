@@ -68,17 +68,45 @@ export type DraftChange =
     }
   | { kind: "delete"; anchor: Anchor; head: Oid; at: number };
 
+/** GitHub's limit on a comment's body. The host counts Unicode scalar
+ * values, so an emoji is one. */
+export const mostDraftChars = 65_536;
+
+/** What the host takes as a draft's text. Blank is the host's `str::trim`:
+ * only Unicode White_Space. JavaScript's `trim` also drops U+FEFF and keeps
+ * U+0085. `crates/host/tests/draft-texts.json` holds the cases both check. */
+export function draftText(text: string): "blank" | "tooLong" | "takes" {
+  if (/^\p{White_Space}*$/u.test(text)) return "blank";
+  if (text.length > mostDraftChars && [...text].length > mostDraftChars)
+    return "tooLong";
+  return "takes";
+}
+
+/** A range of one line has no start, and a range dragged upward starts at
+ * its top, as the host and GitHub take them. */
+export function placed(anchor: Anchor): Anchor {
+  if (anchor.kind !== "line" || anchor.start?.side !== anchor.side)
+    return anchor;
+  const { line, start } = anchor;
+  if (start.line === line) return { ...anchor, start: null };
+  if (start.line > line)
+    return { ...anchor, line: start.line, start: { ...start, line } };
+  return anchor;
+}
+
 /** What a line annotation carries for a draft. The text is never in it, so
  * typing never redraws the diff. */
 export type DraftKey = string & { readonly __brand: "DraftKey" };
 
 /** One draft per key. A line number means something at one commit only, so a
  * line draft's key includes its head; every other draft follows the head. */
-export const draftKey = (anchor: Anchor, head: Oid): DraftKey =>
-  JSON.stringify(
+export function draftKey(given: Anchor, head: Oid): DraftKey {
+  const anchor = placed(given);
+  return JSON.stringify(
     anchor.kind === "line"
       ? [anchor.kind, head, anchor.path, anchor.side, anchor.line, anchor.start]
       : anchor.kind === "reply"
         ? [anchor.kind, anchor.thread]
         : [anchor.kind],
   ) as DraftKey;
+}

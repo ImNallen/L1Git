@@ -1,4 +1,6 @@
+import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { hostRoute } from "./domain/host";
 import { draftKey } from "./domain/drafts";
 import type { Anchor } from "./domain/drafts";
@@ -319,4 +321,80 @@ it("says when drafts for one more pull request have no room, and drops none", as
   bridge.world.host.drafts.delete("octo octo/pin#101");
   expect(await drafts.flush()).toBe(true);
   expect(heldTexts()).toEqual(["New"]);
+});
+
+/** The host checks the same cases in `crates/host/tests/drafts.rs`. */
+const textCases = z
+  .array(
+    z.object({
+      text: z.string(),
+      times: z.number(),
+      host: z.enum(["takes", "blank", "tooLong"]),
+    }),
+  )
+  .parse(
+    JSON.parse(
+      readFileSync(
+        new URL("../crates/host/tests/draft-texts.json", import.meta.url),
+        "utf8",
+      ),
+    ),
+  );
+
+const codePoints = (text: string) =>
+  [...text]
+    .map((char) => `U+${char.codePointAt(0)?.toString(16).padStart(4, "0")}`)
+    .join(" ");
+
+it.each(
+  textCases.map(
+    (item) => [`${item.times} × ${codePoints(item.text)}`, item] as const,
+  ),
+)("sends %s only when the host takes it", async (_, { text, times, host }) => {
+  const drafts = window();
+  drafts.type(pull, conversation, HEAD, text.repeat(times));
+  expect(await drafts.flush()).toBe(host !== "tooLong");
+  expect(changes().map(({ kind }) => kind)).toEqual(
+    host === "takes" ? ["put"] : [],
+  );
+  expect(drafts.read(pull).drafts.map(({ save }) => save)).toEqual(
+    host === "takes"
+      ? [{ kind: "saved" }]
+      : host === "tooLong"
+        ? [{ kind: "tooLong", most: 65_536 }]
+        : [],
+  );
+});
+
+it("tries a draft that was too long again once it fits", async () => {
+  const drafts = window();
+  drafts.type(pull, conversation, HEAD, "x".repeat(65_537));
+  expect(await drafts.flush()).toBe(false);
+  drafts.type(pull, conversation, HEAD, "x".repeat(65_536));
+  expect(drafts.read(pull).drafts[0]?.save).toEqual({ kind: "saving" });
+  expect(await drafts.flush()).toBe(true);
+  expect(heldTexts()).toEqual(["x".repeat(65_536)]);
+});
+
+it("sends a range of one line with no start, and a range dragged upward in order", async () => {
+  const drafts = window();
+  const at = (line: number, start: number): Anchor => ({
+    kind: "line",
+    path: "a.rs",
+    side: "right",
+    line,
+    start: { side: "right", line: start },
+  });
+  drafts.type(pull, at(5, 5), HEAD, "One line");
+  drafts.type(pull, at(3, 9), HEAD, "Upward");
+  expect(await drafts.flush()).toBe(true);
+  expect(
+    bridge.world.host.drafts.get(stored)?.map(({ anchor }) => anchor),
+  ).toEqual([{ ...at(5, 5), start: null }, { ...at(9, 3) }]);
+  expect(drafts.read(pull).drafts.map(({ key }) => key)).toEqual([
+    draftKey(at(5, 5), HEAD),
+    draftKey(at(3, 9), HEAD),
+  ]);
+  drafts.type(pull, at(9, 3), HEAD, "Upward, edited");
+  expect(texts(drafts)).toEqual(["One line", "Upward, edited"]);
 });

@@ -455,3 +455,23 @@ fn drafts_refuse_what_github_would_not_take() {
             .is_err()
     );
 }
+
+/// The window checks the same cases in `src/drafts.test.ts`, so a text it
+/// sends is never one the host refuses.
+#[test]
+fn the_host_and_the_window_agree_on_the_text_a_draft_takes() {
+    let cases: Vec<Value> = serde_json::from_str(include_str!("draft-texts.json")).unwrap();
+    for case in cases {
+        let text = case["text"]
+            .as_str()
+            .unwrap()
+            .repeat(case["times"].as_u64().unwrap() as usize);
+        let parsed = serde_json::from_value::<Request>(pull(
+            "octo",
+            "app",
+            1,
+            put(conversation(), HEAD, &text, Value::Null),
+        ));
+        assert_eq!(parsed.is_ok(), case["host"] == "takes", "{case}");
+    }
+}

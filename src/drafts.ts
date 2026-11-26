@@ -1,4 +1,4 @@
-import { draftKey } from "./domain/drafts";
+import { draftKey, draftText, mostDraftChars, placed } from "./domain/drafts";
 import type {
   Anchor,
   Draft,
@@ -33,6 +33,9 @@ type DraftSave =
   | { kind: "saving" }
   /** The words are still here. The next edit or flush tries again. */
   | { kind: "unsaved"; why: string }
+  /** More than GitHub takes, so nothing was sent. The words are only in
+   * this window until an edit brings them under `most`. */
+  | { kind: "tooLong"; most: number }
   /** Another window changed or deleted this draft after this one read it.
    * Nothing saves until `settle` picks one. */
   | { kind: "changedElsewhere"; theirs: Draft | null };
@@ -166,8 +169,13 @@ export function createDrafts(host: Pick<HostClient, "ask">) {
     const entry = pull.entries.get(key);
     if (!entry || !isPending(entry)) return;
     const { anchor, head, text, base } = entry;
+    const takes = draftText(text);
+    if (takes === "tooLong") {
+      entry.save = { kind: "tooLong", most: mostDraftChars };
+      return changed(pull);
+    }
     let change: DraftChange;
-    if (text.trim() !== "") {
+    if (takes === "takes") {
       if (base?.text === text && base.head === head) {
         entry.save = saved;
         return changed(pull);
@@ -216,7 +224,8 @@ export function createDrafts(host: Pick<HostClient, "ask">) {
   }
 
   /** Blank text deletes the draft. */
-  function type(of: DraftsOf, anchor: Anchor, head: Oid, text: string) {
+  function type(of: DraftsOf, given: Anchor, head: Oid, text: string) {
+    const anchor = placed(given);
     const pull = pullOf(of);
     const key = draftKey(anchor, head);
     const entry = pull.entries.get(key) ?? {
