@@ -336,6 +336,33 @@ fn send_anyway_sends_the_same_write_once_more_from_a_fresh_reading() {
 }
 
 #[test]
+fn send_anyway_github_refused_still_shows_the_first_send_may_have_posted() {
+    let world = World::connected();
+    let (attempt, _) = lost(&world, lgtm(), said(&[]));
+    world.github.graphql([
+        said(&[]),
+        said(&[]),
+        Reply::graphql(json!({"data": {"addComment": null}, "errors": [
+            {"type": "UNPROCESSABLE", "path": ["addComment"], "message": "Pull request is locked."},
+        ]})),
+    ]);
+    let again = world.send_again(&attempt);
+    assert_eq!(again["written"]["kind"], "refused");
+    let message = again["written"]["message"].as_str().unwrap();
+    assert!(
+        message.contains("first send may still have posted"),
+        "{message}"
+    );
+    assert_eq!(kept(&again["drafts"]), (0, 1), "{again}");
+    assert_eq!(again["drafts"]["sent"][0]["attempt"], attempt.as_str());
+    assert_eq!(world.write(lgtm())["kind"], "notSent", "still held");
+
+    world.github.graphql([said(&[("IC_7", "octo", "LGTM")])]);
+    assert_eq!(world.check()["settled"][0]["seen"]["kind"], "landed");
+    assert_eq!(world.mutations().len(), 2);
+}
+
+#[test]
 fn a_lost_resolve_settles_from_the_thread_and_can_be_sent_again() {
     let world = World::connected();
     let resolve = json!({"kind": "resolve", "thread": "PRRT_1"});
