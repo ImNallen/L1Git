@@ -1,5 +1,5 @@
 import { useId, useLayoutEffect, useRef, useState } from "react";
-import type { RefObject } from "react";
+import type { ReactNode, RefObject } from "react";
 import { ChevronRight, Eye, MessageSquare } from "lucide-react";
 import { remindersOf } from "../domain/finishReview";
 import type { ReviewEvent } from "../domain/finishReview";
@@ -13,7 +13,7 @@ import { useModalDialog } from "./Dialog";
 import { Problem, saveText } from "./LineCommentParts";
 import { MayHavePosted } from "./MayHavePosted";
 import type { FinishReview } from "./useFinishReview";
-import type { LineComments, ShownDraft } from "./useLineComments";
+import type { LineComments } from "./useLineComments";
 
 const eventWords: Record<ReviewEvent, { title: string; text: string }> = {
   comment: { title: "Comment", text: "Give feedback without approving." },
@@ -29,27 +29,22 @@ const fileName = (path: string) => path.slice(path.lastIndexOf("/") + 1);
 const placeOf = ({ path, line, start }: Lines) =>
   `${fileName(path)}:${start === null ? line : `${start.line}–${line}`}`;
 
-function Comments({
+function Comments<Comment extends { key: string }>({
   title,
-  drafts,
+  comments,
   children,
 }: {
   title: string;
-  drafts: readonly ShownDraft[];
-  children: (draft: ShownDraft & { anchor: Lines }) => React.ReactNode;
+  comments: readonly Comment[];
+  children: (comment: Comment) => ReactNode;
 }) {
   return (
     <section className="finish-section" aria-label={title}>
       <h3>{title}</h3>
       <ul className="finish-comments">
-        {drafts.map(
-          (draft) =>
-            draft.anchor.kind === "line" && (
-              <li key={draft.key}>
-                {children(draft as ShownDraft & { anchor: Lines })}
-              </li>
-            ),
-        )}
+        {comments.map((comment) => (
+          <li key={comment.key}>{children(comment)}</li>
+        ))}
       </ul>
     </section>
   );
@@ -192,19 +187,19 @@ function FinishReviewPopover({
             </p>
           )}
         </section>
-      ) : current.length > 0 ? (
+      ) : finish.listed.length > 0 ? (
         <Comments
-          title={counted(current.length, "pending comment")}
-          drafts={current}
+          title={counted(finish.listed.length, "pending comment")}
+          comments={finish.listed}
         >
           {(draft) => (
             <button
               type="button"
               className="finish-comment"
-              onClick={go(() => onGoTo(draft.anchor, false))}
+              onClick={go(() => onGoTo(draft.lines, false))}
             >
               <MessageSquare size={13} aria-hidden="true" />
-              <code>{placeOf(draft.anchor)}</code>
+              <code>{placeOf(draft.lines)}</code>
               <span>{firstWords(draft.text)}</span>
               {draft.mayHavePosted && (
                 <span className="line-comment-pending">May have posted</span>
@@ -220,7 +215,7 @@ function FinishReviewPopover({
         </p>
       )}
       {older.length > 0 && (
-        <Comments title="Written against an earlier commit" drafts={older}>
+        <Comments title="Written against an earlier commit" comments={older}>
           {(draft) => (
             <div className="finish-comment finish-older">
               <code>{placeOf(draft.anchor)}</code>

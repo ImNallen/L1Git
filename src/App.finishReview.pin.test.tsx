@@ -183,6 +183,10 @@ it("sends nothing while a review is on its way, and shows it as sending", async 
     "its comments show once, as on their way",
   ).toEqual([]);
   expect(get("region", "Review comment").textContent).toContain("Sending…");
+  expect(
+    get("region", "1 pending comment", shown).textContent,
+    "the popover still lists what it sends",
+  ).toBe("1 pending commenta.ts:11Once");
   await app.click(submit());
   await app.press("Enter", { ctrlKey: true });
   held.release();

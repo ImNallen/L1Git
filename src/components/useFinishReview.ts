@@ -3,6 +3,7 @@ import { draftKey, draftText } from "../domain/drafts";
 import type { Anchor } from "../domain/drafts";
 import { byHead, eventsFor, heldBack, reviewOf } from "../domain/finishReview";
 import type { ReviewEvent } from "../domain/finishReview";
+import type { Lines } from "../domain/lineComments";
 import type { PullRequest } from "../domain/pullRequest";
 import type { PullWrite } from "../domain/pullRequestWrites";
 import type { Attempt } from "../pullRequestWrites";
@@ -28,6 +29,13 @@ type SendView =
   | { kind: "unknown"; attempt: Attempt };
 
 const idle: Sending = { kind: "idle", problem: null };
+
+type Listed = {
+  key: string;
+  lines: Lines;
+  text: string;
+  mayHavePosted: boolean;
+};
 const summaryAnchor: Anchor = { kind: "summary" };
 const sendProblems = {
   busy: "Another write to this pull request is still sending, or may have posted. L1 Git sends nothing more for it until it knows.",
@@ -92,6 +100,23 @@ export function useFinishReview({
     (each) => isReview(each) && each.state.kind === "unknown",
   );
   const state = attempt?.state;
+  /** What the popover lists: the comments its review carries while that is
+   * out or may have posted, else the pending ones that would send. */
+  const listed: readonly Listed[] =
+    attempt?.write.kind === "submitReview" &&
+    (state?.kind === "sending" || state?.kind === "unknown")
+      ? attempt.write.threads.map(({ lines, body }, index) => ({
+          key: `${attempt.id} ${index}`,
+          lines,
+          text: body,
+          mayHavePosted: false,
+        }))
+      : current.map(({ key, anchor, text, mayHavePosted }) => ({
+          key,
+          lines: anchor,
+          text,
+          mayHavePosted,
+        }));
   const send: SendView =
     sending.kind === "starting" || state?.kind === "sending"
       ? { kind: "sending" }
@@ -150,6 +175,7 @@ export function useFinishReview({
     },
     /** Pending comments that send, counted on the button. */
     current,
+    listed,
     older,
     pending,
     events,
