@@ -34,7 +34,7 @@ import type { Unfolded } from "./ReviewThreads";
 import { hasSelection } from "./selection";
 import { tabIntoView } from "./tabIntoView";
 import { Turns, TurnsContext } from "./turns";
-import { reviewMetrics } from "./useDiffSteps";
+import { ABOVE_CHANGE, reviewMetrics } from "./useDiffSteps";
 import type { DiffSteps } from "./useDiffSteps";
 import { entryId, fileOfDiff, useFileItems } from "./useFileItems";
 import type { FileNote } from "./useFileItems";
@@ -284,6 +284,15 @@ export function AllFiles({
     toStart: (of) => keeper.toStart(of),
     tell: keeper.tell,
     beforeMark,
+    toLine: (to, { part, side, number }) =>
+      keeper.put(
+        {
+          id: entryId(to, part),
+          line: { side, number },
+          below: HEADER + ABOVE_CHANGE,
+        },
+        to,
+      ),
     comment: () => {
       const here = keeper.stopHere();
       const entry = here && entries.get(here.id);
