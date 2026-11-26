@@ -448,22 +448,40 @@ pub(crate) struct Fetched<T> {
 
 impl Host {
     fn generation(&self) -> Option<CommitId> {
+        self.connection().map(|(generation, _)| generation)
+    }
+
+    /// Read together, so a login checked here is the one `generation` signs in.
+    pub(crate) fn connection(&self) -> Option<(CommitId, Login)> {
         let state = self.lock();
         let connection = state.saved.get(self.endpoints.api())?;
-        Some(connection.generation)
+        Some((connection.generation, connection.login().clone()))
     }
 
     pub(crate) fn with_github<T>(
         &self,
         read: impl FnOnce(&GitHub<'_>) -> Result<T, ApiError>,
     ) -> Result<Fetched<T>, Failure> {
-        let api = self.endpoints.api();
         let generation = self.generation().ok_or_else(|| {
             Failure::new(
                 ErrorKind::NotConnected,
                 "L1 Git is not connected to GitHub. Sign in from Settings › Hosts.",
             )
         })?;
+        match self.as_connection(generation, read)? {
+            Ok(value) => Ok(Fetched { value, generation }),
+            Err(ApiError::Unauthorized) => Err(self.revoked(generation)),
+            Err(error) => Err(api_failure(error)),
+        }
+    }
+
+    /// Calls GitHub as connection `generation`, with its token read now.
+    pub(crate) fn as_connection<T>(
+        &self,
+        generation: CommitId,
+        call: impl FnOnce(&GitHub<'_>) -> T,
+    ) -> Result<T, Failure> {
+        let api = self.endpoints.api();
         let Some(token) = self.vault.read(api).map_err(keychain)? else {
             self.forget(&self.lock_writes(), generation, EndReason::TokenMissing);
             return Err(Failure::new(
@@ -471,23 +489,21 @@ impl Host {
                 "L1 Git's GitHub sign-in is no longer in the system keychain. Sign in again in Settings › Hosts.",
             ));
         };
-        let github = GitHub {
+        Ok(call(&GitHub {
             http: self.http.client()?,
             api,
             token: &token,
             connection: Some((self, generation)),
-        };
-        match read(&github) {
-            Ok(value) => Ok(Fetched { value, generation }),
-            Err(ApiError::Unauthorized) => {
-                self.forget(&self.lock_writes(), generation, EndReason::Revoked);
-                Err(Failure::new(
-                    ErrorKind::SignedOut,
-                    "GitHub no longer accepts L1 Git's sign-in. Sign in again in Settings › Hosts.",
-                ))
-            }
-            Err(error) => Err(api_failure(error)),
-        }
+        }))
+    }
+
+    /// For GitHub's 401 to connection `generation`'s token.
+    pub(crate) fn revoked(&self, generation: CommitId) -> Failure {
+        self.forget(&self.lock_writes(), generation, EndReason::Revoked);
+        Failure::new(
+            ErrorKind::SignedOut,
+            "GitHub no longer accepts L1 Git's sign-in. Sign in again in Settings › Hosts.",
+        )
     }
 }
 
