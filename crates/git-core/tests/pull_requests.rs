@@ -915,6 +915,44 @@ fn remove_waits_for_a_remote_that_never_answers_only_as_long_as_a_fetch_it_can_d
 }
 
 #[test]
+fn with_no_remote_for_the_pull_requests_repository_the_copy_still_reads_and_removes() {
+    let world = World::new();
+    let head = world.same(1, "feat", "feat.txt");
+    world.tried(1, &head);
+    let other = world.same(2, "two", "two.txt");
+    git(
+        &world.root,
+        &[
+            "remote",
+            "set-url",
+            "origin",
+            "https://github.com/someone/else.git",
+        ],
+    );
+    let no_remote = Pushes::Nowhere {
+        why: NoPush::NoRemote,
+    };
+    let PullCheckout::Absent { plan, .. } = world.read(2, &other) else {
+        panic!("#2 is not absent");
+    };
+    assert_eq!(plan.pushes, no_remote);
+    let tried = world.try_at(2, &other, &world.folder(2)).unwrap_err();
+    assert!(
+        tried
+            .message
+            .contains("No remote of this repository is github.com/octo/app"),
+        "{tried:?}"
+    );
+    let PullCheckout::Absent { plan, .. } = world.remove(1, &head, &head.oid) else {
+        panic!("#1 is not absent");
+    };
+    assert_eq!(plan.pushes, no_remote);
+    assert!(!world.folder(1).exists());
+    assert_eq!(world.tip("pr/1"), None);
+    world.assert_main_untouched();
+}
+
+#[test]
 fn remove_refuses_a_worktree_with_uncommitted_files_and_keeps_everything() {
     let world = World::new();
     let head = world.same(1, "feat", "feat.txt");

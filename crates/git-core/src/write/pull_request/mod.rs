@@ -115,15 +115,21 @@ pub enum Pushes {
         destination: BranchRef,
         adds_remote: bool,
     },
-    /// The branch follows `refs/pull/<number>/head`, which takes no push.
+    /// Pushing updates nothing on the pull request.
     Nowhere { why: NoPush },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum NoPush {
+    /// The fork takes no push from you. The branch follows
+    /// `refs/pull/<number>/head`, which takes none either.
     NoEdits,
+    /// The fork was deleted. The branch follows `refs/pull/<number>/head`.
     ForkGone,
+    /// No remote of the repository is the pull request's, so Try cannot
+    /// fetch it.
+    NoRemote,
 }
 
 #[derive(Debug, Clone, Serialize)]

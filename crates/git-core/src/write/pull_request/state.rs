@@ -157,7 +157,7 @@ fn plan(
         folder: worktrees::default_folder(main, branch)
             .to_string_lossy()
             .into_owned(),
-        pushes: Upstream::of(&repo.root, pull, head, reads)?.pushes(),
+        pushes: Upstream::pushes_of(&repo.root, pull, head, reads)?,
     })
 }
 

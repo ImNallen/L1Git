@@ -51,7 +51,8 @@ const planSchema = z.strictObject({
     }),
     z.strictObject({
       kind: z.literal("nowhere"),
-      why: z.enum(["noEdits", "forkGone"]),
+      /** `noRemote`: no remote of the repository is the pull request's, so Try cannot fetch it. */
+      why: z.enum(["noEdits", "forkGone", "noRemote"]),
     }),
   ]),
 });

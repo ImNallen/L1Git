@@ -23,8 +23,7 @@ impl Upstream {
         head: &PullHead,
         reads: Deadline,
     ) -> Result<Self, RepositoryError> {
-        let found = remotes::read(root, reads)?;
-        let base = remotes::of_github(found.clone(), &pull.github).ok_or_else(|| {
+        Self::found(root, pull, head, reads)?.ok_or_else(|| {
             RepositoryError::new(
                 ErrorKind::GitFailed,
                 format!(
@@ -32,27 +31,55 @@ impl Upstream {
                     pull.github.owner, pull.github.repo
                 ),
             )
-        })?;
+        })
+    }
+
+    /// Where pushes go, or nowhere when no remote is the pull request's
+    /// repository, so a read still answers.
+    pub(super) fn pushes_of(
+        root: &Path,
+        pull: &PullKey,
+        head: &PullHead,
+        reads: Deadline,
+    ) -> Result<Pushes, RepositoryError> {
+        Ok(Self::found(root, pull, head, reads)?.map_or(
+            Pushes::Nowhere {
+                why: NoPush::NoRemote,
+            },
+            |upstream| upstream.pushes(),
+        ))
+    }
+
+    fn found(
+        root: &Path,
+        pull: &PullKey,
+        head: &PullHead,
+        reads: Deadline,
+    ) -> Result<Option<Self>, RepositoryError> {
+        let found = remotes::read(root, reads)?;
+        let Some(base) = remotes::of_github(found.clone(), &pull.github) else {
+            return Ok(None);
+        };
         let merge = head.reference.clone();
         let fork = match &head.from {
             HeadFrom::Same => {
-                return Ok(Self::Branch {
+                return Ok(Some(Self::Branch {
                     remote: base,
                     merge,
                     adds: None,
-                });
+                }));
             }
             HeadFrom::Fork { edits: false, .. } => {
-                return Ok(Self::PullRef {
+                return Ok(Some(Self::PullRef {
                     remote: base,
                     why: NoPush::NoEdits,
-                });
+                }));
             }
             HeadFrom::Gone => {
-                return Ok(Self::PullRef {
+                return Ok(Some(Self::PullRef {
                     remote: base,
                     why: NoPush::ForkGone,
-                });
+                }));
             }
             HeadFrom::Fork {
                 repository,
@@ -60,11 +87,11 @@ impl Upstream {
             } => repository,
         };
         if let Some(remote) = remotes::of_github(found.clone(), fork) {
-            return Ok(Self::Branch {
+            return Ok(Some(Self::Branch {
                 remote,
                 merge,
                 adds: None,
-            });
+            }));
         }
         let url = remotes::sibling_url(&remotes::raw_url(root, &base, reads)?, fork).ok_or_else(
             || {
@@ -78,11 +105,11 @@ impl Upstream {
             },
         )?;
         let name = free_name(&found, fork);
-        Ok(Self::Branch {
+        Ok(Some(Self::Branch {
             remote: name.clone(),
             merge,
             adds: Some(AddRemote { name, url }),
-        })
+        }))
     }
 
     pub(super) fn settled(
@@ -124,7 +151,7 @@ impl Upstream {
         }
     }
 
-    pub(super) fn pushes(&self) -> Pushes {
+    fn pushes(&self) -> Pushes {
         match self {
             Self::Branch {
                 remote,

@@ -115,6 +115,17 @@ describe("pullCheckoutSchema", () => {
       expect(pullCheckoutSchema.parse(checkout)).toEqual(checkout);
   });
 
+  it("reads each reason pushes go nowhere", () => {
+    for (const why of ["noEdits", "forkGone", "noRemote"] as const)
+      expect(
+        pullCheckoutSchema.parse({
+          kind: "absent",
+          branch: "refs/heads/pr/7",
+          plan: { ...plan, pushes: { kind: "nowhere", why } },
+        }),
+      ).toMatchObject({ plan: { pushes: { why } } });
+  });
+
   it("refuses a relation or a push it does not know", () => {
     expect(
       pullCheckoutSchema.safeParse({
