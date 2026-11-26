@@ -485,6 +485,8 @@ fn movable(
     Ok(worktree)
 }
 
+/// The main worktree, or `opened` when the main one is a bare repository,
+/// which Git lists with no HEAD.
 fn main_worktree(
     opened: Repo,
     records: &[WorktreeRecord],
@@ -492,7 +494,7 @@ fn main_worktree(
 ) -> Result<Repo, RepositoryError> {
     match records
         .iter()
-        .find(|record| record.main)
+        .find(|record| record.main && record.head.is_some())
         .and_then(|record| record.root.as_deref())
     {
         Some(main) if main != opened.root => opened.worktree(&main.to_string_lossy(), reads),

@@ -706,6 +706,61 @@ fn remove_asked_from_the_copy_itself_runs_from_the_main_worktree() {
 }
 
 #[test]
+fn remove_runs_from_the_opened_worktree_when_the_main_one_is_bare() {
+    let world = World::new();
+    let head = world.same(1, "feat", "feat.txt");
+    let hub = world.top.join("hub.git");
+    git(
+        &world.top,
+        &[
+            "clone",
+            "-q",
+            "--bare",
+            world.base.to_str().unwrap(),
+            "hub.git",
+        ],
+    );
+    let insteadof = format!("url.{}.insteadOf", world.base.display());
+    for (key, value) in [
+        ("user.name", "Ada"),
+        ("user.email", "ada@example.test"),
+        ("core.hooksPath", "/dev/null"),
+        ("remote.origin.url", BASE_URL),
+        ("remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"),
+        (insteadof.as_str(), BASE_URL),
+    ] {
+        git(&hub, &["config", key, value]);
+    }
+    let opened = world.top.join("hub-main");
+    git(
+        &hub,
+        &["worktree", "add", "-q", opened.to_str().unwrap(), "main"],
+    );
+    let path = opened.to_str().unwrap();
+    let folder = world.top.join("hub-pr-1");
+    world
+        .core
+        .try_pull_request(path, &World::key(1), &head, &folder)
+        .unwrap();
+    let removed = world
+        .core
+        .remove_pull_request(path, &World::key(1), &head, &head.oid)
+        .unwrap();
+    assert!(
+        matches!(removed, PullCheckout::Absent { .. }),
+        "{removed:?}"
+    );
+    assert!(!folder.exists());
+    assert!(
+        !run_git(
+            &hub,
+            &["rev-parse", "--verify", "--quiet", "refs/heads/pr/1"]
+        )
+        .0
+    );
+}
+
+#[test]
 fn remove_refuses_a_worktree_with_uncommitted_files_and_keeps_everything() {
     let world = World::new();
     let head = world.same(1, "feat", "feat.txt");
