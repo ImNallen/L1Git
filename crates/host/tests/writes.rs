@@ -262,6 +262,12 @@ fn a_head_branch_that_could_not_be_checked_is_not_deleted() {
         Reply::graphql(json!({"data": {"node": null}, "errors": [
             {"type": "NOT_FOUND", "path": ["node"], "message": "Could not resolve to a node."},
         ]})),
+        Reply::graphql(json!({"data": {"node": {
+            "merged": true, "headRefName": "fix", "isCrossRepository": false, "headRef": null,
+            "headRepository": {"id": "R_1", "basedOn": {"totalCount": 0}},
+        }}, "errors": [
+            {"type": "SERVICE_UNAVAILABLE", "path": ["node", "headRef"], "message": "Something went wrong."},
+        ]})),
     ] {
         let world = World::connected();
         world.github.graphql([reply]);
