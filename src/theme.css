@@ -16,6 +16,7 @@
 @import "./styles/filesChanged.css";
 @import "./styles/viewedFiles.css";
 @import "./styles/lineComments.css";
+@import "./styles/writes.css";
 
 :root {
   font-family: "InterVariable", Inter, sans-serif;

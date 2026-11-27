@@ -10,6 +10,7 @@ import type { Notes } from "../domain/reviewThreads";
 import type { RangeFile } from "../domain/range";
 import type { Attempt } from "../pullRequestWrites";
 import { usePullDrafts, usePullWrites } from "../shell/usePullWriting";
+import { sentNothing } from "./sentNothing";
 import type { OpenedPullRequest } from "../shell/usePullRequests";
 
 type Opened = Pick<
@@ -53,16 +54,6 @@ export type BoxView =
    * comment, carries the words saved here until it ends. */
   | { kind: "held"; text: string; isSending: boolean }
   | { kind: "unknown"; text: string; attempt: Attempt };
-
-const sendProblems = {
-  busy: "Another write to this pull request is still sending, or may have posted. L1 Git sends nothing more for it until it knows.",
-  unsaved:
-    "L1 Git couldn't save these words on this computer, so it sent nothing.",
-  signedOut: "L1 Git isn't signed in to GitHub, so it sent nothing.",
-  restarting: "L1 Git is restarting to update, so it sent nothing.",
-  notInRead:
-    "L1 Git's latest read of this pull request doesn't match this comment, so it sent nothing. Refresh the pull request and try again.",
-} as const;
 
 const idle: Sending = { kind: "idle", problem: null };
 
@@ -247,7 +238,7 @@ export function useLineComments({
           ? { kind: "sent", attempt: attempt.id }
           : {
               kind: "idle",
-              problem: started === "started" ? null : sendProblems[started],
+              problem: started === "started" ? null : sentNothing[started],
             },
     });
   }
@@ -317,12 +308,14 @@ export function useLineComments({
       if (box) drafts.settle(draftKey(box.anchor, head), pick);
     },
     keepAsDraft: async (attempt: string) => {
-      if (await writes.keep(attempt))
+      const kept = await writes.keep(attempt);
+      if (kept)
         setBox((before) =>
           before?.sending.kind === "sent" && before.sending.attempt === attempt
             ? { ...before, sending: idle }
             : before,
         );
+      return kept;
     },
     sendAnyway: (attempt: string) => writes.sendAnyway(attempt),
     dismiss: (attempt: string) => writes.dismiss(attempt),

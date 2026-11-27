@@ -10,8 +10,8 @@ import {
   mayHavePostedText,
   Problem,
   saveText,
-  Unknown,
 } from "./LineCommentParts";
+import { MayHavePosted } from "./MayHavePosted";
 import { Body } from "./PullRequestBody";
 import { ThreadChips } from "./ReviewThreads";
 import type { Unfolded } from "./ReviewThreads";
@@ -113,7 +113,7 @@ function SentComment({
         <Body text={write.body} />
       </div>
       {state.kind === "unknown" ? (
-        <Unknown attempt={attempt} url={url} comments={comments} />
+        <MayHavePosted attempt={attempt} url={url} choices={comments} />
       ) : (
         (state.kind === "refused" || state.kind === "notSent") && (
           <>

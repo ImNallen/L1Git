@@ -145,6 +145,9 @@
 .line-comment-problem a {
   color: var(--blue);
 }
+.line-comment > .write-notice {
+  margin: 0 10px 8px;
+}
 .line-comment-note {
   margin: 0;
   padding: 0 12px 10px;

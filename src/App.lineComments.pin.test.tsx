@@ -261,6 +261,7 @@ it("offers three choices when a comment may have posted, and never sends it agai
   expect(get("link", "Open on GitHub", box()!).getAttribute("href")).toBe(
     "https://github.com/octo/pin/pull/1/files",
   );
+  expect(box()?.textContent).toContain("Send anyway may post it twice.");
   await app.click(refresh());
   expect(app.bridge.world.host.mutations).toHaveLength(1);
   await app.click(get("button", "Keep as draft"));
@@ -445,5 +446,34 @@ it("keeps a comment's may have posted choices in the box when Send anyway sends 
   expect(get("button", "Keep as draft", box()!)).toBeTruthy();
   expect(get("button", "Send anyway", box()!)).toBeTruthy();
   expect(words().readOnly).toBe(true);
+  expect(app.bridge.world.host.mutations).toHaveLength(1);
+});
+
+it("says so in the box when Send anyway or Keep as draft does nothing", async () => {
+  const app = await openFiles({
+    world: (world) => {
+      world.host.writes = [{ kind: "unknown", applied: false }];
+    },
+  });
+  await choose(app, 12);
+  await app.type(words(), "Stuck?");
+  await app.click(get("button", "Add single comment"));
+  const { draftImpact, freezeDrafts } = app.modules.draftProtection;
+  const frozen = freezeDrafts(draftImpact().revision);
+  await app.click(get("button", "Send anyway"));
+  expect(box()?.textContent).toContain(
+    "L1 Git is restarting to update, so it sent nothing.",
+  );
+  if (frozen.kind === "frozen") frozen.release();
+  const failing = app.bridge.failHost(
+    { kind: "unreachable", message: "L1 Git could not reach GitHub." },
+    pullKey("octo/pin", 1),
+  );
+  await app.click(get("button", "Keep as draft"));
+  expect(box()?.textContent).toContain(
+    "L1 Git couldn't keep it as a draft, so nothing changed.",
+  );
+  expect(get("button", "Send anyway", box()!)).toBeTruthy();
+  failing();
   expect(app.bridge.world.host.mutations).toHaveLength(1);
 });

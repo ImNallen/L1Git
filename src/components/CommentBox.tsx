@@ -8,8 +8,8 @@ import {
   mayHavePostedText,
   Problem,
   saveText,
-  Unknown,
 } from "./LineCommentParts";
+import { MayHavePosted } from "./MayHavePosted";
 import type { BoxView, LineComments } from "./useLineComments";
 
 /** The box under the chosen lines. Its words are a draft on this computer. */
@@ -133,7 +133,13 @@ export function CommentBox({
         </p>
       )}
       {view.kind === "unknown" && (
-        <Unknown attempt={view.attempt} url={url} comments={comments} />
+        <MayHavePosted
+          key={view.attempt.id}
+          attempt={view.attempt}
+          url={url}
+          choices={comments}
+          home={() => words.current}
+        />
       )}
       <footer className="line-comment-footer">
         <span
