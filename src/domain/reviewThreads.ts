@@ -86,12 +86,14 @@ const empty: LineNote = { threads: [], drafts: [], sent: [], box: false };
  * Where a file's notes show in its patch at `head`, which for a changed type
  * is two parts. A pending comment or a sent one of another head, like an
  * outdated thread, is elsewhere: a line number means something at one commit
- * only. The box shows its own draft and its own attempt.
+ * only. The box shows its own draft and its own attempt. Without `left`, the
+ * old side is a commit GitHub has never seen, and what is on it is elsewhere.
  */
 export function placeNotes(
   { threads, drafts, sent, box }: Notes,
   head: Oid,
   patch: readonly FileDiffMetadata[],
+  { left }: { left: boolean } = { left: true },
 ): { onLines: NotesOnLine[][]; elsewhere: Elsewhere } {
   const onLines = patch.map(() => new Map<string, NotesOnLine>());
   const elsewhere = {
@@ -100,10 +102,16 @@ export function placeNotes(
     sent: [] as string[],
   };
   const put = (
-    at: { side: "left" | "right"; line: number | null } | null,
+    at: {
+      side: "left" | "right";
+      line: number | null;
+      start?: { side: "left" | "right" } | null;
+    } | null,
     add: (note: LineNote) => LineNote,
   ): boolean => {
     if (at === null || at.line === null) return false;
+    if (!left && (at.side === "left" || at.start?.side === "left"))
+      return false;
     const side = sides[at.side];
     const { line } = at;
     const places = onLines[patch.findIndex((each) => shows(each, side, line))];

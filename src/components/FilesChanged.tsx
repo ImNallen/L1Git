@@ -14,6 +14,14 @@ import { problemFrom } from "../domain/repository";
 import { threadsByFile } from "../domain/reviewThreads";
 import { nextUnviewed } from "../domain/viewedFiles";
 import { clampMessage } from "../domain/worktree";
+import { sinceRefusal } from "../domain/lineComments";
+import type { LineAnchor } from "../domain/lineComments";
+import {
+  isContentMissing,
+  isSinceShown,
+  shownFiles,
+  sinceShown,
+} from "../filesChanged";
 import type { FilesChanged as Held } from "../filesChanged";
 import type { FilesChangedState } from "../shell/useFilesChanged";
 import type { OpenedPullRequest } from "../shell/usePullRequests";
@@ -32,6 +40,7 @@ import type { Unfolded } from "./ReviewThreads";
 import { OnGitHub } from "./PullRequestParts";
 import { useFolded } from "./useFolded";
 import { FinishReviewButton } from "./FinishReview";
+import { SinceBar, SinceNotice } from "./SinceReview";
 import { useFilesGoTo } from "./useFilesGoTo";
 import type { Left } from "./useFilesGoTo";
 import { useFinishReview } from "./useFinishReview";
@@ -66,26 +75,27 @@ function Stopped({
 }
 
 /** What a screen reader hears as the tab goes on. */
-function said({ read, at }: Held): string {
-  switch (read.kind) {
+function said(held: Held): string {
+  const { read, at } = held;
+  const since = isSinceShown(held) ? held.since?.read.kind : null;
+  switch (since === "reading" || since === "fetching" ? since : read.kind) {
     case "reading":
       return "Reading the changes…";
     case "fetching":
       return "Getting the commits from GitHub…";
     case "stopped":
       return "";
-    case "ready": {
-      const file = read.files[at];
-      return file
-        ? `File ${(at + 1).toLocaleString()} of ${read.files.length.toLocaleString()}, ${pathLabel(file)}`
-        : "";
-    }
     default: {
-      const exhaustive: never = read;
-      return exhaustive;
+      const files = shownFiles(held);
+      const file = files[at];
+      return file
+        ? `File ${(at + 1).toLocaleString()} of ${files.length.toLocaleString()}, ${pathLabel(file)}`
+        : "";
     }
   }
 }
+
+const noSince: ReadonlyMap<RangeFile, RangeFile | null> = new Map();
 
 function Warning({
   children,
@@ -213,11 +223,21 @@ function Shown({
     range,
     pull: { threads: page },
   } = held;
-  const changed = read.kind === "ready" ? read.files : null;
+  const changed = shownFiles(held);
   const threads = useMemo(
-    () => threadsByFile(changed ?? [], page?.items ?? []),
+    () => threadsByFile(changed, page?.items ?? []),
     [changed, page],
   );
+  const isSince = isSinceShown(held);
+  const nowOf = sinceShown(held)?.nowOf ?? noSince;
+  /** A file of what changed since your review takes comments only on lines GitHub knows. */
+  const refusal = (file: RangeFile, anchor: LineAnchor) => {
+    if (!nowOf.has(file)) return null;
+    const now = nowOf.get(file) ?? null;
+    const own = now && patches?.get(now);
+    return sinceRefusal(anchor, now, own?.kind === "ready" ? own.patch : null);
+  };
+  const since = isSince ? held.since?.read : undefined;
   switch (read.kind) {
     case "reading":
       return <ReadingFiles />;
@@ -232,8 +252,25 @@ function Shown({
         <Stopped stop={read.stop} held={held} url={url} onRetry={onRetry} />
       );
     case "ready": {
-      const file = read.files[at];
-      if (!file) return <FilesState title="No changes." url={url} />;
+      if (since?.kind === "reading") return <ReadingFiles />;
+      if (since?.kind === "fetching")
+        return (
+          <FilesState title="Getting the commits from GitHub…" url={url} busy>
+            <p>This clone doesn&apos;t have the commit you reviewed yet.</p>
+          </FilesState>
+        );
+      const file = changed[at];
+      if (!file)
+        return (
+          <FilesState
+            title={
+              isSince
+                ? "Nothing new from the author since your review."
+                : "No changes."
+            }
+            url={url}
+          />
+        );
       const startsAt = () => {
         const { current: last } = left;
         // It is for this switch only.
@@ -242,7 +279,8 @@ function Shown({
         });
         return last && last.view !== view && last.at === at ? last.line : null;
       };
-      const next = nextUnviewed(read.files, viewed, at);
+      const next = nextUnviewed(changed, viewed, at);
+      const shownKey = `${range.head} ${read.mergeBase} ${isSince ? `since ${held.since?.rebased}` : "all"}`;
       const onLeave = (of: number, line: LinePlace) => {
         left.current = { view, at: of, line };
       };
@@ -260,10 +298,12 @@ function Shown({
       };
       return view === "all" ? (
         <AllFiles
-          key={`${range.head} ${read.mergeBase}`}
+          key={shownKey}
           {...shared}
-          files={read.files}
-          contentMissing={read.contentMissing}
+          files={changed}
+          nowOf={nowOf}
+          refusal={refusal}
+          contentMissing={isContentMissing(held)}
           patches={patches}
           at={at}
           threads={threads}
@@ -279,21 +319,28 @@ function Shown({
         />
       ) : (
         <FileChanged
-          key={`${range.head} ${read.mergeBase} ${at}`}
+          key={`${shownKey} ${at}`}
           {...shared}
           file={file}
+          isSince={nowOf.has(file)}
+          refusal={(anchor) => refusal(file, anchor)}
           enter={enter}
           patch={patches?.get(file) ?? null}
-          contentMissing={read.contentMissing}
+          contentMissing={isContentMissing(held, file)}
           threads={threads.get(file) ?? none}
           whole={() => whole(file)}
           onRetry={() => onRetryFile(file)}
           below={
             <EndOfOne
               isViewed={viewed.has(file)}
-              onMark={(isViewed) => mark(file, isViewed)}
+              isSince={nowOf.has(file)}
+              onMark={
+                nowOf.get(file) === null
+                  ? null
+                  : (isViewed) => mark(file, isViewed)
+              }
               onNextUnviewed={next === null ? null : () => go(next)}
-              onNext={at + 1 < read.files.length ? () => go(at + 1) : null}
+              onNext={at + 1 < changed.length ? () => go(at + 1) : null}
             />
           }
           onLeave={(line) => onLeave(at, line)}
@@ -359,12 +406,15 @@ export function FilesChanged({
   const [ids, toggle, unfold] = useToggled();
   const [folded, fold, unfoldFile] = useFolded(files.viewed);
   const unfolded = useMemo(() => ({ ids, toggle }), [ids, toggle]);
-  const { range, read, at, counted } = held;
+  const { range, read, at, counted, since } = held;
+  const isSince = isSinceShown(held);
   const counts = useMemo(
-    () => (read.kind === "ready" ? countsNotice(read, counted) : null),
-    [read, counted],
+    () =>
+      read.kind === "ready" && !isSince ? countsNotice(read, counted) : null,
+    [read, counted, isSince],
   );
-  const file = read.kind === "ready" ? read.files[at] : undefined;
+  const shown = shownFiles(held);
+  const file = shown[at];
   const newer = read.kind === "reading" ? null : newerThan(range, pull, viewer);
   const [problem, setProblem] = useState<{
     file: RangeFile;
@@ -402,11 +452,21 @@ export function FilesChanged({
           aria-label="Files changed"
           tabIndex={-1}
         >
+          {since && (
+            <SinceBar
+              held={held}
+              since={since}
+              viewer={viewer}
+              onShow={files.show}
+              onRetry={keepingFocus(files.retrySince)}
+            />
+          )}
           {file && read.kind === "ready" && (
             <FilesToolbar
-              files={read.files}
-              contentMissing={read.contentMissing}
+              files={shown}
+              contentMissing={isContentMissing(held)}
               at={at}
+              nowOf={sinceShown(held)?.nowOf ?? noSince}
               state={files}
             >
               <FinishReviewButton
@@ -422,11 +482,21 @@ export function FilesChanged({
                 onGoTo={goToLines}
                 onShowUnviewed={() => {
                   const next = nextUnviewed(read.files, files.viewed, -1);
-                  if (next !== null) files.go(next);
+                  if (next === null) return;
+                  files.show("all");
+                  files.go(next);
                 }}
                 onOpenThread={openThread}
               />
             </FilesToolbar>
+          )}
+          {since && (
+            <SinceNotice
+              held={held}
+              since={since}
+              viewer={viewer}
+              onRebased={files.showRebased}
+            />
           )}
           {counts !== null && (
             <p className="files-counts">

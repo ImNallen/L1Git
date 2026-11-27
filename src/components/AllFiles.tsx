@@ -15,6 +15,7 @@ import type { CodeViewHandle } from "@pierre/diffs/react";
 import { partOf } from "../domain/changeStops";
 import { sidesFor } from "../domain/fileSides";
 import { placeOf, rangeOf, runAt } from "../domain/lineComments";
+import type { LineAnchor } from "../domain/lineComments";
 import type { DiffStyle } from "../domain/lineSelection";
 import type { ReviewThread } from "../domain/pullRequest";
 import type { RangeFile } from "../domain/range";
@@ -62,6 +63,8 @@ export function AllFiles({
   at,
   head,
   threads: newest,
+  nowOf,
+  refusal,
   unfolded,
   viewed,
   onMark,
@@ -89,6 +92,10 @@ export function AllFiles({
   /** The head of what is shown. */
   head: Oid;
   threads: ReadonlyMap<RangeFile, readonly ReviewThread[]>;
+  /** For each file of what changed since your review, the pull request's file at its path, or null for one it no longer changes. */
+  nowOf: ReadonlyMap<RangeFile, RangeFile | null>;
+  /** Why chosen lines take no comment, or null when they take one. */
+  refusal: (file: RangeFile, anchor: LineAnchor) => string | null;
   unfolded: Unfolded;
   viewed: ReadonlySet<RangeFile>;
   onMark: (file: RangeFile, isViewed: boolean) => void;
@@ -126,6 +133,7 @@ export function AllFiles({
     folded,
     head,
     comments?.notesOf ?? noNotesOf,
+    nowOf,
   );
   const boxLines = comments?.box ? JSON.stringify(comments.box.anchor) : null;
   const chosen = useMemo(
@@ -135,15 +143,16 @@ export function AllFiles({
         : { id: boxAt, range: rangeOf(JSON.parse(boxLines)) },
     [boxAt, boxLines],
   );
-  const latest = useRef({ entries, comments, diffStyle });
-  latest.current = { entries, comments, diffStyle };
+  const latest = useRef({ entries, comments, diffStyle, refusal });
+  latest.current = { entries, comments, diffStyle, refusal };
   const choose = useCallback((id: string, range: SelectedLineRange | null) => {
-    const { entries, comments, diffStyle } = latest.current;
+    const { entries, comments, diffStyle, refusal } = latest.current;
     const entry = entries.get(id);
     if (!range || !entry?.diff) return;
     const anchor = placeOf(entry.diff, diffStyle, entry.file.path, range);
-    if (anchor) comments?.open(anchor);
-    else comments?.refuseLines();
+    const refused = anchor && refusal(entry.file, anchor);
+    if (anchor && !refused) comments?.open(anchor);
+    else comments?.refuseLines(refused ?? undefined);
   }, []);
   const [begins] = useState(at);
   const isReady = count > begins;
@@ -340,12 +349,16 @@ export function AllFiles({
             const marking = {
               isCurrent: entry.at === at,
               isViewed: viewed.has(file),
-              onMark: (isViewed: boolean) => onMark(file, isViewed),
+              onMark:
+                nowOf.get(file) === null
+                  ? null
+                  : (isViewed: boolean) => onMark(file, isViewed),
             };
             return (
               <>
                 <FileHeader
                   {...marking}
+                  isSince={nowOf.has(file)}
                   entry={entry}
                   folded={isFolded}
                   onFold={() => {

@@ -1,0 +1,118 @@
+.since-bar {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 14px;
+  min-height: 48px;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-raised);
+}
+.since-toggle {
+  display: flex;
+  flex-shrink: 0;
+  padding: 2px;
+  border: 1px solid var(--border-control);
+  border-radius: 6px;
+}
+.since-toggle button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 4px;
+  color: var(--text-body);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.since-toggle button:hover:not([aria-pressed="true"]) {
+  background: var(--control-hover);
+}
+.since-toggle button[aria-pressed="true"] {
+  background: var(--primary-bg);
+  color: var(--primary-text);
+}
+.since-count {
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.since-toggle [aria-pressed="true"] .since-count {
+  color: inherit;
+  opacity: 0.8;
+}
+.since-reviewed {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.since-reviewed code {
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.since-notice,
+.since-stopped {
+  flex-shrink: 0;
+}
+.since-notice > button,
+.since-stopped > button {
+  margin-left: 12px;
+  color: var(--blue);
+  text-decoration: none;
+}
+.since-notice > span + button,
+.since-stopped > span + button {
+  margin-right: auto;
+}
+.since-stopped-detail {
+  color: var(--muted);
+}
+.files-since {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.files-gone {
+  flex-shrink: 0;
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.files-header > .files-gone {
+  margin-right: 0;
+}
+.files-next > .files-since-end {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: auto;
+  padding-left: 54px;
+}
+.files-since-end > svg {
+  color: var(--success);
+}
+.pull-tab-count.new {
+  background: var(--primary-bg);
+  color: var(--primary-text);
+}
+/* The path needs the room more. */
+@container (max-width: 760px) {
+  .files-toolbar > .files-since {
+    display: none;
+  }
+}
+@container (max-width: 560px) {
+  .since-reviewed > span {
+    display: none;
+  }
+}

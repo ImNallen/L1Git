@@ -19,7 +19,11 @@ import type {
   PullRequests,
 } from "../domain/pullRequest";
 import type { GitHubRepository } from "../domain/repository";
-import { rangeFilesSchema, rangePatchesSchema } from "../domain/range";
+import {
+  rangeFilesSchema,
+  rangePatchesSchema,
+  sinceReviewSchema,
+} from "../domain/range";
 import { pullCopyHandlers } from "./fakePullCopies";
 import { draftsHandler } from "./fakeDrafts";
 import type { FakeSent } from "./fakeDrafts";
@@ -366,6 +370,16 @@ const handlers: Record<string, Handler> = {
       },
     ]),
   fetchCommits: () => ({ kind: "done" }),
+  /** The base did not move, and nothing changed since the review. */
+  sinceReview: (request) =>
+    sinceReviewSchema.parse({
+      kind: "ready",
+      since: request.reviewed,
+      fromBase: { kind: "none" },
+      reviewed: [],
+      files: [],
+      contentMissing: false,
+    }),
   worktreePatch: () => ({
     kind: "diff",
     diff: {

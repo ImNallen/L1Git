@@ -164,6 +164,27 @@ describe("placeNotes", () => {
     );
   });
 
+  it("puts what is on the old side elsewhere when GitHub has never seen it", () => {
+    const { onLines, elsewhere } = placeNotes(
+      {
+        ...nothing,
+        threads: [
+          thread("new", { line: 22 }),
+          thread("old", { line: 11, side: "left" }),
+        ],
+        drafts: [{ key: key(11), anchor: anchor(11, "left"), head }],
+      },
+      head,
+      patch,
+      { left: false },
+    );
+    expect(
+      onLines.map((lines) => lines.map(({ lineNumber }) => lineNumber)),
+    ).toEqual([[22]]);
+    expect(elsewhere.threads.map(({ id }) => id)).toEqual(["old"]);
+    expect(elsewhere.drafts).toHaveLength(1);
+  });
+
   it("keeps threads on one line together, in their order", () => {
     expect(
       places({

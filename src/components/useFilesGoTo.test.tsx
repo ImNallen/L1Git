@@ -31,6 +31,7 @@ type Shown = {
   view: "single" | "all";
   patches: Held["patches"];
   folded: ReadonlySet<RangeFile>;
+  since?: Held["since"];
 };
 
 let container: HTMLDivElement;
@@ -38,10 +39,11 @@ let root: ReturnType<typeof createRoot>;
 let toLine: ReturnType<typeof vi.fn<() => void>>;
 let unfoldFile: ReturnType<typeof vi.fn<(file: RangeFile) => void>>;
 let onShown: ReturnType<typeof vi.fn<() => void>>;
+let showAll: ReturnType<typeof vi.fn<(showing: "since" | "all") => void>>;
 let left: { current: Left | null };
 let showing: ReviewThread | null;
 
-function Files({ view, patches, folded }: Shown) {
+function Files({ view, patches, folded, since = null }: Shown) {
   useFilesGoTo({
     held: {
       read: {
@@ -50,6 +52,7 @@ function Files({ view, patches, folded }: Shown) {
         files: [file],
         contentMissing: false,
       },
+      since,
       at: 0,
       patches,
     },
@@ -57,6 +60,7 @@ function Files({ view, patches, folded }: Shown) {
       view,
       ref: { current: { toLine } },
       go: () => {},
+      show: showAll,
     } as unknown as FilesChangedState,
     unfold: () => {},
     folded,
@@ -75,6 +79,7 @@ beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   toLine = vi.fn();
   unfoldFile = vi.fn();
+  showAll = vi.fn();
   onShown = vi.fn(() => {
     showing = null;
   });
@@ -123,4 +128,37 @@ it("unfolds a folded or viewed file in All files before it goes to the line", as
   expect(toLine).not.toHaveBeenCalled();
   await show({ view: "all", patches, folded: new Set() });
   expect(toLine).toHaveBeenCalledTimes(1);
+});
+
+it("shows All changes for a line that the since diff doesn't draw", async () => {
+  const again = { ...file, oldBlob: oid("9") };
+  const since: Held["since"] = {
+    point: { oid: oid("e"), at: "2026-11-24T18:00:00Z" },
+    read: {
+      kind: "ready",
+      since: oid("5"),
+      fromBase: { kind: "leftOut" },
+      reviewed: [file],
+      files: [again],
+      contentMissing: false,
+    },
+    showing: "since",
+    rebased: "folded",
+  };
+  const hunk: PatchRead = {
+    kind: "ready",
+    patch: {
+      kind: "text",
+      patch: "@@ -10,4 +10,4 @@\n a\n-b\n+B\n c\n",
+      lossy: false,
+    },
+  };
+  await show({
+    view: "single",
+    patches: new Map([[again, hunk]]),
+    folded: new Set(),
+    since,
+  });
+  expect(showAll).toHaveBeenCalledWith("all");
+  expect(left.current).toBeNull();
 });

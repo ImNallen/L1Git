@@ -324,10 +324,9 @@ export function useLineComments({
     notesOf,
     notice,
     dismissNotice: () => setNotice(null),
-    refuseLines: () =>
-      setNotice(
-        "GitHub takes comments only on the lines of a change. Choose lines inside a hunk.",
-      ),
+    refuseLines: (
+      why = "GitHub takes comments only on the lines of a change. Choose lines inside a hunk.",
+    ) => setNotice(why),
     /** Opens the box on lines, on the pending comment there if one is. A
      * box with words typed in it stays, so they never become a pending
      * comment without Start a review. */

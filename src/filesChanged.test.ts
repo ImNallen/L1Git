@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { pullRequestSchema } from "./domain/pullRequest";
 import type { PullRequest } from "./domain/pullRequest";
-import type { CommitsFetch, RangeFile } from "./domain/range";
+import type { CommitsFetch, RangeFile, SinceReady } from "./domain/range";
 import { oidSchema, rootSchema } from "./domain/repository";
 import type { FilePatch } from "./domain/repository";
-import { createFilesChanged } from "./filesChanged";
+import { createFilesChanged, shownFiles } from "./filesChanged";
 
 const oid = (digit: string) => oidSchema.parse(digit.repeat(40));
 const root = rootSchema.parse("/work/app");
@@ -87,6 +87,18 @@ const ready = (
   files: RangeFile[],
   { contentMissing = false, shallow = false } = {},
 ) => ({ kind: "ready", mergeBase, files, contentMissing, shallow }) as const;
+const replayed = oid("5");
+const sinceReady = (
+  files: RangeFile[],
+  reviewed: RangeFile[] = [],
+): SinceReady => ({
+  kind: "ready",
+  since: replayed,
+  fromBase: { kind: "leftOut" },
+  reviewed,
+  files,
+  contentMissing: false,
+});
 const missing = (...heads: string[]) =>
   ({ kind: "missing", oids: heads.map(oid) }) as const;
 
@@ -104,6 +116,7 @@ function setup(deps: Partial<Deps> = {}) {
       text(`own ${path}`),
     ),
     fetchCommits: vi.fn<Deps["fetchCommits"]>(async () => ({ kind: "done" })),
+    sinceReview: vi.fn<Deps["sinceReview"]>(async () => sinceReady([])),
     ...deps,
   };
   const store = createFilesChanged(given);
@@ -570,4 +583,191 @@ it("steps to files there are, and says where to begin in one", async () => {
   store.go(2);
   store.go(-1);
   expect(store.read()?.at).toBe(1);
+});
+
+describe("what changed since your review", () => {
+  const reviewedOid = oid("e");
+  const at = "2026-11-24T18:00:00Z";
+  const reviewedPull = (head: string) =>
+    pull(head, { reviewed: { oid: reviewedOid, at } });
+  const shown = (store: ReturnType<typeof setup>["store"]) => {
+    const held = store.read();
+    return held ? shownFiles(held).map(({ path }) => path) : null;
+  };
+
+  it("is read after the range, shown first, and its files read from where it starts", async () => {
+    const again = file("b.ts", { oldBlob: oid("9") });
+    const { store, ...deps } = setup({
+      sinceReview: vi.fn<Deps["sinceReview"]>(async () =>
+        sinceReady(
+          [again],
+          [file("a.ts"), file("b.ts", { newBlob: oid("8") })],
+        ),
+      ),
+      rangePatches: vi.fn<Deps["rangePatches"]>(async (_, from) =>
+        from === replayed
+          ? [{ path: "b.ts", patch: text("since b.ts") }]
+          : [
+              { path: "b.ts", patch: text("b.ts") },
+              { path: "a.ts", patch: text("a.ts") },
+            ],
+      ),
+    });
+    store.see("me one", repository, reviewedPull("1"), false);
+    await settle();
+    expect(deps.sinceReview).toHaveBeenCalledExactlyOnceWith(
+      root,
+      base,
+      reviewedOid,
+      oid("1"),
+    );
+    expect(deps.rangePatches).toHaveBeenLastCalledWith(
+      root,
+      replayed,
+      oid("1"),
+    );
+    expect(shown(store)).toEqual(["b.ts"]);
+    const held = store.read();
+    const read = held?.patches?.get(again);
+    expect(read?.kind === "ready" && read.patch).toEqual(text("since b.ts"));
+    await store.whole(again);
+    expect(deps.filePatch).toHaveBeenLastCalledWith(
+      root,
+      {
+        base: { kind: "commit", oid: replayed },
+        target: { kind: "commit", oid: oid("1") },
+      },
+      "b.ts",
+      "whole",
+      "b.ts",
+    );
+  });
+
+  it("shows all changes at the same file in one step, and back", async () => {
+    const { store } = setup({
+      sinceReview: async () =>
+        sinceReady([file("b.ts", { oldBlob: oid("9") })], [file("a.ts")]),
+    });
+    store.see("me one", repository, reviewedPull("1"), false);
+    await settle();
+    store.show("all");
+    expect(shown(store)).toEqual(["a.ts", "b.ts"]);
+    expect(store.read()?.at, "at b.ts").toBe(1);
+    store.go(0);
+    store.show("since");
+    expect(store.read()?.at, "a.ts is not there").toBe(0);
+  });
+
+  it("fetches the commit you reviewed once, and then reads again", async () => {
+    const sinceReview = vi
+      .fn<Deps["sinceReview"]>()
+      .mockResolvedValueOnce(missing("e"))
+      .mockResolvedValueOnce(sinceReady([]));
+    const { store, fetchCommits } = setup({ sinceReview });
+    store.see("me one", repository, reviewedPull("1"), false);
+    await settle();
+    expect(fetchCommits).toHaveBeenCalledExactlyOnceWith(
+      root,
+      repository.github,
+      [reviewedOid],
+    );
+    expect(sinceReview).toHaveBeenCalledTimes(2);
+    expect(store.read()?.since?.read.kind).toBe("ready");
+  });
+
+  it("shows all changes when it stops, and reads again on Retry", async () => {
+    const sinceReview = vi
+      .fn<Deps["sinceReview"]>()
+      .mockResolvedValueOnce({ kind: "treesMissing" })
+      .mockResolvedValueOnce(sinceReady([]));
+    const { store } = setup({ sinceReview });
+    store.see("me one", repository, reviewedPull("1"), false);
+    await settle();
+    expect(store.read()?.since).toMatchObject({
+      read: { kind: "stopped", stop: { kind: "treesMissing" } },
+      showing: "all",
+    });
+    expect(shown(store)).toEqual(["a.ts", "b.ts"]);
+    store.retrySince();
+    await settle();
+    expect(store.read()?.since).toMatchObject({
+      read: { kind: "ready" },
+      showing: "since",
+    });
+  });
+
+  it("reads the file it shows in its place when it stops after the patches came", async () => {
+    const answer = deferred<Awaited<ReturnType<Deps["sinceReview"]>>>();
+    const { store, patch } = setup({
+      sinceReview: vi.fn<Deps["sinceReview"]>(() => answer.promise),
+      rangePatches: vi.fn<Deps["rangePatches"]>(async () => []),
+    });
+    store.see("me one", repository, reviewedPull("1"), false);
+    await settle();
+    answer.resolve({ kind: "treesMissing" });
+    await settle();
+    expect(store.read()?.since?.showing).toBe("all");
+    expect(patch()).toBe("own a.ts");
+  });
+
+  it("reads its current file by itself when it has no contents", async () => {
+    const again = file("b.ts", { oldBlob: oid("9") });
+    const answer = deferred<Awaited<ReturnType<Deps["sinceReview"]>>>();
+    const { store, filePatch } = setup({
+      sinceReview: vi.fn<Deps["sinceReview"]>(() => answer.promise),
+    });
+    store.see("me one", repository, reviewedPull("1"), false);
+    await settle();
+    answer.resolve({
+      ...sinceReady([again], [file("b.ts", { newBlob: oid("8") })]),
+      contentMissing: true,
+    });
+    await settle();
+    expect(shown(store)).toEqual(["b.ts"]);
+    expect(store.read()?.patches?.get(again)?.kind).toBe("ready");
+    expect(filePatch).toHaveBeenCalledWith(
+      root,
+      {
+        base: { kind: "commit", oid: replayed },
+        target: { kind: "commit", oid: oid("1") },
+      },
+      "b.ts",
+      "hunks",
+      "b.ts",
+    );
+  });
+
+  it("makes no Git call for a commit GitHub no longer has", async () => {
+    const { store, sinceReview } = setup();
+    store.see(
+      "me one",
+      repository,
+      pull("1", { reviewed: { oid: null, at } }),
+      false,
+    );
+    await settle();
+    expect(sinceReview).not.toHaveBeenCalled();
+    expect(store.read()?.since?.read).toEqual({
+      kind: "stopped",
+      stop: { kind: "gone" },
+    });
+    expect(shown(store)).toEqual(["a.ts", "b.ts"]);
+  });
+
+  it("compares a newer head with the same review, and keeps the view chosen", async () => {
+    const { store, sinceReview } = setup();
+    store.see("me one", repository, reviewedPull("1"), false);
+    await settle();
+    store.show("all");
+    store.see("me one", repository, reviewedPull("2"), false);
+    store.showNewest();
+    await settle();
+    expect(sinceReview).toHaveBeenLastCalledWith(
+      root,
+      base,
+      reviewedOid,
+      oid("2"),
+    );
+    expect(store.read()?.since?.showing).toBe("all");
+  });
 });

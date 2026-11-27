@@ -2,7 +2,13 @@ import { useEffect } from "react";
 import { ChevronDown, FileX2, TriangleAlert } from "lucide-react";
 import { partialClone, pathLabel } from "../domain/filesChanged";
 import type { RangeFile } from "../domain/range";
-import { FileTotals, Moved, StatusPill, ViewedBox } from "./FileParts";
+import {
+  FileTotals,
+  Moved,
+  NoLongerChanged,
+  StatusPill,
+  ViewedBox,
+} from "./FileParts";
 import { ThreadsElsewhere } from "./ReviewThreads";
 import { isElsewhere } from "./useFileItems";
 import type { Unfolded } from "./ReviewThreads";
@@ -13,6 +19,7 @@ export function FileHeader({
   folded,
   isCurrent,
   isViewed,
+  isSince,
   onFold,
   onMark,
 }: {
@@ -20,8 +27,11 @@ export function FileHeader({
   folded: boolean;
   isCurrent: boolean;
   isViewed: boolean;
+  /** Whether its lines are what changed since your review. */
+  isSince: boolean;
   onFold: () => void;
-  onMark: (isViewed: boolean) => void;
+  /** Null for a file the pull request no longer changes, which has no mark. */
+  onMark: ((isViewed: boolean) => void) | null;
 }) {
   const label = pathLabel(file);
   return (
@@ -41,13 +51,17 @@ export function FileHeader({
       {parts > 1 && (
         <span className="files-part">{part === 0 ? "Before" : "After"}</span>
       )}
-      {part === 0 && <FileTotals file={file} />}
-      <ViewedBox
-        name={`Viewed, ${label}`}
-        isCurrent={isCurrent}
-        isViewed={isViewed}
-        onMark={onMark}
-      />
+      {part === 0 && <FileTotals file={file} isSince={isSince} />}
+      {onMark === null ? (
+        <NoLongerChanged />
+      ) : (
+        <ViewedBox
+          name={`Viewed, ${label}`}
+          isCurrent={isCurrent}
+          isViewed={isViewed}
+          onMark={onMark}
+        />
+      )}
     </div>
   );
 }
