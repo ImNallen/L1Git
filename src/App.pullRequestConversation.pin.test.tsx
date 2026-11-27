@@ -351,3 +351,45 @@ it("says why a comment sent nothing in the words every write uses", async () => 
   );
   expect(sent(app)).toEqual([]);
 });
+
+it("says Posted. for 8 seconds after the read that shows it, or until you type again", async () => {
+  vi.useFakeTimers({
+    toFake: ["setTimeout", "clearTimeout"],
+    shouldAdvanceTime: true,
+  });
+  try {
+    const app = await visit({ world: withThreads(thread("T1")) });
+    await open(app, 1);
+    await comment(app, "Thanks!");
+    await vi.waitFor(() => expect(sent(app)).toHaveLength(1));
+    await settled(app);
+    expect(said()).toContain("Thanks!");
+    expect(status()).toBe("Posted.");
+    expect(get("status", "Posted.", box())).toBeTruthy();
+    await app.act(() => {
+      vi.advanceTimersByTime(7_000);
+    });
+    expect(status(), "still there after 7 s").toBe("Posted.");
+    await app.act(() => {
+      vi.advanceTimersByTime(1_500);
+    });
+    expect(status()).not.toBe("Posted.");
+
+    await comment(app, "Again");
+    await vi.waitFor(() => expect(sent(app)).toHaveLength(2));
+    await settled(app);
+    expect(status()).toBe("Posted.");
+    await app.type(words(), "M");
+    expect(status(), "typing moves on").not.toBe("Posted.");
+
+    await app.click(get("button", "Reply…", region()));
+    await app.type(get("textbox", "Reply", region()), "Renamed");
+    await app.click(get("button", "Reply", region()));
+    await vi.waitFor(() => expect(sent(app)).toHaveLength(3));
+    await settled(app);
+    expect(region().textContent).toContain("Renamed");
+    expect(get("status", "Posted your reply.", region())).toBeTruthy();
+  } finally {
+    vi.useRealTimers();
+  }
+});

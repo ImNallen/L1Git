@@ -1,4 +1,11 @@
-import { createContext, use, useMemo, useSyncExternalStore } from "react";
+import {
+  createContext,
+  use,
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import type { Anchor } from "../domain/drafts";
 import type { PullRequest, ReviewThread } from "../domain/pullRequest";
 import type { PullWrite } from "../domain/pullRequestWrites";
@@ -121,3 +128,30 @@ export const wordsOf = (write: PullWrite) =>
 /** The id GitHub gave a done comment or reply. */
 export const madeId = ({ state }: Attempt) =>
   state.kind === "done" && state.echo.kind === "comment" ? state.echo.id : null;
+
+/** How long a place says that its write posted, at least. */
+const SAYS_MS = 8_000;
+
+/**
+ * What to say of the last write that posted at a place: its `text` from when
+ * a new one comes until 8 seconds later, or until `quiet`, as the user moves
+ * on. The read right after it posted drops the write within moments.
+ */
+export function useLasting(note: { id: string; text: string } | null) {
+  const [told, setTold] = useState<{ id: string; text: string | null } | null>(
+    null,
+  );
+  if (note !== null && note.id !== told?.id) setTold(note);
+  useEffect(() => {
+    if (told?.text == null) return;
+    const timer = setTimeout(
+      () => setTold((was) => was && { ...was, text: null }),
+      SAYS_MS,
+    );
+    return () => clearTimeout(timer);
+  }, [told]);
+  return {
+    text: told?.text ?? null,
+    quiet: () => setTold((was) => was && { ...was, text: null }),
+  };
+}

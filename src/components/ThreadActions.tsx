@@ -16,6 +16,7 @@ import {
   doneAt,
   madeId,
   readShowsReply,
+  useLasting,
   waitingAt,
   wordsOf,
 } from "./conversationWriting";
@@ -95,6 +96,9 @@ function Actions({
   const [seen, setSeen] = useState<string | null>(null);
   const [postedPast, setPostedPast] = useState(false);
   const last = posted.at(-1);
+  const replied = useLasting(
+    last && shows ? { id: last.id, text: "Posted your reply." } : null,
+  );
   if (last && last.id !== seen) {
     setSeen(last.id);
     if (!shows) setPostedPast(true);
@@ -102,6 +106,14 @@ function Actions({
 
   const canFlip = resolved ? can.unresolve : can.resolve;
   const flipped = doneAt(writes.attempts, resolve).at(-1);
+  const flipSaid = useLasting(
+    flipped
+      ? {
+          id: flipped.id,
+          text: flipped.write.kind === "resolve" ? "Resolved." : "Unresolved.",
+        }
+      : null,
+  );
   // Done waits for the read that shows it, so a second click sends nothing.
   const flipping = resolving?.state.kind === "sending" || flipped !== undefined;
   async function flip() {
@@ -201,17 +213,11 @@ function Actions({
         </div>
       </div>
       <span className="visually-hidden" role="status">
-        {flipped
-          ? flipped.write.kind === "resolve"
-            ? "Resolved."
-            : "Unresolved."
-          : flipping
-            ? resolved
-              ? "Unresolving…"
-              : "Resolving…"
-            : shows && sent.length > 0
-              ? "Posted your reply."
-              : ""}
+        {flipping && !flipped
+          ? resolved
+            ? "Unresolving…"
+            : "Resolving…"
+          : (flipSaid.text ?? replied.text ?? "")}
       </span>
       {refused !== null && (
         <Problem

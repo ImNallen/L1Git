@@ -7,6 +7,7 @@ import {
   anchorOf,
   ConversationWritingContext,
   doneAt,
+  useLasting,
   waitingAt,
   wordsOf,
 } from "./conversationWriting";
@@ -72,12 +73,14 @@ export function ConversationBox({
   const takes = draftText(text);
   const ready = !held && takes === "takes";
   const verb = verbs[place.kind];
-  const posted = doneAt(writes.attempts, place).length > 0;
+  const done = doneAt(writes.attempts, place).at(-1);
+  const posted = useLasting(done ? { id: done.id, text: "Posted." } : null);
 
   const { pull, head } = writing;
   async function send() {
     if (!ready) return;
     setRefused(null);
+    posted.quiet();
     setStarting(true);
     // The last write's message goes, so it doesn't come back once this one posts.
     if (waiting !== null) writes.dismiss(waiting.id);
@@ -100,17 +103,19 @@ export function ConversationBox({
       ? "Sending…"
       : kept
         ? "May have posted."
-        : save?.kind === "unsaved"
-          ? `Not saved. ${save.why}`
-          : takes === "tooLong"
-            ? `Too long to save or send. GitHub takes at most ${mostDraftChars.toLocaleString()} characters.`
-            : save?.kind === "changedElsewhere"
-              ? "Another window changed this draft."
-              : takes === "blank"
-                ? shortcut
-                : save?.kind === "saving"
-                  ? `${shortcut} · Saving…`
-                  : `${shortcut} · Saved as a draft on this machine`;
+        : posted.text !== null && takes === "blank"
+          ? posted.text
+          : save?.kind === "unsaved"
+            ? `Not saved. ${save.why}`
+            : takes === "tooLong"
+              ? `Too long to save or send. GitHub takes at most ${mostDraftChars.toLocaleString()} characters.`
+              : save?.kind === "changedElsewhere"
+                ? "Another window changed this draft."
+                : takes === "blank"
+                  ? shortcut
+                  : save?.kind === "saving"
+                    ? `${shortcut} · Saving…`
+                    : `${shortcut} · Saved as a draft on this machine`;
 
   return (
     <div
@@ -157,9 +162,10 @@ export function ConversationBox({
           autoFocus={autoFocus}
           value={text}
           readOnly={held}
-          onChange={(event) =>
-            drafts.type(anchor, writing.head, event.target.value)
-          }
+          onChange={(event) => {
+            posted.quiet();
+            drafts.type(anchor, writing.head, event.target.value);
+          }}
           onKeyDown={messageKeys(() => void send())}
         />
       )}
@@ -214,7 +220,7 @@ export function ConversationBox({
         </button>
       </div>
       <span className="visually-hidden" role="status">
-        {sending || starting ? verb.sending : posted ? "Posted." : ""}
+        {sending || starting ? verb.sending : (posted.text ?? "")}
       </span>
       {refused !== null && (
         <Problem
