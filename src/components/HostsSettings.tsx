@@ -5,12 +5,13 @@ import type { Host } from "../host";
 import { settingsDestinations } from "../settingsSearch";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { GitHubSignInDialog } from "./GitHubSignInDialog";
+import { githubPromise } from "./githubPromise";
 import { NoHost } from "./NoHost";
 
 const access: Record<Access, string> = {
-  private: "Reads private and public repositories.",
-  publicOnly: "Reads public repositories only.",
-  perRepository: "Reads the repositories this token allows.",
+  private: "Private and public repositories.",
+  publicOnly: "Public repositories only.",
+  perRepository: "The repositories this token allows.",
 };
 
 export function HostsSettings({ host }: { host: Host }) {
@@ -25,7 +26,7 @@ export function HostsSettings({ host }: { host: Host }) {
           <h1 id="hosts-heading" tabIndex={-1}>
             Hosts
           </h1>
-          <p>Connect the services L1 Git reads pull requests from.</p>
+          <p>Connect the services that host your pull requests.</p>
         </div>
         <section
           className="general-settings-group"
@@ -84,6 +85,7 @@ export function HostsSettings({ host }: { host: Host }) {
               </div>
             )}
           </div>
+          <p className="settings-description">{githubPromise}</p>
           {host.problem && !signingIn && (
             <p className="settings-error" role="alert">
               {host.problem}
