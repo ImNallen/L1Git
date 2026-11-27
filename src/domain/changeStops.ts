@@ -32,6 +32,32 @@ export function changeStops(patch: readonly FileDiffMetadata[]): ChangeStop[] {
   );
 }
 
+/**
+ * The part of a file's patch whose hunks hold a line. A place named before
+ * the patch was read, such as a thread's line, says part 0, and a file whose
+ * type changed has two parts. Where no hunk holds the line, the part named.
+ */
+export function partOf(
+  patch: readonly (FileDiffMetadata | null | undefined)[],
+  {
+    part,
+    side,
+    number,
+  }: { part: number; side: ChangeStop["side"]; number: number },
+): number {
+  const holds = (diff: FileDiffMetadata | null | undefined) =>
+    diff?.hunks.some((hunk) =>
+      side === "additions"
+        ? number >= hunk.additionStart &&
+          number < hunk.additionStart + hunk.additionCount
+        : number >= hunk.deletionStart &&
+          number < hunk.deletionStart + hunk.deletionCount,
+    ) ?? false;
+  if (holds(patch[part])) return part;
+  const found = patch.findIndex(holds);
+  return found < 0 ? part : found;
+}
+
 /** The first of `count` for which `is` is true, when it is for each one after. */
 export function firstOf(count: number, is: (index: number) => boolean): number {
   let from = 0;

@@ -1,6 +1,6 @@
 import { parsePatchFiles } from "@pierre/diffs";
 import { describe, expect, it, vi } from "vitest";
-import { changeAt, changeStops, nextChange } from "./changeStops";
+import { changeAt, changeStops, nextChange, partOf } from "./changeStops";
 
 const stops = (patch: string) =>
   changeStops(parsePatchFiles(patch).flatMap(({ files }) => files)).map(
@@ -128,5 +128,35 @@ describe("nextChange", () => {
     });
     expect(nextChange(4_000, topOf, end, -1)?.scrollTop).toBe(99_984);
     expect(topOf.mock.calls.length).toBeLessThan(40);
+  });
+});
+
+describe("partOf", () => {
+  // A file that became a symlink: the patch's two halves are two parts.
+  const parts = parsePatchFiles(`diff --git a/link b/link
+deleted file mode 100644
+--- a/link
++++ /dev/null
+@@ -1,2 +0,0 @@
+-one
+-two
+diff --git a/link b/link
+new file mode 120000
+--- /dev/null
++++ b/link
+@@ -0,0 +1 @@
++target
+`).flatMap(({ files }) => files);
+
+  it("finds the part whose hunks hold a line, whatever part was named", () => {
+    expect(parts).toHaveLength(2);
+    expect(partOf(parts, { part: 0, side: "additions", number: 1 })).toBe(1);
+    expect(partOf(parts, { part: 1, side: "deletions", number: 2 })).toBe(0);
+    expect(partOf(parts, { part: 1, side: "additions", number: 1 })).toBe(1);
+  });
+
+  it("keeps the part named when no hunk holds the line", () => {
+    expect(partOf(parts, { part: 1, side: "deletions", number: 9 })).toBe(1);
+    expect(partOf([], { part: 0, side: "additions", number: 1 })).toBe(0);
   });
 });
