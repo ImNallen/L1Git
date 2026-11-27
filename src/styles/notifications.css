@@ -1,0 +1,129 @@
+.notifications {
+  position: absolute;
+  inset: auto 20px 16px;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+.notification {
+  --notification-bg: var(--panel-raised);
+  --notification-border: var(--border-control);
+  --notification-tint: color-mix(in srgb, var(--text-strong) 6%, transparent);
+  --notification-shadow: 0 10px 28px var(--shadow-pane);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  max-width: min(540px, 100%);
+  min-height: 36px;
+  padding: 7px 8px 8px 12px;
+  overflow: hidden;
+  border: 1px solid var(--notification-border);
+  border-radius: 9px;
+  background: var(--notification-bg);
+  box-shadow: var(--notification-shadow);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 16px;
+  pointer-events: auto;
+}
+:where(:root[data-theme="dark"]) .notification {
+  --notification-bg: color-mix(
+    in srgb,
+    var(--panel-raised),
+    var(--text-strong) 9%
+  );
+  --notification-border: color-mix(
+    in srgb,
+    var(--text-strong) 12%,
+    transparent
+  );
+  --notification-tint: color-mix(in srgb, var(--text-strong) 9%, transparent);
+  --notification-shadow:
+    0 1px 2px var(--shadow-control), 0 10px 28px var(--shadow-pane);
+}
+.notification.error {
+  --notification-bg: var(--error-bg);
+  --notification-border: var(--error-border);
+}
+.notification.stacked {
+  padding: 10px 10px 10px 12px;
+}
+.notification-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 16px;
+}
+.notification-row > svg,
+.notification-row > .workspace-action-icon {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  color: var(--text-icon);
+}
+.notification.error .notification-row > svg {
+  color: var(--error-text);
+}
+.notification-message {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.notification-action,
+.notification-dismiss {
+  flex-shrink: 0;
+  height: 24px;
+  margin-block: -4px;
+  border-radius: 5px;
+  transition: background-color 120ms ease-out;
+}
+.notification-action {
+  padding: 0 8px;
+  background: var(--notification-tint);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.notification-action:hover:not([aria-disabled="true"]) {
+  background: color-mix(in srgb, var(--text-strong) 14%, transparent);
+}
+.notification-action.primary {
+  background: var(--primary-bg);
+  color: var(--primary-text);
+}
+.notification-action.primary:hover {
+  background: var(--primary-hover);
+}
+.notification-dismiss {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  color: var(--text-icon);
+}
+.notification-dismiss:hover {
+  background: var(--notification-tint);
+  color: var(--text);
+}
+.notification-output {
+  margin: 8px 0 0 24px;
+  padding: 6px 8px;
+  border-radius: 5px;
+  background: var(--control-inset);
+  color: var(--text-secondary);
+  font: 11px / 16px var(--mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.notification-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
+}
+.notification-actions > .notification-action {
+  margin-block: 0;
+}

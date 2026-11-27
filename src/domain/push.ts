@@ -198,6 +198,16 @@ export function pushDisabledReason(
   }
 }
 
+export const pushSucceeded: Record<PushOutcome["kind"], boolean> = {
+  published: true,
+  pushed: true,
+  upToDate: true,
+  stale: false,
+  rejected: false,
+  failed: false,
+  uncertain: false,
+};
+
 export function pushOutcomeText(
   outcome: PushOutcome,
   intent: PushIntent,

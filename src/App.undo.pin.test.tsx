@@ -183,6 +183,16 @@ it("a clean cherry-pick shows a notice whose Undo takes it back", async () => {
   );
 });
 
+it("Undo in a notice hands the focus to the Redo that replaces it", async () => {
+  const app = await mountApp({ bridge: journal });
+  await cherryPickRelease(app);
+  const undo = get("button", "Undo", get("status", /Cherry-picked/));
+  await app.act(() => undo.focus());
+  await app.click(undo);
+  expect(get("status", /Undid/)).toBeTruthy();
+  expect(focused()).toBe("button Redo");
+});
+
 it("Dismiss closes a write notice and keyboard undo still takes the write back", async () => {
   const app = await mountApp({ bridge: journal });
   await cherryPickRelease(app);

@@ -517,7 +517,7 @@ it("the unsaved conflict results list opens RetainedResolution, switching reposi
   ).toBeTruthy();
 });
 
-it("notices keep their order above the panes", async () => {
+it("panels keep their order above the panes, and notifications theirs over the panes", async () => {
   const app = await mountApp();
   await dirtyResolution(app, OTHER, "there.txt");
   await app.click(historyRow("Release,"));
@@ -540,15 +540,17 @@ it("notices keep their order above the panes", async () => {
   });
   await app.refocusWindow();
   const content = document.querySelector(".repository-content")!;
-  const rows = [
+  const pinned = [
     ...content.querySelectorAll(
-      ":scope > .notice, :scope > .resolution-draft-list, :scope > .merge-controls",
+      ":scope > .resolution-draft-list, :scope > .merge-controls",
     ),
-  ].map((row) => row.getAttribute("aria-label") ?? row.textContent);
-  expect(rows).toMatchInlineSnapshot(`
+  ].map((row) => row.getAttribute("aria-label"));
+  expect(pinned).toEqual(["Branch merge", "Unsaved conflict results"]);
+  const floating = [
+    ...content.querySelectorAll(":scope > .notifications > .notification"),
+  ].map((row) => row.textContent);
+  expect(floating).toMatchInlineSnapshot(`
     [
-      "Branch merge",
-      "Unsaved conflict results",
       "Hidden and soloed branches changed for this session. Could not save them.",
       "Reading this repository took too long. The last successful view is retained.Try again",
       "topic is hidden in the graph.Show topic",

@@ -1,5 +1,6 @@
 import { EyeOff, Info, TriangleAlert } from "lucide-react";
 import { MergeControls } from "../components/MergeControls";
+import { Notification } from "../components/Notification";
 import { ReplayPanel } from "../components/ReplayPanel";
 import { WriteNoticeRow } from "../components/UndoControls";
 import { WorktreeNoticeRow } from "../components/WorktreeNotice";
@@ -19,7 +20,7 @@ import type { ResolutionDrafts } from "./useResolutionDrafts";
 import type { Navigation } from "./useNavigation";
 import type { RefWrites } from "./useRefWrites";
 
-/** The rows above the panes, in this order. */
+/** The panels pinned above the panes, then the notifications floating over them, each in this order. */
 export function Notices({
   snapshot,
   writes,
@@ -59,63 +60,69 @@ export function Notices({
       {merge.replay && (
         <ReplayPanel key={`replay:${merge.replay.root}`} {...merge.replay} />
       )}
-      <WriteNoticeRow writes={writes} />
-      {worktreeNotice && (
-        <WorktreeNoticeRow
-          notice={worktreeNotice}
-          onOpen={(root) => {
-            dismissWorktreeNotice();
-            worktree.open(root);
-          }}
-          onDismiss={dismissWorktreeNotice}
-        />
-      )}
       <ResolutionDraftList drafts={drafts} />
-      {persistenceError && (
-        <div className="notice error-notice" role="alert">
-          <TriangleAlert size={14} />
-          <span>{persistenceError}</span>
-        </div>
-      )}
-      {error && (
-        <div className="notice error-notice" role="alert">
-          <TriangleAlert size={14} />
-          <span>{error.message} The last successful view is retained.</span>
-          <button onClick={onRetry}>Try again</button>
-        </div>
-      )}
-      {repository &&
-        repositoryWarnings(repository).map((warning) => (
-          <div className="notice error-notice" role="alert" key={warning}>
-            <TriangleAlert size={14} />
-            <span>{warning}</span>
-          </div>
-        ))}
-      {hiddenJump && snapshot && (
-        <div className="notice info-notice" role="status">
-          <EyeOff size={14} />
-          <span>
+      <div className="notifications">
+        <WriteNoticeRow writes={writes} />
+        {worktreeNotice && (
+          <WorktreeNoticeRow
+            notice={worktreeNotice}
+            onOpen={(root) => {
+              dismissWorktreeNotice();
+              worktree.open(root);
+            }}
+            onDismiss={dismissWorktreeNotice}
+          />
+        )}
+        {persistenceError && (
+          <Notification tone="error" icon={<TriangleAlert size={16} />}>
+            {persistenceError}
+          </Notification>
+        )}
+        {error && (
+          <Notification
+            tone="error"
+            icon={<TriangleAlert size={16} />}
+            actions={[{ label: "Try again", run: onRetry }]}
+          >
+            {error.message} The last successful view is retained.
+          </Notification>
+        )}
+        {repository &&
+          repositoryWarnings(repository).map((warning) => (
+            <Notification
+              key={warning}
+              tone="error"
+              icon={<TriangleAlert size={16} />}
+            >
+              {warning}
+            </Notification>
+          ))}
+        {hiddenJump && snapshot && (
+          <Notification
+            tone="info"
+            icon={<EyeOff size={16} />}
+            actions={[
+              {
+                label: isBranch(hiddenJump)
+                  ? `Show ${hiddenJump.name}`
+                  : "Show all branches",
+                run: () => nav.showInGraph(snapshot.root, hiddenJump),
+              },
+            ]}
+          >
             {hiddenJump.name}{" "}
             {rule.kind === "solo"
               ? "is outside the soloed branches."
               : "is hidden in the graph."}
-          </span>
-          <button onClick={() => nav.showInGraph(snapshot.root, hiddenJump)}>
-            {isBranch(hiddenJump)
-              ? `Show ${hiddenJump.name}`
-              : "Show all branches"}
-          </button>
-        </div>
-      )}
-      {jumped && jumpedUnloaded && snapshot && (
-        <div className="notice info-notice" role="status">
-          <Info size={14} />
-          <span>
+          </Notification>
+        )}
+        {jumped && jumpedUnloaded && snapshot && (
+          <Notification tone="info" icon={<Info size={16} />}>
             {jumped.name} is older than the newest{" "}
             {snapshot.commits.length.toLocaleString()} loaded commits.
-          </span>
-        </div>
-      )}
+          </Notification>
+        )}
+      </div>
     </>
   );
 }
