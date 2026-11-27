@@ -56,8 +56,10 @@ export function MayHavePosted({
         {kept && carriesWords && <p>{twice(write)}</p>}
         {said !== null && <p>{said}</p>}
         <div className="write-choices">
+          {/* WebKit's Tab skips a link or button with no tabIndex of its own. */}
           <a
             className="button secondary"
+            tabIndex={0}
             href={url}
             target="_blank"
             rel="noreferrer"
@@ -69,6 +71,7 @@ export function MayHavePosted({
             <button
               type="button"
               className="button secondary"
+              tabIndex={0}
               onClick={() =>
                 void choices.keepAsDraft(id).then((done) => {
                   if (done) home?.()?.focus();
@@ -83,6 +86,7 @@ export function MayHavePosted({
             <button
               type="button"
               className="button secondary"
+              tabIndex={0}
               onClick={() => {
                 const answer = choices.sendAnyway(id);
                 setSaid(answer === "started" ? null : sentNothing[answer]);
@@ -95,6 +99,7 @@ export function MayHavePosted({
             <button
               type="button"
               className="button secondary"
+              tabIndex={0}
               onClick={() => {
                 choices.dismiss(id);
                 home?.()?.focus();

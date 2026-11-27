@@ -21,6 +21,7 @@ export function Problem({
         <button
           type="button"
           className="notice-dismiss"
+          tabIndex={0}
           aria-label="Dismiss"
           onClick={onDismiss}
         >

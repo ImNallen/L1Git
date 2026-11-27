@@ -1,5 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { draftText } from "../domain/drafts";
+import { mac } from "../repositories";
+import { messageKeys } from "./CommitBox";
 import { linesLabel } from "../domain/lineComments";
 import type { Lines } from "../domain/lineComments";
 import { Body } from "./PullRequestBody";
@@ -54,6 +56,12 @@ export function CommentBox({
     view.kind === "sending" || (view.kind === "held" && view.isSending);
   const hasWords = draftText(view.text) === "takes";
   const isOff = writing === null || !hasWords;
+  const keepOff = isOff || (!isEdit && comments.isBehind);
+  /** The main button, which Cmd/Ctrl+Enter presses too. */
+  const keep = () => {
+    if (!keepOff) comments.keep();
+  };
+  const shortcut = `${mac ? "⌘" : "Ctrl+"}Enter`;
   const tabs = (
     <div className="line-comment-tabs" role="tablist" aria-label={label}>
       {(["write", "preview"] as const).map((each) => (
@@ -61,6 +69,7 @@ export function CommentBox({
           key={each}
           type="button"
           role="tab"
+          tabIndex={0}
           id={`${id}-${each}`}
           aria-selected={tab === each}
           aria-controls={`${id}-panel`}
@@ -95,6 +104,7 @@ export function CommentBox({
             value={view.text}
             readOnly={writing === null}
             onChange={(event) => comments.type(event.target.value)}
+            onKeyDown={messageKeys(keep)}
           />
         ) : (
           <div className="line-comment-preview">
@@ -113,6 +123,7 @@ export function CommentBox({
           <button
             type="button"
             className="pull-link"
+            tabIndex={0}
             onClick={() => comments.settleBox("mine")}
           >
             Keep mine
@@ -120,6 +131,7 @@ export function CommentBox({
           <button
             type="button"
             className="pull-link"
+            tabIndex={0}
             onClick={() => comments.settleBox("theirs")}
           >
             Use theirs
@@ -156,9 +168,11 @@ export function CommentBox({
               ? "May have posted"
               : (saveText(view.save) ?? "Saved as a draft on this machine")}
         </span>
+        {/* WebKit's Tab skips a button with no tabIndex of its own. */}
         <button
           type="button"
           className="button secondary"
+          tabIndex={0}
           aria-disabled={view.kind === "sending"}
           onClick={() => {
             if (view.kind !== "sending") comments.cancel();
@@ -166,42 +180,36 @@ export function CommentBox({
         >
           Cancel
         </button>
-        {isEdit ? (
+        {!isEdit && (
           <button
             type="button"
-            className="button primary"
+            className="button secondary"
+            tabIndex={0}
             aria-disabled={isOff}
             onClick={() => {
-              if (!isOff) comments.keep();
+              if (!isOff) void comments.single();
             }}
           >
-            Update comment
+            Add single comment
           </button>
-        ) : (
-          <>
-            <button
-              type="button"
-              className="button secondary"
-              aria-disabled={isOff}
-              onClick={() => {
-                if (!isOff) void comments.single();
-              }}
-            >
-              Add single comment
-            </button>
-            <button
-              type="button"
-              className="button primary"
-              aria-disabled={isOff || comments.isBehind}
-              aria-describedby={comments.isBehind ? `${id}-behind` : undefined}
-              onClick={() => {
-                if (!isOff && !comments.isBehind) comments.keep();
-              }}
-            >
-              {comments.hasReview ? "Add review comment" : "Start a review"}
-            </button>
-          </>
         )}
+        <button
+          type="button"
+          className="button primary"
+          tabIndex={0}
+          aria-disabled={keepOff}
+          aria-describedby={
+            !isEdit && comments.isBehind ? `${id}-behind` : undefined
+          }
+          title={keepOff ? undefined : shortcut}
+          onClick={keep}
+        >
+          {isEdit
+            ? "Update comment"
+            : comments.hasReview
+              ? "Add review comment"
+              : "Start a review"}
+        </button>
       </footer>
       {comments.isBehind && !isEdit && (
         <p id={`${id}-behind`} className="line-comment-note">

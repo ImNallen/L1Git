@@ -531,3 +531,19 @@ it("gives a box opened while a single comment saves none of that comment's sendi
   expect(panel().textContent).toContain("Saved first");
   expect(app.bridge.world.host.mutations).toHaveLength(1);
 });
+
+it("keeps a comment pending with Cmd or Ctrl+Enter, as the box's main button does", async () => {
+  const app = await openFiles();
+  await choose(app, 12);
+  await app.type(words(), "By keys");
+  await app.press("Enter", { target: words(), ctrlKey: true });
+  expect(box()).toBeNull();
+  await choose(app, 13, 13, "context");
+  await app.type(words(), "And more");
+  await app.press("Enter", { target: words(), metaKey: true });
+  expect(await pending(app)).toEqual([
+    "OYou on line 12PendingEditDeleteBy keys",
+    "OYou on line 13PendingEditDeleteAnd more",
+  ]);
+  expect(app.bridge.world.host.mutations).toEqual([]);
+});
