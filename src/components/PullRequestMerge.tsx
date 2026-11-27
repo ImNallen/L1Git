@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import {
   Check,
   ChevronDown,
@@ -69,6 +69,7 @@ function SplitButton({
   onChoose: (method: MergeMethod) => void;
   onMerge: () => void;
 }) {
+  const id = useId();
   const chevron = useRef<HTMLButtonElement>(null);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const close = () => {
@@ -115,6 +116,8 @@ function SplitButton({
               key={choice.method}
               type="button"
               role="menuitemradio"
+              aria-label={choice.label}
+              aria-describedby={`${id}-${choice.method}`}
               aria-checked={choice.method === method}
               aria-disabled={choice.off}
               onClick={() => {
@@ -130,7 +133,7 @@ function SplitButton({
               />
               <span>
                 {choice.label}
-                <small>{choice.note}</small>
+                <small id={`${id}-${choice.method}`}>{choice.note}</small>
               </span>
             </button>
           ))}

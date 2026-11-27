@@ -295,6 +295,24 @@ it("merges anyway past a failing check that isn't required", async () => {
   await vi.waitFor(() => expect(kinds(app)).toEqual(["merge"]));
 });
 
+it("names each method in the menu by its label, and describes it by its note", async () => {
+  const app = await visit();
+  await open(app, 1);
+  await app.click(get("button", "Choose how to merge"));
+  const described = (name: string) => {
+    const item = get("menuitemradio", name);
+    const note = item.getAttribute("aria-describedby") ?? "";
+    return document.getElementById(note)?.textContent;
+  };
+  expect(described("Squash and merge")).toBe("One commit on main.");
+  expect(described("Create a merge commit")).toBe(
+    "Keeps the commit and adds a merge commit.",
+  );
+  expect(described("Rebase and merge")).toBe(
+    "Puts the commit on main one by one.",
+  );
+});
+
 it("picks the method from a menu, turns off what the repository turns off, and remembers the last one used", async () => {
   const app = await visit({
     world: (world) => {
