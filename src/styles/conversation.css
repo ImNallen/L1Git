@@ -181,50 +181,6 @@
   margin: 0 8px 8px;
 }
 
-.write-notice {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 8px 12px;
-  border: 1px solid var(--error-border);
-  border-radius: 6px;
-  background: var(--error-bg);
-  color: var(--error-text);
-  font-size: 12px;
-  line-height: 18px;
-}
-.write-notice svg {
-  flex-shrink: 0;
-  margin-top: 2px;
-}
-.write-notice p {
-  flex: 1;
-  margin: 0;
-}
-.write-notice.unknown {
-  border-color: var(--warning-border);
-  background: var(--warning-bg);
-  color: var(--text);
-}
-.write-notice.unknown svg {
-  color: var(--warning-icon);
-}
-.write-notice.unknown > div {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  gap: 4px;
-}
-.write-choices {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 6px;
-}
-.write-choices .button {
-  height: 28px;
-}
-
 .thread-actions {
   display: flex;
   align-items: flex-start;

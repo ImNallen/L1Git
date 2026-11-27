@@ -13,8 +13,9 @@ import {
 import type { WritePlace } from "./conversationWriting";
 import { Body } from "./PullRequestBody";
 import { OnGitHub } from "./PullRequestParts";
-import { Problem, unsent, WriteNotice } from "./WriteNotice";
-import type { Unsent } from "./WriteNotice";
+import { sentNothing } from "./sentNothing";
+import type { SentNothing } from "./sentNothing";
+import { Problem, WriteNotice } from "./WriteNotice";
 
 type Place = Extract<WritePlace, { kind: "comment" | "reply" }>;
 
@@ -49,7 +50,7 @@ export function ConversationBox({
   const drafts = usePullDrafts(writing.opened);
   const writes = usePullWrites(writing.opened);
   const [preview, setPreview] = useState(false);
-  const [refused, setRefused] = useState<Unsent | null>(null);
+  const [refused, setRefused] = useState<SentNothing | null>(null);
   /** From the click until the writes store answers, while drafts save. */
   const [starting, setStarting] = useState(false);
   const status = useId();
@@ -217,7 +218,7 @@ export function ConversationBox({
       </span>
       {refused !== null && (
         <Problem
-          text={unsent[refused]}
+          text={sentNothing[refused]}
           onDismiss={() => setRefused(null)}
           home={home}
         />

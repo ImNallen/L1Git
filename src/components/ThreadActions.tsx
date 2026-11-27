@@ -22,8 +22,9 @@ import {
 import type { ConversationWriting } from "./conversationWriting";
 import { Body } from "./PullRequestBody";
 import { Avatar, OnGitHub } from "./PullRequestParts";
-import { Problem, unsent, WriteNotice } from "./WriteNotice";
-import type { Unsent } from "./WriteNotice";
+import { sentNothing } from "./sentNothing";
+import type { SentNothing } from "./sentNothing";
+import { Problem, WriteNotice } from "./WriteNotice";
 
 type Props = {
   thread: ReviewThread;
@@ -69,7 +70,7 @@ function Actions({
       ),
   );
   const [asked, setAsked] = useState(false);
-  const [refused, setRefused] = useState<Unsent | null>(null);
+  const [refused, setRefused] = useState<SentNothing | null>(null);
   const replyButton = useRef<HTMLButtonElement>(null);
   const flipButton = useRef<HTMLButtonElement>(null);
   const home = () => replyButton.current ?? flipButton.current;
@@ -214,7 +215,7 @@ function Actions({
       </span>
       {refused !== null && (
         <Problem
-          text={unsent[refused]}
+          text={sentNothing[refused]}
           onDismiss={() => setRefused(null)}
           home={home}
         />

@@ -326,3 +326,28 @@ it("resolves once, even when clicked again before the read shows it", async () =
   );
   expect(sent(app)).toEqual([{ kind: "resolve", thread: "T1" }]);
 });
+
+it("says why a comment sent nothing in the words every write uses", async () => {
+  const app = await visit({
+    world: (world) =>
+      world.host.sent.set("octo octo/pin#1", [
+        {
+          attempt: "elsewhere",
+          at: 1,
+          write: {
+            kind: "resolve",
+            thread: "T9",
+          },
+          drafts: [],
+          sending: true,
+          applied: false,
+        },
+      ]),
+  });
+  await open(app, 1);
+  await comment(app, "Not now");
+  expect(get("alert", undefined, box()).textContent).toContain(
+    "Another write to this pull request is still sending, or may have posted, so L1 Git sent nothing. Try again once that one ends.",
+  );
+  expect(sent(app)).toEqual([]);
+});
