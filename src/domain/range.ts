@@ -35,6 +35,26 @@ export const rangeFilesSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("missing"), oids: z.array(oidSchema) }),
   z.strictObject({ kind: z.literal("unrelated"), shallow: z.boolean() }),
 ]);
+export const sinceReviewSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("ready"),
+    since: oidSchema,
+    fromBase: z.discriminatedUnion("kind", [
+      z.strictObject({ kind: z.literal("none") }),
+      z.strictObject({ kind: z.literal("leftOut") }),
+      z.strictObject({
+        kind: z.literal("untold"),
+        why: z.enum(["shallow", "conflict", "unreadable"]),
+      }),
+    ]),
+    reviewed: z.array(rangeFileSchema),
+    files: z.array(rangeFileSchema),
+    contentMissing: z.boolean(),
+  }),
+  z.strictObject({ kind: z.literal("treesMissing") }),
+  z.strictObject({ kind: z.literal("missing"), oids: z.array(oidSchema) }),
+  z.strictObject({ kind: z.literal("unrelated"), shallow: z.boolean() }),
+]);
 /** A null `patch` is one to read by itself. */
 export const rangePatchesSchema = z.array(
   z.strictObject({ path: z.string(), patch: filePatchSchema.nullable() }),

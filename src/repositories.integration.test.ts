@@ -52,6 +52,7 @@ import {
   commitsFetchSchema,
   rangeFilesSchema,
   rangePatchesSchema,
+  sinceReviewSchema,
 } from "./domain/range";
 import {
   addRemoteReportSchema,
@@ -1144,6 +1145,25 @@ describe("real Rust transport contract", () => {
           newMode: "100644",
         },
       ],
+    });
+    const since = answer("sinceReview", sinceReviewSchema).parse(
+      await (
+        await post({
+          op: "sinceReview",
+          path: work,
+          base,
+          reviewed: base,
+          head,
+        })
+      ).json(),
+    ).data;
+    expect(since).toMatchObject({
+      kind: "ready",
+      since: base,
+      fromBase: { kind: "none" },
+      reviewed: [],
+      files: range.kind === "ready" ? range.files : [],
+      contentMissing: false,
     });
     const patches = answer("rangePatches", rangePatchesSchema).parse(
       await (

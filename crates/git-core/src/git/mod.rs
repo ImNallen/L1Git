@@ -1,9 +1,11 @@
 mod hooks;
+mod merge_tree;
 #[cfg(windows)]
 mod windows;
 mod write;
 
 pub(crate) use hooks::{HOOK_OFF, NoHooks, defined as defined_hooks};
+pub(crate) use merge_tree::{Merging, listed_paths, merge_tree};
 pub(crate) use write::{
     LocalWrite, Write, WriteDeadline, Wrote, install_config_values, install_tracking,
 };
@@ -111,6 +113,7 @@ pub(crate) enum LocalRead {
     RangeFiles,
     RangePatches,
     RangePatch,
+    SinceReview,
     FileHistory,
     Blame,
     WorktreeStatus,
@@ -142,6 +145,7 @@ impl LocalRead {
             Self::RangeFiles
             | Self::RangePatches
             | Self::RangePatch
+            | Self::SinceReview
             | Self::FileHistory
             | Self::Blame
             | Self::BranchStatus => 60,
@@ -157,6 +161,7 @@ impl LocalRead {
             Self::FilePatch | Self::RangePatch => "this file's diff",
             Self::RangeFiles => "the changed files",
             Self::RangePatches => "the diffs of the changed files",
+            Self::SinceReview => "the changes since your review",
             Self::FileHistory => "this file's history",
             Self::Blame => "this file's blame",
             Self::WorktreeStatus => "the worktree status",

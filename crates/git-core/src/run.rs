@@ -6,12 +6,12 @@ use crate::{
     NewWorktree, Oid, Operation, OperationProbe, PatchContext, PublishChoice, PublishOptions,
     PullCheckout, PullHead, PullKey, PushAvailability, PushIntent, PushReport, RangeFiles,
     RangePatch, ReplayOf, ReplayReview, RepositoryError, RepositoryOverview, RepositoryRefs,
-    RepositorySnapshot, Side, UndoHistory, WantedCommits, WholeFileConflict, WorktreePatch,
-    WorktreeReview, WorktreeSource, WorktreeStatus,
+    RepositorySnapshot, Side, SinceReview, UndoHistory, WantedCommits, WholeFileConflict,
+    WorktreePatch, WorktreeReview, WorktreeSource, WorktreeStatus,
     directories::{DirectoryListing, expand_home, home_dir, list_directories},
     file_history::{blame_within, file_history_within},
     git::LocalRead,
-    range::{range_files_within, range_patch_within, range_patches_within},
+    range::{range_files_within, range_patch_within, range_patches_within, since_review_within},
     repository::{
         commit_detail_within, file_patch_within, line_stats_within, refs_within, snapshot_within,
     },
@@ -80,6 +80,12 @@ pub enum Request {
     RangePatches {
         path: String,
         merge_base: Oid,
+        head: Oid,
+    },
+    SinceReview {
+        path: String,
+        base: Oid,
+        reviewed: Oid,
         head: Oid,
     },
     FileHistory {
@@ -238,6 +244,7 @@ pub enum Response {
     FilePatch(FilePatch),
     RangeFiles(RangeFiles),
     RangePatches(Vec<RangePatch>),
+    SinceReview(SinceReview),
     FileHistory(Vec<FileRevision>),
     Blame(Blame),
     Overview(RepositoryOverview),
@@ -342,6 +349,18 @@ pub fn run(coordinator: &Coordinator, request: Request) -> Result<Response, Repo
             &merge_base,
             &head,
             deadline(LocalRead::RangePatches),
+        )?),
+        Request::SinceReview {
+            path,
+            base,
+            reviewed,
+            head,
+        } => Response::SinceReview(since_review_within(
+            &path,
+            &base,
+            &reviewed,
+            &head,
+            deadline(LocalRead::SinceReview),
         )?),
         Request::FileHistory { path, oid, file } => Response::FileHistory(file_history_within(
             &path,

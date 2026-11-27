@@ -405,7 +405,7 @@ it.each([true, false])(
 );
 
 it("sends a range's reads and its fetch and validates their answers", async () => {
-  const { fetchCommits, filePatch, rangeFiles, rangePatches } =
+  const { fetchCommits, filePatch, rangeFiles, rangePatches, sinceReview } =
     await load(true);
   const head = oidSchema.parse("b".repeat(40));
   const sent = () =>
@@ -472,6 +472,41 @@ it("sends a range's reads and its fetch and validates their answers", async () =
     mergeBase: oid,
     head,
   });
+
+  const reviewed = oidSchema.parse("c".repeat(40));
+  const since = {
+    kind: "ready",
+    since: oid,
+    fromBase: { kind: "leftOut" },
+    reviewed: [file],
+    files: [{ ...file, status: "M", from: null, similarity: null }],
+    contentMissing: false,
+  };
+  for (const data of [
+    since,
+    { ...since, since: reviewed, fromBase: { kind: "none" } },
+    { ...since, fromBase: { kind: "untold", why: "conflict" } },
+    { kind: "treesMissing" },
+    { kind: "missing", oids: [reviewed] },
+    { kind: "unrelated", shallow: false },
+  ]) {
+    invoke.mockResolvedValueOnce({ op: "sinceReview", data });
+    expect(await sinceReview(root, oid, reviewed, head)).toEqual(data);
+  }
+  expect(sent()).toEqual({
+    op: "sinceReview",
+    path: root,
+    base: oid,
+    reviewed,
+    head,
+  });
+  invoke.mockResolvedValueOnce({
+    op: "sinceReview",
+    data: { ...since, fromBase: { kind: "untold", why: "busy" } },
+  });
+  await expect(sinceReview(root, oid, reviewed, head)).rejects.toHaveProperty(
+    "issues",
+  );
 
   invoke.mockResolvedValueOnce({ op: "filePatch", data: patch });
   const comparison = singleCommit(head);

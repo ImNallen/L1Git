@@ -23,7 +23,8 @@ pub use file_history::{blame, file_history};
 pub use git::stop_all_git;
 pub use model::*;
 pub use range::{
-    RANGE_PATCH_LIMIT, RangeFile, RangeFiles, RangePatch, RangeStatus, range_files, range_patches,
+    FromBase, RANGE_PATCH_LIMIT, RangeFile, RangeFiles, RangePatch, RangeStatus, SinceReview,
+    Untold, range_files, range_patches, since_review,
 };
 pub use repository::{
     HISTORY_LIMIT, LINE_STATS_LIMIT, commit_detail, file_patch, line_stats, refs, snapshot,
