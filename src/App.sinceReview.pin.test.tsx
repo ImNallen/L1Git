@@ -227,6 +227,42 @@ it("keeps the mark of a file main alone changed, in both views", async () => {
   expect(pulls[0]?.marks).toHaveLength(5);
 });
 
+it("keeps a file you unmark before the since read lands unmarked once it does", async () => {
+  // b.ts was carried on an earlier look, so it has its mark as reviewed and now.
+  const carriedBefore = {
+    [VIEWED]: JSON.stringify({
+      version: 1,
+      pulls: [
+        {
+          pull: "octo/pin#1",
+          marks: [...asReviewed.map(markOf), markOf(now[1]!)],
+        },
+      ],
+    }),
+  };
+  let held: ReturnType<Bridge["hold"]> | null = null;
+  const app = await openFiles(
+    {},
+    (bridge) => {
+      held = bridge.hold("sinceReview");
+    },
+    "one",
+    carriedBefore,
+  );
+  await app.click(toggle(/^All changes/));
+  await app.press("j");
+  expect(path()).toBe("src/b.ts");
+  expect(viewedBox().checked).toBe(true);
+  await app.click(viewedBox());
+  expect(viewedBox().checked).toBe(false);
+  held!.release();
+  await app.settle();
+  await frames(app);
+  expect(path()).toBe("src/b.ts");
+  expect(viewedBox().checked, "the carry doesn't bring it back").toBe(false);
+  expect(progress(), "c.ts and d.ts").toBe("Viewed2 of 4");
+});
+
 it("keeps a file you unmark unmarked after the next rebase", async () => {
   const app = await openFiles({}, () => {}, "one", viewedAtReview);
   await app.click(toggle(/^All changes/));

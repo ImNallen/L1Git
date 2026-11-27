@@ -1,6 +1,13 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import type { RangeFile } from "../domain/range";
 import { carried } from "../domain/sinceReview";
+import type { Rebased } from "../domain/sinceReview";
 import { markOf, pullName, viewedAmong } from "../domain/viewedFiles";
 import type { MarkChange } from "../domain/viewedFiles";
 import { sinceShown } from "../filesChanged";
@@ -28,9 +35,35 @@ export function useViewedFiles(held: FilesChanged | null) {
   const shown = held && sinceShown(held);
   const nowOf = shown?.nowOf ?? null;
   const rebased = shown?.groups.rebased ?? null;
+  /**
+   * The marks you removed before the groups were known, when it couldn't yet
+   * tell which files only the base's changes moved.
+   */
+  const unmarked = useRef<{ pull: string | null; marks: Set<string> }>({
+    pull,
+    marks: new Set(),
+  });
+  if (unmarked.current.pull !== pull)
+    unmarked.current = { pull, marks: new Set() };
   useEffect(() => {
     if (pull === null || rebased === null) return;
-    const changes = carried(pull, rebased, store.read());
+    const { marks } = unmarked.current;
+    const isUnmarked = ({ now }: Rebased) => marks.has(markOf(now));
+    const changes: MarkChange[] = [
+      ...rebased
+        .filter(isUnmarked)
+        .flatMap(({ reviewed }) =>
+          reviewed === null
+            ? []
+            : [{ pull, mark: markOf(reviewed), isViewed: false }],
+        ),
+      ...carried(
+        pull,
+        rebased.filter((each) => !isUnmarked(each)),
+        store.read(),
+      ),
+    ];
+    marks.clear();
     if (changes.length > 0) setPersistenceError(store.mark(changes));
   }, [store, pull, rebased]);
   const viewed = useMemo(() => {
@@ -43,7 +76,7 @@ export function useViewedFiles(held: FilesChanged | null) {
   }, [files, nowOf, record, pull]);
   return {
     viewed,
-    /** Unmarking a file only the base's changes moved unmarks it as you reviewed it too, so it is not carried again. */
+    /** Unmarking a file only the base's changes moved unmarks it as you reviewed it too, so it is not carried again, also when the groups come after. */
     mark: (file: RangeFile, isViewed: boolean) => {
       const now = nowOf?.has(file) ? nowOf.get(file) : file;
       if (pull === null || !now) return;
@@ -52,6 +85,11 @@ export function useViewedFiles(held: FilesChanged | null) {
         : (rebased?.find((each) => each.now === now)?.reviewed ?? null);
       const changes: MarkChange[] = [{ pull, mark: markOf(now), isViewed }];
       if (before) changes.push({ pull, mark: markOf(before), isViewed });
+      if (rebased === null) {
+        const { marks } = unmarked.current;
+        if (isViewed) marks.delete(markOf(now));
+        else marks.add(markOf(now));
+      }
       setPersistenceError(store.mark(changes));
     },
     persistenceError,
