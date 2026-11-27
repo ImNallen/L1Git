@@ -95,7 +95,12 @@
               "author": {
                 "login": "review-bot"
               },
-              "state": "COMMENTED"
+              "state": "COMMENTED",
+              "viewerDidAuthor": false,
+              "submittedAt": "2026-11-24T15:33:39Z",
+              "commit": {
+                "oid": "1111111111111111111111111111111111111111"
+              }
             }
           ]
         },

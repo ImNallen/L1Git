@@ -63,6 +63,7 @@ const pull = (number: number) => ({
       ref: null,
     },
     reviewers: [],
+    reviewed: null,
     checks: null,
     commits: { items: [], total: 0 },
     timeline: { items: [], total: 0 },

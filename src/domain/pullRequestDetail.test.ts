@@ -54,6 +54,7 @@ function pull(fields: Partial<PullRequest> = {}): PullRequest {
       ref: { id: "REF_1", othersOpen: 0, viewerCanDelete: true },
     },
     reviewers: [],
+    reviewed: null,
     checks: page([]),
     commits: page([]),
     timeline: page([]),
@@ -440,6 +441,17 @@ describe("the conversation", () => {
     [
       { id: "E16", kind: "convertedToDraft", by: "a", at: at(1) },
       "marked this as a draft",
+    ],
+    [
+      {
+        id: "E17",
+        kind: "baseChanged",
+        from: "main",
+        to: "release",
+        by: "a",
+        at: at(1),
+      },
+      "changed the base from main to release",
     ],
     [review("R", 1, { state: "approved" }), "approved these changes"],
     [review("R", 1, { state: "changesRequested" }), "requested changes"],

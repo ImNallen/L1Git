@@ -99,6 +99,31 @@ it("keeps the words as they are while they are on their way", async () => {
   expect(sent(app)).toHaveLength(1);
 });
 
+it("says when the base changed", async () => {
+  const retarget = {
+    id: "B1",
+    kind: "baseChanged" as const,
+    from: "main",
+    to: "release",
+    by: "maja",
+    at: at(4),
+  };
+  const app = await visit({
+    world: (world) =>
+      world.host.details.set(
+        pullKey("octo/pin", 1),
+        pull(1, { timeline: page([retarget]) }),
+      ),
+  });
+  await open(app, 1);
+  const line = [...document.querySelectorAll(".entry-line")].find((entry) =>
+    entry.textContent?.includes("base"),
+  );
+  expect(line?.textContent).toMatch(
+    /^maja changed the base from main to release · /,
+  );
+});
+
 it("shows Markdown in Preview", async () => {
   const app = await visit();
   await open(app, 1);

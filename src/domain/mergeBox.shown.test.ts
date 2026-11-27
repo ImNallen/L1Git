@@ -38,6 +38,7 @@ function pull(fields: Partial<PullRequest> = {}): PullRequest {
       ref: { id: "REF_1", othersOpen: 0, viewerCanDelete: true },
     },
     reviewers: [{ login: "jonas", state: "approved" }],
+    reviewed: null,
     checks: page([]),
     commits: page(
       ["a", "c", "d", "e"].map((digit) => ({

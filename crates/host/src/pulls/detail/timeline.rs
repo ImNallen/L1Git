@@ -38,11 +38,15 @@ enum What {
     BranchDeleted,
     ReadyForReview,
     ConvertedToDraft,
+    BaseChanged {
+        from: String,
+        to: String,
+    },
 }
 
 #[derive(Deserialize)]
 pub(super) struct Oid {
-    oid: String,
+    pub(super) oid: String,
 }
 
 #[derive(Deserialize)]
@@ -85,6 +89,13 @@ pub(super) enum Item {
     HeadRefDeletedEvent(Act),
     ReadyForReviewEvent(Act),
     ConvertToDraftEvent(Act),
+    BaseRefChangedEvent {
+        id: String,
+        author: Option<Actor>,
+        at: String,
+        previous_ref_name: String,
+        current_ref_name: String,
+    },
     #[serde(other)]
     Unknown,
 }
@@ -168,6 +179,21 @@ pub(super) fn event(item: Item) -> Option<Event> {
         Item::HeadRefDeletedEvent(event) => act(event, What::BranchDeleted),
         Item::ReadyForReviewEvent(event) => act(event, What::ReadyForReview),
         Item::ConvertToDraftEvent(event) => act(event, What::ConvertedToDraft),
+        Item::BaseRefChangedEvent {
+            id,
+            author,
+            at,
+            previous_ref_name,
+            current_ref_name,
+        } => Event {
+            id,
+            by: login(author),
+            at,
+            what: What::BaseChanged {
+                from: previous_ref_name,
+                to: current_ref_name,
+            },
+        },
         Item::Unknown => return None,
     })
 }

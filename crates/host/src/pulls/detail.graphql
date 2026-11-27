@@ -20,7 +20,7 @@ query($owner: String!, $repo: String!, $number: Int!, $threads: Boolean!) {
       reviewRequests(first: 100) { nodes { requestedReviewer {
         ... on User { login } ... on Bot { login } ... on Mannequin { login }
       } } }
-      latestReviews(first: 100) { nodes { author { login } state } }
+      latestReviews(first: 100) { nodes { author { login } state viewerDidAuthor submittedAt commit { oid } } }
       latestOpinionatedReviews(first: 100) { nodes { author { login } state } }
       statusCheckRollup { contexts(first: 100) { totalCount nodes {
         __typename
@@ -28,7 +28,7 @@ query($owner: String!, $repo: String!, $number: Int!, $threads: Boolean!) {
         ... on StatusContext { context state url: targetUrl isRequired(pullRequestNumber: $number) }
       } } }
       commits(last: 100) { totalCount nodes { commit { ...commit } } }
-      timelineItems(last: 100, itemTypes: [PULL_REQUEST_COMMIT, PULL_REQUEST_REVIEW, ISSUE_COMMENT, HEAD_REF_FORCE_PUSHED_EVENT, MERGED_EVENT, CLOSED_EVENT, REOPENED_EVENT, HEAD_REF_DELETED_EVENT, READY_FOR_REVIEW_EVENT, CONVERT_TO_DRAFT_EVENT]) {
+      timelineItems(last: 100, itemTypes: [PULL_REQUEST_COMMIT, PULL_REQUEST_REVIEW, ISSUE_COMMENT, HEAD_REF_FORCE_PUSHED_EVENT, MERGED_EVENT, CLOSED_EVENT, REOPENED_EVENT, HEAD_REF_DELETED_EVENT, READY_FOR_REVIEW_EVENT, CONVERT_TO_DRAFT_EVENT, BASE_REF_CHANGED_EVENT]) {
         totalCount: filteredCount
         nodes {
           __typename
@@ -42,6 +42,7 @@ query($owner: String!, $repo: String!, $number: Int!, $threads: Boolean!) {
           ... on HeadRefDeletedEvent { id author: actor { login } at: createdAt }
           ... on ReadyForReviewEvent { id author: actor { login } at: createdAt }
           ... on ConvertToDraftEvent { id author: actor { login } at: createdAt }
+          ... on BaseRefChangedEvent { id author: actor { login } at: createdAt previousRefName currentRefName }
         }
       }
       reviewThreads(last: 100) @include(if: $threads) { totalCount nodes {

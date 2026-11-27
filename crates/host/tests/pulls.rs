@@ -597,7 +597,7 @@ fn one_pull_request_answers_in_l1_gits_words() {
         "id": "PR_kwDOAPP12", "repositoryId": "R_kgDOAPP", "number": 12, "title": "Read the configuration file once",
         "body": "The file was read for **every** request.",
         "state": {"kind": "open", "draft": false}, "author": "hubot", "viewerIsAuthor": false,
-        "viewerPermission": "write", "base": "main", "baseOid": "b".repeat(40),
+        "viewerPermission": "write", "base": "main", "baseOid": "b".repeat(40), "reviewed": null,
         "labels": {"total": 1, "items": [{"name": "bug", "color": "d73a4a"}]},
         "additions": 80, "deletions": 8, "changedFiles": 3,
         "createdAt": "2026-05-07T21:40:00Z", "updatedAt": "2026-11-24T15:33:39Z",
@@ -916,6 +916,44 @@ fn reviewers_show_what_is_asked_of_them_last() {
 }
 
 #[test]
+fn reads_the_commit_of_your_last_submitted_review() {
+    let world = World::connected();
+    let review = |login: &str, mine: bool, state: &str, at: Value, oid: Value| {
+        json!({
+            "author": {"login": login}, "state": state, "viewerDidAuthor": mine,
+            "submittedAt": at, "commit": oid.as_str().map(|oid| json!({"oid": oid})),
+        })
+    };
+    let reviewed = "e".repeat(40);
+    let head = "1".repeat(40);
+    let data = world.pulls(pull(json!({"latestReviews": {"nodes": [
+        review("monalisa", false, "APPROVED", json!("2026-11-25T09:00:00Z"), json!(head)),
+        review("octo", true, "PENDING", json!(null), json!(head)),
+        review("octo", true, "COMMENTED", json!("2026-11-24T18:00:00Z"), json!(reviewed)),
+    ]}})));
+    assert_eq!(
+        data["reviewed"],
+        json!({"oid": reviewed, "at": "2026-11-24T18:00:00Z"})
+    );
+    assert_eq!(
+        data["reviewers"],
+        json!([
+            {"login": "monalisa", "state": "approved"},
+            {"login": "octo", "state": "commented"},
+        ])
+    );
+
+    let gone = world.pulls(pull(json!({"latestReviews": {"nodes": [
+        review("octo", true, "CHANGES_REQUESTED", json!("2026-11-24T18:00:00Z"), json!(null)),
+    ]}})));
+    assert_eq!(
+        gone["reviewed"],
+        json!({"oid": null, "at": "2026-11-24T18:00:00Z"})
+    );
+    assert_eq!(world.pulls(pull(json!({})))["reviewed"], json!(null));
+}
+
+#[test]
 fn the_timeline_skips_what_it_cannot_tell_but_counts_it() {
     let world = World::connected();
     let act = |kind: &str| json!({"__typename": kind, "id": kind, "author": null, "at": "2026-11-24T16:23:14Z"});
@@ -938,6 +976,24 @@ fn the_timeline_skips_what_it_cannot_tell_but_counts_it() {
             {"id": "PURC_1", "kind": "commit", "oid": "a", "headline": "Fix it", "by": "Mona Lisa", "at": at},
         ]})
     );
+}
+
+#[test]
+fn the_timeline_tells_when_the_base_changed() {
+    let world = World::connected();
+    let data = world.pulls(pull(json!({"timelineItems": {"totalCount": 1, "nodes": [{
+        "__typename": "BaseRefChangedEvent", "id": "BRCE_1", "author": {"login": "maja"},
+        "at": "2026-11-25T09:00:00Z", "previousRefName": "main", "currentRefName": "release",
+    }]}})));
+    assert_eq!(
+        data["timeline"]["items"],
+        json!([{
+            "id": "BRCE_1", "kind": "baseChanged", "from": "main", "to": "release",
+            "by": "maja", "at": "2026-11-25T09:00:00Z",
+        }])
+    );
+    let asked = &world.github.questions()[0]["query"];
+    assert!(asked.as_str().unwrap().contains("BASE_REF_CHANGED_EVENT"));
 }
 
 #[test]
