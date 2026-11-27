@@ -12,20 +12,9 @@ import {
 import type { LocalDelete, MergeMethod } from "../domain/pullRequestMerge";
 import type { useMerge } from "../shell/useMerge";
 import { useModalDialog } from "./Dialog";
+import { sentNothing } from "./sentNothing";
 
 const WIDTH = 368;
-
-type Started = Awaited<ReturnType<ReturnType<typeof useMerge>["merge"]>>;
-
-const unsent: Record<Exclude<Started, "started">, string> = {
-  busy: "Another write for this pull request is still sending, or may have posted, so L1 Git sent nothing. Merge once it ends.",
-  unsaved: "L1 Git sent nothing. Try again.",
-  signedOut: "L1 Git isn't signed in to GitHub, so it sent nothing.",
-  restarting:
-    "L1 Git is restarting to update, so it sent nothing. Merge after it restarts.",
-  notInRead:
-    "L1 Git's latest read of this pull request doesn't match this merge, so it sent nothing. Refresh the pull request and try again.",
-};
 
 /** Above the merge box, at the inspector's right edge. */
 function useAbove(anchor: RefObject<HTMLElement | null>) {
@@ -119,7 +108,7 @@ export function MergePopover({
       return onClose(true);
     }
     setSending(false);
-    setFailure(unsent[started]);
+    setFailure(sentNothing[started]);
   }
 
   const keys = (event: KeyboardEvent) => {

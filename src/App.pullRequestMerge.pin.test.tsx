@@ -372,3 +372,26 @@ it("keeps a local branch that is checked out, and says where", async () => {
     "pr/1. It's checked out in pin-pr-1.",
   );
 });
+
+it("says why a merge sent nothing in the words every write uses", async () => {
+  const app = await visit({
+    world: (world) =>
+      world.host.sent.set("octo octo/pin#1", [
+        {
+          attempt: "elsewhere",
+          at: 1,
+          write: { kind: "resolve", thread: "T9" },
+          drafts: [],
+          sending: true,
+          applied: false,
+        },
+      ]),
+  });
+  await open(app, 1);
+  await app.click(get("button", "Squash and merge"));
+  await confirm(app);
+  expect(get("alert", undefined, popover()).textContent).toBe(
+    "Another write to this pull request is still sending, or may have posted, so L1 Git sent nothing. Try again once that one ends.",
+  );
+  expect(sent(app)).toEqual([]);
+});

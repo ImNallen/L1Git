@@ -15,6 +15,7 @@ import { browserStorage, readStored, writeStored } from "../persisted";
 import type { Attempt } from "../pullRequestWrites";
 import type { PullRequestCheckout } from "./usePullRequestCheckout";
 import type { OpenedPullRequest } from "./usePullRequests";
+import { sentNothing } from "../components/sentNothing";
 import { usePullWrites } from "./usePullWriting";
 
 const LAST_KEY = "l1git.mergeMethod.v1";
@@ -82,14 +83,6 @@ type MergeAsk = {
 /** What happened to a branch L1 Git deleted after a merge. */
 type Note = { text: string; failed: boolean };
 
-const unsent = {
-  busy: "another write for this pull request was still sending",
-  unsaved: "a draft it carries wasn't saved",
-  signedOut: "L1 Git isn't signed in to GitHub",
-  restarting: "L1 Git is restarting to update",
-  notInRead: "its latest read of this pull request doesn't match the merge",
-};
-
 /**
  * The opened pull request's merge: what the box shows, and the merge with the
  * branch deletions the user asked for, which run only once GitHub answered
@@ -153,7 +146,7 @@ export function useMerge(
       .then((started) => {
         if (started !== "started")
           setNote({
-            text: `L1 Git didn't delete ${branch} on GitHub, because ${unsent[started]}.`,
+            text: `L1 Git didn't delete ${branch} on GitHub. ${sentNothing[started]}`,
             failed: true,
           });
       });
