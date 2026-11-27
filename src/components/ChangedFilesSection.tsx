@@ -6,7 +6,12 @@ import { threadsLeftOut } from "../domain/pullRequestDetail";
 import type { RangeFile } from "../domain/range";
 import { commentsIn, threadsByFile } from "../domain/reviewThreads";
 import { viewedCount as viewedOf } from "../domain/viewedFiles";
-import { isSinceShown, shownFiles } from "../filesChanged";
+import {
+  isSinceShown,
+  shownFiles,
+  sinceShown,
+  sinceTotal,
+} from "../filesChanged";
 import type { FilesChanged } from "../filesChanged";
 import { ChangedFileTree } from "./ChangedFileTree";
 import type { RowLabel } from "./ChangedFileTree";
@@ -110,6 +115,7 @@ export function ChangedFilesSection({
   const read = held?.read.kind === "ready" ? held.read : null;
   const shown = held ? shownFiles(held) : [];
   const isSince = held !== null && isSinceShown(held);
+  const since = held && isSince ? sinceShown(held) : null;
   const isReading =
     held === null ||
     held.read.kind === "reading" ||
@@ -133,10 +139,10 @@ export function ChangedFilesSection({
         {isSince ? (
           <span className="changed-files-title">
             Since your last review
-            {read && !isReading && (
+            {read && since && (
               <span className="count">
-                {shown.length.toLocaleString()} of{" "}
-                {read.files.length.toLocaleString()}
+                {since.again.length.toLocaleString()} of{" "}
+                {sinceTotal(since).toLocaleString()}
               </span>
             )}
           </span>

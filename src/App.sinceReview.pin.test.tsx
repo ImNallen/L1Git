@@ -361,3 +361,36 @@ it("takes no comment outside the pull request's own hunks when its patch came by
     "GitHub takes comments only on lines this pull request changes. Choose lines inside one of its hunks.",
   );
 });
+
+it("counts a file the pull request no longer changes among the files it counts", async () => {
+  // You reviewed c.ts and x.ts. Since then the author took x.ts back out.
+  const kept = file("src/c.ts");
+  await openFiles({ changedFiles: 1 }, (bridge) => {
+    bridge.respond("rangeFiles", () => ({
+      kind: "ready",
+      mergeBase: oid("a"),
+      files: [kept],
+      contentMissing: false,
+      shallow: false,
+    }));
+    bridge.respond("sinceReview", () => ({
+      kind: "ready",
+      since: replayed,
+      fromBase: { kind: "leftOut" },
+      reviewed: [kept, file("src/x.ts")],
+      files: [file("src/x.ts", { newBlob: oid("1") })],
+      contentMissing: false,
+    }));
+    bridge.respond("rangePatches", (request) =>
+      request.mergeBase === replayed
+        ? [patchOf("src/x.ts", own("src/x.ts"))]
+        : [patchOf("src/c.ts", own("src/c.ts"))],
+    );
+  });
+  expect(tab("Files changed").textContent).toBe("Files changed1 new");
+  expect(
+    get("complementary", "Pull request details").querySelector(
+      ".files-section h3 .count",
+    )?.textContent,
+  ).toBe("1 of 2");
+});

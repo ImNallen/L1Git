@@ -160,6 +160,16 @@ export function newLabel(
   return shown ? `${shown.groups.again.length.toLocaleString()} new` : "new";
 }
 
+/**
+ * How many files the since view lists or folds: each the author changed since
+ * your review, whether the pull request still changes it or not, and each
+ * other file of the pull request. The header counts the first of these out of
+ * all of them, as the tab's "N new" counts the first.
+ */
+export const sinceTotal = ({
+  groups: { again, rebased, unchanged },
+}: SinceShown) => again.length + rebased.length + unchanged.length;
+
 function sinceFor(pull: PullRequest, before: Since | null): Since | null {
   const point = reviewPointOf(pull);
   if (point === null) return null;
