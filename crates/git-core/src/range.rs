@@ -1,4 +1,5 @@
 mod output;
+mod since;
 
 use crate::{
     Base, Comparison, ErrorKind, FilePatch, Oid, PatchContext, RepositoryError, Target,
@@ -7,6 +8,8 @@ use crate::{
 };
 use output::{Change, Limit, Patches, changes, counts, read_patches, unreadable};
 use serde::Serialize;
+pub(crate) use since::since_review_within;
+pub use since::{FromBase, SinceReview, Untold, since_review};
 use std::{
     io::{self, BufReader},
     iter,

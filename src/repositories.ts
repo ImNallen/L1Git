@@ -67,6 +67,15 @@ export async function rangePatches(
   return (await run({ op: "rangePatches", path, mergeBase, head })).data;
 }
 
+export async function sinceReview(
+  path: RepositoryRoot,
+  base: Oid,
+  reviewed: Oid,
+  head: Oid,
+) {
+  return (await run({ op: "sinceReview", path, base, reviewed, head })).data;
+}
+
 export async function fetchCommits(
   path: RepositoryRoot,
   github: GitHubRepository,

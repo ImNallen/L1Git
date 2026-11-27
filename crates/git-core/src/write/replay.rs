@@ -9,7 +9,7 @@ use super::{
 use crate::{
     BranchRef, ErrorKind, Head, MoveSide, Oid, RepositoryError, Sides, StagedStamp, StaleReason,
     StatusEntry,
-    git::{self, Deadline, WriteDeadline, Wrote},
+    git::{self, Deadline, Merging, WriteDeadline, Wrote, listed_paths},
     repository,
     status::{self, Untracked},
     sync::{self, InProgress},
@@ -233,15 +233,6 @@ fn prepared(repo: &Repo, of: &ReplayOf, head: &Oid) -> Result<PathBuf, Repositor
     Ok(folder)
 }
 
-/// NUL-separated paths, or `None` when one is not UTF-8, which L1 Git cannot name.
-fn listed_paths(bytes: &[u8]) -> Option<BTreeSet<String>> {
-    bytes
-        .split(|byte| *byte == 0)
-        .filter(|path| !path.is_empty())
-        .map(|path| String::from_utf8(path.to_vec()).ok())
-        .collect()
-}
-
 pub(super) struct Simulated {
     tree: Oid,
     pub(super) conflicted: BTreeSet<String>,
@@ -310,25 +301,15 @@ pub(super) fn simulate(
     theirs: &str,
     deadline: WriteDeadline,
 ) -> Result<Option<Simulated>, RepositoryError> {
-    let merge_base = merge_base.map(|base| format!("--merge-base={base}"));
-    let mut args = vec![
-        "merge-tree",
-        "--write-tree",
-        "-z",
-        "--name-only",
-        "--no-messages",
-    ];
-    args.extend(merge_base.as_deref());
-    args.extend([head.as_str(), theirs]);
-    let ran = git::run(&repo.root, &args, deadline.reads())?;
-    if !matches!(ran.status.code(), Some(0 | 1)) {
-        return Ok(None);
-    }
-    let Some(end) = ran.stdout.iter().position(|byte| *byte == 0) else {
-        return Err(git::malformed());
-    };
-    let tree = Oid::try_from(git::text(&ran.stdout[..end])).map_err(|_| git::malformed())?;
-    Ok(listed_paths(&ran.stdout[end..]).map(|conflicted| Simulated { tree, conflicted }))
+    let merged = git::merge_tree(
+        &repo.root,
+        merge_base,
+        head.as_str(),
+        theirs,
+        Merging::AsConfigured,
+        deadline.reads(),
+    )?;
+    Ok(merged.map(|(tree, conflicted)| Simulated { tree, conflicted }))
 }
 
 struct Paths {

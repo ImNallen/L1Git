@@ -28,6 +28,7 @@ import {
   commitsFetchSchema,
   rangeFilesSchema,
   rangePatchesSchema,
+  sinceReviewSchema,
 } from "./domain/range";
 import type { Advance, FetchMode } from "./domain/overview";
 import {
@@ -87,6 +88,13 @@ type RepositoryRequest =
     }
   | { op: "rangeFiles"; path: RepositoryRoot; base: Oid; head: Oid }
   | { op: "rangePatches"; path: RepositoryRoot; mergeBase: Oid; head: Oid }
+  | {
+      op: "sinceReview";
+      path: RepositoryRoot;
+      base: Oid;
+      reviewed: Oid;
+      head: Oid;
+    }
   | { op: "fileHistory"; path: RepositoryRoot; oid: Oid; file: string }
   | { op: "blame"; path: RepositoryRoot; oid: Oid; file: string }
   | { op: "overview"; path: RepositoryRoot; mode: FetchMode }
@@ -169,6 +177,7 @@ const responseSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("filePatch"), data: filePatchSchema }),
   z.object({ op: z.literal("rangeFiles"), data: rangeFilesSchema }),
   z.object({ op: z.literal("rangePatches"), data: rangePatchesSchema }),
+  z.object({ op: z.literal("sinceReview"), data: sinceReviewSchema }),
   z.object({ op: z.literal("fileHistory"), data: fileHistorySchema }),
   z.object({ op: z.literal("blame"), data: blameSchema }),
   z.object({ op: z.literal("overview"), data: overviewSchema }),
