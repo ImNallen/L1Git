@@ -1,7 +1,14 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { FormEvent, KeyboardEvent, ReactNode, RefObject } from "react";
 import { flushSync } from "react-dom";
-import { LoaderCircle } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowUp,
+  CornerDownLeft,
+  Delete,
+  LoaderCircle,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import {
   BARE_REASON,
   baseFromHome,
@@ -20,6 +27,7 @@ import {
 } from "../domain/addRepository";
 import type {
   DirectoryEntry,
+  Key,
   SourceKind,
   SourceStep,
   Step,
@@ -439,7 +447,7 @@ function SubStep({
           ) : (
             <>
               {text.submit}
-              <kbd aria-hidden="true">↵</kbd>
+              <Keycap name="enter" hidden />
             </>
           )}
         </button>
@@ -547,6 +555,28 @@ function SubStep({
   );
 }
 
+const KEYCAPS: Record<Key, { label: string; icon?: LucideIcon }> = {
+  up: { label: "Up arrow", icon: ArrowUp },
+  down: { label: "Down arrow", icon: ArrowDown },
+  enter: { label: "Return", icon: CornerDownLeft },
+  backspace: { label: "Backspace", icon: Delete },
+  esc: { label: "Esc" },
+  tab: { label: "Tab" },
+};
+
+function Keycap({ name, hidden = false }: { name: Key; hidden?: boolean }) {
+  const { label, icon: Icon } = KEYCAPS[name];
+  return (
+    <kbd aria-hidden={hidden || undefined}>
+      {Icon === undefined ? (
+        label
+      ) : (
+        <Icon size={11} strokeWidth={2} role="img" aria-label={label} />
+      )}
+    </kbd>
+  );
+}
+
 function Hints({ hints }: { hints: ReturnType<typeof shownHints> }) {
   return (
     <div className="add-palette-footer">
@@ -557,7 +587,11 @@ function Hints({ hints }: { hints: ReturnType<typeof shownHints> }) {
             disabled ? "add-palette-hint disabled" : "add-palette-hint"
           }
         >
-          <kbd data-keys={keys}>{keys}</kbd>
+          <span className="add-palette-keys">
+            {keys.map((key) => (
+              <Keycap key={key} name={key} />
+            ))}
+          </span>
           {label}
         </span>
       ))}

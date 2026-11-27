@@ -66,16 +66,22 @@ export function filterSources(query: string): readonly Source[] {
   return SOURCES.filter(({ title }) => title.toLowerCase().includes(wanted));
 }
 
-const NAVIGATE: Hint = { keys: "↑ ↓", label: "Navigate" };
-const CLOSE: Hint = { keys: "Esc", label: "Close" };
-const MOVE_FOCUS: Hint = { keys: "Tab", label: "Move focus" };
+export type Key = "up" | "down" | "enter" | "backspace" | "esc" | "tab";
 
-type Hint = { keys: string; label: string; role?: "clear" | "submit" };
+type Hint = {
+  keys: readonly Key[];
+  label: string;
+  role?: "clear" | "submit";
+};
+
+const NAVIGATE: Hint = { keys: ["up", "down"], label: "Navigate" };
+const CLOSE: Hint = { keys: ["esc"], label: "Close" };
+const MOVE_FOCUS: Hint = { keys: ["tab"], label: "Move focus" };
 
 export const SOURCES_HINTS: readonly Hint[] = [
   NAVIGATE,
-  { keys: "↵", label: "Select", role: "submit" },
-  { keys: "⌫", label: "Clear", role: "clear" },
+  { keys: ["enter"], label: "Select", role: "submit" },
+  { keys: ["backspace"], label: "Clear", role: "clear" },
   CLOSE,
 ];
 
@@ -98,7 +104,11 @@ export const STEP_TEXT: Record<
     submit: "Create",
     busy: "Creating…",
     section: "Create in",
-    hints: [MOVE_FOCUS, { keys: "↵", label: "Create", role: "submit" }, CLOSE],
+    hints: [
+      MOVE_FOCUS,
+      { keys: ["enter"], label: "Create", role: "submit" },
+      CLOSE,
+    ],
   },
   url: {
     input: "Git URL",
@@ -107,7 +117,11 @@ export const STEP_TEXT: Record<
     submit: "Clone",
     busy: "Cloning…",
     section: "Clone into",
-    hints: [MOVE_FOCUS, { keys: "↵", label: "Clone", role: "submit" }, CLOSE],
+    hints: [
+      MOVE_FOCUS,
+      { keys: ["enter"], label: "Clone", role: "submit" },
+      CLOSE,
+    ],
   },
   local: {
     input: "Path",
@@ -118,8 +132,8 @@ export const STEP_TEXT: Record<
     section: "Directories",
     hints: [
       NAVIGATE,
-      { keys: "↵", label: "Open", role: "submit" },
-      { keys: "⌫", label: "Back" },
+      { keys: ["enter"], label: "Open", role: "submit" },
+      { keys: ["backspace"], label: "Back" },
       CLOSE,
     ],
   },

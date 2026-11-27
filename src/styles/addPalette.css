@@ -297,6 +297,15 @@ label.add-palette-label {
   font-weight: 500;
   line-height: 1;
 }
+.add-palette kbd:has(> svg) {
+  width: 18px;
+  min-width: 18px;
+  padding: 0;
+}
+.add-palette-keys {
+  display: flex;
+  gap: 3px;
+}
 .add-palette-hint kbd {
   background: var(--add-palette-key);
   border-color: transparent;
@@ -305,25 +314,4 @@ label.add-palette-label {
 .add-palette-source > .workspace-icon:first-child {
   align-self: flex-start;
   margin-top: 9px;
-}
-
-.add-palette-hint kbd[data-keys="↑ ↓"] {
-  width: 33px;
-}
-.add-palette-hint kbd[data-keys="↵"] {
-  width: 24px;
-}
-.add-palette-hint kbd[data-keys="Esc"] {
-  width: 28px;
-}
-.add-palette-hint kbd[data-keys="Tab"] {
-  width: 30px;
-}
-.add-palette-hint kbd[data-keys="⌫"] {
-  width: 26px;
-}
-.add-palette-primary kbd {
-  min-width: 18px;
-  width: 18px;
-  padding: 0;
 }
