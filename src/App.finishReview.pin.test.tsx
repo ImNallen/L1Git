@@ -311,7 +311,7 @@ it("reminds of files not viewed and threads not resolved, and still sends", asyn
   });
   const shown = await openPopover(app);
   expect(get("region", "Before you send", shown).textContent).toBe(
-    "2 of 2 files not viewed yetShow themsara's thread on a.ts is unresolvedOpen",
+    "2 of 2 files not viewed yetShow themsara's thread on a.ts:11 is unresolvedOpen",
   );
   expect(submit().getAttribute("aria-disabled")).toBe("false");
   await app.click(get("button", "Show them", shown));

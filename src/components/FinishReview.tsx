@@ -1,11 +1,11 @@
 import { useId, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode, RefObject } from "react";
 import { ChevronRight, Eye, MessageSquare } from "lucide-react";
-import { remindersOf } from "../domain/finishReview";
+import { remindersOf, unresolvedText } from "../domain/finishReview";
 import type { ReviewEvent } from "../domain/finishReview";
 import type { Lines } from "../domain/lineComments";
 import type { ReviewThread } from "../domain/pullRequest";
-import { counted, personName } from "../domain/pullRequestDetail";
+import { counted } from "../domain/pullRequestDetail";
 import type { RangeFile } from "../domain/range";
 import { firstWords } from "../domain/reviewThreads";
 import { mac } from "../repositories";
@@ -29,7 +29,8 @@ const EDGE = 8;
 const LEAST_HEIGHT = 200;
 
 const fileName = (path: string) => path.slice(path.lastIndexOf("/") + 1);
-const placeOf = ({ path, line, start }: Lines) =>
+/** "a.ts:11", or "a.ts:11–12" for a range. */
+const shortPlace = ({ path, line, start }: Lines) =>
   `${fileName(path)}:${start === null ? line : `${start.line}–${line}`}`;
 
 function Comments<Comment extends { key: string }>({
@@ -221,7 +222,7 @@ function FinishReviewPopover({
               onClick={go(() => onGoTo(draft.lines, false))}
             >
               <MessageSquare size={13} aria-hidden="true" />
-              <code>{placeOf(draft.lines)}</code>
+              <code>{shortPlace(draft.lines)}</code>
               <span>{firstWords(draft.text)}</span>
               {draft.mayHavePosted && (
                 <span className="line-comment-pending">May have posted</span>
@@ -240,7 +241,7 @@ function FinishReviewPopover({
         <Comments title="Written against an earlier commit" comments={older}>
           {(draft) => (
             <div className="finish-comment finish-older">
-              <code>{placeOf(draft.anchor)}</code>
+              <code>{shortPlace(draft.anchor)}</code>
               <span>{firstWords(draft.text)}</span>
               <button
                 type="button"
@@ -287,10 +288,7 @@ function FinishReviewPopover({
           {shownThreads.map((thread) => (
             <p key={thread.id} className="finish-reminder">
               <MessageSquare size={14} aria-hidden="true" />
-              <span>
-                {personName(thread.comments.items[0]?.by ?? null, viewer)}
-                &apos;s thread on {fileName(thread.path)} is unresolved
-              </span>
+              <span>{unresolvedText(thread, viewer)}</span>
               <button
                 type="button"
                 className="pull-link"

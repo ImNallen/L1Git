@@ -5,6 +5,7 @@ import {
   heldBack,
   remindersOf,
   reviewOf,
+  unresolvedText,
 } from "./finishReview";
 import type { ReviewEvent } from "./finishReview";
 import type { PullRequest, ReviewThread } from "./pullRequest";
@@ -97,4 +98,34 @@ it("reminds of files not viewed and threads not resolved", () => {
   expect(shown.notViewed).toBe(1);
   expect(shown.of).toBe(2);
   expect(shown.unresolved.map(({ id }) => id)).toEqual(["open"]);
+});
+
+describe("unresolvedText", () => {
+  const thread = (
+    by: string | null,
+    line: number | null,
+    originalLine: number | null = line,
+  ) =>
+    ({
+      path: "src/views/ReplayPanel.tsx",
+      line,
+      originalLine,
+      comments: { items: [{ by }], total: 1 },
+    }) as unknown as ReviewThread;
+  it.each<[ReviewThread, string]>([
+    [thread("octo", 92), "Your thread on ReplayPanel.tsx:92 is unresolved"],
+    [thread("OCTO", 92), "Your thread on ReplayPanel.tsx:92 is unresolved"],
+    [thread("sara", 7), "sara's thread on ReplayPanel.tsx:7 is unresolved"],
+    [thread(null, 7), "ghost's thread on ReplayPanel.tsx:7 is unresolved"],
+    [
+      thread("sara", null, 40),
+      "sara's thread on ReplayPanel.tsx:40 is unresolved",
+    ],
+    [
+      thread("sara", null, null),
+      "sara's thread on ReplayPanel.tsx is unresolved",
+    ],
+  ])("names whose thread and where", (shown, text) => {
+    expect(unresolvedText(shown, "octo")).toBe(text);
+  });
 });

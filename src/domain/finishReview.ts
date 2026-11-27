@@ -1,6 +1,7 @@
 import { draftText } from "./drafts";
 import type { LineAnchor } from "./lineComments";
 import type { PullRequest, ReviewThread } from "./pullRequest";
+import { whose } from "./pullRequestDetail";
 import type { PullWrite } from "./pullRequestWrites";
 import type { RangeFile } from "./range";
 import type { Oid } from "./repository";
@@ -87,4 +88,15 @@ export function remindersOf({
     of: files.length,
     unresolved: threads.filter(({ resolved }) => !resolved),
   };
+}
+
+/** "Your thread on a.ts:11 is unresolved", with the line, so two threads of
+ * one file read apart. */
+export function unresolvedText(
+  { path, line, originalLine, comments }: ReviewThread,
+  viewer: string,
+): string {
+  const file = path.slice(path.lastIndexOf("/") + 1);
+  const at = line ?? originalLine;
+  return `${whose(comments.items[0]?.by ?? null, viewer)} thread on ${at === null ? file : `${file}:${at}`} is unresolved`;
 }
