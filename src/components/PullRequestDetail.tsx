@@ -5,6 +5,7 @@ import {
   useImperativeHandle,
   useMemo,
   useRef,
+  useState,
 } from "react";
 import type { PullRequestCheckout } from "../shell/usePullRequestCheckout";
 import type { KeyboardEvent, ReactNode, Ref } from "react";
@@ -18,7 +19,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { flushSync } from "react-dom";
-import type { PullRequest } from "../domain/pullRequest";
+import type { PullRequest, ReviewThread } from "../domain/pullRequest";
 import {
   conversationCount,
   detailNotice,
@@ -247,6 +248,12 @@ export function PullRequestDetail({
     flushSync(() => onTab(next));
     document.getElementById(tabId(next))?.focus();
   };
+  // Files changed goes to the thread once it has read its files.
+  const [inDiff, setInDiff] = useState<ReviewThread | null>(null);
+  const showInDiff = (thread: ReviewThread) => {
+    setInDiff(thread);
+    show("files");
+  };
   function steer(event: KeyboardEvent) {
     const at = order.indexOf(tab);
     const next = {
@@ -375,8 +382,9 @@ export function PullRequestDetail({
                 ) : of === "conversation" ? (
                   <PullRequestConversation
                     pull={pull}
-                    viewer={viewer}
+                    opened={opened}
                     url={url}
+                    onShowInDiff={showInDiff}
                   />
                 ) : of === "commits" ? (
                   <PullRequestCommits pull={pull} viewer={viewer} url={url} />
@@ -391,6 +399,8 @@ export function PullRequestDetail({
                           pull={pull}
                           opened={opened}
                           url={`${url}/files`}
+                          showing={inDiff}
+                          onShown={() => setInDiff(null)}
                         />
                       )}
                     </Suspense>

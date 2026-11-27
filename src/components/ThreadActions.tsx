@@ -1,0 +1,238 @@
+import {
+  use,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
+import { CircleCheck, CornerDownLeft, LoaderCircle } from "lucide-react";
+import { draftKey, draftText } from "../domain/drafts";
+import type { ReviewThread } from "../domain/pullRequest";
+import { usePullWrites } from "../shell/usePullWriting";
+import { ConversationBox } from "./ConversationBox";
+import {
+  anchorOf,
+  ConversationWritingContext,
+  doneAt,
+  madeId,
+  readShowsReply,
+  useLasting,
+  waitingAt,
+  wordsOf,
+} from "./conversationWriting";
+import type { ConversationWriting } from "./conversationWriting";
+import { Body } from "./PullRequestBody";
+import { Avatar, OnGitHub } from "./PullRequestParts";
+import { sentNothing } from "./sentNothing";
+import type { SentNothing } from "./sentNothing";
+import { Problem, WriteNotice } from "./WriteNotice";
+
+type Props = {
+  thread: ReviewThread;
+  /** "Resolve" instead of "Resolve conversation", where a row is narrow. */
+  short?: boolean;
+  onShowInDiff?: (thread: ReviewThread) => void;
+  /** A reply, a resolve or an unresolve was sent from here. */
+  onAct?: (kind: "reply" | "resolve" | "unresolve") => void;
+};
+
+/** Reply, Resolve and Show in diff under a thread, and the replies that
+ * posted until a read has them. Nothing where nothing writes. */
+export function ThreadActions(props: Props) {
+  const writing = use(ConversationWritingContext);
+  return writing && <Actions writing={writing} {...props} />;
+}
+
+function Actions({
+  writing,
+  thread,
+  short = false,
+  onShowInDiff,
+  onAct,
+}: Props & { writing: ConversationWriting }) {
+  const { id, resolved, can, comments } = thread;
+  const writes = usePullWrites(writing.opened);
+  const reply = { kind: "reply", thread: id } as const;
+  const resolve = { kind: "resolve", thread: id } as const;
+  const { drafts } = writing.opened.writing;
+  const key = draftKey(anchorOf(reply), writing.head);
+  const of = {
+    login: writing.opened.viewer,
+    repository: writing.opened.repository.github,
+    number: writing.opened.number,
+  };
+  const drafted = useSyncExternalStore(drafts.subscribe, () =>
+    drafts
+      .read(of)
+      .drafts.some(
+        (each) =>
+          draftKey(each.anchor, each.head) === key &&
+          draftText(each.text) !== "blank",
+      ),
+  );
+  const [asked, setAsked] = useState(false);
+  const [refused, setRefused] = useState<SentNothing | null>(null);
+  const replyButton = useRef<HTMLButtonElement>(null);
+  const flipButton = useRef<HTMLButtonElement>(null);
+  const home = () => replyButton.current ?? flipButton.current;
+  const resolving = waitingAt(writes.attempts, resolve);
+  const replying = waitingAt(writes.attempts, reply);
+  const boxShown = replying !== null || (can.reply && (asked || drafted));
+  const cancelled = useRef(false);
+  // The box goes once its reply posts, and focus with it.
+  useLayoutEffect(() => {
+    if (boxShown) return;
+    if (cancelled.current || document.activeElement === document.body)
+      replyButton.current?.focus();
+    cancelled.current = false;
+  }, [boxShown]);
+
+  // A read doesn't hold a reply past a thread's first comments, so GitHub
+  // shows it and L1 Git can't.
+  const shows = readShowsReply(comments);
+  const read = new Set(comments.items.map((comment) => comment.id));
+  const posted = doneAt(writes.attempts, reply);
+  const sent = posted.filter((attempt) => !read.has(madeId(attempt) ?? ""));
+  const [seen, setSeen] = useState<string | null>(null);
+  const [postedPast, setPostedPast] = useState(false);
+  const last = posted.at(-1);
+  const replied = useLasting(
+    last && shows ? { id: last.id, text: "Posted your reply." } : null,
+  );
+  if (last && last.id !== seen) {
+    setSeen(last.id);
+    if (!shows) setPostedPast(true);
+  }
+
+  const canFlip = resolved ? can.unresolve : can.resolve;
+  const flipped = doneAt(writes.attempts, resolve).at(-1);
+  const flipSaid = useLasting(
+    flipped
+      ? {
+          id: flipped.id,
+          text: flipped.write.kind === "resolve" ? "Resolved." : "Unresolved.",
+        }
+      : null,
+  );
+  // Done waits for the read that shows it, so a second click sends nothing.
+  const flipping = resolving?.state.kind === "sending" || flipped !== undefined;
+  async function flip() {
+    if (flipping) return;
+    setRefused(null);
+    if (resolving !== null) writes.dismiss(resolving.id);
+    const kind = resolved ? "unresolve" : "resolve";
+    const answer = await writes.send({ kind, thread: id });
+    if (answer === "started") onAct?.(kind);
+    else setRefused(answer);
+  }
+
+  return (
+    <>
+      {shows && sent.length > 0 && (
+        <ul className="thread-comments thread-sent">
+          {sent.map(({ id: attempt, write }) => (
+            <li key={attempt}>
+              <Avatar login={writing.opened.viewer} />
+              <div className="thread-comment">
+                <p className="thread-by">
+                  <strong>You</strong> <span className="entry-pill">Sent</span>
+                </p>
+                <Body text={wordsOf(write)} />
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+      {postedPast && !boxShown && (
+        <p className="thread-posted" role="status">
+          Posted. GitHub shows it in the full thread.{" "}
+          <OnGitHub url={writing.url} />
+        </p>
+      )}
+      <div className="thread-actions">
+        {boxShown ? (
+          <ConversationBox
+            place={reply}
+            label="Reply"
+            placeholder="Reply. Markdown works here."
+            autoFocus={asked}
+            onStarted={() => {
+              setAsked(false);
+              onAct?.("reply");
+            }}
+            onCancel={() => {
+              cancelled.current = true;
+              setAsked(false);
+              if (replying !== null) writes.dismiss(replying.id);
+              void drafts.remove(of, anchorOf(reply), writing.head);
+            }}
+          />
+        ) : (
+          can.reply && (
+            <button
+              ref={replyButton}
+              type="button"
+              className="thread-reply"
+              onClick={() => {
+                setAsked(true);
+                setPostedPast(false);
+              }}
+            >
+              <CornerDownLeft size={13} aria-hidden="true" />
+              Reply…
+            </button>
+          )
+        )}
+        <div className="thread-buttons">
+          {onShowInDiff && (
+            <button
+              type="button"
+              className="button secondary"
+              onClick={() => onShowInDiff(thread)}
+            >
+              Show in diff
+            </button>
+          )}
+          {canFlip && (
+            <button
+              ref={flipButton}
+              type="button"
+              className="button secondary"
+              aria-disabled={flipping}
+              onClick={() => void flip()}
+            >
+              {flipping ? (
+                <LoaderCircle size={13} className="spin" aria-hidden="true" />
+              ) : (
+                <CircleCheck size={13} aria-hidden="true" />
+              )}
+              {resolved ? "Unresolve" : "Resolve"}
+              {short ? "" : " conversation"}
+            </button>
+          )}
+        </div>
+      </div>
+      <span className="visually-hidden" role="status">
+        {flipping && !flipped
+          ? resolved
+            ? "Unresolving…"
+            : "Resolving…"
+          : (flipSaid.text ?? replied.text ?? "")}
+      </span>
+      {refused !== null && (
+        <Problem
+          text={sentNothing[refused]}
+          onDismiss={() => setRefused(null)}
+          home={home}
+        />
+      )}
+      {resolving !== null && (
+        <WriteNotice
+          key={resolving.id}
+          attempt={resolving}
+          home={() => flipButton.current ?? home()}
+        />
+      )}
+    </>
+  );
+}

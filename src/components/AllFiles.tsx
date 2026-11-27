@@ -12,6 +12,7 @@ import type { Ref, RefObject } from "react";
 import type { FileDiffMetadata, SelectedLineRange } from "@pierre/diffs";
 import { CodeView as Viewer } from "@pierre/diffs/react";
 import type { CodeViewHandle } from "@pierre/diffs/react";
+import { partOf } from "../domain/changeStops";
 import { sidesFor } from "../domain/fileSides";
 import { placeOf, rangeOf, runAt } from "../domain/lineComments";
 import type { DiffStyle } from "../domain/lineSelection";
@@ -287,7 +288,16 @@ export function AllFiles({
     toLine: (to, { part, side, number }) =>
       keeper.put(
         {
-          id: entryId(to, part),
+          id: entryId(
+            to,
+            partOf(
+              Array.from(
+                { length: entries.get(entryId(to))?.parts ?? 1 },
+                (_, each) => entries.get(entryId(to, each))?.diff,
+              ),
+              { part, side, number },
+            ),
+          ),
           line: { side, number },
           below: HEADER + ABOVE_CHANGE,
         },

@@ -6,7 +6,9 @@ import { chipOf, elsewhereLabel } from "../domain/reviewThreads";
 import type { Elsewhere } from "../domain/reviewThreads";
 import { CommentsElsewhere } from "./LineComments";
 import { Avatar } from "./PullRequestParts";
+import { useThreadWaits } from "./conversationWriting";
 import { Thread, ThreadComments } from "./PullRequestThread";
+import { ThreadActions } from "./ThreadActions";
 
 /** Which threads are unfolded, and which files' other ones. */
 export type Unfolded = {
@@ -30,12 +32,14 @@ const ThreadChip = memo(function ThreadChip({
 }) {
   const content = useId();
   const { people, count, by, words } = chipOf(thread, viewer);
+  // A reply or a resolve that waits here stays in sight.
+  const shown = useThreadWaits(thread.id) || open;
   return (
     <section className="thread-chip" aria-label="Thread">
       <button
         type="button"
         className="thread-chip-row"
-        aria-expanded={open}
+        aria-expanded={shown}
         aria-controls={content}
         onClick={() => onToggle(thread.id)}
       >
@@ -63,8 +67,13 @@ const ThreadChip = memo(function ThreadChip({
         {thread.resolved && <span className="thread-resolved">Resolved</span>}
         <ChevronDown size={14} aria-hidden="true" />
       </button>
-      <div id={content} hidden={!open}>
-        {open && <ThreadComments thread={thread} viewer={viewer} url={url} />}
+      <div id={content} hidden={!shown}>
+        {shown && (
+          <>
+            <ThreadComments thread={thread} viewer={viewer} url={url} />
+            <ThreadActions thread={thread} short />
+          </>
+        )}
       </div>
     </section>
   );

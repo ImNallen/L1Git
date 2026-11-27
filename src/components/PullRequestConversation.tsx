@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { use, useState } from "react";
 import type { ReactNode } from "react";
 import {
   CircleCheck,
@@ -23,12 +23,25 @@ import {
   reviewStateLabels,
   threadsLeftOut,
 } from "../domain/pullRequestDetail";
+import { threadsView } from "../domain/threadStanding";
 import type { Entry } from "../domain/pullRequestDetail";
-import type { PullRequest } from "../domain/pullRequest";
+import type { PullRequest, ReviewThread } from "../domain/pullRequest";
 import { shortOid } from "../domain/shortOid";
+import type { ThreadFilter } from "../domain/threadStanding";
+import { usePullWrites } from "../shell/usePullWriting";
+import type { OpenedPullRequest } from "../shell/usePullRequests";
+import { ConversationBox } from "./ConversationBox";
+import {
+  ConversationWritingContext,
+  useConversationWriting,
+  doneAt,
+  madeId,
+  wordsOf,
+} from "./conversationWriting";
 import { Body } from "./PullRequestBody";
 import { Ago, Avatar, OnGitHub } from "./PullRequestParts";
 import { Thread } from "./PullRequestThread";
+import { PullRequestThreads, ThreadFilters } from "./PullRequestThreads";
 import { Turns, TurnsContext } from "./turns";
 
 type EventEntry = Extract<Entry, { kind: "event" }>;
@@ -224,14 +237,46 @@ function LeftOut({ text, url }: { text: string; url: string }) {
   );
 }
 
+/** Comments GitHub took that no read has shown yet. */
+function Sent({ pull, viewer }: { pull: PullRequest; viewer: string }) {
+  const writing = use(ConversationWritingContext);
+  if (writing === null) throw new Error("Sent comments need their writing.");
+  const { attempts } = usePullWrites(writing.opened);
+  const read = new Set(pull.timeline.items.map(({ id }) => id));
+  return doneAt(attempts, { kind: "comment" })
+    .filter((attempt) => !read.has(madeId(attempt) ?? ""))
+    .map((attempt) => (
+      <li className="entry" key={attempt.id}>
+        <Card
+          by={viewer}
+          viewer={viewer}
+          at={new Date(
+            attempt.state.kind === "done" ? attempt.state.answeredAt : 0,
+          ).toISOString()}
+          verb="commented"
+          pill={<span className="entry-pill">Sent</span>}
+        >
+          <Body text={wordsOf(attempt.write)} />
+        </Card>
+      </li>
+    ));
+}
+
+type View = "timeline" | "threads";
+
 export function PullRequestConversation({
   pull,
-  viewer,
+  opened: { writing, viewer, repository, number },
   url,
+  onShowInDiff,
 }: {
   pull: PullRequest;
-  viewer: string;
+  opened: Pick<
+    OpenedPullRequest,
+    "writing" | "viewer" | "repository" | "number"
+  >;
   url: string;
+  onShowInDiff: (thread: ReviewThread) => void;
 }) {
   const earlier = leftOut(pull);
   const threads =
@@ -239,8 +284,95 @@ export function PullRequestConversation({
       ? "Review threads didn't load. GitHub couldn't answer for a pull request this large."
       : threadsLeftOut(pull);
   const [turns] = useState(() => new Turns());
+  const [view, setView] = useState<View>("timeline");
+  const [filter, setFilter] = useState<ThreadFilter>("open");
+  const writes = useConversationWriting(
+    { writing, viewer, repository, number },
+    pull,
+    url,
+  );
+  const items = pull.threads?.items ?? [];
+  const open = items.filter(({ resolved }) => !resolved).length;
+  const counts = threadsView(items, viewer, filter, new Set()).counts;
   return (
-    <TurnsContext value={turns}>
+    <ConversationWritingContext value={writes}>
+      <TurnsContext value={turns}>
+        <div className="conversation-bar">
+          <div className="conversation-views" role="group" aria-label="Show">
+            {(["timeline", "threads"] as const).map((each) => (
+              <button
+                key={each}
+                type="button"
+                aria-pressed={view === each}
+                onClick={() => setView(each)}
+              >
+                {each === "timeline" ? "Timeline" : "Threads"}
+                {each === "threads" && pull.threads !== null && (
+                  <>
+                    {" "}
+                    <span className="conversation-views-count">
+                      {open.toLocaleString()} open
+                    </span>
+                  </>
+                )}
+              </button>
+            ))}
+          </div>
+          {view === "threads" && pull.threads !== null && (
+            <>
+              <ThreadFilters
+                counts={counts}
+                filter={filter}
+                onFilter={setFilter}
+              />
+              <span className="conversation-sorted">Sorted by file</span>
+            </>
+          )}
+        </div>
+        {view === "threads" ? (
+          <>
+            {threads !== null && <p className="threads-note">{threads}</p>}
+            {pull.threads !== null && (
+              <PullRequestThreads
+                key={filter}
+                threads={items}
+                viewer={viewer}
+                url={url}
+                filter={filter}
+                onFilter={setFilter}
+                onShowInDiff={onShowInDiff}
+              />
+            )}
+          </>
+        ) : (
+          <Timeline
+            pull={pull}
+            viewer={viewer}
+            url={url}
+            earlier={earlier}
+            threads={threads}
+          />
+        )}
+      </TurnsContext>
+    </ConversationWritingContext>
+  );
+}
+
+function Timeline({
+  pull,
+  viewer,
+  url,
+  earlier,
+  threads,
+}: {
+  pull: PullRequest;
+  viewer: string;
+  url: string;
+  earlier: string | null;
+  threads: string | null;
+}) {
+  return (
+    <>
       <ol className="conversation" aria-label="Conversation">
         <li className="entry">
           <Card
@@ -264,7 +396,16 @@ export function PullRequestConversation({
             <Shown entry={entry} pull={pull} viewer={viewer} url={url} />
           </li>
         ))}
+        <Sent pull={pull} viewer={viewer} />
       </ol>
-    </TurnsContext>
+      <div className="conversation-compose">
+        <Avatar login={viewer} />
+        <ConversationBox
+          place={{ kind: "comment" }}
+          label="Comment on this pull request"
+          placeholder="Leave a comment. Markdown works here."
+        />
+      </div>
+    </>
   );
 }

@@ -9,7 +9,12 @@ import type { Ref, RefObject } from "react";
 import { keyExpanders } from "./expanders";
 import { VirtualizedFileDiff } from "@pierre/diffs";
 import type { FileDiffMetadata, VirtualFileMetrics } from "@pierre/diffs";
-import { changeAt, changeStops, nextChange } from "../domain/changeStops";
+import {
+  changeAt,
+  changeStops,
+  nextChange,
+  partOf,
+} from "../domain/changeStops";
 import type { ChangeStop } from "../domain/changeStops";
 import type { RangeFile } from "../domain/range";
 import type { LinePlace } from "./KeepDiffPlace";
@@ -131,7 +136,11 @@ export function useDiffSteps(
       toLine: (_, { part, side, number }) => {
         const measured = measure();
         if (!measured) return;
-        const top = measured.lineTop({ part, side, line: number });
+        const top = measured.lineTop({
+          part: partOf(patch, { part, side, number }),
+          side,
+          line: number,
+        });
         measured.scroller.scrollTop = Math.max(top - ABOVE_CHANGE, 0);
       },
       comment: () => {
@@ -142,7 +151,7 @@ export function useDiffSteps(
         return stop !== undefined && onComment !== undefined && onComment(stop);
       },
     }),
-    [scroll, body, measure, stops, onComment],
+    [scroll, body, measure, stops, onComment, patch],
   );
   useEffect(() => {
     if (startsAtEnd) scroll(-1, Infinity);

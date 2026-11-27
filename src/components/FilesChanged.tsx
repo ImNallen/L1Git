@@ -15,9 +15,13 @@ import { threadsByFile } from "../domain/reviewThreads";
 import { nextUnviewed } from "../domain/viewedFiles";
 import { clampMessage } from "../domain/worktree";
 import type { FilesChanged as Held } from "../filesChanged";
-import type { FilesChangedState, FilesView } from "../shell/useFilesChanged";
+import type { FilesChangedState } from "../shell/useFilesChanged";
 import type { OpenedPullRequest } from "../shell/usePullRequests";
 import { AllFiles } from "./AllFiles";
+import {
+  ConversationWritingContext,
+  useConversationWriting,
+} from "./conversationWriting";
 import { FileChanged } from "./FileChanged";
 import { EndOfOne } from "./FileEnd";
 import { FilesBoundary } from "./FilesBoundary";
@@ -28,7 +32,8 @@ import type { Unfolded } from "./ReviewThreads";
 import { OnGitHub } from "./PullRequestParts";
 import { useFolded } from "./useFolded";
 import { FinishReviewButton } from "./FinishReview";
-import { ABOVE_CHANGE } from "./useDiffSteps";
+import { useFilesGoTo } from "./useFilesGoTo";
+import type { Left } from "./useFilesGoTo";
 import { useFinishReview } from "./useFinishReview";
 import { LineCommentsContext, useLineComments } from "./useLineComments";
 
@@ -168,7 +173,6 @@ const none: ReviewThread[] = [];
 
 /** Where one of the two views was left, for the other, or with no view a
  * line to go to, for either. */
-type Left = { view: FilesView | null; at: number; line: LinePlace };
 
 function Shown({
   pane,
@@ -303,7 +307,7 @@ function Shown({
   }
 }
 
-function useToggled(): [ReadonlySet<string>, (id: string) => void] {
+function useToggled() {
   const [toggled, setToggled] = useState<ReadonlySet<string>>(new Set());
   const toggle = useCallback(
     (id: string) =>
@@ -314,7 +318,9 @@ function useToggled(): [ReadonlySet<string>, (id: string) => void] {
       }),
     [],
   );
-  return [toggled, toggle];
+  const unfold = (id: string) =>
+    setToggled((before) => (before.has(id) ? before : new Set(before).add(id)));
+  return [toggled, toggle, unfold] as const;
 }
 
 export function FilesChanged({
@@ -324,6 +330,8 @@ export function FilesChanged({
   pull,
   opened,
   url,
+  showing,
+  onShown,
 }: {
   /** Whether its tab is on screen. */
   isShown: boolean;
@@ -337,15 +345,19 @@ export function FilesChanged({
   >;
   /** Its page of changes on GitHub. */
   url: string;
+  /** A thread to go to, as Show in diff asks. */
+  showing: ReviewThread | null;
+  onShown: () => void;
 }) {
   const { viewer } = opened;
+  const writing = useConversationWriting(opened, pull, url);
   const comments = useLineComments({ opened, head: held.range.head, pull });
   const finish = useFinishReview({ opened, pull, comments });
   const pane = useRef<HTMLElement>(null);
   const holdsFocus = useRef(false);
   const left = useRef<Left | null>(null);
-  const [ids, toggle] = useToggled();
-  const [folded, fold] = useFolded(files.viewed);
+  const [ids, toggle, unfold] = useToggled();
+  const [folded, fold, unfoldFile] = useFolded(files.viewed);
   const unfolded = useMemo(() => ({ ids, toggle }), [ids, toggle]);
   const { range, read, at, counted } = held;
   const counts = useMemo(
@@ -366,131 +378,105 @@ export function FilesChanged({
       setProblem({ file: of, message: problemFrom(error).message });
       throw error;
     });
-  /** Goes to a file, and to a line of it, unfolding what is named. */
-  const goTo = (
-    path: string,
-    line: Omit<LinePlace, "below"> | null,
-    unfold: readonly string[],
-  ) => {
-    if (read.kind !== "ready") return;
-    const to = read.files.findIndex(
-      (each) => each.path === path || each.from === path,
-    );
-    if (to < 0) return;
-    for (const id of unfold) if (!ids.has(id)) toggle(id);
-    if (line === null) return files.go(to);
-    if (files.view === "all" || to === at)
-      files.ref.current?.toLine?.(to, line);
-    else {
-      left.current = {
-        view: null,
-        at: to,
-        line: { ...line, below: ABOVE_CHANGE },
-      };
-      files.go(to);
-    }
-  };
-  const sides = { left: "deletions", right: "additions" } as const;
+  const { goToLines, openThread } = useFilesGoTo({
+    held,
+    files,
+    unfold,
+    folded,
+    unfoldFile,
+    left,
+    showing,
+    onShown,
+  });
   // Its button goes away, and the focus would go with it.
   const keepingFocus = (act: () => void) => () => {
     pane.current?.focus({ preventScroll: true });
     act();
   };
   return (
-    <LineCommentsContext value={comments}>
-      <section
-        ref={pane}
-        className="file-diff files-changed"
-        aria-label="Files changed"
-        tabIndex={-1}
-      >
-        {file && read.kind === "ready" && (
-          <FilesToolbar
-            files={read.files}
-            contentMissing={read.contentMissing}
-            at={at}
-            state={files}
+    <ConversationWritingContext value={writing}>
+      <LineCommentsContext value={comments}>
+        <section
+          ref={pane}
+          className="file-diff files-changed"
+          aria-label="Files changed"
+          tabIndex={-1}
+        >
+          {file && read.kind === "ready" && (
+            <FilesToolbar
+              files={read.files}
+              contentMissing={read.contentMissing}
+              at={at}
+              state={files}
+            >
+              <FinishReviewButton
+                finish={finish}
+                comments={comments}
+                number={pull.number}
+                author={pull.author}
+                viewer={viewer}
+                url={url}
+                files={read.files}
+                viewed={files.viewed}
+                threads={pull.threads?.items ?? none}
+                onGoTo={goToLines}
+                onShowUnviewed={() => {
+                  const next = nextUnviewed(read.files, files.viewed, -1);
+                  if (next !== null) files.go(next);
+                }}
+                onOpenThread={openThread}
+              />
+            </FilesToolbar>
+          )}
+          {counts !== null && (
+            <p className="files-counts">
+              {counts} <OnGitHub url={url} />
+            </p>
+          )}
+          <span className="visually-hidden" role="status">
+            {said(held)}
+          </span>
+          <FilesBoundary
+            key={`${files.view} ${files.view === "one" ? at : ""} ${range.head}`}
+            url={url}
+            onRetry={keepingFocus(() => {})}
           >
-            <FinishReviewButton
-              finish={finish}
-              comments={comments}
-              number={pull.number}
-              author={pull.author}
+            <Shown
+              pane={pane}
+              holdsFocus={holdsFocus}
+              left={left}
+              unfolded={unfolded}
+              folded={folded}
+              onFold={fold}
+              isShown={isShown}
+              held={held}
+              files={files}
+              whole={whole}
+              onRetry={keepingFocus(files.retry)}
+              onRetryFile={(of) =>
+                keepingFocus(() => files.readFileAgain(of))()
+              }
               viewer={viewer}
               url={url}
-              files={read.files}
-              viewed={files.viewed}
-              threads={pull.threads?.items ?? none}
-              onGoTo={({ path, side, line }, isOlder) =>
-                goTo(
-                  path,
-                  isOlder ? null : { part: 0, side: sides[side], number: line },
-                  isOlder ? [`elsewhere ${path}`] : [],
-                )
-              }
-              onShowUnviewed={() => {
-                const next = nextUnviewed(read.files, files.viewed, -1);
-                if (next !== null) files.go(next);
-              }}
-              onOpenThread={(thread) => {
-                const isOnLine = thread.line !== null && !thread.outdated;
-                goTo(
-                  thread.path,
-                  isOnLine && thread.line !== null
-                    ? { part: 0, side: sides[thread.side], number: thread.line }
-                    : null,
-                  isOnLine ? [thread.id] : [`elsewhere ${thread.path}`],
-                );
-              }}
             />
-          </FilesToolbar>
-        )}
-        {counts !== null && (
-          <p className="files-counts">
-            {counts} <OnGitHub url={url} />
-          </p>
-        )}
-        <span className="visually-hidden" role="status">
-          {said(held)}
-        </span>
-        <FilesBoundary
-          key={`${files.view} ${files.view === "one" ? at : ""} ${range.head}`}
-          url={url}
-          onRetry={keepingFocus(() => {})}
-        >
-          <Shown
-            pane={pane}
-            holdsFocus={holdsFocus}
-            left={left}
-            unfolded={unfolded}
-            folded={folded}
-            onFold={fold}
-            isShown={isShown}
-            held={held}
-            files={files}
-            whole={whole}
-            onRetry={keepingFocus(files.retry)}
-            onRetryFile={(of) => keepingFocus(() => files.readFileAgain(of))()}
-            viewer={viewer}
-            url={url}
+          </FilesBoundary>
+          <Notices
+            newer={newer}
+            unsaved={persistenceError === seen ? null : persistenceError}
+            problem={
+              problem && (files.view === "all" || problem.file === file)
+                ? problem.message
+                : null
+            }
+            lines={comments.notice}
+            onShow={keepingFocus(files.showNewest)}
+            onDismissUnsaved={keepingFocus(() => setSeen(persistenceError))}
+            onDismiss={keepingFocus(() => setProblem(null))}
+            onDismissLines={keepingFocus(comments.dismissNotice)}
+            onOpenReview={finish.unknown ? finish.open : null}
           />
-        </FilesBoundary>
-        <Notices
-          newer={newer}
-          unsaved={persistenceError === seen ? null : persistenceError}
-          problem={
-            problem && (files.view === "all" || problem.file === file)
-              ? problem.message
-              : null
-          }
-          lines={comments.notice}
-          onShow={keepingFocus(files.showNewest)}
-          onDismissUnsaved={keepingFocus(() => setSeen(persistenceError))}
-          onDismiss={keepingFocus(() => setProblem(null))}
-          onDismissLines={keepingFocus(comments.dismissNotice)}
-          onOpenReview={finish.unknown ? finish.open : null}
-        />
-      </section>
-    </LineCommentsContext>
+        </section>
+      </LineCommentsContext>
+    </ConversationWritingContext>
   );
 }

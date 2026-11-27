@@ -11,6 +11,7 @@ import type { FileDiffMetadata, SelectedLineRange } from "@pierre/diffs";
 import { FileX2, TriangleAlert } from "lucide-react";
 import { FileDiff, Virtualizer } from "@pierre/diffs/react";
 import type { Appearance } from "../themes/palette";
+import { partOf } from "../domain/changeStops";
 import { sidesFor, undrawn } from "../domain/fileSides";
 import { hunkAnchor, parsedFiles } from "../domain/lineSelection";
 import type { DiffStyle, HunkBar } from "../domain/lineSelection";
@@ -347,7 +348,10 @@ function Patch({
         <KeepDiffPlace
           body={scroll}
           parts={drawnParts}
-          startsAt={review.startsAt}
+          startsAt={() => {
+            const line = review.startsAt();
+            return line && { ...line, part: partOf(files, line) };
+          }}
           onLeave={review.onLeave}
           isShown={review.isShown}
           diffStyle={diffStyle}

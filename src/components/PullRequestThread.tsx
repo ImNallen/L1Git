@@ -1,4 +1,11 @@
-import { memo, Suspense, useId, useRef, useState } from "react";
+import {
+  memo,
+  Suspense,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   counted,
   excerpt,
@@ -10,7 +17,9 @@ import type { ReviewThread } from "../domain/pullRequest";
 import { turnsIn } from "../markdown/runs";
 import { Hunk } from "../shell/lazyViews";
 import { Body, Plainly } from "./PullRequestBody";
+import { useThreadWaits } from "./conversationWriting";
 import { Ago, Avatar, OnGitHub } from "./PullRequestParts";
+import { ThreadActions } from "./ThreadActions";
 import { useTurn } from "./useTurn";
 
 const LINE = 20;
@@ -83,6 +92,62 @@ export function ThreadComments({
   );
 }
 
+/** Its lines, its comments, and what can be done with it. */
+export function ThreadBody({
+  thread,
+  viewer,
+  url,
+  short,
+  onShowInDiff,
+  onAct,
+}: { thread: ReviewThread; viewer: string; url: string } & Parameters<
+  typeof ThreadActions
+>[0]) {
+  const cut = excerpt(thread);
+  return (
+    <>
+      {cut && <ThreadHunk path={thread.path} of={cut} />}
+      <ThreadComments thread={thread} viewer={viewer} url={url} />
+      <ThreadActions
+        thread={thread}
+        short={short}
+        onShowInDiff={onShowInDiff}
+        onAct={onAct}
+      />
+    </>
+  );
+}
+
+/**
+ * Whether a thread shows whole: a resolved one starts as one row, and folds
+ * when it is resolved. Resolving it here gives focus to that row.
+ */
+export function useFold(resolved: boolean) {
+  const [expanded, setExpanded] = useState(!resolved);
+  const [was, setWas] = useState(resolved);
+  if (was !== resolved) {
+    setWas(resolved);
+    setExpanded(!resolved);
+  }
+  const toggle = useRef<HTMLButtonElement>(null);
+  const resolving = useRef(false);
+  useLayoutEffect(() => {
+    const asked = resolving.current;
+    resolving.current = false;
+    // Only when the Resolve button that had focus went with the fold.
+    if (resolved && asked && document.activeElement === document.body)
+      toggle.current?.focus({ preventScroll: true });
+  }, [resolved]);
+  return {
+    expanded,
+    setExpanded,
+    toggle,
+    onAct: (kind: "reply" | "resolve" | "unresolve") => {
+      resolving.current = kind === "resolve";
+    },
+  };
+}
+
 /** A resolved thread starts as one row. */
 export const Thread = memo(function Thread({
   thread,
@@ -94,10 +159,10 @@ export const Thread = memo(function Thread({
   url: string;
 }) {
   const { path, outdated, resolved, comments: said } = thread;
-  const [expanded, setExpanded] = useState(!resolved);
-  const open = expanded || !resolved;
+  const { expanded, setExpanded, toggle, onAct } = useFold(resolved);
+  const waits = useThreadWaits(thread.id);
+  const open = expanded || !resolved || waits;
   const content = useId();
-  const cut = excerpt(thread);
   return (
     <section className="thread" aria-label={`Thread on ${path}`}>
       <div className="thread-heading">
@@ -108,6 +173,7 @@ export const Thread = memo(function Thread({
         {outdated && <span className="thread-outdated">Outdated</span>}
         {resolved && (
           <button
+            ref={toggle}
             type="button"
             className="thread-toggle"
             aria-expanded={open}
@@ -122,10 +188,7 @@ export const Thread = memo(function Thread({
       </div>
       <div id={content} hidden={!open}>
         {open && (
-          <>
-            {cut && <ThreadHunk path={path} of={cut} />}
-            <ThreadComments thread={thread} viewer={viewer} url={url} />
-          </>
+          <ThreadBody thread={thread} viewer={viewer} url={url} onAct={onAct} />
         )}
       </div>
     </section>
