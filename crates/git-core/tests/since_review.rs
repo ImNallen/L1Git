@@ -465,6 +465,67 @@ fn a_file_the_pull_request_deleted_and_main_changed_is_untold() {
     assert_eq!(names(&read.files), ["M a"]);
 }
 
+/// You reviewed the addition of `n`, and main added its own `n`. Keeping the
+/// reviewed side of each hunk keeps your `n` whole, so main's lines would show as
+/// the author's.
+#[test]
+fn a_file_both_sides_added_differently_is_untold() {
+    let fixture = Fixture::new();
+    let start = fixture.commit(&tree(&[("a", lines(&[]))]), &[]);
+    let reviewed = fixture.commit(
+        &tree(&[("a", lines(&[])), ("n", lines(&[(5, "pr5")]))]),
+        &[&start],
+    );
+    let base = fixture.commit(
+        &tree(&[("a", lines(&[])), ("n", lines(&[(25, "main25")]))]),
+        &[&start],
+    );
+    let head = fixture.commit(
+        &tree(&[
+            ("a", lines(&[])),
+            ("n", lines(&[(5, "pr5"), (25, "main25")])),
+        ]),
+        &[&base],
+    );
+    let pull = Pull {
+        base,
+        reviewed: reviewed.clone(),
+        head,
+    };
+    let read = ready(fixture.read(&pull));
+    assert_eq!(
+        read.from_base,
+        FromBase::Untold {
+            why: Untold::Conflict
+        }
+    );
+    assert_eq!(read.since, reviewed);
+}
+
+/// Main added the same `n` you reviewed, so none of `n` is the author's since.
+#[test]
+fn a_file_both_sides_added_alike_is_left_out() {
+    let fixture = Fixture::new();
+    let start = fixture.commit(&tree(&[("a", lines(&[]))]), &[]);
+    let reviewed = fixture.commit(
+        &tree(&[("a", lines(&[(5, "five")])), ("n", lines(&[]))]),
+        &[&start],
+    );
+    let base = fixture.commit(&tree(&[("a", lines(&[])), ("n", lines(&[]))]), &[&start]);
+    let head = fixture.commit(
+        &tree(&[("a", lines(&[(5, "five")])), ("n", lines(&[]))]),
+        &[&base],
+    );
+    let pull = Pull {
+        base,
+        reviewed,
+        head,
+    };
+    let read = ready(fixture.read(&pull));
+    assert_eq!(read.from_base, FromBase::LeftOut);
+    assert!(read.files.is_empty());
+}
+
 #[test]
 fn a_blobless_clone_is_untold() {
     let fixture = Fixture::new();

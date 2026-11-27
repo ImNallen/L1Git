@@ -1,11 +1,15 @@
-use super::{RangeFile, files_between, merge_base, missing};
+use super::{
+    NO_RENAMES, RangeFile, args, files_between, merge_base, missing,
+    output::{changes, unreadable},
+    strs,
+};
 use crate::{
     Oid, RepositoryError,
     git::{self, Deadline, LocalRead, Merging},
     repository::root,
 };
 use serde::Serialize;
-use std::path::Path;
+use std::{collections::BTreeMap, path::Path};
 
 /// What the author changed since the commit you reviewed.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -59,7 +63,7 @@ pub enum Untold {
     Shallow,
     /// Replaying your review hit a conflict that keeping its side of each hunk
     /// does not settle, such as a file the pull request deleted and the base
-    /// changed.
+    /// changed, or a file both added with different contents.
     Conflict,
     /// Git could not read every file the replay needs, as in a partial clone.
     Unreadable,
@@ -142,6 +146,11 @@ fn replay(
     reviewed: &Oid,
     deadline: Deadline,
 ) -> Result<Result<Oid, Untold>, RepositoryError> {
+    match added_by_both_differently(root, old, new, reviewed, deadline)? {
+        Some(false) => {}
+        Some(true) => return Ok(Err(Untold::Conflict)),
+        None => return Ok(Err(Untold::Unreadable)),
+    }
     let Some((tree, conflicted)) = git::merge_tree(
         root,
         Some(old.as_str()),
@@ -176,6 +185,38 @@ fn replay(
         Some(1) => Err(Untold::Conflict),
         _ => Err(Untold::Unreadable),
     })
+}
+
+/// Whether the base and the pull request each added a path that `old` lacks, with
+/// different contents. Keeping the reviewed side of each hunk then keeps the reviewed
+/// file whole and Git reports no conflict, so the base's lines would show as the
+/// author's. `None` when Git could not read the folders.
+fn added_by_both_differently(
+    root: &Path,
+    old: &Oid,
+    new: &Oid,
+    reviewed: &Oid,
+    deadline: Deadline,
+) -> Result<Option<bool>, RepositoryError> {
+    let added = |end: &Oid| -> Result<Option<BTreeMap<Vec<u8>, _>>, RepositoryError> {
+        let args = args([old, end], NO_RENAMES, &["--raw", "--diff-filter=A"], &[]);
+        let listed = git::run_objects(root, &strs(&args), deadline)?;
+        if !listed.status.success() {
+            return Ok(None);
+        }
+        let changes = changes(&mut listed.stdout.as_slice()).map_err(unreadable)?;
+        changes
+            .into_iter()
+            .map(|change| Ok((change.path, (change.new.mode.clone(), change.new.blob()?))))
+            .collect::<Result<_, _>>()
+            .map(Some)
+    };
+    let (Some(by_base), Some(by_pull)) = (added(new)?, added(reviewed)?) else {
+        return Ok(None);
+    };
+    Ok(Some(by_pull.iter().any(|(path, file)| {
+        by_base.get(path).is_some_and(|other| other != file)
+    })))
 }
 
 /// A commit of `tree` on `parent` whose id depends on nothing else. It needs no
