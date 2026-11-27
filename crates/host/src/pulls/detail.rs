@@ -18,7 +18,7 @@ mod timeline;
 use merge::{HeadRef, Merge, RefNode, Settings};
 use pending::{Pending, ReviewNode};
 use threads::{Thread, ThreadNode};
-use timeline::{Event, Item, event};
+use timeline::{Event, Item, Oid, event};
 
 const DETAIL: &str = include_str!("detail.graphql");
 
@@ -45,6 +45,9 @@ pub struct PullRequest {
     created_at: String,
     updated_at: String,
     reviewers: Vec<Reviewer>,
+    /// The viewer's newest review that they sent. None when they have not
+    /// sent one.
+    reviewed: Option<Reviewed>,
     /// None when this sign-in cannot read them.
     checks: Option<Page<Check>>,
     /// The newest 100, oldest first, as is `timeline`.
@@ -93,6 +96,13 @@ struct Reviewer {
     /// not ask for.
     login: Option<String>,
     state: ReviewState,
+}
+
+#[derive(Debug, Serialize)]
+struct Reviewed {
+    /// None when GitHub no longer has the commit the review was of.
+    oid: Option<String>,
+    at: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -217,9 +227,16 @@ struct Requested {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct Review {
     author: Option<Actor>,
     state: ReviewState,
+    /// Only `latestReviews` asks for this and the two below.
+    #[serde(default)]
+    viewer_did_author: bool,
+    /// None while the review is pending.
+    submitted_at: Option<String>,
+    commit: Option<Oid>,
 }
 
 #[derive(Deserialize)]
@@ -331,6 +348,7 @@ fn parse(
     PullRequest {
         id: node.id,
         repository_id: base.id,
+        reviewed: reviewed(node.latest_reviews.as_ref()),
         reviewers: reviewers(
             node.author.as_ref(),
             node.latest_reviews,
@@ -381,6 +399,24 @@ fn parse(
         merge: base.settings.into(),
         pending: Pending::new(node.viewer_pending),
     }
+}
+
+/// A pending review is not sent yet, so it has no `submittedAt` and never
+/// counts.
+fn reviewed(latest: Option<&Nodes<Review>>) -> Option<Reviewed> {
+    latest?
+        .nodes
+        .iter()
+        .flatten()
+        .flatten()
+        .filter(|review| review.viewer_did_author)
+        .filter_map(|review| {
+            Some(Reviewed {
+                oid: review.commit.as_ref().map(|commit| commit.oid.clone()),
+                at: review.submitted_at.clone()?,
+            })
+        })
+        .max_by(|one, other| one.at.cmp(&other.at))
 }
 
 /// A verdict outlasts a later comment, and a new request outlasts both. The

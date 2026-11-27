@@ -55,6 +55,7 @@ export function pull(
       ref: { id: `REF_${number}`, othersOpen: 0, viewerCanDelete: true },
     },
     reviewers: [],
+    reviewed: null,
     checks: page([]),
     commits: page([
       { oid: "a".repeat(40), headline: "Read it", by: "maja", at: at(1) },

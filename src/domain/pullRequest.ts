@@ -129,6 +129,14 @@ export const pullRequestSchema = z.object({
       .nullable(),
   }),
   reviewers: z.array(z.object({ login: account, state: reviewStateSchema })),
+  /** The viewer's newest review that they sent. Null when they have not sent one. */
+  reviewed: z
+    .object({
+      /** Null when GitHub no longer has the commit the review was of. */
+      oid: oidSchema.nullable(),
+      at: time,
+    })
+    .nullable(),
   checks: page(
     z.object({
       name: z.string(),

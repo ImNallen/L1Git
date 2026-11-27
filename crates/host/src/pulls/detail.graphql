@@ -20,7 +20,7 @@ query($owner: String!, $repo: String!, $number: Int!, $threads: Boolean!) {
       reviewRequests(first: 100) { nodes { requestedReviewer {
         ... on User { login } ... on Bot { login } ... on Mannequin { login }
       } } }
-      latestReviews(first: 100) { nodes { author { login } state } }
+      latestReviews(first: 100) { nodes { author { login } state viewerDidAuthor submittedAt commit { oid } } }
       latestOpinionatedReviews(first: 100) { nodes { author { login } state } }
       statusCheckRollup { contexts(first: 100) { totalCount nodes {
         __typename

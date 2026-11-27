@@ -54,6 +54,7 @@ function pull(fields: Partial<PullRequest> = {}): PullRequest {
       ref: { id: "REF_1", othersOpen: 0, viewerCanDelete: true },
     },
     reviewers: [],
+    reviewed: null,
     checks: page([]),
     commits: page([]),
     timeline: page([]),

@@ -61,13 +61,23 @@
               "author": {
                 "login": "review-bot"
               },
-              "state": "COMMENTED"
+              "state": "COMMENTED",
+              "viewerDidAuthor": false,
+              "submittedAt": "2026-11-17T19:18:36Z",
+              "commit": {
+                "oid": "6666666666666666666666666666666666666666"
+              }
             },
             {
               "author": {
                 "login": "hubot"
               },
-              "state": "APPROVED"
+              "state": "APPROVED",
+              "viewerDidAuthor": false,
+              "submittedAt": "2026-11-17T19:18:36Z",
+              "commit": {
+                "oid": "6666666666666666666666666666666666666666"
+              }
             }
           ]
         },

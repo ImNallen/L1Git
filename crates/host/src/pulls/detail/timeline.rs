@@ -42,7 +42,7 @@ enum What {
 
 #[derive(Deserialize)]
 pub(super) struct Oid {
-    oid: String,
+    pub(super) oid: String,
 }
 
 #[derive(Deserialize)]
