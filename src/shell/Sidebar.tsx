@@ -69,9 +69,7 @@ export function Sidebar({
             <PullRequestFilters
               model={pulls.model}
               choices={pulls.choices}
-              reading={pulls.reading}
               onChoose={pulls.choose}
-              onRefresh={pulls.refresh}
             />
           </div>
         )}

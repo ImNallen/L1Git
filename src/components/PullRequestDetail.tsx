@@ -35,6 +35,7 @@ import type { Layout } from "../shell/useLayout";
 import { newLabel } from "../filesChanged";
 import { FilesChanged } from "../shell/lazyViews";
 import { FilesBoundary } from "./FilesBoundary";
+import { RefreshPullRequests } from "./RefreshPullRequests";
 import type { FilesChangedState } from "../shell/useFilesChanged";
 import type {
   OpenedPullRequest,
@@ -202,6 +203,7 @@ export function PullRequestDetail({
   painted,
   onTab,
   onBack,
+  reading,
   onRefresh,
 }: {
   ref: Ref<PullRequestDetailHandle>;
@@ -218,6 +220,7 @@ export function PullRequestDetail({
   painted: boolean;
   onTab: (tab: PullRequestTab) => void;
   onBack: () => void;
+  reading: boolean;
   onRefresh: (() => void) | null;
 }) {
   const { repository, number, tab, read, position, viewer } = opened;
@@ -290,6 +293,7 @@ export function PullRequestDetail({
               {position.at.toLocaleString()} of {position.of.toLocaleString()}
             </span>
           )}
+          <RefreshPullRequests reading={reading} onRefresh={onRefresh} />
           {checkout.offer && (
             <TryPullRequest
               ref={tryButton}

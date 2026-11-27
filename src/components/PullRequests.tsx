@@ -21,6 +21,7 @@ import {
   PullRequestSkeleton,
 } from "./PullRequestList";
 import { PullRequestMenus } from "./PullRequestMenus";
+import { RefreshPullRequests } from "./RefreshPullRequests";
 import { clock, PullRequestNotice } from "./PullRequestNotice";
 import { useRovingRows } from "./useRovingRows";
 import { WorkspaceIcon } from "./WorkspaceIcon";
@@ -259,31 +260,37 @@ function Screen({
                 : `${model.scope}, as of ${clock(asOf)}`)}
           </span>
           {listing && (
-            <div className="pull-search" role="search">
-              <WorkspaceIcon name="SettingsSearch" />
-              <input
-                ref={search}
-                aria-label="Search pull requests"
-                placeholder="Search title, number, branch or author"
-                spellCheck={false}
-                autoComplete="off"
-                value={choices.query}
-                onChange={(event) => choose({ query: event.target.value })}
-                onKeyDown={(event) => {
-                  if (event.nativeEvent.isComposing) return;
-                  if (event.key === "Escape") {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    if (choices.query === "") onLeave();
-                    else choose({ query: "" });
-                  } else if (event.key === "ArrowDown") {
-                    event.preventDefault();
-                    focus();
-                  }
-                }}
+            <>
+              <RefreshPullRequests
+                reading={state.reading}
+                onRefresh={state.refresh}
               />
-              <kbd aria-hidden="true">{mac ? "⌘ F" : "Ctrl F"}</kbd>
-            </div>
+              <div className="pull-search" role="search">
+                <WorkspaceIcon name="SettingsSearch" />
+                <input
+                  ref={search}
+                  aria-label="Search pull requests"
+                  placeholder="Search title, number, branch or author"
+                  spellCheck={false}
+                  autoComplete="off"
+                  value={choices.query}
+                  onChange={(event) => choose({ query: event.target.value })}
+                  onKeyDown={(event) => {
+                    if (event.nativeEvent.isComposing) return;
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      if (choices.query === "") onLeave();
+                      else choose({ query: "" });
+                    } else if (event.key === "ArrowDown") {
+                      event.preventDefault();
+                      focus();
+                    }
+                  }}
+                />
+                <kbd aria-hidden="true">{mac ? "⌘ F" : "Ctrl F"}</kbd>
+              </div>
+            </>
           )}
         </header>
         {listing &&
@@ -357,6 +364,7 @@ function Screen({
           painted={painted}
           onTab={state.showTab}
           onBack={onBack}
+          reading={state.reading}
           onRefresh={state.refresh}
         />
       )}
