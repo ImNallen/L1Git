@@ -1,4 +1,5 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { ChevronDown } from "lucide-react";
 import type { GitStatus } from "@pierre/trees";
 import { distinctPaths, lineTotals, shownPath } from "../domain/filesChanged";
 import type { PullRequest } from "../domain/pullRequest";
@@ -12,7 +13,7 @@ import {
   sinceShown,
   sinceTotal,
 } from "../filesChanged";
-import type { FilesChanged } from "../filesChanged";
+import type { FilesChanged, Since, SinceShown } from "../filesChanged";
 import { ChangedFileTree } from "./ChangedFileTree";
 import type { RowLabel } from "./ChangedFileTree";
 import { LineTotals } from "./LineTotals";
@@ -26,16 +27,24 @@ const gitStatuses: Record<RangeFile["status"], GitStatus> = {
   T: "modified",
 };
 
+/** A folded group's tree has no filter of its own, and scrolls past this many rows. */
+const MOST_GROUP_ROWS = 40;
+
 function Tree({
   files,
   at,
   viewed,
+  progressOf = files,
+  maxRows,
   threads,
   onGo,
 }: {
   files: readonly RangeFile[];
   at: number;
   viewed: ReadonlySet<RangeFile>;
+  /** The files the viewed count is of, or null for none. */
+  progressOf?: readonly RangeFile[] | null;
+  maxRows?: number;
   threads: PullRequest["threads"];
   onGo: (at: number) => void;
 }) {
@@ -73,7 +82,8 @@ function Tree({
     () => new Set([...viewed].map(({ path }) => shownPath(path))),
     [viewed],
   );
-  const viewedCount = files.filter((file) => viewed.has(file)).length;
+  const viewedCount =
+    progressOf?.filter((file) => viewed.has(file)).length ?? 0;
   return (
     <ChangedFileTree
       files={named.map(({ path, status }) => ({
@@ -84,16 +94,134 @@ function Tree({
       comments={comments}
       viewed={viewedPaths}
       overTree={
-        <div className="files-progress">
-          <span>Viewed</span>
-          <span>{viewedOf(viewedCount, files.length)}</span>
-          <progress aria-hidden="true" value={viewedCount} max={files.length} />
-        </div>
+        progressOf && (
+          <div className="files-progress">
+            <span>Viewed</span>
+            <span>{viewedOf(viewedCount, progressOf.length)}</span>
+            <progress
+              aria-hidden="true"
+              value={viewedCount}
+              max={progressOf.length}
+            />
+          </div>
+        )
       }
+      maxRows={maxRows}
       selectedPath={selected ? shownPath(selected.path) : null}
       onSelectFile={choose}
       onSelectAgain={choose}
     />
+  );
+}
+
+/** A folded group of files, and its count. */
+function GroupRow({
+  label,
+  count,
+  isOpen,
+  onToggle,
+}: {
+  label: string;
+  count: number;
+  isOpen: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="since-group"
+      aria-expanded={isOpen}
+      onClick={onToggle}
+    >
+      <ChevronDown size={14} aria-hidden="true" />
+      <span>{label}</span>
+      <span className="since-group-count">{count.toLocaleString()}</span>
+    </button>
+  );
+}
+
+/**
+ * What the author changed since your review, and below it the files that
+ * didn't change since then and the ones only the base's changes moved, each
+ * folded into a row.
+ */
+function SinceGroups({
+  held,
+  since,
+  viewed,
+  onGo,
+  onShowRebased,
+  onOpenInAll,
+}: {
+  held: FilesChanged;
+  since: SinceShown;
+  viewed: ReadonlySet<RangeFile>;
+  onGo: (at: number) => void;
+  onShowRebased: (rebased: Since["rebased"]) => void;
+  onOpenInAll: (file: RangeFile) => void;
+}) {
+  const [isUnchangedOpen, setUnchangedOpen] = useState(false);
+  const { again, rebased, unchanged } = since;
+  const isRebasedShown = held.since?.rebased === "shown";
+  const threads = held.pull.threads;
+  const key = `${held.range.head} ${held.since?.rebased}`;
+  return (
+    <>
+      {again.length > 0 && (
+        <Tree
+          key={`again ${key}`}
+          files={again}
+          at={held.at}
+          viewed={viewed}
+          progressOf={shownFiles(held)}
+          threads={threads}
+          onGo={onGo}
+        />
+      )}
+      {unchanged.length > 0 && (
+        <GroupRow
+          label="Unchanged since your review"
+          count={unchanged.length}
+          isOpen={isUnchangedOpen}
+          onToggle={() => setUnchangedOpen((before) => !before)}
+        />
+      )}
+      {isUnchangedOpen && unchanged.length > 0 && (
+        <Tree
+          key={`unchanged ${key}`}
+          files={unchanged}
+          at={-1}
+          viewed={viewed}
+          progressOf={null}
+          maxRows={MOST_GROUP_ROWS}
+          threads={threads}
+          onGo={(at) => {
+            const file = unchanged[at];
+            if (file) onOpenInAll(file);
+          }}
+        />
+      )}
+      {rebased.length > 0 && (
+        <GroupRow
+          label="Changed only by the rebase"
+          count={rebased.length}
+          isOpen={isRebasedShown}
+          onToggle={() => onShowRebased(isRebasedShown ? "folded" : "shown")}
+        />
+      )}
+      {isRebasedShown && rebased.length > 0 && (
+        <Tree
+          key={`rebased ${key}`}
+          files={rebased}
+          at={held.at - again.length}
+          viewed={viewed}
+          progressOf={null}
+          maxRows={MOST_GROUP_ROWS}
+          threads={threads}
+          onGo={(at) => onGo(again.length + at)}
+        />
+      )}
+    </>
   );
 }
 
@@ -104,12 +232,17 @@ export function ChangedFilesSection({
   pull,
   url,
   onGo,
+  onShowRebased,
+  onOpenInAll,
 }: {
   held: FilesChanged | null;
   viewed: ReadonlySet<RangeFile>;
   pull: PullRequest | null;
   url: string;
   onGo: (at: number) => void;
+  onShowRebased: (rebased: Since["rebased"]) => void;
+  /** Shows All changes at a file. */
+  onOpenInAll: (file: RangeFile) => void;
 }) {
   const of = held?.pull ?? pull;
   const read = held?.read.kind === "ready" ? held.read : null;
@@ -163,9 +296,18 @@ export function ChangedFilesSection({
           {threads} <OnGitHub url={url} />
         </p>
       )}
-      {shown.length > 0 ? (
+      {held && since ? (
+        <SinceGroups
+          held={held}
+          since={since}
+          viewed={viewed}
+          onGo={onGo}
+          onShowRebased={onShowRebased}
+          onOpenInAll={onOpenInAll}
+        />
+      ) : shown.length > 0 ? (
         <Tree
-          key={`${read?.mergeBase} ${held?.range.head} ${isSince ? `since ${held.since?.rebased}` : "all"}`}
+          key={`${read?.mergeBase} ${held?.range.head}`}
           files={shown}
           at={held?.at ?? 0}
           viewed={viewed}

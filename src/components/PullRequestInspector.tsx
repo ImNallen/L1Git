@@ -172,7 +172,10 @@ export function PullRequestInspector({
   onShowCommits,
 }: {
   opened: OpenedPullRequest;
-  files: Pick<FilesChangedState, "held" | "viewed" | "choose">;
+  files: Pick<
+    FilesChangedState,
+    "held" | "viewed" | "choose" | "show" | "showRebased"
+  >;
   checkout: Pick<PullRequestCheckout, "local" | "deleteLocal">;
   onShowChecks: () => void;
   onShowCommits: () => void;
@@ -222,6 +225,13 @@ export function PullRequestInspector({
             pull={pull}
             url={`${url}/files`}
             onGo={files.choose}
+            onShowRebased={files.showRebased}
+            onOpenInAll={(file) => {
+              const all =
+                files.held?.read.kind === "ready" ? files.held.read.files : [];
+              files.show("all");
+              files.choose(all.indexOf(file));
+            }}
           />
         ) : (
           <ChecksAndDetails opened={opened} onShowChecks={onShowChecks} />
