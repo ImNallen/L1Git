@@ -288,6 +288,51 @@ it("keeps a file you unmark unmarked after the next rebase", async () => {
   expect(progress(), "c.ts and d.ts").toBe("Viewed2 of 4");
 });
 
+it("lists unchanged files in one folded row, and opens one in All changes", async () => {
+  const app = await openFiles();
+  const inspector = () => get("complementary", "Pull request details");
+  const trees = () =>
+    [...inspector().querySelectorAll("file-tree-container")].map((tree) =>
+      [
+        ...(tree.shadowRoot?.querySelectorAll("[data-item-type=file]") ?? []),
+      ].map((row) => row.getAttribute("data-item-path")),
+    );
+  const row = (name: RegExp) => get("button", name, inspector());
+  expect(trees()).toEqual([["src/a.ts"]]);
+  expect(row(/^Unchanged since your review/).textContent).toBe(
+    "Unchanged since your review2",
+  );
+  expect(
+    row(/^Unchanged since your review/).getAttribute("aria-expanded"),
+  ).toBe("false");
+  expect(row(/^Changed only by the rebase/).textContent).toBe(
+    "Changed only by the rebase1",
+  );
+
+  await app.click(row(/^Changed only by the rebase/));
+  expect(trees(), "the same as Show them").toEqual([
+    ["src/a.ts"],
+    ["src/b.ts"],
+  ]);
+  expect(get("button", "Hide them")).toBeTruthy();
+
+  await app.click(row(/^Unchanged since your review/));
+  expect(trees()).toEqual([
+    ["src/a.ts"],
+    ["src/c.ts", "src/d.ts"],
+    ["src/b.ts"],
+  ]);
+  const unchanged = inspector().querySelectorAll("file-tree-container")[1]!;
+  await app.click(
+    unchanged.shadowRoot!.querySelector<HTMLElement>(
+      '[data-item-path="src/d.ts"]',
+    )!,
+  );
+  expect(toggle(/^All changes/).getAttribute("aria-pressed")).toBe("true");
+  expect(place()).toBe("4 of 4");
+  expect(path()).toBe("src/d.ts");
+});
+
 it("shows the files main alone changed when asked", async () => {
   const app = await openFiles();
   expect(notice()).toBe(

@@ -81,7 +81,11 @@ export type SinceShown = {
   nowOf: ReadonlyMap<RangeFile, RangeFile | null>;
   /** What the author changed, in the order of the tree. */
   again: readonly RangeFile[];
-  /** The same, followed by the files that only the base's changes moved. */
+  /** The pull request's files that only the base's changes moved, in the order of the tree. */
+  rebased: readonly RangeFile[];
+  /** The pull request's files as you reviewed them, in the order of the tree. */
+  unchanged: readonly RangeFile[];
+  /** What the author changed, followed by what only the base's changes moved. */
   withRebased: readonly RangeFile[];
 };
 
@@ -97,14 +101,14 @@ export function sinceShown({
   if (known) return known;
   const groups = sinceGroups(read.files, since.read);
   const again = inTreeOrder(groups.again.map(({ since: file }) => file));
+  const rebased = inTreeOrder(groups.rebased.map(({ now }) => now));
   const made = {
     groups,
     nowOf: new Map(groups.again.map(({ since: file, now }) => [file, now])),
     again,
-    withRebased: [
-      ...again,
-      ...inTreeOrder(groups.rebased.map(({ now }) => now)),
-    ],
+    rebased,
+    unchanged: inTreeOrder(groups.unchanged),
+    withRebased: [...again, ...rebased],
   };
   derived.set(since.read, made);
   return made;

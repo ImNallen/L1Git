@@ -101,6 +101,40 @@
 .files-since-end > svg {
   color: var(--success);
 }
+.since-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 30px;
+  margin-top: 4px;
+  padding: 0 4px;
+  border-radius: 5px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-align: left;
+}
+.since-group:hover {
+  background: var(--control-hover);
+}
+.since-group > svg {
+  flex-shrink: 0;
+  transition: transform 120ms ease;
+}
+.since-group[aria-expanded="false"] > svg {
+  transform: rotate(-90deg);
+}
+.since-group-count {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+@media (prefers-reduced-motion: reduce) {
+  .since-group > svg {
+    transition: none;
+  }
+}
 .pull-tab-count.new {
   background: var(--primary-bg);
   color: var(--primary-text);
