@@ -32,6 +32,35 @@ export function Problem({
   );
 }
 
+/** The ways out of words another window changed or deleted. */
+export function SettleChoices({
+  settle,
+}: {
+  settle: (pick: "mine" | "theirs") => void;
+}) {
+  return (
+    <>
+      {" "}
+      <button
+        type="button"
+        className="pull-link"
+        tabIndex={0}
+        onClick={() => settle("mine")}
+      >
+        Keep mine
+      </button>{" "}
+      <button
+        type="button"
+        className="pull-link"
+        tabIndex={0}
+        onClick={() => settle("theirs")}
+      >
+        Use theirs
+      </button>
+    </>
+  );
+}
+
 /** What the footer says of the words. Typing saves a moment later, and a
  * crash loses at most that moment. */
 export function saveText(save: DraftSave | null): string | null {

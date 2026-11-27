@@ -208,6 +208,10 @@ export function useFinishReview({
       if (send.kind === "idle") drafts.type(summaryAnchor, head, text);
     },
     summarySave: summaryDraft?.save ?? null,
+    /** Ends "changed in another window" for the summary. */
+    settleSummary: (pick: "mine" | "theirs") => {
+      if (summaryDraft) drafts.settle(summaryDraft.key, pick);
+    },
     reason,
     send,
     done: told?.saying ?? false,

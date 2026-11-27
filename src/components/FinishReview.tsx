@@ -10,7 +10,7 @@ import type { RangeFile } from "../domain/range";
 import { firstWords } from "../domain/reviewThreads";
 import { mac } from "../repositories";
 import { useModalDialog } from "./Dialog";
-import { Problem, saveText } from "./LineCommentParts";
+import { Problem, saveText, SettleChoices } from "./LineCommentParts";
 import { MayHavePosted } from "./MayHavePosted";
 import type { FinishReview } from "./useFinishReview";
 import type { LineComments } from "./useLineComments";
@@ -316,7 +316,14 @@ function FinishReviewPopover({
           readOnly={isHeld}
           onChange={(change) => finish.typeSummary(change.target.value)}
         />
-        {summaryWords && <Problem>{summaryWords}</Problem>}
+        {summaryWords && (
+          <Problem>
+            {summaryWords}
+            {finish.summarySave?.kind === "changedElsewhere" && (
+              <SettleChoices settle={finish.settleSummary} />
+            )}
+          </Problem>
+        )}
       </section>
       <fieldset className="finish-section finish-events" disabled={isHeld}>
         <legend className="visually-hidden">Your review</legend>

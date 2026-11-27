@@ -1,8 +1,10 @@
 // @vitest-environment happy-dom
 import { expect, it } from "vitest";
+import type { Draft } from "./domain/drafts";
 import type { PullRequest } from "./domain/pullRequest";
 import { focused, get, installHarness } from "./test/appHarness";
 import {
+  book,
   draft,
   finish,
   head,
@@ -203,4 +205,35 @@ it("fits under its button in the window, and keeps fitting as the window changes
   });
   expect(shown.style.maxHeight).toBe("478px");
   window.innerHeight = height;
+});
+
+it("settles a summary another window changed with Keep mine or Use theirs, then sends it", async () => {
+  const summary = (text: string, savedAt: number): Draft => ({
+    anchor: { kind: "summary" },
+    head,
+    text,
+    writtenAt: savedAt,
+    savedAt,
+    mayHavePosted: false,
+  });
+  const comment = draft(11, "First thought");
+  const app = await openFiles({ drafts: [comment, summary("Before", 1)] });
+  const shown = await openPopover(app);
+  app.bridge.world.host.drafts.set(book, [comment, summary("Theirs", 2)]);
+  await app.type(get("textbox", "Summary", shown), "Mine");
+  await app.act(() => {
+    window.dispatchEvent(new Event("blur"));
+  });
+  await app.settle();
+  expect(shown.textContent).toContain(
+    "Another L1 Git window changed this comment.",
+  );
+  expect(get("button", "Use theirs", shown)).toBeTruthy();
+  await app.click(get("button", "Keep mine", shown));
+  expect(shown.textContent).not.toContain("Another L1 Git window");
+  await app.click(submit());
+  await app.settle();
+  expect(mutations(app)).toMatchObject([
+    { kind: "submitReview", body: "Mine" },
+  ]);
 });
