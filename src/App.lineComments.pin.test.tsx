@@ -1,132 +1,23 @@
 // @vitest-environment happy-dom
 import { expect, it } from "vitest";
-import type { Draft } from "./domain/drafts";
-import type { PullRequest } from "./domain/pullRequest";
-import { oidSchema } from "./domain/repository";
-import { get, installHarness, query, queryAll } from "./test/appHarness";
-import type { Harness } from "./test/appHarness";
+import { get, installHarness } from "./test/appHarness";
 import { pullKey } from "./test/fakeBridge";
-import type { Bridge, World } from "./test/fakeBridge";
-import { open, pull, refresh, tab, visit } from "./test/pullRequests";
+import {
+  book,
+  box,
+  choose,
+  draft,
+  kept,
+  oid,
+  openFiles,
+  panel,
+  pending,
+  words,
+  writes,
+} from "./test/lineComments";
+import { pull, refresh } from "./test/pullRequests";
 
 installHarness();
-
-const oid = (digit: string) => oidSchema.parse(digit.repeat(40));
-const head = oid("1");
-const book = "octo octo/pin#1";
-const patch = `diff --git a/src/a.ts b/src/a.ts
---- a/src/a.ts
-+++ b/src/a.ts
-@@ -10,3 +10,4 @@
- one
--two
-+TWO
-+and
- three
-`;
-
-function answer(bridge: Bridge) {
-  bridge.respond("rangeFiles", () => ({
-    kind: "ready",
-    mergeBase: oid("a"),
-    files: [
-      {
-        path: "src/a.ts",
-        status: "M",
-        from: null,
-        similarity: null,
-        added: 2,
-        deleted: 1,
-        oldBlob: oid("1"),
-        newBlob: oid("2"),
-        oldMode: "100644",
-        newMode: "100644",
-        submodule: false,
-      },
-    ],
-    contentMissing: false,
-    shallow: false,
-  }));
-  bridge.respond("rangePatches", () => [
-    { path: "src/a.ts", patch: { kind: "text", patch, lossy: false } },
-  ]);
-}
-
-const draft = (line: number, text: string, fields: Partial<Draft> = {}) => ({
-  anchor: {
-    kind: "line" as const,
-    path: "src/a.ts",
-    side: "right" as const,
-    line,
-    start: null,
-  },
-  head,
-  text,
-  writtenAt: 1,
-  savedAt: 1,
-  mayHavePosted: false,
-  ...fields,
-});
-
-async function openFiles({
-  fields = {},
-  world,
-}: {
-  fields?: Partial<PullRequest>;
-  world?: (world: World) => void;
-} = {}): Promise<Harness> {
-  const app = await visit({
-    bridge: answer,
-    world: (each) => {
-      each.host.details.set(pullKey("octo/pin", 1), pull(1, fields));
-      world?.(each);
-    },
-  });
-  await open(app, 1);
-  await app.click(tab("Files changed"));
-  return app;
-}
-
-const panel = () => get("tabpanel", /^Files changed/);
-const diff = () => panel().querySelector("diffs-container")!.shadowRoot!;
-const number = (line: number, type = "change-addition") =>
-  diff().querySelector<HTMLElement>(
-    `[data-column-number="${line}"][data-line-type="${type}"]`,
-  )!;
-const pointer = (target: EventTarget, kind: string, init: PointerEventInit) =>
-  target.dispatchEvent(
-    new PointerEvent(kind, {
-      bubbles: true,
-      composed: true,
-      pointerType: "mouse",
-      button: 0,
-      pointerId: 1,
-      ...init,
-    }),
-  );
-/** A click on a line number, and a Shift-click on another to extend it. */
-async function choose(app: Harness, from: number, to = from, type?: string) {
-  await app.act(() => {
-    pointer(number(from, type), "pointerdown", {});
-    pointer(document, "pointerup", {});
-  });
-  if (to === from) return;
-  await app.act(() => {
-    pointer(number(to), "pointerdown", { shiftKey: true });
-    pointer(document, "pointerup", {});
-  });
-}
-const box = () => query("region", /^Comment on /);
-const words = () => get("textbox", /^Comment on /) as HTMLTextAreaElement;
-/** The pending comments, once their words are drawn. */
-async function pending(app: Harness) {
-  for (let frame = 0; frame < 5; frame += 1) await app.flushFrames();
-  return queryAll("region", "Pending comment").map((each) => each.textContent);
-}
-const kept = (bridge: Bridge) =>
-  (bridge.world.host.drafts.get(book) ?? []).map(({ text }) => text);
-const writes = (bridge: Bridge) =>
-  bridge.hostLog.filter(({ op }) => op === "write").length;
 
 it("opens a box under chosen lines, and keeps its words as a pending comment", async () => {
   const app = await openFiles();
@@ -186,103 +77,6 @@ it("keeps pending comments for the next time, and edits and deletes them", async
   await app.click(get("button", "Delete"));
   expect(await pending(app)).toEqual([]);
   expect(kept(app.bridge)).toEqual([]);
-});
-
-it("adds a single comment once, on your own pull request too", async () => {
-  const app = await openFiles({
-    fields: { viewerIsAuthor: true, author: "octo" },
-  });
-  await choose(app, 11, 12);
-  await app.type(words(), "Name it better.");
-  const held = app.bridge.hold("write");
-  await app.click(get("button", "Add single comment"));
-  expect(words().readOnly, "the words wait for GitHub's answer").toBe(true);
-  expect(box()?.getAttribute("aria-busy")).toBe("true");
-  expect(get("status", "Sending…")).toBeTruthy();
-  await app.click(get("button", "Add single comment"));
-  held.release();
-  await app.settle();
-  expect(app.bridge.world.host.mutations).toEqual([
-    {
-      kind: "singleComment",
-      pull: "PR_1",
-      commit: head,
-      lines: {
-        path: "src/a.ts",
-        side: "right",
-        line: 12,
-        start: { side: "right", line: 11 },
-      },
-      body: "Name it better.",
-    },
-  ]);
-  expect(box()).toBeNull();
-  expect(kept(app.bridge)).toEqual([]);
-  await app.click(refresh());
-  expect(queryAll("region", "Single comment")).toEqual([]);
-  expect(panel().textContent).toContain("Name it better.");
-});
-
-it("gives the words back when GitHub refuses, and says why", async () => {
-  const app = await openFiles({
-    world: (world) => {
-      world.host.writes = [
-        {
-          kind: "refused",
-          message: "GitHub didn't do it: Line 12 isn't in the diff.",
-        },
-      ];
-    },
-  });
-  await choose(app, 12);
-  await app.type(words(), "Hm.");
-  await app.click(get("button", "Add single comment"));
-  expect(box()?.querySelector("[role=alert]")?.textContent).toBe(
-    "GitHub didn't do it: Line 12 isn't in the diff.",
-  );
-  expect(words().readOnly).toBe(false);
-  expect(words().value).toBe("Hm.");
-  expect(app.bridge.world.host.mutations).toEqual([]);
-});
-
-it("offers three choices when a comment may have posted, and never sends it again by itself", async () => {
-  const app = await openFiles({
-    world: (world) => {
-      world.host.writes = [{ kind: "unknown", applied: false }];
-    },
-  });
-  await choose(app, 12);
-  await app.type(words(), "Maybe.");
-  await app.click(get("button", "Add single comment"));
-  expect(box()?.textContent).toContain("may have posted");
-  expect(box()?.textContent, "its words are not a draft now").not.toContain(
-    "Saved as a draft",
-  );
-  expect(get("link", "Open on GitHub", box()!).getAttribute("href")).toBe(
-    "https://github.com/octo/pin/pull/1/files",
-  );
-  expect(box()?.textContent).toContain("Send anyway may post it twice.");
-  await app.click(refresh());
-  expect(app.bridge.world.host.mutations).toHaveLength(1);
-  await app.click(get("button", "Keep as draft"));
-  expect(words().readOnly).toBe(false);
-  expect(words().value).toBe("Maybe.");
-  expect(box()?.textContent).toContain("it may have posted");
-  expect(app.bridge.world.host.mutations).toHaveLength(1);
-});
-
-it("sends a comment that may have posted again only on Send anyway", async () => {
-  const app = await openFiles({
-    world: (world) => {
-      world.host.writes = [{ kind: "unknown", applied: false }];
-    },
-  });
-  await choose(app, 12);
-  await app.type(words(), "Again?");
-  await app.click(get("button", "Add single comment"));
-  await app.click(get("button", "Send anyway"));
-  expect(app.bridge.world.host.mutations).toHaveLength(2);
-  expect(box()).toBeNull();
 });
 
 it("shows a pending comment of an earlier commit with the file's other comments, never on a line", async () => {
@@ -367,117 +161,6 @@ it("comments on lines in All files too", async () => {
   ]);
 });
 
-it("shows a comment on its way once, from its own card, when the box moves on", async () => {
-  const app = await openFiles();
-  await choose(app, 12);
-  await app.type(words(), "On its way");
-  const held = app.bridge.hold("write");
-  await app.click(get("button", "Add single comment"));
-  await choose(app, 13, 13, "context");
-  expect(await pending(app), "its words are not pending now").toEqual([]);
-  expect(get("region", "Single comment").textContent).toContain("Sending…");
-  held.release();
-  await app.settle();
-  expect(app.bridge.world.host.mutations).toHaveLength(1);
-});
-
-it("reads only where another write carries the words, until it ends", async () => {
-  const carried = draft(12, "Sent with the review");
-  const lines = {
-    path: "src/a.ts",
-    side: "right" as const,
-    line: 12,
-    start: null,
-  };
-  const review = {
-    kind: "submitReview" as const,
-    pull: "PR_1" as never,
-    commit: head,
-    event: "comment" as const,
-    body: "",
-    threads: [{ lines, body: carried.text }],
-  };
-  const app = await openFiles({
-    world: (world) =>
-      world.host.sent.set(book, [
-        {
-          attempt: "elsewhere",
-          at: 1,
-          write: review,
-          drafts: [carried],
-          sending: true,
-          applied: false,
-        },
-      ]),
-  });
-  await choose(app, 12);
-  expect(words().readOnly).toBe(true);
-  expect(words().value).toBe("Sent with the review");
-  expect(get("status", "Sending…", box()!)).toBeTruthy();
-  expect(box()?.textContent).toContain("You can change them once it ends.");
-  expect(
-    get("button", "Add single comment").getAttribute("aria-disabled"),
-  ).toBe("true");
-  await app.click(get("button", "Cancel"));
-  expect(box()).toBeNull();
-  expect(kept(app.bridge)).toEqual([]);
-  expect(app.bridge.world.host.mutations).toEqual([]);
-});
-
-it("keeps a comment's may have posted choices in the box when Send anyway sends nothing", async () => {
-  const app = await openFiles({
-    world: (world) => {
-      world.host.writes = [
-        { kind: "unknown", applied: false },
-        {
-          kind: "notSent",
-          message:
-            "L1 Git could not read the pull request first, so it sent nothing.",
-        },
-      ];
-    },
-  });
-  await choose(app, 12);
-  await app.type(words(), "Twice?");
-  await app.click(get("button", "Add single comment"));
-  await app.click(get("button", "Send anyway"));
-  expect(box()?.textContent).toContain("could not read the pull request");
-  expect(box()?.textContent).toContain("May have posted");
-  expect(get("button", "Keep as draft", box()!)).toBeTruthy();
-  expect(get("button", "Send anyway", box()!)).toBeTruthy();
-  expect(words().readOnly).toBe(true);
-  expect(app.bridge.world.host.mutations).toHaveLength(1);
-});
-
-it("says so in the box when Send anyway or Keep as draft does nothing", async () => {
-  const app = await openFiles({
-    world: (world) => {
-      world.host.writes = [{ kind: "unknown", applied: false }];
-    },
-  });
-  await choose(app, 12);
-  await app.type(words(), "Stuck?");
-  await app.click(get("button", "Add single comment"));
-  const { draftImpact, freezeDrafts } = app.modules.draftProtection;
-  const frozen = freezeDrafts(draftImpact().revision);
-  await app.click(get("button", "Send anyway"));
-  expect(box()?.textContent).toContain(
-    "L1 Git is restarting to update, so it sent nothing.",
-  );
-  if (frozen.kind === "frozen") frozen.release();
-  const failing = app.bridge.failHost(
-    { kind: "unreachable", message: "L1 Git could not reach GitHub." },
-    pullKey("octo/pin", 1),
-  );
-  await app.click(get("button", "Keep as draft"));
-  expect(box()?.textContent).toContain(
-    "L1 Git couldn't keep it as a draft, so nothing changed.",
-  );
-  expect(get("button", "Send anyway", box()!)).toBeTruthy();
-  failing();
-  expect(app.bridge.world.host.mutations).toHaveLength(1);
-});
-
 it("keeps the box where its words are when other lines are chosen, until they are finished or cancelled", async () => {
   const app = await openFiles({
     world: (world) => world.host.drafts.set(book, [draft(11, "Kept")]),
@@ -511,25 +194,6 @@ it("keeps the box where its words are when other lines are chosen, until they ar
   expect(box()?.getAttribute("aria-label")).toBe("Comment on line 11");
   expect(box()?.textContent).toContain("Finish or cancel this comment first.");
   expect(app.bridge.world.host.mutations).toEqual([]);
-});
-
-it("gives a box opened while a single comment saves none of that comment's sending", async () => {
-  const app = await openFiles();
-  await choose(app, 12);
-  await app.type(words(), "Saved first");
-  const saving = app.bridge.hold("drafts");
-  await app.click(get("button", "Add single comment"));
-  await saving.arrived;
-  await choose(app, 13, 13, "context");
-  saving.release();
-  await app.settle();
-  expect(box()?.getAttribute("aria-label")).toBe("Comment on line 13");
-  expect(words().readOnly).toBe(false);
-  expect(words().value).toBe("");
-  expect(box()?.textContent).not.toContain("Sending…");
-  await app.click(get("button", "Cancel"));
-  expect(panel().textContent).toContain("Saved first");
-  expect(app.bridge.world.host.mutations).toHaveLength(1);
 });
 
 it("keeps a comment pending with Cmd or Ctrl+Enter, as the box's main button does", async () => {
