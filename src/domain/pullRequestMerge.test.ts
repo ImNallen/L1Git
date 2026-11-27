@@ -254,6 +254,38 @@ describe("deleting the local branch", () => {
     });
   });
 
+  it("keeps a branch it can't compare with the pull request", () => {
+    expect(
+      localDelete(
+        copy({
+          kind: "parked",
+          branch: "refs/heads/pr/127",
+          tip: oid("1"),
+          relation: { kind: "unfetched" },
+          plan,
+        }),
+        [],
+      ),
+    ).toEqual({
+      kind: "off",
+      name: "pr/127",
+      note: "L1 Git hasn't fetched the pull request's newest commits, so it can't tell whether this branch has commits that aren't in it.",
+    });
+    const absent = copy({ kind: "absent", branch: "refs/heads/pr/127", plan });
+    expect(
+      localDelete(absent, [
+        branch("fix/sync-stall", {
+          kind: "gone",
+          upstream: "refs/remotes/origin/fix/sync-stall",
+        } as BranchStatus["state"]),
+      ]),
+    ).toEqual({
+      kind: "off",
+      name: "fix/sync-stall",
+      note: "Its branch on GitHub is gone, so L1 Git can't tell whether it has commits that aren't on GitHub.",
+    });
+  });
+
   it("keeps a copy checked out in a worktree", () => {
     expect(
       localDelete(

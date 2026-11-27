@@ -141,6 +141,26 @@ export type LocalDelete =
   | { kind: "off"; name: string; note: string }
   | { kind: "offer"; name: string; branch: BranchTip };
 
+type Relation = Extract<PullCheckout, { relation: unknown }>["relation"];
+
+/** Why a branch stays: only what the core proved holds nothing else goes. */
+const keepsCopy: Record<Relation["kind"], string | null> = {
+  upToDate: null,
+  behind: null,
+  ahead: "It has commits that aren't in the pull request.",
+  diverged: "It has commits that aren't in the pull request.",
+  unfetched:
+    "L1 Git hasn't fetched the pull request's newest commits, so it can't tell whether this branch has commits that aren't in it.",
+};
+const keepsTracking: Record<BranchStatus["state"]["kind"], string | null> = {
+  untracked: "It tracks no branch on GitHub.",
+  upToDate: null,
+  behind: null,
+  ahead: "It has commits that aren't on GitHub.",
+  diverged: "It has commits that aren't on GitHub.",
+  gone: "Its branch on GitHub is gone, so L1 Git can't tell whether it has commits that aren't on GitHub.",
+};
+
 const folderName = (root: string) =>
   root
     .replace(/[\\/]+$/, "")
@@ -164,15 +184,8 @@ export function localDelete(
         name,
         note: `It's checked out in ${checkout.worktree.name}.`,
       };
-    if (
-      checkout.relation.kind === "ahead" ||
-      checkout.relation.kind === "diverged"
-    )
-      return {
-        kind: "off",
-        name,
-        note: "It has commits that aren't in the pull request.",
-      };
+    const kept = keepsCopy[checkout.relation.kind];
+    if (kept !== null) return { kind: "off", name, note: kept };
     return {
       kind: "offer",
       name,
@@ -194,8 +207,8 @@ export function localDelete(
       name,
       note: `It's checked out in ${folderName(found.checkedOutAt)}.`,
     };
-  if (found.state.kind === "ahead" || found.state.kind === "diverged")
-    return { kind: "off", name, note: "It has commits that aren't on GitHub." };
+  const kept = keepsTracking[found.state.kind];
+  if (kept !== null) return { kind: "off", name, note: kept };
   return {
     kind: "offer",
     name,
