@@ -109,27 +109,62 @@ pub(crate) fn range_files_within(
     }
     let shallow = git::read(&root, &["rev-parse", "--is-shallow-repository"], deadline)?;
     let shallow = git::line(&shallow) == "true";
-    let found = git::run_objects(
-        &root,
-        &["merge-base", base.as_str(), head.as_str()],
-        deadline,
-    )?;
-    let merge_base = match found.status.code() {
-        Some(0) => Oid::try_from(git::line(&found.stdout))?,
-        Some(1) => return Ok(RangeFiles::Unrelated { shallow }),
-        _ => return Err(git::read_failed()),
+    let Some(merge_base) = merge_base(&root, base, head, deadline)? else {
+        return Ok(RangeFiles::Unrelated { shallow });
     };
-    let ends = [&merge_base, head];
+    let Some(Between {
+        files,
+        content_missing,
+    }) = files_between(&root, [&merge_base, head], deadline)?
+    else {
+        return Ok(RangeFiles::TreesMissing);
+    };
+    Ok(RangeFiles::Ready {
+        merge_base,
+        files,
+        content_missing,
+        shallow,
+    })
+}
+
+/// `None` when no commit is in the history of both.
+fn merge_base(
+    root: &Path,
+    a: &Oid,
+    b: &Oid,
+    deadline: Deadline,
+) -> Result<Option<Oid>, RepositoryError> {
+    let found = git::run_objects(root, &["merge-base", a.as_str(), b.as_str()], deadline)?;
+    match found.status.code() {
+        Some(0) => Ok(Some(Oid::try_from(git::line(&found.stdout))?)),
+        Some(1) => Ok(None),
+        _ => Err(git::read_failed()),
+    }
+}
+
+/// What changed from the first of `ends` to the second.
+struct Between {
+    /// In Git's order, by the bytes of `path`.
+    files: Vec<RangeFile>,
+    content_missing: bool,
+}
+
+/// `None` in a partial clone that does not have the folders of `ends`.
+fn files_between(
+    root: &Path,
+    ends: [&Oid; 2],
+    deadline: Deadline,
+) -> Result<Option<Between>, RepositoryError> {
     let counted = git::run_objects(
-        &root,
+        root,
         &strs(&args(ends, RENAMES, &["--raw", "--numstat"], &[])),
         deadline,
     )?;
     let content_missing = !counted.status.success();
     let files = if content_missing {
-        let Some(changes) = names(&root, ends, deadline)? else {
-            return if partial(&root, deadline)? {
-                Ok(RangeFiles::TreesMissing)
+        let Some(changes) = names(root, ends, deadline)? else {
+            return if partial(root, deadline)? {
+                Ok(None)
             } else {
                 Err(git::read_failed())
             };
@@ -150,12 +185,10 @@ pub(crate) fn range_files_within(
             .map(|(change, counts)| file(&change, counts))
             .collect::<Result<_, _>>()?
     };
-    Ok(RangeFiles::Ready {
-        merge_base,
+    Ok(Some(Between {
         files,
         content_missing,
-        shallow,
-    })
+    }))
 }
 
 pub fn range_patches(
