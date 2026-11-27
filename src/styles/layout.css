@@ -266,6 +266,7 @@ kbd {
   min-width: 0;
 }
 .repository-content {
+  position: relative;
   display: flex;
   flex-direction: column;
   flex: 1;

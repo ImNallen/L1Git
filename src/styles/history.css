@@ -42,6 +42,11 @@
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar) var(--panel-raised);
 }
+.history-scroll::after {
+  content: "";
+  display: block;
+  height: 48px;
+}
 .history-table {
   display: block;
   border-spacing: 0;

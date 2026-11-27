@@ -9,6 +9,7 @@ import {
 } from "./refs";
 import { shownText, splittable } from "./lineSelection";
 import type { BranchRef } from "./overview";
+import { pushSucceeded } from "./push";
 import type { PushResult } from "./push";
 import type { ListSide } from "./worktree";
 import type {
@@ -671,6 +672,27 @@ export type WriteNotice =
       problem: Problem;
       entry: EntryId;
     };
+
+const confirmations: Record<Exclude<WriteNotice["kind"], "pushed">, boolean> = {
+  fetched: true,
+  pulled: true,
+  advanced: true,
+  stepped: false,
+  wrote: false,
+  removedWorktree: false,
+  failed: false,
+};
+
+/** A confirmation leaves on its own. A notice that offers an action, reports a problem, or says what cannot be undone stays until dismissed. */
+export function isConfirmation(notice: WriteNotice) {
+  if (notice.kind !== "pushed") return confirmations[notice.kind];
+  const { outcome, refreshProblem } = notice;
+  return (
+    pushSucceeded[outcome.kind] &&
+    refreshProblem === null &&
+    (outcome.kind !== "published" || outcome.tracking.kind === "set")
+  );
+}
 
 export type StaleReason = Extract<Problem, { kind: "staleView" }>["reason"];
 

@@ -517,7 +517,7 @@ it("the unsaved conflict results list opens RetainedResolution, switching reposi
   ).toBeTruthy();
 });
 
-it("notices keep their order above the panes", async () => {
+it("panels keep their order above the panes, and notifications theirs over the panes", async () => {
   const app = await mountApp();
   await dirtyResolution(app, OTHER, "there.txt");
   await app.click(historyRow("Release,"));
@@ -540,15 +540,17 @@ it("notices keep their order above the panes", async () => {
   });
   await app.refocusWindow();
   const content = document.querySelector(".repository-content")!;
-  const rows = [
+  const pinned = [
     ...content.querySelectorAll(
-      ":scope > .notice, :scope > .resolution-draft-list, :scope > .merge-controls",
+      ":scope > .resolution-draft-list, :scope > .merge-controls",
     ),
-  ].map((row) => row.getAttribute("aria-label") ?? row.textContent);
-  expect(rows).toMatchInlineSnapshot(`
+  ].map((row) => row.getAttribute("aria-label"));
+  expect(pinned).toEqual(["Branch merge", "Unsaved conflict results"]);
+  const floating = [
+    ...content.querySelectorAll(":scope > .notifications > .notification"),
+  ].map((row) => row.textContent);
+  expect(floating).toMatchInlineSnapshot(`
     [
-      "Branch merge",
-      "Unsaved conflict results",
       "Hidden and soloed branches changed for this session. Could not save them.",
       "Reading this repository took too long. The last successful view is retained.Try again",
       "topic is hidden in the graph.Show topic",
@@ -591,3 +593,104 @@ it("a successful stage keeps a commit notice shown", async () => {
   ]);
   expect(get("status", /Committed/).textContent).toBe(committed);
 });
+
+async function withFakeTimers(run: () => Promise<void>) {
+  vi.useFakeTimers({
+    toFake: ["setTimeout", "clearTimeout", "Date"],
+    shouldAdvanceTime: true,
+  });
+  try {
+    await run();
+  } finally {
+    vi.useRealTimers();
+  }
+}
+
+const wait = (app: Harness, ms: number) =>
+  app.act(() => {
+    vi.advanceTimersByTime(ms);
+  });
+
+it("fetch and push confirmations dismiss themselves after 4.5 seconds", () =>
+  withFakeTimers(async () => {
+    const app = await mountApp();
+    answerFetch(app, [{ remote: "origin", outcome: { kind: "fetched" } }]);
+    await app.runPaletteItem("Fetch all");
+    await wait(app, 4_000);
+    expect(query("status", /Fetched/)).toBeTruthy();
+    await wait(app, 1_000);
+    expect(query("status", /Fetched/)).toBeNull();
+
+    answerPush(app, { kind: "pushed" });
+    await app.click(await toolbarItem(app, "Push", "Push to origin/main"));
+    await wait(app, 4_000);
+    expect(query("status", /Pushed main/)).toBeTruthy();
+    await wait(app, 1_000);
+    expect(query("status", /Pushed main/)).toBeNull();
+  }));
+
+it("a later fetch confirmation restarts the countdown", () =>
+  withFakeTimers(async () => {
+    const app = await mountApp();
+    answerFetch(app, [{ remote: "origin", outcome: { kind: "fetched" } }]);
+    await app.runPaletteItem("Fetch all");
+    await wait(app, 3_000);
+    await app.runPaletteItem("Fetch all");
+    await wait(app, 3_000);
+    expect(query("status", /Fetched/)).toBeTruthy();
+    await wait(app, 2_000);
+    expect(query("status", /Fetched/)).toBeNull();
+  }));
+
+it("a confirmation stays while it is pointed at, and leaves once the pointer has been away 4.5 seconds", () =>
+  withFakeTimers(async () => {
+    const app = await mountApp();
+    answerFetch(app, [{ remote: "origin", outcome: { kind: "fetched" } }]);
+    await app.runPaletteItem("Fetch all");
+    const fetched = get("status", /Fetched/);
+    await app.act(() => {
+      fetched.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
+    });
+    await wait(app, 30_000);
+    expect(query("status", /Fetched/)).toBeTruthy();
+    await app.act(() => {
+      fetched.dispatchEvent(
+        new PointerEvent("pointerout", {
+          bubbles: true,
+          relatedTarget: document.body,
+        }),
+      );
+    });
+    await wait(app, 4_000);
+    expect(query("status", /Fetched/)).toBeTruthy();
+    await wait(app, 1_000);
+    expect(query("status", /Fetched/)).toBeNull();
+  }));
+
+it("a confirmation stays while focus is in it", () =>
+  withFakeTimers(async () => {
+    const app = await mountApp();
+    answerFetch(app, [{ remote: "origin", outcome: { kind: "fetched" } }]);
+    await app.runPaletteItem("Fetch all");
+    const dismiss = get("button", "Dismiss", get("status", /Fetched/));
+    await app.act(() => dismiss.focus());
+    await wait(app, 30_000);
+    expect(query("status", /Fetched/)).toBeTruthy();
+    await app.act(() => dismiss.blur());
+    await wait(app, 5_000);
+    expect(query("status", /Fetched/)).toBeNull();
+  }));
+
+it("errors and Undo notices stay until dismissed", () =>
+  withFakeTimers(async () => {
+    const app = await mountApp();
+    await rejectPush(app);
+    await wait(app, 60_000);
+    expect(alerts()).toEqual([
+      "Push rejected. main has diverged from origin/main (1 ahead, 1 behind). Pull, then push again. ",
+    ]);
+
+    await checkOutTopic(app);
+    await wait(app, 60_000);
+    expect(get("status", /^Checked out topic/).textContent).toContain("Undo");
+  }));
