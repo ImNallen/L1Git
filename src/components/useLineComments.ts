@@ -1,7 +1,7 @@
 import { createContext, useMemo, useState } from "react";
 import { draftKey, draftText } from "../domain/drafts";
 import type { DraftKey } from "../domain/drafts";
-import { carriedBy } from "../domain/lineComments";
+import { carriedBy, linesLabel } from "../domain/lineComments";
 import type { LineAnchor, Lines } from "../domain/lineComments";
 import type { PullRequest } from "../domain/pullRequest";
 import type { PullWrite } from "../domain/pullRequestWrites";
@@ -36,6 +36,8 @@ type Box = {
    * for a new comment. */
   before: string | null;
   sending: Sending;
+  /** How many times other lines were chosen while it held typed words. */
+  stays: number;
 };
 
 /** What the box shows, from its draft and its attempt. */
@@ -56,6 +58,7 @@ export type BoxView =
   | { kind: "unknown"; text: string; attempt: Attempt };
 
 const idle: Sending = { kind: "idle", problem: null };
+const finishFirst = "Finish or cancel this comment first.";
 
 const linesOf = ({ path, side, line, start }: LineAnchor): Lines => ({
   path,
@@ -67,6 +70,12 @@ const linesOf = ({ path, side, line, start }: LineAnchor): Lines => ({
 const isLine = (
   draft: ShownDraft,
 ): draft is ShownDraft & { anchor: LineAnchor } => draft.anchor.kind === "line";
+
+/** Whether the box holds words it didn't open with. */
+const typed = ({ before }: Box, text: string) =>
+  before === null ? draftText(text) !== "blank" : text !== before;
+
+const fileName = (path: string) => path.slice(path.lastIndexOf("/") + 1);
 
 /** The words a write carries for the draft at `key`. */
 function wordsAt(write: PullWrite, key: DraftKey): string {
@@ -250,7 +259,12 @@ export function useLineComments({
     drafts: lineDrafts,
     sent,
     box: box &&
-      view && { anchor: box.anchor, isEdit: box.before !== null, view },
+      view && {
+        anchor: box.anchor,
+        isEdit: box.before !== null,
+        view,
+        stays: box.stays,
+      },
     /** Whether a review has begun: a pending comment besides the box's own. */
     hasReview: lineDrafts.some(
       (draft) =>
@@ -264,15 +278,30 @@ export function useLineComments({
       setNotice(
         "GitHub takes comments only on the lines of a change. Choose lines inside a hunk.",
       ),
-    /** Opens the box on lines, on the pending comment there if one is. */
+    /** Opens the box on lines, on the pending comment there if one is. A
+     * box with words typed in it stays, so they never become a pending
+     * comment without Start a review. */
     open(anchor: LineAnchor) {
       setNotice(null);
       if (box && draftKey(box.anchor, head) === draftKey(anchor, head)) return;
+      if (box && view?.kind === "writing" && typed(box, view.text)) {
+        setBox({
+          ...box,
+          sending: { kind: "idle", problem: finishFirst },
+          stays: box.stays + 1,
+        });
+        if (box.anchor.path !== anchor.path)
+          setNotice(
+            `Finish or cancel your comment on ${linesLabel(box.anchor)} of ${fileName(box.anchor.path)} first.`,
+          );
+        return;
+      }
       setBox({
         anchor,
         head,
         before: draftAt(anchor, head)?.text ?? null,
         sending: idle,
+        stays: 0,
       });
     },
     type(words: string) {

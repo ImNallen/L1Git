@@ -477,3 +477,38 @@ it("says so in the box when Send anyway or Keep as draft does nothing", async ()
   failing();
   expect(app.bridge.world.host.mutations).toHaveLength(1);
 });
+
+it("keeps the box where its words are when other lines are chosen, until they are finished or cancelled", async () => {
+  const app = await openFiles({
+    world: (world) => world.host.drafts.set(book, [draft(11, "Kept")]),
+  });
+  await choose(app, 12);
+  await app.type(words(), "Half a thought");
+  await choose(app, 13, 13, "context");
+  expect(box()?.getAttribute("aria-label")).toBe("Comment on line 12");
+  expect(words().value).toBe("Half a thought");
+  expect(box()?.textContent).toContain("Finish or cancel this comment first.");
+  await app.flushFrames();
+  expect(document.activeElement, "the words take the focus").toBe(words());
+  expect(await pending(app), "its words don't become pending").toEqual([
+    "OYou on line 11PendingEditDeleteKept",
+  ]);
+  await app.click(get("button", "Cancel"));
+  await choose(app, 13, 13, "context");
+  expect(box()?.getAttribute("aria-label")).toBe("Comment on line 13");
+
+  await app.click(get("button", "Cancel"));
+  await app.click(get("button", "Edit"));
+  await choose(app, 13, 13, "context");
+  expect(
+    box()?.getAttribute("aria-label"),
+    "an edit with its words as they were moves",
+  ).toBe("Comment on line 13");
+  await app.click(get("button", "Cancel"));
+  await app.click(get("button", "Edit"));
+  await app.type(words(), "Kept, and changed");
+  await choose(app, 13, 13, "context");
+  expect(box()?.getAttribute("aria-label")).toBe("Comment on line 11");
+  expect(box()?.textContent).toContain("Finish or cancel this comment first.");
+  expect(app.bridge.world.host.mutations).toEqual([]);
+});

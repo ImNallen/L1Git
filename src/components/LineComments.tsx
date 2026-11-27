@@ -202,6 +202,7 @@ export function LineNoteView({
               view={comments.box.view}
               lines={comments.box.anchor}
               isEdit={comments.box.isEdit}
+              stays={comments.box.stays}
               viewer={viewer}
               url={url}
               comments={comments}

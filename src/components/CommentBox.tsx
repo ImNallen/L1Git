@@ -17,6 +17,7 @@ export function CommentBox({
   view,
   lines,
   isEdit,
+  stays,
   viewer,
   url,
   comments,
@@ -24,6 +25,8 @@ export function CommentBox({
   view: BoxView;
   lines: Lines;
   isEdit: boolean;
+  /** Grows each time other lines were chosen while it held typed words. */
+  stays: number;
   viewer: string;
   url: string;
   comments: LineComments;
@@ -40,9 +43,10 @@ export function CommentBox({
       if (!box) return;
       box.focus({ preventScroll: true });
       box.setSelectionRange(box.value.length, box.value.length);
+      if (stays > 0) box.scrollIntoView({ block: "nearest" });
     });
     return () => cancelAnimationFrame(frame);
-  }, [place]);
+  }, [place, stays]);
   const id = useId();
   const label = `Comment on ${linesLabel(lines)}`;
   const writing = view.kind === "writing" ? view : null;
