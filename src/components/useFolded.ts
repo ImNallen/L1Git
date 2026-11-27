@@ -4,7 +4,11 @@ import type { RangeFile } from "../domain/range";
 /** Viewed files are folded. A reader can fold and unfold each, until it is marked the other way. */
 export function useFolded(
   viewed: ReadonlySet<RangeFile>,
-): [ReadonlySet<RangeFile>, (file: RangeFile) => void] {
+): [
+  ReadonlySet<RangeFile>,
+  (file: RangeFile) => void,
+  (file: RangeFile) => void,
+] {
   const [{ of, byHand }, set] = useState<{
     of: ReadonlySet<RangeFile>;
     byHand: ReadonlyMap<RangeFile, boolean>;
@@ -33,5 +37,14 @@ export function useFolded(
       })),
     [],
   );
-  return [folded, fold];
+  /** Unfolds it, viewed or not, and leaves its mark as it is. */
+  const unfold = useCallback(
+    (file: RangeFile) =>
+      set(({ of, byHand }) => ({
+        of,
+        byHand: new Map(byHand).set(file, false),
+      })),
+    [],
+  );
+  return [folded, fold, unfold];
 }

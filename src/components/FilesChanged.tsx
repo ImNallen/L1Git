@@ -357,7 +357,7 @@ export function FilesChanged({
   const holdsFocus = useRef(false);
   const left = useRef<Left | null>(null);
   const [ids, toggle, unfold] = useToggled();
-  const [folded, fold] = useFolded(files.viewed);
+  const [folded, fold, unfoldFile] = useFolded(files.viewed);
   const unfolded = useMemo(() => ({ ids, toggle }), [ids, toggle]);
   const { range, read, at, counted } = held;
   const counts = useMemo(
@@ -382,6 +382,8 @@ export function FilesChanged({
     held,
     files,
     unfold,
+    folded,
+    unfoldFile,
     left,
     showing,
     onShown,
