@@ -72,7 +72,7 @@ function progressOf(attempt: Attempt | undefined): MergeProgress {
 }
 
 /** What the popover asks for once the user confirms. */
-export type MergeAsk = {
+type MergeAsk = {
   write: MergeWrite;
   /** The head branch to delete on GitHub after it merged. */
   remote: string | null;

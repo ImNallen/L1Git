@@ -43,7 +43,7 @@ const methods: Record<
 };
 const order: readonly MergeMethod[] = ["squash", "merge", "rebase"];
 
-export type MethodChoice = {
+type MethodChoice = {
   method: MergeMethod;
   label: string;
   note: string;
@@ -102,7 +102,7 @@ export function commitTexts(
 
 /** After a merge: whether L1 Git can delete the head branch on GitHub. The
  * host checks again, and keeps it when an open pull request merges into it. */
-export type RemoteDelete =
+type RemoteDelete =
   | { kind: "none" }
   | { kind: "off"; note: string }
   /** GitHub deletes it itself, so the box is checked and fixed. */
