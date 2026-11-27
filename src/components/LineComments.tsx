@@ -3,7 +3,6 @@ import { linesLabel } from "../domain/lineComments";
 import type { Lines } from "../domain/lineComments";
 import type { ReviewThread } from "../domain/pullRequest";
 import type { LineNote } from "../domain/reviewThreads";
-import type { Attempt } from "../pullRequestWrites";
 import { CommentBox } from "./CommentBox";
 import {
   Header,
@@ -16,7 +15,7 @@ import { Body } from "./PullRequestBody";
 import { ThreadChips } from "./ReviewThreads";
 import type { Unfolded } from "./ReviewThreads";
 import { LineCommentsContext } from "./useLineComments";
-import type { LineComments, ShownDraft } from "./useLineComments";
+import type { LineComments, SentNote, ShownDraft } from "./useLineComments";
 
 /** A pending comment: on this computer until the review is sent. */
 function PendingComment({
@@ -95,36 +94,41 @@ const sentWords = {
   unknown: "May have posted",
 } as const;
 
-/** A single comment sent from here, until a read shows it. */
+/** A comment sent from here, alone or in a review, until a read shows it. */
 function SentComment({
-  attempt,
+  note: { attempt, lines, body, isReview },
   viewer,
   url,
   comments,
 }: {
-  attempt: Attempt;
+  note: SentNote;
   viewer: string;
   url: string;
   comments: LineComments;
 }) {
-  const { write, state } = attempt;
-  if (write.kind !== "singleComment") return null;
+  const { state } = attempt;
   return (
     <section
       className="line-comment"
-      aria-label="Single comment"
+      aria-label={isReview ? "Review comment" : "Single comment"}
       aria-busy={state.kind === "sending"}
     >
       <Header viewer={viewer}>
-        <strong>You</strong> on {linesLabel(write.lines)}
+        <strong>You</strong> on {linesLabel(lines)}
         <span className="line-comment-state" role="status">
           {sentWords[state.kind]}
         </span>
       </Header>
       <div className="line-comment-body">
-        <Body text={write.body} />
+        <Body text={body} />
       </div>
-      {state.kind === "unknown" ? (
+      {isReview ? (
+        state.kind === "unknown" && (
+          <p className="line-comment-note">
+            Your review may have posted. Finish review says what you can do.
+          </p>
+        )
+      ) : state.kind === "unknown" ? (
         <MayHavePosted attempt={attempt} url={url} choices={comments} />
       ) : (
         (state.kind === "refused" || state.kind === "notSent") && (
@@ -138,7 +142,7 @@ function SentComment({
                 className="button secondary"
                 onClick={() => {
                   comments.dismiss(attempt.id);
-                  comments.open({ kind: "line", ...write.lines });
+                  comments.open({ kind: "line", ...lines });
                 }}
               >
                 Edit
@@ -196,12 +200,12 @@ export function LineNoteView({
             );
           })}
           {note.sent.map((id) => {
-            const attempt = comments.sent.find((each) => each.id === id);
+            const sent = comments.sent.find((each) => each.id === id);
             return (
-              attempt && (
+              sent && (
                 <SentComment
                   key={id}
-                  attempt={attempt}
+                  note={sent}
                   viewer={viewer}
                   url={url}
                   comments={comments}
@@ -263,12 +267,12 @@ export function CommentsElsewhere({
         );
       })}
       {sent.map((id) => {
-        const attempt = comments.sent.find((each) => each.id === id);
+        const sent = comments.sent.find((each) => each.id === id);
         return (
-          attempt && (
+          sent && (
             <SentComment
               key={id}
-              attempt={attempt}
+              note={sent}
               viewer={viewer}
               url={url}
               comments={comments}

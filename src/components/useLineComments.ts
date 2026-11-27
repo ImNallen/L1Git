@@ -8,6 +8,7 @@ import type { PullWrite } from "../domain/pullRequestWrites";
 import type { Oid } from "../domain/repository";
 import type { Notes } from "../domain/reviewThreads";
 import type { RangeFile } from "../domain/range";
+import { stamp } from "../pullRequests";
 import type { Attempt } from "../pullRequestWrites";
 import { usePullDrafts, usePullWrites } from "../shell/usePullWriting";
 import { sentNothing } from "./sentNothing";
@@ -38,6 +39,8 @@ type Box = {
   sending: Sending;
   /** How many times other lines were chosen while it held typed words. */
   stays: number;
+  /** When it opened: a write that posted its words after this took them. */
+  openedAt: number;
 };
 
 /** What the box shows, from its draft and its attempt. */
@@ -87,8 +90,41 @@ function wordsAt(write: PullWrite, key: DraftKey): string {
   return thread?.body ?? "";
 }
 
-const sentLines = (attempt: Attempt) =>
-  attempt.write.kind === "singleComment" ? attempt.write : null;
+/** A comment a write carries, until a read shows it. */
+export type SentNote = {
+  id: string;
+  attempt: Attempt;
+  lines: Lines;
+  commit: Oid;
+  body: string;
+  /** One of a review's, whose choices are in Finish review. */
+  isReview: boolean;
+};
+
+/** A single comment, or each comment of a review. A review GitHub refused or
+ * never got gives its comments back as pending ones, so they show as those. */
+function sentNotes(attempt: Attempt): SentNote[] {
+  const { write, state } = attempt;
+  if (write.kind === "singleComment")
+    return [{ id: attempt.id, attempt, ...write, isReview: false }];
+  if (
+    write.kind !== "submitReview" ||
+    !(
+      state.kind === "sending" ||
+      state.kind === "done" ||
+      state.kind === "unknown"
+    )
+  )
+    return [];
+  return write.threads.map(({ lines, body }, index) => ({
+    id: `${attempt.id} ${index}`,
+    attempt,
+    lines,
+    commit: write.commit,
+    body,
+    isReview: true,
+  }));
+}
 
 /**
  * Comments on the lines of the head shown: the pending ones, the single ones
@@ -126,7 +162,7 @@ export function useLineComments({
     );
   }, [drafts, writes.attempts]);
   const sent = useMemo(
-    () => writes.attempts.filter((attempt) => sentLines(attempt) !== null),
+    () => writes.attempts.flatMap(sentNotes),
     [writes.attempts],
   );
   const draftAt = (anchor: LineAnchor, at: Oid) => {
@@ -142,8 +178,18 @@ export function useLineComments({
         ? (writes.attempts.findLast(({ write }) => write === sending.write) ??
           null)
         : null;
-  // A single comment GitHub has is shown on its line until a read has it.
-  if (box && boxAttempt?.state.kind === "done") setBox(null);
+  // A single comment GitHub has is shown on its line until a read has it,
+  // and a review that posted the box's pending comment leaves nothing to
+  // edit, so Cancel can't put it back to send again.
+  const posted =
+    box &&
+    writes.attempts.some(
+      ({ write, state }) =>
+        state.kind === "done" &&
+        state.answeredAt > box.openedAt &&
+        carriedBy(write).includes(draftKey(box.anchor, head)),
+    );
+  if (posted) setBox(null);
 
   const view = ((): BoxView | null => {
     if (!box) return null;
@@ -186,7 +232,7 @@ export function useLineComments({
 
   const places = JSON.stringify([
     lineDrafts.map(({ key, anchor, head: at }) => [key, anchor, at]),
-    sent.map(({ id, write }) => [id, write]),
+    sent.map(({ id, lines, commit }) => [id, lines, commit]),
     box && [box.anchor, boxAttempt?.id ?? null],
   ]);
   /** Ids and places only, the same object while they stay, so typing draws
@@ -194,7 +240,7 @@ export function useLineComments({
   const notesOf = useMemo(() => {
     const [draftPlaces, sentPlaces, boxPlace] = JSON.parse(places) as [
       [DraftKey, LineAnchor, Oid][],
-      [string, Extract<PullWrite, { kind: "singleComment" }>][],
+      [string, Lines, Oid][],
       [LineAnchor, string | null] | null,
     ];
     const cache = new Map<string, Omit<Notes, "threads">>();
@@ -207,12 +253,8 @@ export function useLineComments({
           .filter(([, anchor]) => paths.includes(anchor.path))
           .map(([key, anchor, at]) => ({ key, anchor, head: at })),
         sent: sentPlaces
-          .filter(([, write]) => paths.includes(write.lines.path))
-          .map(([id, write]) => ({
-            id,
-            lines: write.lines,
-            commit: write.commit,
-          })),
+          .filter(([, lines]) => paths.includes(lines.path))
+          .map(([id, lines, commit]) => ({ id, lines, commit })),
         box:
           boxPlace && boxPlace[0].path === file.path
             ? { anchor: boxPlace[0], attempt: boxPlace[1] }
@@ -318,6 +360,7 @@ export function useLineComments({
         before: draftAt(anchor, head)?.text ?? null,
         sending: idle,
         stays: 0,
+        openedAt: stamp(),
       });
     },
     type(words: string) {

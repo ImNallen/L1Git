@@ -27,6 +27,9 @@ import type { LinePlace } from "./KeepDiffPlace";
 import type { Unfolded } from "./ReviewThreads";
 import { OnGitHub } from "./PullRequestParts";
 import { useFolded } from "./useFolded";
+import { FinishReviewButton } from "./FinishReview";
+import { ABOVE_CHANGE } from "./useDiffSteps";
+import { useFinishReview } from "./useFinishReview";
 import { LineCommentsContext, useLineComments } from "./useLineComments";
 
 function Stopped({
@@ -112,6 +115,7 @@ function Notices({
   onDismissUnsaved,
   onDismiss,
   onDismissLines,
+  onOpenReview,
 }: {
   newer: ReturnType<typeof newerThan>;
   unsaved: string | null;
@@ -122,9 +126,22 @@ function Notices({
   onDismissUnsaved: () => void;
   onDismiss: () => void;
   onDismissLines: () => void;
+  /** Opens Finish review while its review may have posted, else null. */
+  onOpenReview: (() => void) | null;
 }) {
   return (
     <div className="files-notices">
+      {onOpenReview && (
+        <div className="notice warning-notice" role="status">
+          <TriangleAlert size={14} aria-hidden="true" />
+          <span>
+            Your review may have posted. Finish review says what you can do.
+          </span>
+          <button type="button" onClick={onOpenReview}>
+            Open Finish review
+          </button>
+        </div>
+      )}
       {lines !== null && <Warning onDismiss={onDismissLines}>{lines}</Warning>}
       {unsaved !== null && (
         <Warning onDismiss={onDismissUnsaved}>{unsaved}</Warning>
@@ -149,8 +166,9 @@ function Notices({
 
 const none: ReviewThread[] = [];
 
-/** Where one of the two views was left, for the other. */
-type Left = { view: FilesView; at: number; line: LinePlace };
+/** Where one of the two views was left, for the other, or with no view a
+ * line to go to, for either. */
+type Left = { view: FilesView | null; at: number; line: LinePlace };
 
 function Shown({
   pane,
@@ -322,6 +340,7 @@ export function FilesChanged({
 }) {
   const { viewer } = opened;
   const comments = useLineComments({ opened, head: held.range.head, pull });
+  const finish = useFinishReview({ opened, pull, comments });
   const pane = useRef<HTMLElement>(null);
   const holdsFocus = useRef(false);
   const left = useRef<Left | null>(null);
@@ -347,6 +366,31 @@ export function FilesChanged({
       setProblem({ file: of, message: problemFrom(error).message });
       throw error;
     });
+  /** Goes to a file, and to a line of it, unfolding what is named. */
+  const goTo = (
+    path: string,
+    line: Omit<LinePlace, "below"> | null,
+    unfold: readonly string[],
+  ) => {
+    if (read.kind !== "ready") return;
+    const to = read.files.findIndex(
+      (each) => each.path === path || each.from === path,
+    );
+    if (to < 0) return;
+    for (const id of unfold) if (!ids.has(id)) toggle(id);
+    if (line === null) return files.go(to);
+    if (files.view === "all" || to === at)
+      files.ref.current?.toLine?.(to, line);
+    else {
+      left.current = {
+        view: null,
+        at: to,
+        line: { ...line, below: ABOVE_CHANGE },
+      };
+      files.go(to);
+    }
+  };
+  const sides = { left: "deletions", right: "additions" } as const;
   // Its button goes away, and the focus would go with it.
   const keepingFocus = (act: () => void) => () => {
     pane.current?.focus({ preventScroll: true });
@@ -366,7 +410,40 @@ export function FilesChanged({
             contentMissing={read.contentMissing}
             at={at}
             state={files}
-          />
+          >
+            <FinishReviewButton
+              finish={finish}
+              comments={comments}
+              number={pull.number}
+              author={pull.author}
+              viewer={viewer}
+              url={url}
+              files={read.files}
+              viewed={files.viewed}
+              threads={pull.threads?.items ?? none}
+              onGoTo={({ path, side, line }, isOlder) =>
+                goTo(
+                  path,
+                  isOlder ? null : { part: 0, side: sides[side], number: line },
+                  isOlder ? [`elsewhere ${path}`] : [],
+                )
+              }
+              onShowUnviewed={() => {
+                const next = nextUnviewed(read.files, files.viewed, -1);
+                if (next !== null) files.go(next);
+              }}
+              onOpenThread={(thread) => {
+                const isOnLine = thread.line !== null && !thread.outdated;
+                goTo(
+                  thread.path,
+                  isOnLine && thread.line !== null
+                    ? { part: 0, side: sides[thread.side], number: thread.line }
+                    : null,
+                  isOnLine ? [thread.id] : [`elsewhere ${thread.path}`],
+                );
+              }}
+            />
+          </FilesToolbar>
         )}
         {counts !== null && (
           <p className="files-counts">
@@ -411,6 +488,7 @@ export function FilesChanged({
           onDismissUnsaved={keepingFocus(() => setSeen(persistenceError))}
           onDismiss={keepingFocus(() => setProblem(null))}
           onDismissLines={keepingFocus(comments.dismissNotice)}
+          onOpenReview={finish.unknown ? finish.open : null}
         />
       </section>
     </LineCommentsContext>

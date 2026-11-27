@@ -284,7 +284,9 @@ function roleOf(element: Element): string | null {
   const explicit = element.getAttribute("role");
   if (explicit) return explicit;
   if (element instanceof HTMLInputElement)
-    return element.type === "checkbox" ? "checkbox" : "textbox";
+    return element.type === "checkbox" || element.type === "radio"
+      ? element.type
+      : "textbox";
   return IMPLICIT_ROLES[element.tagName] ?? null;
 }
 

@@ -12,6 +12,7 @@ import type { FileDiffMetadata, VirtualFileMetrics } from "@pierre/diffs";
 import { changeAt, changeStops, nextChange } from "../domain/changeStops";
 import type { ChangeStop } from "../domain/changeStops";
 import type { RangeFile } from "../domain/range";
+import type { LinePlace } from "./KeepDiffPlace";
 
 const LINE = 22;
 /** What Pierre reckons with until it has measured, as the stylesheet has it. */
@@ -72,6 +73,8 @@ export type DiffSteps = {
   /** Opens the comment box on the change the view is at. False when there
    * is none to comment on. */
   comment?: () => boolean;
+  /** Scrolls to a line of a file, when it is the one shown. */
+  toLine?: (at: number, line: Omit<LinePlace, "below">) => void;
 };
 
 export function useDiffSteps(
@@ -92,22 +95,20 @@ export function useDiffSteps(
         instance,
         top: node.getBoundingClientRect().top - origin,
       }));
-      const topOf = (stop: number) => {
-        const { part, side, line } = stops[stop] ?? { part: -1 };
+      const lineTop = ({ part, side, line }: ChangeStop) => {
         const { instance, top = 0 } = drawn[part] ?? {};
-        return (
-          top +
-          (line === undefined
-            ? 0
-            : (instance?.getLinePosition(line, side)?.top ?? 0))
-        );
+        return top + (instance?.getLinePosition(line, side)?.top ?? 0);
+      };
+      const topOf = (stop: number) => {
+        const found = stops[stop];
+        return found ? lineTop(found) : 0;
       };
       const view = {
         at: from ?? scroller.scrollTop,
         most: scroller.scrollHeight - scroller.clientHeight,
         above: ABOVE_CHANGE,
       };
-      return { scroller, topOf, view };
+      return { scroller, topOf, lineTop, view };
     },
     [body, stops, parts],
   );
@@ -127,6 +128,12 @@ export function useDiffSteps(
     () => ({
       step: (by) => scroll(by),
       toStart: () => scrollerIn(body)?.scrollTo({ top: 0 }),
+      toLine: (_, { part, side, number }) => {
+        const measured = measure();
+        if (!measured) return;
+        const top = measured.lineTop({ part, side, line: number });
+        measured.scroller.scrollTop = Math.max(top - ABOVE_CHANGE, 0);
+      },
       comment: () => {
         const measured = measure();
         const at =

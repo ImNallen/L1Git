@@ -154,3 +154,230 @@
   color: var(--muted);
   font-size: 12px;
 }
+
+.finish-sent {
+  flex-shrink: 0;
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.finish-sent:empty {
+  margin-left: auto;
+}
+.finish-button {
+  flex-shrink: 0;
+  height: 28px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+.finish-review {
+  position: fixed;
+  inset: auto;
+  width: 460px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--panel-raised);
+  color: var(--text-secondary);
+  font-size: 13px;
+  box-shadow: 0 16px 48px var(--shadow-dialog);
+}
+.finish-review::backdrop {
+  background: transparent;
+}
+.finish-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.finish-header h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+.finish-header span {
+  color: var(--muted);
+}
+.finish-section {
+  margin: 0;
+  padding: 10px 16px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+}
+.finish-section h3 {
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+.finish-section p {
+  margin: 0;
+}
+.finish-section p + p {
+  margin-top: 6px;
+}
+.finish-none {
+  color: var(--muted);
+}
+.finish-comments {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.finish-comment {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 30px;
+  padding: 0 6px;
+  border-radius: 5px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-align: start;
+}
+button.finish-comment:hover {
+  background: var(--row-hover);
+  color: var(--text);
+}
+.finish-comment > svg {
+  flex-shrink: 0;
+  color: var(--warning-icon);
+}
+.finish-comment code {
+  flex-shrink: 0;
+  color: var(--text);
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 12px;
+}
+.finish-comment > span:not(.line-comment-pending) {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.finish-older .pull-link {
+  flex-shrink: 0;
+}
+.finish-note {
+  margin: 0;
+  padding: 0 16px 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.finish-section .finish-note {
+  padding: 6px 0 0;
+}
+.finish-reminder {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 5px;
+  background: var(--row-hover);
+  color: var(--text);
+  font-size: 12px;
+}
+.finish-section .finish-reminder + .finish-reminder {
+  margin-top: 6px;
+}
+.finish-reminder > svg {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+.finish-reminder > span {
+  flex: 1;
+  min-width: 0;
+}
+.finish-summary {
+  display: block;
+  width: 100%;
+  min-height: 64px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-control);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  line-height: 20px;
+  resize: vertical;
+}
+.finish-summary::placeholder {
+  color: var(--text-faint);
+}
+.finish-events {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.finish-event {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.finish-event:has(:checked) {
+  background: var(--row-hover);
+}
+.finish-event input {
+  margin: 2px 0 0;
+  accent-color: var(--primary-bg);
+}
+.finish-event > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.finish-event strong {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+}
+.finish-review .line-comment-problem {
+  margin: 10px 16px 0;
+}
+.finish-review .line-comment-actions {
+  padding: 8px 16px 0;
+}
+/* Submit and Cancel stay in sight while the rest scrolls. */
+.finish-footer {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px 14px;
+  background: var(--panel-raised);
+}
+.finish-footer .button {
+  height: 28px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+
+/* Room for the path beside Finish review in a narrow pane. */
+.files-toolbar {
+  container-type: inline-size;
+}
+@container (max-width: 960px) {
+  .files-views button span {
+    display: none;
+  }
+}

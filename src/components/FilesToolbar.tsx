@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { ChevronLeft, ChevronRight, File, Rows2 } from "lucide-react";
 import { lineTotals, pathLabel } from "../domain/filesChanged";
 import type { DiffStyle } from "../domain/lineSelection";
@@ -73,11 +74,14 @@ export function FilesToolbar({
   contentMissing,
   at,
   state: { diffStyle, view, setLook, viewed, mark, go },
+  children,
 }: {
   files: readonly RangeFile[];
   contentMissing: boolean;
   at: number;
   state: FilesChangedState;
+  /** At its end. */
+  children?: ReactNode;
 }) {
   const file = files[at];
   return (
@@ -134,6 +138,7 @@ export function FilesToolbar({
           </button>
         ))}
       </div>
+      {children}
     </header>
   );
 }

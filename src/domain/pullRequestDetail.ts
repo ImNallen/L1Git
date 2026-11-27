@@ -42,6 +42,10 @@ const isLogin = (login: string | null, other: string | null) =>
 export const personName = (login: string | null, viewer: string | null) =>
   isLogin(login, viewer) ? "You" : (login ?? "ghost");
 
+/** "Your", or "sara's", before a noun. */
+export const whose = (login: string | null, viewer: string | null) =>
+  isLogin(login, viewer) ? "Your" : `${login ?? "ghost"}'s`;
+
 /** "a", "a and b", "a, b and 2 more". */
 export function named(names: readonly string[]): string {
   const shown = names.slice(0, names.length > 3 ? 2 : 3);

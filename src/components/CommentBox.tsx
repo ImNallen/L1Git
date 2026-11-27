@@ -10,6 +10,7 @@ import {
   mayHavePostedText,
   Problem,
   saveText,
+  SettleChoices,
 } from "./LineCommentParts";
 import { MayHavePosted } from "./MayHavePosted";
 import type { BoxView, LineComments } from "./useLineComments";
@@ -119,23 +120,8 @@ export function CommentBox({
       )}
       {writing?.save?.kind === "changedElsewhere" && (
         <Problem>
-          {saveText(writing.save)}{" "}
-          <button
-            type="button"
-            className="pull-link"
-            tabIndex={0}
-            onClick={() => comments.settleBox("mine")}
-          >
-            Keep mine
-          </button>{" "}
-          <button
-            type="button"
-            className="pull-link"
-            tabIndex={0}
-            onClick={() => comments.settleBox("theirs")}
-          >
-            Use theirs
-          </button>
+          {saveText(writing.save)}
+          <SettleChoices settle={comments.settleBox} />
         </Problem>
       )}
       {writing?.problem && (
