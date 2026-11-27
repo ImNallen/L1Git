@@ -3,11 +3,9 @@ import { createViewedFiles } from "./viewedFiles";
 
 const KEY = "l1git.viewed.v1";
 const pull = "octo/pin#1";
-const mark = (name: string, isViewed = true) => ({
-  pull,
-  mark: name,
-  isViewed,
-});
+const mark = (name: string, isViewed = true) => [
+  { pull, mark: name, isViewed },
+];
 function fakeStorage(saved: string | null = null) {
   const items = new Map(saved === null ? [] : [[KEY, saved]]);
   return {

@@ -3,7 +3,8 @@ import { pull } from "../test/pullRequests";
 import type { PullRequest, TimelineEvent } from "./pullRequest";
 import { oidSchema } from "./repository";
 import type { RangeFile } from "./range";
-import { baseWords, reviewPointOf, sinceGroups } from "./sinceReview";
+import { baseWords, carried, reviewPointOf, sinceGroups } from "./sinceReview";
+import { markOf } from "./viewedFiles";
 
 const at = "2026-11-24T18:00:00Z";
 const head = oidSchema.parse("1".repeat(40));
@@ -145,6 +146,63 @@ describe("sinceGroups", () => {
     expect(again).toEqual([{ since: since[0], now: now[1] }]);
     expect(rebased).toEqual([]);
     expect(unchanged).toEqual([]);
+  });
+});
+
+describe("carried", () => {
+  const name = "octo/pin#1";
+  const record = (marks: string[]) => ({
+    version: 1 as const,
+    pulls: [{ pull: name, marks }],
+  });
+  const reviewedFile = file("b.ts", "1");
+  const once = file("b.ts", "3", { oldBlob: blob("4") });
+
+  it("marks a file only the rebase moved where you viewed it as reviewed, and nothing twice", () => {
+    const rebased = [{ now: once, reviewed: reviewedFile }];
+    const marks = carried(name, rebased, record([markOf(reviewedFile)]));
+    expect(marks).toEqual([{ pull: name, mark: markOf(once), isViewed: true }]);
+    expect(
+      carried(name, rebased, record([markOf(reviewedFile), markOf(once)])),
+    ).toEqual([]);
+  });
+
+  it("carries a second rebase from the reviewed mark", () => {
+    const twice = file("b.ts", "5", { oldBlob: blob("6") });
+    expect(
+      carried(
+        name,
+        [{ now: twice, reviewed: reviewedFile }],
+        record([markOf(reviewedFile), markOf(once)]),
+      ),
+    ).toEqual([{ pull: name, mark: markOf(twice), isViewed: true }]);
+  });
+
+  it("carries nothing you didn't view, or without a reviewed file", () => {
+    expect(
+      carried(name, [{ now: once, reviewed: reviewedFile }], record([])),
+    ).toEqual([]);
+    expect(
+      carried(name, [{ now: once, reviewed: null }], record([markOf(once)])),
+    ).toEqual([]);
+  });
+
+  it("carries no mark to the old path of a file renamed since your review", () => {
+    // The pull request lists D a.ts and A b.ts, as its own read doesn't pair
+    // the rename the author made since your review.
+    const reviewedA = file("a.ts", "1");
+    const now = [
+      file("a.ts", "0", { status: "D", newBlob: null, newMode: null }),
+      file("b.ts", "1", { status: "A", oldBlob: null, oldMode: null }),
+    ];
+    const since = [
+      file("b.ts", "1", { status: "R", from: "a.ts", oldBlob: blob("1") }),
+    ];
+    const { rebased } = sinceGroups(now, {
+      files: since,
+      reviewed: [reviewedA],
+    });
+    expect(carried(name, rebased, record([markOf(reviewedA)]))).toEqual([]);
   });
 });
 

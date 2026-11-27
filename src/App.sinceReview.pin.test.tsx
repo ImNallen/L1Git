@@ -2,6 +2,7 @@
 import { expect, it } from "vitest";
 import type { PullRequest, ReviewThread } from "./domain/pullRequest";
 import type { RangeFile } from "./domain/range";
+import { markOf } from "./domain/viewedFiles";
 import { get, installHarness, query } from "./test/appHarness";
 import type { Harness } from "./test/appHarness";
 import { pullKey } from "./test/fakeBridge";
@@ -105,6 +106,7 @@ async function openFiles(
   fields: Partial<PullRequest> = {},
   more: (bridge: Bridge) => void = () => {},
   view: "one" | "all" = "one",
+  stored: Record<string, string> = {},
 ): Promise<Harness> {
   const app = await visit({
     stored: {
@@ -113,6 +115,7 @@ async function openFiles(
         diffStyle: "unified",
         view,
       }),
+      ...stored,
     },
     bridge: (bridge) => {
       answer(bridge);
@@ -194,6 +197,95 @@ it("shows what changed since your review in All files too", async () => {
   await app.click(get("button", "Show them"));
   await frames(app);
   expect(panel().querySelector(".files-all")?.textContent).toContain("2 files");
+});
+
+const VIEWED = "l1git.viewed.v1";
+/** What you marked viewed as you reviewed: every file of the pull request then. */
+const viewedAtReview = {
+  [VIEWED]: JSON.stringify({
+    version: 1,
+    pulls: [{ pull: "octo/pin#1", marks: asReviewed.map(markOf) }],
+  }),
+};
+const viewedBox = () => get("checkbox", "Viewed", panel()) as HTMLInputElement;
+const progress = () => document.querySelector(".files-progress")?.textContent;
+
+it("keeps the mark of a file main alone changed, in both views", async () => {
+  const app = await openFiles({}, () => {}, "one", viewedAtReview);
+  expect(viewedBox().checked, "a.ts changed again").toBe(false);
+  await app.click(get("button", "Show them"));
+  await app.press("j");
+  expect(path()).toBe("src/b.ts");
+  expect(viewedBox().checked, "only the rebase moved b.ts").toBe(true);
+  await app.click(toggle(/^All changes/));
+  expect(progress()).toBe("Viewed3 of 4");
+  const pulls = (
+    JSON.parse(localStorage.getItem(VIEWED) ?? "{}") as {
+      pulls: { marks: string[] }[];
+    }
+  ).pulls;
+  expect(pulls[0]?.marks).toHaveLength(5);
+});
+
+it("keeps a file you unmark before the since read lands unmarked once it does", async () => {
+  // b.ts was carried on an earlier look, so it has its mark as reviewed and now.
+  const carriedBefore = {
+    [VIEWED]: JSON.stringify({
+      version: 1,
+      pulls: [
+        {
+          pull: "octo/pin#1",
+          marks: [...asReviewed.map(markOf), markOf(now[1]!)],
+        },
+      ],
+    }),
+  };
+  let held: ReturnType<Bridge["hold"]> | null = null;
+  const app = await openFiles(
+    {},
+    (bridge) => {
+      held = bridge.hold("sinceReview");
+    },
+    "one",
+    carriedBefore,
+  );
+  await app.click(toggle(/^All changes/));
+  await app.press("j");
+  expect(path()).toBe("src/b.ts");
+  expect(viewedBox().checked).toBe(true);
+  await app.click(viewedBox());
+  expect(viewedBox().checked).toBe(false);
+  held!.release();
+  await app.settle();
+  await frames(app);
+  expect(path()).toBe("src/b.ts");
+  expect(viewedBox().checked, "the carry doesn't bring it back").toBe(false);
+  expect(progress(), "c.ts and d.ts").toBe("Viewed2 of 4");
+});
+
+it("keeps a file you unmark unmarked after the next rebase", async () => {
+  const app = await openFiles({}, () => {}, "one", viewedAtReview);
+  await app.click(toggle(/^All changes/));
+  await app.press("j");
+  expect(path()).toBe("src/b.ts");
+  await app.click(viewedBox());
+  expect(viewedBox().checked).toBe(false);
+  const again = now.map((each) =>
+    each.path === "src/b.ts" ? { ...each, newBlob: oid("7") } : each,
+  );
+  app.bridge.respond("rangeFiles", () => ({
+    kind: "ready",
+    mergeBase: oid("a"),
+    files: again,
+    contentMissing: false,
+    shallow: false,
+  }));
+  await app.click(get("button", "Pull requests"));
+  await open(app, 1);
+  await app.click(tab("Files changed"));
+  await frames(app);
+  await app.click(toggle(/^All changes/));
+  expect(progress(), "c.ts and d.ts").toBe("Viewed2 of 4");
 });
 
 it("shows the files main alone changed when asked", async () => {
