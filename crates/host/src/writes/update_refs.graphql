@@ -1,0 +1,3 @@
+mutation($input: UpdateRefsInput!) {
+  updateRefs(input: $input) { clientMutationId }
+}

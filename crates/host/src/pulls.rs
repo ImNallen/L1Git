@@ -13,14 +13,14 @@ pub use list::{PullRequestList, PullRequests};
 
 /// The same shape a snapshot's remotes carry. Both names go into search
 /// queries, so neither can hold a space or a quote.
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Repository {
     owner: Name,
     repo: Name,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(try_from = "String")]
 struct Name(String);
 

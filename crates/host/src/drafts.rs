@@ -3,11 +3,12 @@
 //! be reachable. Preferences go in the webview's `localStorage`; work goes
 //! here.
 
-use std::io::Write;
+mod file;
+mod sent;
+mod waiting;
+
 use std::num::NonZeroU32;
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::{fs, io, process};
 
 use serde::{Deserialize, Serialize};
 
@@ -15,14 +16,17 @@ use crate::Host;
 use crate::github::{ApiBase, Login};
 use crate::pulls::Repository;
 use crate::state::unix_millis;
-use crate::wire::{ErrorKind, Failure};
+use crate::wire::Failure;
+use file::Shelf;
+pub(crate) use file::{Gate, Lane};
+pub(crate) use sent::{Carried, Sent, SentView};
+pub(crate) use waiting::Waiting;
 
-const VERSION: u64 = 1;
 /// Pull requests with drafts, across every account and GitHub.
 const MOST_PULLS: usize = 100;
 const MOST_DRAFTS: usize = 100;
 /// GitHub's limit on a comment's body.
-const MOST_CHARS: usize = 65_536;
+pub(crate) const MOST_CHARS: usize = 65_536;
 
 #[derive(Debug, Deserialize)]
 #[serde(
@@ -48,6 +52,18 @@ pub enum Change {
         head: Oid,
         at: u64,
     },
+    /// Keep as draft: a write that may have posted gives its drafts back,
+    /// marked so, and holds the pull request no longer. Keeping one that is
+    /// gone is done.
+    Keep {
+        attempt: AttemptId,
+    },
+    /// Drops the words that waited at this place, as picking the other
+    /// window's words does. Forgetting none is done.
+    Forget {
+        anchor: Anchor,
+        head: Oid,
+    },
 }
 
 /// Every answer carries what this pull request holds now, so a window that
@@ -60,6 +76,12 @@ pub struct PullDrafts {
     /// Where an unreadable `drafts.json` went, on the one answer that moved
     /// it.
     set_aside: Option<String>,
+    /// Writes that left, or may have, with the drafts each carried.
+    sent: Vec<SentView>,
+    /// Words typed where a write held the place, until the write ends, or,
+    /// when they were typed on another draft than it carried, until a save
+    /// or `forget` at their place.
+    waiting: Vec<Waiting>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -70,6 +92,11 @@ pub struct PullDrafts {
 )]
 pub enum Refused {
     Stale,
+    /// A write that left, or may have, holds this place, until it is known
+    /// or the user keeps it as a draft. The words wait in `waiting`.
+    Sent,
+    /// Its write is still sending, so it can't be kept as a draft yet.
+    Sending,
     /// Nothing is dropped to make room, so the user chooses what to send or
     /// delete, and `of` names where.
     Full {
@@ -97,14 +124,22 @@ pub struct Draft {
     written_at: u64,
     /// Grows with every save of this draft, so it is also what `at` names.
     saved_at: u64,
+    /// A write carried these words, GitHub's answer was lost, and the user
+    /// kept them as a draft. Sending them again may post them twice.
+    #[serde(default)]
+    may_have_posted: bool,
 }
 
 impl Draft {
-    /// A line number means something at one commit only, so a line draft's
-    /// place includes its head. Every other draft follows the head along.
     fn is_at(&self, anchor: &Anchor, head: &Oid) -> bool {
-        self.anchor == *anchor && (!matches!(anchor, Anchor::Line(_)) || self.head == *head)
+        same_place(&self.anchor, &self.head, anchor, head)
     }
+}
+
+/// A line number means something at one commit only, so a line draft's
+/// place includes its head. Every other draft follows the head along.
+fn same_place(anchor: &Anchor, head: &Oid, other: &Anchor, other_head: &Oid) -> bool {
+    anchor == other && (!matches!(anchor, Anchor::Line(_)) || head == other_head)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -130,10 +165,10 @@ pub enum Anchor {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "RawLines")]
 pub struct Lines {
-    path: FilePath,
-    side: Side,
-    line: NonZeroU32,
-    start: Option<LinePoint>,
+    pub(crate) path: FilePath,
+    pub(crate) side: Side,
+    pub(crate) line: NonZeroU32,
+    pub(crate) start: Option<LinePoint>,
 }
 
 #[derive(Deserialize)]
@@ -167,8 +202,8 @@ impl TryFrom<RawLines> for Lines {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LinePoint {
-    side: Side,
-    line: NonZeroU32,
+    pub(crate) side: Side,
+    pub(crate) line: NonZeroU32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -202,6 +237,13 @@ macro_rules! checked_string {
                 value.0
             }
         }
+
+        impl $name {
+            #[allow(dead_code, reason = "not every checked string is read back")]
+            pub(crate) fn as_str(&self) -> &str {
+                &self.0
+            }
+        }
     };
 }
 
@@ -227,6 +269,14 @@ checked_string!(
     "A path is 1 to 4096 bytes without a NUL."
 );
 checked_string!(
+    AttemptId,
+    |value| (1..=64).contains(&value.len())
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"-_".contains(&b)),
+    "An attempt id is 1 to 64 letters, digits, - and _."
+);
+checked_string!(
     Text,
     |value| !value.trim().is_empty() && value.chars().count() <= MOST_CHARS,
     "A draft holds 1 to 65,536 characters that are not all spaces."
@@ -235,145 +285,60 @@ checked_string!(
 /// One pull request's drafts under one account on one GitHub.
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct Book {
+pub(crate) struct Book {
     api: ApiBase,
     login: Login,
     repository: Repository,
     number: u32,
     drafts: Vec<Draft>,
+    #[serde(default)]
+    sent: Vec<Sent>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    waiting: Vec<Waiting>,
 }
 
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct File {
-    version: u64,
-    pulls: Vec<Book>,
+/// One pull request, as one account names it on this computer's GitHub.
+pub(crate) struct BookKey {
+    pub(crate) login: Login,
+    pub(crate) repository: Repository,
+    pub(crate) number: u32,
 }
 
-/// Read alone first, so a newer build's shape is never parsed as this one's.
-#[derive(Deserialize)]
-struct Version {
-    version: u64,
-}
-
-struct Loaded {
-    pulls: Vec<Book>,
-    set_aside: Option<String>,
-}
-
-/// An unreadable file, such as one a power loss emptied, would refuse every
-/// save after it. It moves aside instead, kept for whoever wants to look,
-/// and the drafts start again.
-fn load(dir: &Path, path: &Path) -> Result<Loaded, Failure> {
-    let bytes = match fs::read(path) {
-        Ok(bytes) => bytes,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            return Ok(Loaded {
-                pulls: Vec::new(),
-                set_aside: None,
-            });
-        }
-        Err(_) => return Err(unreadable()),
-    };
-    match serde_json::from_slice::<Version>(&bytes) {
-        Ok(Version { version }) if version > VERSION => {
-            return Err(Failure::new(
-                ErrorKind::Storage,
-                "A newer version of L1 Git saved the drafts on this computer. L1 Git left them as they are; update it to see them.",
-            ));
-        }
-        Ok(Version { version: VERSION }) => {
-            if let Ok(file) = serde_json::from_slice::<File>(&bytes) {
-                return Ok(Loaded {
-                    pulls: file.pulls,
-                    set_aside: None,
-                });
-            }
-        }
-        _ => {}
-    }
-    let aside = dir.join(format!("drafts.corrupt-{}.json", unix_millis()));
-    fs::rename(path, &aside).map_err(|_| unreadable())?;
-    Ok(Loaded {
-        pulls: Vec::new(),
-        set_aside: Some(aside.display().to_string()),
-    })
-}
-
-fn unreadable() -> Failure {
-    Failure::new(
-        ErrorKind::Storage,
-        "L1 Git can't read the drafts saved on this computer, so it left them as they are and saved nothing.",
-    )
-}
-
-fn unwritable() -> Failure {
-    Failure::new(
-        ErrorKind::Storage,
-        "L1 Git could not save this draft. Check that its configuration folder is writable.",
-    )
-}
-
-/// Held from the read to the save, so another L1 Git on this folder never
-/// saves over a change it didn't read. The system lets go of it when the
-/// process ends, however it ends.
-fn lock(dir: &Path) -> Result<fs::File, Failure> {
-    let open = || -> io::Result<fs::File> {
-        fs::create_dir_all(dir)?;
-        let file = fs::OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .write(true)
-            .open(dir.join("drafts.lock"))?;
-        file.lock()?;
-        Ok(file)
-    };
-    open().map_err(|_| unwritable())
-}
-
-/// Every save writes a file of its own, so no other save can rename it away.
-static SAVES: AtomicU64 = AtomicU64::new(0);
-
-/// Fails only when `drafts.json` still holds what it held before.
-fn save(dir: &Path, path: &Path, pulls: Vec<Book>) -> Result<(), Failure> {
-    for entry in fs::read_dir(dir).into_iter().flatten().flatten() {
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
-        if name.starts_with("drafts.") && name.ends_with(".tmp") {
-            let _ = fs::remove_file(entry.path());
+impl Book {
+    fn view(&self, set_aside: Option<String>, sending: bool) -> PullDrafts {
+        PullDrafts {
+            drafts: self.drafts.clone(),
+            refused: None,
+            set_aside,
+            sent: self.sent.iter().map(|sent| sent.view(sending)).collect(),
+            waiting: self.waiting.clone(),
         }
     }
-    let temporary = dir.join(format!(
-        "drafts.{}.{}.tmp",
-        process::id(),
-        SAVES.fetch_add(1, Ordering::Relaxed)
-    ));
-    let write = || -> io::Result<()> {
-        let bytes = serde_json::to_vec(&File {
-            version: VERSION,
-            pulls,
-        })?;
-        let mut file = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temporary)?;
-        file.write_all(&bytes)?;
-        file.sync_all()?;
-        fs::rename(&temporary, path)
-    };
-    if write().is_err() {
-        let _ = fs::remove_file(&temporary);
-        return Err(unwritable());
-    }
-    // The rename saved it. Syncing the folder keeps the rename through a
-    // power loss, and failing to doesn't undo it.
-    #[cfg(unix)]
-    let _ = fs::File::open(dir).and_then(|folder| folder.sync_all());
-    Ok(())
 }
 
-/// `None` when the change is done, and `drafts` is then what to save.
-fn apply(drafts: &mut Vec<Draft>, change: Change, now: u64) -> Option<Refused> {
+/// `None` when the change is done, and `book` is then what to save. `room`
+/// says whether a book that was not there before may be kept.
+fn apply(book: &mut Book, change: Change, now: u64, room: bool, gate: &Gate) -> Option<Refused> {
+    let place = match &change {
+        Change::Put { anchor, head, .. } | Change::Delete { anchor, head, .. } => {
+            Some((anchor.clone(), head.clone()))
+        }
+        _ => None,
+    };
+    let refused = apply_change(book, change, now, room, gate);
+    if let (None, Some((anchor, head))) = (refused, place) {
+        book.unwait(&anchor, &head);
+    }
+    refused
+}
+
+fn apply_change(
+    book: &mut Book,
+    change: Change,
+    now: u64,
+    room: bool,
+    gate: &Gate,
+) -> Option<Refused> {
     match change {
         Change::Read {} => None,
         Change::Put {
@@ -381,12 +346,25 @@ fn apply(drafts: &mut Vec<Draft>, change: Change, now: u64) -> Option<Refused> {
             head,
             text,
             at,
+        } if book.holds(&anchor, &head) => {
+            book.wait(anchor, head, text, at);
+            Some(Refused::Sent)
+        }
+        Change::Put {
+            anchor,
+            head,
+            text,
+            at,
         } => {
+            let drafts = &mut book.drafts;
             let found = drafts.iter().position(|draft| draft.is_at(&anchor, &head));
             match (found, at) {
                 (None, None) if drafts.len() >= MOST_DRAFTS => {
                     Some(Refused::Full { of: Limit::Drafts })
                 }
+                (None, None) if !room => Some(Refused::Full {
+                    of: Limit::PullRequests,
+                }),
                 (None, None) => {
                     drafts.push(Draft {
                         anchor,
@@ -394,6 +372,7 @@ fn apply(drafts: &mut Vec<Draft>, change: Change, now: u64) -> Option<Refused> {
                         text,
                         written_at: now,
                         saved_at: now,
+                        may_have_posted: false,
                     });
                     None
                 }
@@ -408,6 +387,7 @@ fn apply(drafts: &mut Vec<Draft>, change: Change, now: u64) -> Option<Refused> {
             }
         }
         Change::Delete { anchor, head, at } => {
+            let drafts = &mut book.drafts;
             match drafts.iter().position(|draft| draft.is_at(&anchor, &head)) {
                 None => None,
                 Some(index) if drafts[index].saved_at == at => {
@@ -417,64 +397,57 @@ fn apply(drafts: &mut Vec<Draft>, change: Change, now: u64) -> Option<Refused> {
                 Some(_) => Some(Refused::Stale),
             }
         }
+        Change::Keep { .. } if gate.held() => Some(Refused::Sending),
+        Change::Keep { attempt } => {
+            book.give_back(&attempt, true);
+            None
+        }
+        Change::Forget { anchor, head } => {
+            book.unwait(&anchor, &head);
+            None
+        }
     }
 }
 
 impl Host {
-    pub(crate) fn drafts(
+    /// One pull request's book under the drafts lock, saved when `change`
+    /// says to. `change` also learns whether a book that was not there before
+    /// may be kept.
+    pub(crate) fn shelved<R>(
         &self,
-        login: Login,
-        repository: Repository,
-        number: u32,
-        change: Change,
-    ) -> Result<PullDrafts, Failure> {
-        let dir = self.file.parent().unwrap_or(Path::new("."));
-        let _only = lock(dir)?;
-        let path = dir.join("drafts.json");
-        let Loaded {
-            mut pulls,
-            set_aside,
-        } = load(dir, &path)?;
-        let api = self.endpoints.api();
+        key: &BookKey,
+        change: impl FnOnce(&mut Book, bool) -> (R, bool),
+    ) -> Result<(R, PullDrafts), Failure> {
+        self.gated(key, |book, room, _| change(book, room))
+    }
+
+    /// `shelved`, with the way to the pull request's lane. A lane freed here
+    /// is free to others only once the book is saved, since they look under
+    /// the same lock.
+    pub(crate) fn gated<R>(
+        &self,
+        key: &BookKey,
+        change: impl FnOnce(&mut Book, bool, &Gate) -> (R, bool),
+    ) -> Result<(R, PullDrafts), Failure> {
+        let mut shelf = Shelf::open(self.file.parent().unwrap_or(Path::new(".")))?;
+        let (mut book, room) = shelf.take(self.endpoints.api(), key);
+        let gate = shelf.gate(&self.lane_name(key));
+        let (answer, save) = change(&mut book, room, &gate);
+        let sending = !book.sent.is_empty() && gate.held();
+        let view = book.view(shelf.set_aside.clone(), sending);
+        if save {
+            shelf.save(book)?;
+        }
+        Ok((answer, view))
+    }
+
+    pub(crate) fn drafts(&self, key: &BookKey, change: Change) -> Result<PullDrafts, Failure> {
         let is_read = matches!(change, Change::Read {});
-        let found = pulls.iter().position(|book| {
-            &book.api == api
-                && book.login == login
-                && book.repository == repository
-                && book.number == number
-        });
-        let mut book = match found {
-            Some(index) => pulls.remove(index),
-            None => Book {
-                api: api.clone(),
-                login,
-                repository,
-                number,
-                drafts: Vec::new(),
-            },
-        };
-        let mut refused = apply(&mut book.drafts, change, unix_millis());
-        if refused.is_none()
-            && found.is_none()
-            && !book.drafts.is_empty()
-            && pulls.len() >= MOST_PULLS
-        {
-            book.drafts.clear();
-            refused = Some(Refused::Full {
-                of: Limit::PullRequests,
-            });
-        }
-        let drafts = book.drafts.clone();
-        if refused.is_none() && !is_read {
-            if !book.drafts.is_empty() {
-                pulls.push(book);
-            }
-            save(dir, &path, pulls)?;
-        }
-        Ok(PullDrafts {
-            drafts,
-            refused,
-            set_aside,
-        })
+        let (refused, view) = self.gated(key, |book, room, gate| {
+            let refused = apply(book, change, unix_millis(), room, gate);
+            let waits = refused == Some(Refused::Sent);
+            (refused, (refused.is_none() || waits) && !is_read)
+        })?;
+        Ok(PullDrafts { refused, ..view })
     }
 }

@@ -90,6 +90,7 @@ pub struct Reply {
     headers: Vec<(&'static str, String)>,
     body: String,
     after: Option<Arc<Barrier>>,
+    unanswered: bool,
 }
 
 impl Reply {
@@ -107,6 +108,7 @@ impl Reply {
                 r#"{{"login":"{login}","id":{id},"node_id":"MDQ6VXNlcjE=","type":"User","site_admin":false,"name":"The Octocat"}}"#
             ),
             after: None,
+            unanswered: false,
         }
     }
 
@@ -116,6 +118,7 @@ impl Reply {
             headers: vec![("Content-Type", "application/json; charset=utf-8".to_owned())],
             body: r#"{"message":"Bad credentials","documentation_url":"https://docs.github.com/rest","status":"401"}"#.to_owned(),
             after: None,
+            unanswered: false,
         }
     }
 
@@ -129,6 +132,7 @@ impl Reply {
             ],
             body: r#"{"message":"API rate limit exceeded for user ID 1.","documentation_url":"https://docs.github.com/rest/overview/rate-limits-for-the-rest-api","status":"403"}"#.to_owned(),
             after: None,
+            unanswered: false,
         }
     }
 
@@ -147,12 +151,22 @@ impl Reply {
             headers: Vec::new(),
             body: body.to_owned(),
             after: None,
+            unanswered: false,
         }
     }
 
     pub fn with_header(mut self, name: &'static str, value: &str) -> Reply {
         self.headers.push((name, value.to_owned()));
         self
+    }
+
+    /// Read to its end, then answered with nothing a client can read: a
+    /// question GitHub heard and never answered.
+    pub fn unanswered() -> Reply {
+        Reply {
+            unanswered: true,
+            ..Reply::status(500, "")
+        }
     }
 
     /// Waits for the test to reach the barrier too.
@@ -167,6 +181,7 @@ impl Reply {
             headers: vec![("Location", location.to_owned())],
             body: String::new(),
             after: None,
+            unanswered: false,
         }
     }
 
@@ -185,6 +200,7 @@ impl Reply {
             headers: vec![("Content-Type", "application/json; charset=utf-8".to_owned())],
             body,
             after: None,
+            unanswered: false,
         }
     }
 
@@ -367,6 +383,15 @@ fn answer(mut request: tiny_http::Request, world: &Mutex<World>) {
             authorization.and_then(|authorization| world.replies.get(&authorization).cloned())
         };
         (!world.silent).then(|| reply.unwrap_or_else(Reply::bad_credentials))
+    };
+    let reply = match reply {
+        Some(reply) if reply.unanswered => {
+            if let Some(reached) = &reply.after {
+                reached.wait();
+            }
+            None
+        }
+        reply => reply,
     };
     match reply {
         Some(reply) => respond(request, reply),

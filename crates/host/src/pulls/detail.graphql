@@ -44,7 +44,7 @@ query($owner: String!, $repo: String!, $number: Int!, $threads: Boolean!) {
           ... on ConvertToDraftEvent { id author: actor { login } at: createdAt }
         }
       }
-      reviewThreads(first: 100) @include(if: $threads) { totalCount nodes {
+      reviewThreads(last: 100) @include(if: $threads) { totalCount nodes {
         id path line startLine originalLine originalStartLine diffSide isOutdated isResolved
         viewerCanReply viewerCanResolve viewerCanUnresolve
         first: comments(first: 1) { nodes { diffHunk pullRequestReview { id } } }

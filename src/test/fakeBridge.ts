@@ -22,7 +22,12 @@ import type { GitHubRepository } from "../domain/repository";
 import { rangeFilesSchema, rangePatchesSchema } from "../domain/range";
 import { pullCopyHandlers } from "./fakePullCopies";
 import { draftsHandler } from "./fakeDrafts";
-import type { Draft } from "../domain/drafts";
+import type { FakeSent } from "./fakeDrafts";
+import { checkHandler, sendAgainArrives, writeArrives } from "./fakeWrites";
+import type { WriteScript } from "./fakeWrites";
+import type { PullWrite } from "../domain/pullRequestWrites";
+import type { Draft, Waiting } from "../domain/drafts";
+import type { Wrote } from "../domain/host";
 import type { PullCopy } from "./fakePullCopies";
 import { mergeSelectionSchema } from "../domain/merge";
 import { probeOf } from "../domain/inProgress";
@@ -87,6 +92,15 @@ export type World = {
     /** The drafts on this computer, by login and `pullKey`, as the host keeps
      * them in drafts.json. */
     drafts: Map<string, Draft[]>;
+    /** The writes drafts.json keeps from before each leaves until its outcome
+     * is known, by login and `pullKey`, with the drafts they carry. */
+    sent: Map<string, FakeSent[]>;
+    waiting: Map<string, Waiting[]>;
+    /** What the next writes answer, in order. A write with none left is done
+     * and changes `details` as GitHub would. */
+    writes: WriteScript[];
+    /** Every write that reached GitHub, in order. */
+    mutations: PullWrite[];
   };
 };
 
@@ -158,6 +172,10 @@ export function createWorld(): World {
       pulls: new Map(),
       details: new Map(),
       drafts: new Map(),
+      sent: new Map(),
+      waiting: new Map(),
+      writes: [],
+      mutations: [],
     },
   };
 }
@@ -457,7 +475,12 @@ const hostHandlers: Record<
     draftsHandler(
       `${String(request.login)} ${pullKey(String(hostPath(request)), Number(request.number))}`.toLowerCase(),
       request.change as DraftChange,
-      host.drafts,
+      host,
+    ),
+  check: (request, host) =>
+    checkHandler(
+      request as unknown as Parameters<typeof checkHandler>[0],
+      host,
     ),
   disconnect: (_, host) => {
     host.status = {
@@ -467,6 +490,24 @@ const hostHandlers: Record<
     };
     return undefined;
   },
+};
+
+/** Writes take their pull request and are kept before the bridge holds
+ * them, as the host does before the mutation leaves. */
+const hostArrivals: Record<
+  string,
+  (request: BridgeRequest, host: World["host"]) => () => Wrote
+> = {
+  write: (request, host) =>
+    writeArrives(
+      request as unknown as Parameters<typeof writeArrives>[0],
+      host,
+    ),
+  sendAgain: (request, host) =>
+    sendAgainArrives(
+      request as unknown as Parameters<typeof sendAgainArrives>[0],
+      host,
+    ),
 };
 
 type Deferred = { promise: Promise<void>; resolve: () => void };
@@ -588,8 +629,18 @@ export function createBridge(world: World = createWorld()) {
     const request = JSON.parse(init.body) as BridgeRequest;
     if (input === "/api/host") {
       hostLog.push(request);
+      const arrived = hostArrivals[request.op]?.(request, world.host);
       await held(request.op, hostPath(request));
-      return reply(() => answerHost(request));
+      return reply(() =>
+        arrived
+          ? {
+              ok: true,
+              op: request.op,
+              data: arrived(),
+              status: world.host.status,
+            }
+          : answerHost(request),
+      );
     }
     log.push(request);
     await held(request.op, request.path);

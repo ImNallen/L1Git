@@ -68,6 +68,7 @@ fn decode<T: Default + DeserializeOwned>(
     {
         return Err(ApiError::RateLimited {
             reset_at: reset_at(headers, now),
+            secondary: false,
         });
     }
     let data = match data {
@@ -84,7 +85,7 @@ fn decode<T: Default + DeserializeOwned>(
     })
 }
 
-fn gave_up(kind: &str) -> bool {
+pub(crate) fn gave_up(kind: &str) -> bool {
     matches!(kind, "RESOURCE_LIMITS_EXCEEDED" | "SERVICE_UNAVAILABLE")
         || kind.contains("TIMEOUT")
         || kind.contains("TIMED_OUT")
@@ -105,6 +106,11 @@ impl Withheld {
             // GitHub types what it refuses, and seldom what it fails at.
             _ => ApiError::Unfinished { message },
         }
+    }
+
+    /// Whether GitHub left out anything at all.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.errors.is_empty()
     }
 
     /// Whether GitHub left out a `field`, anywhere in the answer.

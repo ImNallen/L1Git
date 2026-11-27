@@ -85,6 +85,7 @@ const reads =
   ({ name }, list) => ({
     value: null,
     at: null,
+    askedAt: null,
     reading: false,
     problem: null,
     ...(list === "open" ? open : recent)[name],

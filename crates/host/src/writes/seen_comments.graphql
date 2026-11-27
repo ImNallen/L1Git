@@ -1,0 +1,5 @@
+query($id: ID!) {
+  node(id: $id) {
+    ... on PullRequest { comments(last: 100) { nodes { id author { login } body } } }
+  }
+}

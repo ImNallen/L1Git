@@ -265,6 +265,9 @@ pub(crate) enum ApiError {
     Unauthorized,
     RateLimited {
         reset_at: Option<u64>,
+        /// GitHub's secondary limit, on how fast requests come rather than
+        /// how many an hour.
+        secondary: bool,
     },
     Forbidden {
         message: String,
@@ -337,6 +340,15 @@ impl GitHub<'_> {
         }
     }
 
+    /// For GitHub's 401 to this token. It forgets the connection, as a read
+    /// does.
+    pub(crate) fn signed_out(&self) -> Failure {
+        match self.connection {
+            Some((host, generation)) => host.revoked(generation),
+            None => api_failure(ApiError::Unauthorized),
+        }
+    }
+
     fn get(&self, path: &str) -> Result<(HeaderMap, Vec<u8>), ApiError> {
         self.send(
             self.http
@@ -401,6 +413,7 @@ fn classify(status: u16, headers: &HeaderMap, body: &[u8], now: u64) -> Option<A
         401 => Some(ApiError::Unauthorized),
         403 | 429 if limited => Some(ApiError::RateLimited {
             reset_at: reset_at(headers, now),
+            secondary: header(headers, "x-ratelimit-remaining") != Some("0"),
         }),
         403 => {
             #[derive(Deserialize)]
@@ -448,22 +461,40 @@ pub(crate) struct Fetched<T> {
 
 impl Host {
     fn generation(&self) -> Option<CommitId> {
+        self.connection().map(|(generation, _)| generation)
+    }
+
+    /// Read together, so a login checked here is the one `generation` signs in.
+    pub(crate) fn connection(&self) -> Option<(CommitId, Login)> {
         let state = self.lock();
         let connection = state.saved.get(self.endpoints.api())?;
-        Some(connection.generation)
+        Some((connection.generation, connection.login().clone()))
     }
 
     pub(crate) fn with_github<T>(
         &self,
         read: impl FnOnce(&GitHub<'_>) -> Result<T, ApiError>,
     ) -> Result<Fetched<T>, Failure> {
-        let api = self.endpoints.api();
         let generation = self.generation().ok_or_else(|| {
             Failure::new(
                 ErrorKind::NotConnected,
                 "L1 Git is not connected to GitHub. Sign in from Settings › Hosts.",
             )
         })?;
+        match self.as_connection(generation, read)? {
+            Ok(value) => Ok(Fetched { value, generation }),
+            Err(ApiError::Unauthorized) => Err(self.revoked(generation)),
+            Err(error) => Err(api_failure(error)),
+        }
+    }
+
+    /// Calls GitHub as connection `generation`, with its token read now.
+    pub(crate) fn as_connection<T>(
+        &self,
+        generation: CommitId,
+        call: impl FnOnce(&GitHub<'_>) -> T,
+    ) -> Result<T, Failure> {
+        let api = self.endpoints.api();
         let Some(token) = self.vault.read(api).map_err(keychain)? else {
             self.forget(&self.lock_writes(), generation, EndReason::TokenMissing);
             return Err(Failure::new(
@@ -471,23 +502,21 @@ impl Host {
                 "L1 Git's GitHub sign-in is no longer in the system keychain. Sign in again in Settings › Hosts.",
             ));
         };
-        let github = GitHub {
+        Ok(call(&GitHub {
             http: self.http.client()?,
             api,
             token: &token,
             connection: Some((self, generation)),
-        };
-        match read(&github) {
-            Ok(value) => Ok(Fetched { value, generation }),
-            Err(ApiError::Unauthorized) => {
-                self.forget(&self.lock_writes(), generation, EndReason::Revoked);
-                Err(Failure::new(
-                    ErrorKind::SignedOut,
-                    "GitHub no longer accepts L1 Git's sign-in. Sign in again in Settings › Hosts.",
-                ))
-            }
-            Err(error) => Err(api_failure(error)),
-        }
+        }))
+    }
+
+    /// For GitHub's 401 to connection `generation`'s token.
+    pub(crate) fn revoked(&self, generation: CommitId) -> Failure {
+        self.forget(&self.lock_writes(), generation, EndReason::Revoked);
+        Failure::new(
+            ErrorKind::SignedOut,
+            "GitHub no longer accepts L1 Git's sign-in. Sign in again in Settings › Hosts.",
+        )
     }
 }
 
@@ -501,16 +530,21 @@ pub(crate) fn api_failure(error: ApiError) -> Failure {
             ErrorKind::Rejected,
             "GitHub did not accept the GitHub CLI's sign-in. Run gh auth login, then try again.",
         ),
-        ApiError::RateLimited { reset_at } => {
+        ApiError::RateLimited {
+            reset_at,
+            secondary,
+        } => {
             let wait = match reset_at.map(|at| at.saturating_sub(unix_secs()).div_ceil(60).max(1)) {
                 Some(1) => "Try again in a minute.".to_owned(),
                 Some(minutes) => format!("Try again in {minutes} minutes."),
                 None => "Try again in a few minutes.".to_owned(),
             };
-            Failure::new(
-                ErrorKind::RateLimited { reset_at },
-                format!("GitHub's rate limit for your account is used up. {wait}"),
-            )
+            let why = if secondary {
+                "GitHub asked L1 Git to slow down, because this account sent many requests in a short time."
+            } else {
+                "GitHub's rate limit for your account is used up."
+            };
+            Failure::new(ErrorKind::RateLimited { reset_at }, format!("{why} {wait}"))
         }
         ApiError::Forbidden { message } => Failure::new(
             ErrorKind::GitHubFailed { http_status: 403 },
@@ -574,6 +608,23 @@ mod tests {
     fn kind(status: u16, pairs: &[(&'static str, &str)], body: &str) -> Option<ErrorKind> {
         classify(status, &headers(pairs), body.as_bytes(), 1_000)
             .map(|error| api_failure(error).kind)
+    }
+
+    #[test]
+    fn a_secondary_rate_limit_asks_to_slow_down() {
+        let said = |pairs: &[(&'static str, &str)]| {
+            classify(403, &headers(pairs), b"{}", 1_000)
+                .map(|error| api_failure(error).message)
+                .unwrap()
+        };
+        let secondary = said(&[("retry-after", "60"), ("x-ratelimit-remaining", "4000")]);
+        assert!(
+            secondary.starts_with("GitHub asked L1 Git to slow down"),
+            "{secondary}"
+        );
+        assert!(secondary.ends_with("Try again in a minute."), "{secondary}");
+        let primary = said(&[("x-ratelimit-remaining", "0")]);
+        assert!(primary.contains("used up"), "{primary}");
     }
 
     #[test]

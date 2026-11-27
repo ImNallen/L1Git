@@ -119,6 +119,31 @@ L1 Git keeps its copy of the token in the system keychain under the service `dev
 
 **Check connection** asks GitHub who the saved token belongs to, and updates the login and what it can read. When GitHub accepts the token, the row says so under the login. A new sign-in shows the same line. If GitHub no longer accepts the token, or the keychain no longer holds it, L1 Git forgets the connection and says why above **Sign in to GitHub**. **Disconnect** asks first, then removes the record from `host.json` and the token from the keychain. It does not revoke the token on GitHub, so `gh` stays signed in. Signing out of `gh` later does not disconnect L1 Git either.
 
+### Writing to GitHub
+
+This version doesn't write to GitHub yet. These are the rules its writes keep once a button sends one.
+
+A write is one click, made for the account signed in when you click. If L1 Git is signed in as someone else by the time it sends, it sends nothing. L1 Git sends each write once and never sends it again on its own, even when no answer comes back.
+
+Before a write leaves, L1 Git saves a record of it in `drafts.json`, with the drafts it carries, and reads what is already on GitHub where its result would appear, which is your reviews on the pull request, the thread's comments, or the conversation's comments. A pull request takes one write at a time. While a write is on its way, or while L1 Git can't tell how one ended, the pull request takes no other write, from this window, another window, or another copy of L1 Git on the same configuration folder. While it is on its way, each of them shows it as sending, and none of them can keep it as a draft or send it again. A copy of L1 Git that quits or crashes while sending lets go of the write, which then may have posted. The record and its drafts stay through a restart, a crash and signing in again, and a draft a write carries can't be sent again or typed over until the write is known. Words a window typed there before it learned of the write wait in `drafts.json`, so closing the window loses none of them. When the write ends, they replace what it gives back if they were typed on the very draft it carried, and become a new draft if GitHub has it. Typed on an older draft, they stay beside what the write gives back, for you to keep yours or take theirs.
+
+Each write ends in one of four ways:
+
+- **Done.** GitHub did it. The drafts it sent are deleted, and what you wrote shows as sent until L1 Git reads the pull request again.
+- **Refused.** GitHub answered and did not do it. L1 Git shows GitHub's reason, and the drafts it carried are drafts again.
+- **Not sent.** Nothing reached GitHub, for example because L1 Git could not reach it, the sign-in changed, or the request never got past L1 Git itself. The drafts it carried are drafts again, and you can send it again.
+- **Unknown.** L1 Git sent it and got no answer it could read, so it may have posted.
+
+**May have posted** is what L1 Git says of an unknown write until it knows. Each time L1 Git reads the pull request, it looks again. A write that would post twice if sent again (a comment, a reply, Add single comment, Finish review, or submitting a pending review) counts as posted only when GitHub shows something new since L1 Git's read before sending, made by you, with the same words, and for a review the same verdict and line comments. Seeing nothing never counts as not posted, because GitHub may still be working on it. A resolve, an unresolve, a merge or deleting the head branch can be done twice without harm, so L1 Git settles it from what it reads, such as whether the thread is resolved, the pull request merged, or the branch gone. If GitHub hasn't done it, L1 Git says so, and you can send it again. A read GitHub answers only in part counts as no read: L1 Git sends nothing after it and settles nothing from it.
+
+Until L1 Git knows, a write that may have posted offers three choices:
+
+- **Open on GitHub** shows the pull request on github.com, so you can check yourself.
+- **Keep as draft** gives its words back to the box as drafts, marked as may have posted, and the pull request takes writes again. Sending them is then up to you.
+- **Send anyway** sends the same write again, and warns that it may post twice. L1 Git reads GitHub first, and if the write is there by then, it sends nothing. If GitHub refuses the second send, or L1 Git can't send it, that says nothing of the first, so the write still shows as may have posted, with these choices.
+
+A merge names the head you saw, so a push while you confirm makes GitHub refuse it. Before L1 Git deletes a merged pull request's head branch on GitHub, it checks that the branch is still at the merged commit, that it is not in a fork, and that no open pull request has it as its head or its base. GitHub then deletes the branch only if it still points at that commit, so a push after the check keeps it. A branch that is already gone counts as deleted. Request changes needs a summary, as GitHub requires.
+
 ## Pull requests
 
 Click **Pull requests** beside **Settings** at the bottom of the sidebar, or run **Show pull requests** from the command palette. The list covers every saved repository that is on GitHub. A repository counts as the one its `upstream` remote names when that is on github.com, else its `origin`, else its first remote that is. Several clones or worktrees of one GitHub repository are one entry, named like the first of them in the sidebar. Saved repositories that are not on GitHub are left out, and a line under the list says how many there are.
@@ -341,24 +366,24 @@ L1GIT_DEV_PORT=1423 L1GIT_BRIDGE_PORT=9418 pnpm dev
 
 Every read and every write has a deadline. When the deadline passes, L1 Git stops Git and every process Git started, such as a clean filter, and the request returns a `timedOut` error that names it and asks you to retry. A stopped write also says what it left behind. The inspector shows it with **Retry details**. A history read that times out shows it with **Try again**, above the last history it read or in place of a history it never read. Each deadline is about 100 times or more the read's run time on the `pnpm fixture:large` repository:
 
-| Read or write                                                                         | Deadline                                                      |
-| ------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
-| `snapshot`                                                                            | 120 s                                                         |
-| `refs`, `lineStats`, `worktreeStatus`, `worktreePatch`, `branchMerged` | 30 s                                                          |
-| The index refresh after `worktreeStatus`                                              | 30 s                                                          |
-| `commitDetail`, `filePatch`                                                           | 20 s                                                          |
-| `fileHistory`, `blame`, `rangeFiles`, `rangePatches`, `filePatch` with a `from`       | 60 s                                                          |
-| Branch status in `overview` and `fastForward`                                         | 60 s                                                          |
-| `write` of `checkout`, and `undo` or `redo` of a checkout                             | 600 s, because `post-checkout` and lazy fetches run inside it |
-| `write` of `stageFiles` or `unstageFiles`, `undo`, `redo`, `undoHistory`                             | 120 s                                                         |
-| `write` of `createBranch`, `renameBranch`, or `deleteBranch`                          | 120 s                                                         |
-| `write` of `createTag` or `deleteTag`                                                 | 120 s                                                         |
-| `write` of `discard`                                                                  | 300 s, because filters and lazy fetches run inside it         |
-| `write` of a hunk or line write                                                       | 120 s                                                         |
-| `write` of `commit`, `amend`, or `editMessage`                                        | 600 s, because hooks run inside it                            |
-| `mergeReview`, `mergeState`, `merge` | 600 s, including hooks and post-command observation |
-| `replayReview` | 600 s, because merge drivers run inside it |
-| `write` of `replay` or `finishReplay`, `replayAbort`, and `undo` or `redo` of a finished cherry-pick or revert | 600 s, because hooks run inside it |
+| Read or write                                                                                                  | Deadline                                                      |
+| -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| `snapshot`                                                                                                     | 120 s                                                         |
+| `refs`, `lineStats`, `worktreeStatus`, `worktreePatch`, `branchMerged`                                         | 30 s                                                          |
+| The index refresh after `worktreeStatus`                                                                       | 30 s                                                          |
+| `commitDetail`, `filePatch`                                                                                    | 20 s                                                          |
+| `fileHistory`, `blame`, `rangeFiles`, `rangePatches`, `filePatch` with a `from`                                | 60 s                                                          |
+| Branch status in `overview` and `fastForward`                                                                  | 60 s                                                          |
+| `write` of `checkout`, and `undo` or `redo` of a checkout                                                      | 600 s, because `post-checkout` and lazy fetches run inside it |
+| `write` of `stageFiles` or `unstageFiles`, `undo`, `redo`, `undoHistory`                                       | 120 s                                                         |
+| `write` of `createBranch`, `renameBranch`, or `deleteBranch`                                                   | 120 s                                                         |
+| `write` of `createTag` or `deleteTag`                                                                          | 120 s                                                         |
+| `write` of `discard`                                                                                           | 300 s, because filters and lazy fetches run inside it         |
+| `write` of a hunk or line write                                                                                | 120 s                                                         |
+| `write` of `commit`, `amend`, or `editMessage`                                                                 | 600 s, because hooks run inside it                            |
+| `mergeReview`, `mergeState`, `merge`                                                                           | 600 s, including hooks and post-command observation           |
+| `replayReview`                                                                                                 | 600 s, because merge drivers run inside it                    |
+| `write` of `replay` or `finishReplay`, `replayAbort`, and `undo` or `redo` of a finished cherry-pick or revert | 600 s, because hooks run inside it                            |
 
 A deadline covers all of a read's or a write's Git commands. A write's deadline starts again once it holds its locks. Branch status is the exception. Its deadline starts again after each fetch, checkout probe, branch move, or fast-forward merge, because those commands have their own deadlines, and after waiting for another fetch or fast-forward of the same repository to finish.
 

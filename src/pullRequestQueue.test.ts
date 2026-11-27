@@ -64,6 +64,37 @@ it("puts what the user is looking at ahead of everything that waits", async () =
   expect(started, "it still runs").toEqual(["a", "d", "b", "c"]);
 });
 
+it("asks a running read once more when a write needs a fresh answer", async () => {
+  const { queue, started, end } = setup();
+  queue.add(all("a", "b"));
+  queue.addFirst(open("a"), { again: true });
+  queue.addFirst(open("a"), { again: true });
+  expect(started).toEqual(["a"]);
+  await end("a");
+  expect(started, "once more, ahead of the rest").toEqual(["a", "a", "b"]);
+  await end("a");
+  expect(started).toEqual(["a", "a", "b"]);
+  queue.addFirst(open("c"), { again: true });
+  expect(started, "one that is not running starts").toEqual([
+    "a",
+    "a",
+    "b",
+    "c",
+  ]);
+});
+
+it("asks a locked keychain once, and keeps a read to ask again for the next read", async () => {
+  const { queue, started, end } = setup();
+  queue.add(all("a", "b"));
+  queue.addFirst(open("a"), { again: true });
+  await end("a", false);
+  expect(started).toEqual(["a"]);
+  queue.add(all("c"));
+  expect(started, "the write's reread comes first").toEqual(["a", "a"]);
+  await end("a");
+  expect(started).toEqual(["a", "a", "c"]);
+});
+
 it("starts nothing more once it is closed", async () => {
   const { queue, started, end } = setup();
   queue.add(all("a", "b", "c", "d", "e", "f"));

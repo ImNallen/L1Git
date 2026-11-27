@@ -11,11 +11,23 @@ export type Route = {
 
 const rejectionSchema = z.object({ error: z.string() });
 
+/** The request never got to Rust, so nothing it asks for ran. */
+export class Unsent extends Error {}
+
 export async function send(route: Route, request: unknown): Promise<unknown> {
   const serialized = JSON.stringify(request);
   if (new TextEncoder().encode(serialized).length > 4 * 1024 * 1024)
-    throw new Error("This request exceeds the 4 MiB transport limit.");
-  if (native) return invoke<unknown>(route.command, { request });
+    throw new Unsent("This request exceeds the 4 MiB transport limit.");
+  if (native)
+    return invoke<unknown>(route.command, { request }).catch(
+      (error: unknown) => {
+        // Tauri rejects with a string only when it couldn't read the
+        // arguments; the command itself rejects with the host's error.
+        if (typeof error === "string" && error.startsWith("invalid args"))
+          throw new Unsent(error);
+        throw error;
+      },
+    );
   let response: Response;
   try {
     response = await fetch(route.path, {
@@ -33,7 +45,7 @@ export async function send(route: Route, request: unknown): Promise<unknown> {
       await response.json().catch(() => null),
     );
     if (rejection.success)
-      throw new Error(
+      throw new Unsent(
         `The development bridge rejected the request. ${rejection.data.error}`,
       );
   }

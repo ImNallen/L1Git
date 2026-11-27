@@ -1,6 +1,7 @@
 import { afterEach, expect, it, vi } from "vitest";
 import type { HostRequest } from "./domain/host";
 import { createHostClient } from "./host";
+import { Unsent } from "./transport";
 
 const notConnected = (revision: number, ended: unknown = null) => ({
   revision,
@@ -397,4 +398,59 @@ it("keeps polling a browser sign-in when a read delivers a newer status", async 
     op: "devicePoll",
     session: "s1",
   });
+});
+
+it("sends every write on its own, calls one Rust never answered unknown, and one that never got to Rust not sent", async () => {
+  const { host, transport, replies } = client();
+  const write = {
+    asLogin: "octo",
+    repository: { owner: "octo", repo: "app" },
+    number: 1,
+    attempt: "a-1",
+    write: { kind: "resolve", thread: "T_1" },
+    drafts: [],
+  } as const;
+  const first = host.write(write);
+  const second = host.write(write);
+  await Promise.resolve();
+  expect(transport, "never joined like runOnce").toHaveBeenCalledTimes(2);
+  expect(transport.mock.calls[0]?.[0]).toEqual({ op: "write", ...write });
+  const done = {
+    written: {
+      kind: "done",
+      echo: { kind: "thread", id: "T_1", resolved: true },
+    },
+    drafts: null,
+  };
+  replies[0]?.resolve({ op: "write", data: done, status: connected(2) });
+  replies[1]?.reject(new Error("The development bridge is unavailable."));
+  expect(await first).toEqual(done);
+  expect(await second).toMatchObject({
+    written: { kind: "unknown" },
+    drafts: null,
+  });
+  expect(host.read().status).toEqual(connected(2));
+  const interrupted = host.write(write);
+  await Promise.resolve();
+  replies[2]?.reject({
+    kind: "interrupted",
+    message: "L1 Git stopped before GitHub answered.",
+    status: connected(2),
+  });
+  expect(await interrupted).toMatchObject({ written: { kind: "unknown" } });
+  const refused = host.sendAgain({ ...write, attempt: "a-1" });
+  await Promise.resolve();
+  expect(transport.mock.calls[3]?.[0]).toMatchObject({ op: "sendAgain" });
+  replies[3]?.reject(
+    new Unsent("The development bridge rejected the request. bad id"),
+  );
+  expect(await refused).toEqual({
+    written: {
+      kind: "notSent",
+      message:
+        "L1 Git sent nothing. The development bridge rejected the request. bad id",
+    },
+    drafts: null,
+  });
+  expect(transport).toHaveBeenCalledTimes(4);
 });

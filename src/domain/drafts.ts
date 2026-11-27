@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { pullWriteSchema } from "./pullRequestWrites";
 import { oidSchema } from "./repository";
 import type { Oid } from "./repository";
 
@@ -31,6 +32,31 @@ const draftSchema = z.object({
   writtenAt: z.number().int().nonnegative(),
   /** What a change based on this draft names as `at`. */
   savedAt: z.number().int().nonnegative(),
+  /** A write carried these words, its answer was lost, and the user kept
+   * them as a draft: sending them again may post them twice. */
+  mayHavePosted: z.boolean(),
+});
+
+/** A write that left, or may have, kept by the host with the drafts it
+ * carried from before it left until its outcome is known. */
+const sentSchema = z.object({
+  attempt: z.string(),
+  /** When it last left, in Unix milliseconds. */
+  at: z.number(),
+  write: pullWriteSchema,
+  drafts: z.array(draftSchema),
+  /** This L1 Git is sending it now. Otherwise its outcome is unknown: it
+   * may have posted. */
+  sending: z.boolean(),
+});
+
+/** Words typed where a write held the place, kept by the host so a close
+ * can't lose them. `on` is the `savedAt` they were typed on. */
+const waitingSchema = z.object({
+  anchor: anchorSchema,
+  head: oidSchema,
+  text: z.string(),
+  on: z.number().int().nonnegative().nullable(),
 });
 
 export const pullDraftsSchema = z.object({
@@ -39,6 +65,11 @@ export const pullDraftsSchema = z.object({
     .discriminatedUnion("kind", [
       /** Another window wrote since. */
       z.object({ kind: z.literal("stale") }),
+      /** A write that left, or may have, holds this place until it is
+       * known or kept as a draft. */
+      z.object({ kind: z.literal("sent") }),
+      /** Its write is still sending, so it can't be kept as a draft yet. */
+      z.object({ kind: z.literal("sending") }),
       /** No room for one more, in this pull request's drafts or in the pull
        * requests that have drafts. Nothing is dropped to make room. */
       z.object({
@@ -50,11 +81,17 @@ export const pullDraftsSchema = z.object({
   /** Where an unreadable drafts file went, on the one answer that moved it
    * aside. The drafts started again without it. */
   setAside: z.string().nullable(),
+  sent: z.array(sentSchema),
+  /** Until the write ends, or, when typed on another draft than it
+   * carried, until a put, delete or forget at their place. */
+  waiting: z.array(waitingSchema),
 });
 
 export type Anchor = z.infer<typeof anchorSchema>;
 export type Draft = z.infer<typeof draftSchema>;
 export type PullDrafts = z.infer<typeof pullDraftsSchema>;
+export type SentWrite = z.infer<typeof sentSchema>;
+export type Waiting = z.infer<typeof waitingSchema>;
 
 export type DraftChange =
   | { kind: "read" }
@@ -66,7 +103,11 @@ export type DraftChange =
       /** The `savedAt` this text is based on, or null for a new draft. */
       at: number | null;
     }
-  | { kind: "delete"; anchor: Anchor; head: Oid; at: number };
+  | { kind: "delete"; anchor: Anchor; head: Oid; at: number }
+  /** Keep as draft: gives back a write's drafts, marked as may have posted. */
+  | { kind: "keep"; attempt: string }
+  /** Drops the words that waited at this place. */
+  | { kind: "forget"; anchor: Anchor; head: Oid };
 
 /** GitHub's limit on a comment's body. The host counts Unicode scalar
  * values, so an emoji is one. */

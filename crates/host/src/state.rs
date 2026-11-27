@@ -38,6 +38,12 @@ pub(crate) struct Connection {
     pub(crate) generation: CommitId,
 }
 
+impl Connection {
+    pub(crate) fn login(&self) -> &Login {
+        &self.login
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 #[serde(transparent)]
 pub(crate) struct CommitId(u64);

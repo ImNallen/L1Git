@@ -13,6 +13,7 @@ mod pulls;
 mod state;
 mod vault;
 mod wire;
+mod writes;
 
 #[cfg(all(test, unix))]
 #[path = "../tests/support/mod.rs"]
@@ -24,6 +25,7 @@ mod tests;
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
+use drafts::BookKey;
 use gh::Gh;
 use github::Http;
 use state::{Saved, State, Unreadable, unix_millis};
@@ -160,8 +162,54 @@ pub fn run(host: &Host, request: Request) -> Result<Response, HostError> {
             number,
             change,
         } => host
-            .drafts(login, repository, number, change)
+            .drafts(
+                &BookKey {
+                    login,
+                    repository,
+                    number,
+                },
+                change,
+            )
             .map(Answer::Drafts),
+        Request::Write {
+            as_login,
+            repository,
+            number,
+            attempt,
+            write,
+            drafts,
+        } => {
+            let key = BookKey {
+                login: as_login,
+                repository,
+                number,
+            };
+            Ok(Answer::Write(host.write(&key, attempt, write, &drafts)))
+        }
+        Request::SendAgain {
+            as_login,
+            repository,
+            number,
+            attempt,
+        } => {
+            let key = BookKey {
+                login: as_login,
+                repository,
+                number,
+            };
+            Ok(Answer::SendAgain(host.send_again(&key, &attempt)))
+        }
+        Request::Check {
+            as_login,
+            repository,
+            number,
+        } => host
+            .check(&BookKey {
+                login: as_login,
+                repository,
+                number,
+            })
+            .map(Answer::Check),
     };
     let status = host.status();
     match outcome {

@@ -169,7 +169,10 @@ describe("the notice", () => {
   const failure = { message: "It failed.", status };
   const url = "https://github.com/orgs/octo/sso";
   const notice = (problem: HostProblem | null, value: PullRequest | null) =>
-    detailNotice({ value, at: 5, reading: false, problem }, repository);
+    detailNotice(
+      { value, at: 5, askedAt: 4, reading: false, problem },
+      repository,
+    );
   const connection = { kind: "connection", message: "It failed." };
 
   it.each<[HostProblem | null, unknown]>([
