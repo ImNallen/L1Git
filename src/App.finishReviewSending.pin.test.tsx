@@ -248,3 +248,26 @@ it("says a review may have posted over the end of the diff, not in the toolbar b
   await app.click(get("button", "Open Finish review", notice));
   expect(get("button", "Send anyway", popover()!)).toBeTruthy();
 });
+
+it("closes an Edit box whose comment the review posted, so Cancel never puts it back to send again", async () => {
+  const app = await openFiles({ drafts: [draft(11, "Once")] });
+  for (let frame = 0; frame < 5; frame += 1) await app.flushFrames();
+  await app.click(get("button", "Edit"));
+  expect((get("textbox", /^Comment on /) as HTMLTextAreaElement).value).toBe(
+    "Once",
+  );
+  await openPopover(app);
+  await app.click(submit());
+  await app.settle();
+  expect(mutations(app)).toHaveLength(1);
+  expect(
+    query("region", /^Comment on /),
+    "nothing is left to cancel",
+  ).toBeNull();
+  expect(kept(app)).toEqual([]);
+  expect(finish().textContent).toBe("Finish review");
+  await openPopover(app);
+  await app.click(submit());
+  await app.settle();
+  expect(mutations(app), "the posted comment never goes again").toHaveLength(1);
+});

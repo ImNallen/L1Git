@@ -8,6 +8,7 @@ import type { PullWrite } from "../domain/pullRequestWrites";
 import type { Oid } from "../domain/repository";
 import type { Notes } from "../domain/reviewThreads";
 import type { RangeFile } from "../domain/range";
+import { stamp } from "../pullRequests";
 import type { Attempt } from "../pullRequestWrites";
 import { usePullDrafts, usePullWrites } from "../shell/usePullWriting";
 import { sentNothing } from "./sentNothing";
@@ -38,6 +39,8 @@ type Box = {
   sending: Sending;
   /** How many times other lines were chosen while it held typed words. */
   stays: number;
+  /** When it opened: a write that posted its words after this took them. */
+  openedAt: number;
 };
 
 /** What the box shows, from its draft and its attempt. */
@@ -175,8 +178,18 @@ export function useLineComments({
         ? (writes.attempts.findLast(({ write }) => write === sending.write) ??
           null)
         : null;
-  // A single comment GitHub has is shown on its line until a read has it.
-  if (box && boxAttempt?.state.kind === "done") setBox(null);
+  // A single comment GitHub has is shown on its line until a read has it,
+  // and a review that posted the box's pending comment leaves nothing to
+  // edit, so Cancel can't put it back to send again.
+  const posted =
+    box &&
+    writes.attempts.some(
+      ({ write, state }) =>
+        state.kind === "done" &&
+        state.answeredAt > box.openedAt &&
+        carriedBy(write).includes(draftKey(box.anchor, head)),
+    );
+  if (posted) setBox(null);
 
   const view = ((): BoxView | null => {
     if (!box) return null;
@@ -347,6 +360,7 @@ export function useLineComments({
         before: draftAt(anchor, head)?.text ?? null,
         sending: idle,
         stays: 0,
+        openedAt: stamp(),
       });
     },
     type(words: string) {
