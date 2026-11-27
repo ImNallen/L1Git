@@ -186,6 +186,24 @@ describe("carried", () => {
       carried(name, [{ now: once, reviewed: null }], record([markOf(once)])),
     ).toEqual([]);
   });
+
+  it("carries no mark to the old path of a file renamed since your review", () => {
+    // The pull request lists D a.ts and A b.ts, as its own read doesn't pair
+    // the rename the author made since your review.
+    const reviewedA = file("a.ts", "1");
+    const now = [
+      file("a.ts", "0", { status: "D", newBlob: null, newMode: null }),
+      file("b.ts", "1", { status: "A", oldBlob: null, oldMode: null }),
+    ];
+    const since = [
+      file("b.ts", "1", { status: "R", from: "a.ts", oldBlob: blob("1") }),
+    ];
+    const { rebased } = sinceGroups(now, {
+      files: since,
+      reviewed: [reviewedA],
+    });
+    expect(carried(name, rebased, record([markOf(reviewedA)]))).toEqual([]);
+  });
 });
 
 describe("baseWords", () => {
