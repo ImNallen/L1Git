@@ -39,9 +39,10 @@ export type SinceGroups = {
 };
 
 /**
- * Files are matched by path. A file of the since read that the pull request
- * neither changes now nor changed at your review is the base's own, which an
- * untold read lists, and it is left out.
+ * Files are matched by path, and a file renamed since your review by its old
+ * path too. A file of the since read that the pull request neither changes now
+ * nor changed at your review is the base's own, which an untold read lists,
+ * and it is left out.
  */
 export function sinceGroups(
   now: readonly RangeFile[],
@@ -54,13 +55,17 @@ export function sinceGroups(
       from === null ? [path] : [path, from],
     ),
   );
+  const changed = new Set<RangeFile>();
   const again = files.flatMap((since): Again[] => {
     const file = nowAt.get(since.path) ?? null;
-    return file !== null || wasReviewed.has(since.path)
-      ? [{ since, now: file }]
-      : [];
+    // When the pull request's own read doesn't pair a rename since your
+    // review, it lists the old path as deleted, and that changed again too.
+    const old = since.from === null ? undefined : nowAt.get(since.from);
+    if (file === null && old === undefined && !wasReviewed.has(since.path))
+      return [];
+    for (const claimed of [file, old]) if (claimed) changed.add(claimed);
+    return [{ since, now: file }];
   });
-  const changed = new Set(again.map(({ now }) => now));
   const rebased: Rebased[] = [];
   const unchanged: RangeFile[] = [];
   for (const file of now) {

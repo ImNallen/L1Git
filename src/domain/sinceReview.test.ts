@@ -126,6 +126,26 @@ describe("sinceGroups", () => {
     const { rebased } = sinceGroups(now, { files: [], reviewed: [] });
     expect(rebased).toEqual([{ now: now[0], reviewed: null }]);
   });
+
+  it("counts the old path of a file renamed since your review as changed again", () => {
+    // You reviewed a heavy edit of a.ts. Since then the author renamed it to
+    // b.ts. Reviewed -> head pairs the rename; merge base -> head doesn't, so
+    // the pull request lists D a.ts and A b.ts.
+    const now = [
+      file("a.ts", "0", { status: "D", newBlob: null, newMode: null }),
+      file("b.ts", "1", { status: "A", oldBlob: null, oldMode: null }),
+    ];
+    const since = [
+      file("b.ts", "1", { status: "R", from: "a.ts", oldBlob: blob("1") }),
+    ];
+    const { again, rebased, unchanged } = sinceGroups(now, {
+      files: since,
+      reviewed: [file("a.ts", "1")],
+    });
+    expect(again).toEqual([{ since: since[0], now: now[1] }]);
+    expect(rebased).toEqual([]);
+    expect(unchanged).toEqual([]);
+  });
 });
 
 describe("baseWords", () => {
