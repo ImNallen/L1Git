@@ -1,128 +1,24 @@
 // @vitest-environment happy-dom
-import { expect, it, vi } from "vitest";
-import type { Draft } from "./domain/drafts";
-import type { PullRequest, ReviewThread } from "./domain/pullRequest";
-import { oidSchema } from "./domain/repository";
+import { expect, it } from "vitest";
+import type { PullRequest } from "./domain/pullRequest";
+import { focused, get, installHarness } from "./test/appHarness";
 import {
-  focused,
-  get,
-  installHarness,
-  query,
-  queryAll,
-} from "./test/appHarness";
-import type { Harness } from "./test/appHarness";
-import { pullKey } from "./test/fakeBridge";
-import type { Bridge, World } from "./test/fakeBridge";
-import { at, open, page, pull, tab, visit } from "./test/pullRequests";
+  draft,
+  finish,
+  head,
+  kept,
+  mutations,
+  oid,
+  openFiles,
+  openPopover,
+  panel,
+  popover,
+  submit,
+  thread,
+} from "./test/finishReview";
+import { page } from "./test/pullRequests";
 
 installHarness();
-
-const oid = (digit: string) => oidSchema.parse(digit.repeat(40));
-const head = oid("1");
-const book = "octo octo/pin#1";
-const patchOf = (path: string) => `diff --git a/${path} b/${path}
---- a/${path}
-+++ b/${path}
-@@ -10,3 +10,4 @@
- one
--two
-+TWO
-+and
- three
-`;
-const paths = ["src/a.ts", "src/b.ts"];
-
-function answer(bridge: Bridge) {
-  bridge.respond("rangeFiles", () => ({
-    kind: "ready",
-    mergeBase: oid("a"),
-    files: paths.map((path) => ({
-      path,
-      status: "M",
-      from: null,
-      similarity: null,
-      added: 2,
-      deleted: 1,
-      oldBlob: oid("1"),
-      newBlob: oid("2"),
-      oldMode: "100644",
-      newMode: "100644",
-      submodule: false,
-    })),
-    contentMissing: false,
-    shallow: false,
-  }));
-  bridge.respond("rangePatches", () =>
-    paths.map((path) => ({
-      path,
-      patch: { kind: "text", patch: patchOf(path), lossy: false },
-    })),
-  );
-}
-
-const draft = (
-  line: number,
-  text: string,
-  fields: Partial<Draft> = {},
-  path = "src/a.ts",
-): Draft => ({
-  anchor: { kind: "line", path, side: "right", line, start: null },
-  head,
-  text,
-  writtenAt: 1,
-  savedAt: 1,
-  mayHavePosted: false,
-  ...fields,
-});
-const thread = (id: string, by: string): ReviewThread => ({
-  id,
-  review: null,
-  path: "src/a.ts",
-  line: 11,
-  startLine: null,
-  originalLine: 11,
-  originalStartLine: null,
-  side: "right",
-  outdated: false,
-  resolved: false,
-  hunk: "",
-  can: { reply: true, resolve: true, unresolve: false },
-  comments: page([{ id: `${id}-1`, by, at: at(2), body: "Why?" }]),
-});
-
-async function openFiles({
-  fields = {},
-  drafts = [],
-  world,
-}: {
-  fields?: Partial<PullRequest>;
-  drafts?: Draft[];
-  world?: (world: World) => void;
-} = {}): Promise<Harness> {
-  const app = await visit({
-    bridge: answer,
-    world: (each) => {
-      each.host.details.set(pullKey("octo/pin", 1), pull(1, fields));
-      each.host.drafts.set(book, drafts);
-      world?.(each);
-    },
-  });
-  await open(app, 1);
-  await app.click(tab("Files changed"));
-  return app;
-}
-
-const finish = () => get("button", /^Finish review/);
-const panel = () => get("tabpanel", /^Files changed/);
-const popover = () => query("dialog", "Finish your review");
-const mutations = (app: Harness) => app.bridge.world.host.mutations;
-const kept = (app: Harness) =>
-  (app.bridge.world.host.drafts.get(book) ?? []).map(({ text }) => text);
-const submit = () => get("button", /^Submit/, popover()!);
-async function openPopover(app: Harness) {
-  await app.click(finish());
-  return popover()!;
-}
 
 it("counts the pending comments, and sends them with the summary in one review", async () => {
   const app = await openFiles({
@@ -168,30 +64,6 @@ it("counts the pending comments, and sends them with the summary in one review",
     "Of an older head",
   ]);
   expect(finish().textContent).toBe("Finish review");
-});
-
-it("sends nothing while a review is on its way, and shows it as sending", async () => {
-  const app = await openFiles({ drafts: [draft(11, "Once")] });
-  const shown = await openPopover(app);
-  const held = app.bridge.hold("write");
-  await app.click(submit());
-  expect(shown.getAttribute("aria-busy")).toBe("true");
-  expect(get("status", "Sending your review…", shown)).toBeTruthy();
-  for (let frame = 0; frame < 5; frame += 1) await app.flushFrames();
-  expect(
-    queryAll("region", "Pending comment"),
-    "its comments show once, as on their way",
-  ).toEqual([]);
-  expect(get("region", "Review comment").textContent).toContain("Sending…");
-  expect(
-    get("region", "1 pending comment", shown).textContent,
-    "the popover still lists what it sends",
-  ).toBe("1 pending commenta.ts:11Once");
-  await app.click(submit());
-  await app.press("Enter", { ctrlKey: true });
-  held.release();
-  await app.settle();
-  expect(mutations(app)).toHaveLength(1);
 });
 
 it("takes a comment only on your own pull request, and Request changes only with a summary", async () => {
@@ -256,54 +128,6 @@ it("says when you have a review in progress on GitHub, and submits that one as i
   expect(kept(app)).toEqual(["Local words"]);
 });
 
-it("keeps the pending comments when GitHub refuses, and says why", async () => {
-  const app = await openFiles({
-    drafts: [draft(11, "Kept")],
-    world: (world) => {
-      world.host.writes = [
-        {
-          kind: "refused",
-          message: "GitHub didn't do it: Pull request is locked.",
-        },
-      ];
-    },
-  });
-  const shown = await openPopover(app);
-  await app.click(submit());
-  expect(shown.querySelector("[role=alert]")?.textContent).toBe(
-    "GitHub didn't do it: Pull request is locked.",
-  );
-  expect(kept(app)).toEqual(["Kept"]);
-  expect(finish().textContent).toBe("Finish review · 1");
-});
-
-it("offers three choices when the review may have posted, and sends it again only when asked", async () => {
-  const app = await openFiles({
-    drafts: [draft(11, "Lost answer")],
-    world: (world) => {
-      world.host.writes = [{ kind: "unknown", applied: false }];
-    },
-  });
-  const shown = await openPopover(app);
-  await app.click(submit());
-  expect(shown.textContent).toContain("may have posted");
-  expect(get("link", "Open on GitHub", shown)).toBeTruthy();
-  expect(shown.textContent).toContain(
-    "Send anyway may post your review twice, with every comment in it.",
-  );
-  const summary = () => get("textbox", "Summary", shown) as HTMLTextAreaElement;
-  expect(summary().readOnly, "the host holds the words").toBe(true);
-  await app.click(get("button", "Keep as draft", shown));
-  expect(summary().readOnly).toBe(false);
-  expect(mutations(app)).toHaveLength(1);
-  expect(
-    app.bridge.world.host.drafts
-      .get(book)
-      ?.map(({ mayHavePosted }) => mayHavePosted),
-  ).toEqual([true]);
-  expect(shown.textContent).toContain("May have posted");
-});
-
 it("reminds of files not viewed and threads not resolved, and still sends", async () => {
   const app = await openFiles({
     fields: { threads: page([thread("T1", "sara")]) },
@@ -362,103 +186,6 @@ it("counts a new comment only once Start a review keeps it", async () => {
   expect(finish().textContent).toBe("Finish review · 2");
 });
 
-it("offers the choices of a review that may have posted from before a restart", async () => {
-  const lost = draft(11, "Sent before the restart");
-  const summary = { ...draft(0, "Looks good"), anchor: { kind: "summary" } };
-  const app = await openFiles({
-    world: (world) =>
-      world.host.sent.set(book, [
-        {
-          attempt: "before",
-          at: 1,
-          write: {
-            kind: "submitReview",
-            pull: "PR_1" as never,
-            commit: head,
-            event: "comment",
-            body: "Looks good",
-            threads: [
-              {
-                lines: {
-                  path: "src/a.ts",
-                  side: "right",
-                  line: 11,
-                  start: null,
-                },
-                body: lost.text,
-              },
-            ],
-          },
-          drafts: [lost, summary as Draft],
-          sending: false,
-          applied: false,
-        },
-      ]),
-  });
-  const shown = await openPopover(app);
-  expect(shown.textContent).toContain("may have posted");
-  expect(shown.textContent).toContain("Sent before the restart");
-  const words = get("textbox", "Summary", shown) as HTMLTextAreaElement;
-  expect(words.readOnly, "the host holds the summary").toBe(true);
-  expect(submit().getAttribute("aria-disabled")).toBe("true");
-  await app.click(get("button", "Keep as draft", shown));
-  expect(words.readOnly).toBe(false);
-  expect(kept(app).sort()).toEqual(["Looks good", "Sent before the restart"]);
-  expect(mutations(app)).toEqual([]);
-});
-
-it("says why it sent nothing in the words every write uses", async () => {
-  const app = await openFiles({
-    drafts: [draft(11, "Waits its turn")],
-    world: (world) =>
-      world.host.sent.set(book, [
-        {
-          attempt: "other",
-          at: 1,
-          write: {
-            kind: "comment",
-            pull: "PR_1" as never,
-            body: "From another window",
-          },
-          drafts: [],
-          sending: true,
-          applied: false,
-        },
-      ]),
-  });
-  const shown = await openPopover(app);
-  await app.click(submit());
-  expect(shown.querySelector("[role=alert]")?.textContent).toBe(
-    "Another write to this pull request is still sending, or may have posted, so L1 Git sent nothing. Try again once that one ends.",
-  );
-  expect(mutations(app)).toEqual([]);
-  expect(kept(app)).toEqual(["Waits its turn"]);
-});
-
-it("stays open on Escape while its review is on its way, so how it ended stays in sight", async () => {
-  const app = await openFiles({
-    drafts: [draft(11, "Patience")],
-    world: (world) => {
-      world.host.writes = [{ kind: "unknown", applied: false }];
-    },
-  });
-  const shown = await openPopover(app);
-  const held = app.bridge.hold("write");
-  await app.click(submit());
-  await app.press("Escape");
-  expect(popover()?.hasAttribute("open")).toBe(true);
-  held.release();
-  await app.settle();
-  expect(popover()?.hasAttribute("open")).toBe(true);
-  expect(get("button", "Send anyway", shown)).toBeTruthy();
-  await app.press("Escape");
-  expect(popover()).toBeNull();
-  await app.click(finish());
-  expect(popover()?.hasAttribute("open"), "the button opens it again").toBe(
-    true,
-  );
-});
-
 it("fits under its button in the window, and keeps fitting as the window changes", async () => {
   const app = await openFiles({ drafts: [draft(11, "Tall")] });
   finish().getBoundingClientRect = () =>
@@ -476,61 +203,4 @@ it("fits under its button in the window, and keeps fitting as the window changes
   });
   expect(shown.style.maxHeight).toBe("478px");
   window.innerHeight = height;
-});
-
-it("says Review sent. for 8 seconds or until Finish review opens again, and gives the focus back to Finish review", async () => {
-  vi.useFakeTimers({
-    toFake: ["setTimeout", "clearTimeout"],
-    shouldAdvanceTime: true,
-  });
-  try {
-    const app = await openFiles({ drafts: [draft(11, "Done soon")] });
-    await openPopover(app);
-    await app.click(submit());
-    await app.settle();
-    expect(popover()).toBeNull();
-    expect(get("status", "Review sent.")).toBeTruthy();
-    expect(focused()).toBe("button Finish review");
-    await app.act(() => {
-      vi.advanceTimersByTime(7_000);
-    });
-    expect(
-      query("status", "Review sent."),
-      "still there after 7 s",
-    ).toBeTruthy();
-    await app.act(() => {
-      vi.advanceTimersByTime(1_500);
-    });
-    expect(query("status", "Review sent.")).toBeNull();
-
-    await app.click(finish());
-    await app.type(get("textbox", "Summary", popover()!), "Once more");
-    await app.click(submit());
-    await app.settle();
-    expect(get("status", "Review sent.")).toBeTruthy();
-    await app.click(finish());
-    expect(query("status", "Review sent."), "a new action moves on").toBeNull();
-  } finally {
-    vi.useRealTimers();
-  }
-});
-
-it("says a review may have posted over the end of the diff, not in the toolbar beside the file's path", async () => {
-  const app = await openFiles({
-    drafts: [draft(11, "Lost again")],
-    world: (world) => {
-      world.host.writes = [{ kind: "unknown", applied: false }];
-    },
-  });
-  await openPopover(app);
-  await app.click(submit());
-  await app.press("Escape");
-  expect(popover()).toBeNull();
-  expect(document.querySelector(".finish-sent")?.textContent).toBe("");
-  const notice = get("status", /^Your review may have posted\./);
-  expect(notice.textContent).toBe(
-    "Your review may have posted. Finish review says what you can do.Open Finish review",
-  );
-  await app.click(get("button", "Open Finish review", notice));
-  expect(get("button", "Send anyway", popover()!)).toBeTruthy();
 });
