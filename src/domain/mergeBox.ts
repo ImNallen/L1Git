@@ -35,7 +35,7 @@ type MergeAction =
   | { kind: "merging" }
   /** Puts away what the last merge said. */
   | { kind: "retry" }
-  /** The head branch a merge L1 Git never saw left on GitHub. */
+  /** The head branch still on GitHub, after a merge with no answer. */
   | { kind: "deleteRemote"; branch: string }
   | { kind: "deleteLocal" };
 export type MergeBox = {
