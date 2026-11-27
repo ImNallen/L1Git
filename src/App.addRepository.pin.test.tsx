@@ -28,11 +28,18 @@ const options = () =>
     );
     return `${title?.textContent}${option.getAttribute("aria-selected") === "true" ? " *" : ""}`;
   });
+const keyName = (kbd: Element) =>
+  kbd.querySelector("[aria-label]")?.getAttribute("aria-label") ??
+  kbd.textContent;
 const hints = () =>
-  [...document.querySelectorAll(".add-palette-hint")].map(
-    (hint) =>
-      `${hint.textContent}${hint.classList.contains("disabled") ? " [disabled]" : ""}`,
-  );
+  [...document.querySelectorAll(".add-palette-hint")].map((hint) => {
+    const keys = [...hint.querySelectorAll("kbd")].map(keyName).join(" ");
+    const label = [...hint.childNodes]
+      .filter((node) => node.nodeType === Node.TEXT_NODE)
+      .map((node) => node.textContent)
+      .join("");
+    return `${keys}: ${label}${hint.classList.contains("disabled") ? " [disabled]" : ""}`;
+  });
 const location = (name: string) => get("textbox", name) as HTMLInputElement;
 const submit = (name: string) => get("button", name) as HTMLButtonElement;
 
@@ -62,18 +69,27 @@ it("lists the sources in order, and a query filters by title", async () => {
   await openPalette(app);
   expect(focused()).toBe("combobox Search sources");
   expect(options()).toEqual(["Local folder *", "Git URL", "New repository"]);
-  expect(hints()).toEqual(["↑ ↓Navigate", "↵Select", "EscClose"]);
+  expect(hints()).toEqual([
+    "Up arrow Down arrow: Navigate",
+    "Return: Select",
+    "Esc: Close",
+  ]);
 
   await app.type(get("combobox", "Search sources"), "g");
   expect(options()).toEqual(["Git URL *"]);
-  expect(hints()).toEqual(["↑ ↓Navigate", "↵Select", "⌫Clear", "EscClose"]);
+  expect(hints()).toEqual([
+    "Up arrow Down arrow: Navigate",
+    "Return: Select",
+    "Backspace: Clear",
+    "Esc: Close",
+  ]);
 
   await app.type(get("combobox", "Search sources"), "zzz");
   expect(options()).toEqual([]);
   expect(get("status", undefined, palette()).textContent).toBe(
     "Nothing matches “zzz”.",
   );
-  expect(hints()).toContain("↵Select [disabled]");
+  expect(hints()).toContain("Return: Select [disabled]");
 });
 
 it("Up, Down, and Enter open a source from the search field", async () => {
@@ -89,7 +105,11 @@ it("Up, Down, and Enter open a source from the search field", async () => {
   expect(options()[1]).toBe("Git URL *");
   await app.press("Enter");
   expect(focused()).toBe("textbox Git URL");
-  expect(hints()).toEqual(["TabMove focus", "↵Clone [disabled]", "EscClose"]);
+  expect(hints()).toEqual([
+    "Tab: Move focus",
+    "Return: Clone [disabled]",
+    "Esc: Close",
+  ]);
 });
 
 it("New repository creates at the derived location and opens it", async () => {
@@ -100,7 +120,7 @@ it("New repository creates at the derived location and opens it", async () => {
 
   await app.type(get("textbox", "Repository name"), "Sandbox");
   expect(location("Create in").value).toBe("~/Projects/Sandbox");
-  expect(hints()).toEqual(["TabMove focus", "↵Create", "EscClose"]);
+  expect(hints()).toEqual(["Tab: Move focus", "Return: Create", "Esc: Close"]);
   app.bridge.reset();
   await app.click(submit("Create"));
 
@@ -161,11 +181,11 @@ it("Local folder lists the base and adds the highlighted repository", async () =
 it("a non-Git row disables Open and its footer hint", async () => {
   const app = await mountApp({ world: opensDocs });
   await openSource(app, /^Local folder/);
-  expect(hints()).toContain("↵Open");
+  expect(hints()).toContain("Return: Open");
   await app.press("ArrowDown");
   expect(options()).toEqual(["docs-site", "screenshots *"]);
   expect(submit("Open").disabled).toBe(true);
-  expect(hints()).toContain("↵Open [disabled]");
+  expect(hints()).toContain("Return: Open [disabled]");
   await app.press("ArrowDown", { target: get("button", "Back") });
   expect(options(), "the arrows work wherever focus is").toEqual([
     "docs-site *",
