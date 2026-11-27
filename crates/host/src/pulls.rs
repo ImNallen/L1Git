@@ -44,6 +44,14 @@ impl TryFrom<String> for Name {
     }
 }
 
+/// Without regard to case, as GitHub names repositories.
+impl PartialEq for Repository {
+    fn eq(&self, other: &Repository) -> bool {
+        self.owner.0.eq_ignore_ascii_case(&other.owner.0)
+            && self.repo.0.eq_ignore_ascii_case(&other.repo.0)
+    }
+}
+
 impl fmt::Display for Repository {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}/{}", self.owner.0, self.repo.0)

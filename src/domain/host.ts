@@ -1,5 +1,7 @@
 import { z } from "zod";
 import type { Route } from "../transport";
+import { pullDraftsSchema } from "./drafts";
+import type { DraftChange } from "./drafts";
 import { pullRequestSchema, pullRequestsSchema } from "./pullRequest";
 import type { PullRequestList } from "./pullRequest";
 import type { GitHubRepository } from "./repository";
@@ -117,6 +119,11 @@ export const hostResponseSchema = z.discriminatedUnion("op", [
     data: pullRequestSchema,
     status: hostStatusSchema,
   }),
+  z.object({
+    op: z.literal("drafts"),
+    data: pullDraftsSchema,
+    status: hostStatusSchema,
+  }),
 ]);
 
 export type HostCommand =
@@ -129,7 +136,16 @@ export type HostRead =
   | { op: "pullRequests"; repository: GitHubRepository; list: PullRequestList }
   | { op: "pullRequest"; repository: GitHubRepository; number: number };
 
-export type HostRequest = HostCommand | HostRead;
+/** Words on this computer, so it needs no sign-in and no network. */
+export type HostDrafts = {
+  op: "drafts";
+  login: string;
+  repository: GitHubRepository;
+  number: number;
+  change: DraftChange;
+};
+
+export type HostRequest = HostCommand | HostRead | HostDrafts;
 
 export const hostRequestOps = hostResponseSchema.options.map(
   (option) => option.shape.op.value,

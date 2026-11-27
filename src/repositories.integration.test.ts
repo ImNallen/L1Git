@@ -47,7 +47,7 @@ import {
   worktreeReviewSchema,
   worktreeStatusSchema,
 } from "./domain/repository";
-import type { WorktreeStatus } from "./domain/repository";
+import type { Oid, WorktreeStatus } from "./domain/repository";
 import {
   commitsFetchSchema,
   rangeFilesSchema,
@@ -69,6 +69,8 @@ import {
   hostResponseSchema,
 } from "./domain/host";
 import { pullCheckoutSchema } from "./domain/pullRequestCheckout";
+import { createDrafts } from "./drafts";
+import { createHostClient } from "./host";
 import { requestOps } from "./repositoryWire";
 
 const fixtureSchema = z.object({
@@ -4292,6 +4294,73 @@ describe("real Rust host contract", () => {
     });
     expect(seen).toEqual(Array(4).fill(`/graphql Bearer ${token}`));
     await ask({ op: "disconnect" });
+  });
+
+  it("keeps review drafts beside host.json, signed out and without GitHub", async () => {
+    seen.length = 0;
+    const window = () =>
+      createDrafts(
+        createHostClient(async (request) => {
+          const body: unknown = await (await hostPost(request)).json();
+          const { ok, error } = z
+            .object({ ok: z.boolean(), error: z.unknown().optional() })
+            .parse(body);
+          if (!ok) throw error;
+          return body;
+        }),
+      );
+    const pull = {
+      login: "octo",
+      repository: { owner: "octo", repo: "pin" },
+      number: 7,
+    };
+    const head = "a".repeat(40) as Oid;
+    const anchor = {
+      kind: "line",
+      path: "notes.txt",
+      side: "right",
+      line: 3,
+      start: null,
+    } as const;
+    const one = window();
+    one.type(pull, anchor, head, "Off by one?");
+    one.type(pull, { kind: "conversation" }, head, "Looks good");
+    expect(await one.flush()).toBe(true);
+    const two = window();
+    await two.load(pull);
+    expect(two.read(pull).drafts.map(({ text }) => text)).toEqual([
+      "Off by one?",
+      "Looks good",
+    ]);
+    one.type(pull, anchor, head, "Off by two?");
+    await one.flush();
+    two.type(pull, anchor, head, "Off by three?");
+    expect(await two.flush()).toBe(false);
+    expect(two.read(pull).drafts[0]?.save).toMatchObject({
+      kind: "changedElsewhere",
+      theirs: { text: "Off by two?" },
+    });
+    const file = JSON.parse(
+      readFileSync(join(fixture.root, "host", "drafts.json"), "utf8"),
+    ) as { version: number; pulls: { drafts: { text: string }[] }[] };
+    expect(file.version).toBe(1);
+    expect(file.pulls[0]?.drafts.map(({ text }) => text)).toEqual([
+      "Off by two?",
+      "Looks good",
+    ]);
+
+    writeFileSync(join(fixture.root, "host", "drafts.json"), "");
+    const three = window();
+    await three.load(pull);
+    const { setAside, drafts } = three.read(pull);
+    expect(drafts).toEqual([]);
+    expect(setAside).toMatch(/[/\\]drafts\.corrupt-\d+\.json$/);
+    expect(readFileSync(setAside ?? "", "utf8")).toBe("");
+    three.type(pull, anchor, head, "Typed again");
+    expect(await three.flush()).toBe(true);
+    await two.load(pull);
+    expect(two.read(pull).setAside).toBeNull();
+    expect(seen).toEqual([]);
   });
 
   it("checks host requests like repository requests and names every host operation", async () => {

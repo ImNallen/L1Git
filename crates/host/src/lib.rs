@@ -4,6 +4,7 @@
 
 mod connect;
 mod device;
+mod drafts;
 mod gh;
 mod github;
 mod graphql;
@@ -153,6 +154,14 @@ pub fn run(host: &Host, request: Request) -> Result<Response, HostError> {
         Request::PullRequest { repository, number } => host
             .with_github(|github| github.pull_request(&repository, number))
             .map(|read| Answer::PullRequest(Box::new(read.value))),
+        Request::Drafts {
+            login,
+            repository,
+            number,
+            change,
+        } => host
+            .drafts(login, repository, number, change)
+            .map(Answer::Drafts),
     };
     let status = host.status();
     match outcome {

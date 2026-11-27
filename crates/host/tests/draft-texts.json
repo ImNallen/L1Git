@@ -1,0 +1,87 @@
+[
+  {
+    "text": "Looks good",
+    "times": 1,
+    "host": "takes"
+  },
+  {
+    "text": " \t\r\n ",
+    "times": 1,
+    "host": "blank"
+  },
+  {
+    "text": "\t",
+    "times": 1,
+    "host": "blank"
+  },
+  {
+    "text": "\u0085",
+    "times": 1,
+    "host": "blank"
+  },
+  {
+    "text": "\u00a0",
+    "times": 1,
+    "host": "blank"
+  },
+  {
+    "text": "\u2028",
+    "times": 1,
+    "host": "blank"
+  },
+  {
+    "text": "\u2029",
+    "times": 1,
+    "host": "blank"
+  },
+  {
+    "text": "\u3000",
+    "times": 1,
+    "host": "blank"
+  },
+  {
+    "text": "\ufeff",
+    "times": 1,
+    "host": "takes"
+  },
+  {
+    "text": "\u200b",
+    "times": 1,
+    "host": "takes"
+  },
+  {
+    "text": "\u0085x\u00a0",
+    "times": 1,
+    "host": "takes"
+  },
+  {
+    "text": "x",
+    "times": 65536,
+    "host": "takes"
+  },
+  {
+    "text": "x",
+    "times": 65537,
+    "host": "tooLong"
+  },
+  {
+    "text": "\ud83d\ude00",
+    "times": 65536,
+    "host": "takes"
+  },
+  {
+    "text": "\ud83d\ude00",
+    "times": 65537,
+    "host": "tooLong"
+  },
+  {
+    "text": "e\u0301",
+    "times": 32768,
+    "host": "takes"
+  },
+  {
+    "text": "e\u0301",
+    "times": 32769,
+    "host": "tooLong"
+  }
+]
