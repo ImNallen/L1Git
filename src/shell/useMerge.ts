@@ -18,17 +18,29 @@ import type { OpenedPullRequest } from "./usePullRequests";
 import { usePullWrites } from "./usePullWriting";
 
 const LAST_KEY = "l1git.mergeMethod.v1";
-const lastSchema = z.record(z.string(), z.enum(["merge", "squash", "rebase"]));
+const methodSchema = z.enum(["merge", "squash", "rebase"]);
+/** An entry L1 Git can't read drops only itself, so one repository's bad
+ * entry doesn't take every other repository's method with it. */
+const lastSchema = z.record(z.string(), z.unknown()).transform((saved) =>
+  Object.fromEntries(
+    Object.entries(saved).flatMap(([key, value]) => {
+      const method = methodSchema.safeParse(value);
+      return method.success ? [[key, method.data] as const] : [];
+    }),
+  ),
+);
+
+const savedMethods = () =>
+  readStored(browserStorage(), LAST_KEY, lastSchema) ?? {};
 
 const lastUsed = (repository: string): MergeMethod | null =>
-  readStored(browserStorage(), LAST_KEY, lastSchema)?.[repository] ?? null;
+  savedMethods()[repository] ?? null;
 
 function rememberMethod(repository: string, method: MergeMethod) {
-  const saved = readStored(browserStorage(), LAST_KEY, lastSchema) ?? {};
   writeStored(
     browserStorage(),
     LAST_KEY,
-    { ...saved, [repository]: method },
+    { ...savedMethods(), [repository]: method },
     "",
   );
 }
@@ -101,7 +113,10 @@ export function useMerge(
     write: MergeWrite;
     branch: string;
   } | null>(null);
-  const named = `${repository.github.owner}/${repository.github.repo}`;
+  // The GitHub is part of the key, so one GitHub's owner/repo can't take
+  // over another's. Only github.com is read today.
+  const methodKey =
+    `github.com/${repository.github.owner}/${repository.github.repo}`.toLowerCase();
   const lastMerge = writes.attempts.findLast(
     ({ write }) => write.kind === "merge",
   );
@@ -165,6 +180,7 @@ export function useMerge(
           setLeftOnGitHub({ write, branch: ask.remote });
         return;
       }
+      rememberMethod(methodKey, write.method);
       queueMicrotask(() => {
         if (ask.remote !== null) deleteOnGitHub(write, ask.remote);
         if (ask.local !== null) void deleteLocal(ask.local);
@@ -184,14 +200,14 @@ export function useMerge(
       local,
       headLeft?.branch ?? null,
     );
-  const choices = pull && mergeChoices(pull, lastUsed(named));
+  const choices = pull && mergeChoices(pull, lastUsed(methodKey));
   return {
     box,
     progress,
     /** The method the box's button merges with. */
     method: chosen ?? choices?.chosen ?? null,
     choose: setChosen,
-    lastUsed: () => lastUsed(named),
+    lastUsed: () => lastUsed(methodKey),
     notes: [
       ...(lastDelete ? deletionNote(lastDelete, pull) : []),
       ...(note ? [note] : []),
@@ -199,7 +215,6 @@ export function useMerge(
     async merge(ask: MergeAsk) {
       const started = await writes.send(ask.write);
       if (started === "started") {
-        rememberMethod(named, ask.write.method);
         setChosen(null);
         setNote(null);
         setLeftOnGitHub(null);
