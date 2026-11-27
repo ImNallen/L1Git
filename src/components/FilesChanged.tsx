@@ -16,7 +16,12 @@ import { nextUnviewed } from "../domain/viewedFiles";
 import { clampMessage } from "../domain/worktree";
 import { sinceRefusal } from "../domain/lineComments";
 import type { LineAnchor } from "../domain/lineComments";
-import { isSinceShown, shownFiles, sinceShown } from "../filesChanged";
+import {
+  isContentMissing,
+  isSinceShown,
+  shownFiles,
+  sinceShown,
+} from "../filesChanged";
 import type { FilesChanged as Held } from "../filesChanged";
 import type { FilesChangedState } from "../shell/useFilesChanged";
 import type { OpenedPullRequest } from "../shell/usePullRequests";
@@ -298,7 +303,7 @@ function Shown({
           files={changed}
           nowOf={nowOf}
           refusal={refusal}
-          contentMissing={read.contentMissing}
+          contentMissing={isContentMissing(held)}
           patches={patches}
           at={at}
           threads={threads}
@@ -321,7 +326,7 @@ function Shown({
           refusal={(anchor) => refusal(file, anchor)}
           enter={enter}
           patch={patches?.get(file) ?? null}
-          contentMissing={read.contentMissing}
+          contentMissing={isContentMissing(held, file)}
           threads={threads.get(file) ?? none}
           whole={() => whole(file)}
           onRetry={() => onRetryFile(file)}
@@ -459,7 +464,7 @@ export function FilesChanged({
           {file && read.kind === "ready" && (
             <FilesToolbar
               files={shown}
-              contentMissing={read.contentMissing}
+              contentMissing={isContentMissing(held)}
               at={at}
               nowOf={sinceShown(held)?.nowOf ?? noSince}
               state={files}

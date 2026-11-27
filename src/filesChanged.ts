@@ -110,6 +110,26 @@ export function sinceShown({
   return made;
 }
 
+/**
+ * Whether Git could not read the contents of a file shown, or of every file
+ * shown when none is named. A file of what changed since your review needs
+ * the since read's contents, and the range's too, without which no patch is
+ * read.
+ */
+export function isContentMissing(
+  { read, since }: Pick<FilesChanged, "read" | "since">,
+  file?: RangeFile,
+): boolean {
+  if (read.kind !== "ready") return false;
+  if (read.contentMissing) return true;
+  return (
+    since?.showing === "since" &&
+    since.read.kind === "ready" &&
+    since.read.contentMissing &&
+    (file === undefined || since.read.files.includes(file))
+  );
+}
+
 /** Whether the tab shows what changed since your review. */
 export const isSinceShown = ({ since }: Pick<FilesChanged, "since">) =>
   since?.showing === "since";
@@ -317,6 +337,8 @@ export function createFilesChanged(deps: Deps) {
               },
             };
             put({ ...changed, at: atPath(changed) });
+            // All changes may show a file that the patches left out.
+            if (stops) readCurrent();
           });
     if (contentMissing) return;
     const patches = new Map<RangeFile, PatchRead>();
@@ -330,7 +352,8 @@ export function createFilesChanged(deps: Deps) {
     set({ patches });
     if (isCurrent()) readCurrent();
     const ready = await sinceRead;
-    if (!ready || ready.contentMissing || ready.files.length === 0) return;
+    if (!ready) return;
+    if (ready.contentMissing || ready.files.length === 0) return readCurrent();
     const answers = await deps
       .rangePatches(root, ready.since, head)
       .catch(() => []);

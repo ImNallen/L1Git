@@ -316,3 +316,20 @@ it("shows a thread on an old line in All changes, where its line is drawn", asyn
   expect(place()).toBe("1 of 4");
   expect(chips()).toEqual(["S1 commentsara: “Says old”"]);
 });
+
+it("says a file has no contents here when the since read couldn't read them", async () => {
+  await openFiles({}, (bridge) =>
+    bridge.respond("sinceReview", () => ({
+      kind: "ready",
+      since: replayed,
+      fromBase: { kind: "leftOut" },
+      reviewed: asReviewed,
+      files: [file("src/a.ts", { added: null, deleted: null })],
+      contentMissing: true,
+    })),
+  );
+  expect(path()).toBe("src/a.ts");
+  expect(panel().textContent).toContain(
+    "This is a partial clone, and file contents aren't on this computer.",
+  );
+});

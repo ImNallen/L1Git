@@ -696,6 +696,47 @@ describe("what changed since your review", () => {
     });
   });
 
+  it("reads the file it shows in its place when it stops after the patches came", async () => {
+    const answer = deferred<Awaited<ReturnType<Deps["sinceReview"]>>>();
+    const { store, patch } = setup({
+      sinceReview: vi.fn<Deps["sinceReview"]>(() => answer.promise),
+      rangePatches: vi.fn<Deps["rangePatches"]>(async () => []),
+    });
+    store.see("me one", repository, reviewedPull("1"), false);
+    await settle();
+    answer.resolve({ kind: "treesMissing" });
+    await settle();
+    expect(store.read()?.since?.showing).toBe("all");
+    expect(patch()).toBe("own a.ts");
+  });
+
+  it("reads its current file by itself when it has no contents", async () => {
+    const again = file("b.ts", { oldBlob: oid("9") });
+    const answer = deferred<Awaited<ReturnType<Deps["sinceReview"]>>>();
+    const { store, filePatch } = setup({
+      sinceReview: vi.fn<Deps["sinceReview"]>(() => answer.promise),
+    });
+    store.see("me one", repository, reviewedPull("1"), false);
+    await settle();
+    answer.resolve({
+      ...sinceReady([again], [file("b.ts", { newBlob: oid("8") })]),
+      contentMissing: true,
+    });
+    await settle();
+    expect(shown(store)).toEqual(["b.ts"]);
+    expect(store.read()?.patches?.get(again)?.kind).toBe("ready");
+    expect(filePatch).toHaveBeenCalledWith(
+      root,
+      {
+        base: { kind: "commit", oid: replayed },
+        target: { kind: "commit", oid: oid("1") },
+      },
+      "b.ts",
+      "hunks",
+      "b.ts",
+    );
+  });
+
   it("makes no Git call for a commit GitHub no longer has", async () => {
     const { store, sinceReview } = setup();
     store.see(
