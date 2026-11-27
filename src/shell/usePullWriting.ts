@@ -22,6 +22,10 @@ export type PullWriting = {
   writes: ReturnType<typeof createPullRequestWrites>;
 };
 
+/** How often a window reads drafts.json while it shows a write as sending. */
+const AGAIN_MS = 5_000;
+const quiet = () => () => {};
+
 /** An opened pull request, as the screens that write to it see it. */
 type OpenedWriting = {
   writing: PullWriting;
@@ -93,6 +97,19 @@ export function usePullWriting({
     window.addEventListener("focus", focused);
     return () => window.removeEventListener("focus", focused);
   }, [writing, openedId]);
+  // Only drafts.json tells this window that another one's write ended.
+  const sending = useSyncExternalStore(
+    writing?.drafts.subscribe ?? quiet,
+    () =>
+      writing !== null &&
+      opened !== null &&
+      writing.drafts.read(opened).sent.some(({ sending }) => sending),
+  );
+  useEffect(() => {
+    if (!sending) return;
+    const timer = setInterval(load, AGAIN_MS);
+    return () => clearInterval(timer);
+  }, [sending, writing, openedId]);
   return writing;
 }
 
@@ -130,7 +147,6 @@ export function usePullWrites({
   );
   return {
     attempts,
-    busy: writes.busy(pull),
     /** Saves the drafts it carries first, so they go as the host keeps them. */
     send: async (
       write: PullWrite,

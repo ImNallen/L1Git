@@ -138,3 +138,45 @@ it("saves the drafts a write carries before it sends them", async () => {
   expect(sent).toBe("started");
   await vi.waitFor(() => expect(bridge.world.host.mutations).toHaveLength(1));
 });
+
+it("reads the drafts again every 5 seconds while it shows another window's write as sending", async () => {
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+  const book = "octo octo/pin#1";
+  const write = { kind: "comment" as const, pull: pull(1).id, body: "From A" };
+  const record = {
+    attempt: "elsewhere",
+    at: 1,
+    write,
+    drafts: [],
+    sending: true,
+    applied: false,
+  };
+  bridge.world.host.sent.set(book, [record]);
+  await act(() =>
+    rendered.at(-1)?.drafts.load({ login: "octo", repository, number: 1 }),
+  );
+  expect(screen?.writes.attempts.map(({ state }) => state.kind)).toEqual([
+    "sending",
+  ]);
+  const reads = () =>
+    bridge.hostLog.filter(
+      (request) =>
+        request.op === "drafts" &&
+        (request.change as { kind: string }).kind === "read",
+    ).length;
+
+  bridge.world.host.sent.set(book, [{ ...record, sending: false }]);
+  await act(async () => vi.advanceTimersByTime(4_000));
+  expect(screen?.writes.attempts.map(({ state }) => state.kind)).toEqual([
+    "sending",
+  ]);
+  await act(async () => vi.advanceTimersByTime(1_000));
+  await vi.waitFor(() =>
+    expect(screen?.writes.attempts.map(({ state }) => state.kind)).toEqual([
+      "unknown",
+    ]),
+  );
+  const after = reads();
+  await act(async () => vi.advanceTimersByTime(20_000));
+  expect(reads(), "nothing shown as sending, so no more reads").toBe(after);
+});
