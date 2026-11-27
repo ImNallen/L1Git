@@ -284,9 +284,9 @@ describe("the merge box's fourteen states", () => {
       },
     ],
   ])("%s", (_, fields, progress, local, expected) => {
-    expect(shownBox(pull(fields), "adam", ago, progress, local)).toMatchObject(
-      expected,
-    );
+    expect(
+      shownBox(pull(fields), "adam", ago, progress, local, null),
+    ).toMatchObject(expected);
   });
 });
 
@@ -295,7 +295,7 @@ describe("what the merge box offers", () => {
     fields: Partial<PullRequest>,
     progress: MergeProgress = idle,
     local: LocalDelete = none,
-  ) => shownBox(pull(fields), "adam", ago, progress, local).action;
+  ) => shownBox(pull(fields), "adam", ago, progress, local, null).action;
 
   it("offers a merge only to a role that can merge", () => {
     for (const viewerPermission of ["write", "maintain", "admin"] as const)
@@ -305,7 +305,14 @@ describe("what the merge box offers", () => {
       });
     expect(actionOf({ viewerPermission: "triage" })).toEqual({ kind: "none" });
     expect(
-      shownBox(pull({ viewerPermission: "unknown" }), "adam", ago, idle, none),
+      shownBox(
+        pull({ viewerPermission: "unknown" }),
+        "adam",
+        ago,
+        idle,
+        none,
+        null,
+      ),
       "an unknown role is no claim that you can't, so it sends you to GitHub",
     ).toMatchObject({ kind: "ready", action: { kind: "openOnGitHub" } });
   });
@@ -336,15 +343,28 @@ describe("what the merge box offers", () => {
 
   it("says plainly that a merge with no answer may have landed", () => {
     expect(
-      shownBox(pull(), "adam", ago, { kind: "unknown", kept: true }, none),
+      shownBox(
+        pull(),
+        "adam",
+        ago,
+        { kind: "unknown", kept: true },
+        none,
+        null,
+      ),
     ).toMatchObject({
       kind: "checking",
       title: "L1 Git can't tell yet whether this merged",
       action: { kind: "openOnGitHub" },
     });
     expect(
-      shownBox(pull(), "adam", ago, { kind: "unknown", kept: false }, none)
-        .action,
+      shownBox(
+        pull(),
+        "adam",
+        ago,
+        { kind: "unknown", kept: false },
+        none,
+        null,
+      ).action,
       "with nothing kept to look for, the user moves on",
     ).toEqual({ kind: "retry" });
   });
@@ -352,10 +372,24 @@ describe("what the merge box offers", () => {
   it("shows the read over a write it settled", () => {
     const merged = pull({ state: { kind: "merged", at } });
     expect(
-      shownBox(merged, "adam", ago, { kind: "unknown", kept: true }, none),
+      shownBox(
+        merged,
+        "adam",
+        ago,
+        { kind: "unknown", kept: true },
+        none,
+        null,
+      ),
     ).toMatchObject({ kind: "merged", action: { kind: "none" } });
     expect(
-      shownBox(pull(), "adam", ago, { kind: "done", commit: oid("4") }, none),
+      shownBox(
+        pull(),
+        "adam",
+        ago,
+        { kind: "done", commit: oid("4") },
+        none,
+        null,
+      ),
       "a done merge shows before a read has it",
     ).toMatchObject({
       kind: "merged",
@@ -369,9 +403,31 @@ describe("what the merge box offers", () => {
       state: { kind: "merged", at },
       head: { ...pull().head, ref: null },
     });
-    expect(shownBox(merged, "adam", ago, idle, tracked).text).toBe(
+    expect(shownBox(merged, "adam", ago, idle, tracked, null).text).toBe(
       "Merged just now. fix/sync-stall was deleted on GitHub. Your local branch pr/127 is still here.",
     );
+  });
+
+  it("offers the branch delete a merge with no answer skipped", () => {
+    const merged = pull({ state: { kind: "merged", at } });
+    expect(
+      shownBox(
+        merged,
+        "adam",
+        ago,
+        { kind: "unknown", kept: true },
+        tracked,
+        "fix/sync-stall",
+      ),
+    ).toMatchObject({
+      kind: "merged",
+      text: "Merged just now. L1 Git got no answer to the merge, so it didn't delete fix/sync-stall on GitHub. Your local branch pr/127 is still here.",
+      action: { kind: "deleteRemote", branch: "fix/sync-stall" },
+    });
+    expect(
+      shownBox(merged, "adam", ago, idle, tracked, null).action,
+      "with nothing left on GitHub, the local branch is the one to offer",
+    ).toEqual({ kind: "deleteLocal" });
   });
 
   it("names why a merge didn't happen, and lets the user move on", () => {
@@ -386,6 +442,7 @@ describe("what the merge box offers", () => {
           expectedHead: oid("1"),
         },
         none,
+        null,
       ),
     ).toMatchObject({
       kind: "failed",
@@ -403,6 +460,7 @@ describe("what the merge box offers", () => {
           message: "L1 Git could not reach GitHub, so it sent nothing.",
         },
         none,
+        null,
       ),
     ).toMatchObject({
       kind: "failed",
@@ -419,6 +477,7 @@ describe("what the merge box offers", () => {
           message: "GitHub hasn't merged this pull request.",
         },
         none,
+        null,
       ),
     ).toMatchObject({
       kind: "failed",

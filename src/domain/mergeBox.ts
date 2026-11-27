@@ -35,6 +35,8 @@ type MergeAction =
   | { kind: "merging" }
   /** Puts away what the last merge said. */
   | { kind: "retry" }
+  /** The head branch a merge L1 Git never saw left on GitHub. */
+  | { kind: "deleteRemote"; branch: string }
   | { kind: "deleteLocal" };
 export type MergeBox = {
   kind: MergeKind;
@@ -286,6 +288,8 @@ export function shownBox(
   ago: (at: string) => string,
   progress: MergeProgress,
   local: LocalDelete,
+  /** The head branch the user asked L1 Git to delete and it hasn't. */
+  headLeft: string | null,
 ): MergeBox {
   const read = mergeBox(pull, viewer, ago);
   const { base } = pull;
@@ -294,15 +298,25 @@ export function shownBox(
     head.ref === null && !head.crossRepository
       ? ` ${head.branch} was deleted on GitHub.`
       : "";
+  const left =
+    headLeft === null
+      ? ""
+      : ` L1 Git got no answer to the merge, so it didn't delete ${headLeft} on GitHub.`;
   const still =
     local.kind === "offer"
       ? ` Your local branch ${local.name} is still here.`
       : "";
+  const after: MergeAction =
+    headLeft !== null
+      ? { kind: "deleteRemote", branch: headLeft }
+      : local.kind === "offer"
+        ? { kind: "deleteLocal" }
+        : { kind: "none" };
   const merged = (text: string): MergeBox => ({
     kind: "merged",
     title: `Merged into ${base}`,
-    text: `${text}${gone}${still}`,
-    action: local.kind === "offer" ? { kind: "deleteLocal" } : { kind: "none" },
+    text: `${text}${gone}${left}${still}`,
+    action: after,
   });
   const failed = (title: string, text: string): MergeBox => ({
     kind: "failed",

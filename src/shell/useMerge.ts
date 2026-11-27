@@ -82,7 +82,8 @@ const unsent = {
  * The opened pull request's merge: what the box shows, and the merge with the
  * branch deletions the user asked for, which run only once GitHub answered
  * that it merged. A merge that ends any other way, an unknown one that a read
- * later finds merged included, deletes nothing.
+ * later finds merged included, deletes nothing, and the box offers the head
+ * branch's delete for the user to send.
  */
 export function useMerge(
   opened: OpenedPullRequest,
@@ -94,6 +95,12 @@ export function useMerge(
   const [chosen, setChosen] = useState<MergeMethod | null>(null);
   const [note, setNote] = useState<Note | null>(null);
   const [deleting, setDeleting] = useState(false);
+  /** A merge L1 Git never saw end, with the head branch the user asked it to
+   * delete once it did. */
+  const [leftOnGitHub, setLeftOnGitHub] = useState<{
+    write: MergeWrite;
+    branch: string;
+  } | null>(null);
   const named = `${repository.github.owner}/${repository.github.repo}`;
   const lastMerge = writes.attempts.findLast(
     ({ write }) => write.kind === "merge",
@@ -120,6 +127,23 @@ export function useMerge(
     setDeleting(false);
   }
 
+  function deleteOnGitHub(write: MergeWrite, branch: string) {
+    void writes
+      .send({
+        kind: "deleteHeadBranch",
+        pull: write.pull,
+        branch,
+        expectedHead: write.expectedHead,
+      })
+      .then((started) => {
+        if (started !== "started")
+          setNote({
+            text: `L1 Git didn't delete ${branch} on GitHub, because ${unsent[started]}.`,
+            failed: true,
+          });
+      });
+  }
+
   /** Waits outside React for the merge's answer, so the deletions run even
    * after the user leaves the pull request. */
   function afterMerge(write: MergeWrite, ask: MergeAsk) {
@@ -134,28 +158,22 @@ export function useMerge(
         .find((each) => each.id === id);
       if (attempt?.state.kind === "sending") return;
       stop();
-      if (attempt?.state.kind !== "done") return;
+      if (attempt?.state.kind !== "done") {
+        // A merge whose answer was lost deletes nothing, so the branch the
+        // user asked for stays on GitHub until they ask for it again.
+        if (ask.remote !== null && attempt?.state.kind === "unknown")
+          setLeftOnGitHub({ write, branch: ask.remote });
+        return;
+      }
       queueMicrotask(() => {
-        if (ask.remote !== null)
-          void writes
-            .send({
-              kind: "deleteHeadBranch",
-              pull: write.pull,
-              branch: ask.remote,
-              expectedHead: write.expectedHead,
-            })
-            .then((started) => {
-              if (started !== "started")
-                setNote({
-                  text: `L1 Git didn't delete ${ask.remote} on GitHub, because ${unsent[started]}.`,
-                  failed: true,
-                });
-            });
+        if (ask.remote !== null) deleteOnGitHub(write, ask.remote);
         if (ask.local !== null) void deleteLocal(ask.local);
       });
     });
   }
 
+  const headLeft =
+    pull !== null && pull.head.ref !== null ? leftOnGitHub : null;
   const box =
     pull &&
     shownBox(
@@ -164,6 +182,7 @@ export function useMerge(
       (at) => relativeTime(Date.parse(at) / 1_000),
       progress,
       local,
+      headLeft?.branch ?? null,
     );
   const choices = pull && mergeChoices(pull, lastUsed(named));
   return {
@@ -183,12 +202,18 @@ export function useMerge(
         rememberMethod(named, ask.write.method);
         setChosen(null);
         setNote(null);
+        setLeftOnGitHub(null);
         afterMerge(ask.write, ask);
       }
       return started;
     },
     retry: () => {
       if (lastMerge) writes.dismiss(lastMerge.id);
+    },
+    deleteRemote: () => {
+      if (headLeft === null) return;
+      setLeftOnGitHub(null);
+      deleteOnGitHub(headLeft.write, headLeft.branch);
     },
     deleteLocal: () => {
       if (local.kind === "offer") void deleteLocal(local.branch);

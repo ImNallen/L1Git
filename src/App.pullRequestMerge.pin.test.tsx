@@ -188,6 +188,40 @@ it("says plainly that a merge got no answer, and deletes nothing even once a rea
   expect(kinds(app)).toEqual(["merge"]);
 });
 
+it("offers the branch delete that a merge with no answer skipped, and sends it only on a click", async () => {
+  const app = await visit({
+    world: (world) =>
+      void world.host.writes.push({ kind: "unknown", applied: true }),
+  });
+  await open(app, 1);
+  await app.click(get("button", "Squash and merge"));
+  await app.click(choice(/^Delete branch-1 on GitHub/));
+  await confirm(app);
+  await vi.waitFor(() =>
+    expect(said()).toBe(
+      "Merged into mainMerged as 9999999 just now. L1 Git got no answer to the merge, so it didn't delete branch-1 on GitHub.",
+    ),
+  );
+  expect(kinds(app), "nothing is deleted without a click").toEqual(["merge"]);
+
+  await app.click(get("button", "Delete branch-1 on GitHub", box()));
+  await vi.waitFor(() =>
+    expect(kinds(app)).toEqual(["merge", "deleteHeadBranch"]),
+  );
+  expect(sent(app)[1]).toEqual({
+    kind: "deleteHeadBranch",
+    pull: "PR_1",
+    branch: "branch-1",
+    expectedHead: HEAD,
+  });
+  await vi.waitFor(() =>
+    expect(said()).toBe(
+      "Merged into mainMerged as 9999999 just now. branch-1 was deleted on GitHub.",
+    ),
+  );
+  expect(boxButtons(), "nothing is left to delete").toEqual([]);
+});
+
 it("offers the merge again once a read shows a merge with no answer didn't land", async () => {
   const app = await visit({
     world: (world) =>

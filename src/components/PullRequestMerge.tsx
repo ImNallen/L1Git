@@ -245,6 +245,18 @@ export function PullRequestMerge({
           Review and try again
         </button>
       )}
+      {action.kind === "deleteRemote" && (
+        <button
+          type="button"
+          className="button secondary"
+          onClick={() => {
+            merge.deleteRemote();
+            stay();
+          }}
+        >
+          Delete {action.branch} on GitHub
+        </button>
+      )}
       {action.kind === "deleteLocal" && (
         <button
           type="button"
