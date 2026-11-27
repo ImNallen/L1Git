@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { z } from "zod";
+import { shownBox } from "../domain/mergeBox";
+import type { MergeProgress } from "../domain/mergeBox";
 import type { PullRequest } from "../domain/pullRequest";
-import { mergeChoices, shownBox } from "../domain/pullRequestMerge";
+import { mergeChoices } from "../domain/pullRequestMerge";
 import type {
   LocalDelete,
   MergeMethod,
-  MergeProgress,
   MergeWrite,
 } from "../domain/pullRequestMerge";
 import type { BranchTip, Problem } from "../domain/repository";

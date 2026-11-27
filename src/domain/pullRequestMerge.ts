@@ -1,13 +1,11 @@
 import type { BranchStatus } from "./overview";
 import type { PullRequest } from "./pullRequest";
 import type { PullCheckout } from "./pullRequestCheckout";
-import { counted, mergeBox } from "./pullRequestDetail";
-import type { MergeBox } from "./pullRequestDetail";
+import { counted } from "./pullRequestDetail";
 import type { PullWrite } from "./pullRequestWrites";
 import { shortBranch } from "./refs";
 import { branchTipSchema } from "./repository";
-import type { BranchTip, Oid } from "./repository";
-import { shortOid } from "./shortOid";
+import type { BranchTip } from "./repository";
 
 export type MergeMethod = PullRequest["merge"]["preferred"];
 export type MergeWrite = Extract<PullWrite, { kind: "merge" }>;
@@ -206,94 +204,4 @@ export function localDelete(
       oid: found.oid,
     }),
   };
-}
-
-/** The last merge sent from this window, by how it ended. */
-export type MergeProgress =
-  | { kind: "idle" }
-  | { kind: "sending"; method: MergeMethod }
-  | { kind: "done"; commit: string | null }
-  /** Sent with no answer. `kept`: the host keeps it, and each read of the
-   * pull request looks for it. */
-  | { kind: "unknown"; kept: boolean }
-  | { kind: "refused"; message: string; expectedHead: Oid }
-  | { kind: "notSent"; message: string }
-  /** A read after an unknown answer shows it didn't merge. */
-  | { kind: "notLanded"; message: string };
-
-/**
- * The merge box as the read and the last merge tell it. A read that shows it
- * merged wins; otherwise the merge in flight, or how it ended, comes first.
- */
-export function shownBox(
-  pull: PullRequest,
-  viewer: string | null,
-  ago: (at: string) => string,
-  progress: MergeProgress,
-  local: LocalDelete,
-): MergeBox {
-  const read = mergeBox(pull, viewer, ago);
-  const { base } = pull;
-  const { head } = pull;
-  const gone =
-    head.ref === null && !head.crossRepository
-      ? ` ${head.branch} was deleted on GitHub.`
-      : "";
-  const still =
-    local.kind === "offer"
-      ? ` Your local branch ${local.name} is still here.`
-      : "";
-  const merged = (text: string): MergeBox => ({
-    kind: "merged",
-    title: `Merged into ${base}`,
-    text: `${text}${gone}${still}`,
-    action: local.kind === "offer" ? { kind: "deleteLocal" } : { kind: "none" },
-  });
-  const failed = (title: string, text: string): MergeBox => ({
-    kind: "failed",
-    title,
-    text,
-    action: { kind: "retry" },
-  });
-  if (read.kind === "merged") return merged(read.text);
-  switch (progress.kind) {
-    case "sending":
-      return {
-        kind: "merging",
-        title: `Merging into ${base}…`,
-        text: "This takes a few seconds. You can leave this page.",
-        action: { kind: "merging" },
-      };
-    case "done":
-      return merged(
-        progress.commit
-          ? `Merged as ${shortOid(progress.commit)} just now.`
-          : "Merged just now.",
-      );
-    case "unknown":
-      return {
-        kind: "checking",
-        title: "L1 Git can't tell yet whether this merged",
-        text: progress.kept
-          ? "GitHub got the merge, and L1 Git got no answer it could read. L1 Git reads the pull request again to find out."
-          : "GitHub got the merge, and L1 Git got no answer it could read. If the pull request doesn't read as merged soon, nothing was merged.",
-        action: progress.kept ? { kind: "openOnGitHub" } : { kind: "retry" },
-      };
-    case "refused":
-      return failed(
-        "GitHub didn't merge this",
-        pull.head.oid === progress.expectedHead
-          ? `${progress.message} Nothing was merged.`
-          : "New commits arrived. Review them, then merge.",
-      );
-    case "notSent":
-      return failed("L1 Git didn't merge this", progress.message);
-    case "notLanded":
-      return failed("Nothing was merged", progress.message);
-    case "idle":
-      break;
-  }
-  if (read.action.kind === "merge" && mergeChoices(pull, null).chosen === null)
-    return { ...read, action: { kind: "none" } };
-  return read;
 }

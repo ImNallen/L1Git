@@ -15,7 +15,7 @@ import {
   LoaderCircle,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import type { MergeBox } from "../domain/pullRequestDetail";
+import type { MergeBox } from "../domain/mergeBox";
 import {
   mergeChoices,
   mergeLabel,
