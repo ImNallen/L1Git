@@ -92,6 +92,7 @@ export type Commands = {
   nextChange: () => void;
   previousChange: () => void;
   toggleViewed: () => void;
+  commentOnChange: () => void;
   toggleSidebar: () => void;
   toggleInspector: () => void;
   fetch: () => void;
@@ -199,6 +200,7 @@ export type ActionId =
   | "nextChange"
   | "previousChange"
   | "toggleViewed"
+  | "commentOnChange"
   | "toggleSidebar"
   | "toggleInspector"
   | "openSettings"
@@ -686,6 +688,13 @@ export const actions: readonly Action[] = [
     once: true,
     available: onFilesChanged,
     run: (commands) => commands.toggleViewed(),
+  },
+  {
+    id: "commentOnChange",
+    title: "Comment on this change",
+    shortcut: letter("c"),
+    available: onFilesChanged,
+    run: (commands) => commands.commentOnChange(),
   },
   {
     id: "showHistory",

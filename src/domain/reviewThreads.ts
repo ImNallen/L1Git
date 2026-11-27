@@ -1,5 +1,9 @@
 import type { DiffLineAnnotation, FileDiffMetadata } from "@pierre/diffs";
+import { draftKey } from "./drafts";
+import type { DraftKey } from "./drafts";
+import type { LineAnchor, Lines } from "./lineComments";
 import type { ReviewThread } from "./pullRequest";
+import type { Oid } from "./repository";
 import { counted, personName } from "./pullRequestDetail";
 import type { RangeFile } from "./range";
 
@@ -29,14 +33,42 @@ export function threadsByFile(
 export const commentsIn = (threads: readonly ReviewThread[]) =>
   threads.reduce((sum, { comments }) => sum + comments.total, 0);
 
-/** The ids of the threads on a line. */
-export type ThreadsOnLine = DiffLineAnnotation<readonly string[]>;
+/**
+ * What a line of a review diff carries. Ids only, never typed words: Pierre
+ * draws every line again for a changed list, and drops the selection.
+ */
+export type LineNote = {
+  readonly threads: readonly string[];
+  /** Pending comments, written against the head shown. */
+  readonly drafts: readonly DraftKey[];
+  /** Single comments sent from here, by attempt, until a read shows them. */
+  readonly sent: readonly string[];
+  /** Whether the open comment box belongs on this line. */
+  readonly box: boolean;
+};
+export type NotesOnLine = DiffLineAnnotation<LineNote>;
+
+/** What there is to show on a file's lines, at any head. */
+export type Notes = {
+  threads: readonly ReviewThread[];
+  drafts: readonly { key: DraftKey; anchor: LineAnchor; head: Oid }[];
+  sent: readonly { id: string; lines: Lines; commit: Oid }[];
+  /** The open comment box, at the head shown, with the attempt it sent. */
+  box: { anchor: LineAnchor; attempt: string | null } | null;
+};
+
+/** What has no line in what is shown of a file. */
+export type Elsewhere = {
+  threads: readonly ReviewThread[];
+  drafts: readonly DraftKey[];
+  sent: readonly string[];
+};
 
 const sides = { left: "deletions", right: "additions" } as const;
 
 function shows(
   { hunks }: FileDiffMetadata,
-  side: ThreadsOnLine["side"],
+  side: NotesOnLine["side"],
   line: number,
 ): boolean {
   return hunks.some((hunk) => {
@@ -48,41 +80,66 @@ function shows(
   });
 }
 
-/** Where a file's threads show in its patch, which for a changed type is two. */
-export function placeThreads(
-  threads: readonly ReviewThread[],
+const empty: LineNote = { threads: [], drafts: [], sent: [], box: false };
+
+/**
+ * Where a file's notes show in its patch at `head`, which for a changed type
+ * is two parts. A pending comment or a sent one of another head, like an
+ * outdated thread, is elsewhere: a line number means something at one commit
+ * only. The box shows its own draft and its own attempt.
+ */
+export function placeNotes(
+  { threads, drafts, sent, box }: Notes,
+  head: Oid,
   patch: readonly FileDiffMetadata[],
-): {
-  /** For each part of the patch. */
-  onLines: ThreadsOnLine[][];
-  elsewhere: ReviewThread[];
-} {
-  const onLines = patch.map(() => new Map<string, ThreadsOnLine>());
-  const elsewhere: ReviewThread[] = [];
-  for (const thread of threads) {
-    const { line, outdated } = thread;
-    const side = sides[thread.side];
-    const part =
-      line === null || outdated
-        ? -1
-        : patch.findIndex((each) => shows(each, side, line));
-    const places = onLines[part];
-    if (line === null || places === undefined) {
-      elsewhere.push(thread);
-      continue;
-    }
+): { onLines: NotesOnLine[][]; elsewhere: Elsewhere } {
+  const onLines = patch.map(() => new Map<string, NotesOnLine>());
+  const elsewhere = {
+    threads: [] as ReviewThread[],
+    drafts: [] as DraftKey[],
+    sent: [] as string[],
+  };
+  const put = (
+    at: { side: "left" | "right"; line: number | null } | null,
+    add: (note: LineNote) => LineNote,
+  ): boolean => {
+    if (at === null || at.line === null) return false;
+    const side = sides[at.side];
+    const { line } = at;
+    const places = onLines[patch.findIndex((each) => shows(each, side, line))];
+    if (!places) return false;
     const key = `${side} ${line}`;
-    places.set(key, {
-      side,
-      lineNumber: line,
-      metadata: [...(places.get(key)?.metadata ?? []), thread.id],
-    });
+    const note = places.get(key)?.metadata ?? empty;
+    places.set(key, { side, lineNumber: line, metadata: add(note) });
+    return true;
+  };
+  for (const thread of threads)
+    if (
+      !put(thread.outdated ? null : thread, (note) => ({
+        ...note,
+        threads: [...note.threads, thread.id],
+      }))
+    )
+      elsewhere.threads.push(thread);
+  const own = box && draftKey(box.anchor, head);
+  for (const draft of drafts) {
+    if (draft.key === own) continue;
+    const at = draft.head === head ? draft.anchor : null;
+    if (!put(at, (note) => ({ ...note, drafts: [...note.drafts, draft.key] })))
+      elsewhere.drafts.push(draft.key);
   }
+  for (const { id, lines, commit } of sent) {
+    if (id === box?.attempt) continue;
+    const at = commit === head ? lines : null;
+    if (!put(at, (note) => ({ ...note, sent: [...note.sent, id] })))
+      elsewhere.sent.push(id);
+  }
+  if (box) put(box.anchor, (note) => ({ ...note, box: true }));
   return { onLines: onLines.map((each) => [...each.values()]), elsewhere };
 }
 
-export function elsewhereLabel(threads: readonly ReviewThread[]): string {
-  const count = commentsIn(threads);
+export function elsewhereLabel({ threads, drafts, sent }: Elsewhere): string {
+  const count = commentsIn(threads) + drafts.length + sent.length;
   return `${counted(count, "comment")} that ${count === 1 ? "isn't" : "aren't"} on a line here`;
 }
 

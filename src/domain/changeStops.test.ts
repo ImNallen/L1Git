@@ -1,6 +1,6 @@
 import { parsePatchFiles } from "@pierre/diffs";
 import { describe, expect, it, vi } from "vitest";
-import { changeStops, nextChange } from "./changeStops";
+import { changeAt, changeStops, nextChange } from "./changeStops";
 
 const stops = (patch: string) =>
   changeStops(parsePatchFiles(patch).flatMap(({ files }) => files)).map(
@@ -96,6 +96,21 @@ describe("nextChange", () => {
     ["before, at the beginning", 0, -1, null],
   ] as const)("finds the %s from %i", (_, at, by, expected) => {
     expect(to(tops, view(at), by)).toBe(expected);
+  });
+
+  it.each([
+    [0, 0],
+    [434, 1],
+    [600, 2],
+    [1500, 3],
+  ])("is at a change from %i", (at, expected) => {
+    expect(changeAt(tops.length, (change) => tops[change]!, view(at))).toBe(
+      expected,
+    );
+  });
+
+  it("is at no change when every one is above the view", () => {
+    expect(changeAt(2, (change) => [10, 20][change]!, view(900))).toBeNull();
   });
 
   it("moves nothing in a file that fits or has no change", () => {

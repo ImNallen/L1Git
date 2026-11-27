@@ -1,5 +1,6 @@
 import { use, useCallback, useLayoutEffect, useMemo, useState } from "react";
 import type { ReactNode, Ref, RefObject } from "react";
+import type { SelectedLineRange } from "@pierre/diffs";
 import { FileX2 } from "lucide-react";
 import {
   inPlaceOfLines,
@@ -7,20 +8,24 @@ import {
   partialClone,
   shownPath,
 } from "../domain/filesChanged";
+import { placeOf, rangeOf } from "../domain/lineComments";
 import { parsedFiles } from "../domain/lineSelection";
 import type { DiffStyle } from "../domain/lineSelection";
 import type { ReviewThread } from "../domain/pullRequest";
 import type { RangeFile } from "../domain/range";
-import { placeThreads } from "../domain/reviewThreads";
-import type { ThreadsOnLine } from "../domain/reviewThreads";
+import type { Oid } from "../domain/repository";
+import { placeNotes } from "../domain/reviewThreads";
+import type { LineNote, NotesOnLine } from "../domain/reviewThreads";
 import type { FilesChanged, PatchRead } from "../filesChanged";
 import { Diff } from "./FilePatchView";
 import { Moved } from "./FileParts";
 import { FilesState, ReadingFiles } from "./FilesState";
 import type { LinePlace } from "./KeepDiffPlace";
 import { SurroundingsContext } from "./pullRequestText";
-import { ThreadChips, ThreadsElsewhere } from "./ReviewThreads";
+import { LineNoteView } from "./LineComments";
+import { ThreadsElsewhere } from "./ReviewThreads";
 import type { Unfolded } from "./ReviewThreads";
+import { LineCommentsContext, noNotes } from "./useLineComments";
 import { hasSelection } from "./selection";
 import { Turns, TurnsContext } from "./turns";
 import type { DiffSteps } from "./useDiffSteps";
@@ -55,6 +60,7 @@ export function FileChanged({
   file,
   enter,
   startsAt,
+  head,
   patch,
   contentMissing,
   threads: newest,
@@ -75,6 +81,8 @@ export function FileChanged({
   file: RangeFile;
   enter: FilesChanged["enter"];
   startsAt: () => LinePlace | null;
+  /** The head of what is shown. */
+  head: Oid;
   /** Null until it was asked for. */
   patch: PatchRead | null;
   contentMissing: boolean;
@@ -92,9 +100,12 @@ export function FileChanged({
 }) {
   const { theme, painted } = use(SurroundingsContext);
   const [turns] = useState(() => new Turns());
+  const comments = use(LineCommentsContext);
+  const notes = comments?.notesOf(file) ?? noNotes;
+  const isBoxOpen = notes.box !== null;
   const isSelected = useCallback(
-    () => pane.current !== null && hasSelection(pane.current),
-    [pane],
+    () => isBoxOpen || (pane.current !== null && hasSelection(pane.current)),
+    [pane, isBoxOpen],
   );
   // Pierre draws every line again for other threads, and a selection is lost.
   const threads = useSteady(newest, isSelected);
@@ -102,19 +113,24 @@ export function FileChanged({
   const words = diff && inPlaceOfLines(file, diff);
   const lines = words === null && diff?.kind === "text" ? diff.patch : null;
   const { onLines, elsewhere } = useMemo(
-    () => placeThreads(threads, lines === null ? [] : parsedFiles(lines)),
-    [threads, lines],
+    () =>
+      placeNotes(
+        { threads, ...notes },
+        head,
+        lines === null ? [] : parsedFiles(lines),
+      ),
+    [threads, notes, head, lines],
   );
   const places = JSON.stringify(onLines);
   // Pierre draws every line again for another list, and drops a selection.
   const steadyPlaces = useMemo(
-    () => JSON.parse(places) as ThreadsOnLine[][],
+    () => JSON.parse(places) as NotesOnLine[][],
     [places],
   );
-  const renderThreads = useCallback(
-    (ids: readonly string[]) => (
-      <ThreadChips
-        ids={ids}
+  const renderNote = useCallback(
+    (note: LineNote) => (
+      <LineNoteView
+        note={note}
         threads={threads}
         viewer={viewer}
         url={url}
@@ -123,6 +139,23 @@ export function FileChanged({
     ),
     [threads, viewer, url, unfolded],
   );
+  const boxPart = steadyPlaces.findIndex((part) =>
+    part.some(({ metadata }) => metadata.box),
+  );
+  const boxLines = notes.box && JSON.stringify(notes.box.anchor);
+  const chosen = useMemo(
+    () =>
+      boxLines === null || boxPart < 0
+        ? null
+        : { part: boxPart, range: rangeOf(JSON.parse(boxLines)) },
+    [boxPart, boxLines],
+  );
+  const choose = (part: number, range: SelectedLineRange) => {
+    const shown = lines === null ? undefined : parsedFiles(lines)[part];
+    const anchor = shown && placeOf(shown, diffStyle, file.path, range);
+    if (anchor) comments?.open(anchor);
+    else comments?.refuseLines();
+  };
   useLayoutEffect(() => {
     const scroller =
       pane.current?.querySelector<HTMLElement>(".file-diff-scroll");
@@ -152,10 +185,12 @@ export function FileChanged({
     [holdsFocus, hasFocus],
   );
 
-  const above = elsewhere.length > 0 && (
+  const above = (elsewhere.threads.length > 0 ||
+    elsewhere.drafts.length > 0 ||
+    elsewhere.sent.length > 0) && (
     <ThreadsElsewhere
       path={file.path}
-      threads={elsewhere}
+      elsewhere={elsewhere}
       viewer={viewer}
       url={url}
       unfolded={unfolded}
@@ -206,7 +241,9 @@ export function FileChanged({
           above,
           below,
           onLines: steadyPlaces,
-          renderThreads,
+          renderNote,
+          chosen,
+          onChoose: choose,
         }}
       />
     );

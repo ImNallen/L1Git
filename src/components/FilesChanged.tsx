@@ -16,6 +16,7 @@ import { nextUnviewed } from "../domain/viewedFiles";
 import { clampMessage } from "../domain/worktree";
 import type { FilesChanged as Held } from "../filesChanged";
 import type { FilesChangedState, FilesView } from "../shell/useFilesChanged";
+import type { OpenedPullRequest } from "../shell/usePullRequests";
 import { AllFiles } from "./AllFiles";
 import { FileChanged } from "./FileChanged";
 import { EndOfOne } from "./FileEnd";
@@ -26,6 +27,7 @@ import type { LinePlace } from "./KeepDiffPlace";
 import type { Unfolded } from "./ReviewThreads";
 import { OnGitHub } from "./PullRequestParts";
 import { useFolded } from "./useFolded";
+import { LineCommentsContext, useLineComments } from "./useLineComments";
 
 function Stopped({
   stop,
@@ -105,19 +107,25 @@ function Notices({
   newer,
   unsaved,
   problem,
+  lines,
   onShow,
   onDismissUnsaved,
   onDismiss,
+  onDismissLines,
 }: {
   newer: ReturnType<typeof newerThan>;
   unsaved: string | null;
   problem: string | null;
+  /** Why chosen lines opened no comment box. */
+  lines: string | null;
   onShow: () => void;
   onDismissUnsaved: () => void;
   onDismiss: () => void;
+  onDismissLines: () => void;
 }) {
   return (
     <div className="files-notices">
+      {lines !== null && <Warning onDismiss={onDismissLines}>{lines}</Warning>}
       {unsaved !== null && (
         <Warning onDismiss={onDismissUnsaved}>{unsaved}</Warning>
       )}
@@ -221,6 +229,7 @@ function Shown({
         pane,
         holdsFocus,
         startsAt,
+        head: range.head,
         unfolded,
         isShown,
         diffStyle,
@@ -295,7 +304,7 @@ export function FilesChanged({
   files,
   held,
   pull,
-  viewer,
+  opened,
   url,
 }: {
   /** Whether its tab is on screen. */
@@ -304,10 +313,15 @@ export function FilesChanged({
   held: Held;
   /** The newest read of it, which may have more than what is shown. */
   pull: PullRequest;
-  viewer: string;
+  opened: Pick<
+    OpenedPullRequest,
+    "writing" | "viewer" | "repository" | "number"
+  >;
   /** Its page of changes on GitHub. */
   url: string;
 }) {
+  const { viewer } = opened;
+  const comments = useLineComments({ opened, head: held.range.head, pull });
   const pane = useRef<HTMLElement>(null);
   const holdsFocus = useRef(false);
   const left = useRef<Left | null>(null);
@@ -339,62 +353,66 @@ export function FilesChanged({
     act();
   };
   return (
-    <section
-      ref={pane}
-      className="file-diff files-changed"
-      aria-label="Files changed"
-      tabIndex={-1}
-    >
-      {file && read.kind === "ready" && (
-        <FilesToolbar
-          files={read.files}
-          contentMissing={read.contentMissing}
-          at={at}
-          state={files}
-        />
-      )}
-      {counts !== null && (
-        <p className="files-counts">
-          {counts} <OnGitHub url={url} />
-        </p>
-      )}
-      <span className="visually-hidden" role="status">
-        {said(held)}
-      </span>
-      <FilesBoundary
-        key={`${files.view} ${files.view === "one" ? at : ""} ${range.head}`}
-        url={url}
-        onRetry={keepingFocus(() => {})}
+    <LineCommentsContext value={comments}>
+      <section
+        ref={pane}
+        className="file-diff files-changed"
+        aria-label="Files changed"
+        tabIndex={-1}
       >
-        <Shown
-          pane={pane}
-          holdsFocus={holdsFocus}
-          left={left}
-          unfolded={unfolded}
-          folded={folded}
-          onFold={fold}
-          isShown={isShown}
-          held={held}
-          files={files}
-          whole={whole}
-          onRetry={keepingFocus(files.retry)}
-          onRetryFile={(of) => keepingFocus(() => files.readFileAgain(of))()}
-          viewer={viewer}
+        {file && read.kind === "ready" && (
+          <FilesToolbar
+            files={read.files}
+            contentMissing={read.contentMissing}
+            at={at}
+            state={files}
+          />
+        )}
+        {counts !== null && (
+          <p className="files-counts">
+            {counts} <OnGitHub url={url} />
+          </p>
+        )}
+        <span className="visually-hidden" role="status">
+          {said(held)}
+        </span>
+        <FilesBoundary
+          key={`${files.view} ${files.view === "one" ? at : ""} ${range.head}`}
           url={url}
+          onRetry={keepingFocus(() => {})}
+        >
+          <Shown
+            pane={pane}
+            holdsFocus={holdsFocus}
+            left={left}
+            unfolded={unfolded}
+            folded={folded}
+            onFold={fold}
+            isShown={isShown}
+            held={held}
+            files={files}
+            whole={whole}
+            onRetry={keepingFocus(files.retry)}
+            onRetryFile={(of) => keepingFocus(() => files.readFileAgain(of))()}
+            viewer={viewer}
+            url={url}
+          />
+        </FilesBoundary>
+        <Notices
+          newer={newer}
+          unsaved={persistenceError === seen ? null : persistenceError}
+          problem={
+            problem && (files.view === "all" || problem.file === file)
+              ? problem.message
+              : null
+          }
+          lines={comments.notice}
+          onShow={keepingFocus(files.showNewest)}
+          onDismissUnsaved={keepingFocus(() => setSeen(persistenceError))}
+          onDismiss={keepingFocus(() => setProblem(null))}
+          onDismissLines={keepingFocus(comments.dismissNotice)}
         />
-      </FilesBoundary>
-      <Notices
-        newer={newer}
-        unsaved={persistenceError === seen ? null : persistenceError}
-        problem={
-          problem && (files.view === "all" || problem.file === file)
-            ? problem.message
-            : null
-        }
-        onShow={keepingFocus(files.showNewest)}
-        onDismissUnsaved={keepingFocus(() => setSeen(persistenceError))}
-        onDismiss={keepingFocus(() => setProblem(null))}
-      />
-    </section>
+      </section>
+    </LineCommentsContext>
   );
 }

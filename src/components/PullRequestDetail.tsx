@@ -389,7 +389,7 @@ export function PullRequestDetail({
                           files={files}
                           held={files.held}
                           pull={pull}
-                          viewer={viewer}
+                          opened={opened}
                           url={`${url}/files`}
                         />
                       )}

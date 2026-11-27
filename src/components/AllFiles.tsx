@@ -9,13 +9,15 @@ import {
   useState,
 } from "react";
 import type { Ref, RefObject } from "react";
-import type { FileDiffMetadata } from "@pierre/diffs";
+import type { FileDiffMetadata, SelectedLineRange } from "@pierre/diffs";
 import { CodeView as Viewer } from "@pierre/diffs/react";
 import type { CodeViewHandle } from "@pierre/diffs/react";
 import { sidesFor } from "../domain/fileSides";
+import { placeOf, rangeOf, runAt } from "../domain/lineComments";
 import type { DiffStyle } from "../domain/lineSelection";
 import type { ReviewThread } from "../domain/pullRequest";
 import type { RangeFile } from "../domain/range";
+import type { Oid } from "../domain/repository";
 import type { FilesChanged } from "../filesChanged";
 import allFilesStyles from "../styles/allFilesPatch.css?inline";
 import { AllFilesKeeper, HEADER, layout } from "./allFilesKeeper";
@@ -27,7 +29,7 @@ import { KeepAllFilesPlace } from "./KeepAllFilesPlace";
 import type { LinePlace } from "./KeepDiffPlace";
 import { patchOptions } from "./patchOptions";
 import { SurroundingsContext } from "./pullRequestText";
-import { ThreadChips } from "./ReviewThreads";
+import { LineNoteView } from "./LineComments";
 import type { Unfolded } from "./ReviewThreads";
 import { hasSelection } from "./selection";
 import { tabIntoView } from "./tabIntoView";
@@ -36,6 +38,7 @@ import { reviewMetrics } from "./useDiffSteps";
 import type { DiffSteps } from "./useDiffSteps";
 import { entryId, fileOfDiff, useFileItems } from "./useFileItems";
 import type { FileNote } from "./useFileItems";
+import { LineCommentsContext, noNotes } from "./useLineComments";
 import { useRedraws } from "./useRedraws";
 import { useSteady } from "./useSteady";
 
@@ -43,6 +46,8 @@ import { useSteady } from "./useSteady";
 const END = 48;
 /** Above this many lines, a file is drawn without colors, which takes Pierre too long. */
 const MOST_COLORED = 3_000;
+
+const noNotesOf = () => noNotes;
 
 /** Every file of a pull request, one after the other. */
 export function AllFiles({
@@ -54,6 +59,7 @@ export function AllFiles({
   contentMissing,
   patches,
   at,
+  head,
   threads: newest,
   unfolded,
   viewed,
@@ -79,6 +85,8 @@ export function AllFiles({
   contentMissing: boolean;
   patches: FilesChanged["patches"];
   at: number;
+  /** The head of what is shown. */
+  head: Oid;
   threads: ReadonlyMap<RangeFile, readonly ReviewThread[]>;
   unfolded: Unfolded;
   viewed: ReadonlySet<RangeFile>;
@@ -100,18 +108,42 @@ export function AllFiles({
   const scroller = useRef<HTMLDivElement>(null);
   const handle = useRef<CodeViewHandle<FileNote, undefined>>(null);
   const viewer = useCallback(() => handle.current?.getInstance(), []);
+  const comments = use(LineCommentsContext);
+  const isBoxOpen = comments?.box != null;
   const isSelected = useCallback(
-    () => scroller.current !== null && hasSelection(scroller.current),
-    [],
+    () =>
+      isBoxOpen ||
+      (scroller.current !== null && hasSelection(scroller.current)),
+    [isBoxOpen],
   );
   const threads = useSteady(newest, isSelected);
-  const { items, entries, count } = useFileItems(
+  const { items, entries, count, boxAt } = useFileItems(
     files,
     patches,
     contentMissing,
     threads,
     folded,
+    head,
+    comments?.notesOf ?? noNotesOf,
   );
+  const boxLines = comments?.box ? JSON.stringify(comments.box.anchor) : null;
+  const chosen = useMemo(
+    () =>
+      boxAt === null || boxLines === null
+        ? null
+        : { id: boxAt, range: rangeOf(JSON.parse(boxLines)) },
+    [boxAt, boxLines],
+  );
+  const latest = useRef({ entries, comments, diffStyle });
+  latest.current = { entries, comments, diffStyle };
+  const choose = useCallback((id: string, range: SelectedLineRange | null) => {
+    const { entries, comments, diffStyle } = latest.current;
+    const entry = entries.get(id);
+    if (!range || !entry?.diff) return;
+    const anchor = placeOf(entry.diff, diffStyle, entry.file.path, range);
+    if (anchor) comments?.open(anchor);
+    else comments?.refuseLines();
+  }, []);
   const [begins] = useState(at);
   const isReady = count > begins;
 
@@ -143,13 +175,23 @@ export function AllFiles({
         holdEnd(node);
         drawn(node);
       },
+      enableLineSelection: true,
+      enableGutterUtility: true,
+      onLineSelectionEnd: (
+        range: SelectedLineRange | null,
+        { item }: { item: { id: string } },
+      ) => choose(item.id, range),
+      onGutterUtilityClick: (
+        range: SelectedLineRange,
+        { item }: { item: { id: string } },
+      ) => choose(item.id, range),
       loadDiffFiles: async (diff: FileDiffMetadata) => {
         const file = fileOfDiff(diff);
         if (!file) throw new Error("The diff is of no file.");
         return sidesFor(diff, await latestWhole.current(file));
       },
     } as const;
-  }, [theme, painted, diffStyle, appearances, drawn]);
+  }, [theme, painted, diffStyle, appearances, drawn, choose]);
 
   const known = { entries, folded, contentMissing, onAt, onRead };
   const [keeper] = useState(() => new AllFilesKeeper(viewer, known));
@@ -242,6 +284,14 @@ export function AllFiles({
     toStart: (of) => keeper.toStart(of),
     tell: keeper.tell,
     beforeMark,
+    comment: () => {
+      const here = keeper.stopHere();
+      const entry = here && entries.get(here.id);
+      const range = here && entry?.diff && runAt(entry.diff, here.stop);
+      if (!entry || !range) return false;
+      choose(entry.id, range);
+      return true;
+    },
   }));
 
   if (!isReady) return <ReadingFiles />;
@@ -261,6 +311,7 @@ export function AllFiles({
           className="file-diff-scroll files-all-scroll"
           items={items}
           options={options}
+          selectedLines={chosen}
           onScroll={keeper.onScroll}
           renderCustomHeader={({ id }) => {
             const entry = entries.get(id);
@@ -318,8 +369,8 @@ export function AllFiles({
                     }}
                   />
                 ) : (
-                  <ThreadChips
-                    ids={metadata}
+                  <LineNoteView
+                    note={metadata}
                     threads={threads.get(entry.file) ?? []}
                     viewer={login}
                     url={url}

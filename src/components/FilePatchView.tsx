@@ -1,4 +1,10 @@
-import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+} from "react";
 import type { MouseEvent, ReactNode, Ref, RefObject } from "react";
 import { DIFFS_TAG_NAME } from "@pierre/diffs";
 import type { FileDiffMetadata, SelectedLineRange } from "@pierre/diffs";
@@ -9,8 +15,9 @@ import { sidesFor, undrawn } from "../domain/fileSides";
 import { hunkAnchor, parsedFiles } from "../domain/lineSelection";
 import type { DiffStyle, HunkBar } from "../domain/lineSelection";
 import type { PartAction } from "../domain/operations";
-import type { FilePatch, LinePick } from "../domain/repository";
-import type { ThreadsOnLine } from "../domain/reviewThreads";
+import type { FilePatch, LinePick, LineSide } from "../domain/repository";
+import { runAt } from "../domain/lineComments";
+import type { LineNote, NotesOnLine } from "../domain/reviewThreads";
 import { KeepDiffPlace } from "./KeepDiffPlace";
 import type { LinePlace } from "./KeepDiffPlace";
 import { patchOptions } from "./patchOptions";
@@ -41,8 +48,12 @@ export type Review = {
   above: ReactNode;
   below: ReactNode;
   /** For each part of the patch. */
-  onLines: readonly ThreadsOnLine[][];
-  renderThreads: (ids: readonly string[]) => ReactNode;
+  onLines: readonly NotesOnLine[][];
+  renderNote: (note: LineNote) => ReactNode;
+  /** The lines the comment box is on, in which part of the patch. */
+  chosen: { part: number; range: SelectedLineRange } | null;
+  /** Lines chosen to comment on, by a drag, the gutter plus or a key. */
+  onChoose: (part: number, range: SelectedLineRange) => void;
 };
 
 type WholeRead = () => Promise<string>;
@@ -128,6 +139,8 @@ function Patch({
   const files = useMemo(() => parsedFiles(patch), [patch]);
   const latest = useRef(parts);
   latest.current = parts;
+  const latestReview = useRef(review);
+  latestReview.current = review;
   const latestWhole = useRef(whole);
   latestWhole.current = whole;
   const firstLineAction = useRef<HTMLButtonElement>(null);
@@ -137,13 +150,25 @@ function Patch({
     writable && firstHunk !== undefined && hunkAnchor(firstHunk, 0) === null;
   const scroll = useRef<HTMLDivElement>(null);
   const { onPostRender, parts: drawnParts } = useDrawnParts();
+  const commentOn = useCallback(
+    ({ part, side, line }: { part: number; side: LineSide; line: number }) => {
+      const file = files[part];
+      const range = file && runAt(file, { side, line });
+      if (!range) return false;
+      latestReview.current?.onChoose(part, range);
+      return true;
+    },
+    [files],
+  );
   useDiffSteps(
     review?.ref,
     scroll,
     files,
     drawnParts,
     review?.startsAtEnd === true,
+    commentOn,
   );
+  const reviewing = review !== null;
   const options = useMemo(
     () =>
       ({
@@ -163,8 +188,26 @@ function Patch({
           onGutterUtilityClick: (range: SelectedLineRange) =>
             gutterFirstAction(range),
         }),
+        ...(reviewing && {
+          enableLineSelection: true,
+          enableGutterUtility: true,
+        }),
       }) as const,
-    [diffStyle, theme, painted, writable, barOnTop, onPostRender],
+    [diffStyle, theme, painted, writable, reviewing, barOnTop, onPostRender],
+  );
+  const partOptions = useMemo(
+    () =>
+      files.map((_, part) => ({
+        ...options,
+        ...(reviewing && {
+          onLineSelectionEnd: (range: SelectedLineRange | null) => {
+            if (range) latestReview.current?.onChoose(part, range);
+          },
+          onGutterUtilityClick: (range: SelectedLineRange) =>
+            latestReview.current?.onChoose(part, range),
+        }),
+      })),
+    [files, options, reviewing],
   );
   const pressed = useRef<{ hunk: number; action: PartAction } | null>(null);
   function gutterFirstAction(range: SelectedLineRange) {
@@ -172,8 +215,10 @@ function Patch({
     latest.current?.onGutterFirstAction(range);
   }
   const [firstAction] = parts?.actions ?? [];
-  const gutterLabel = firstAction && lineLabels[firstAction];
-  const range = parts?.range;
+  const gutterLabel = reviewing
+    ? "Comment on the chosen lines"
+    : firstAction && lineLabels[firstAction];
+  const range = parts?.range ?? review?.chosen;
   useEffect(
     function nameTheGutterPlus() {
       if (!gutterLabel) return;
@@ -265,15 +310,16 @@ function Patch({
           {review?.above}
           {files.map((file, index) =>
             review ? (
-              <FileDiff<readonly string[]>
+              <FileDiff<LineNote>
                 key={index}
                 fileDiff={file}
-                options={options}
+                options={partOptions[index] ?? options}
                 metrics={reviewMetrics}
                 lineAnnotations={review.onLines[index]}
-                renderAnnotation={({ metadata }) =>
-                  review.renderThreads(metadata)
+                selectedLines={
+                  review.chosen?.part === index ? review.chosen.range : null
                 }
+                renderAnnotation={({ metadata }) => review.renderNote(metadata)}
               />
             ) : (
               <FileDiff<HunkBar>

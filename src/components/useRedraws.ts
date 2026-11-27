@@ -9,6 +9,14 @@ const CALM_MS = 1_000;
 /** What Pierre draws in place of a file it failed to draw. */
 const FAILED = "[data-error-wrapper]";
 
+/** What WebKit and Chromium report, with no error, when sizes change again
+ * inside a ResizeObserver callback. Nothing failed, so nothing is redrawn. */
+const RESIZE_NOTICE =
+  "ResizeObserver loop completed with undelivered notifications.";
+
+const isNotice = (event: ErrorEvent) =>
+  event.error === null && event.message === RESIZE_NOTICE;
+
 /** Calls `redraw` once Pierre is done with the frame, still before it shows. */
 function onFailure(redraw: () => void) {
   let tries = 0;
@@ -48,8 +56,11 @@ export function useRedraws() {
   const [drawn, redraw] = useReducer(() => watching(failed), failed, watching);
   // What Pierre throws in its own frames, outside of a file.
   useEffect(() => {
-    addEventListener("error", failed);
-    return () => removeEventListener("error", failed);
+    const heard = (event: ErrorEvent) => {
+      if (!isNotice(event)) failed();
+    };
+    addEventListener("error", heard);
+    return () => removeEventListener("error", heard);
   }, [failed]);
   return drawn;
 }
