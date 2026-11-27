@@ -1,5 +1,6 @@
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { X } from "lucide-react";
-import type { ReactNode, Ref } from "react";
+import type { CSSProperties, ReactNode, Ref } from "react";
 
 export type NotificationAction = {
   label: string;
@@ -7,6 +8,14 @@ export type NotificationAction = {
   primary?: boolean;
   unavailable?: boolean;
 };
+
+type Dismissal =
+  | { onDismiss?: undefined; expiresAfter?: undefined }
+  | {
+      onDismiss: () => void;
+      /** Milliseconds shown before it dismisses itself, held while pointed at or focused. */
+      expiresAfter?: number;
+    };
 
 /** A popup over the panes, so showing or hiding one never moves them. */
 export function Notification({
@@ -17,6 +26,7 @@ export function Notification({
   actions = [],
   actionsBelow = false,
   onDismiss,
+  expiresAfter,
   ref,
 }: {
   tone: "info" | "error";
@@ -26,9 +36,11 @@ export function Notification({
   output?: readonly string[];
   actions?: readonly NotificationAction[];
   actionsBelow?: boolean;
-  onDismiss?: () => void;
   ref?: Ref<HTMLDivElement>;
-}) {
+} & Dismissal) {
+  const [held, setHeld] = useState({ pointer: false, focus: false });
+  const isHeld = held.pointer || held.focus;
+  useExpiry(expiresAfter, isHeld, onDismiss);
   const buttons = actions.map((action) => (
     <button
       key={action.label}
@@ -46,6 +58,14 @@ export function Notification({
       ref={ref}
       className={`notification ${tone}${output.length > 0 || actionsBelow ? " stacked" : ""}`}
       role={tone === "error" ? "alert" : "status"}
+      data-held={(expiresAfter !== undefined && isHeld) || undefined}
+      onPointerEnter={() => setHeld((shown) => ({ ...shown, pointer: true }))}
+      onPointerLeave={() => setHeld((shown) => ({ ...shown, pointer: false }))}
+      onFocus={() => setHeld((shown) => ({ ...shown, focus: true }))}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget))
+          setHeld((shown) => ({ ...shown, focus: false }));
+      }}
     >
       <div className="notification-row">
         {icon}
@@ -65,6 +85,31 @@ export function Notification({
         <pre className="notification-output">{output.join("\n")}</pre>
       )}
       {actionsBelow && <div className="notification-actions">{buttons}</div>}
+      {expiresAfter !== undefined && (
+        <div
+          className="notification-expiry"
+          aria-hidden="true"
+          style={{ "--expires-after": `${expiresAfter}ms` } as CSSProperties}
+        />
+      )}
     </div>
   );
+}
+
+function useExpiry(
+  expiresAfter: number | undefined,
+  held: boolean,
+  onExpire: (() => void) | undefined,
+) {
+  const left = useRef(expiresAfter);
+  const expire = useEffectEvent(() => onExpire?.());
+  useEffect(() => {
+    if (left.current === undefined || held) return;
+    const started = Date.now();
+    const timer = setTimeout(expire, left.current);
+    return () => {
+      clearTimeout(timer);
+      if (left.current !== undefined) left.current -= Date.now() - started;
+    };
+  }, [held]);
 }

@@ -8,14 +8,17 @@ import {
   fetchedText,
   historyFailure,
   hookOutputTail,
+  isConfirmation,
   nextEntry,
   pulledText,
   steppedText,
 } from "../domain/operations";
-import type { Step } from "../domain/operations";
+import type { Step, WriteNotice } from "../domain/operations";
 import { pushOutcomeText, pushSucceeded } from "../domain/push";
 import type { WritesView } from "../useWrites";
 import { Notification } from "./Notification";
+
+const CONFIRMATION_MS = 4_500;
 
 export function WriteNoticeRow({ writes }: { writes: WritesView }) {
   const { history } = writes;
@@ -29,6 +32,16 @@ export function WriteNoticeRow({ writes }: { writes: WritesView }) {
       )}
     </>
   );
+}
+
+const shown = new WeakMap<WriteNotice, number>();
+let shownCount = 0;
+
+/** Each notice gets its own popup, so a later one restarts the countdown. */
+function shownKey(notice: WriteNotice) {
+  const key = shown.get(notice) ?? shownCount++;
+  shown.set(notice, key);
+  return key;
 }
 
 type Shown = Pick<
@@ -120,5 +133,13 @@ function StepNotice({ writes }: { writes: WritesView }) {
       }
     }
   })();
-  return <Notification ref={row} {...shownNotice} onDismiss={writes.dismiss} />;
+  return (
+    <Notification
+      key={shownKey(notice)}
+      ref={row}
+      {...shownNotice}
+      onDismiss={writes.dismiss}
+      expiresAfter={isConfirmation(notice) ? CONFIRMATION_MS : undefined}
+    />
+  );
 }

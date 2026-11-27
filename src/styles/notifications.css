@@ -127,3 +127,30 @@
 .notification-actions > .notification-action {
   margin-block: 0;
 }
+.notification-expiry {
+  position: absolute;
+  inset: auto 0 0;
+  height: 2px;
+  background: color-mix(in srgb, var(--text-strong) 8%, transparent);
+}
+.notification-expiry::after {
+  content: "";
+  display: block;
+  height: 100%;
+  background: color-mix(in srgb, var(--success) 72%, transparent);
+  transform-origin: left;
+  animation: notification-expiry var(--expires-after) linear forwards;
+}
+.notification[data-held] .notification-expiry::after {
+  animation-play-state: paused;
+}
+@keyframes notification-expiry {
+  to {
+    transform: scaleX(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .notification-expiry::after {
+    animation: none;
+  }
+}
