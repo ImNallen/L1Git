@@ -1,10 +1,6 @@
 import type { ReactNode } from "react";
-import {
-  checkGroups,
-  checksSummary,
-  headName,
-  reviewers,
-} from "../domain/pullRequestDetail";
+import { checkGroups, checksSummary } from "../domain/pullRequestChecks";
+import { headName, reviewers } from "../domain/pullRequestDetail";
 import { pullRequestUrl } from "../domain/pullRequestList";
 import type { OpenedPullRequest } from "../shell/usePullRequests";
 import type { FilesChangedState } from "../shell/useFilesChanged";
