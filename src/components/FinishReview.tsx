@@ -61,6 +61,12 @@ export function FinishReviewButton(props: PopoverProps) {
   const { finish } = props;
   const button = useRef<HTMLButtonElement>(null);
   const count = finish.current.length;
+  const { refocus, refocused } = finish;
+  useLayoutEffect(() => {
+    if (!refocus) return;
+    button.current?.focus();
+    refocused();
+  }, [refocus, refocused]);
   return (
     <>
       <span className="finish-sent" role="status">

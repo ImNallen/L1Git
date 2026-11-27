@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { draftKey, draftText } from "../domain/drafts";
 import type { Anchor } from "../domain/drafts";
 import { byHead, eventsFor, heldBack, reviewOf } from "../domain/finishReview";
@@ -30,6 +30,11 @@ type SendView =
   | { kind: "unknown"; attempt: Attempt };
 
 const idle: Sending = { kind: "idle", problem: null };
+/** How long the toolbar says Review sent. */
+const SAYS_MS = 8_000;
+const quiet = <Told extends { saying: boolean; focus: boolean }>(
+  was: Told | null,
+) => was && { ...was, saying: false, focus: false };
 
 type Listed = {
   key: string;
@@ -62,6 +67,12 @@ export function useFinishReview({
   const [isOpen, setOpen] = useState(false);
   const [chosen, choose] = useState<ReviewEvent>("comment");
   const [sending, setSending] = useState<Sending>(idle);
+  /** The last review this window saw posted, while the toolbar says so. */
+  const [told, setTold] = useState<{
+    id: string;
+    saying: boolean;
+    focus: boolean;
+  } | null>(null);
   const head = pull.head.oid;
   // A new comment still in its box is not in the review until Start a review.
   const writing =
@@ -89,13 +100,21 @@ export function useFinishReview({
               (each.state.kind === "sending" || each.state.kind === "unknown"),
           ) ?? null)
         : null;
-  if (attempt?.state.kind === "done") {
+  // The read right after it posted drops a done review within moments, so
+  // the toolbar says so from here, and the focus goes back to the button.
+  const finished = writes.attempts.findLast(
+    (each) => isReview(each) && each.state.kind === "done",
+  );
+  if (finished && finished.id !== told?.id) {
+    setTold({ id: finished.id, saying: true, focus: isOpen });
     setSending(idle);
     setOpen(false);
   }
-  const done = writes.attempts.some(
-    (each) => isReview(each) && each.state.kind === "done",
-  );
+  useEffect(() => {
+    if (!told?.saying) return;
+    const timer = setTimeout(() => setTold(quiet), SAYS_MS);
+    return () => clearTimeout(timer);
+  }, [told]);
   const unknown = writes.attempts.some(
     (each) => isReview(each) && each.state.kind === "unknown",
   );
@@ -167,7 +186,10 @@ export function useFinishReview({
 
   return {
     isOpen,
-    open: () => setOpen(true),
+    open: () => {
+      setTold(quiet);
+      setOpen(true);
+    },
     close: () => {
       if (send.kind === "sending") return;
       void drafts.flush();
@@ -188,7 +210,10 @@ export function useFinishReview({
     summarySave: summaryDraft?.save ?? null,
     reason,
     send,
-    done,
+    done: told?.saying ?? false,
+    /** Finish review takes the focus once the review it sent posted. */
+    refocus: told?.focus ?? false,
+    refocused: () => setTold((was) => was && { ...was, focus: false }),
     unknown,
     submit,
     clearProblem: () => {

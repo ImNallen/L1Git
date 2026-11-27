@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import type { Draft } from "./domain/drafts";
 import type { PullRequest, ReviewThread } from "./domain/pullRequest";
 import { oidSchema } from "./domain/repository";
@@ -476,4 +476,41 @@ it("fits under its button in the window, and keeps fitting as the window changes
   });
   expect(shown.style.maxHeight).toBe("478px");
   window.innerHeight = height;
+});
+
+it("says Review sent. for 8 seconds or until Finish review opens again, and gives the focus back to Finish review", async () => {
+  vi.useFakeTimers({
+    toFake: ["setTimeout", "clearTimeout"],
+    shouldAdvanceTime: true,
+  });
+  try {
+    const app = await openFiles({ drafts: [draft(11, "Done soon")] });
+    await openPopover(app);
+    await app.click(submit());
+    await app.settle();
+    expect(popover()).toBeNull();
+    expect(get("status", "Review sent.")).toBeTruthy();
+    expect(focused()).toBe("button Finish review");
+    await app.act(() => {
+      vi.advanceTimersByTime(7_000);
+    });
+    expect(
+      query("status", "Review sent."),
+      "still there after 7 s",
+    ).toBeTruthy();
+    await app.act(() => {
+      vi.advanceTimersByTime(1_500);
+    });
+    expect(query("status", "Review sent.")).toBeNull();
+
+    await app.click(finish());
+    await app.type(get("textbox", "Summary", popover()!), "Once more");
+    await app.click(submit());
+    await app.settle();
+    expect(get("status", "Review sent.")).toBeTruthy();
+    await app.click(finish());
+    expect(query("status", "Review sent."), "a new action moves on").toBeNull();
+  } finally {
+    vi.useRealTimers();
+  }
 });
