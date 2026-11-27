@@ -273,6 +273,8 @@ export function eventText(
       return "marked this as ready for review";
     case "convertedToDraft":
       return "marked this as a draft";
+    case "baseChanged":
+      return `changed the base from ${event.from} to ${event.to}`;
     default: {
       const exhaustive: never = event;
       return exhaustive;

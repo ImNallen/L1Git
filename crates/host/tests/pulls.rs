@@ -979,6 +979,24 @@ fn the_timeline_skips_what_it_cannot_tell_but_counts_it() {
 }
 
 #[test]
+fn the_timeline_tells_when_the_base_changed() {
+    let world = World::connected();
+    let data = world.pulls(pull(json!({"timelineItems": {"totalCount": 1, "nodes": [{
+        "__typename": "BaseRefChangedEvent", "id": "BRCE_1", "author": {"login": "maja"},
+        "at": "2026-11-25T09:00:00Z", "previousRefName": "main", "currentRefName": "release",
+    }]}})));
+    assert_eq!(
+        data["timeline"]["items"],
+        json!([{
+            "id": "BRCE_1", "kind": "baseChanged", "from": "main", "to": "release",
+            "by": "maja", "at": "2026-11-25T09:00:00Z",
+        }])
+    );
+    let asked = &world.github.questions()[0]["query"];
+    assert!(asked.as_str().unwrap().contains("BASE_REF_CHANGED_EVENT"));
+}
+
+#[test]
 fn checks_claim_the_least() {
     let world = World::connected();
     let run = |status: &str, conclusion: Value| json!({"__typename": "CheckRun", "name": "run", "status": status, "conclusion": conclusion, "startedAt": null, "completedAt": null, "url": null, "isRequired": false});

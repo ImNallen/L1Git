@@ -5,6 +5,7 @@ import {
   CircleDot,
   CircleX,
   Eye,
+  GitBranch,
   GitCommitHorizontal,
   GitMerge,
   GitPullRequestClosed,
@@ -73,6 +74,8 @@ function eventIcon({ event }: EventEntry): [LucideIcon, string] {
       return [Eye, ""];
     case "convertedToDraft":
       return [GitPullRequestDraft, ""];
+    case "baseChanged":
+      return [GitBranch, ""];
     default: {
       const exhaustive: never = event;
       return exhaustive;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { pull } from "../test/pullRequests";
-import type { PullRequest } from "./pullRequest";
+import type { PullRequest, TimelineEvent } from "./pullRequest";
 import { oidSchema } from "./repository";
 import { reviewPointOf } from "./sinceReview";
 
@@ -33,5 +33,25 @@ describe("reviewPointOf", () => {
 
   it("keeps a review of a commit GitHub no longer has, without its commit", () => {
     expect(reviewPointOf(reviewedAt(null))).toEqual({ oid: null, at });
+  });
+
+  it("is nothing once the base changed after your review, and stays when it changed before", () => {
+    const retarget = (when: string): TimelineEvent => ({
+      id: "B1",
+      kind: "baseChanged",
+      from: "main",
+      to: "release",
+      by: "maja",
+      at: when,
+    });
+    const timeline = (when: string) => ({
+      timeline: { items: [retarget(when)], total: 1 },
+    });
+    expect(
+      reviewPointOf(reviewedAt(reviewed, timeline("2026-11-24T19:00:00Z"))),
+    ).toBeNull();
+    expect(
+      reviewPointOf(reviewedAt(reviewed, timeline("2026-11-24T17:00:00Z"))),
+    ).toEqual({ oid: reviewed, at });
   });
 });

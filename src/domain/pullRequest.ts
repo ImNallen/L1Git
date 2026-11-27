@@ -84,6 +84,12 @@ const eventSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("branchDeleted"), ...entry }),
   z.object({ kind: z.literal("readyForReview"), ...entry }),
   z.object({ kind: z.literal("convertedToDraft"), ...entry }),
+  z.object({
+    kind: z.literal("baseChanged"),
+    from: z.string(),
+    to: z.string(),
+    ...entry,
+  }),
 ]);
 
 export const pullRequestSchema = z.object({
