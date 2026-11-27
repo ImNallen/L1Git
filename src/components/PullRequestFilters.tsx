@@ -5,7 +5,6 @@ import {
   GitMerge,
   GitPullRequest,
   GitPullRequestDraft,
-  RefreshCw,
   Square,
   SquareCheck,
   Tag,
@@ -45,34 +44,17 @@ const Count = ({ of }: { of: number | null }) =>
 export function PullRequestFilters({
   model,
   choices,
-  reading,
   onChoose,
-  onRefresh,
 }: {
   model: ListModel;
   choices: Choices;
-  reading: boolean;
   onChoose: (choices: Partial<Choices>) => void;
-  /** Null while there is no sign-in to read with. */
-  onRefresh: (() => void) | null;
 }) {
   const rows = useRef<HTMLDivElement>(null);
   useRovingRows(rows);
   return (
     <>
-      <div className="pull-filters-heading">
-        <strong>Pull requests</strong>
-        <button
-          type="button"
-          className="icon-button"
-          aria-label="Refresh pull requests"
-          title="Refresh pull requests"
-          aria-disabled={onRefresh === null}
-          onClick={onRefresh ?? undefined}
-        >
-          <RefreshCw size={14} className={reading ? "spin" : undefined} />
-        </button>
-      </div>
+      <div className="pull-filters-heading" data-tauri-drag-region />
       <div ref={rows} className="pull-filters">
         <nav className="pull-filter-group" aria-label="Pull request views">
           <h3 aria-hidden="true">Views</h3>
