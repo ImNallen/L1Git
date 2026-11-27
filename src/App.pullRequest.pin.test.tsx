@@ -75,7 +75,9 @@ it("opens a row in the app, and shows it whole", async () => {
   const inspector = get("complementary", "Pull request details");
   expect(inspector.textContent).toContain("Nobody yet");
   expect(inspector.textContent).toContain("+1 −1 in 2 files");
-  expect(box()).toBe("Ready to mergeGitHub finds nothing that stops it.");
+  expect(box()).toBe(
+    "Ready to mergeGitHub finds nothing that stops it.Squash and merge",
+  );
 });
 
 it("leaves a click with a modifier to the browser", async () => {

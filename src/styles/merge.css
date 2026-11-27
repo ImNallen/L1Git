@@ -1,0 +1,223 @@
+.merge-box:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: -2px;
+}
+.merge-box p.merge-note {
+  margin-top: 6px;
+  color: var(--text-secondary);
+}
+.merge-box p.merge-note.bad {
+  color: var(--error-text);
+}
+.merge-box .merge-dismiss {
+  grid-column: 2;
+  justify-self: start;
+  font-size: 12px;
+}
+.merge-icon.spin {
+  animation-duration: 1.4s;
+}
+
+.merge-split {
+  display: flex;
+  grid-column: 1 / -1;
+  margin-top: 8px;
+}
+.merge-box .merge-split .button {
+  margin-top: 0;
+}
+.merge-split .button:first-child {
+  flex: 1;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.merge-split .button:last-child {
+  width: 34px;
+  padding: 0;
+  border-left-color: color-mix(in srgb, var(--primary-text) 24%, transparent);
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+.merge-split.danger .button:last-child {
+  border-left-color: var(--error-border);
+}
+
+.merge-menu [role="menuitemradio"] {
+  align-items: flex-start;
+  height: auto;
+  padding-block: 6px;
+}
+.merge-menu [role="menuitemradio"] > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  white-space: normal;
+}
+.merge-menu small {
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 15px;
+}
+.merge-menu [aria-checked="true"] > svg {
+  color: var(--blue);
+}
+
+.merge-popover {
+  position: fixed;
+  inset: auto;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 32px);
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--panel-raised);
+  color: var(--text-secondary);
+  box-shadow: 0 16px 48px var(--shadow-dialog);
+}
+.merge-popover::backdrop {
+  background: transparent;
+}
+.merge-popover header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 14px 16px 10px;
+}
+.merge-popover h1 {
+  flex: 1;
+  margin: 0;
+  color: var(--text-heading);
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.merge-popover header > span {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.merge-popover fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.merge-popover .merge-methods {
+  display: grid;
+  gap: 2px;
+  padding: 0 12px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.merge-methods label {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 7px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--text-body);
+  font-size: 12px;
+}
+.merge-methods label.chosen {
+  border-color: var(--border);
+  background: var(--control);
+}
+.merge-methods label:has(input:disabled) {
+  color: var(--text-dim);
+}
+.merge-methods input,
+.merge-after input {
+  flex-shrink: 0;
+  margin: 2px 0 0;
+  accent-color: var(--primary-bg);
+}
+.merge-methods span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.merge-methods small,
+.merge-after small {
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 15px;
+}
+.merge-methods label:not(:has(input:disabled)) small {
+  color: var(--muted);
+}
+.merge-message {
+  display: grid;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.merge-message label,
+.merge-after legend {
+  color: var(--muted);
+  font-size: 11px;
+}
+.merge-message input,
+.merge-message textarea {
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid var(--border-input);
+  border-radius: 6px;
+  background: var(--control-inset);
+  color: var(--text-input);
+  font: inherit;
+  font-size: 12px;
+  line-height: 18px;
+}
+.merge-message textarea {
+  resize: vertical;
+  min-height: 64px;
+}
+.merge-after {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.merge-after fieldset {
+  display: grid;
+  gap: 8px;
+}
+.merge-after legend {
+  float: left;
+  margin-bottom: 2px;
+  padding: 0;
+}
+.merge-after label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 8px;
+  row-gap: 2px;
+  padding-left: 22px;
+  color: var(--text-body);
+  font-size: 12px;
+}
+.merge-after label input {
+  margin-left: -22px;
+}
+.merge-after label:has(input:disabled) > span {
+  color: var(--text-dim);
+}
+.merge-popover .error-message {
+  margin: 12px 16px 0;
+}
+/* Merge and Cancel stay in sight while the rest scrolls. */
+.merge-popover footer {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: var(--panel-raised);
+}
+.merge-popover footer > span {
+  flex: 1;
+  color: var(--muted);
+  font-size: 11px;
+}

@@ -430,7 +430,9 @@ export function PullRequestDetail({
             <PullRequestInspector
               opened={opened}
               files={files}
+              checkout={checkout}
               onShowChecks={() => show("checks")}
+              onShowCommits={() => show("commits")}
             />
           </div>
         </>

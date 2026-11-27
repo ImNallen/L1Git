@@ -13,7 +13,7 @@ import {
   checksStarted,
   checkStates,
   checkUrl,
-} from "../domain/pullRequestDetail";
+} from "../domain/pullRequestChecks";
 import type { Check, PullRequest } from "../domain/pullRequest";
 import { shortOid } from "../domain/shortOid";
 import { Ago, OnGitHub } from "./PullRequestParts";
