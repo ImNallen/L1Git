@@ -458,3 +458,22 @@ it("stays open on Escape while its review is on its way, so how it ended stays i
     true,
   );
 });
+
+it("fits under its button in the window, and keeps fitting as the window changes", async () => {
+  const app = await openFiles({ drafts: [draft(11, "Tall")] });
+  finish().getBoundingClientRect = () =>
+    ({ top: 180, bottom: 208, left: 1300, right: 1392 }) as DOMRect;
+  const height = window.innerHeight;
+  window.innerHeight = 900;
+  const shown = await openPopover(app);
+  expect(shown.style.top).toBe("214px");
+  expect(shown.style.maxHeight, "the window's height below its top").toBe(
+    "678px",
+  );
+  window.innerHeight = 700;
+  await app.act(() => {
+    window.dispatchEvent(new Event("resize"));
+  });
+  expect(shown.style.maxHeight).toBe("478px");
+  window.innerHeight = height;
+});

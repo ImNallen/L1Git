@@ -24,6 +24,9 @@ const eventWords: Record<ReviewEvent, { title: string; text: string }> = {
   },
 };
 const MOST_THREADS = 3;
+/** Room it leaves under itself, and the least height it takes. */
+const EDGE = 8;
+const LEAST_HEIGHT = 200;
 
 const fileName = (path: string) => path.slice(path.lastIndexOf("/") + 1);
 const placeOf = ({ path, line, start }: Lines) =>
@@ -129,16 +132,25 @@ function FinishReviewPopover({
     summary.current?.focus(),
   );
   const id = useId();
-  const [place, setPlace] = useState<{ top: number; right: number } | null>(
-    null,
-  );
+  const [place, setPlace] = useState<{
+    top: number;
+    right: number;
+    maxHeight: number;
+  } | null>(null);
   useLayoutEffect(() => {
-    const bounds = under.current?.getBoundingClientRect();
-    if (bounds)
+    const fit = () => {
+      const bounds = under.current?.getBoundingClientRect();
+      if (!bounds) return;
+      const top = bounds.bottom + 6;
       setPlace({
-        top: bounds.bottom + 6,
+        top,
         right: Math.max(document.documentElement.clientWidth - bounds.right, 8),
+        maxHeight: Math.max(window.innerHeight - top - EDGE, LEAST_HEIGHT),
       });
+    };
+    fit();
+    window.addEventListener("resize", fit);
+    return () => window.removeEventListener("resize", fit);
   }, [under]);
   const { send, pending, current, older, events, event, reason } = finish;
   const isSending = send.kind === "sending";
