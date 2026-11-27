@@ -9,13 +9,14 @@ import {
   draft,
   kept,
   oid,
+  oneFile,
   openFiles,
   panel,
   pending,
   words,
   writes,
 } from "./test/lineComments";
-import { pull, refresh } from "./test/pullRequests";
+import { open, pull, refresh, tab, visit } from "./test/pullRequests";
 
 installHarness();
 
@@ -77,6 +78,34 @@ it("keeps pending comments for the next time, and edits and deletes them", async
   await app.click(get("button", "Delete"));
   expect(await pending(app)).toEqual([]);
   expect(kept(app.bridge)).toEqual([]);
+});
+
+it("opens no box before the saved comments are read, so Cancel never deletes one it didn't make", async () => {
+  const app = await visit({
+    bridge: oneFile,
+    world: (world) => {
+      world.host.details.set(pullKey("octo/pin", 1), pull(1));
+      world.host.drafts.set(book, [draft(12, "Is this right?")]);
+    },
+  });
+  const reading = app.bridge.hold("drafts");
+  await open(app, 1);
+  await app.click(tab("Files changed"));
+  await reading.arrived;
+  await choose(app, 12);
+  expect(box()).toBeNull();
+  expect(panel().textContent).toContain(
+    "Reading your saved comments. Choose the lines again in a moment.",
+  );
+  reading.release();
+  await app.settle();
+  await choose(app, 12);
+  expect(words().value).toBe("Is this right?");
+  await app.click(get("button", "Cancel"));
+  expect(await pending(app)).toEqual([
+    "OYou on line 12PendingEditDeleteIs this right?",
+  ]);
+  expect(kept(app.bridge)).toEqual(["Is this right?"]);
 });
 
 it("shows a pending comment of an earlier commit with the file's other comments, never on a line", async () => {

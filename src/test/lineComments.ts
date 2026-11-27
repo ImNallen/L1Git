@@ -21,7 +21,8 @@ const patch = `diff --git a/src/a.ts b/src/a.ts
  three
 `;
 
-function answer(bridge: Bridge) {
+/** Answers the reads of Files changed with one file to comment on. */
+export function oneFile(bridge: Bridge) {
   bridge.respond("rangeFiles", () => ({
     kind: "ready",
     mergeBase: oid("a"),
@@ -77,7 +78,7 @@ export async function openFiles({
   world?: (world: World) => void;
 } = {}): Promise<Harness> {
   const app = await visit({
-    bridge: answer,
+    bridge: oneFile,
     world: (each) => {
       each.host.details.set(pullKey("octo/pin", 1), pull(1, fields));
       world?.(each);

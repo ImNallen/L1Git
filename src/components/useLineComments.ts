@@ -290,6 +290,14 @@ export function useLineComments({
      * box with words typed in it stays, so they never become a pending
      * comment without Start a review. */
     open(anchor: LineAnchor) {
+      // Before the read, a box can't tell a saved comment from a new one,
+      // and Cancel would delete the saved one.
+      if (drafts.read.kind !== "ready")
+        return setNotice(
+          drafts.read.kind === "unread"
+            ? "Reading your saved comments. Choose the lines again in a moment."
+            : `L1 Git can't read your saved comments, so it opens no box: ${drafts.read.why}`,
+        );
       setNotice(null);
       if (box && draftKey(box.anchor, head) === draftKey(anchor, head)) return;
       if (box && view?.kind === "writing" && typed(box, view.text)) {
