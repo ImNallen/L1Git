@@ -139,7 +139,14 @@ export function CommentBox({
         </Problem>
       )}
       {writing?.problem && (
-        <Problem onDismiss={comments.clearProblem}>{writing.problem}</Problem>
+        <Problem
+          onDismiss={() => {
+            comments.clearProblem();
+            words.current?.focus();
+          }}
+        >
+          {writing.problem}
+        </Problem>
       )}
       {view.kind === "held" && (
         <p className="line-comment-note">

@@ -547,3 +547,19 @@ it("keeps a comment pending with Cmd or Ctrl+Enter, as the box's main button doe
   ]);
   expect(app.bridge.world.host.mutations).toEqual([]);
 });
+
+it("gives the focus to the pending comment Start a review keeps, and to the words when a message goes", async () => {
+  const app = await openFiles({
+    world: (world) => {
+      world.host.writes = [{ kind: "refused", message: "GitHub said no." }];
+    },
+  });
+  await choose(app, 12);
+  await app.type(words(), "Focus here");
+  await app.click(get("button", "Add single comment"));
+  await app.click(get("button", "Dismiss", box()!));
+  expect(document.activeElement, "the words, not the page").toBe(words());
+  await app.click(get("button", "Start a review"));
+  await pending(app);
+  expect(document.activeElement).toBe(get("region", "Pending comment"));
+});

@@ -111,6 +111,8 @@ export function useLineComments({
   const [held, setBox] = useState<Box | null>(null);
   /** Why chosen lines opened no box. */
   const [notice, setNotice] = useState<string | null>(null);
+  /** The pending comment the box just kept, which takes the focus. */
+  const [kept, setKept] = useState<DraftKey | null>(null);
   const box = held?.head === head ? held : null;
   const lineDrafts = useMemo(() => {
     const carried = new Set(
@@ -331,8 +333,12 @@ export function useLineComments({
       if (!box) return;
       if (boxAttempt) writes.dismiss(boxAttempt.id);
       void drafts.flush();
+      setKept(draftKey(box.anchor, head));
       setBox(null);
     },
+    kept,
+    /** The kept pending comment has the focus. */
+    landed: () => setKept(null),
     single,
     clearProblem() {
       if (boxAttempt) writes.dismiss(boxAttempt.id);

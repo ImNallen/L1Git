@@ -1,4 +1,4 @@
-import { use } from "react";
+import { use, useLayoutEffect, useRef } from "react";
 import { linesLabel } from "../domain/lineComments";
 import type { Lines } from "../domain/lineComments";
 import type { ReviewThread } from "../domain/pullRequest";
@@ -36,8 +36,20 @@ function PendingComment({
   where: string | null;
 }) {
   const problem = saveText(draft.save);
+  const card = useRef<HTMLElement>(null);
+  const takesFocus = comments.kept === draft.key;
+  useLayoutEffect(() => {
+    if (!takesFocus) return;
+    card.current?.focus({ preventScroll: true });
+    comments.landed();
+  }, [takesFocus, comments]);
   return (
-    <section className="line-comment" aria-label="Pending comment">
+    <section
+      ref={card}
+      className="line-comment"
+      aria-label="Pending comment"
+      tabIndex={-1}
+    >
       <Header
         viewer={viewer}
         aside={
