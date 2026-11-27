@@ -434,3 +434,27 @@ it("says why it sent nothing in the words every write uses", async () => {
   expect(mutations(app)).toEqual([]);
   expect(kept(app)).toEqual(["Waits its turn"]);
 });
+
+it("stays open on Escape while its review is on its way, so how it ended stays in sight", async () => {
+  const app = await openFiles({
+    drafts: [draft(11, "Patience")],
+    world: (world) => {
+      world.host.writes = [{ kind: "unknown", applied: false }];
+    },
+  });
+  const shown = await openPopover(app);
+  const held = app.bridge.hold("write");
+  await app.click(submit());
+  await app.press("Escape");
+  expect(popover()?.hasAttribute("open")).toBe(true);
+  held.release();
+  await app.settle();
+  expect(popover()?.hasAttribute("open")).toBe(true);
+  expect(get("button", "Send anyway", shown)).toBeTruthy();
+  await app.press("Escape");
+  expect(popover()).toBeNull();
+  await app.click(finish());
+  expect(popover()?.hasAttribute("open"), "the button opens it again").toBe(
+    true,
+  );
+});

@@ -158,7 +158,11 @@ function FinishReviewPopover({
       aria-labelledby={`${id}-title`}
       aria-busy={isSending}
       style={place ?? undefined}
-      onCancel={onCancel}
+      onCancel={(event) => {
+        // Closed while its review is on its way, it would hide how it ended.
+        if (isSending) event.preventDefault();
+        else onCancel(event);
+      }}
       onClick={(event) => {
         if (event.target === event.currentTarget) back();
       }}
