@@ -3,7 +3,8 @@ import { pull } from "../test/pullRequests";
 import type { PullRequest, TimelineEvent } from "./pullRequest";
 import { oidSchema } from "./repository";
 import type { RangeFile } from "./range";
-import { baseWords, reviewPointOf, sinceGroups } from "./sinceReview";
+import { baseWords, carried, reviewPointOf, sinceGroups } from "./sinceReview";
+import { markOf } from "./viewedFiles";
 
 const at = "2026-11-24T18:00:00Z";
 const head = oidSchema.parse("1".repeat(40));
@@ -145,6 +146,45 @@ describe("sinceGroups", () => {
     expect(again).toEqual([{ since: since[0], now: now[1] }]);
     expect(rebased).toEqual([]);
     expect(unchanged).toEqual([]);
+  });
+});
+
+describe("carried", () => {
+  const name = "octo/pin#1";
+  const record = (marks: string[]) => ({
+    version: 1 as const,
+    pulls: [{ pull: name, marks }],
+  });
+  const reviewedFile = file("b.ts", "1");
+  const once = file("b.ts", "3", { oldBlob: blob("4") });
+
+  it("marks a file only the rebase moved where you viewed it as reviewed, and nothing twice", () => {
+    const rebased = [{ now: once, reviewed: reviewedFile }];
+    const marks = carried(name, rebased, record([markOf(reviewedFile)]));
+    expect(marks).toEqual([{ pull: name, mark: markOf(once), isViewed: true }]);
+    expect(
+      carried(name, rebased, record([markOf(reviewedFile), markOf(once)])),
+    ).toEqual([]);
+  });
+
+  it("carries a second rebase from the reviewed mark", () => {
+    const twice = file("b.ts", "5", { oldBlob: blob("6") });
+    expect(
+      carried(
+        name,
+        [{ now: twice, reviewed: reviewedFile }],
+        record([markOf(reviewedFile), markOf(once)]),
+      ),
+    ).toEqual([{ pull: name, mark: markOf(twice), isViewed: true }]);
+  });
+
+  it("carries nothing you didn't view, or without a reviewed file", () => {
+    expect(
+      carried(name, [{ now: once, reviewed: reviewedFile }], record([])),
+    ).toEqual([]);
+    expect(
+      carried(name, [{ now: once, reviewed: null }], record([markOf(once)])),
+    ).toEqual([]);
   });
 });
 

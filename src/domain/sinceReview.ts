@@ -6,6 +6,7 @@ import type { RangeFile, SinceReady } from "./range";
 import type { GitHubRepository } from "./repository";
 import { shortOid } from "./shortOid";
 import { markOf } from "./viewedFiles";
+import type { MarkChange, ViewedRecord } from "./viewedFiles";
 
 export type ReviewPoint = NonNullable<PullRequest["reviewed"]>;
 
@@ -30,7 +31,7 @@ export function reviewPointOf(
 /** A file the author changed since your review. `now` is the pull request's file at its path, and null for a file it no longer changes. */
 type Again = { since: RangeFile; now: RangeFile | null };
 /** A file of the pull request that only the base's changes moved, with the file as you reviewed it. */
-type Rebased = { now: RangeFile; reviewed: RangeFile | null };
+export type Rebased = { now: RangeFile; reviewed: RangeFile | null };
 /** The pull request's files, split by what happened to each since your review. */
 export type SinceGroups = {
   again: Again[];
@@ -76,6 +77,26 @@ export function sinceGroups(
     else rebased.push({ now: file, reviewed: before });
   }
   return { again, rebased, unchanged };
+}
+
+/**
+ * The marks that keep a file viewed when only the base's changes moved it:
+ * the pull request's file now is marked where the file as you reviewed it
+ * was. The reviewed mark stays, so a second rebase carries from it again,
+ * and a second run adds nothing.
+ */
+export function carried(
+  pull: string,
+  rebased: readonly Rebased[],
+  record: ViewedRecord,
+): MarkChange[] {
+  const marks = new Set(record.pulls.find((each) => each.pull === pull)?.marks);
+  return rebased.flatMap(({ now, reviewed }) => {
+    const mark = markOf(now);
+    return reviewed !== null && marks.has(markOf(reviewed)) && !marks.has(mark)
+      ? [{ pull, mark, isViewed: true }]
+      : [];
+  });
 }
 
 /** Who pushed over the head after your review, or null when nobody did. */

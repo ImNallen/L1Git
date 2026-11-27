@@ -41,13 +41,14 @@ export function createViewedFiles(
     },
     read: () => record,
     look: () => put(latest()),
-    /** Null once saved, else the message to show. */
-    mark(change: MarkChange): string | null {
+    /** Null once saved, else the message to show. Each batch is one write. */
+    mark(changes: readonly MarkChange[]): string | null {
+      const changed = new Set(
+        changes.map(({ pull, mark }) => `${pull}\0${mark}`),
+      );
       unsaved = [
-        ...unsaved.filter(
-          ({ pull, mark }) => pull !== change.pull || mark !== change.mark,
-        ),
-        change,
+        ...unsaved.filter(({ pull, mark }) => !changed.has(`${pull}\0${mark}`)),
+        ...changes,
       ];
       const next = latest();
       const isNewer = readStored(storage, VIEWED_KEY, newerSchema) !== null;
