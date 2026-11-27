@@ -4259,6 +4259,24 @@ describe("real Rust host contract", () => {
       "comment",
     ]);
     expect(one.data.threads?.items.map(({ line }) => line)).toEqual([null, 30]);
+    expect(one.data).toMatchObject({
+      id: "PR_kwDOAPP12",
+      repositoryId: "R_kgDOAPP",
+      decision: "required",
+      head: {
+        ref: { id: "REF_kwDOHUBOT", othersOpen: 1, viewerCanDelete: false },
+      },
+      merge: {
+        allowed: { merge: false, squash: true, rebase: true },
+        preferred: "squash",
+        deletesBranch: true,
+      },
+      pending: { kind: "review", id: "PRR_2", comments: { total: 3 } },
+    });
+    expect(one.data.threads?.items.map(({ can }) => can)).toEqual([
+      { reply: true, resolve: false, unresolve: true },
+      { reply: true, resolve: true, unresolve: false },
+    ]);
     const ended = await ask({ op: "pullRequest", repository, number: 10 });
     if (ended.op !== "pullRequest") throw new Error(ended.op);
     expect(ended.data.timeline.items.map(({ kind }) => kind)).toEqual([
@@ -4266,6 +4284,12 @@ describe("real Rust host contract", () => {
       "closed",
       "branchDeleted",
     ]);
+    expect(ended.data).toMatchObject({
+      decision: "approved",
+      head: { ref: null },
+      merge: { preferred: "merge", deletesBranch: false },
+      pending: { kind: "none" },
+    });
     expect(seen).toEqual(Array(4).fill(`/graphql Bearer ${token}`));
     await ask({ op: "disconnect" });
   });

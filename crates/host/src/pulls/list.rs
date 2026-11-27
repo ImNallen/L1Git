@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use super::{
-    Actor, CHECKS, CheckState, Label, Mergeability, Nodes, Page, Repository, State, login,
+    Actor, CHECKS, CheckState, Label, Mergeability, Nodes, Page, Repository, Review, State, login,
 };
 use crate::github::{ApiError, GitHub};
 use crate::graphql::Reply;
@@ -49,16 +49,6 @@ pub struct Summary {
     deletions: u32,
     created_at: String,
     updated_at: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all(serialize = "camelCase", deserialize = "SCREAMING_SNAKE_CASE"))]
-enum Review {
-    Approved,
-    ChangesRequested,
-    /// Also a decision GitHub adds later, so it never looks like an approval.
-    #[serde(other)]
-    Required,
 }
 
 #[derive(Debug, Default, Serialize)]

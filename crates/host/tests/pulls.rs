@@ -114,11 +114,17 @@ fn pull(fields: Value) -> Value {
         "baseRefName": "main", "baseRefOid": "b".repeat(40), "headRefName": "fix", "headRefOid": "1".repeat(40),
         "isCrossRepository": false, "maintainerCanModify": false,
         "headRepository": {"name": "app", "owner": {"login": "octo"}},
-        "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
-        "reviewRequests": empty(), "latestReviews": empty(), "latestOpinionatedReviews": empty(),
+        "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN", "reviewDecision": null,
+        "baseRepository": {
+            "id": "R_1", "mergeCommitAllowed": true, "squashMergeAllowed": true, "rebaseMergeAllowed": true,
+            "viewerDefaultMergeMethod": "MERGE", "deleteBranchOnMerge": false,
+        },
+        "headRef": {"id": "REF_1", "associatedPullRequests": {"totalCount": 1}}, "viewerCanDeleteHeadRef": true,
+        "viewerPending": empty(), "reviewRequests": empty(), "latestReviews": empty(), "latestOpinionatedReviews": empty(),
         "statusCheckRollup": null, "commits": empty(), "timelineItems": empty(), "reviewThreads": empty(),
     });
-    json!({"data": {"repository": {"viewerPermission": null, "pullRequest": with(pull, fields)}}})
+    let pull = with(json!({"id": "PR_1"}), with(pull, fields));
+    json!({"data": {"repository": {"viewerPermission": null, "pullRequest": pull}}})
 }
 
 fn open(name: &str, rows: Vec<Value>, requested: &[u32]) -> Value {
@@ -588,7 +594,7 @@ fn one_pull_request_answers_in_l1_gits_words() {
     assert_eq!(answer["status"]["github"]["login"], "octo");
     let hunk = "@@ -1,2 +1,2 @@\n-let file = read();\n+let file = read_once();";
     let facts = json!({
-        "number": 12, "title": "Read the configuration file once",
+        "id": "PR_kwDOAPP12", "repositoryId": "R_kgDOAPP", "number": 12, "title": "Read the configuration file once",
         "body": "The file was read for **every** request.",
         "state": {"kind": "open", "draft": false}, "author": "hubot", "viewerIsAuthor": false,
         "viewerPermission": "write", "base": "main", "baseOid": "b".repeat(40),
@@ -599,8 +605,16 @@ fn one_pull_request_answers_in_l1_gits_words() {
             "branch": "read-config-once", "oid": "1".repeat(40),
             "repository": {"owner": "hubot", "repo": "app"},
             "crossRepository": true, "maintainerCanModify": true,
+            "ref": {"id": "REF_kwDOHUBOT", "othersOpen": 1, "viewerCanDelete": false},
         },
-        "mergeable": "mergeable", "mergeState": "blocked",
+        "mergeable": "mergeable", "mergeState": "blocked", "decision": "required",
+        "merge": {
+            "allowed": {"merge": false, "squash": true, "rebase": true},
+            "preferred": "squash", "deletesBranch": true,
+        },
+        "pending": {"kind": "review", "id": "PRR_2", "comments": {"total": 3, "items": [
+            {"path": "src/config.rs"}, {"path": "src/main.rs"}, {"path": "src/main.rs"},
+        ]}},
     });
     assert_eq!(
         answer["data"],
@@ -640,11 +654,13 @@ fn one_pull_request_answers_in_l1_gits_words() {
                     {
                         "id": "PRRT_1", "review": "PRR_1", "path": "src/config.rs", "line": null, "startLine": null, "originalLine": 175, "originalStartLine": null,
                         "side": "right", "outdated": true, "resolved": true, "hunk": hunk,
+                        "can": {"reply": true, "resolve": false, "unresolve": true},
                         "comments": {"total": 2, "items": [{"id": "PRRC_1", "by": "review-bot", "at": "2026-11-18T23:12:35Z", "body": "Could this stay lazy?"}]},
                     },
                     {
                         "id": "PRRT_2", "review": null, "path": "src/main.rs", "line": 30, "startLine": 30, "originalLine": 26, "originalStartLine": null,
                         "side": "right", "outdated": false, "resolved": false, "hunk": hunk,
+                        "can": {"reply": true, "resolve": true, "unresolve": false},
                         "comments": {"total": 4, "items": [{"id": "PRRC_2", "by": "monalisa", "at": "2026-11-19T18:23:35Z", "body": "Could this stay lazy?"}]},
                     },
                 ]},
@@ -700,6 +716,13 @@ fn a_pull_request_too_large_for_github_reads_without_its_threads() {
         let data = world.pull().unwrap()["data"].clone();
         assert_eq!(data["threads"], json!(null));
         assert_eq!(data["timeline"], json!({"items": [], "total": 0}));
+        assert_eq!(
+            data["id"], "PR_1",
+            "what writes need does not hang on threads"
+        );
+        assert_eq!(data["head"]["ref"]["id"], "REF_1");
+        assert_eq!(data["merge"]["preferred"], "merge");
+        assert_eq!(data["pending"], json!({"kind": "none"}));
         assert_eq!(asked_for_threads(&world), [true, false]);
     }
 }
@@ -795,6 +818,50 @@ fn a_merged_pull_request_tells_how_it_ended() {
     assert_eq!(data["checks"]["items"][0]["state"], "skipped");
     assert_eq!(data["mergeable"], "unknown");
     assert_eq!(data["mergeState"], "unknown");
+    assert_eq!(data["decision"], "approved");
+    assert_eq!(data["head"]["ref"], json!(null), "its branch is deleted");
+    assert_eq!(data["pending"], json!({"kind": "none"}));
+    assert_eq!(
+        data["merge"],
+        json!({
+            "allowed": {"merge": true, "squash": true, "rebase": false},
+            "preferred": "merge", "deletesBranch": false,
+        })
+    );
+}
+
+#[test]
+fn a_pending_review_github_withholds_is_unknown_not_absent() {
+    let world = World::connected();
+    let mut answer = pull(json!({"viewerPending": null}));
+    answer["errors"] = json!([refusal(
+        "FORBIDDEN",
+        json!(["repository", "pullRequest", "viewerPending"])
+    )]);
+    let data = world.pulls(answer);
+    assert_eq!(data["pending"], json!({"kind": "unknown"}));
+    assert_eq!(data["number"], 12, "the rest still reads");
+
+    let unreadable = pull(json!({"viewerPending": {"totalCount": 1, "nodes": [null]}}));
+    assert_eq!(
+        world.pulls(unreadable)["pending"],
+        json!({"kind": "unknown"})
+    );
+}
+
+#[test]
+fn others_on_the_head_branch_leave_this_one_out_while_it_is_open() {
+    let world = World::connected();
+    let head = |total: u32| json!({"id": "REF_1", "associatedPullRequests": {"totalCount": total}});
+    let open = world.pulls(pull(json!({"headRef": head(3)})));
+    assert_eq!(
+        open["head"]["ref"],
+        json!({"id": "REF_1", "othersOpen": 2, "viewerCanDelete": true})
+    );
+    let merged = world.pulls(pull(json!({
+        "headRef": head(1), "mergedAt": "2026-11-24T16:23:14Z", "closedAt": "2026-11-24T16:23:14Z",
+    })));
+    assert_eq!(merged["head"]["ref"]["othersOpen"], 1);
 }
 
 #[test]
@@ -920,13 +987,16 @@ fn a_gone_fork_and_unknown_values_still_read() {
     let world = World::connected();
     let mut answer = pull(json!({
         "author": null, "headRepository": null, "isCrossRepository": true,
-        "mergeStateStatus": "BY_MAGIC", "reviewRequests": null, "latestReviews": null, "latestOpinionatedReviews": null,
+        "mergeStateStatus": "BY_MAGIC", "reviewDecision": "BY_MAGIC", "reviewRequests": null, "latestReviews": null, "latestOpinionatedReviews": null,
         "reviewThreads": {"totalCount": 1, "nodes": [{
             "id": "PRRT_1", "path": "src/main.rs", "line": null, "startLine": null, "originalLine": null, "originalStartLine": null,
             "diffSide": "LEFT", "isOutdated": false, "isResolved": false, "first": {"nodes": []}, "comments": {"totalCount": 0, "nodes": []},
+            "viewerCanReply": false, "viewerCanResolve": false, "viewerCanUnresolve": false,
         }]},
     }));
     answer["data"]["repository"]["viewerPermission"] = json!("BY_MAGIC");
+    answer["data"]["repository"]["pullRequest"]["baseRepository"]["viewerDefaultMergeMethod"] =
+        json!("BY_MAGIC");
     let data = world.pulls(answer);
     assert_eq!(data["author"], json!(null));
     assert_eq!(data["head"]["repository"], json!(null));
@@ -936,4 +1006,12 @@ fn a_gone_fork_and_unknown_values_still_read() {
     assert_eq!(data["reviewers"], json!([]));
     assert_eq!(data["threads"]["items"][0]["side"], "left");
     assert_eq!(data["threads"]["items"][0]["hunk"], "");
+    assert_eq!(
+        data["decision"], "required",
+        "a new decision never reads as an approval"
+    );
+    assert_eq!(
+        data["merge"]["preferred"], "merge",
+        "GitHub's own default for a method it adds later"
+    );
 }

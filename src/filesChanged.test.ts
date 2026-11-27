@@ -20,6 +20,8 @@ const mergeBase = oid("a");
 function pull(head: string, fields: Partial<PullRequest> = {}): PullRequest {
   const page = { items: [], total: 0 };
   return pullRequestSchema.parse({
+    id: "PR_1",
+    repositoryId: "R_1",
     number: 1,
     title: "One",
     body: "",
@@ -41,6 +43,7 @@ function pull(head: string, fields: Partial<PullRequest> = {}): PullRequest {
       repository: null,
       crossRepository: false,
       maintainerCanModify: false,
+      ref: { id: "REF_1", othersOpen: 0, viewerCanDelete: true },
     },
     reviewers: [],
     checks: null,
@@ -49,6 +52,13 @@ function pull(head: string, fields: Partial<PullRequest> = {}): PullRequest {
     threads: page,
     mergeable: "unknown",
     mergeState: "unknown",
+    decision: null,
+    merge: {
+      allowed: { merge: true, squash: true, rebase: true },
+      preferred: "merge",
+      deletesBranch: false,
+    },
+    pending: { kind: "none" },
     ...fields,
   });
 }

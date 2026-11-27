@@ -291,6 +291,7 @@ it("folds a resolved thread, and shows the hunk of another as text when it is no
     side: "right" as const,
     outdated: true,
     hunk: "no hunk",
+    can: { reply: true, resolve: true, unresolve: false },
     comments: page([{ id: "TC1", body: "Fixed", by: "sara", at: at(3) }]),
   };
   const app = await visit({
@@ -660,6 +661,7 @@ const resolvedThread = {
   outdated: false,
   resolved: true,
   hunk: "no hunk",
+  can: { reply: true, resolve: true, unresolve: false },
   comments: page([{ id: "TC1", body: "Fixed", by: "sara", at: at(3) }]),
 };
 

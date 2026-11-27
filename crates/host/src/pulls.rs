@@ -115,6 +115,16 @@ enum Mergeability {
     Unknown,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "SCREAMING_SNAKE_CASE"))]
+enum Review {
+    Approved,
+    ChangesRequested,
+    /// Also a decision GitHub adds later, so it never looks like an approval.
+    #[serde(other)]
+    Required,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 enum CheckState {

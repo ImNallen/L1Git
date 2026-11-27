@@ -40,6 +40,8 @@ export function pull(
   const { head: branch, checks: _, ...summary } = row(number);
   return pullRequestSchema.parse({
     ...summary,
+    id: `PR_${number}`,
+    repositoryId: "R_pin",
     viewerPermission: "admin",
     body: "Reads **once**.",
     baseOid: "b".repeat(40),
@@ -50,6 +52,7 @@ export function pull(
       repository: { owner: "octo", repo: "pin" },
       crossRepository: false,
       maintainerCanModify: false,
+      ref: { id: `REF_${number}`, othersOpen: 0, viewerCanDelete: true },
     },
     reviewers: [],
     checks: page([]),
@@ -69,6 +72,13 @@ export function pull(
     ]),
     threads: page([]),
     mergeState: "clean",
+    decision: null,
+    merge: {
+      allowed: { merge: true, squash: true, rebase: true },
+      preferred: "squash",
+      deletesBranch: false,
+    },
+    pending: { kind: "none" },
     ...fields,
   });
 }

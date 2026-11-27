@@ -3,6 +3,7 @@
     "repository": {
       "viewerPermission": "WRITE",
       "pullRequest": {
+        "id": "PR_kwDOAPP12",
         "number": 12,
         "title": "Read the configuration file once",
         "body": "The file was read for **every** request.",
@@ -41,6 +42,44 @@
         },
         "mergeable": "MERGEABLE",
         "mergeStateStatus": "BLOCKED",
+        "baseRepository": {
+          "id": "R_kgDOAPP",
+          "mergeCommitAllowed": false,
+          "squashMergeAllowed": true,
+          "rebaseMergeAllowed": true,
+          "viewerDefaultMergeMethod": "SQUASH",
+          "deleteBranchOnMerge": true
+        },
+        "reviewDecision": "REVIEW_REQUIRED",
+        "headRef": {
+          "id": "REF_kwDOHUBOT",
+          "associatedPullRequests": {
+            "totalCount": 2
+          }
+        },
+        "viewerCanDeleteHeadRef": false,
+        "viewerPending": {
+          "totalCount": 1,
+          "nodes": [
+            {
+              "id": "PRR_2",
+              "comments": {
+                "totalCount": 3,
+                "nodes": [
+                  {
+                    "path": "src/config.rs"
+                  },
+                  {
+                    "path": "src/main.rs"
+                  },
+                  {
+                    "path": "src/main.rs"
+                  }
+                ]
+              }
+            }
+          ]
+        },
         "reviewRequests": {
           "nodes": [
             {
@@ -234,7 +273,10 @@
                     }
                   }
                 ]
-              }
+              },
+              "viewerCanReply": true,
+              "viewerCanResolve": false,
+              "viewerCanUnresolve": true
             },
             {
               "path": "src/main.rs",
@@ -266,7 +308,10 @@
                     "pullRequestReview": null
                   }
                 ]
-              }
+              },
+              "viewerCanReply": true,
+              "viewerCanResolve": true,
+              "viewerCanUnresolve": false
             }
           ]
         }

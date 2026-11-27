@@ -3,6 +3,7 @@
     "repository": {
       "viewerPermission": "ADMIN",
       "pullRequest": {
+        "id": "PR_kwDOAPP10",
         "number": 10,
         "title": "Cache the parsed theme",
         "body": "Parsing took 40 ms.",
@@ -36,6 +37,21 @@
         },
         "mergeable": "UNKNOWN",
         "mergeStateStatus": "UNKNOWN",
+        "baseRepository": {
+          "id": "R_kgDOAPP",
+          "mergeCommitAllowed": true,
+          "squashMergeAllowed": true,
+          "rebaseMergeAllowed": false,
+          "viewerDefaultMergeMethod": "MERGE",
+          "deleteBranchOnMerge": false
+        },
+        "reviewDecision": "APPROVED",
+        "headRef": null,
+        "viewerCanDeleteHeadRef": false,
+        "viewerPending": {
+          "totalCount": 0,
+          "nodes": []
+        },
         "reviewRequests": {
           "nodes": []
         },
