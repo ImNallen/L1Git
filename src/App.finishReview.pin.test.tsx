@@ -514,3 +514,23 @@ it("says Review sent. for 8 seconds or until Finish review opens again, and give
     vi.useRealTimers();
   }
 });
+
+it("says a review may have posted over the end of the diff, not in the toolbar beside the file's path", async () => {
+  const app = await openFiles({
+    drafts: [draft(11, "Lost again")],
+    world: (world) => {
+      world.host.writes = [{ kind: "unknown", applied: false }];
+    },
+  });
+  await openPopover(app);
+  await app.click(submit());
+  await app.press("Escape");
+  expect(popover()).toBeNull();
+  expect(document.querySelector(".finish-sent")?.textContent).toBe("");
+  const notice = get("status", /^Your review may have posted\./);
+  expect(notice.textContent).toBe(
+    "Your review may have posted. Finish review says what you can do.Open Finish review",
+  );
+  await app.click(get("button", "Open Finish review", notice));
+  expect(get("button", "Send anyway", popover()!)).toBeTruthy();
+});

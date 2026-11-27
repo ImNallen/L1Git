@@ -71,11 +71,7 @@ export function FinishReviewButton(props: PopoverProps) {
   return (
     <>
       <span className="finish-sent" role="status">
-        {finish.unknown
-          ? "Your review may have posted."
-          : finish.done
-            ? "Review sent."
-            : ""}
+        {finish.done ? "Review sent." : ""}
       </span>
       <button
         ref={button}

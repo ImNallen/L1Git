@@ -115,6 +115,7 @@ function Notices({
   onDismissUnsaved,
   onDismiss,
   onDismissLines,
+  onOpenReview,
 }: {
   newer: ReturnType<typeof newerThan>;
   unsaved: string | null;
@@ -125,9 +126,22 @@ function Notices({
   onDismissUnsaved: () => void;
   onDismiss: () => void;
   onDismissLines: () => void;
+  /** Opens Finish review while its review may have posted, else null. */
+  onOpenReview: (() => void) | null;
 }) {
   return (
     <div className="files-notices">
+      {onOpenReview && (
+        <div className="notice warning-notice" role="status">
+          <TriangleAlert size={14} aria-hidden="true" />
+          <span>
+            Your review may have posted. Finish review says what you can do.
+          </span>
+          <button type="button" onClick={onOpenReview}>
+            Open Finish review
+          </button>
+        </div>
+      )}
       {lines !== null && <Warning onDismiss={onDismissLines}>{lines}</Warning>}
       {unsaved !== null && (
         <Warning onDismiss={onDismissUnsaved}>{unsaved}</Warning>
@@ -474,6 +488,7 @@ export function FilesChanged({
           onDismissUnsaved={keepingFocus(() => setSeen(persistenceError))}
           onDismiss={keepingFocus(() => setProblem(null))}
           onDismissLines={keepingFocus(comments.dismissNotice)}
+          onOpenReview={finish.unknown ? finish.open : null}
         />
       </section>
     </LineCommentsContext>
