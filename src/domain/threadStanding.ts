@@ -86,6 +86,7 @@ export function threadsView(
     resolved: 0,
   };
   const byPath = new Map<string, ThreadRow[]>();
+  /** The resolved threads behind "Show them". */
   let hidden = 0;
   for (const thread of threads) {
     const of = standing(thread, viewer);
@@ -117,6 +118,5 @@ export function threadsView(
         (left, right) => lineOf(left.thread) - lineOf(right.thread),
       ),
     }));
-  /** The resolved threads behind "Show them". */
   return { counts, groups, hidden };
 }
