@@ -174,7 +174,7 @@ it("says plainly that a merge got no answer, and deletes nothing even once a rea
   await Promise.all([reading.arrived, looking.arrived]);
   await vi.waitFor(() =>
     expect(said()).toBe(
-      "L1 Git can't tell yet whether this mergedGitHub got the merge, and L1 Git got no answer it could read. L1 Git reads the pull request again to find out.",
+      "L1 Git can't tell yet whether this mergedL1 Git sent the merge to GitHub and got no answer, so it may have merged. L1 Git looks again each time it reads this pull request.",
     ),
   );
   expect(boxButtons(), "nothing to send again").toEqual([]);

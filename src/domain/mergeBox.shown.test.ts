@@ -354,6 +354,7 @@ describe("what the merge box offers", () => {
     ).toMatchObject({
       kind: "checking",
       title: "L1 Git can't tell yet whether this merged",
+      text: "L1 Git sent the merge to GitHub and got no answer, so it may have merged. L1 Git looks again each time it reads this pull request.",
       action: { kind: "openOnGitHub" },
     });
     expect(
@@ -364,9 +365,12 @@ describe("what the merge box offers", () => {
         { kind: "unknown", kept: false },
         none,
         null,
-      ).action,
+      ),
       "with nothing kept to look for, the user moves on",
-    ).toEqual({ kind: "retry" });
+    ).toMatchObject({
+      text: "L1 Git sent the merge to GitHub and got no answer, so it may have merged. L1 Git isn't looking for it any more. Review the pull request before you merge again.",
+      action: { kind: "retry" },
+    });
   });
 
   it("shows the read over a write it settled", () => {

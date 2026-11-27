@@ -343,9 +343,11 @@ export function shownBox(
       return {
         kind: "checking",
         title: "L1 Git can't tell yet whether this merged",
-        text: progress.kept
-          ? "GitHub got the merge, and L1 Git got no answer it could read. L1 Git reads the pull request again to find out."
-          : "GitHub got the merge, and L1 Git got no answer it could read. If the pull request doesn't read as merged soon, nothing was merged.",
+        text: `L1 Git sent the merge to GitHub and got no answer, so it may have merged. ${
+          progress.kept
+            ? "L1 Git looks again each time it reads this pull request."
+            : "L1 Git isn't looking for it any more. Review the pull request before you merge again."
+        }`,
         action: progress.kept ? { kind: "openOnGitHub" } : { kind: "retry" },
       };
     case "refused":
