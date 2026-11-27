@@ -9,6 +9,7 @@ import type { PullWrite } from "../domain/pullRequestWrites";
 import type { Attempt } from "../pullRequestWrites";
 import { usePullDrafts, usePullWrites } from "../shell/usePullWriting";
 import type { OpenedPullRequest } from "../shell/usePullRequests";
+import { sentNothing } from "./sentNothing";
 import type { LineComments } from "./useLineComments";
 
 type Opened = Pick<
@@ -37,15 +38,6 @@ type Listed = {
   mayHavePosted: boolean;
 };
 const summaryAnchor: Anchor = { kind: "summary" };
-const sendProblems = {
-  busy: "Another write to this pull request is still sending, or may have posted. L1 Git sends nothing more for it until it knows.",
-  unsaved:
-    "L1 Git couldn't save your words on this computer, so it sent nothing.",
-  signedOut: "L1 Git isn't signed in to GitHub, so it sent nothing.",
-  restarting: "L1 Git is restarting to update, so it sent nothing.",
-  notInRead:
-    "L1 Git's latest read of this pull request doesn't match this review, so it sent nothing. Refresh the pull request and try again.",
-} as const;
 
 const isReview = ({ write }: Attempt) =>
   write.kind === "submitReview" || write.kind === "submitPending";
@@ -168,7 +160,7 @@ export function useFinishReview({
         ? { kind: "sent", attempt: made.id }
         : {
             kind: "idle",
-            problem: started === "started" ? null : sendProblems[started],
+            problem: started === "started" ? null : sentNothing[started],
           },
     );
   }

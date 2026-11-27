@@ -288,6 +288,9 @@ it("offers three choices when the review may have posted, and sends it again onl
   await app.click(submit());
   expect(shown.textContent).toContain("may have posted");
   expect(get("link", "Open on GitHub", shown)).toBeTruthy();
+  expect(shown.textContent).toContain(
+    "Send anyway may post your review twice, with every comment in it.",
+  );
   const summary = () => get("textbox", "Summary", shown) as HTMLTextAreaElement;
   expect(summary().readOnly, "the host holds the words").toBe(true);
   await app.click(get("button", "Keep as draft", shown));
@@ -402,4 +405,32 @@ it("offers the choices of a review that may have posted from before a restart", 
   expect(words.readOnly).toBe(false);
   expect(kept(app).sort()).toEqual(["Looks good", "Sent before the restart"]);
   expect(mutations(app)).toEqual([]);
+});
+
+it("says why it sent nothing in the words every write uses", async () => {
+  const app = await openFiles({
+    drafts: [draft(11, "Waits its turn")],
+    world: (world) =>
+      world.host.sent.set(book, [
+        {
+          attempt: "other",
+          at: 1,
+          write: {
+            kind: "comment",
+            pull: "PR_1" as never,
+            body: "From another window",
+          },
+          drafts: [],
+          sending: true,
+          applied: false,
+        },
+      ]),
+  });
+  const shown = await openPopover(app);
+  await app.click(submit());
+  expect(shown.querySelector("[role=alert]")?.textContent).toBe(
+    "Another write to this pull request is still sending, or may have posted, so L1 Git sent nothing. Try again once that one ends.",
+  );
+  expect(mutations(app)).toEqual([]);
+  expect(kept(app)).toEqual(["Waits its turn"]);
 });
