@@ -266,25 +266,26 @@ it("comments on a new line at the head's line number, and on no old one", async 
   ]);
 });
 
+const thread = (id: string, fields: Partial<ReviewThread>): ReviewThread => ({
+  id,
+  review: null,
+  path: "src/a.ts",
+  line: 12,
+  startLine: null,
+  originalLine: 12,
+  originalStartLine: null,
+  side: "right",
+  outdated: false,
+  resolved: false,
+  hunk: "",
+  can: { reply: true, resolve: true, unresolve: false },
+  comments: page([
+    { id: `${id}-1`, by: "sara", at: at(2), body: `Says ${id}` },
+  ]),
+  ...fields,
+});
+
 it("places a right-side thread on its line, and a left-side one above the diff", async () => {
-  const thread = (id: string, fields: Partial<ReviewThread>): ReviewThread => ({
-    id,
-    review: null,
-    path: "src/a.ts",
-    line: 12,
-    startLine: null,
-    originalLine: 12,
-    originalStartLine: null,
-    side: "right",
-    outdated: false,
-    resolved: false,
-    hunk: "",
-    can: { reply: true, resolve: true, unresolve: false },
-    comments: page([
-      { id: `${id}-1`, by: "sara", at: at(2), body: `Says ${id}` },
-    ]),
-    ...fields,
-  });
   const app = await openFiles({
     threads: page([
       thread("new", {}),
@@ -299,4 +300,19 @@ it("places a right-side thread on its line, and a left-side one above the diff",
     "S1 commentsara: “Says new”",
     "S1 commentsara: “Says old”",
   ]);
+});
+
+it("shows a thread on an old line in All changes, where its line is drawn", async () => {
+  const app = await openFiles({
+    threads: page([thread("old", { side: "left", line: 11 })]),
+  });
+  expect(place()).toBe("1 of 1");
+  await app.click(tab("Conversation"));
+  await app.click(get("button", /^Threads/));
+  await app.click(get("button", /Says old/));
+  await app.click(get("button", "Show in diff"));
+  await frames(app);
+  expect(toggle(/^All changes/).getAttribute("aria-pressed")).toBe("true");
+  expect(place()).toBe("1 of 4");
+  expect(chips()).toEqual(["S1 commentsara: “Says old”"]);
 });

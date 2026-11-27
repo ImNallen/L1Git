@@ -124,6 +124,14 @@ export function carriedBy(write: PullWrite): DraftKey[] {
 
 const hunkHeader = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/gm;
 
+/** Whether one hunk of a patch holds the new lines from `first` to `last`. */
+export function isInOneHunk(patch: string, first: number, last = first) {
+  return [...patch.matchAll(hunkHeader)].some(
+    ([, begin = "0", count = "1"]) =>
+      first >= Number(begin) && last < Number(begin) + Number(count),
+  );
+}
+
 /**
  * Why chosen lines of a file the author changed since your review take no
  * comment, or null when they take one. Its new side is the head, which GitHub
@@ -140,12 +148,7 @@ export function sinceRefusal(
   if (side === "left" || start?.side === "left")
     return "In Since your last review, comments go on new lines. Switch to All changes to comment on old ones.";
   if (patch?.kind !== "text") return null;
-  const first = start?.line ?? line;
-  const isInOne = [...patch.patch.matchAll(hunkHeader)].some(
-    ([, begin = "0", count = "1"]) =>
-      first >= Number(begin) && line < Number(begin) + Number(count),
-  );
-  return isInOne
+  return isInOneHunk(patch.patch, start?.line ?? line, line)
     ? null
     : "GitHub takes comments only on lines this pull request changes. Choose lines inside one of its hunks.";
 }
