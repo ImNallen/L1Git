@@ -141,3 +141,28 @@ it("remembers the method once GitHub merged, under this GitHub's name for the re
     "github.com/octo/pin": "squash",
   });
 });
+
+it("fits above the merge box in a short window, and scrolls inside with its buttons in sight", async () => {
+  const app = await visit();
+  await open(app, 1);
+  box().getBoundingClientRect = () =>
+    ({ top: 300, bottom: 420, left: 1000, right: 1400 }) as DOMRect;
+  const height = window.innerHeight;
+  window.innerHeight = 540;
+  await app.click(get("button", "Squash and merge"));
+  expect(popover().style.bottom).toBe("248px");
+  expect(popover().style.maxHeight, "the room above the merge box").toBe(
+    "276px",
+  );
+  box().getBoundingClientRect = () =>
+    ({ top: 60, bottom: 180, left: 1000, right: 1400 }) as DOMRect;
+  await app.act(() => {
+    window.dispatchEvent(new Event("resize"));
+  });
+  const { bottom, maxHeight } = popover().style;
+  expect(
+    540 - parseFloat(bottom) - parseFloat(maxHeight),
+    "its top stays in the window",
+  ).toBeGreaterThanOrEqual(16);
+  window.innerHeight = height;
+});

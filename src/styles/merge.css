@@ -206,11 +206,15 @@
 .merge-popover .error-message {
   margin: 12px 16px 0;
 }
+/* Merge and Cancel stay in sight while the rest scrolls. */
 .merge-popover footer {
+  position: sticky;
+  bottom: 0;
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 12px 16px;
+  background: var(--panel-raised);
 }
 .merge-popover footer > span {
   flex: 1;

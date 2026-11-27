@@ -15,18 +15,37 @@ import { useModalDialog } from "./Dialog";
 import { sentNothing } from "./sentNothing";
 
 const WIDTH = 368;
+/** The space it keeps from the window's edges and from the merge box. */
+const EDGE = 16;
+const GAP = 8;
+/** Room for the header, a method and the buttons. */
+const LEAST_HEIGHT = 200;
 
-/** Above the merge box, at the inspector's right edge. */
+/** Above the merge box, at the inspector's right edge, and never above the
+ * window: it scrolls inside when the room above the box is short. */
 function useAbove(anchor: RefObject<HTMLElement | null>) {
-  const [at, setAt] = useState<{ bottom: number; right: number } | null>(null);
+  const [at, setAt] = useState<{
+    bottom: number;
+    right: number;
+    maxHeight: number;
+  } | null>(null);
   useLayoutEffect(() => {
     const place = () => {
       const box = anchor.current?.getBoundingClientRect();
-      if (box)
-        setAt({
-          bottom: Math.max(16, window.innerHeight - box.top + 8),
-          right: Math.max(16, window.innerWidth - box.right + 16),
-        });
+      if (!box) return;
+      const { innerHeight, innerWidth } = window;
+      const maxHeight = Math.max(
+        box.top - GAP - EDGE,
+        Math.min(LEAST_HEIGHT, innerHeight - 2 * EDGE),
+      );
+      setAt({
+        bottom: Math.min(
+          Math.max(EDGE, innerHeight - box.top + GAP),
+          innerHeight - EDGE - maxHeight,
+        ),
+        right: Math.max(EDGE, innerWidth - box.right + EDGE),
+        maxHeight,
+      });
     };
     place();
     window.addEventListener("resize", place);
