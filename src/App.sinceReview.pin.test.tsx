@@ -333,3 +333,31 @@ it("says a file has no contents here when the since read couldn't read them", as
     "This is a partial clone, and file contents aren't on this computer.",
   );
 });
+
+it("takes no comment outside the pull request's own hunks when its patch came by itself", async () => {
+  const app = await openFiles({}, (bridge) => {
+    bridge.respond("rangePatches", (request) =>
+      request.mergeBase === replayed
+        ? [
+            patchOf(
+              "src/a.ts",
+              "@@ -10,4 +10,4 @@\n one\n TWO\n-and\n+AND\n three\n",
+            ),
+          ]
+        : now.map(({ path }) =>
+            path === "src/a.ts"
+              ? { path, patch: null }
+              : patchOf(path, own(path)),
+          ),
+    );
+    bridge.respond(
+      "filePatch",
+      () => patchOf("src/a.ts", own("src/b.ts")).patch,
+    );
+  });
+  await choose(app, 12);
+  expect(box()).toBeNull();
+  expect(panel().textContent).toContain(
+    "GitHub takes comments only on lines this pull request changes. Choose lines inside one of its hunks.",
+  );
+});

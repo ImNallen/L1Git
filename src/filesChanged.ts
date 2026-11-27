@@ -443,8 +443,11 @@ export function createFilesChanged(deps: Deps) {
     return held ? (shownFiles(held)[held.at] ?? null) : null;
   }
 
+  /** A file the author changed since your review takes comments only inside the hunks of the pull request's own patch, so that is read too. */
   function readFile(file: RangeFile) {
-    if (held?.patches && !held.patches.has(file)) readPatch(file);
+    const now = held && sinceShown(held)?.nowOf.get(file);
+    for (const each of now ? [file, now] : [file])
+      if (held?.patches && !held.patches.has(each)) readPatch(each);
   }
 
   function readCurrent() {
