@@ -70,4 +70,8 @@ export const commitsFetchSchema = z.discriminatedUnion("kind", [
 ]);
 
 export type RangeFile = z.infer<typeof rangeFileSchema>;
+export type SinceReady = Extract<
+  z.infer<typeof sinceReviewSchema>,
+  { kind: "ready" }
+>;
 export type CommitsFetch = z.infer<typeof commitsFetchSchema>;

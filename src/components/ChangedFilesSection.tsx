@@ -5,7 +5,8 @@ import type { PullRequest } from "../domain/pullRequest";
 import { threadsLeftOut } from "../domain/pullRequestDetail";
 import type { RangeFile } from "../domain/range";
 import { commentsIn, threadsByFile } from "../domain/reviewThreads";
-import { viewedCount } from "../domain/viewedFiles";
+import { viewedCount as viewedOf } from "../domain/viewedFiles";
+import { isSinceShown, shownFiles } from "../filesChanged";
 import type { FilesChanged } from "../filesChanged";
 import { ChangedFileTree } from "./ChangedFileTree";
 import type { RowLabel } from "./ChangedFileTree";
@@ -67,6 +68,7 @@ function Tree({
     () => new Set([...viewed].map(({ path }) => shownPath(path))),
     [viewed],
   );
+  const viewedCount = files.filter((file) => viewed.has(file)).length;
   return (
     <ChangedFileTree
       files={named.map(({ path, status }) => ({
@@ -79,8 +81,8 @@ function Tree({
       overTree={
         <div className="files-progress">
           <span>Viewed</span>
-          <span>{viewedCount(viewed.size, files.length)}</span>
-          <progress aria-hidden="true" value={viewed.size} max={files.length} />
+          <span>{viewedOf(viewedCount, files.length)}</span>
+          <progress aria-hidden="true" value={viewedCount} max={files.length} />
         </div>
       }
       selectedPath={selected ? shownPath(selected.path) : null}
@@ -106,13 +108,18 @@ export function ChangedFilesSection({
 }) {
   const of = held?.pull ?? pull;
   const read = held?.read.kind === "ready" ? held.read : null;
+  const shown = held ? shownFiles(held) : [];
+  const isSince = held !== null && isSinceShown(held);
   const isReading =
     held === null ||
     held.read.kind === "reading" ||
-    held.read.kind === "fetching";
+    held.read.kind === "fetching" ||
+    (isSince &&
+      (held.since?.read.kind === "reading" ||
+        held.since?.read.kind === "fetching"));
   const totals =
     read && !read.contentMissing
-      ? lineTotals(read.files)
+      ? lineTotals(isSince ? shown : read.files)
       : of && { added: of.additions, deleted: of.deletions };
   const threads =
     of === null
@@ -123,14 +130,26 @@ export function ChangedFilesSection({
   return (
     <section className="files-section" aria-label="Changed files">
       <h3>
-        <span className="changed-files-title">
-          Changed files
-          {of && (
-            <span className="count">
-              {(read?.files.length ?? of.changedFiles).toLocaleString()}
-            </span>
-          )}
-        </span>
+        {isSince ? (
+          <span className="changed-files-title">
+            Since your last review
+            {read && !isReading && (
+              <span className="count">
+                {shown.length.toLocaleString()} of{" "}
+                {read.files.length.toLocaleString()}
+              </span>
+            )}
+          </span>
+        ) : (
+          <span className="changed-files-title">
+            Changed files
+            {of && (
+              <span className="count">
+                {(read?.files.length ?? of.changedFiles).toLocaleString()}
+              </span>
+            )}
+          </span>
+        )}
         {totals && <LineTotals {...totals} />}
       </h3>
       {threads !== null && (
@@ -138,10 +157,10 @@ export function ChangedFilesSection({
           {threads} <OnGitHub url={url} />
         </p>
       )}
-      {read && read.files.length > 0 ? (
+      {shown.length > 0 ? (
         <Tree
-          key={`${read.mergeBase} ${held?.range.head}`}
-          files={read.files}
+          key={`${read?.mergeBase} ${held?.range.head} ${isSince ? `since ${held.since?.rebased}` : "all"}`}
+          files={shown}
           at={held?.at ?? 0}
           viewed={viewed}
           threads={held?.pull.threads ?? null}

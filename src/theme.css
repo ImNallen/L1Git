@@ -17,6 +17,7 @@
 @import "./styles/merge.css";
 @import "./styles/filesChanged.css";
 @import "./styles/viewedFiles.css";
+@import "./styles/sinceReview.css";
 @import "./styles/lineComments.css";
 @import "./styles/writes.css";
 

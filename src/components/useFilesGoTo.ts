@@ -3,6 +3,7 @@ import type { RefObject } from "react";
 import type { Lines } from "../domain/lineComments";
 import type { ReviewThread } from "../domain/pullRequest";
 import type { RangeFile } from "../domain/range";
+import { isSinceShown, shownFiles } from "../filesChanged";
 import type { FilesChanged as Held } from "../filesChanged";
 import type { FilesChangedState, FilesView } from "../shell/useFilesChanged";
 import type { LinePlace } from "./KeepDiffPlace";
@@ -23,10 +24,10 @@ type Destination = {
 /**
  * Goes to a file, a line of it or a thread, in either view, unfolding what
  * is named and the file in All files, and to `showing` once the files are
- * read.
+ * read. A file that changed only before your review is in All changes.
  */
 export function useFilesGoTo({
-  held: { read, at, patches },
+  held,
   files,
   unfold,
   folded,
@@ -35,7 +36,7 @@ export function useFilesGoTo({
   showing,
   onShown,
 }: {
-  held: Pick<Held, "read" | "at" | "patches">;
+  held: Pick<Held, "read" | "since" | "at" | "patches">;
   files: FilesChangedState;
   unfold: (id: string) => void;
   /** The files All files shows folded, and how to open one. */
@@ -45,14 +46,20 @@ export function useFilesGoTo({
   showing: ReviewThread | null;
   onShown: () => void;
 }) {
+  const { read, at, patches, since } = held;
   const [going, goTo] = useState<Destination | null>(null);
   const arrive = useEffectEvent(() => {
     if (going === null || read.kind !== "ready") return;
     const { path, line, names } = going;
-    const to = read.files.findIndex(
-      (each) => each.path === path || each.from === path,
-    );
-    const file = read.files[to];
+    const isAt = (each: RangeFile) => each.path === path || each.from === path;
+    const shown = shownFiles(held);
+    const to = shown.findIndex(isAt);
+    const file = shown[to];
+    if (!file && isSinceShown(held) && read.files.some(isAt)) {
+      // Until what changed since your review is read, it can't tell whether it has the file.
+      if (since?.read.kind === "ready") files.show("all");
+      return;
+    }
     if (!file) return goTo(null);
     if (files.view === "all") {
       if (folded.has(file)) return unfoldFile(file);
@@ -74,7 +81,10 @@ export function useFilesGoTo({
     };
     if (to !== at) files.go(to);
   });
-  useEffect(() => arrive(), [going, read, at, patches, folded, files.view]);
+  useEffect(
+    () => arrive(),
+    [going, read, since, at, patches, folded, files.view],
+  );
   /** A pending comment's lines, or, for one of an older commit, its file's
    * other comments. */
   const goToLines = ({ path, side, line }: Lines, isOlder: boolean) =>

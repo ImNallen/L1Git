@@ -2,7 +2,16 @@ import { parsePatchFiles } from "@pierre/diffs";
 import type { SelectedLineRange } from "@pierre/diffs";
 import { describe, expect, it } from "vitest";
 import { draftKey } from "./drafts";
-import { carriedBy, linesLabel, placeOf, rangeOf, runAt } from "./lineComments";
+import {
+  carriedBy,
+  linesLabel,
+  placeOf,
+  rangeOf,
+  runAt,
+  sinceRefusal,
+} from "./lineComments";
+import type { Lines } from "./lineComments";
+import type { RangeFile } from "./range";
 import { oidSchema } from "./repository";
 import type { DiffStyle } from "./lineSelection";
 
@@ -148,4 +157,45 @@ it("names the drafts a write carries, at the commit it is about", () => {
     }),
   ).toEqual([key]);
   expect(carriedBy({ kind: "comment", pull, body: "a" })).toEqual([]);
+});
+
+describe("sinceRefusal", () => {
+  const now = { path: "src/a.ts" } as RangeFile;
+  const own = {
+    kind: "text",
+    lossy: false,
+    patch:
+      "--- a/src/a.ts\n+++ b/src/a.ts\n@@ -10,4 +10,5 @@\n one\n-two\n+TWO\n three\n@@ -30,2 +31,3 @@\n thirty\n+inserted\n",
+  } as const;
+  const lines = (
+    line: number,
+    start: number | null = null,
+    side: "left" | "right" = "right",
+  ): Lines => ({
+    path: "src/a.ts",
+    side,
+    line,
+    start: start === null ? null : { side, line: start },
+  });
+
+  it("takes new lines inside one hunk of the pull request's own patch", () => {
+    expect(sinceRefusal(lines(14, 10), now, own)).toBeNull();
+    expect(sinceRefusal(lines(33), now, own)).toBeNull();
+  });
+
+  it("refuses lines outside its hunks, or across two of them", () => {
+    expect(sinceRefusal(lines(20), now, own)).toMatch(/^GitHub takes/);
+    expect(sinceRefusal(lines(31, 14), now, own)).toMatch(/^GitHub takes/);
+  });
+
+  it("refuses old lines, which are of a commit GitHub has never seen", () => {
+    expect(sinceRefusal(lines(11, null, "left"), now, own)).toBe(
+      "In Since your last review, comments go on new lines. Switch to All changes to comment on old ones.",
+    );
+  });
+
+  it("refuses a file the pull request no longer changes, and leaves the rest to GitHub without its patch", () => {
+    expect(sinceRefusal(lines(11), null, own)).toMatch(/no longer changes/);
+    expect(sinceRefusal(lines(99), now, null)).toBeNull();
+  });
 });

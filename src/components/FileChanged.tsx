@@ -9,6 +9,7 @@ import {
   shownPath,
 } from "../domain/filesChanged";
 import { placeOf, rangeOf } from "../domain/lineComments";
+import type { LineAnchor } from "../domain/lineComments";
 import { parsedFiles } from "../domain/lineSelection";
 import type { DiffStyle } from "../domain/lineSelection";
 import type { ReviewThread } from "../domain/pullRequest";
@@ -64,6 +65,8 @@ export function FileChanged({
   patch,
   contentMissing,
   threads: newest,
+  isSince,
+  refusal,
   unfolded,
   isShown,
   diffStyle,
@@ -87,6 +90,10 @@ export function FileChanged({
   patch: PatchRead | null;
   contentMissing: boolean;
   threads: readonly ReviewThread[];
+  /** Whether it is of what changed since your review, whose old side GitHub has never seen. */
+  isSince: boolean;
+  /** Why chosen lines take no comment, or null when they take one. */
+  refusal: (anchor: LineAnchor) => string | null;
   unfolded: Unfolded;
   isShown: boolean;
   diffStyle: DiffStyle;
@@ -118,8 +125,9 @@ export function FileChanged({
         { threads, ...notes },
         head,
         lines === null ? [] : parsedFiles(lines),
+        { left: !isSince },
       ),
-    [threads, notes, head, lines],
+    [threads, notes, head, lines, isSince],
   );
   const places = JSON.stringify(onLines);
   // Pierre draws every line again for another list, and drops a selection.
@@ -153,8 +161,9 @@ export function FileChanged({
   const choose = (part: number, range: SelectedLineRange) => {
     const shown = lines === null ? undefined : parsedFiles(lines)[part];
     const anchor = shown && placeOf(shown, diffStyle, file.path, range);
-    if (anchor) comments?.open(anchor);
-    else comments?.refuseLines();
+    const refused = anchor && refusal(anchor);
+    if (anchor && !refused) comments?.open(anchor);
+    else comments?.refuseLines(refused ?? undefined);
   };
   useLayoutEffect(() => {
     const scroller =

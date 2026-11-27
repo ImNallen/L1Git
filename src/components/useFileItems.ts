@@ -102,10 +102,13 @@ function entriesOf(
   read: PatchRead | undefined,
   notes: Notes,
   head: Oid,
+  isSince: boolean,
 ) {
   const patch = read?.kind === "ready" ? read.patch : null;
   const diffs = patch ? partsOf(file, patch) : [];
-  const { onLines, elsewhere } = placeNotes(notes, head, diffs);
+  const { onLines, elsewhere } = placeNotes(notes, head, diffs, {
+    left: !isSince,
+  });
   const whole: FileEntry = {
     id: entryId(at),
     at,
@@ -200,6 +203,8 @@ export function useFileItems(
   folded: ReadonlySet<RangeFile>,
   head: Oid,
   notesOf: (file: RangeFile) => Omit<Notes, "threads">,
+  /** The files of what changed since your review. */
+  since: ReadonlyMap<RangeFile, unknown>,
 ) {
   const count = useParsed(files, patches, contentMissing);
   const before = useRef<ReadonlyMap<string, Made>>(new Map());
@@ -213,6 +218,7 @@ export function useFileItems(
         patches?.get(file),
         { threads: threads.get(file) ?? [], ...notesOf(file) },
         head,
+        since.has(file),
       )) {
         const collapsed = folded.has(file);
         const like = JSON.stringify([collapsed, hasNote(entry), onLines]);
@@ -242,5 +248,5 @@ export function useFileItems(
           ),
       )?.id ?? null;
     return { items, entries, count, boxAt };
-  }, [files, count, patches, threads, folded, head, notesOf]);
+  }, [files, count, patches, threads, folded, head, notesOf, since]);
 }

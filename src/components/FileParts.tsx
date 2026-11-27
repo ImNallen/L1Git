@@ -10,10 +10,28 @@ export function StatusPill({ file }: { file: RangeFile }) {
 }
 
 /** Nothing for a file without changed lines. */
-export function FileTotals({ file: { added, deleted } }: { file: RangeFile }) {
-  return added !== null && added + (deleted ?? 0) > 0 ? (
-    <LineTotals added={added} deleted={deleted} />
-  ) : null;
+export function FileTotals({
+  file: { added, deleted },
+  isSince = false,
+}: {
+  file: RangeFile;
+  /** Whether they are the lines changed since your review. */
+  isSince?: boolean;
+}) {
+  if (added === null || added + (deleted ?? 0) === 0) return null;
+  return (
+    <>
+      <LineTotals added={added} deleted={deleted} />
+      {isSince && <span className="files-since">since your review</span>}
+    </>
+  );
+}
+
+/** In place of the Viewed box of a file the pull request went back on. */
+export function NoLongerChanged() {
+  return (
+    <span className="files-gone">No longer changed by this pull request</span>
+  );
 }
 
 export function ViewedBox({

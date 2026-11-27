@@ -1,7 +1,7 @@
 import { useCallback, useState } from "react";
 import { createPortal } from "react-dom";
 import { DIFFS_TAG_NAME } from "@pierre/diffs";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, CircleCheck } from "lucide-react";
 import { pathLabel } from "../domain/filesChanged";
 import type { RangeFile } from "../domain/range";
 
@@ -11,28 +11,40 @@ const markLabel = (isViewed: boolean) =>
 /** What to do at the end of the file, where one file shows at a time. */
 export function EndOfOne({
   isViewed,
+  isSince = false,
   onMark,
   onNextUnviewed,
   onNext,
 }: {
   isViewed: boolean;
-  onMark: (isViewed: boolean) => void;
+  /** Whether it shows what changed since your review. */
+  isSince?: boolean;
+  /** Null for a file the pull request no longer changes, which has no mark. */
+  onMark: ((isViewed: boolean) => void) | null;
   /** Null when no other file is left to view. */
   onNextUnviewed: (() => void) | null;
   onNext: (() => void) | null;
 }) {
   return (
     <div className="files-next">
+      {isSince && (
+        <span className="files-since-end">
+          <CircleCheck size={14} aria-hidden="true" />
+          That&apos;s everything new in this file.
+        </span>
+      )}
       {isViewed && onNextUnviewed === null && <span>All files viewed</span>}
-      <button
-        type="button"
-        className={`button ${isViewed || onNextUnviewed ? "secondary" : "primary"}`}
-        title={`${markLabel(isViewed)} (V)`}
-        onClick={() => onMark(!isViewed)}
-      >
-        {markLabel(isViewed)}
-      </button>
-      {onNextUnviewed ? (
+      {onMark && (
+        <button
+          type="button"
+          className={`button ${isViewed || onNextUnviewed ? "secondary" : "primary"}`}
+          title={`${markLabel(isViewed)} (V)`}
+          onClick={() => onMark(!isViewed)}
+        >
+          {markLabel(isViewed)}
+        </button>
+      )}
+      {onNextUnviewed && onMark ? (
         <button
           type="button"
           className="button primary"
@@ -88,7 +100,8 @@ export function EndOfEach({
   file: RangeFile;
   isCurrent: boolean;
   isViewed: boolean;
-  onMark: (isViewed: boolean) => void;
+  /** Null for a file the pull request no longer changes, which has no mark. */
+  onMark: ((isViewed: boolean) => void) | null;
 }) {
   const [drawn, setDrawn] = useState<Element | null>(null);
   const find = useCallback(
@@ -107,16 +120,18 @@ export function EndOfEach({
             <span className="file-diff-path" title={label}>
               <bdi>{label}</bdi>
             </span>
-            {isCurrent && <span aria-hidden="true">V</span>}
-            <button
-              type="button"
-              className="button secondary"
-              aria-label={`${mark}, ${label}`}
-              title={isCurrent ? `${mark} (V)` : undefined}
-              onClick={() => onMark(!isViewed)}
-            >
-              {mark}
-            </button>
+            {onMark && isCurrent && <span aria-hidden="true">V</span>}
+            {onMark && (
+              <button
+                type="button"
+                className="button secondary"
+                aria-label={`${mark}, ${label}`}
+                title={isCurrent ? `${mark} (V)` : undefined}
+                onClick={() => onMark(!isViewed)}
+              >
+                {mark}
+              </button>
+            )}
           </div>,
           drawn,
         )}

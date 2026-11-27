@@ -32,6 +32,7 @@ import { pullRequestUrl, stateLabels } from "../domain/pullRequestList";
 import { markdownReader } from "../markdown/markdownReader";
 import { INSPECTOR_WIDTH } from "../shell/useLayout";
 import type { Layout } from "../shell/useLayout";
+import { newLabel } from "../filesChanged";
 import { FilesChanged } from "../shell/lazyViews";
 import { FilesBoundary } from "./FilesBoundary";
 import type { FilesChangedState } from "../shell/useFilesChanged";
@@ -337,9 +338,15 @@ export function PullRequestDetail({
               onClick={() => onTab(of)}
             >
               {tabs[of].label}
-              <span className="pull-tab-count">
-                {pull ? tabs[of].count(pull) : "–"}
-              </span>
+              {of === "files" && pull && newLabel(files.held, pull) ? (
+                <span className="pull-tab-count new">
+                  {newLabel(files.held, pull)}
+                </span>
+              ) : (
+                <span className="pull-tab-count">
+                  {pull ? tabs[of].count(pull) : "–"}
+                </span>
+              )}
             </button>
           ))}
         </div>

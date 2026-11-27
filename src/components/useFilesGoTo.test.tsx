@@ -50,6 +50,7 @@ function Files({ view, patches, folded }: Shown) {
         files: [file],
         contentMissing: false,
       },
+      since: null,
       at: 0,
       patches,
     },

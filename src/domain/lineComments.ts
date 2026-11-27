@@ -5,7 +5,8 @@ import type { PullWrite } from "./pullRequestWrites";
 import type { Anchor } from "./drafts";
 import { rowsOf } from "./lineSelection";
 import type { DiffStyle, Row } from "./lineSelection";
-import type { LineSide } from "./repository";
+import type { RangeFile } from "./range";
+import type { FilePatch, LineSide } from "./repository";
 
 /** Where a line comment goes, in GitHub's terms. */
 export type LineAnchor = Extract<Anchor, { kind: "line" }>;
@@ -119,4 +120,32 @@ export function carriedBy(write: PullWrite): DraftKey[] {
     default:
       return [];
   }
+}
+
+const hunkHeader = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/gm;
+
+/**
+ * Why chosen lines of a file the author changed since your review take no
+ * comment, or null when they take one. Its new side is the head, which GitHub
+ * knows, but GitHub takes only lines inside one hunk of the pull request's own
+ * patch. Without that patch, GitHub's own answer says.
+ */
+export function sinceRefusal(
+  { side, line, start }: Lines,
+  now: RangeFile | null,
+  patch: FilePatch | null,
+): string | null {
+  if (now === null)
+    return "This pull request no longer changes this file, so it takes no comments.";
+  if (side === "left" || start?.side === "left")
+    return "In Since your last review, comments go on new lines. Switch to All changes to comment on old ones.";
+  if (patch?.kind !== "text") return null;
+  const first = start?.line ?? line;
+  const isInOne = [...patch.patch.matchAll(hunkHeader)].some(
+    ([, begin = "0", count = "1"]) =>
+      first >= Number(begin) && line < Number(begin) + Number(count),
+  );
+  return isInOne
+    ? null
+    : "GitHub takes comments only on lines this pull request changes. Choose lines inside one of its hunks.";
 }

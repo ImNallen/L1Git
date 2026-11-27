@@ -6,7 +6,12 @@ import { counted } from "../domain/pullRequestDetail";
 import type { RangeFile } from "../domain/range";
 import { viewedCount } from "../domain/viewedFiles";
 import type { FilesChangedState, FilesView } from "../shell/useFilesChanged";
-import { FileTotals, StatusPill, ViewedBox } from "./FileParts";
+import {
+  FileTotals,
+  NoLongerChanged,
+  StatusPill,
+  ViewedBox,
+} from "./FileParts";
 import { LineTotals } from "./LineTotals";
 
 const styles: { style: DiffStyle; label: string }[] = [
@@ -23,6 +28,7 @@ function OneFile({
   at,
   count,
   isViewed,
+  isSince,
   onGo,
   onMark,
 }: {
@@ -30,8 +36,10 @@ function OneFile({
   at: number;
   count: number;
   isViewed: boolean;
+  isSince: boolean;
   onGo: (at: number) => void;
-  onMark: (isViewed: boolean) => void;
+  /** Null for a file the pull request no longer changes, which has no mark. */
+  onMark: ((isViewed: boolean) => void) | null;
 }) {
   const label = pathLabel(file);
   return (
@@ -63,8 +71,12 @@ function OneFile({
         <bdi>{label}</bdi>
       </span>
       <StatusPill file={file} />
-      <FileTotals file={file} />
-      <ViewedBox isCurrent isViewed={isViewed} onMark={onMark} />
+      <FileTotals file={file} isSince={isSince} />
+      {onMark === null ? (
+        <NoLongerChanged />
+      ) : (
+        <ViewedBox isCurrent isViewed={isViewed} onMark={onMark} />
+      )}
     </>
   );
 }
@@ -73,12 +85,15 @@ export function FilesToolbar({
   files,
   contentMissing,
   at,
+  nowOf,
   state: { diffStyle, view, setLook, viewed, mark, go },
   children,
 }: {
   files: readonly RangeFile[];
   contentMissing: boolean;
   at: number;
+  /** For each file of what changed since your review, the pull request's file at its path, or null for one it no longer changes. */
+  nowOf: ReadonlyMap<RangeFile, RangeFile | null>;
   state: FilesChangedState;
   /** At its end. */
   children?: ReactNode;
@@ -91,7 +106,11 @@ export function FilesToolbar({
           <strong>{counted(files.length, "file")}</strong>
           {!contentMissing && <LineTotals {...lineTotals(files)} />}
           <span className="files-viewed-count">
-            · Viewed {viewedCount(viewed.size, files.length)}
+            · Viewed{" "}
+            {viewedCount(
+              files.filter((each) => viewed.has(each)).length,
+              files.length,
+            )}
           </span>
         </span>
       ) : (
@@ -101,8 +120,13 @@ export function FilesToolbar({
             at={at}
             count={files.length}
             isViewed={viewed.has(file)}
+            isSince={nowOf.has(file)}
             onGo={go}
-            onMark={(isViewed) => mark(file, isViewed)}
+            onMark={
+              nowOf.get(file) === null
+                ? null
+                : (isViewed) => mark(file, isViewed)
+            }
           />
         )
       )}

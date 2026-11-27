@@ -4,7 +4,7 @@ import { z } from "zod";
 import type { DiffSteps } from "../components/useDiffSteps";
 import type { DiffStyle } from "../domain/lineSelection";
 import type { RangeFile } from "../domain/range";
-import { createFilesChanged } from "../filesChanged";
+import { createFilesChanged, shownFiles } from "../filesChanged";
 import type { FilesChanged } from "../filesChanged";
 import { browserStorage, readStored, writeStored } from "../persisted";
 import * as repositories from "../repositories";
@@ -37,6 +37,9 @@ export type FilesChangedState = {
   choose: (at: number) => void;
   showNewest: () => void;
   retry: () => void;
+  retrySince: () => void;
+  show: (showing: "since" | "all") => void;
+  showRebased: (rebased: "folded" | "shown") => void;
   readFile: (file: RangeFile) => void;
   readFileAgain: (file: RangeFile) => void;
   whole: (file: RangeFile) => Promise<string>;
@@ -89,7 +92,7 @@ export function useFilesChanged({
 
   const held = latest !== null && latest.of === id ? latest : null;
   const { viewed, ...marks } = useViewedFiles(held);
-  const files = held?.read.kind === "ready" ? held.read.files : [];
+  const files = held ? shownFiles(held) : [];
   const count = files.length;
   const at = held?.at ?? 0;
   /** The current file as it is when a key is pressed. */
@@ -132,6 +135,9 @@ export function useFilesChanged({
     },
     showNewest: store.showNewest,
     retry: store.retry,
+    retrySince: store.retrySince,
+    show: store.show,
+    showRebased: store.showRebased,
     readFile: store.readFile,
     readFileAgain: store.readFileAgain,
     whole: store.whole,
