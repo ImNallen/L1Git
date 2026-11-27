@@ -316,4 +316,24 @@ describe("the merge box", () => {
     expect(acts({})).toBe("merge");
     expect(acts({ mergeState: "unknown" })).toBe("none");
   });
+
+  it("says why it offers no merge when GitHub didn't say your role", () => {
+    const unsure = { viewerPermission: "unknown" } as const;
+    expect(
+      mergeBox(pull({ ...unsure, checks: page(passed(2)) }), "octo", () => ""),
+    ).toMatchObject({
+      kind: "ready",
+      title: "Ready to merge",
+      text: "All 2 checks passed. GitHub didn't say whether you can merge here.",
+      action: { kind: "openOnGitHub" },
+    });
+    expect(
+      mergeBox(pull({ ...unsure, mergeState: "unknown" }), "octo", () => ""),
+      "where no merge was on offer, nothing is said of the role",
+    ).toMatchObject({
+      kind: "unknown",
+      text: "GitHub hasn't said yet whether this can merge.",
+      action: { kind: "none" },
+    });
+  });
 });

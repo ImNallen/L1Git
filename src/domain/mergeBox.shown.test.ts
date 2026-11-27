@@ -306,8 +306,8 @@ describe("what the merge box offers", () => {
     expect(actionOf({ viewerPermission: "triage" })).toEqual({ kind: "none" });
     expect(
       shownBox(pull({ viewerPermission: "unknown" }), "adam", ago, idle, none),
-      "an unknown role is no claim that you can't",
-    ).toMatchObject({ kind: "ready", action: { kind: "none" } });
+      "an unknown role is no claim that you can't, so it sends you to GitHub",
+    ).toMatchObject({ kind: "ready", action: { kind: "openOnGitHub" } });
   });
 
   it("merges anyway past a check it can't see", () => {

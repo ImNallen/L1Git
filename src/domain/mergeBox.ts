@@ -63,6 +63,21 @@ export function mergeBox(
   viewer: string | null,
   ago: (at: string) => string,
 ): MergeBox {
+  const box = verdict(pull, viewer, ago);
+  if (box.action.kind !== "merge" || canMerge(pull)) return box;
+  return {
+    ...box,
+    text: `${box.text} GitHub didn't say whether you can merge here.`,
+    action: { kind: "openOnGitHub" },
+  };
+}
+
+/** What the read says, before the viewer's role is weighed. */
+function verdict(
+  pull: PullRequest,
+  viewer: string | null,
+  ago: (at: string) => string,
+): MergeBox {
   const { state, base, mergeable, mergeState } = pull;
   const checks = pull.checks?.items ?? [];
   const whole = pull.checks !== null && checks.length >= pull.checks.total;
@@ -84,8 +99,6 @@ export function mergeBox(
   const unsaid = "GitHub hasn't said yet whether this can merge.";
   const none: MergeAction = { kind: "none" };
   const onGitHub: MergeAction = { kind: "openOnGitHub" };
-  const merges = (anyway: boolean): MergeAction =>
-    canMerge(pull) ? { kind: "merge", anyway } : none;
   // A login keeps its own letters, at the start of a sentence too.
   const sentence = (text: string) =>
     /^(?:a team|you|approved|all|the)\b/.test(text)
@@ -197,7 +210,10 @@ export function mergeBox(
           ? `None of them is required on ${base}, so this can still merge.`
           : "This can still merge.",
       ),
-      action: open && requiredRunning.length === 0 ? merges(true) : none,
+      action:
+        open && requiredRunning.length === 0
+          ? { kind: "merge", anyway: true }
+          : none,
     };
   if (running > 0)
     return {
@@ -210,14 +226,17 @@ export function mergeBox(
           ? "None of the others is required, so this can merge now."
           : "This can merge now.",
       ),
-      action: open && requiredRunning.length === 0 ? merges(false) : none,
+      action:
+        open && requiredRunning.length === 0
+          ? { kind: "merge", anyway: false }
+          : none,
     };
   if (open && mergeState === "unstable" && !whole)
     return {
       kind: "unknown",
       title: "A check hasn't passed",
       text: "It isn't required, so this can still merge. L1 Git can't see which one it is.",
-      action: merges(true),
+      action: { kind: "merge", anyway: true },
     };
   if (open) {
     const all =
@@ -233,7 +252,7 @@ export function mergeBox(
       text: sentence(
         `${by && all ? `${by}, and ${all}` : (by ?? all ?? "GitHub finds nothing that stops it")}.`,
       ),
-      action: merges(false),
+      action: { kind: "merge", anyway: false },
     };
   }
   return {
