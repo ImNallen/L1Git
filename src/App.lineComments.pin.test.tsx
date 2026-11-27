@@ -512,3 +512,22 @@ it("keeps the box where its words are when other lines are chosen, until they ar
   expect(box()?.textContent).toContain("Finish or cancel this comment first.");
   expect(app.bridge.world.host.mutations).toEqual([]);
 });
+
+it("gives a box opened while a single comment saves none of that comment's sending", async () => {
+  const app = await openFiles();
+  await choose(app, 12);
+  await app.type(words(), "Saved first");
+  const saving = app.bridge.hold("drafts");
+  await app.click(get("button", "Add single comment"));
+  await saving.arrived;
+  await choose(app, 13, 13, "context");
+  saving.release();
+  await app.settle();
+  expect(box()?.getAttribute("aria-label")).toBe("Comment on line 13");
+  expect(words().readOnly).toBe(false);
+  expect(words().value).toBe("");
+  expect(box()?.textContent).not.toContain("Sending…");
+  await app.click(get("button", "Cancel"));
+  expect(panel().textContent).toContain("Saved first");
+  expect(app.bridge.world.host.mutations).toHaveLength(1);
+});

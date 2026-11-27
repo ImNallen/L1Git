@@ -241,15 +241,21 @@ export function useLineComments({
     const attempt = opened.writing.writes
       .attempts({ repository: opened.repository.github, number: opened.number })
       .findLast((each) => each.write === write);
-    change({
-      sending:
-        started === "started" && attempt
-          ? { kind: "sent", attempt: attempt.id }
-          : {
-              kind: "idle",
-              problem: started === "started" ? null : sentNothing[started],
-            },
-    });
+    const sending: Sending =
+      started === "started" && attempt
+        ? { kind: "sent", attempt: attempt.id }
+        : {
+            kind: "idle",
+            problem: started === "started" ? null : sentNothing[started],
+          };
+    // Only the box that sent it, not one opened on other lines meanwhile.
+    setBox(
+      (before) =>
+        before &&
+        (before.sending.kind === "starting" && before.sending.write === write
+          ? { ...before, sending }
+          : before),
+    );
   }
 
   return {
