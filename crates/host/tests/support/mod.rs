@@ -231,6 +231,7 @@ struct World {
     forms: Vec<Form>,
     graphql: VecDeque<Reply>,
     questions: Vec<Value>,
+    silent: bool,
 }
 
 pub struct FakeGitHub {
@@ -294,6 +295,14 @@ impl FakeGitHub {
     pub fn questions(&self) -> Vec<Value> {
         lock(&self.world).questions.clone()
     }
+
+    /// From now on, reads every request to its end and then answers nothing an
+    /// HTTP client can read. tiny_http answers 500 for a dropped request and
+    /// cannot close the socket, so the closest it comes to hanging up is to
+    /// write what no client takes for a status line.
+    pub fn silence(&self) {
+        lock(&self.world).silent = true;
+    }
 }
 
 impl Drop for FakeGitHub {
@@ -338,29 +347,35 @@ fn answer(mut request: tiny_http::Request, world: &Mutex<World>) {
         .iter()
         .find(|header| header.field.equiv("Authorization"))
         .map(|header| header.value.as_str().to_owned());
-    let question = (path == "/graphql").then(|| {
-        let mut body = String::new();
-        let _ = request.as_reader().read_to_string(&mut body);
-        serde_json::from_str(&body).unwrap_or(Value::Null)
-    });
+    let mut body = String::new();
+    let _ = request.as_reader().read_to_string(&mut body);
+    let graphql = path == "/graphql";
     let reply = {
         let mut world = lock(world);
         world.seen.push(Seen {
             path,
             authorization: authorization.clone(),
         });
-        match question {
-            Some(question) => {
-                world.questions.push(question);
-                world.graphql.pop_front()
-            }
-            None => {
-                authorization.and_then(|authorization| world.replies.get(&authorization).cloned())
-            }
+        if graphql {
+            world
+                .questions
+                .push(serde_json::from_str(&body).unwrap_or(Value::Null));
         }
-        .unwrap_or_else(Reply::bad_credentials)
+        let reply = if graphql {
+            world.graphql.pop_front()
+        } else {
+            authorization.and_then(|authorization| world.replies.get(&authorization).cloned())
+        };
+        (!world.silent).then(|| reply.unwrap_or_else(Reply::bad_credentials))
     };
-    respond(request, reply);
+    match reply {
+        Some(reply) => respond(request, reply),
+        None => {
+            let mut writer = request.into_writer();
+            let _ = writer.write_all(b"\0\r\n\r\n");
+            let _ = writer.flush();
+        }
+    }
 }
 
 fn respond(request: tiny_http::Request, reply: Reply) {

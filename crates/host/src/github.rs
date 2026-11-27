@@ -280,7 +280,10 @@ pub(crate) enum ApiError {
     },
     TooLarge,
     Status(u16),
+    /// No connection opened, so nothing was sent.
     Unreachable,
+    /// The request may have left this machine, and no answer came back.
+    Unanswered,
     Unexpected,
 }
 
@@ -289,11 +292,22 @@ pub(crate) fn read_body(response: Response) -> Result<Vec<u8>, ApiError> {
     response
         .take(BODY_CAP + 1)
         .read_to_end(&mut body)
-        .map_err(|_| ApiError::Unreachable)?;
+        .map_err(|_| ApiError::Unanswered)?;
     if body.len() as u64 > BODY_CAP {
         return Err(ApiError::TooLarge);
     }
     Ok(body)
+}
+
+/// Only a failure to connect, or a request reqwest refused to build, proves
+/// nothing left. Any other failure, a timeout included, may come after GitHub
+/// had the request.
+pub(crate) fn reaching(error: &reqwest::Error) -> ApiError {
+    if error.is_connect() || error.is_builder() {
+        ApiError::Unreachable
+    } else {
+        ApiError::Unanswered
+    }
 }
 
 impl GitHub<'_> {
@@ -301,6 +315,8 @@ impl GitHub<'_> {
         self.api.0.join(path).map_err(|_| ApiError::Unexpected)
     }
 
+    /// `Ended` promises nothing was sent, so the generation check must stay
+    /// before `send()`.
     pub(crate) fn send(&self, request: RequestBuilder) -> Result<(HeaderMap, Vec<u8>), ApiError> {
         if let Some((host, generation)) = self.connection
             && host.generation() != Some(generation)
@@ -310,7 +326,7 @@ impl GitHub<'_> {
         let response = request
             .header(AUTHORIZATION, self.token.authorization())
             .send()
-            .map_err(|_| ApiError::Unreachable)?;
+            .map_err(|error| reaching(&error))?;
         let status = response.status().as_u16();
         let headers = response.headers().clone();
         let body = read_body(response);
@@ -525,6 +541,10 @@ pub(crate) fn api_failure(error: ApiError) -> Failure {
         ApiError::Unreachable => Failure::new(
             ErrorKind::Unreachable,
             "L1 Git could not reach GitHub. Check your connection, then try again.",
+        ),
+        ApiError::Unanswered => Failure::new(
+            ErrorKind::Unanswered,
+            "L1 Git sent the request to GitHub and no answer came back. Check your connection.",
         ),
         ApiError::Unexpected => Failure::new(
             ErrorKind::GitHubFailed { http_status: 200 },

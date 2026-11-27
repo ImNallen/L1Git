@@ -357,6 +357,56 @@ fn a_read_asks_nothing_more_once_its_connection_ended() {
 }
 
 #[test]
+fn a_question_is_never_sent_once_its_connection_ended() {
+    let fixture = Fixture::new();
+    fixture.connect("gho_one", "octo").unwrap();
+    let read = fixture.host.with_github(|github| {
+        drop(run(&fixture.host, Request::Disconnect {}).unwrap());
+        github
+            .graphql::<Value>("{ viewer { login } }", json!({}))
+            .map(drop)
+    });
+    assert_eq!(read.unwrap_err().kind, ErrorKind::Interrupted);
+    assert!(fixture.github.questions().is_empty());
+}
+
+fn open_pull_requests(host: &Host) -> ErrorKind {
+    let request = json!({"op": "pullRequests", "repository": {"owner": "octo", "repo": "app"}, "list": "open"});
+    kind(run(host, serde_json::from_value(request).unwrap()))
+}
+
+#[test]
+fn a_port_nobody_listens_on_is_unreachable() {
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let fixture = Fixture::new();
+    let host = Host::with_vault(
+        fixture.dir.path().to_owned(),
+        Endpoints::loopback(&format!("http://127.0.0.1:{port}/")).unwrap(),
+        GhChoice::At(fixture.gh.path()),
+        Box::new(Arc::clone(&fixture.vault)),
+    );
+    host.commit(
+        &host.lock_writes(),
+        Verified::assume("gho_one", "octo", 1, Access::Private),
+    )
+    .unwrap();
+    assert_eq!(open_pull_requests(&host), ErrorKind::Unreachable);
+}
+
+#[test]
+fn a_question_github_heard_and_never_answered_is_unanswered() {
+    let fixture = Fixture::new();
+    fixture.connect("gho_one", "octo").unwrap();
+    fixture.github.silence();
+    assert_eq!(open_pull_requests(&fixture.host), ErrorKind::Unanswered);
+    assert_eq!(fixture.github.questions().len(), 1, "it was sent once");
+}
+
+#[test]
 fn missing_token_forgets_with_ended_token_missing() {
     let fixture = Fixture::new();
     fixture.connect("gho_one", "octo").unwrap();

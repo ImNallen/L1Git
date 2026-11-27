@@ -224,6 +224,9 @@ pub enum ErrorKind {
         reset_at: Option<u64>,
     },
     Unreachable,
+    /// The request left this machine and no answer came back, so GitHub may
+    /// or may not have acted on it.
+    Unanswered,
     GitHubFailed {
         http_status: u16,
     },
