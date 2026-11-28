@@ -7,7 +7,6 @@
   position: relative;
 }
 .sidebar-bottom .pull-entry.back {
-  container-type: inline-size;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -15,9 +14,9 @@
   min-width: 0;
   height: 32px;
   padding: 0 10px;
-  border: 1px solid var(--border-control);
+  border: 0;
   border-radius: 6px;
-  background: var(--control);
+  background: none;
   color: var(--text-secondary);
   font-size: 12px;
   font-weight: 500;
@@ -32,11 +31,6 @@
 }
 .pull-entry.back > svg {
   flex-shrink: 0;
-}
-.pull-entry.back > kbd {
-  margin-left: auto;
-  border: 0;
-  background: none;
 }
 .pull-badge {
   position: absolute;
@@ -690,11 +684,6 @@ a.pull-row:focus-visible {
   width: 20px;
 }
 
-@container (max-width: 140px) {
-  .pull-entry.back > kbd {
-    display: none;
-  }
-}
 @container (max-width: 1000px) {
   .pull-columns,
   .pull-row {

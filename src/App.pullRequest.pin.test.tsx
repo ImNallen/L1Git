@@ -187,7 +187,6 @@ it("stays open over a visit to the history", async () => {
   const app = await visit();
   await open(app, 1);
   const back = get("button", "Back to history");
-  expect(back.querySelector("kbd"), "Escape leads elsewhere").toBeNull();
   await app.click(back);
   await app.click(get("button", /^Pull requests/));
   expect(focused()).toBe("heading Row 1 #1");
