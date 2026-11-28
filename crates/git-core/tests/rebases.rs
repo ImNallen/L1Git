@@ -563,6 +563,129 @@ fn continue_refuses_before_git_runs() {
     assert_eq!(world.progress().step, oid(&world.ours[0]));
 }
 
+/// `onto` renames `old/` to `new/`. The first local commit conflicts on `f`, and the
+/// second adds `old/b`, which Git's directory-rename detection writes at `new/b`.
+#[test]
+fn continue_refuses_to_overwrite_an_ignored_file_where_a_directory_rename_moves_a_path() {
+    for renames in ["true", "conflict"] {
+        let world = World::new();
+        world.git(&["config", "merge.directoryRenames", renames]);
+        world.git(&["switch", "--quiet", "--detach", &world.theirs]);
+        fs::create_dir(world.work.join("old")).unwrap();
+        world.put("old/a", "a\n");
+        let base = world.commit_all("old a");
+        world.git(&["mv", "old", "new"]);
+        world.put("f", "f upstream\n");
+        let onto = world.commit_all("rename old");
+        world.git(&["switch", "--quiet", "-c", "topic", &base]);
+        world.put("f", "f topic\n");
+        world.commit_all("topic f");
+        world.put("old/b", "b\n");
+        world.commit_all("add old/b");
+        let stopped = terminal(&world.work, &["rebase", &onto], &[]);
+        assert!(
+            !stopped.status.success(),
+            "{renames}: the rebase should stop"
+        );
+
+        world.resolve("f", "f resolved\n");
+        fs::write(world.work.join(".git/info/exclude"), "new/b\n").unwrap();
+        world.put("new/b", "build output\n");
+        refused(
+            &world.continue_rebase(&world.progress()).unwrap_err(),
+            "Preserve these untracked or ignored files first, because the rest of the rebase would write to their paths: new/b.",
+        );
+        assert_eq!(world.read("new/b"), "build output\n", "{renames}");
+        assert_eq!((world.progress().done, world.progress().total), (1, 2));
+
+        fs::remove_file(world.work.join("new/b")).unwrap();
+        let continued = world.continue_rebase(&world.progress());
+        if renames == "true" {
+            continued.unwrap();
+            assert_eq!(world.read("new/b"), "b\n");
+        } else {
+            let stop = continued.unwrap_err();
+            assert_eq!(
+                stop.message,
+                "The rebase stopped on a conflict in commit 2 of 2. Resolve it, then continue or abort the rebase.",
+                "{stop:?}"
+            );
+        }
+    }
+}
+
+/// The same rename in a partial clone, where the next step also merges `g`, whose
+/// base blob was never fetched, so `merge-tree` cannot simulate it.
+#[test]
+fn continue_refuses_where_a_directory_rename_may_move_a_path_it_cannot_simulate() {
+    let world = World::new();
+    let source = world.directory.path().join("source");
+    git(
+        world.directory.path(),
+        &["clone", "--quiet", world.path(), source.to_str().unwrap()],
+    );
+    git(&source, &["config", "uploadpack.allowFilter", "true"]);
+    git(&source, &["switch", "--quiet", "--detach", &world.theirs]);
+    fs::create_dir(source.join("old")).unwrap();
+    fs::write(source.join("old/a"), "a\n").unwrap();
+    fs::write(source.join("g"), "1\n2\n3\n4\n5\n6\n").unwrap();
+    git(&source, &["add", "-A"]);
+    git(&source, &["commit", "--quiet", "-m", "old a"]);
+    git(&source, &["branch", "base"]);
+    git(&source, &["mv", "old", "new"]);
+    fs::write(source.join("f"), "f upstream\n").unwrap();
+    fs::write(source.join("g"), "upstream\n2\n3\n4\n5\n6\n").unwrap();
+    git(&source, &["commit", "--quiet", "-am", "rename old"]);
+    git(&source, &["branch", "up"]);
+    git(&source, &["switch", "--quiet", "-c", "topic", "base"]);
+    fs::write(source.join("f"), "f topic\n").unwrap();
+    git(&source, &["commit", "--quiet", "-am", "topic f"]);
+    fs::write(source.join("old/b"), "b\n").unwrap();
+    fs::write(source.join("g"), "1\n2\n3\n4\n5\ntopic\n").unwrap();
+    git(&source, &["add", "-A"]);
+    git(&source, &["commit", "--quiet", "-m", "add old/b"]);
+
+    let partial = world.directory.path().join("partial");
+    git(
+        world.directory.path(),
+        &[
+            "clone",
+            "--quiet",
+            "--filter=blob:none",
+            "--branch=topic",
+            &format!("file://{}", source.display()),
+            partial.to_str().unwrap(),
+        ],
+    );
+    let world = World {
+        work: partial.canonicalize().unwrap(),
+        ..world
+    };
+    for (key, value) in [
+        ("user.name", "Ada"),
+        ("user.email", "ada@example.test"),
+        ("core.hooksPath", "/dev/null"),
+        ("merge.directoryRenames", "true"),
+    ] {
+        world.git(&["config", key, value]);
+    }
+    let stopped = terminal(&world.work, &["rebase", "origin/up"], &[]);
+    assert!(!stopped.status.success(), "the rebase should stop");
+
+    world.resolve("f", "f resolved\n");
+    fs::write(world.work.join(".git/info/exclude"), "new/b\n").unwrap();
+    world.put("new/b", "build output\n");
+    refused(
+        &world.continue_rebase(&world.progress()).unwrap_err(),
+        "Preserve these untracked or ignored files first, because the rest of the rebase would write to their paths: new/b.",
+    );
+    assert_eq!(world.read("new/b"), "build output\n");
+
+    fs::remove_file(world.work.join("new/b")).unwrap();
+    world.continue_rebase(&world.progress()).unwrap();
+    assert_eq!(world.read("new/b"), "b\n");
+}
+
 #[test]
 fn abort_refuses_what_it_would_silently_destroy() {
     let world = World::stopped();

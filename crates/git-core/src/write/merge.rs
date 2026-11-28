@@ -1213,10 +1213,26 @@ pub(super) fn colliding_files(
     incoming: &[String],
     deadline: WriteDeadline,
 ) -> Result<Vec<String>, RepositoryError> {
-    let incoming: Vec<_> = incoming
-        .iter()
-        .map(|path| super::files::fold_for_any_disk(path))
-        .collect();
+    colliding(repo, who, incoming, &[], deadline)
+}
+
+/// As `colliding_files`, and also any untracked or ignored file whose path is one
+/// of `tails` or ends in `/` and one of them, for a write whose directory L1 Git
+/// cannot name.
+pub(super) fn colliding(
+    repo: &Repo,
+    who: &str,
+    incoming: &[String],
+    tails: &[String],
+    deadline: WriteDeadline,
+) -> Result<Vec<String>, RepositoryError> {
+    let fold = |paths: &[String]| -> Vec<String> {
+        paths
+            .iter()
+            .map(|path| super::files::fold_for_any_disk(path))
+            .collect()
+    };
+    let (incoming, tails) = (fold(incoming), fold(tails));
     // No exclude rules: ignored files need the same protection as other untracked files.
     let untracked = names(repo, who, &["ls-files", "--others", "-z"], deadline)?;
     Ok(untracked
@@ -1228,6 +1244,9 @@ pub(super) fn colliding_files(
                 *target == path
                     || target.starts_with(&format!("{path}/"))
                     || path.starts_with(&format!("{target}/"))
+            }) || tails.iter().any(|tail| {
+                path.strip_suffix(tail.as_str())
+                    .is_some_and(|above| above.is_empty() || above.ends_with('/'))
             })
         })
         .collect())

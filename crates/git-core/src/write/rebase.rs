@@ -15,7 +15,7 @@ use crate::{
     sync::{self, InProgress},
 };
 use serde::{Deserialize, Serialize};
-use std::{fs, path::PathBuf};
+use std::{collections::BTreeSet, fs, path::PathBuf};
 
 const WHO: &str = "Pull (Rebase)";
 const STEPPING: &str = "This rebase";
@@ -191,12 +191,7 @@ pub(super) fn apply(
             ),
         ));
     }
-    let collisions = merge::colliding_files(
-        repo,
-        WHO,
-        &written(repo, &before, &target, deadline)?,
-        deadline,
-    )?;
+    let collisions = written(repo, &before, &target, deadline)?.colliding(repo, WHO, deadline)?;
     if !collisions.is_empty() {
         return Err(merge::refused(format!(
             "Preserve these untracked or ignored files first, because the rebase would write to their paths: {}.",
@@ -241,15 +236,27 @@ fn commit_of(repo: &Repo, name: &str, deadline: WriteDeadline) -> Result<Oid, Re
     Oid::try_from(git::line(&output))
 }
 
-/// Every path the rebase may write: Git first checks out `onto`, then replays
-/// each local commit, so a path a commit adds and a later one deletes counts.
+/// Every path Pull (Rebase) may write: Git checks out `onto`, then picks each
+/// local commit onto it.
 fn written(
     repo: &Repo,
     before: &Oid,
     onto: &Oid,
     deadline: WriteDeadline,
-) -> Result<Vec<String>, RepositoryError> {
-    let mut paths = merge::names(
+) -> Result<Ahead, RepositoryError> {
+    let picks = oids(
+        repo,
+        &[
+            "rev-list",
+            "--reverse",
+            "--topo-order",
+            "--no-merges",
+            &format!("{}..{}", onto.as_str(), before.as_str()),
+        ],
+        deadline,
+    )?;
+    let mut ahead = ahead(repo, WHO, onto, &picks, deadline)?;
+    ahead.paths.extend(merge::names(
         repo,
         WHO,
         &[
@@ -261,22 +268,171 @@ fn written(
             onto.as_str(),
         ],
         deadline,
-    )?;
-    paths.extend(merge::names(
+    )?);
+    Ok(ahead)
+}
+
+fn oids(repo: &Repo, args: &[&str], deadline: WriteDeadline) -> Result<Vec<Oid>, RepositoryError> {
+    git::text(&git::read(&repo.root, args, deadline.reads())?)
+        .lines()
+        .map(|line| Oid::try_from(line.to_owned()))
+        .collect()
+}
+
+/// What the rest of a rebase may write. `git rebase` overwrites an ignored file
+/// there, silently.
+#[derive(Default)]
+struct Ahead {
+    paths: Vec<String>,
+    /// For a step `merge-tree` cannot simulate: a path ending in one of these, in
+    /// whichever directory a directory rename moves it to.
+    tails: Vec<String>,
+}
+
+impl Ahead {
+    fn colliding(
+        &self,
+        repo: &Repo,
+        who: &str,
+        deadline: WriteDeadline,
+    ) -> Result<Vec<String>, RepositoryError> {
+        merge::colliding(repo, who, &self.paths, &self.tails, deadline)
+    }
+}
+
+/// The single answer to what the rest of a rebase writes once the worktree holds
+/// `from`, a commit or a tree, and Git picks each of `picks` in turn. Rename
+/// detection, directory renames included, can write a commit's change where the
+/// commit names no path, so each pick is simulated onto the tree the one before it
+/// left, as Git would merge it. A conflicted tree carries on the chain: Git stops
+/// there and the next Continue checks again, so the later steps count only to be
+/// safe. Once a step cannot be simulated, as in a partial clone that lacks a blob,
+/// that step and every later one count as `unsimulated` says.
+fn ahead(
+    repo: &Repo,
+    who: &str,
+    from: &Oid,
+    picks: &[Oid],
+    deadline: WriteDeadline,
+) -> Result<Ahead, RepositoryError> {
+    let mut ahead = Ahead::default();
+    let (mut head, mut simulating) = (from.clone(), true);
+    for commit in picks {
+        if simulating {
+            if let Some((tree, written)) = replay::pick_onto(repo, commit, &head, deadline)? {
+                ahead.paths.extend(written);
+                head = tree;
+                continue;
+            }
+            simulating = false;
+        }
+        unsimulated(repo, who, commit, &head, &mut ahead, deadline)?;
+    }
+    Ok(ahead)
+}
+
+/// A step L1 Git cannot simulate writes the paths the commit changes. A directory
+/// rename on either side moves a path the other side adds out of a directory this
+/// side removed, keeping the part below it, into a directory L1 Git cannot name.
+/// So that part counts as a tail. `onto`, the last tree simulated, stands in for
+/// the one the step merges onto.
+fn unsimulated(
+    repo: &Repo,
+    who: &str,
+    commit: &Oid,
+    onto: &Oid,
+    ahead: &mut Ahead,
+    deadline: WriteDeadline,
+) -> Result<(), RepositoryError> {
+    let (parent, _) = ReplayOf::picking(commit.clone()).sides(repo, deadline)?;
+    let theirs = changes(repo, who, &parent, commit.as_str(), deadline)?;
+    let ours = changes(repo, who, &parent, onto.as_str(), deadline)?;
+    ahead.tails.extend(moved(
+        &theirs,
+        &removed(repo, who, &ours, onto.as_str(), deadline)?,
+    ));
+    ahead.tails.extend(moved(
+        &ours,
+        &removed(repo, who, &theirs, commit.as_str(), deadline)?,
+    ));
+    ahead.paths.extend(theirs.into_iter().map(|(_, path)| path));
+    Ok(())
+}
+
+/// `(status, path)` for each path that differs between two trees.
+fn changes(
+    repo: &Repo,
+    who: &str,
+    from: &str,
+    to: &str,
+    deadline: WriteDeadline,
+) -> Result<Vec<(String, String)>, RepositoryError> {
+    let listed = merge::names(
         repo,
-        WHO,
+        who,
         &[
-            "log",
-            "--no-show-signature",
-            "--format=",
-            "--name-only",
+            "diff-tree",
+            "-r",
             "--no-renames",
+            "--name-status",
             "-z",
-            &format!("{}..{}", onto.as_str(), before.as_str()),
+            from,
+            to,
         ],
         deadline,
-    )?);
-    Ok(paths)
+    )?;
+    Ok(listed
+        .chunks_exact(2)
+        .map(|pair| (pair[0].clone(), pair[1].clone()))
+        .collect())
+}
+
+/// The directories that held a path `changes` deletes and that `tree` no longer has,
+/// which are the only ones Git can detect as renamed.
+fn removed(
+    repo: &Repo,
+    who: &str,
+    changes: &[(String, String)],
+    tree: &str,
+    deadline: WriteDeadline,
+) -> Result<BTreeSet<String>, RepositoryError> {
+    let holding: BTreeSet<_> = changes
+        .iter()
+        .filter(|(status, _)| status == "D")
+        .flat_map(|(_, path)| directories(path).map(str::to_owned))
+        .collect();
+    if holding.is_empty() {
+        return Ok(holding);
+    }
+    let present: BTreeSet<_> = merge::names(
+        repo,
+        who,
+        &["ls-tree", "-r", "-d", "--name-only", "-z", tree],
+        deadline,
+    )?
+    .into_iter()
+    .collect();
+    Ok(holding
+        .into_iter()
+        .filter(|directory| !present.contains(directory))
+        .collect())
+}
+
+/// The part below each removed directory of every path `changes` writes.
+fn moved(changes: &[(String, String)], removed: &BTreeSet<String>) -> Vec<String> {
+    changes
+        .iter()
+        .filter(|(status, _)| status != "D")
+        .flat_map(|(_, path)| {
+            directories(path)
+                .filter(|directory| removed.contains(*directory))
+                .map(|directory| path[directory.len() + 1..].to_owned())
+        })
+        .collect()
+}
+
+fn directories(path: &str) -> impl Iterator<Item = &str> {
+    path.match_indices('/').map(|(at, _)| &path[..at])
 }
 
 fn ancestor(
@@ -699,27 +855,20 @@ impl Proceed {
     }
 }
 
-/// Every path the rest of the todo list writes. `git rebase` overwrites an ignored
-/// file at one of them, silently.
-fn remaining(repo: &Repo, deadline: WriteDeadline) -> Result<Vec<String>, RepositoryError> {
+/// What the rest of the todo list writes once Git holds `from`, the result of the
+/// step Continue commits or Skip drops.
+fn remaining(repo: &Repo, from: &Oid, deadline: WriteDeadline) -> Result<Ahead, RepositoryError> {
     let todo = state_file(repo, "git-rebase-todo").unwrap_or_default();
     let Some(commits) = picks(&todo) else {
-        return Ok(Vec::new());
+        return Ok(Ahead::default());
     };
     if commits.is_empty() {
-        return Ok(Vec::new());
+        return Ok(Ahead::default());
     }
-    let mut args = vec![
-        "log",
-        "--no-walk=unsorted",
-        "--no-show-signature",
-        "--format=",
-        "--name-only",
-        "--no-renames",
-        "-z",
-    ];
+    let mut args = vec!["rev-list", "--no-walk=unsorted", "--end-of-options"];
     args.extend(commits);
-    merge::names(repo, STEPPING, &args, deadline)
+    let picks = oids(repo, &args, deadline)?;
+    ahead(repo, STEPPING, from, &picks, deadline)
 }
 
 /// Continues or skips the step Git stopped on. Both run on the global store and
@@ -824,7 +973,7 @@ pub(super) fn proceed(
             ),
         }));
     }
-    let collisions = merge::colliding_files(repo, STEPPING, &remaining(repo, deadline)?, deadline)?;
+    let collisions = remaining(repo, &result, deadline)?.colliding(repo, STEPPING, deadline)?;
     if !collisions.is_empty() {
         return Err(merge::refused(format!(
             "Preserve these untracked or ignored files first, because the rest of the rebase would write to their paths: {}.",

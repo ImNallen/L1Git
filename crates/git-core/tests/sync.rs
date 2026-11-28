@@ -1854,6 +1854,58 @@ fn a_pull_rebase_refuses_to_overwrite_an_ignored_file() {
     assert_eq!(coordinator.undo_history(world.path()).unwrap().undo, None);
 }
 
+/// The upstream renames `old/` to `new/`, and a local commit adds `old/b`, which
+/// Git's directory-rename detection writes at `new/b`.
+#[test]
+fn a_pull_rebase_refuses_to_overwrite_an_ignored_file_where_a_directory_rename_moves_a_path() {
+    for renames in ["true", "conflict"] {
+        let world = World::new();
+        let coordinator = coordinator(&world);
+        git(&world.work, &["config", "merge.directoryRenames", renames]);
+        fs::create_dir(world.work.join("old")).unwrap();
+        commit(&world.work, "old/a", "a\n", "old a");
+        git(&world.work, &["push", "--quiet", "origin", "main"]);
+        git(&world.colleague, &["pull", "--quiet", "--ff-only"]);
+        git(&world.colleague, &["mv", "old", "new"]);
+        git(&world.colleague, &["commit", "--quiet", "-m", "rename old"]);
+        git(&world.colleague, &["push", "--quiet", "origin", "main"]);
+        let ours = commit(&world.work, "old/b", "b\n", "add old/b");
+        coordinator
+            .overview(world.path(), fetch_local("main"))
+            .unwrap();
+        fs::write(world.work.join(".git/info/exclude"), "new/b\n").unwrap();
+        fs::create_dir(world.work.join("new")).unwrap();
+        fs::write(world.work.join("new/b"), "local data\n").unwrap();
+
+        let error = rebase_main(&coordinator, &world).unwrap_err();
+        assert_eq!(error.kind, ErrorKind::Conflict, "{renames}: {error:?}");
+        assert_eq!(
+            error.message,
+            "Preserve these untracked or ignored files first, because the rebase would write to their paths: new/b."
+        );
+        assert!(!rebasing(&world));
+        assert_eq!(git(&world.work, &["rev-parse", "HEAD"]), ours);
+        assert_eq!(
+            fs::read_to_string(world.work.join("new/b")).unwrap(),
+            "local data\n"
+        );
+
+        fs::remove_file(world.work.join("new/b")).unwrap();
+        let pulled = rebase_main(&coordinator, &world);
+        if renames == "true" {
+            pulled.unwrap();
+            assert_eq!(fs::read_to_string(world.work.join("new/b")).unwrap(), "b\n");
+        } else {
+            let stop = pulled.unwrap_err();
+            assert!(
+                matches!(stop.kind, ErrorKind::RebaseStopped { .. }),
+                "{stop:?}"
+            );
+            assert!(rebasing(&world));
+        }
+    }
+}
+
 #[test]
 fn a_pull_rebase_refuses_tracked_changes_and_changes_nothing() {
     let world = World::new();

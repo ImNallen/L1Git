@@ -87,7 +87,7 @@ impl ReplayOf {
 
     /// `merge-tree`'s (base, theirs). A pick merges the commit's change onto
     /// HEAD, and a revert merges the opposite change.
-    fn sides(
+    pub(super) fn sides(
         &self,
         repo: &Repo,
         deadline: WriteDeadline,
@@ -377,6 +377,28 @@ pub(super) fn paths(
         merge::persist(&conflicted_memo, &paths.conflicted)
     });
     Ok(Some(paths))
+}
+
+/// One step of a rebase that has not run yet: `commit` picked onto `head`, a commit
+/// or a tree. The tree it leaves, conflicted or not, and every path it writes, under
+/// the names Git gives them. Nothing is memoized, because `head` is often a tree no
+/// commit has. `None` when `merge-tree` cannot answer.
+pub(super) fn pick_onto(
+    repo: &Repo,
+    commit: &Oid,
+    head: &Oid,
+    deadline: WriteDeadline,
+) -> Result<Option<(Oid, Vec<String>)>, RepositoryError> {
+    let of = ReplayOf::picking(commit.clone());
+    let (base, theirs) = of.sides(repo, deadline)?;
+    let Some(simulated) = simulate(repo, Some(&base), head, &theirs, deadline)? else {
+        return Ok(None);
+    };
+    let Some(written) = simulated.footprint(repo, head, deadline)? else {
+        return Ok(None);
+    };
+    let written = real_names(repo, &of, head, written.into_iter().collect(), deadline)?;
+    Ok(Some((simulated.tree, written.into_iter().collect())))
 }
 
 fn footprint(
