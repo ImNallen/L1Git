@@ -200,7 +200,11 @@ pub(super) fn in_flight(
     Ok(Some(ReplayOf { kind, commit }))
 }
 
-fn parents(repo: &Repo, commit: &Oid, deadline: Deadline) -> Result<Vec<String>, RepositoryError> {
+pub(super) fn parents(
+    repo: &Repo,
+    commit: &Oid,
+    deadline: Deadline,
+) -> Result<Vec<String>, RepositoryError> {
     let output = git::read(
         &repo.root,
         &["show", "-s", "--format=%P", commit.as_str()],
@@ -312,9 +316,9 @@ pub(super) fn simulate(
     Ok(merged.map(|(tree, conflicted)| Simulated { tree, conflicted }))
 }
 
-struct Paths {
-    footprint: Vec<String>,
-    conflicted: Vec<String>,
+pub(super) struct Paths {
+    pub(super) footprint: Vec<String>,
+    pub(super) conflicted: Vec<String>,
 }
 
 /// The conflicted paths and every path the simulated result changes, under the names
@@ -322,7 +326,7 @@ struct Paths {
 /// did not make stays outside, which is what lets Abort refuse to drop it. `merge-tree`
 /// runs custom merge drivers, so each (kind, commit, HEAD) runs it once, and the memo
 /// keeps the answer. Losing the memo costs one more run.
-fn paths(
+pub(super) fn paths(
     repo: &Repo,
     of: &ReplayOf,
     head: &Oid,
@@ -431,7 +435,11 @@ fn real_names(
         .collect()
 }
 
-fn tree_of(repo: &Repo, commit: &Oid, deadline: WriteDeadline) -> Result<Oid, RepositoryError> {
+pub(super) fn tree_of(
+    repo: &Repo,
+    commit: &Oid,
+    deadline: WriteDeadline,
+) -> Result<Oid, RepositoryError> {
     let output = git::read(
         &repo.root,
         &[
@@ -444,13 +452,51 @@ fn tree_of(repo: &Repo, commit: &Oid, deadline: WriteDeadline) -> Result<Oid, Re
     Oid::try_from(git::line(&output)).map_err(|_| git::malformed())
 }
 
-fn subject(repo: &Repo, commit: &Oid, deadline: WriteDeadline) -> Result<String, RepositoryError> {
+pub(super) fn subject(
+    repo: &Repo,
+    commit: &Oid,
+    deadline: WriteDeadline,
+) -> Result<String, RepositoryError> {
     let shown = git::read(
         &repo.root,
         &["show", "-s", "--format=%s", commit.as_str()],
         deadline.reads(),
     )?;
     Ok(git::line(&shown))
+}
+
+/// Where the resolution of one applied commit stands, read from the index.
+pub(super) struct Resolution {
+    pub(super) unresolved: Vec<String>,
+    pub(super) staged: StagedStamp,
+    /// `None` while a path is unmerged.
+    pub(super) tree: Option<Oid>,
+    /// The staged result equals HEAD.
+    pub(super) empty: bool,
+}
+
+pub(super) fn resolution(
+    repo: &Repo,
+    head: &Oid,
+    deadline: WriteDeadline,
+) -> Result<Resolution, RepositoryError> {
+    let (entries, staged) = status::entries(&repo.root, Untracked::No, deadline.reads())?;
+    let unresolved = merge::unresolved(&entries);
+    let tree = if unresolved.is_empty() {
+        Some(merge::staged_tree(repo, deadline)?)
+    } else {
+        None
+    };
+    let empty = match &tree {
+        Some(tree) => *tree == tree_of(repo, head, deadline)?,
+        None => false,
+    };
+    Ok(Resolution {
+        unresolved,
+        staged,
+        tree,
+        empty,
+    })
 }
 
 /// `None` unless `in_flight` answers and `merge-tree` can name the footprint.
@@ -470,17 +516,12 @@ pub(super) fn progress(
     else {
         return Ok(None);
     };
-    let (entries, staged) = status::entries(&repo.root, Untracked::No, deadline.reads())?;
-    let unresolved = merge::unresolved(&entries);
-    let tree = if unresolved.is_empty() {
-        Some(merge::staged_tree(repo, deadline)?)
-    } else {
-        None
-    };
-    let empty = match &tree {
-        Some(tree) => *tree == tree_of(repo, &head, deadline)?,
-        None => false,
-    };
+    let Resolution {
+        unresolved,
+        staged,
+        tree,
+        empty,
+    } = resolution(repo, &head, deadline)?;
     let subject = subject(repo, &of.commit, deadline)?;
     let suggested_message = match fs::read(repo.git_dir.join("MERGE_MSG")) {
         Ok(message) => cut_conflicts_block(&git::text(&message), &comment_string(repo, deadline)?),
@@ -621,9 +662,8 @@ pub(super) fn review(
 /// Where the resolver's undo history lives while this replay lasts. The path comes
 /// from Git's state, and nothing reads the folder to learn what is in progress, so
 /// deleting it costs only resolution Undo. Runs under the store lock.
-pub(super) fn journal(repo: &Repo, progress: &ReplayProgress) -> Result<PathBuf, RepositoryError> {
-    let head = refs::oid(&progress.destination).ok_or_else(git::malformed)?;
-    let folder = prepared(repo, &progress.of(), &head)?;
+pub(super) fn journal(repo: &Repo, of: &ReplayOf, head: &Oid) -> Result<PathBuf, RepositoryError> {
+    let folder = prepared(repo, of, head)?;
     sweep(repo, Some(&folder));
     Ok(folder.join("undo"))
 }
@@ -655,21 +695,38 @@ pub(super) fn admit(
     let Some(footprint) = footprint(repo, &of, &head, deadline)? else {
         return Ok(());
     };
-    let name = refs::capitalized(of.kind.operation().name());
+    confine(
+        &refs::capitalized(of.kind.operation().name()),
+        ("Finish", "finish"),
+        &footprint,
+        operation,
+    )
+}
+
+/// While one commit is applied in progress, only resolution and index edits within
+/// its footprint pass, and the write that ends it. `ending` is how the panel names
+/// that write, capitalized and not.
+pub(super) fn confine(
+    name: &str,
+    (ending, end): (&str, &str),
+    footprint: &[String],
+    operation: &Operation,
+) -> Result<(), RepositoryError> {
     match merge::edit(operation) {
         Edit::Paths(changed) => {
-            let outside = outside(changed, &footprint);
+            let outside = outside(changed, footprint);
             if outside.is_empty() {
                 return Ok(());
             }
             Err(merge::refused(format!(
-                "{name} is in progress in this worktree, and it does not change these paths: {}. Finish or abort it before you change them.",
-                outside.join(", ")
+                "{name} is in progress in this worktree, and it does not change these paths: {}. {} or abort it before you change them.",
+                outside.join(", "),
+                refs::capitalized(end)
             )))
         }
         Edit::Finish => Ok(()),
         Edit::Refused => Err(merge::refused(format!(
-            "{name} is in progress in this worktree. Only resolution and index edits within its affected paths are available until Finish or Abort."
+            "{name} is in progress in this worktree. Only resolution and index edits within its affected paths are available until {ending} or Abort."
         ))),
     }
 }
@@ -912,7 +969,7 @@ pub(super) fn finish(
             ),
         ));
     }
-    let footprint = known_footprint(repo, of, &before, deadline)?;
+    let footprint = known_footprint(repo, of, &before, name, deadline)?;
     let extra = outside(staged_paths(repo, &before, deadline)?, &footprint);
     if !extra.is_empty() {
         return Err(merge::refused(format!(
@@ -1074,7 +1131,7 @@ pub(super) fn abort(
     let current = refs::oid(head).ok_or_else(git::malformed)?;
     settle_journal(repo, of, &current, deadline)?;
     merge::safe_index_for(repo, WHO, deadline)?;
-    let footprint = known_footprint(repo, of, &current, deadline)?;
+    let footprint = known_footprint(repo, of, &current, of.kind.operation().name(), deadline)?;
     let extra = outside(staged_paths(repo, &current, deadline)?, &footprint);
     if !extra.is_empty() {
         return Err(merge::refused(format!(
@@ -1129,7 +1186,7 @@ pub(super) fn step(
     refs::restore_with(repo, entry, change, direction, Files::Follow, deadline)
 }
 
-fn settle_journal(
+pub(super) fn settle_journal(
     repo: &Repo,
     of: &ReplayOf,
     head: &Oid,
@@ -1140,21 +1197,22 @@ fn settle_journal(
     Ok(())
 }
 
-fn known_footprint(
+/// `name` is the operation as a sentence names it, as in "a rebase".
+pub(super) fn known_footprint(
     repo: &Repo,
     of: &ReplayOf,
     head: &Oid,
+    name: &str,
     deadline: WriteDeadline,
 ) -> Result<Vec<String>, RepositoryError> {
     footprint(repo, of, head, deadline)?.ok_or_else(|| {
         merge::refused(format!(
-            "L1 Git cannot work out which paths {} changes. End it with Git.",
-            of.kind.operation().name()
+            "L1 Git cannot work out which paths {name} changes. End it with Git."
         ))
     })
 }
 
-fn staged_paths(
+pub(super) fn staged_paths(
     repo: &Repo,
     head: &Oid,
     deadline: WriteDeadline,
@@ -1177,7 +1235,7 @@ fn staged_paths(
 
 /// `git diff` would rewrite the index and run `post-index-change` for a file touched
 /// with no edits, even with `GIT_OPTIONAL_LOCKS=0`. `git status` does neither.
-fn unstaged_paths(entries: &[StatusEntry]) -> BTreeSet<String> {
+pub(super) fn unstaged_paths(entries: &[StatusEntry]) -> BTreeSet<String> {
     entries
         .iter()
         .filter_map(|entry| match entry {
@@ -1203,7 +1261,7 @@ fn unstaged_paths(entries: &[StatusEntry]) -> BTreeSet<String> {
         .collect()
 }
 
-fn outside(paths: BTreeSet<String>, footprint: &[String]) -> Vec<String> {
+pub(super) fn outside(paths: BTreeSet<String>, footprint: &[String]) -> Vec<String> {
     paths
         .into_iter()
         .filter(|path| !footprint.contains(path))

@@ -1796,7 +1796,10 @@ pub(super) fn journal(
             message,
             ..
         } => Err(refused(message)),
-        MergeState::Replay { progress } => replay::journal(repo, &progress).map(Some),
+        MergeState::Replay { progress } => {
+            let head = refs::oid(&progress.destination).ok_or_else(git::malformed)?;
+            replay::journal(repo, &progress.of(), &head).map(Some)
+        }
         MergeState::Idle => {
             replay::sweep(repo, None);
             Ok(None)
