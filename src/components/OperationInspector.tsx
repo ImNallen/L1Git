@@ -12,9 +12,11 @@ import type { Read } from "../useRead";
 import { IncomingChip, SideChip } from "./OperationStrip";
 import { shortOid } from "../domain/shortOid";
 
-function explanation({ verb, current, subject }: Running): string {
+function explanation({ verb, current, subject, rebase }: Running): string {
   const moves = `${current.name === "Detached HEAD" ? "HEAD" : current.name} moves only when you finish.`;
   switch (verb) {
+    case "rebase":
+      return `Continue commits “${subject ?? ""}” on HEAD with its own message, then goes on with the rest of the rebase. ${rebase?.branch ?? "The branch"} moves only when the rebase ends.`;
     case "merge":
       return `The merge commit gets both as parents. ${moves}`;
     case "cherryPick":
@@ -180,7 +182,9 @@ export function OperationMessage({ running }: { running: Running }) {
   );
 }
 
-export function undoNote({ verb, phase }: Running): string {
+export function undoNote({ verb, phase, rebase }: Running): string {
+  if (verb === "rebase")
+    return `Each resolution has Undo until you ${phase === "empty" ? "skip" : "continue"}. Once the rebase ends, Undo puts ${rebase?.branch ?? "the branch"} back where it was. Abort cannot be undone.`;
   if (phase === "empty")
     return "Each resolution has Undo until you abort. Abort cannot be undone.";
   return verb === "merge"

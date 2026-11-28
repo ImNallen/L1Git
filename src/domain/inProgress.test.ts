@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { activeMerge, idleMerge, replayInProgress } from "../test/fixtures";
+import {
+  activeMerge,
+  C4,
+  C5,
+  C6,
+  idleMerge,
+  rebaseInProgress,
+  replayInProgress,
+} from "../test/fixtures";
 import {
   draftConflictLabel,
   conflictLabel,
@@ -9,6 +17,7 @@ import {
   operationGroups,
   operationMessage,
   probeOf,
+  rebaseTitle,
 } from "./inProgress";
 import { mergeStateSchema } from "./merge";
 import type { MergeState, OperationProbe } from "./merge";
@@ -127,6 +136,44 @@ describe("inProgress", () => {
     });
   });
 
+  it("describes a rebase step: HEAD against the commit being rebased", () => {
+    const shown = running(
+      rebaseInProgress(root, ["x.ts", "y.ts"], {
+        conflicted: ["x.ts"],
+        unresolved: ["x.ts"],
+        tree: null,
+      }),
+    );
+    expect(shown).toMatchObject({
+      verb: "rebase",
+      key: `rebase:${C6}`,
+      current: { name: "HEAD", oid: C5 },
+      incoming: { name: shortOid(C6), oid: C6 },
+      subject: "Rebased commit",
+      phase: "conflicted",
+      rebase: {
+        branch: "main",
+        onto: "origin/main",
+        origHead: C4,
+        done: 2,
+        total: 3,
+      },
+      suggestedMessage: "",
+      progress: { resolved: [], clean: ["y.ts"], total: 1 },
+    });
+    expect(rebaseTitle(shown.rebase!)).toBe(
+      "Rebasing main onto origin/main · commit 2 of 3",
+    );
+  });
+
+  it("names a rebase onto a commit no branch points at by its short ID", () => {
+    const shown = running(
+      rebaseInProgress(root, [], { ontoName: null, empty: true }),
+    );
+    expect(shown.rebase?.onto).toBe(shortOid("3".repeat(40)));
+    expect(shown.phase).toBe("empty");
+  });
+
   it("separates operations started elsewhere from ones needing recovery", () => {
     expect(
       inProgress(
@@ -176,6 +223,24 @@ describe("finishBlock", () => {
     expect(finishBlock(resolved, { ...all, unsavedResults: false })).toBe(
       "notStaged",
     );
+  });
+
+  it("lets a rebase continue with no message and with Amend on", () => {
+    const rebase = running(rebaseInProgress(root, ["x.ts"]));
+    expect(
+      finishBlock(rebase, {
+        unsavedResults: false,
+        amending: true,
+        message: "",
+      }),
+    ).toBeNull();
+    expect(
+      finishBlock(rebase, {
+        unsavedResults: true,
+        amending: false,
+        message: "",
+      }),
+    ).toBe("unsavedResults");
   });
 
   it("blocks a replay while Amend is on, but not a merge", () => {
@@ -344,6 +409,11 @@ describe("operationBadge", () => {
       "Cherry-picking",
     );
     expect(label({ kind: "replay", replay: "revert" })).toBe("Reverting");
+    expect(operationBadge({ kind: "rebase" })).toEqual({
+      label: "Rebasing",
+      title:
+        "A rebase is in progress. Open the repository to continue or abort it.",
+    });
   });
 
   it("names an operation L1 Git cannot finish by the first one Git holds", () => {
@@ -373,6 +443,9 @@ describe("probeOf", () => {
     expect(
       probeOf(replayInProgress(root, ["a.ts"], { kind: "revert" }), undefined),
     ).toEqual({ kind: "replay", replay: "revert" });
+    expect(probeOf(rebaseInProgress(root, ["a.ts"]), undefined)).toEqual({
+      kind: "rebase",
+    });
     expect(
       probeOf(
         {

@@ -16,7 +16,16 @@ import { worktreeGroups } from "./worktree";
 import type { WorktreeGroup } from "./worktree";
 import { shortOid } from "./shortOid";
 
-export type OperationVerb = "merge" | ReplayKind;
+export type OperationVerb = "merge" | ReplayKind | "rebase";
+
+/** Where a rebase stands: `branch` moves onto `onto` when it ends. */
+export type RebaseStep = {
+  branch: string;
+  onto: string;
+  origHead: Oid;
+  done: number;
+  total: number;
+};
 
 type OperationSide = { name: string; oid: Oid | null };
 
@@ -40,6 +49,8 @@ export type InProgress =
       progress: ConflictProgress;
       phase: "conflicted" | "ready" | "empty";
       sourceMoved: boolean;
+      /** Null for anything but a rebase. */
+      rebase: RebaseStep | null;
       footprint: readonly string[];
       staged: string;
       tree: Oid | null;
@@ -111,6 +122,7 @@ export function inProgress(state: MergeState | null): InProgress {
         ),
         phase: state.unresolved.length > 0 ? "conflicted" : "ready",
         sourceMoved: state.sourceMoved,
+        rebase: null,
         footprint: session.footprint,
         staged: state.staged,
         tree: state.tree,
@@ -138,10 +150,51 @@ export function inProgress(state: MergeState | null): InProgress {
             ? "conflicted"
             : "ready",
         sourceMoved: false,
+        rebase: null,
         footprint: progress.footprint,
         staged: progress.staged,
         tree: progress.tree,
         suggestedMessage: progress.suggestedMessage,
+      };
+    }
+    case "rebase": {
+      const { progress } = state;
+      return {
+        kind: "running",
+        root: progress.root,
+        verb: "rebase",
+        key: `rebase:${progress.step}`,
+        current: {
+          name: "HEAD",
+          oid: progress.head.kind === "unborn" ? null : progress.head.oid,
+        },
+        incoming: { name: shortOid(progress.step), oid: progress.step },
+        subject: progress.subject,
+        progress: progressOf(
+          progress.footprint,
+          progress.conflicted,
+          progress.unresolved,
+        ),
+        phase: progress.empty
+          ? "empty"
+          : progress.unresolved.length > 0
+            ? "conflicted"
+            : "ready",
+        sourceMoved: false,
+        rebase: {
+          branch: shortRef(progress.branch),
+          onto:
+            progress.ontoName === null
+              ? shortOid(progress.onto)
+              : shortRef(progress.ontoName),
+          origHead: progress.origHead,
+          done: progress.done,
+          total: progress.total,
+        },
+        footprint: progress.footprint,
+        staged: progress.staged,
+        tree: progress.tree,
+        suggestedMessage: "",
       };
     }
   }
@@ -165,6 +218,8 @@ export function finishBlock(
   if (running.progress.unresolved.length > 0) return "unresolved";
   if (unsavedResults) return "unsavedResults";
   if (running.tree === null) return "notStaged";
+  // A rebase step keeps its own message, so the draft has no say.
+  if (running.verb === "rebase") return null;
   if (amending && running.verb !== "merge") return "amending";
   if (message.trim() === "") return "noMessage";
   return null;
@@ -190,7 +245,12 @@ export const operationWords: Record<
     onto: "onto",
   },
   revert: { ...replayNames.revert, doing: "Reverting", onto: "on" },
+  rebase: { noun: "rebase", title: "Rebase", doing: "Rebasing", onto: "onto" },
 };
+
+/** `Rebasing main onto origin/main · commit 2 of 5`. */
+export const rebaseTitle = ({ branch, onto, done, total }: RebaseStep) =>
+  `Rebasing ${branch} onto ${onto} · commit ${done} of ${total}`;
 
 export function operationMessage(
   running: Pick<Running, "suggestedMessage">,
@@ -312,6 +372,8 @@ export function probeOf(
       return { kind: "merge", attention: false };
     case "replay":
       return { kind: "replay", replay: state.progress.kind };
+    case "rebase":
+      return { kind: "rebase" };
     case "attention":
       if (state.session !== null || state.reason === "recoveryRequired")
         return { kind: "merge", attention: true };
@@ -366,6 +428,12 @@ export function operationBadge(
         title: `A ${noun} is in progress. ${openToFinish}`,
       };
     }
+    case "rebase":
+      return {
+        label: operationWords.rebase.doing,
+        title:
+          "A rebase is in progress. Open the repository to continue or abort it.",
+      };
     case "external": {
       const [first] = probe.operations;
       const { doing, noun } =

@@ -5,6 +5,7 @@ import {
   headSchema,
   oidSchema,
   refSchema,
+  localRefSchema,
   replayKindSchema,
   rootSchema,
   stagedStampSchema,
@@ -59,6 +60,24 @@ const replayProgressSchema = z.strictObject({
   empty: z.boolean(),
   suggestedMessage: z.string(),
 });
+const rebaseProgressSchema = z.strictObject({
+  root: rootSchema,
+  branch: localRefSchema,
+  onto: oidSchema,
+  ontoName: refSchema.nullable(),
+  origHead: oidSchema,
+  step: oidSchema,
+  subject: z.string(),
+  done: z.number().int().nonnegative(),
+  total: z.number().int().nonnegative(),
+  head: headSchema,
+  footprint: z.array(z.string()),
+  conflicted: z.array(z.string()),
+  unresolved: z.array(z.string()),
+  staged: stagedStampSchema,
+  tree: oidSchema.nullable(),
+  empty: z.boolean(),
+});
 export const mergeStateSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("idle") }),
   z.strictObject({
@@ -76,6 +95,7 @@ export const mergeStateSchema = z.discriminatedUnion("kind", [
     message: z.string(),
   }),
   z.strictObject({ kind: z.literal("replay"), progress: replayProgressSchema }),
+  z.strictObject({ kind: z.literal("rebase"), progress: rebaseProgressSchema }),
 ]);
 export const operationInProgressSchema = z.enum([
   "merge",
@@ -90,6 +110,7 @@ export const operationProbeSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("idle") }),
   z.strictObject({ kind: z.literal("merge"), attention: z.boolean() }),
   z.strictObject({ kind: z.literal("replay"), replay: replayKindSchema }),
+  z.strictObject({ kind: z.literal("rebase") }),
   z.strictObject({
     kind: z.literal("external"),
     operations: z.array(operationInProgressSchema),
@@ -136,6 +157,7 @@ export type MergeAction = z.infer<typeof mergeActionSchema>;
 export type MergeReport = z.infer<typeof mergeReportSchema>;
 export type MergeSession = z.infer<typeof mergeSessionSchema>;
 export type ReplayProgress = z.infer<typeof replayProgressSchema>;
+export type RebaseProgress = z.infer<typeof rebaseProgressSchema>;
 export type OperationProbe = z.infer<typeof operationProbeSchema>;
 
 export const replayNames: Record<
@@ -166,7 +188,7 @@ export function mergeAllows(
   const owned = (path: string) =>
     state.kind === "active"
       ? state.session.footprint.includes(path)
-      : state.kind === "replay"
+      : state.kind === "replay" || state.kind === "rebase"
         ? state.progress.footprint.includes(path)
         : state.reason === "externalOperation";
   switch (operation.kind) {
@@ -205,5 +227,8 @@ export function mergeAllows(
       return false;
     case "finishReplay":
       return state.kind === "replay";
+    case "continueRebase":
+    case "skipRebase":
+      return state.kind === "rebase";
   }
 }

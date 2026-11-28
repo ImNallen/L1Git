@@ -61,6 +61,7 @@ import type {
   Oid,
   Operation,
   PatchContext,
+  RebaseOf,
   ReplayOf,
   RepositoryRoot,
   Side,
@@ -74,6 +75,7 @@ type RepositoryRequest =
   | { op: "merge"; path: RepositoryRoot; action: MergeAction }
   | { op: "replayReview"; path: RepositoryRoot; of: ReplayOf }
   | { op: "replayAbort"; path: RepositoryRoot; of: ReplayOf; head: Head }
+  | { op: "rebaseAbort"; path: RepositoryRoot; of: RebaseOf; head: Head }
   | { op: "snapshot"; path: string }
   | { op: "refs"; path: RepositoryRoot }
   | { op: "commitDetail"; path: string; comparison: Comparison }
@@ -170,6 +172,7 @@ const responseSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("merge"), data: mergeReportSchema }),
   z.object({ op: z.literal("replayReview"), data: replayReviewSchema }),
   z.object({ op: z.literal("replayAbort"), data: mergeStateSchema }),
+  z.object({ op: z.literal("rebaseAbort"), data: mergeStateSchema }),
   z.object({ op: z.literal("snapshot"), data: snapshotSchema }),
   z.object({ op: z.literal("refs"), data: refsSchema }),
   z.object({ op: z.literal("commitDetail"), data: detailSchema }),

@@ -454,6 +454,13 @@ export const replayOfSchema = z.strictObject({
   kind: replayKindSchema,
   commit: oidSchema,
 });
+/** What Continue, Skip, and Abort carry. The core answers `staleView` once Git's rebase moved on. */
+const rebaseOfSchema = z.strictObject({
+  branch: localRefSchema,
+  onto: oidSchema,
+  origHead: oidSchema,
+  step: oidSchema,
+});
 const replayPredictionSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("clean"), tree: oidSchema }),
   z.strictObject({ kind: z.literal("conflict"), paths: z.array(z.string()) }),
@@ -554,6 +561,17 @@ const otherOperationSchema = z.discriminatedUnion("kind", [
     branch: localRefSchema,
     onto: remoteRefSchema,
   }),
+  z.strictObject({
+    kind: z.literal("continueRebase"),
+    of: rebaseOfSchema,
+    staged: stagedStampSchema,
+    tree: oidSchema,
+  }),
+  z.strictObject({
+    kind: z.literal("skipRebase"),
+    of: rebaseOfSchema,
+    staged: stagedStampSchema,
+  }),
 ]);
 const saveConflictDescriptor = z.strictObject({
   kind: z.literal("saveConflict"),
@@ -639,6 +657,7 @@ export const repositoryErrorSchema = z.union([
       "afterHookFailed",
       "missingIdentity",
       "replayStopped",
+      "rebaseStopped",
     ]),
     message: z.string(),
     output: z.string(),
@@ -676,6 +695,7 @@ export type IndexObject = z.infer<typeof indexObjectSchema>;
 export type Conflict = z.infer<typeof conflictSchema>;
 export type ReplayKind = z.infer<typeof replayKindSchema>;
 export type ReplayOf = z.infer<typeof replayOfSchema>;
+export type RebaseOf = z.infer<typeof rebaseOfSchema>;
 export type ReplayPrediction = z.infer<typeof replayPredictionSchema>;
 export type ReplayReview = z.infer<typeof replayReviewSchema>;
 export type StatusEntry = z.infer<typeof statusEntrySchema>;

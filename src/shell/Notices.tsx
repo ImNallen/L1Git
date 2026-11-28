@@ -1,6 +1,7 @@
 import { EyeOff, GitPullRequest, Info, TriangleAlert } from "lucide-react";
 import { MergeControls } from "../components/MergeControls";
 import { Notification } from "../components/Notification";
+import { RebasePanel } from "../components/RebasePanel";
 import { ReplayPanel } from "../components/ReplayPanel";
 import { WriteNoticeRow } from "../components/UndoControls";
 import { WorktreeNoticeRow } from "../components/WorktreeNotice";
@@ -39,7 +40,7 @@ export function Notices({
 }: {
   snapshot: RepositorySnapshot | null;
   writes: WritesView;
-  merge: Pick<MergePanel, "controls" | "replay">;
+  merge: Pick<MergePanel, "controls" | "replay" | "rebase">;
   drafts: ResolutionDrafts;
   sync: Pick<SyncControls, "opened">;
   persistenceError: string | null;
@@ -64,6 +65,9 @@ export function Notices({
       )}
       {merge.replay && (
         <ReplayPanel key={`replay:${merge.replay.root}`} {...merge.replay} />
+      )}
+      {merge.rebase && (
+        <RebasePanel key={`rebase:${merge.rebase.root}`} {...merge.rebase} />
       )}
       <ResolutionDraftList drafts={drafts} />
       <div className="notifications">

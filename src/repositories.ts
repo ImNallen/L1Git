@@ -17,6 +17,7 @@ import type {
   Oid,
   Operation,
   PatchContext,
+  RebaseOf,
   ReplayOf,
   RepositoryRoot,
   Side,
@@ -351,4 +352,12 @@ export async function replayAbort(
   head: Head,
 ) {
   return (await run({ op: "replayAbort", path, of, head })).data;
+}
+
+export async function rebaseAbort(
+  path: RepositoryRoot,
+  of: RebaseOf,
+  head: Head,
+) {
+  return (await run({ op: "rebaseAbort", path, of, head })).data;
 }

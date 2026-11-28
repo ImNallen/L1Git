@@ -125,7 +125,7 @@ function notAllowedBy(
   if (mergeAllows(state, operation)) return null;
   return state.kind === "attention"
     ? state.message
-    : `This path is outside the ${state.kind === "replay" ? replayNames[state.progress.kind].noun : "merge"}'s affected paths. Preserve it externally before continuing.`;
+    : `This path is outside the ${state.kind === "replay" ? replayNames[state.progress.kind].noun : state.kind === "rebase" ? "rebase" : "merge"}'s affected paths. Preserve it externally before continuing.`;
 }
 
 type MenuItem = {
@@ -300,14 +300,21 @@ export function ConflictResolver({
     </button>
   );
   const refreshConflict = () => setRetry((value) => value + 1);
-  const revertHelp = mergeRead.kind === "ready" &&
-    mergeRead.value.kind === "replay" &&
-    mergeRead.value.progress.kind === "revert" && (
+  const shownRunning = running?.kind === "running" ? running : null;
+  const sidesHelp = shownRunning?.rebase ? (
+    <p className="conflict-help">
+      In a rebase, Current is HEAD: {shownRunning.rebase.onto} with the commits
+      rebased so far. Incoming is the commit being rebased,{" "}
+      {shownRunning.incoming.name}.
+    </p>
+  ) : (
+    shownRunning?.verb === "revert" && (
       <p className="conflict-help">
         In a revert, Incoming holds the reverse of the commit. Base is that
         commit and Incoming is its parent.
       </p>
-    );
+    )
+  );
   const header = (children?: ReactNode) => (
     <header className="conflict-header">
       {leading}
@@ -345,7 +352,7 @@ export function ConflictResolver({
               {moreButton}
             </>,
           )}
-          help={revertHelp}
+          help={sidesHelp}
           notAllowed={notAllowedBy(mergeRead, {
             kind: "resolveWhole",
             path,
@@ -690,7 +697,7 @@ export function ConflictResolver({
               </button>
             </div>
           )}
-          {revertHelp}
+          {sidesHelp}
           {notAllowed && (
             <p className="conflict-help" role="status">
               {notAllowed}
