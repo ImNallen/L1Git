@@ -13,6 +13,7 @@ A desktop Git client for macOS, Linux, and Windows. Browse your repositories, re
 - Try any branch locally in its own linked worktree, so you can run and test it without stashing or leaving the branch you are on. Remove the worktree from the same branch menu when you are done.
 - Fetch, fast-forward branches, and push or publish the current branch.
 - Pull the current branch from its upstream. When the branch has diverged, Pull (Fast-forward if possible) opens the merge review, Pull (Fast-forward only) leaves the branch as it is, and Pull (Rebase) rebases your local commits onto the upstream.
+- Resolve a rebase that stops on a conflict in the app, whether Pull (Rebase) or a terminal started it. Continue to the next commit, skip a commit that has nothing left to apply, or abort to put the branch back. Undo puts back the whole finished rebase.
 - Merge a selected local or remote branch into the current working copy after reviewing both refs, both commit IDs, and the files the merge will conflict in. Fast-forward when possible, or resolve text conflicts and finish or abort a merge commit.
 - Cherry-pick or revert one commit from the history menu or the command palette, after reviewing what it will do. A clean result commits straight away, and a conflict opens the resolver with Finish and Abort. Undo removes the new commit and its file changes.
 - Undo and redo local edits made through the app, including commits and discarded changes, from the notice that a commit, a discard, or another history change shows, or from the **More** menu.
@@ -22,7 +23,7 @@ A desktop Git client for macOS, Linux, and Windows. Browse your repositories, re
 - Open a pull request from a branch's menu in the sidebar, with its title, description, base, and commits in one popover, publishing or pushing the branch first when GitHub doesn't have it yet. L1 Git looks on GitHub first, so it never opens a second pull request from the same branch into the same base.
 - Choose light or dark themes, create your own, or import themes from VS Code and Open VSX.
 
-L1 Git does not force-push, and it does not resolve rebase conflicts. A Pull (Rebase) that hits a conflict is aborted and changes nothing. Fetch, fast-forward, push, remote setup, and merge Start, Finish, and Abort have no Undo entry. Creating and removing a worktree have no Undo entry either, and removing one drops the Undo entries made in it. The fetch and fast-forward that a pull runs have no Undo entry either. Pull (Rebase) has Undo and Redo. Merge resolution edits have Undo and Redo until you finish or abort.
+L1 Git does not force-push. It resolves a plain rebase only: an interactive rebase with edit, exec, squash, fixup, or reword steps, and a rebase with `--apply`, continue in your terminal. Fetch, fast-forward, push, remote setup, and merge Start, Finish, and Abort have no Undo entry. Creating and removing a worktree have no Undo entry either, and removing one drops the Undo entries made in it. The fetch and fast-forward that a pull runs have no Undo entry either. Pull (Rebase) has Undo and Redo, as one entry for the whole rebase, and Abort rebase has none. Merge resolution edits have Undo and Redo until you finish or abort.
 
 ## Get started
 
@@ -72,7 +73,7 @@ pnpm dev
 
 Open <http://127.0.0.1:1422>. The preview uses the same Rust core through a local development bridge.
 
-To try the app with sample repositories, run `pnpm fixture` and add the printed `repository` path with **Local folder**. Use `pnpm fixture:large` for a larger test repository. These commands create temporary local repositories. `pnpm fixture:merge` creates clean and conflicting upstream merges for testing.
+To try the app with sample repositories, run `pnpm fixture` and add the printed `repository` path with **Local folder**. Use `pnpm fixture:large` for a larger test repository. These commands create temporary local repositories. `pnpm fixture:merge` creates clean and conflicting upstream merges for testing, and a `rebase` repository where Pull (Rebase) stops on two commits.
 
 ## Check and build
 
