@@ -624,7 +624,15 @@ fn continue_refuses_where_a_directory_rename_may_move_a_path_it_cannot_simulate(
         world.directory.path(),
         &["clone", "--quiet", world.path(), source.to_str().unwrap()],
     );
-    git(&source, &["config", "uploadpack.allowFilter", "true"]);
+    for (key, value) in [
+        ("user.name", "Ada"),
+        ("user.email", "ada@example.test"),
+        ("commit.gpgSign", "false"),
+        ("core.hooksPath", "/dev/null"),
+        ("uploadpack.allowFilter", "true"),
+    ] {
+        git(&source, &["config", key, value]);
+    }
     git(&source, &["switch", "--quiet", "--detach", &world.theirs]);
     fs::create_dir(source.join("old")).unwrap();
     fs::write(source.join("old/a"), "a\n").unwrap();
@@ -664,6 +672,7 @@ fn continue_refuses_where_a_directory_rename_may_move_a_path_it_cannot_simulate(
     for (key, value) in [
         ("user.name", "Ada"),
         ("user.email", "ada@example.test"),
+        ("commit.gpgSign", "false"),
         ("core.hooksPath", "/dev/null"),
         ("merge.directoryRenames", "true"),
     ] {
