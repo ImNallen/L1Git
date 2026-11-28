@@ -17,6 +17,7 @@ type Host = {
   openScript: OpenScript[];
   /** Every opening that reached GitHub, in order. */
   openings: HostOpenPull["open"][];
+  ids: Map<string, string>;
 };
 
 const named = ({ owner, repo }: GitHubRepository) => `${owner}/${repo}`;
@@ -29,7 +30,7 @@ export function openContextHandler(
   host: Host,
 ): OpenPullContext {
   return {
-    repositoryId: repositoryIdOf(repository),
+    repositoryId: host.ids.get(named(repository)) ?? repositoryIdOf(repository),
     defaultBranch: "main",
     open: (host.opens.get(named(repository)) ?? [])
       .filter((pull) => pull.head === head)
@@ -48,6 +49,12 @@ export function openPullHandler(
     (host.opens.get(name) ?? []).find(
       (pull) => pull.head === open.head && pull.base === open.base,
     );
+  const id = host.ids.get(name) ?? repositoryIdOf(repository);
+  if (open.repositoryId !== id)
+    return {
+      kind: "notSent",
+      message: `${name} is another repository on GitHub than the one L1 Git read, so it sent nothing. Open the pull request again.`,
+    };
   const before = found();
   if (before) return { kind: "alreadyOpen", number: before.number };
   const script = host.openScript.shift();

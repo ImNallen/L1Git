@@ -118,6 +118,9 @@ export type World = {
     openScript: OpenScript[];
     /** Every opening that reached GitHub, in order. */
     openings: HostOpenPull["open"][];
+    /** Repository ids by `owner/repo`, for a name that now belongs to
+     * another repository than `repositoryIdOf` says. */
+    ids: Map<string, string>;
   };
 };
 
@@ -196,6 +199,7 @@ export function createWorld(): World {
       opens: new Map(),
       openScript: [],
       openings: [],
+      ids: new Map(),
     },
   };
 }

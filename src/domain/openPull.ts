@@ -2,6 +2,7 @@ import type {
   Branch,
   Commit,
   GitHubRepository,
+  Head,
   Oid,
   RepositorySnapshot,
 } from "./repository";
@@ -162,6 +163,155 @@ export function pushed(
   return ahead.complete && behind.complete
     ? apart(ahead.commits.length, behind.commits.length)
     : { kind: "unknown" };
+}
+
+/** What has to happen before GitHub can open a pull request from the head:
+ * nothing, publishing it or pushing to it with the user's Git credentials,
+ * or something L1 Git doesn't do, which `message` says. */
+export type FirstStep =
+  | { kind: "none" }
+  | { kind: "publish"; message: string }
+  | { kind: "push"; message: string }
+  | { kind: "blocked"; message: string };
+
+const commitsOf = (count: number) =>
+  count === 1 ? "1 commit" : `${count.toLocaleString()} commits`;
+
+/** Where the head is checked out: in the worktree the popover opened in,
+ * in another one, named, or nowhere. */
+export type Checkout =
+  | { kind: "here" }
+  | { kind: "elsewhere"; worktree: string }
+  | { kind: "nowhere" };
+
+/** The branch's checkout: the snapshot's head, or another worktree's. */
+export function checkoutOf(
+  snapshot: Pick<RepositorySnapshot, "head" | "worktrees">,
+  head: string,
+): Checkout {
+  const reference = `refs/heads/${head}`;
+  const at = (checkedOut: Head) =>
+    checkedOut.kind === "attached" && checkedOut.reference === reference;
+  if (at(snapshot.head)) return { kind: "here" };
+  const other = snapshot.worktrees.find(
+    (worktree) => !worktree.current && at(worktree.head),
+  );
+  return other
+    ? { kind: "elsewhere", worktree: other.name }
+    : { kind: "nowhere" };
+}
+
+/** An upstream ref as Git names it short: `origin/main`, or `main` for a
+ * local branch. */
+const shortUpstream = (upstream: string) =>
+  upstream.replace(/^refs\/(remotes|heads)\//, "");
+
+/**
+ * L1 Git publishes or pushes only the branch checked out where it opened,
+ * as the toolbar's Push does, and never force-pushes. It decides as the
+ * core does, from the branch's upstream: it publishes only a branch with
+ * none, and pushes only one whose upstream is `remote`'s branch of the same
+ * name, so the push lands on the branch GitHub opens from.
+ */
+export function firstStep(
+  state: Pushed,
+  {
+    head,
+    remote,
+    upstream,
+    checkout,
+  }: {
+    head: string;
+    remote: string;
+    upstream: string | null;
+    checkout: Checkout;
+  },
+): FirstStep {
+  const blocked = (message: string): FirstStep => ({
+    kind: "blocked",
+    message,
+  });
+  switch (state.kind) {
+    case "pushed":
+      return { kind: "none" };
+    case "behind":
+      return blocked(
+        `${remote}/${head} has ${commitsOf(state.behind)} that ${head} doesn't. Pull first, so the pull request shows what you see here.`,
+      );
+    case "diverged":
+      return blocked(
+        `${head} and ${remote}/${head} have each moved on. Pull and push first, then open the pull request.`,
+      );
+    case "unknown":
+      return blocked(
+        `${remote}/${head} is at another commit than ${head}, and L1 Git can't tell which is ahead from the history it loaded. Make them match in Git, then open the pull request.`,
+      );
+  }
+  const lacking =
+    state.kind === "missing"
+      ? `${head} isn't on ${remote} yet.`
+      : `${remote} doesn't have ${commitsOf(state.ahead)} of ${head} yet.`;
+  const tracked = `refs/remotes/${remote}/${head}`;
+  if (upstream !== null && upstream !== tracked)
+    return blocked(
+      `${lacking} ${head} tracks ${shortUpstream(upstream)}, so L1 Git can't publish it as ${head} on ${remote}. Push it there in Git first, then open the pull request.`,
+    );
+  const kind = upstream === null ? "publish" : "push";
+  const verb = kind === "publish" ? "publish it" : "push";
+  switch (checkout.kind) {
+    case "nowhere":
+      return blocked(
+        `${lacking} Check it out to ${verb}, then open the pull request.`,
+      );
+    case "elsewhere":
+      return blocked(
+        `${lacking} It's checked out in the worktree ${checkout.worktree}. Switch to that worktree to ${verb}, then open the pull request.`,
+      );
+    case "here":
+      return {
+        kind,
+        message: `${lacking} L1 Git ${kind === "publish" ? "publishes it" : "pushes"} first, with your Git credentials, then opens the pull request.`,
+      };
+  }
+}
+
+/** GitHub's longest title, and the longest description L1 Git sends. */
+const TITLE_CHARS = 256;
+const BODY_CHARS = 65_536;
+
+/** What the host would refuse to open before it sends anything, in its
+ * words, so L1 Git can tell before it publishes or pushes for nothing. */
+export function unopenable(open: {
+  title: string;
+  body: string;
+  head: string;
+  base: string;
+}): string | null {
+  const title = open.title.trim();
+  if (title === "" || [...title].length > TITLE_CHARS)
+    return `A pull request needs a title of at most ${TITLE_CHARS} characters.`;
+  if ([...open.body].length > BODY_CHARS)
+    return `A description holds at most ${BODY_CHARS.toLocaleString("en-US")} characters.`;
+  if (
+    open.head.trim() === "" ||
+    open.base.trim() === "" ||
+    open.head === open.base
+  )
+    return "A pull request merges one branch into another.";
+  return null;
+}
+
+/** Why the host wouldn't open as `login`, the account the popover opened
+ * with, now that GitHub is `now`. */
+export function signedInProblem(
+  login: string,
+  now: string | null,
+): string | null {
+  if (now === null)
+    return "L1 Git is not connected to GitHub. Sign in from Settings › Hosts.";
+  return now.toLowerCase() === login.toLowerCase()
+    ? null
+    : `L1 Git is signed in to GitHub as ${now}, not ${login}.`;
 }
 
 /** The subject of the oldest commit, the one the branch starts with. */
