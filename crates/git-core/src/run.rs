@@ -5,9 +5,9 @@ use crate::{
     LineStats, MergeAction, MergeReport, MergeReview, MergeSelection, MergeState, NewRepository,
     NewWorktree, Oid, Operation, OperationProbe, PatchContext, PublishChoice, PublishOptions,
     PullCheckout, PullHead, PullKey, PushAvailability, PushIntent, PushReport, RangeFiles,
-    RangePatch, ReplayOf, ReplayReview, RepositoryError, RepositoryOverview, RepositoryRefs,
-    RepositorySnapshot, Side, SinceReview, UndoHistory, WantedCommits, WholeFileConflict,
-    WorktreePatch, WorktreeReview, WorktreeSource, WorktreeStatus,
+    RangePatch, RebaseOf, ReplayOf, ReplayReview, RepositoryError, RepositoryOverview,
+    RepositoryRefs, RepositorySnapshot, Side, SinceReview, UndoHistory, WantedCommits,
+    WholeFileConflict, WorktreePatch, WorktreeReview, WorktreeSource, WorktreeStatus,
     directories::{DirectoryListing, expand_home, home_dir, list_directories},
     file_history::{blame_within, file_history_within},
     git::LocalRead,
@@ -44,6 +44,11 @@ pub enum Request {
     ReplayAbort {
         path: String,
         of: ReplayOf,
+        head: Head,
+    },
+    RebaseAbort {
+        path: String,
+        of: RebaseOf,
         head: Head,
     },
     Snapshot {
@@ -237,6 +242,7 @@ pub enum Response {
     Merge(MergeReport),
     ReplayReview(ReplayReview),
     ReplayAbort(MergeState),
+    RebaseAbort(MergeState),
     Snapshot(RepositorySnapshot),
     Refs(RepositoryRefs),
     CommitDetail(CommitDetail),
@@ -296,6 +302,9 @@ pub fn run(coordinator: &Coordinator, request: Request) -> Result<Response, Repo
         }
         Request::ReplayAbort { path, of, head } => {
             Response::ReplayAbort(coordinator.abort_replay(&path, &of, &head)?)
+        }
+        Request::RebaseAbort { path, of, head } => {
+            Response::RebaseAbort(coordinator.abort_rebase(&path, &of, &head)?)
         }
         Request::Snapshot { path } => {
             Response::Snapshot(snapshot_within(&path, deadline(LocalRead::Snapshot))?)

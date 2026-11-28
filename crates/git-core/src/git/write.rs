@@ -53,6 +53,9 @@ pub(crate) enum LocalWrite {
     UndoReplay,
     RedoReplay,
     Rebase,
+    RebaseContinue,
+    RebaseSkip,
+    RebaseAbort,
     UndoRebase,
     RedoRebase,
     RefreshIndex,
@@ -112,6 +115,9 @@ impl LocalWrite {
             | Self::UndoReplay
             | Self::RedoReplay
             | Self::Rebase
+            | Self::RebaseContinue
+            | Self::RebaseSkip
+            | Self::RebaseAbort
             | Self::UndoRebase
             | Self::RedoRebase
             | Self::CreateWorktree
@@ -160,6 +166,9 @@ impl LocalWrite {
             Self::UndoReplay => "Undoing the cherry-pick or revert",
             Self::RedoReplay => "Redoing the cherry-pick or revert",
             Self::Rebase => "Rebasing the branch",
+            Self::RebaseContinue => "Continuing the rebase",
+            Self::RebaseSkip => "Skipping the commit",
+            Self::RebaseAbort => "Aborting the rebase",
             Self::UndoRebase => "Undoing the rebase",
             Self::RedoRebase => "Redoing the rebase",
             Self::RefreshIndex => "Refreshing the index",
@@ -201,6 +210,9 @@ impl LocalWrite {
             Self::StashPop => "l1git stash pop",
             Self::StashDrop => "l1git stash drop",
             Self::Rebase => "l1git rebase",
+            Self::RebaseContinue => "l1git rebase continue",
+            Self::RebaseSkip => "l1git rebase skip",
+            Self::RebaseAbort => "l1git rebase abort",
             Self::Undo
             | Self::UndoCheckout
             | Self::UndoStash
@@ -222,9 +234,11 @@ impl LocalWrite {
 
     pub(super) const fn left_behind(self) -> &'static str {
         match self {
-            Self::MergeStart | Self::MergeFinish | Self::MergeAbort | Self::ReplayAbort => {
-                "L1 Git rereads the merge state to see what changed."
-            }
+            Self::MergeStart
+            | Self::MergeFinish
+            | Self::MergeAbort
+            | Self::ReplayAbort
+            | Self::RebaseAbort => "L1 Git rereads the merge state to see what changed.",
             Self::StageFiles
             | Self::UnstageFiles
             | Self::StagePart
@@ -250,6 +264,8 @@ impl LocalWrite {
             | Self::UndoReplay
             | Self::RedoReplay
             | Self::Rebase
+            | Self::RebaseContinue
+            | Self::RebaseSkip
             | Self::UndoRebase
             | Self::RedoRebase => "L1 Git rereads HEAD to see whether Git moved it.",
             Self::StashPush
@@ -478,6 +494,13 @@ impl<'a> Write<'a> {
         )
         .uncapped()
         .lazy_fetch_unprompted()
+    }
+
+    /// `GIT_EDITOR` is `:`, so a continued step keeps its message.
+    pub(crate) fn rebase_proceed(txn: &'a RebaseTxn<'_>, flag: &'a str) -> Self {
+        Self::user(txn.root(), vec![NO_REPLACE, "rebase", flag])
+            .uncapped()
+            .lazy_fetch_unprompted()
     }
 
     pub(crate) fn rebase_abort(txn: &'a RebaseTxn<'_>) -> Self {

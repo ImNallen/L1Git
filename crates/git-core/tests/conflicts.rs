@@ -750,10 +750,17 @@ fn the_probe_names_each_operation_without_writing() {
         |repo| repo.put("f.txt", b"theirs\n"),
     );
     rebasing.fails(&["rebase", "topic"]);
+    assert_eq!(rebasing.probe(), OperationProbe::Rebase);
+
+    let applying = Repo::diverged(
+        |repo| repo.put("f.txt", b"ours\n"),
+        |repo| repo.put("f.txt", b"theirs\n"),
+    );
+    applying.fails(&["rebase", "--apply", "topic"]);
     assert_eq!(
-        rebasing.probe(),
+        applying.probe(),
         OperationProbe::External {
-            operations: vec![InProgress::Rebase]
+            operations: vec![InProgress::RebaseOrAm]
         }
     );
 }

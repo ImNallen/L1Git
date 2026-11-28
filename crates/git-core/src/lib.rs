@@ -42,6 +42,7 @@ pub use write::{
     MergeAction, MergeAttention, MergeContext, MergeOutcome, MergePlan, MergePrediction,
     MergeReport, MergeReview, MergeSelection, MergeSession, MergeSource, MergeState, MergeTracking,
     NewWorktree, NoPush, Operation, OperationProbe, Plan, PullCheckout, PullHead, PullKey, Pushes,
-    Relation, ReplayKind, ReplayOf, ReplayPrediction, ReplayProgress, ReplayReview, Start,
-    StashTip, TagTip, UndoHistory, WorktreeBranch, WorktreeReview, WorktreeSource,
+    RebaseOf, RebaseProgress, Relation, ReplayKind, ReplayOf, ReplayPrediction, ReplayProgress,
+    ReplayReview, Start, StashTip, TagTip, UndoHistory, WorktreeBranch, WorktreeReview,
+    WorktreeSource,
 };

@@ -75,6 +75,16 @@ impl ReplayReview {
 }
 
 impl ReplayOf {
+    /// A rebase applies each commit as a cherry-pick onto HEAD, with the same sides
+    /// and the same conflict labels, so a rebase step shares this simulation, its
+    /// memo, and its resolution journal.
+    pub(super) const fn picking(commit: Oid) -> Self {
+        Self {
+            kind: ReplayKind::CherryPick,
+            commit,
+        }
+    }
+
     /// `merge-tree`'s (base, theirs). A pick merges the commit's change onto
     /// HEAD, and a revert merges the opposite change.
     fn sides(

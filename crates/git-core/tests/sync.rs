@@ -1803,29 +1803,27 @@ fn a_pull_rebase_replays_local_commits_onto_the_upstream_and_undoes() {
 }
 
 #[test]
-fn a_pull_rebase_that_conflicts_aborts_and_changes_nothing() {
+fn a_pull_rebase_that_conflicts_stays_in_progress_with_no_entry() {
     let world = World::new();
     let coordinator = coordinator(&world);
     world.colleague_pushes("main", "f", "theirs\n");
-    let ours = commit(&world.work, "f", "ours\n", "local work");
+    commit(&world.work, "f", "ours\n", "local work");
     coordinator
         .overview(world.path(), fetch_local("main"))
         .unwrap();
 
     let error = rebase_main(&coordinator, &world).unwrap_err();
-    assert_eq!(error.kind, ErrorKind::Conflict);
+    assert_eq!(
+        error.kind,
+        ErrorKind::RebaseStopped {
+            output: String::new()
+        }
+    );
     assert_eq!(
         error.message,
-        "The rebase stopped on conflicts in f, so L1 Git aborted it and nothing changed. Use Pull (Fast-forward if possible) to merge instead."
+        "The rebase stopped on a conflict in commit 1 of 1. Resolve it, then continue or abort the rebase."
     );
-    assert!(!rebasing(&world));
-    assert_eq!(git(&world.work, &["rev-parse", "HEAD"]), ours);
-    assert_eq!(
-        git(&world.work, &["symbolic-ref", "HEAD"]),
-        "refs/heads/main"
-    );
-    assert_eq!(git(&world.work, &["status", "--porcelain"]), "");
-    assert_eq!(fs::read_to_string(world.work.join("f")).unwrap(), "ours\n");
+    assert!(rebasing(&world));
     assert_eq!(coordinator.undo_history(world.path()).unwrap().undo, None);
 }
 
