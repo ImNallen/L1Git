@@ -28,6 +28,7 @@ import type {
   NewWorktree,
   Operation,
   Problem,
+  RebaseOf,
   ReplayOf,
   RepositoryRoot,
   WorktreeSource,
@@ -154,7 +155,9 @@ export function useWrites(
       ]);
       const notice: WriteNotice | null =
         outcome.kind === "failed"
-          ? outcome.problem.kind === "replayStopped"
+          ? // The panel the stop opens says what happened.
+            outcome.problem.kind === "replayStopped" ||
+            outcome.problem.kind === "rebaseStopped"
             ? null
             : job.action === "write"
               ? {
@@ -278,6 +281,25 @@ export function useWrites(
     );
   }
 
+  function abortRebase(
+    worktree: RepositoryRoot,
+    of: RebaseOf,
+    head: Head,
+  ): Promise<ReplayAbortOutcome> {
+    return task("merge", "Abort rebase", async (repository) => {
+      const outcome = await attempt(async () => {
+        await repositories.rebaseAbort(worktree, of, head);
+        return { kind: "aborted" as const };
+      });
+      if (outcome.kind === "failed" && rereadsRepository(outcome.problem))
+        reread.repository(repository);
+      // Abort moves the branch back, so the history and branches change.
+      await reread.refs(worktree, repository);
+      await rereadAfter(worktree);
+      return outcome;
+    });
+  }
+
   /** Try it locally: neither write has an undo entry or sets a notice. */
   function createWorktree(
     source: WorktreeSource,
@@ -335,6 +357,7 @@ export function useWrites(
     ...writes,
     merge,
     abortReplay,
+    abortRebase,
     createWorktree,
     removeWorktree,
     write: (worktree: RepositoryRoot, { operation, expect, label }: Write) =>

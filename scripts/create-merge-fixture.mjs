@@ -61,9 +61,35 @@ function make(name, conflict) {
     source: git(path, "rev-parse", "@{upstream}"),
   };
 }
+/** Pull (Rebase) stops twice: the first and second local commits each conflict with the upstream. */
+function makeRebase() {
+  const { path, remote } = make("rebase", true);
+  git(path, "switch", "--detach", "origin/main");
+  writeFileSync(join(path, "unrelated.txt"), "upstream\n");
+  git(path, "commit", "-am", "Upstream edits unrelated.txt");
+  git(path, "push", "origin", "HEAD:main");
+  git(path, "switch", "main");
+  git(path, "fetch", "origin");
+  writeFileSync(join(path, "unrelated.txt"), "local\n");
+  git(path, "commit", "-am", "Local edit to unrelated.txt");
+  writeFileSync(join(path, "added.txt"), "added locally\n");
+  git(path, "add", "added.txt");
+  git(path, "commit", "-m", "Local new file");
+  return {
+    path,
+    remote,
+    local: git(path, "rev-parse", "HEAD"),
+    upstream: git(path, "rev-parse", "@{upstream}"),
+  };
+}
 console.log(
   JSON.stringify(
-    { root, clean: make("clean", false), conflict: make("conflict", true) },
+    {
+      root,
+      clean: make("clean", false),
+      conflict: make("conflict", true),
+      rebase: makeRebase(),
+    },
     null,
     2,
   ),

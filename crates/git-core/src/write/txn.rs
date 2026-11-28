@@ -538,6 +538,10 @@ impl<'r> RebaseTxn<'r> {
         Write::rebase_abort(self)
     }
 
+    pub(super) fn proceed(&self, how: super::rebase::Proceed) -> Write<'_> {
+        Write::rebase_proceed(self, how.flag())
+    }
+
     pub(super) fn renewed(self) -> Self {
         Self(self.0.renewed())
     }

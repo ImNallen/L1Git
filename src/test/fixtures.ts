@@ -1,5 +1,10 @@
 import { mergeReviewSchema, mergeStateSchema } from "../domain/merge";
-import type { MergeReview, MergeState, ReplayProgress } from "../domain/merge";
+import type {
+  MergeReview,
+  MergeState,
+  RebaseProgress,
+  ReplayProgress,
+} from "../domain/merge";
 import { overviewSchema } from "../domain/overview";
 import type { RepositoryOverview } from "../domain/overview";
 import { pushAvailabilitySchema } from "../domain/push";
@@ -488,6 +493,36 @@ export function replayInProgress(
       tree: C3,
       empty: false,
       suggestedMessage: "Picked commit\n",
+      ...progress,
+    },
+  });
+}
+
+/** `main` stopped rebasing onto `origin/main` at C3, on C6, the second of three commits. */
+export function rebaseInProgress(
+  root: RepositoryRoot,
+  footprint: string[],
+  progress: Partial<Omit<RebaseProgress, "root" | "footprint">> = {},
+): MergeState {
+  return mergeStateSchema.parse({
+    kind: "rebase",
+    progress: {
+      root,
+      branch: "refs/heads/main",
+      onto: C3,
+      ontoName: "refs/remotes/origin/main",
+      origHead: C4,
+      step: C6,
+      subject: "Rebased commit",
+      done: 2,
+      total: 3,
+      head: { kind: "detached", oid: C5 },
+      footprint,
+      conflicted: footprint,
+      unresolved: [],
+      staged: STAMP,
+      tree: C3,
+      empty: false,
       ...progress,
     },
   });

@@ -149,7 +149,10 @@ fn git(path: &Path, args: &[&str]) -> String {
 fn active(state: MergeState) -> MergeSession {
     match state {
         MergeState::Active { session, .. } => session,
-        state @ (MergeState::Idle | MergeState::Attention { .. } | MergeState::Replay { .. }) => {
+        state @ (MergeState::Idle
+        | MergeState::Attention { .. }
+        | MergeState::Replay { .. }
+        | MergeState::Rebase { .. }) => {
             panic!("{state:?}")
         }
     }

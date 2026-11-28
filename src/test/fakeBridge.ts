@@ -337,6 +337,10 @@ const handlers: Record<string, Handler> = {
     world.merges.delete(request.path as RepositoryRoot);
     return idleMerge();
   },
+  rebaseAbort: (request, world) => {
+    world.merges.delete(request.path as RepositoryRoot);
+    return idleMerge();
+  },
   conflictFile: (request) =>
     editableConflict(request.path, String(request.file)),
   conflictSummary: (request, world) => {
@@ -344,7 +348,7 @@ const handlers: Record<string, Handler> = {
     const unresolved =
       state?.kind === "active"
         ? state.unresolved
-        : state?.kind === "replay"
+        : state?.kind === "replay" || state?.kind === "rebase"
           ? state.progress.unresolved
           : [];
     return unresolved.map((path) => ({ kind: "text", path, conflicts: 1 }));

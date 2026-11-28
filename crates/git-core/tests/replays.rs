@@ -803,10 +803,18 @@ fn an_external_operation_is_named() {
         repo.git(&["merge", "--abort"]);
 
         repo.git(&["switch", "--quiet", "topic"]);
-        repo.fails(&["rebase", "main"]);
+        repo.fails(&["rebase", "--exec", "true", "main"]);
         assert_eq!(
             external_message(&repo),
-            "A rebase is in progress. Finish or abort it with Git, then refresh.",
+            "A rebase is in progress. Continue it with git rebase --continue or end it with git rebase --abort, then refresh.",
+            "{format}",
+        );
+        repo.git(&["rebase", "--abort"]);
+
+        repo.fails(&["rebase", "--apply", "main"]);
+        assert_eq!(
+            external_message(&repo),
+            "A rebase or am is in progress. Finish or abort it with Git, then refresh.",
             "{format}",
         );
     }

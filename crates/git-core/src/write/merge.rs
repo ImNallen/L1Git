@@ -1,6 +1,7 @@
 use super::{
-    BranchTip, Change, CommitTxn, EntryId, MergeIndexTxn, MergeTxn, Operation, Published,
-    ReplayKind, ReplayOf, ReplayProgress, ReplayReview, Repo, commit, index, refs, replay,
+    BranchTip, Change, CommitTxn, EntryId, MergeIndexTxn, MergeTxn, Operation, Published, RebaseOf,
+    RebaseProgress, ReplayKind, ReplayOf, ReplayProgress, ReplayReview, Repo, commit, index,
+    rebase, refs, replay,
     store::{EntryObjects, Identity, LockedStore, Objects},
     txn::Runner,
 };
@@ -148,6 +149,10 @@ pub enum MergeState {
     Replay {
         progress: ReplayProgress,
     },
+    /// One plain rebase that Git holds stopped on a step, wherever it started.
+    Rebase {
+        progress: RebaseProgress,
+    },
 }
 
 /// What a list of repositories shows for one worktree, read without locks.
@@ -169,6 +174,8 @@ pub enum OperationProbe {
     Replay {
         replay: ReplayKind,
     },
+    /// One rebase that L1 Git can continue, wherever it started.
+    Rebase,
     /// Operations L1 Git cannot finish, which always need attention.
     External {
         operations: Vec<InProgress>,
@@ -738,6 +745,9 @@ fn state(
     if let Some(progress) = replay::progress(repo, deadline)? {
         return Ok(MergeState::Replay { progress });
     }
+    if let Some(progress) = rebase::progress(repo, deadline)? {
+        return Ok(MergeState::Rebase { progress });
+    }
     let operations = sync::in_progress(&repo.root, deadline.reads())?;
     if operations.is_empty() {
         Ok(MergeState::Idle)
@@ -764,6 +774,9 @@ fn external_operation_message(operations: &[InProgress]) -> String {
         return format!(
             "A {command} of several commits is in progress. Continue it with git {command} --continue or end it with git {command} --abort, then refresh."
         );
+    }
+    if operations == [InProgress::Rebase] {
+        return "A rebase is in progress. Continue it with git rebase --continue or end it with git rebase --abort, then refresh.".to_owned();
     }
     let names: Vec<_> = operations
         .iter()
@@ -1200,10 +1213,26 @@ pub(super) fn colliding_files(
     incoming: &[String],
     deadline: WriteDeadline,
 ) -> Result<Vec<String>, RepositoryError> {
-    let incoming: Vec<_> = incoming
-        .iter()
-        .map(|path| super::files::fold_for_any_disk(path))
-        .collect();
+    colliding(repo, who, incoming, &[], deadline)
+}
+
+/// As `colliding_files`, and also any untracked or ignored file whose path is one
+/// of `tails` or ends in `/` and one of them, for a write whose directory L1 Git
+/// cannot name.
+pub(super) fn colliding(
+    repo: &Repo,
+    who: &str,
+    incoming: &[String],
+    tails: &[String],
+    deadline: WriteDeadline,
+) -> Result<Vec<String>, RepositoryError> {
+    let fold = |paths: &[String]| -> Vec<String> {
+        paths
+            .iter()
+            .map(|path| super::files::fold_for_any_disk(path))
+            .collect()
+    };
+    let (incoming, tails) = (fold(incoming), fold(tails));
     // No exclude rules: ignored files need the same protection as other untracked files.
     let untracked = names(repo, who, &["ls-files", "--others", "-z"], deadline)?;
     Ok(untracked
@@ -1215,6 +1244,9 @@ pub(super) fn colliding_files(
                 *target == path
                     || target.starts_with(&format!("{path}/"))
                     || path.starts_with(&format!("{target}/"))
+            }) || tails.iter().any(|tail| {
+                path.strip_suffix(tail.as_str())
+                    .is_some_and(|above| above.is_empty() || above.ends_with('/'))
             })
         })
         .collect())
@@ -1343,6 +1375,22 @@ impl Coordinator {
     ) -> Result<MergeState, RepositoryError> {
         self.merge_locked(path, LocalWrite::ReplayAbort, |repo, _, deadline| {
             replay::abort(repo, of, head, deadline)?;
+            let deadline = deadline.renewed();
+            let record = reconcile(repo, deadline)?;
+            state(repo, record.as_ref(), deadline)
+        })
+    }
+
+    /// Ends the rebase Git holds in progress with `git rebase --abort`, which puts
+    /// the branch back where the rebase began, and answers the state after it.
+    pub fn abort_rebase(
+        &self,
+        path: &str,
+        of: &RebaseOf,
+        head: &Head,
+    ) -> Result<MergeState, RepositoryError> {
+        self.merge_locked(path, LocalWrite::RebaseAbort, |repo, _, deadline| {
+            rebase::abort(repo, of, head, deadline)?;
             let deadline = deadline.renewed();
             let record = reconcile(repo, deadline)?;
             state(repo, record.as_ref(), deadline)
@@ -1776,6 +1824,9 @@ pub(crate) fn operation_within(
     if let Some(of) = replay::in_flight(&repo, deadline)? {
         return Ok(OperationProbe::Replay { replay: of.kind });
     }
+    if rebase::in_flight(&repo, deadline)?.is_some() {
+        return Ok(OperationProbe::Rebase);
+    }
     let operations = sync::in_progress(&repo.root, deadline)?;
     Ok(if operations.is_empty() {
         OperationProbe::Idle
@@ -1796,7 +1847,11 @@ pub(super) fn journal(
             message,
             ..
         } => Err(refused(message)),
-        MergeState::Replay { progress } => replay::journal(repo, &progress).map(Some),
+        MergeState::Replay { progress } => {
+            let head = refs::oid(&progress.destination).ok_or_else(git::malformed)?;
+            replay::journal(repo, &progress.of(), &head).map(Some)
+        }
+        MergeState::Rebase { progress } => rebase::journal(repo, &progress).map(Some),
         MergeState::Idle => {
             replay::sweep(repo, None);
             Ok(None)
@@ -1830,7 +1885,8 @@ pub(super) fn admit(
             }
         }
     }
-    replay::admit(repo, operation, deadline)
+    replay::admit(repo, operation, deadline)?;
+    rebase::admit(repo, operation, deadline)
 }
 
 pub(super) enum Edit {
@@ -1850,7 +1906,9 @@ pub(super) fn edit(operation: &Operation) -> Edit {
         Operation::StageFiles { entries } | Operation::UnstageFiles { entries } => {
             Edit::Paths(paths(entries))
         }
-        Operation::FinishReplay { .. } => Edit::Finish,
+        Operation::FinishReplay { .. }
+        | Operation::ContinueRebase { .. }
+        | Operation::SkipRebase { .. } => Edit::Finish,
         Operation::Commit { .. }
         | Operation::Amend { .. }
         | Operation::EditMessage { .. }
@@ -1891,8 +1949,11 @@ fn branch_names(
             Head::Attached { reference, .. } => vec![reference],
             Head::Detached { .. } | Head::Unborn { .. } => Vec::new(),
         },
-        // Finish moves the branch its own replay holds, which `guard_refs` refuses.
+        // Finish, Continue, and Skip move the branch their own operation holds,
+        // which `guard_refs` refuses.
         Operation::FinishReplay { .. }
+        | Operation::ContinueRebase { .. }
+        | Operation::SkipRebase { .. }
         | Operation::SaveConflict { .. }
         | Operation::ResolveWhole { .. }
         | Operation::StageFiles { .. }
@@ -1961,6 +2022,14 @@ pub(super) fn guard_refs(
                 refs::capitalized(of.kind.operation().name()),
             )));
         }
+        if let Some(of) = rebase::in_flight(&target, deadline.reads())?
+            && names.iter().any(|name| name == of.branch.as_str())
+        {
+            return Err(refused(format!(
+                "A rebase in {path} is rebasing {}. Continue or abort it before changing that branch.",
+                of.branch.as_str()
+            )));
+        }
     }
     Ok(())
 }
@@ -1981,6 +2050,9 @@ pub(super) fn admit_step(
     if target.root != opened.root && journal(&target, deadline)?.is_some() {
         let holder = match replay::in_flight(&target, deadline.reads())? {
             Some(of) => format!("{} in progress", of.kind.operation().name()),
+            None if rebase::in_flight(&target, deadline.reads())?.is_some() => {
+                "a rebase in progress".to_owned()
+            }
             None => "an active merge".to_owned(),
         };
         return Err(refused(format!(

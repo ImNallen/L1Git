@@ -1126,7 +1126,7 @@ function WorktreeInspector({
             ))}
           </div>
         )}
-        {running && running.phase !== "empty" && (
+        {running && running.phase !== "empty" && running.verb !== "rebase" && (
           <OperationMessage running={running} />
         )}
       </div>

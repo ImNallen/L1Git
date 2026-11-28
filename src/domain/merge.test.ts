@@ -117,3 +117,53 @@ describe("mergeAllows for a whole-file resolution", () => {
     ).toBe(true);
   });
 });
+
+describe("mergeAllows during a rebase", () => {
+  const rebase = mergeStateSchema.parse({
+    kind: "rebase",
+    progress: {
+      root: "/repo",
+      branch: "refs/heads/main",
+      onto: oid("a"),
+      ontoName: "refs/remotes/origin/main",
+      origHead: oid("b"),
+      step: oid("e"),
+      subject: "Rebased",
+      done: 1,
+      total: 2,
+      head: { kind: "detached", oid: oid("a") },
+      footprint: ["inside.txt"],
+      conflicted: ["inside.txt"],
+      unresolved: [],
+      staged: "c".repeat(40),
+      tree: oid("d"),
+      empty: false,
+    },
+  });
+  const of = {
+    branch: "refs/heads/main",
+    onto: oid("a"),
+    origHead: oid("b"),
+    step: oid("e"),
+  };
+  const proceed = operation({
+    kind: "continueRebase",
+    of,
+    staged: "c".repeat(40),
+    tree: oid("d"),
+  });
+  const skip = operation({ kind: "skipRebase", of, staged: "c".repeat(40) });
+
+  it("allows Continue and Skip only during a rebase, and Finish never", () => {
+    expect(mergeAllows(rebase, proceed)).toBe(true);
+    expect(mergeAllows(rebase, skip)).toBe(true);
+    expect(mergeAllows(rebase, finish)).toBe(false);
+    expect(mergeAllows(replay, proceed)).toBe(false);
+  });
+
+  it("allows index edits only inside the step's footprint", () => {
+    expect(mergeAllows(rebase, stageHunk("inside.txt"))).toBe(true);
+    expect(mergeAllows(rebase, stageHunk("outside.txt"))).toBe(false);
+    expect(mergeAllows(rebase, start)).toBe(false);
+  });
+});

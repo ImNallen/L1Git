@@ -203,6 +203,32 @@ group("describe", () => {
     expect(describe(start("revert"), "past")).toBe("Reverted aaaaaaa on main");
   });
 
+  it("names a continued or skipped rebase step by the whole rebase its entry holds", () => {
+    const of = {
+      branch: "refs/heads/main",
+      onto: "a".repeat(40),
+      origHead: "b".repeat(40),
+      step: "c".repeat(40),
+    };
+    const proceed = {
+      kind: "continueRebase",
+      of,
+      staged: "d".repeat(40),
+      tree: "e".repeat(40),
+    } as unknown as Operation;
+    const skip = {
+      kind: "skipRebase",
+      of,
+      staged: "d".repeat(40),
+    } as unknown as Operation;
+    expect(describe(proceed)).toBe("Rebase main onto aaaaaaa");
+    expect(describe(skip, "past")).toBe("Rebased main onto aaaaaaa");
+    expect(attemptLabel(proceed)).toBe("Continue rebase");
+    expect(attemptLabel(skip)).toBe("Skip commit");
+    expect(movesRefs(proceed)).toBe(true);
+    expect(movesRefs(skip)).toBe(true);
+  });
+
   it("names a write that has run in the past tense", () => {
     expect(
       describe(

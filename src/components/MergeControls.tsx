@@ -135,7 +135,10 @@ export function MergeControls({
     return result;
   }
   const state = read.kind === "ready" ? read.value : null;
-  const shown = state?.kind === "replay" ? null : inProgress(state);
+  const shown =
+    state?.kind === "replay" || state?.kind === "rebase"
+      ? null
+      : inProgress(state);
   const operation = shown?.kind === "none" ? null : shown;
   const offer = state?.kind === "idle" && eligible;
   return (

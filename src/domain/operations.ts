@@ -161,7 +161,9 @@ export const movesRefs = (operation: Operation) =>
   isStashOperation(operation) ||
   operation.kind === "checkout" ||
   operation.kind === "replay" ||
-  operation.kind === "rebase";
+  operation.kind === "rebase" ||
+  operation.kind === "continueRebase" ||
+  operation.kind === "skipRebase";
 
 export type BranchAsk =
   | { kind: "create"; at: Start; from: string }
@@ -521,6 +523,8 @@ export const announcesResult: Record<Operation["kind"], boolean> = {
   replay: true,
   finishReplay: true,
   rebase: true,
+  continueRebase: true,
+  skipRebase: true,
 };
 
 function folderOf(path: string): string[] {
@@ -580,6 +584,10 @@ export function describe(operation: Operation, tense: Tense = "now"): string {
     }
     case "rebase":
       return `${say("Rebase", "Rebased")} ${shortBranch(operation.branch)} onto ${shortRemote(operation.onto)}`;
+    // Its undo entry holds the whole rebase, whichever step ended it.
+    case "continueRebase":
+    case "skipRebase":
+      return `${say("Rebase", "Rebased")} ${shortBranch(operation.of.branch)} onto ${shortOid(operation.of.onto)}`;
   }
   if ("message" in operation)
     return `${commitVerbs[operation.kind][tense]} ${quoted(operation.message)}`;
@@ -599,10 +607,18 @@ export function describe(operation: Operation, tense: Tense = "now"): string {
 }
 
 /** What a write is called while it runs or if it fails. A refused Finish must not read as a refused start. */
-export const attemptLabel = (operation: Operation) =>
-  operation.kind === "finishReplay"
-    ? `Finish ${replayNames[operation.of.kind].noun} ${quoted(operation.message)}`
-    : describe(operation);
+export function attemptLabel(operation: Operation): string {
+  switch (operation.kind) {
+    case "finishReplay":
+      return `Finish ${replayNames[operation.of.kind].noun} ${quoted(operation.message)}`;
+    case "continueRebase":
+      return "Continue rebase";
+    case "skipRebase":
+      return "Skip commit";
+    default:
+      return describe(operation);
+  }
+}
 
 export type Step = "undo" | "redo";
 

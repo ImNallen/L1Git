@@ -44,6 +44,7 @@ pub use partial::{LinePick, LineSide};
 pub use pull_request::{
     Changes, CheckedOut, HeadFrom, NoPush, Plan, PullCheckout, PullHead, PullKey, Pushes, Relation,
 };
+pub use rebase::{RebaseOf, RebaseProgress};
 pub use replay::{ReplayKind, ReplayOf, ReplayPrediction, ReplayProgress, ReplayReview};
 pub(crate) use resolution::conflict_file_within;
 use serde::{Deserialize, Serialize};
@@ -207,9 +208,24 @@ pub enum Operation {
     },
     /// Rebases the checked-out `branch` onto the commit `onto` names, its
     /// upstream, with Git's merge backend, the user's hooks, and signing. A
-    /// clean worktree is required. A rebase that stops is aborted, so nothing
-    /// changes, and conflicts answer `conflict`. Undo puts the old tip back.
+    /// clean worktree is required. A rebase that stops where L1 Git can continue
+    /// it answers `rebaseStopped` with no entry, and `mergeState` then reads
+    /// `rebase`. Any other stop is aborted, so nothing changes. Undo puts the old
+    /// tip back.
     Rebase { branch: BranchRef, onto: RemoteRef },
+    /// Commits the resolved step of the rebase Git holds in progress and goes on,
+    /// with `git rebase --continue`, the user's hooks, and signing. The step keeps
+    /// its message. `staged` and `tree` are what `mergeState` showed. A rebase this
+    /// ends has one undo entry, which puts the branch back where the rebase began.
+    /// A stop on the next step answers `rebaseStopped` with no entry.
+    ContinueRebase {
+        of: RebaseOf,
+        staged: StagedStamp,
+        tree: Oid,
+    },
+    /// Drops the step whose staged result equals HEAD and goes on, with `git
+    /// rebase --skip`. It ends as Continue does.
+    SkipRebase { of: RebaseOf, staged: StagedStamp },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -607,6 +623,8 @@ impl Operation {
             Self::Replay { .. } => LocalWrite::ReplayStart,
             Self::FinishReplay { .. } => LocalWrite::ReplayFinish,
             Self::Rebase { .. } => LocalWrite::Rebase,
+            Self::ContinueRebase { .. } => LocalWrite::RebaseContinue,
+            Self::SkipRebase { .. } => LocalWrite::RebaseSkip,
         }
     }
 
@@ -713,6 +731,22 @@ impl Operation {
             Self::Rebase { branch, onto } => {
                 unpublished(rebase::apply(&writing, expect, branch, onto))
             }
+            Self::ContinueRebase { of, staged, tree } => unpublished(rebase::proceed(
+                &writing,
+                expect,
+                of,
+                staged,
+                Some(tree),
+                rebase::Proceed::Continue,
+            )),
+            Self::SkipRebase { of, staged } => unpublished(rebase::proceed(
+                &writing,
+                expect,
+                of,
+                staged,
+                None,
+                rebase::Proceed::Skip,
+            )),
         }
     }
 }
@@ -882,8 +916,12 @@ impl Coordinator {
         work: impl FnOnce(Repo, &LockedStore, Log, WriteDeadline) -> Result<T, RepositoryError>,
     ) -> Result<T, RepositoryError> {
         self.with_store(path, write, |repo, store, deadline| {
+            // The write that ends an operation records into global history.
             if let Some(dir) = merge::journal(&repo, deadline)?
-                && write != LocalWrite::ReplayFinish
+                && !matches!(
+                    write,
+                    LocalWrite::ReplayFinish | LocalWrite::RebaseContinue | LocalWrite::RebaseSkip
+                )
             {
                 let session = LockedStore::lock(&dir, &repo.common_dir, deadline.reads())?;
                 let log = session.settled_log(&repo, deadline)?;

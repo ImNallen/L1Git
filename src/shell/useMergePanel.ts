@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ComponentProps } from "react";
 import type { MergeControls } from "../components/MergeControls";
+import type { RebasePanel } from "../components/RebasePanel";
 import type { ReplayPanel } from "../components/ReplayPanel";
 import type { MergeSelection } from "../domain/merge";
 import { worktreeHead } from "../domain/worktree";
@@ -44,6 +45,8 @@ export type MergePanel = {
   controls: ComponentProps<typeof MergeControls> | null;
   /** Null with no snapshot. Keyed by `replay.root`, so a new worktree remounts it too. */
   replay: ComponentProps<typeof ReplayPanel> | null;
+  /** Null with no snapshot. Keyed by `rebase.root`. */
+  rebase: ComponentProps<typeof RebasePanel> | null;
   sidebar: SidebarRefActions["merge"];
   commitReplay: CommitReplay;
   actions: ActionSlice<
@@ -83,7 +86,13 @@ export function useMergePanel({
   pull: OverviewStore["pull"];
   writes: Pick<
     WritesView,
-    "running" | "merge" | "write" | "abortReplay" | "dismiss" | "post"
+    | "running"
+    | "merge"
+    | "write"
+    | "abortReplay"
+    | "abortRebase"
+    | "dismiss"
+    | "post"
   >;
   rereadChanges: () => void;
   /** The user selects the worktree, which clears the sidebar jump. */
@@ -224,6 +233,17 @@ export function useMergePanel({
             dismiss: writes.dismiss,
             review: pinnedReplay?.of ?? null,
             onCloseReview: () => setReplayReview(null),
+            onInspect: inspect,
+          }
+        : null,
+    rebase:
+      root && snapshot
+        ? {
+            root,
+            read: active.merge,
+            busy,
+            write: writes.write,
+            abort: writes.abortRebase,
             onInspect: inspect,
           }
         : null,

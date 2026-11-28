@@ -1116,6 +1116,13 @@ pub enum ErrorKind {
         /// 64 KiB.
         output: String,
     },
+    /// A rebase stopped on a step L1 Git can continue, so `mergeState` reads
+    /// `rebase`.
+    RebaseStopped {
+        /// Empty for a plain conflict. Otherwise what Git or a hook printed, up to
+        /// 64 KiB.
+        output: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]

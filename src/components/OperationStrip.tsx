@@ -14,6 +14,7 @@ import {
   operationMessage,
   operationWords,
   progressLabel,
+  rebaseTitle,
 } from "../domain/inProgress";
 import type { FinishBlock, InProgress, Running } from "../domain/inProgress";
 import { useDraftImpact } from "../draftProtection";
@@ -62,19 +63,25 @@ const finishReasons: Record<FinishBlock | "busy" | "frozen", string> = {
   noMessage: "Write a commit message first.",
 };
 
+type Ends = {
+  onFinish: (message: string, draft: CommitDraft) => Promise<unknown>;
+  /** A rebase's Skip commit, which replaces Continue when the result matches HEAD. */
+  onSkip?: () => Promise<unknown>;
+  onAbort: () => Promise<boolean>;
+};
+
 export function OperationStrip({
   shown,
   busy,
   onInspect,
   onFinish,
+  onSkip,
   onAbort,
   children,
-}: {
+}: Ends & {
   shown: Shown;
   busy: boolean;
   onInspect: () => void;
-  onFinish: (message: string, draft: CommitDraft) => Promise<unknown>;
-  onAbort: () => Promise<boolean>;
   children?: ReactNode;
 }) {
   return (
@@ -85,6 +92,7 @@ export function OperationStrip({
           busy={busy}
           onInspect={onInspect}
           onFinish={onFinish}
+          onSkip={onSkip}
           onAbort={onAbort}
         />
       ) : shown.kind === "attention" ? (
@@ -191,6 +199,21 @@ function AttentionStrip({ message }: { message: string }) {
 function statusLine(running: Running): string {
   const { phase, progress, verb } = running;
   const { noun } = operationWords[verb];
+  if (verb === "rebase")
+    switch (phase) {
+      case "empty":
+        return "The staged result matches HEAD, so this commit has nothing left to apply. Skip it to go on with the rebase.";
+      case "conflicted": {
+        const left = progress.unresolved.length;
+        return left === 1
+          ? "1 file still has a conflict. Resolve it, then continue the rebase."
+          : `${left} files still have conflicts. Resolve them, then continue the rebase.`;
+      }
+      case "ready":
+        return progress.total === 0
+          ? "Review the result, then continue."
+          : "All conflicts are resolved. Review the result, then continue.";
+    }
   switch (phase) {
     case "empty":
       return `The staged result matches HEAD, so there is nothing to commit. Abort ends the ${noun} and keeps every commit.`;
@@ -242,15 +265,14 @@ function RunningStrip({
   busy,
   onInspect,
   onFinish,
+  onSkip,
   onAbort,
-}: {
+}: Ends & {
   running: Running;
   busy: boolean;
   onInspect: () => void;
-  onFinish: (message: string, draft: CommitDraft) => Promise<unknown>;
-  onAbort: () => Promise<boolean>;
 }) {
-  const { root, verb, current, phase, footprint } = running;
+  const { root, verb, current, phase, footprint, rebase } = running;
   const words = operationWords[verb];
   const [draft] = useCommitDraft(root);
   const impact = useDraftImpact();
@@ -291,14 +313,23 @@ function RunningStrip({
         )
       }
       title={
-        <>
-          <span>{words.doing}</span> <IncomingChip running={running} />{" "}
-          <span>{words.onto}</span>{" "}
-          <SideChip side="current">{current.name}</SideChip>
-        </>
+        rebase ? (
+          rebaseTitle(rebase)
+        ) : (
+          <>
+            <span>{words.doing}</span> <IncomingChip running={running} />{" "}
+            <span>{words.onto}</span>{" "}
+            <SideChip side="current">{current.name}</SideChip>
+          </>
+        )
       }
       status={
         <>
+          {rebase && (
+            <p className="operation-status">
+              <IncomingChip running={running} />
+            </p>
+          )}
           <p className="operation-status">{statusLine(running)}</p>
           {running.sourceMoved && (
             <p className="operation-status">
@@ -318,6 +349,15 @@ function RunningStrip({
       >
         Abort {words.noun}…
       </button>
+      {phase === "empty" && onSkip && (
+        <button
+          className="button primary"
+          disabled={stopped}
+          onClick={() => void onSkip()}
+        >
+          Skip commit
+        </button>
+      )}
       {phase !== "empty" && (
         <>
           <button
@@ -329,7 +369,7 @@ function RunningStrip({
               if (block === null) void onFinish(message, draft);
             }}
           >
-            Finish {words.noun}
+            {verb === "rebase" ? "Continue rebase" : `Finish ${words.noun}`}
           </button>
           {reason !== null && (
             <span id={reasonId} className="visually-hidden">
@@ -366,9 +406,10 @@ function AbortDialog({
   onClose: () => void;
   onConfirm: () => void;
 }) {
-  const { verb, current, progress } = running;
+  const { verb, current, progress, rebase } = running;
   const { noun, doing } = operationWords[verb];
   const resolved = progress.resolved;
+  const rebased = rebase === null ? 0 : rebase.done - 1;
   return (
     <ConfirmDialog
       icon={verb === "merge" ? GitMerge : GitCommitHorizontal}
@@ -380,11 +421,20 @@ function AbortDialog({
       onConfirm={onConfirm}
     >
       <p className="abort-lead">
-        <SideChip side="current">{current.name}</SideChip> goes back to{" "}
-        {current.oid === null ? (
-          "where it was"
+        {rebase ? (
+          <>
+            <SideChip side="current">{rebase.branch}</SideChip> goes back to{" "}
+            <code>{shortOid(rebase.origHead)}</code>
+          </>
         ) : (
-          <code>{shortOid(current.oid)}</code>
+          <>
+            <SideChip side="current">{current.name}</SideChip> goes back to{" "}
+            {current.oid === null ? (
+              "where it was"
+            ) : (
+              <code>{shortOid(current.oid)}</code>
+            )}
+          </>
         )}{" "}
         exactly as before you started.
       </p>
@@ -405,7 +455,15 @@ function AbortDialog({
               <code>{path}</code> <span>unsaved result draft</span>
             </li>
           ))}
-          {resolved?.length === 0 && drafts.length === 0 && (
+          {rebase && rebased > 0 && (
+            <li>
+              {rebased === 1
+                ? "The commit already rebased"
+                : `The ${rebased} commits already rebased`}{" "}
+              onto {rebase.onto}
+            </li>
+          )}
+          {resolved?.length === 0 && drafts.length === 0 && rebased <= 0 && (
             <li>Nothing you have resolved yet.</li>
           )}
         </ul>
@@ -420,7 +478,9 @@ function AbortDialog({
       <p className="abort-note">
         {verb === "merge"
           ? "Unrelated tracked changes block Abort."
-          : `A staged change outside the ${noun}'s files blocks Abort.`}{" "}
+          : verb === "rebase"
+            ? "A staged change outside the commit's files, or an unstaged edit outside a conflicted file, blocks Abort."
+            : `A staged change outside the ${noun}'s files blocks Abort.`}{" "}
         This cannot be undone.
       </p>
     </ConfirmDialog>
