@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::Login;
 use crate::drafts::{AttemptId, Carried, Change, PullDrafts};
 use crate::pulls::{PullRequest, PullRequestList, PullRequests, Repository};
-use crate::writes::{Checked, Write, Wrote};
+use crate::writes::{Checked, OpenContext, Opened, Opening, Write, Wrote};
 
 /// Variants without fields are empty structs, because serde ignores unknown
 /// fields on an internally tagged unit variant.
@@ -76,6 +76,22 @@ pub enum Request {
         repository: Repository,
         number: u32,
     },
+    /// What opening a pull request from `head` needs: the repository's id,
+    /// its default branch, and the pull requests already open from `head`.
+    /// Read again after an unknown opening, it tells whether it landed.
+    OpenPullContext {
+        repository: Repository,
+        head: String,
+    },
+    /// Opens a pull request as `asLogin` only, at most once. It keeps no
+    /// record in drafts.json, because GitHub keeps one open pull request per
+    /// head and base.
+    #[serde(rename_all = "camelCase")]
+    OpenPull {
+        as_login: Login,
+        repository: Repository,
+        open: Opening,
+    },
 }
 
 /// `{op, data?, status}`.
@@ -103,6 +119,8 @@ pub enum Answer {
     Write(Wrote),
     SendAgain(Wrote),
     Check(Checked),
+    OpenPullContext(OpenContext),
+    OpenPull(Opened),
 }
 
 /// Everything the webview knows about the host side. No field can hold a
@@ -469,6 +487,16 @@ mod tests {
             parse(json!({"op": "write", "asLogin": "octo", "repository": {"owner": "octo", "repo": "app"}, "number": 1, "attempt": "a-1", "write": {"kind": "unresolve", "thread": "T_1"}, "drafts": []})),
             Ok(Request::Write { as_login, .. }) if as_login.as_str() == "octo"
         ));
+        assert!(matches!(
+            parse(json!({"op": "openPullContext", "repository": {"owner": "octo", "repo": "app"}, "head": "fix"})),
+            Ok(Request::OpenPullContext { head, .. }) if head == "fix"
+        ));
+        assert!(matches!(
+            parse(json!({"op": "openPull", "asLogin": "octo", "repository": {"owner": "octo", "repo": "app"}, "open": {
+                "repositoryId": "R_1", "base": "main", "head": "fix", "title": "Fix", "body": "", "draft": true,
+            }})),
+            Ok(Request::OpenPull { as_login, .. }) if as_login.as_str() == "octo"
+        ));
         for refused in [
             json!({"op": "status", "extra": 1}),
             json!({"op": "connectGh", "login": "-x"}),
@@ -492,6 +520,13 @@ mod tests {
             json!({"op": "write", "asLogin": "octo", "repository": {"owner": "octo", "repo": "app"}, "number": 1, "attempt": "a-1", "write": {"kind": "merge", "pull": "PR_1", "expectedHead": "main", "method": "squash", "headline": null, "body": null}, "drafts": []}),
             json!({"op": "write", "asLogin": "octo", "repository": {"owner": "octo", "repo": "app"}, "number": 1, "attempt": "a 1", "write": {"kind": "resolve", "thread": "T_1"}, "drafts": []}),
             json!({"op": "check", "asLogin": "octo", "repository": {"owner": "octo", "repo": "app"}, "number": 1, "attempt": "a-1"}),
+            json!({"op": "openPullContext", "repository": {"owner": "octo", "repo": "app"}}),
+            json!({"op": "openPull", "asLogin": "octo", "repository": {"owner": "octo", "repo": "app"}, "open": {
+                "repositoryId": "R 1", "base": "main", "head": "fix", "title": "Fix", "body": "", "draft": false,
+            }}),
+            json!({"op": "openPull", "asLogin": "octo", "repository": {"owner": "octo", "repo": "app"}, "open": {
+                "repositoryId": "R_1", "base": "main", "head": "fix", "title": "Fix", "body": "", "draft": false, "maintainerCanModify": true,
+            }}),
         ] {
             assert!(parse(refused.clone()).is_err(), "{refused}");
         }

@@ -210,6 +210,18 @@ pub fn run(host: &Host, request: Request) -> Result<Response, HostError> {
                 number,
             })
             .map(Answer::Check),
+        Request::OpenPullContext { repository, head } => host
+            .open_context(&repository, &head)
+            .map(Answer::OpenPullContext),
+        Request::OpenPull {
+            as_login,
+            repository,
+            open,
+        } => Ok(Answer::OpenPull(host.open_pull(
+            &as_login,
+            &repository,
+            &open,
+        ))),
     };
     let status = host.status();
     match outcome {

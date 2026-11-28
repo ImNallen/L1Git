@@ -38,7 +38,7 @@ impl Host {
 
     /// Sent only as `as_login`, so a click made for one account never posts
     /// as another.
-    fn signed_in_as(&self, as_login: &Login) -> Result<CommitId, String> {
+    pub(super) fn signed_in_as(&self, as_login: &Login) -> Result<CommitId, String> {
         let Some((generation, login)) = self.connection() else {
             return Err(
                 "L1 Git is not connected to GitHub, so it sent nothing. Sign in from Settings › Hosts."
