@@ -12,7 +12,7 @@ const snapshot = (revision: number, state: unknown, track = "stable") => ({
   track,
   state,
 });
-const candidate = { id: "1", version: "0.2.0", notes: null };
+const candidate = { id: "1", version: "0.2.0", notes: null, changes: null };
 const ready = parseUpdateSnapshot(
   snapshot(1, { kind: "downloaded", candidate, message: null }),
 );
@@ -61,7 +61,7 @@ it("parses IPC and reports invalid payloads without replacing valid state", asyn
   emit(
     snapshot(1, {
       kind: "downloaded",
-      candidate: { id: "url", version: "", notes: null },
+      candidate: { id: "url", version: "", notes: null, changes: null },
     }),
   );
   expect(updates.read().snapshot.state.kind).toBe("idle");

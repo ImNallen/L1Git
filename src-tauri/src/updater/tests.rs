@@ -6,18 +6,18 @@ use std::{
 };
 use tauri::test::{MockRuntime, mock_builder, mock_context, noop_assets};
 
-struct Feed {
+/// Answers each request with the status and body `respond` gives its path.
+struct Server {
     url: String,
     stopped: Arc<AtomicBool>,
     worker: Option<std::thread::JoinHandle<()>>,
 }
 
-impl Feed {
-    fn new(signature: &str, payload: &str, version: &str) -> Self {
+impl Server {
+    fn new(respond: impl Fn(&str, &str) -> (u16, String) + Send + 'static) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
-        let manifest = serde_json::json!({ "version": version, "notes": "<script>plain notes</script>", "url": format!("{url}/payload"), "signature": signature }).to_string();
-        let payload = payload.to_owned();
+        let base = url.clone();
         let stopped = Arc::new(AtomicBool::new(false));
         let stop = Arc::clone(&stopped);
         let worker = std::thread::spawn(move || {
@@ -31,13 +31,10 @@ impl Feed {
                     .unwrap();
                 let mut request = [0; 4096];
                 let read = stream.read(&mut request).unwrap();
-                let body = if String::from_utf8_lossy(&request[..read]).starts_with("GET /payload ")
-                {
-                    &payload
-                } else {
-                    &manifest
-                };
-                write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
+                let request = String::from_utf8_lossy(&request[..read]);
+                let path = request.split(' ').nth(1).unwrap_or_default();
+                let (status, body) = respond(&base, path);
+                write!(stream, "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
             }
         });
         Self {
@@ -46,8 +43,22 @@ impl Feed {
             worker: Some(worker),
         }
     }
+
+    fn feed(signature: &str, payload: &str, version: &str) -> Self {
+        let signature = signature.to_owned();
+        let payload = payload.to_owned();
+        let version = version.to_owned();
+        Self::new(move |url, path| {
+            let body = if path == "/payload" {
+                payload.clone()
+            } else {
+                serde_json::json!({ "version": version, "notes": "<script>plain notes</script>", "url": format!("{url}/payload"), "signature": signature }).to_string()
+            };
+            (200, body)
+        })
+    }
 }
-impl Drop for Feed {
+impl Drop for Server {
     fn drop(&mut self) {
         self.stopped.store(true, Ordering::SeqCst);
         let _ = std::net::TcpStream::connect(self.url.trim_start_matches("http://"));
@@ -86,7 +97,7 @@ fn app_at_version(public_key: &str, version: &str) -> tauri::App<MockRuntime> {
         .unwrap()
 }
 
-async fn found(app: &tauri::App<MockRuntime>, feed: &Feed) -> Option<Update> {
+async fn found(app: &tauri::App<MockRuntime>, feed: &Server) -> Option<Update> {
     app.updater_builder()
         .endpoints(vec![feed.url.parse().unwrap()])
         .unwrap()
@@ -134,7 +145,7 @@ fn real_updater_verifies_bytes_key_and_required_signed_version() {
             false,
         ),
     ] {
-        let feed = Feed::new(fixture[signature].as_str().unwrap(), payload, "0.2.0");
+        let feed = Server::feed(fixture[signature].as_str().unwrap(), payload, "0.2.0");
         tauri::async_runtime::block_on(async {
             let update = found(&app, &feed).await.unwrap();
             let mut received = 0;
@@ -153,7 +164,7 @@ fn default_comparator_never_downgrades_or_reinstalls() {
     let fixture = fixtures();
     let app = app(fixture["publicKey"].as_str().unwrap());
     for version in ["0.0.9", "0.1.0", "0.1.0-nightly.20260101.1"] {
-        let feed = Feed::new(fixture["signature"].as_str().unwrap(), "unused", version);
+        let feed = Server::feed(fixture["signature"].as_str().unwrap(), "unused", version);
         assert!(tauri::async_runtime::block_on(found(&app, &feed)).is_none());
     }
     let nightly = app_at_version(
@@ -161,10 +172,10 @@ fn default_comparator_never_downgrades_or_reinstalls() {
         "0.3.0-nightly.20261029.1",
     );
     for version in ["0.2.9", "0.3.0-nightly.20261028.1"] {
-        let feed = Feed::new(fixture["signature"].as_str().unwrap(), "unused", version);
+        let feed = Server::feed(fixture["signature"].as_str().unwrap(), "unused", version);
         assert!(tauri::async_runtime::block_on(found(&nightly, &feed)).is_none());
     }
-    let newer_stable = Feed::new(fixture["signature"].as_str().unwrap(), "unused", "0.3.0");
+    let newer_stable = Server::feed(fixture["signature"].as_str().unwrap(), "unused", "0.3.0");
     assert!(tauri::async_runtime::block_on(found(&nightly, &newer_stable)).is_some());
 }
 
@@ -172,7 +183,7 @@ fn default_comparator_never_downgrades_or_reinstalls() {
 fn duplicate_stale_and_track_switch_completions_cannot_replace_current_candidate() {
     let fixture = fixtures();
     let app = app(fixture["publicKey"].as_str().unwrap());
-    let feed = Feed::new(
+    let feed = Server::feed(
         fixture["signature"].as_str().unwrap(),
         fixture["payload"].as_str().unwrap(),
         "0.2.0",
@@ -184,8 +195,20 @@ fn duplicate_stale_and_track_switch_completions_cannot_replace_current_candidate
     controller.track = Track::Nightly;
     controller.phase = Phase::Idle;
     let (current, _) = controller.begin_check().unwrap();
-    assert!(!controller.finish_check(old, Ok(Some(update.clone()))));
-    assert!(controller.finish_check(current, Ok(Some(update))));
+    assert!(!controller.finish_check(
+        old,
+        Ok(Some(Found {
+            update: update.clone(),
+            changes: None
+        }))
+    ));
+    assert!(controller.finish_check(
+        current,
+        Ok(Some(Found {
+            update,
+            changes: None
+        }))
+    ));
     let Phase::Available { release, .. } = &controller.phase else {
         panic!()
     };
@@ -220,7 +243,7 @@ fn duplicate_stale_and_track_switch_completions_cannot_replace_current_candidate
 fn actual_failed_install_retains_verified_download_and_reopens_repository_admission() {
     let fixture = fixtures();
     let app = app(fixture["publicKey"].as_str().unwrap());
-    let feed = Feed::new(
+    let feed = Server::feed(
         fixture["signature"].as_str().unwrap(),
         fixture["payload"].as_str().unwrap(),
         "0.2.0",
@@ -233,6 +256,7 @@ fn actual_failed_install_retains_verified_download_and_reopens_repository_admiss
                 id: "1".into(),
                 version: update.version.clone(),
                 notes: None,
+                changes: None,
             },
             update,
         };
@@ -249,6 +273,7 @@ fn actual_failed_install_retains_verified_download_and_reopens_repository_admiss
             preference: temporary.path().join("updates.json"),
             activity: Arc::new(RepositoryActivity::default()),
             feeds: None,
+            compare: None,
         });
         let hidden_request = updater.activity.admit().unwrap();
         assert!(matches!(
@@ -342,12 +367,12 @@ async fn wait_for(
 fn real_commands_check_download_switch_track_and_keep_verified_bytes_until_explicit_install() {
     let fixture = fixtures();
     let app = app(fixture["publicKey"].as_str().unwrap());
-    let stable = Feed::new(
+    let stable = Server::feed(
         fixture["signature"].as_str().unwrap(),
         fixture["payload"].as_str().unwrap(),
         "0.2.0",
     );
-    let nightly = Feed::new(
+    let nightly = Server::feed(
         fixture["signature"].as_str().unwrap(),
         fixture["payload"].as_str().unwrap(),
         "0.2.0",
@@ -359,6 +384,7 @@ fn real_commands_check_download_switch_track_and_keep_verified_bytes_until_expli
         preference: temporary.path().join("updates.json"),
         activity: Arc::new(RepositoryActivity::default()),
         feeds: Some([stable.url.clone(), nightly.url.clone()]),
+        compare: None,
     });
     tauri::async_runtime::block_on(async {
         assert!(matches!(updater.check().state, UpdateState::Checking));
@@ -411,6 +437,149 @@ fn real_commands_check_download_switch_track_and_keep_verified_bytes_until_expli
         assert!(refused.preference_error.is_some());
         assert!(matches!(refused.state, UpdateState::Available { .. }));
     });
+}
+
+fn comparison(status: &str, total: usize, commits: &[(&str, usize)]) -> String {
+    let commits: Vec<_> = commits
+        .iter()
+        .map(|(message, parents)| {
+            serde_json::json!({
+                "sha": "0000",
+                "commit": { "message": message },
+                "parents": vec![serde_json::json!({ "sha": "1111" }); *parents],
+            })
+        })
+        .collect();
+    serde_json::json!({ "status": status, "total_commits": total, "commits": commits, "files": [] })
+        .to_string()
+}
+
+/// Serves `pages` for the range v0.1.0...v0.2.0 and 404 for anything else.
+fn compare_server(pages: Vec<(u16, String)>) -> (Server, Arc<std::sync::atomic::AtomicUsize>) {
+    let requests = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counted = Arc::clone(&requests);
+    let server = Server::new(move |_, path| {
+        counted.fetch_add(1, Ordering::SeqCst);
+        let page = path
+            .strip_prefix("/v0.1.0...v0.2.0?per_page=100&page=")
+            .and_then(|page| page.parse::<usize>().ok())
+            .and_then(|page| pages.get(page.wrapping_sub(1)));
+        page.cloned()
+            .unwrap_or((404, r#"{"message":"Not Found"}"#.into()))
+    });
+    (server, requests)
+}
+
+fn changes_from(server: &Server, installed: &str) -> Option<Vec<String>> {
+    tauri::async_runtime::block_on(changes(&format!("{}/", server.url), installed, "0.2.0"))
+}
+
+#[test]
+fn compare_lists_every_non_merge_subject_newest_first() {
+    let (server, _) = compare_server(vec![(
+        200,
+        comparison(
+            "ahead",
+            3,
+            &[
+                ("feat(pulls): first (#1)\n\nBody text.", 1),
+                ("Merge branch 'main' into feature", 2),
+                ("fix(shell): second (#2)", 1),
+            ],
+        ),
+    )]);
+    assert_eq!(
+        changes_from(&server, "0.1.0").unwrap(),
+        ["fix(shell): second (#2)", "feat(pulls): first (#1)"]
+    );
+}
+
+#[test]
+fn compare_pages_until_it_has_the_whole_range() {
+    let subjects: Vec<String> = (0..150).map(|n| format!("change {n}")).collect();
+    let page = |range: std::ops::Range<usize>, total| {
+        let commits: Vec<_> = subjects[range].iter().map(|s| (s.as_str(), 1)).collect();
+        (200, comparison("ahead", total, &commits))
+    };
+    let (server, _) = compare_server(vec![page(0..100, 150), page(100..150, 150)]);
+    let mut expected = subjects.clone();
+    expected.reverse();
+    assert_eq!(changes_from(&server, "0.1.0").unwrap(), expected);
+
+    let (short, _) = compare_server(vec![page(0..100, 150), page(0..0, 150)]);
+    assert_eq!(changes_from(&short, "0.1.0"), None);
+
+    let (long, requests) = compare_server(vec![page(0..100, 501); 6]);
+    assert_eq!(changes_from(&long, "0.1.0"), None);
+    assert_eq!(requests.load(Ordering::SeqCst), COMPARE_PAGES);
+}
+
+#[test]
+fn compare_without_the_whole_ahead_range_is_none() {
+    let ahead = comparison("ahead", 1, &[("feat: one", 1)]);
+    for (status, body) in [
+        (200, comparison("behind", 1, &[("feat: one", 1)])),
+        (200, comparison("diverged", 1, &[("feat: one", 1)])),
+        (200, comparison("identical", 0, &[])),
+        (200, "not json".into()),
+        (403, r#"{"message":"API rate limit exceeded"}"#.into()),
+        (500, ahead.clone()),
+    ] {
+        let (server, _) = compare_server(vec![(status, body.clone())]);
+        assert_eq!(changes_from(&server, "0.1.0"), None, "{status} {body}");
+    }
+    let (server, requests) = compare_server(vec![(200, ahead)]);
+    assert_eq!(changes_from(&server, "0.0.9"), None, "missing tag");
+    assert_eq!(changes_from(&server, "0.1.0/../x"), None);
+    assert_eq!(requests.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn check_publishes_the_candidate_once_with_its_changes_or_without_them() {
+    let fixture = fixtures();
+    let app = app(fixture["publicKey"].as_str().unwrap());
+    let feed = Server::feed(
+        fixture["signature"].as_str().unwrap(),
+        fixture["payload"].as_str().unwrap(),
+        "0.2.0",
+    );
+    let (listed, _) = compare_server(vec![(
+        200,
+        comparison("ahead", 2, &[("feat: old (#1)", 1), ("feat: new (#2)", 1)]),
+    )]);
+    let (failing, _) = compare_server(vec![(200, comparison("behind", 0, &[]))]);
+    let temporary = tempfile::tempdir().unwrap();
+    for (compare, changes) in [
+        (
+            &listed,
+            serde_json::json!(["feat: new (#2)", "feat: old (#1)"]),
+        ),
+        (&failing, serde_json::Value::Null),
+    ] {
+        let updater = Arc::new(Updater {
+            app: app.handle().clone(),
+            inner: Mutex::new(controller()),
+            preference: temporary.path().join("updates.json"),
+            activity: Arc::new(RepositoryActivity::default()),
+            feeds: Some([feed.url.clone(), feed.url.clone()]),
+            compare: Some(format!("{}/", compare.url)),
+        });
+        tauri::async_runtime::block_on(async {
+            let checking = updater.check();
+            let available = wait_for(&updater, |state| {
+                matches!(state, UpdateState::Available { .. })
+            })
+            .await;
+            assert_eq!(available.revision, checking.revision + 1);
+            let json = serde_json::to_value(&available).unwrap();
+            assert_eq!(json["state"]["candidate"]["changes"], changes);
+            assert_eq!(
+                json["state"]["candidate"]["notes"],
+                "<script>plain notes</script>"
+            );
+            assert_eq!(json["state"]["message"], serde_json::Value::Null);
+        });
+    }
 }
 
 #[test]

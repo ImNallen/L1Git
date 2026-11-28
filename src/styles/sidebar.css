@@ -585,7 +585,6 @@ input::placeholder {
   right: auto;
   left: 16px;
   bottom: 100%;
-  min-height: 224px;
   padding: 15px;
   border-radius: 9px;
   border-color: var(--workspace-update-border, var(--border-strong));
@@ -645,63 +644,110 @@ input::placeholder {
   padding-top: 0;
   border-top: 0;
 }
-.update-notes-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 12px;
-}
 .update-release-card .update-tooltip-title {
   font-size: 13px;
   line-height: 19px;
   margin-bottom: 0;
   color: var(--workspace-update-notes-heading, var(--text));
 }
-.update-notes-source {
+.update-changes-since {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 2px;
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+  color: var(--workspace-update-meta, var(--muted));
+}
+.update-changes-version {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--mono);
   font-size: 10px;
-  font-weight: 500;
-  line-height: 14px;
-  color: var(--workspace-update-source, var(--muted));
 }
 .update-release-card .update-tooltip-notes {
   min-height: 90px;
+  margin-top: 12px;
   font-size: 11px;
   line-height: 20px;
   color: var(--workspace-update-notes, var(--text-secondary));
 }
-.update-note-list {
+@property --update-list-fade {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@keyframes update-list-fade {
+  from,
+  90% {
+    --update-list-fade: 44px;
+  }
+  to {
+    --update-list-fade: 0px;
+  }
+}
+.update-feature-list {
   display: block;
-  white-space: normal;
+  max-height: 236px;
+  margin-top: 12px;
+  overflow-y: auto;
+  mask-image: linear-gradient(
+    to bottom,
+    #000 calc(100% - var(--update-list-fade)),
+    transparent
+  );
+  animation: update-list-fade linear both;
+  animation-timeline: scroll(self);
+}
+.update-feature-list > [role="list"] {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 .update-note-row {
   display: grid;
-  grid-template-columns: 3px minmax(0, 1fr) auto;
-  column-gap: 8px;
-  min-height: 30px;
+  grid-template-columns: 4px minmax(0, 1fr) auto;
+  column-gap: 9px;
   align-items: start;
+  font-size: 12px;
+  line-height: 17px;
 }
-.update-note-row > .workspace-icon {
+.update-note-row::before {
+  content: "";
+  width: 3px;
+  height: 3px;
   margin-top: 7px;
+  border-radius: 50%;
+  background: var(--workspace-update-bullet, var(--text-faint));
 }
 .update-note-title {
-  margin-right: 10px;
-  min-width: 0;
+  display: -webkit-box;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 11px;
-  line-height: 16px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  color: var(--workspace-update-notes, var(--text-secondary));
 }
 .update-note-reference {
   font-family: var(--mono);
   font-size: 10px;
-  line-height: 14px;
-  padding-top: 1px;
-  color: var(--workspace-update-reference, var(--link));
+  color: var(--workspace-update-reference, var(--text-faint));
 }
-.update-release-card.with-progress {
-  min-height: 272px;
+.update-changes-summary {
+  display: block;
+  margin-top: 12px;
+  font-size: 12px;
+  line-height: 17px;
+  color: var(--workspace-update-notes, var(--text-secondary));
+}
+.update-changes-rest {
+  display: block;
+  margin-top: 16px;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--workspace-update-meta, var(--muted));
 }
 .update-release-progress {
   display: block;
