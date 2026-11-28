@@ -128,6 +128,7 @@ const openPullContextSchema = z.object({
   defaultBranch: z.string().nullable(),
   open: z.array(z.object({ number: z.number().int(), base: z.string() })),
 });
+export type OpenPullContext = z.infer<typeof openPullContextSchema>;
 
 /** How opening a pull request ended. GitHub keeps one open pull request per
  * head and base, so a read of the context tells what an unknown one did. */

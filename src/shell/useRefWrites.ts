@@ -34,6 +34,7 @@ import { defineSlice } from "./actionSlices";
 import type { ActionSlice } from "./actionSlices";
 import type { Focus } from "./useFocus";
 import type { Navigation } from "./useNavigation";
+import type { OpenPull } from "./useOpenPull";
 import type { Staging } from "./useStaging";
 import type { WorkspaceApi } from "./workspaceView";
 import { shortOid } from "../domain/shortOid";
@@ -63,6 +64,7 @@ export type SidebarRefActions = {
     root: RepositoryRoot;
     checkedOutIn: ReadonlyMap<FullRef, Worktree>;
   } | null;
+  openPull?: OpenPull["sidebar"];
   onBranchAsk: (ask: BranchAsk) => void;
   onTagAsk: (ask: TagAsk) => void;
   onStashAction: (action: "apply" | "pop" | "drop", stash: Stash) => void;

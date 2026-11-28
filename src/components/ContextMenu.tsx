@@ -23,6 +23,7 @@ export function ContextMenu({
   label,
   className = "",
   ignoreScrollIn,
+  container,
   onClose,
   children,
 }: {
@@ -32,6 +33,9 @@ export function ContextMenu({
   label: string;
   className?: string;
   ignoreScrollIn?: RefObject<HTMLElement | null>;
+  /** Where it renders: a modal dialog's menu has to be inside it, because a
+   * modal dialog makes the rest of the page inert. */
+  container?: Element | null;
   onClose: (options: { returnFocus: boolean }) => void;
   children: ReactNode;
 }) {
@@ -159,6 +163,6 @@ export function ContextMenu({
     >
       {children}
     </div>,
-    document.body,
+    container ?? document.body,
   );
 }

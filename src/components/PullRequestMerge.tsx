@@ -1,7 +1,5 @@
-import { useId, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import {
-  Check,
-  ChevronDown,
   CircleAlert,
   CircleCheck,
   CircleDashed,
@@ -21,17 +19,12 @@ import {
   mergeLabel,
   mergingLabel,
 } from "../domain/pullRequestMerge";
-import type { MergeMethod } from "../domain/pullRequestMerge";
-import type { PullRequest } from "../domain/pullRequest";
 import { useMerge } from "../shell/useMerge";
 import type { PullRequestCheckout } from "../shell/usePullRequestCheckout";
 import type { OpenedPullRequest } from "../shell/usePullRequests";
-import { ContextMenu } from "./ContextMenu";
 import { MergePopover } from "./MergePopover";
+import { SplitButton } from "./SplitButton";
 import { Bars } from "./PullRequestParts";
-
-const MENU_WIDTH = 300;
-const MENU_HEIGHT = 156;
 
 const mergeIcons: Record<MergeBox["kind"], [LucideIcon, string]> = {
   merged: [GitMerge, "merged"],
@@ -52,96 +45,6 @@ const mergeIcons: Record<MergeBox["kind"], [LucideIcon, string]> = {
   ready: [CircleCheck, "good"],
   unknown: [CircleHelp, ""],
 };
-
-/** The primary merge button, and a menu that picks the method it uses. */
-function SplitButton({
-  pull,
-  method,
-  anyway,
-  last,
-  onChoose,
-  onMerge,
-}: {
-  pull: PullRequest;
-  method: MergeMethod;
-  anyway: boolean;
-  last: MergeMethod | null;
-  onChoose: (method: MergeMethod) => void;
-  onMerge: () => void;
-}) {
-  const id = useId();
-  const chevron = useRef<HTMLButtonElement>(null);
-  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
-  const close = () => {
-    setMenu(null);
-    chevron.current?.focus();
-  };
-  const tone = anyway ? "danger" : "primary";
-  return (
-    <div className={`merge-split ${tone}`}>
-      <button
-        type="button"
-        className={`button ${tone}`}
-        aria-haspopup="dialog"
-        onClick={onMerge}
-      >
-        {mergeLabel(method, anyway)}
-      </button>
-      <button
-        ref={chevron}
-        type="button"
-        className={`button ${tone}`}
-        aria-label="Choose how to merge"
-        aria-haspopup="menu"
-        aria-expanded={menu !== null}
-        onClick={() => {
-          const rect = chevron.current?.getBoundingClientRect();
-          // Above the button, which sits at the bottom of the window.
-          if (rect)
-            setMenu({ x: rect.right - MENU_WIDTH, y: rect.top - MENU_HEIGHT });
-        }}
-      >
-        <ChevronDown size={14} aria-hidden="true" />
-      </button>
-      {menu && (
-        <ContextMenu
-          className="merge-menu"
-          x={menu.x}
-          y={menu.y}
-          label="Merge method"
-          onClose={({ returnFocus }) => (returnFocus ? close() : setMenu(null))}
-        >
-          {mergeChoices(pull, last).methods.map((choice) => (
-            <button
-              key={choice.method}
-              type="button"
-              role="menuitemradio"
-              aria-label={choice.label}
-              aria-describedby={`${id}-${choice.method}`}
-              aria-checked={choice.method === method}
-              aria-disabled={choice.off}
-              onClick={() => {
-                if (choice.off) return;
-                close();
-                onChoose(choice.method);
-              }}
-            >
-              <Check
-                size={14}
-                visibility={choice.method === method ? "visible" : "hidden"}
-                aria-hidden="true"
-              />
-              <span>
-                {choice.label}
-                <small id={`${id}-${choice.method}`}>{choice.note}</small>
-              </span>
-            </button>
-          ))}
-        </ContextMenu>
-      )}
-    </div>
-  );
-}
 
 export function PullRequestMerge({
   opened,
@@ -221,12 +124,17 @@ export function PullRequestMerge({
       )}
       {action.kind === "merge" && method !== null && (
         <SplitButton
-          pull={pull}
-          method={method}
-          anyway={action.anyway}
-          last={merge.lastUsed()}
+          label={mergeLabel(method, action.anyway)}
+          tone={action.anyway ? "danger" : "primary"}
+          choices={mergeChoices(pull, merge.lastUsed()).methods.map(
+            (choice) => ({ ...choice, key: choice.method }),
+          )}
+          chosen={method}
+          menuLabel="Merge method"
+          chooseLabel="Choose how to merge"
+          opensDialog
           onChoose={merge.choose}
-          onMerge={() => setAsking(true)}
+          onRun={() => setAsking(true)}
         />
       )}
       {action.kind === "merging" && progress.kind === "sending" && (
