@@ -398,6 +398,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
         snapshot={view.snapshot}
         host={host}
         statuses={opened.repository?.overview.branches}
+        push={overview.store.push}
       />
       <StashHost staging={staging} writes={writes} />
       <DropStashHost

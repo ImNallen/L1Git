@@ -2,6 +2,7 @@ import { OpenPullPopover } from "../components/OpenPullPopover";
 import type { BranchStatus } from "../domain/overview";
 import type { RepositorySnapshot } from "../domain/repository";
 import type { Host } from "../host";
+import type { OverviewStore } from "../overview";
 import type { OpenPull } from "./useOpenPull";
 
 export function OpenPullHost({
@@ -9,11 +10,13 @@ export function OpenPullHost({
   snapshot,
   host,
   statuses,
+  push,
 }: {
   openPull: OpenPull;
   snapshot: RepositorySnapshot | null;
-  host: Pick<Host, "ask" | "openPull">;
+  host: Pick<Host, "ask" | "openPull" | "read">;
   statuses: readonly BranchStatus[] | undefined;
+  push: OverviewStore["push"];
 }) {
   const { asking } = openPull;
   if (!asking || snapshot?.root !== asking.root) return null;
@@ -24,6 +27,7 @@ export function OpenPullHost({
       snapshot={snapshot}
       host={host}
       statuses={statuses ?? []}
+      push={push}
       onOpened={openPull.opened}
       onView={(number) => {
         openPull.close();

@@ -14,6 +14,7 @@ import {
   GitCommitHorizontal,
   GitPullRequest,
   GitPullRequestDraft,
+  Info,
   LoaderCircle,
   TriangleAlert,
 } from "lucide-react";
@@ -23,14 +24,26 @@ import {
   baseChoices,
   between,
   bodyOf,
+  checkoutOf,
+  firstStep,
   onRemote,
   pushed,
+  signedInProblem,
   titleOf,
+  unopenable,
 } from "../domain/openPull";
-import type { Pushed } from "../domain/openPull";
 import type { BranchStatus } from "../domain/overview";
+import { branchRefSchema } from "../domain/overview";
+import {
+  pushDisabledReason,
+  pushOutcomeText,
+  pushSucceeded,
+} from "../domain/push";
+import type { PushAvailability, PushIntent, PushResult } from "../domain/push";
+import { shortBranch } from "../domain/refs";
 import { counted } from "../domain/pullRequestDetail";
-import type { RepositorySnapshot } from "../domain/repository";
+import { problemFrom } from "../domain/repository";
+import type { RepositoryRoot, RepositorySnapshot } from "../domain/repository";
 import { shortOid } from "../domain/shortOid";
 import type { HostClient } from "../host";
 import * as repositories from "../repositories";
@@ -97,24 +110,6 @@ function useBeside(
   });
 }
 
-/** What keeps the main button from opening, said where it shows. */
-function unpushed(state: Pushed, head: string, remote: string) {
-  switch (state.kind) {
-    case "pushed":
-      return null;
-    case "missing":
-      return `${head} isn't on ${remote} yet. Publish it first, then open the pull request.`;
-    case "ahead":
-      return `${remote} doesn't have ${counted(state.ahead, "commit")} of ${head} yet. Push first, then open the pull request.`;
-    case "behind":
-      return `${remote}/${head} has ${counted(state.behind, "commit")} that ${head} doesn't. Pull first, so the pull request shows what you see here.`;
-    case "diverged":
-      return `${head} and ${remote}/${head} have each moved on. Pull and push first, then open the pull request.`;
-    case "unknown":
-      return `${remote}/${head} is at another commit than ${head}, and L1 Git can't tell which is ahead from the history it loaded. Make them match in Git, then open the pull request.`;
-  }
-}
-
 const time = (at: Date) =>
   at.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 
@@ -128,6 +123,7 @@ export function OpenPullPopover({
   snapshot,
   host,
   statuses,
+  push,
   onOpened,
   onView,
   onClose,
@@ -136,7 +132,13 @@ export function OpenPullPopover({
   snapshot: RepositorySnapshot;
   /** The overview's branches, whose ahead and behind Git counted. */
   statuses: readonly BranchStatus[];
-  host: Pick<HostClient, "ask" | "openPull">;
+  /** `read` tells the account GitHub is signed in as now. */
+  host: Pick<HostClient, "ask" | "openPull" | "read">;
+  /** The toolbar's Push and Publish, which never force. */
+  push: (
+    root: RepositoryRoot,
+    intent: PushIntent,
+  ) => Promise<PushResult | null>;
   onOpened: (pull: OpenedPull) => void;
   onView: (number: number) => void;
   onClose: () => void;
@@ -190,9 +192,19 @@ export function OpenPullPopover({
     baseOid === null ? null : between(snapshot.commits, baseOid, head.oid);
   const commits = range?.commits ?? [];
   const already = value?.open.find((pull) => pull.base === base) ?? null;
-  const state = head.local
-    ? pushed(snapshot, remote, head, statuses)
-    : { kind: "pushed" as const };
+  const local = snapshot.branches.find(
+    (branch) => branch.reference === `refs/heads/${head.name}`,
+  );
+  const upstream = local?.kind === "local" ? local.upstream : null;
+  const step = firstStep(
+    head.local ? pushed(snapshot, remote, head, statuses) : { kind: "pushed" },
+    {
+      head: head.name,
+      remote,
+      upstream,
+      checkout: checkoutOf(snapshot, head.name),
+    },
+  );
 
   useEffect(() => {
     if (baseOid === null) return;
@@ -250,7 +262,9 @@ export function OpenPullPopover({
   const blocked =
     base === null
       ? `${remote} has no branch to merge ${head.name} into.`
-      : (missingBase ?? unpushed(state, head.name, remote) ?? empty);
+      : (missingBase ??
+        (step.kind === "blocked" ? step.message : null) ??
+        empty);
   const sending = phase.kind === "sending";
   const unsure = phase.kind === "unknown" || phase.kind === "checking";
   const locked = sending || unsure;
@@ -264,6 +278,22 @@ export function OpenPullPopover({
       return;
     }
     setPhase({ kind: "sending" });
+    if (step.kind === "publish" || step.kind === "push") {
+      const before = await beforeFirst(value.repositoryId, base);
+      if (before !== null)
+        return before.kind === "alreadyOpen"
+          ? settle(before, base)
+          : setPhase({
+              kind: "failed",
+              message: `${before.message} L1 Git pushed nothing and opened no pull request.`,
+            });
+      const problem = await sendFirst(step.kind);
+      if (problem !== null)
+        return setPhase({
+          kind: "failed",
+          message: `${problem} L1 Git opened no pull request.`,
+        });
+    }
     const opened = await host.openPull({
       asLogin: login,
       repository: github,
@@ -277,6 +307,86 @@ export function OpenPullPopover({
       },
     });
     settle(opened, base);
+  }
+
+  /** What the host's opening would stop at, asked before a publish or push
+   * that has no Undo: the fields, the account the popover opened with, the
+   * repository it read, and a pull request open into the base since. */
+  async function beforeFirst(
+    repositoryId: string,
+    into: string,
+  ): Promise<
+    | { kind: "problem"; message: string }
+    | { kind: "alreadyOpen"; number: number }
+    | null
+  > {
+    const problem = (message: string) => ({
+      kind: "problem" as const,
+      message,
+    });
+    const fields = unopenable({
+      title: shownTitle,
+      body: shownBody,
+      head: head.name,
+      base: into,
+    });
+    if (fields !== null) return problem(fields);
+    const answer = await host.ask({
+      op: "openPullContext",
+      repository: github,
+      head: head.name,
+    });
+    if (!answer.ok)
+      return problem(
+        `L1 Git couldn't look on GitHub first. ${answer.problem.message}`,
+      );
+    const connection = host.read().status?.github;
+    const account = signedInProblem(
+      login,
+      connection?.kind === "connected" ? connection.login : null,
+    );
+    if (account !== null) return problem(account);
+    if (answer.reply.data.repositoryId !== repositoryId)
+      return problem(
+        `${github.owner}/${github.repo} is another repository on GitHub than the one L1 Git read. Open the pull request again.`,
+      );
+    const open = answer.reply.data.open.find((pull) => pull.base === into);
+    return open ? { kind: "alreadyOpen", number: open.number } : null;
+  }
+
+  /** Publishes or pushes the head with the toolbar's own steps, and says
+   * why it didn't, so nothing reaches GitHub after a rejected push. */
+  async function sendFirst(kind: "publish" | "push"): Promise<string | null> {
+    const branch = branchRefSchema.parse(`refs/heads/${head.name}`);
+    const destination = branch;
+    let availability: PushAvailability;
+    try {
+      availability =
+        kind === "publish"
+          ? await repositories.preparePublish(root, { remote, destination })
+          : await repositories.preparePush(root);
+    } catch (error) {
+      return `L1 Git couldn't check where ${head.name} goes. ${problemFrom(error).message}`;
+    }
+    if (availability.kind !== "ready")
+      return pushDisabledReason(availability) ?? "";
+    const { intent } = availability;
+    // Another Git client can switch the worktree to a branch at the same
+    // commit while GitHub is asked, and the steps then name that branch.
+    if (intent.branch !== branch)
+      return `The worktree has ${shortBranch(intent.branch)} checked out now, not ${head.name}, so L1 Git pushed nothing. Check out ${head.name}, then open the pull request again.`;
+    if (intent.source !== head.oid)
+      return `${head.name} has new commits since the popover opened, so L1 Git pushed nothing. Close it and open it again.`;
+    if (intent.remote !== remote || intent.destination !== destination)
+      return `${head.name} would go to ${intent.remote}/${shortBranch(intent.destination)}, not ${remote}/${head.name}, so L1 Git pushed nothing.`;
+    if (!intent.tracksEndpoint)
+      return `${remote} pushes to ${intent.endpoint}, not to where it fetches ${github.owner}/${github.repo} from, so GitHub wouldn't have ${head.name} and L1 Git pushed nothing. Push it to ${github.owner}/${github.repo} in Git first.`;
+    const result = await push(root, intent);
+    if (result === null)
+      return "L1 Git couldn't push now. Try again when the current operation ends.";
+    return pushSucceeded[result.outcome.kind]
+      ? null
+      : pushOutcomeText(result.outcome, intent);
   }
 
   function settle(opened: Opened, into: string) {
@@ -391,11 +501,18 @@ export function OpenPullPopover({
   else
     main = (
       <>
-        {blocked && (
+        {blocked ? (
           <div className="open-pull-callout" role="status">
             <CircleAlert size={16} aria-hidden="true" />
             <p>{blocked}</p>
           </div>
+        ) : (
+          (step.kind === "publish" || step.kind === "push") && (
+            <div className="open-pull-callout" role="status">
+              <Info size={16} aria-hidden="true" />
+              <p>{step.message}</p>
+            </div>
+          )
         )}
         <fieldset
           className={`open-pull-form${unsure ? " dimmed" : ""}`}
@@ -556,7 +673,11 @@ export function OpenPullPopover({
   else
     footer = (
       <>
-        <span>Opening has no Undo.</span>
+        <span>
+          {step.kind === "publish" || step.kind === "push"
+            ? "Neither step has an Undo."
+            : "Opening has no Undo."}
+        </span>
         <button
           type="button"
           className="button ghost"
@@ -568,7 +689,11 @@ export function OpenPullPopover({
           Cancel
         </button>
         <SplitButton
-          label={modes.find((each) => each.key === mode)!.label}
+          label={
+            step.kind === "publish" || step.kind === "push"
+              ? `${step.kind === "publish" ? "Publish" : "Push"} and open${mode === "draft" ? " as draft" : ""}`
+              : modes.find((each) => each.key === mode)!.label
+          }
           tone="primary"
           choices={modes.map((each) => ({ ...each, off: false }))}
           chosen={mode}

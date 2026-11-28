@@ -3,15 +3,20 @@ import {
   baseChoices,
   between,
   bodyOf,
+  checkoutOf,
+  firstStep,
   headOf,
   pushed,
   remoteOf,
+  signedInProblem,
   titleOf,
+  unopenable,
 } from "./openPull";
+import type { Checkout } from "./openPull";
 import { branchRefSchema } from "./overview";
 import type { BranchStatus } from "./overview";
 import { oidSchema, refSchema } from "./repository";
-import type { Branch, Commit, Oid } from "./repository";
+import type { Branch, Commit, Oid, RepositoryRoot } from "./repository";
 
 const oid = (digit: string) => oidSchema.parse(digit.repeat(40));
 const commit = (at: string, parents: string[], subject = at): Commit => ({
@@ -179,4 +184,142 @@ it("names a head by its branch on GitHub's remote only", () => {
 it("takes a commit message's body without its subject", () => {
   expect(bodyOf("Fix it\n\nStart at a.rs.\r\n\n")).toBe("Start at a.rs.");
   expect(bodyOf("Fix it\n")).toBe("");
+});
+
+const TRACKED = "refs/remotes/origin/topic";
+const here = { kind: "here" } as const;
+
+it("publishes or pushes first only the branch checked out here, and never past a diverged one", () => {
+  const step = (
+    state: Parameters<typeof firstStep>[0],
+    checkout: Checkout,
+    upstream: string | null = null,
+  ) =>
+    firstStep(state, { head: "topic", remote: "origin", upstream, checkout })
+      .kind;
+  const nowhere = { kind: "nowhere" } as const;
+  expect(step({ kind: "pushed" }, nowhere)).toBe("none");
+  expect(step({ kind: "missing" }, here)).toBe("publish");
+  expect(step({ kind: "ahead", ahead: 2 }, here, TRACKED)).toBe("push");
+  expect(step({ kind: "missing" }, nowhere)).toBe("blocked");
+  expect(step({ kind: "ahead", ahead: 2 }, nowhere, TRACKED)).toBe("blocked");
+  expect(step({ kind: "diverged" }, here, TRACKED)).toBe("blocked");
+  expect(step({ kind: "behind", behind: 1 }, here, TRACKED)).toBe("blocked");
+  expect(step({ kind: "unknown" }, here, TRACKED)).toBe("blocked");
+  expect(
+    firstStep(
+      { kind: "ahead", ahead: 2 },
+      { head: "topic", remote: "origin", upstream: TRACKED, checkout: here },
+    ),
+  ).toEqual({
+    kind: "push",
+    message:
+      "origin doesn't have 2 commits of topic yet. L1 Git pushes first, with your Git credentials, then opens the pull request.",
+  });
+});
+
+it("decides between publish and push from the upstream, as the core does", () => {
+  const step = (
+    state: Parameters<typeof firstStep>[0],
+    upstream: string | null,
+  ) =>
+    firstStep(state, {
+      head: "topic",
+      remote: "origin",
+      upstream,
+      checkout: here,
+    });
+  // git switch -c topic origin/main: it tracks origin/main, and origin has
+  // no topic. The core publishes no branch with an upstream.
+  expect(step({ kind: "missing" }, "refs/remotes/origin/main")).toEqual({
+    kind: "blocked",
+    message:
+      "topic isn't on origin yet. topic tracks origin/main, so L1 Git can't publish it as topic on origin. Push it there in Git first, then open the pull request.",
+  });
+  // git push origin topic without -u, then a commit: origin has topic, but
+  // topic tracks nothing. The core pushes no branch without an upstream,
+  // and publishes it.
+  expect(step({ kind: "ahead", ahead: 1 }, null)).toEqual({
+    kind: "publish",
+    message:
+      "origin doesn't have 1 commit of topic yet. L1 Git publishes it first, with your Git credentials, then opens the pull request.",
+  });
+  expect(step({ kind: "missing" }, TRACKED).kind, "its upstream is gone").toBe(
+    "push",
+  );
+  expect(step({ kind: "ahead", ahead: 1 }, "refs/heads/main")).toMatchObject({
+    kind: "blocked",
+    message: expect.stringContaining("topic tracks main,"),
+  });
+  expect(step({ kind: "pushed" }, "refs/remotes/origin/main").kind).toBe(
+    "none",
+  );
+});
+
+it("says to switch to the worktree a branch is checked out in, not to check it out", () => {
+  const worktree = (name: string, branch: string, current: boolean) => ({
+    root: `/r/${name}` as RepositoryRoot,
+    name,
+    head: {
+      kind: "attached" as const,
+      reference: refSchema.parse(`refs/heads/${branch}`),
+      oid: oid("5"),
+    },
+    current,
+    main: current,
+  });
+  const snapshot = {
+    head: worktree("pin", "main", true).head,
+    worktrees: [
+      worktree("pin", "main", true),
+      worktree("pin-topic", "topic", false),
+    ],
+  };
+  expect(checkoutOf(snapshot, "main")).toEqual({ kind: "here" });
+  expect(checkoutOf(snapshot, "topic")).toEqual({
+    kind: "elsewhere",
+    worktree: "pin-topic",
+  });
+  expect(checkoutOf(snapshot, "other")).toEqual({ kind: "nowhere" });
+  expect(
+    firstStep(
+      { kind: "missing" },
+      {
+        head: "topic",
+        remote: "origin",
+        upstream: null,
+        checkout: checkoutOf(snapshot, "topic"),
+      },
+    ),
+  ).toEqual({
+    kind: "blocked",
+    message:
+      "topic isn't on origin yet. It's checked out in the worktree pin-topic. Switch to that worktree to publish it, then open the pull request.",
+  });
+});
+
+it("tells what the host would refuse to open before anything is sent", () => {
+  const open = { title: "Fix it", body: "", head: "topic", base: "main" };
+  expect(unopenable(open)).toBeNull();
+  expect(unopenable({ ...open, title: "x".repeat(256) })).toBeNull();
+  expect(unopenable({ ...open, title: "x".repeat(257) })).toBe(
+    "A pull request needs a title of at most 256 characters.",
+  );
+  expect(unopenable({ ...open, title: "  " })).toBe(
+    "A pull request needs a title of at most 256 characters.",
+  );
+  expect(unopenable({ ...open, body: "é".repeat(65_536) })).toBeNull();
+  expect(unopenable({ ...open, body: "x".repeat(65_537) })).toBe(
+    "A description holds at most 65,536 characters.",
+  );
+  expect(unopenable({ ...open, base: "topic" })).toBe(
+    "A pull request merges one branch into another.",
+  );
+  expect(signedInProblem("octo", "Octo")).toBeNull();
+  expect(signedInProblem("octo", "hubot")).toBe(
+    "L1 Git is signed in to GitHub as hubot, not octo.",
+  );
+  expect(signedInProblem("octo", null)).toBe(
+    "L1 Git is not connected to GitHub. Sign in from Settings › Hosts.",
+  );
 });

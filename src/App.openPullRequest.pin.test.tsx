@@ -15,6 +15,8 @@ import type { World } from "./test/fakeBridge";
 import { C3, C4, C5, C6, PIN } from "./test/fixtures";
 import { page, pull } from "./test/pullRequests";
 import { branchRefSchema } from "./domain/overview";
+import { pushIntentSchema, pushReportSchema } from "./domain/push";
+import type { PushOutcome } from "./domain/push";
 import { refSchema } from "./domain/repository";
 import type { Branch, Oid } from "./domain/repository";
 
@@ -312,11 +314,11 @@ it("lets the user open again when Check GitHub finds nothing, and says what GitH
   expect(openings(app)).toHaveLength(3);
 });
 
-it("asks to push a branch that isn't on origin first, and sends nothing", async () => {
+it("asks to check out a branch that isn't on origin before publishing it, and sends nothing", async () => {
   const app = await mountApp({ world: onGitHub() });
   await openFrom(app, "topic");
   expect(popover().textContent).toContain(
-    "topic isn't on origin yet. Publish it first, then open the pull request.",
+    "topic isn't on origin yet. Check it out to publish it, then open the pull request.",
   );
   const open = button("Open pull request");
   expect(open.getAttribute("aria-disabled")).toBe("true");
@@ -360,6 +362,14 @@ it("takes Git's count of what origin lacks when the history loaded stops short",
       const snapshot = world.snapshots.get(PIN)!;
       world.snapshots.set(PIN, {
         ...snapshot,
+        branches: snapshot.branches.map((branch) =>
+          branch.name === "topic" && branch.kind === "local"
+            ? {
+                ...branch,
+                upstream: refSchema.parse("refs/remotes/origin/topic"),
+              }
+            : branch,
+        ),
         commits: snapshot.commits.filter((commit) => commit.oid === C6),
       });
       const overview = world.overviews.get(PIN)!;
@@ -385,7 +395,7 @@ it("takes Git's count of what origin lacks when the history loaded stops short",
   });
   await openFrom(app, "topic");
   expect(popover().textContent).toContain(
-    "origin doesn't have 1 commit of topic yet. Push first, then open the pull request.",
+    "origin doesn't have 1 commit of topic yet. Check it out to push, then open the pull request.",
   );
   expect(popover().textContent).not.toContain("moved on");
 });
@@ -412,23 +422,386 @@ it("is unavailable without a GitHub sign-in or a repository on GitHub", async ()
   expect(item?.getAttribute("aria-disabled")).toBe("true");
 });
 
+/** PIN with topic checked out, tracking `upstream`, and origin's copy of it
+ * at `there`. */
+function onTopic(there: Oid | null, upstream: string | null = null) {
+  return (world: World) => {
+    onGitHub()(world);
+    const snapshot = world.snapshots.get(PIN)!;
+    world.snapshots.set(PIN, {
+      ...snapshot,
+      head: {
+        kind: "attached",
+        reference: refSchema.parse("refs/heads/topic"),
+        oid: C6,
+      },
+      branches: [
+        ...snapshot.branches.map((branch) =>
+          branch.name === "topic" && branch.kind === "local"
+            ? {
+                ...branch,
+                upstream: upstream === null ? null : refSchema.parse(upstream),
+              }
+            : branch,
+        ),
+        ...(there === null ? [] : [remote("topic", there)]),
+      ],
+    });
+  };
+}
+
+const TRACKED = "refs/remotes/origin/topic";
+
 it("opens from the command palette for the checked-out branch", async () => {
+  const app = await mountApp({ world: onTopic(C6) });
+  await app.runPaletteItem("Open pull request…");
+  expect(popover().textContent).toContain("Merge topic into main");
+  expect(field("Title").value).toBe("Main tip");
+});
+
+const intent = (purpose: "publish" | "upstream") =>
+  pushIntentSchema.parse({
+    purpose,
+    branch: "refs/heads/topic",
+    source: C6,
+    remote: "origin",
+    destination: "refs/heads/topic",
+    endpoint: "https://github.com/octo/pin.git",
+    tracksEndpoint: true,
+    fingerprint: "c".repeat(40),
+  });
+
+/** Answers each push with `outcome`, and notes how many pull requests had
+ * been opened when it ran. */
+function pushing(app: Harness, outcome: PushOutcome) {
+  const openedBefore: number[] = [];
+  app.bridge.respond("push", (_request, world) => {
+    openedBefore.push(world.host.openings.length);
+    return pushReportSchema.parse({
+      outcome,
+      refresh: { kind: "failed", message: "Not refreshed." },
+    });
+  });
+  return openedBefore;
+}
+
+it("publishes a checked-out branch that isn't on origin, then opens its pull request", async () => {
+  const app = await mountApp({
+    world: onTopic(null),
+    bridge: (bridge) =>
+      bridge.respond("preparePublish", () => ({
+        kind: "ready",
+        intent: intent("publish"),
+      })),
+  });
+  const openedBefore = pushing(app, {
+    kind: "published",
+    tracking: { kind: "set" },
+  });
+  await app.runPaletteItem("Open pull request…");
+  expect(popover().textContent).toContain(
+    "topic isn't on origin yet. L1 Git publishes it first, with your Git credentials, then opens the pull request.",
+  );
+  expect(popover().querySelector("footer")?.textContent).toContain(
+    "Neither step has an Undo.",
+  );
+  await app.click(button("Publish and open"));
+
+  await vi.waitFor(() =>
+    expect(openings(app)).toMatchObject([{ head: "topic", base: "main" }]),
+  );
+  expect(openedBefore, "it published once, before GitHub was asked").toEqual([
+    0,
+  ]);
+  expect(
+    app.bridge.log.find((request) => request.op === "preparePublish")?.choice,
+  ).toEqual({ remote: "origin", destination: "refs/heads/topic" });
+  await vi.waitFor(() =>
+    expect(notification()).toBe(
+      "Opened pull request #41 from topic into main.",
+    ),
+  );
+});
+
+it("pushes a branch origin is behind on first, and a rejected push opens nothing", async () => {
+  const app = await mountApp({
+    world: (world) => {
+      onTopic(C4, TRACKED)(world);
+      world.pushes.set(PIN, { kind: "ready", intent: intent("upstream") });
+    },
+  });
+  pushing(app, { kind: "rejected", message: "The remote said no." });
+  await app.runPaletteItem("Open pull request…");
+  expect(popover().textContent).toContain(
+    "origin doesn't have 1 commit of topic yet. L1 Git pushes first, with your Git credentials, then opens the pull request.",
+  );
+  await app.click(button("Push and open"));
+  await vi.waitFor(() =>
+    expect(get("alert", undefined, popover()).textContent).toBe(
+      "Push rejected. The remote said no. L1 Git opened no pull request.",
+    ),
+  );
+  expect(openings(app), "a rejected push stops before GitHub").toEqual([]);
+
+  const openedBefore = pushing(app, { kind: "pushed" });
+  await app.click(button("Push and open"));
+  await vi.waitFor(() =>
+    expect(openings(app)).toMatchObject([{ head: "topic" }]),
+  );
+  expect(openedBefore).toEqual([0]);
+});
+
+it("pushes nothing to a destination other than the head on origin", async () => {
+  const app = await mountApp({
+    world: (world) => {
+      onTopic(C4, TRACKED)(world);
+      world.pushes.set(PIN, {
+        kind: "ready",
+        intent: {
+          ...intent("upstream"),
+          destination: branchRefSchema.parse("refs/heads/elsewhere"),
+        },
+      });
+    },
+  });
+  await app.runPaletteItem("Open pull request…");
+  await app.click(button("Push and open"));
+  await vi.waitFor(() =>
+    expect(get("alert", undefined, popover()).textContent).toBe(
+      "topic would go to origin/elsewhere, not origin/topic, so L1 Git pushed nothing. L1 Git opened no pull request.",
+    ),
+  );
+  expect(app.bridge.count("push")).toBe(0);
+  expect(openings(app)).toEqual([]);
+});
+
+it("says to switch to the worktree a branch is checked out in to publish it", async () => {
   const app = await mountApp({
     world: (world) => {
       onGitHub()(world);
       const snapshot = world.snapshots.get(PIN)!;
       world.snapshots.set(PIN, {
         ...snapshot,
-        head: {
-          kind: "attached",
-          reference: refSchema.parse("refs/heads/topic"),
-          oid: C6,
+        branches: snapshot.branches.filter(
+          (branch) => branch.name !== "origin/feature",
+        ),
+      });
+    },
+  });
+  await openFrom(app, "feature");
+  expect(popover().textContent).toContain(
+    "feature isn't on origin yet. It's checked out in the worktree pin-feature. Switch to that worktree to publish it, then open the pull request.",
+  );
+  expect(popover().textContent).not.toContain("Check it out");
+});
+
+it("publishes nothing from a branch that tracks another branch, as git switch -c topic origin/main leaves it", async () => {
+  const app = await mountApp({
+    world: onTopic(null, "refs/remotes/origin/main"),
+  });
+  await app.runPaletteItem("Open pull request…");
+  expect(popover().textContent).toContain(
+    "topic isn't on origin yet. topic tracks origin/main, so L1 Git can't publish it as topic on origin. Push it there in Git first, then open the pull request.",
+  );
+  expect(query("button", "Publish and open", popover())).toBeNull();
+  const open = button("Open pull request");
+  expect(open.getAttribute("aria-disabled")).toBe("true");
+  await app.click(open);
+  expect(app.bridge.count("preparePublish")).toBe(0);
+  expect(app.bridge.count("push")).toBe(0);
+  expect(openings(app)).toEqual([]);
+});
+
+it("publishes, not pushes, a branch on origin that tracks nothing, as git push origin topic without -u leaves it", async () => {
+  const app = await mountApp({
+    world: onTopic(C4),
+    bridge: (bridge) =>
+      bridge.respond("preparePublish", () => ({
+        kind: "ready",
+        intent: intent("publish"),
+      })),
+  });
+  const openedBefore = pushing(app, {
+    kind: "published",
+    tracking: { kind: "set" },
+  });
+  await app.runPaletteItem("Open pull request…");
+  expect(popover().textContent).toContain(
+    "origin doesn't have 1 commit of topic yet. L1 Git publishes it first, with your Git credentials, then opens the pull request.",
+  );
+  expect(query("button", "Push and open", popover())).toBeNull();
+  await app.click(button("Publish and open"));
+  await vi.waitFor(() =>
+    expect(openings(app)).toMatchObject([{ head: "topic" }]),
+  );
+  expect(openedBefore).toEqual([0]);
+  expect(
+    app.bridge.log.find((request) => request.op === "preparePublish")?.choice,
+  ).toEqual({ remote: "origin", destination: "refs/heads/topic" });
+});
+
+/** topic checked out and on origin one commit behind, ready to push. */
+function readyToPush(world: World) {
+  onTopic(C4, TRACKED)(world);
+  world.pushes.set(PIN, { kind: "ready", intent: intent("upstream") });
+}
+
+it("pushes nothing for an opening the host would refuse anyway", async () => {
+  const app = await mountApp({ world: readyToPush });
+  pushing(app, { kind: "pushed" });
+  await app.runPaletteItem("Open pull request…");
+  const pushed = () => app.bridge.count("push");
+
+  await app.type(field("Title"), "x".repeat(257));
+  await app.click(button("Push and open"));
+  await vi.waitFor(() =>
+    expect(get("alert", undefined, popover()).textContent).toBe(
+      "A pull request needs a title of at most 256 characters. L1 Git pushed nothing and opened no pull request.",
+    ),
+  );
+  await app.type(field("Title"), "Topic work");
+  await app.type(field("Description"), "x".repeat(65_537));
+  await app.click(button("Push and open"));
+  await vi.waitFor(() =>
+    expect(get("alert", undefined, popover()).textContent).toBe(
+      "A description holds at most 65,536 characters. L1 Git pushed nothing and opened no pull request.",
+    ),
+  );
+  await app.type(field("Description"), "");
+
+  const status = app.bridge.world.host.status;
+  app.bridge.world.host.status = {
+    ...status,
+    github:
+      status.github.kind === "connected"
+        ? { ...status.github, login: "hubot" }
+        : status.github,
+  };
+  await app.click(button("Push and open"));
+  await vi.waitFor(() =>
+    expect(get("alert", undefined, popover()).textContent).toBe(
+      "L1 Git is signed in to GitHub as hubot, not octo. L1 Git pushed nothing and opened no pull request.",
+    ),
+  );
+  app.bridge.world.host.status = status;
+
+  app.bridge.world.host.ids.set("octo/pin", "R_other");
+  await app.click(button("Push and open"));
+  await vi.waitFor(() =>
+    expect(get("alert", undefined, popover()).textContent).toBe(
+      "octo/pin is another repository on GitHub than the one L1 Git read. Open the pull request again. L1 Git pushed nothing and opened no pull request.",
+    ),
+  );
+  expect(pushed(), "no push ran for any of them").toBe(0);
+  expect(openings(app)).toEqual([]);
+
+  app.bridge.world.host.ids.delete("octo/pin");
+  await app.click(button("Push and open"));
+  await vi.waitFor(() =>
+    expect(openings(app)).toMatchObject([{ title: "Topic work" }]),
+  );
+  expect(pushed()).toBe(1);
+});
+
+it("pushes nothing for a pull request opened from the branch since", async () => {
+  const app = await mountApp({ world: readyToPush });
+  await app.runPaletteItem("Open pull request…");
+  app.bridge.world.host.opens.set("octo/pin", [
+    { number: 9, head: "topic", base: "main" },
+  ]);
+  await app.click(button("Push and open"));
+  await vi.waitFor(() =>
+    expect(popover().textContent).toContain(
+      "topic already has pull request #9 open into main.",
+    ),
+  );
+  expect(app.bridge.count("push")).toBe(0);
+});
+
+it("pushes nothing when origin pushes somewhere other than the repository on GitHub", async () => {
+  const app = await mountApp({
+    world: (world) => {
+      readyToPush(world);
+      world.pushes.set(PIN, {
+        kind: "ready",
+        intent: {
+          ...intent("upstream"),
+          endpoint: "https://github.com/hubot/pin.git",
+          tracksEndpoint: false,
         },
-        branches: [...snapshot.branches, remote("topic", C6)],
       });
     },
   });
   await app.runPaletteItem("Open pull request…");
-  expect(popover().textContent).toContain("Merge topic into main");
-  expect(field("Title").value).toBe("Main tip");
+  await app.click(button("Push and open"));
+  await vi.waitFor(() =>
+    expect(get("alert", undefined, popover()).textContent).toBe(
+      "origin pushes to https://github.com/hubot/pin.git, not to where it fetches octo/pin from, so GitHub wouldn't have topic and L1 Git pushed nothing. Push it to octo/pin in Git first. L1 Git opened no pull request.",
+    ),
+  );
+  expect(app.bridge.count("push")).toBe(0);
+  expect(openings(app)).toEqual([]);
+});
+
+/** Another Git client switches PIN to `other` at the same commit, as
+ * `git switch -c other` does, while the popover asks GitHub before its push. */
+async function switchedDuringTheLook(app: Harness, label: string) {
+  await app.runPaletteItem("Open pull request…");
+  const look = app.bridge.hold("openPullContext");
+  await app.click(button(label));
+  await look.arrived;
+  const { world } = app.bridge;
+  const snapshot = world.snapshots.get(PIN)!;
+  world.snapshots.set(PIN, {
+    ...snapshot,
+    head: {
+      kind: "attached",
+      reference: refSchema.parse("refs/heads/other"),
+      oid: C6,
+    },
+  });
+  const push = world.pushes.get(PIN);
+  if (push?.kind === "ready")
+    world.pushes.set(PIN, {
+      ...push,
+      intent: {
+        ...push.intent,
+        branch: branchRefSchema.parse("refs/heads/other"),
+      },
+    });
+  look.release();
+  await vi.waitFor(() =>
+    expect(get("alert", undefined, popover()).textContent).toBe(
+      "The worktree has other checked out now, not topic, so L1 Git pushed nothing. Check out topic, then open the pull request again. L1 Git opened no pull request.",
+    ),
+  );
+  expect(app.bridge.count("push")).toBe(0);
+  expect(openings(app)).toEqual([]);
+}
+
+it("publishes nothing when the worktree switches to another branch at the same commit during the look", async () => {
+  const app = await mountApp({
+    world: onTopic(null),
+    bridge: (bridge) =>
+      bridge.respond("preparePublish", (_request, world) => {
+        const { head } = world.snapshots.get(PIN)!;
+        return {
+          kind: "ready",
+          intent: {
+            ...intent("publish"),
+            branch: head.kind === "attached" ? head.reference : null,
+          },
+        };
+      }),
+  });
+  pushing(app, { kind: "published", tracking: { kind: "set" } });
+  await switchedDuringTheLook(app, "Publish and open");
+  expect(app.bridge.count("preparePublish")).toBe(1);
+});
+
+it("pushes nothing when the worktree switches to another branch at the same commit during the look", async () => {
+  const app = await mountApp({ world: readyToPush });
+  pushing(app, { kind: "pushed" });
+  await switchedDuringTheLook(app, "Push and open");
+  expect(app.bridge.count("preparePush")).toBeGreaterThan(0);
 });
