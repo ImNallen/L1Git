@@ -1,0 +1,10 @@
+query($owner: String!, $repo: String!, $head: String!, $after: String) {
+  repository(owner: $owner, name: $repo) {
+    id
+    defaultBranchRef { name }
+    pullRequests(headRefName: $head, states: OPEN, first: 100, after: $after) {
+      nodes { number baseRefName isCrossRepository }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+}

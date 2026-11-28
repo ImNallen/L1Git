@@ -454,3 +454,57 @@ it("sends every write on its own, calls one Rust never answered unknown, and one
   });
   expect(transport).toHaveBeenCalledTimes(4);
 });
+
+it("opens a pull request on its own each time, and calls one whose answer was lost unknown", async () => {
+  const { host, transport, replies } = client();
+  const open = {
+    asLogin: "octo",
+    repository: { owner: "octo", repo: "app" },
+    open: {
+      repositoryId: "R_1",
+      base: "main",
+      head: "fix",
+      title: "Fix it",
+      body: "",
+      draft: false,
+    },
+  };
+  const first = host.openPull(open);
+  const second = host.openPull(open);
+  await Promise.resolve();
+  expect(transport, "never joined like runOnce").toHaveBeenCalledTimes(2);
+  expect(transport.mock.calls[0]?.[0]).toEqual({ op: "openPull", ...open });
+  replies[0]?.resolve({
+    op: "openPull",
+    data: { kind: "done", number: 12 },
+    status: connected(2),
+  });
+  replies[1]?.reject(new Error("The development bridge is unavailable."));
+  expect(await first).toEqual({ kind: "done", number: 12 });
+  expect(await second).toMatchObject({ kind: "unknown" });
+  const unsent = host.openPull(open);
+  await Promise.resolve();
+  replies[2]?.reject(new Unsent("The development bridge rejected it."));
+  expect(await unsent).toEqual({
+    kind: "notSent",
+    message: "L1 Git sent nothing. The development bridge rejected it.",
+  });
+  const context = host.ask({
+    op: "openPullContext",
+    repository: open.repository,
+    head: "fix",
+  });
+  await Promise.resolve();
+  const read = {
+    repositoryId: "R_1",
+    defaultBranch: "main",
+    open: [{ number: 12, base: "main" }],
+  };
+  replies[3]?.resolve({
+    op: "openPullContext",
+    data: read,
+    status: connected(2),
+  });
+  expect(await context).toMatchObject({ ok: true, reply: { data: read } });
+  expect(transport).toHaveBeenCalledTimes(4);
+});

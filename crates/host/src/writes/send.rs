@@ -112,13 +112,13 @@ impl GitHub<'_> {
     }
 
     /// One POST of one mutation. Its outcome is final.
-    pub(super) fn mutate(
+    pub(super) fn mutate<E>(
         &self,
         document: &str,
         field: &str,
         input: Value,
-        echo: fn(&Value) -> Echo,
-    ) -> Written {
+        echo: fn(&Value) -> E,
+    ) -> Written<E> {
         let Ok(url) = self.url("graphql") else {
             return not_sent("L1 Git could not make GitHub's address, so it sent nothing.");
         };
@@ -135,7 +135,7 @@ impl GitHub<'_> {
     }
 
     /// What a failed send says about whether GitHub did it.
-    fn missed(&self, error: ApiError) -> Written {
+    fn missed<E>(&self, error: ApiError) -> Written<E> {
         match error {
             ApiError::Ended => not_sent("L1 Git's GitHub sign-in changed, so it sent nothing."),
             ApiError::Unreachable => not_sent(api_failure(error).message),
@@ -159,7 +159,7 @@ impl GitHub<'_> {
 /// the query and no `data` at all, before it runs anything, so that is a
 /// refusal. Otherwise only typed errors are refusals; GitHub leaves untyped
 /// what it failed at, such as a timeout.
-pub(super) fn judge(body: &[u8], field: &str, echo: fn(&Value) -> Echo) -> Written {
+pub(super) fn judge<E>(body: &[u8], field: &str, echo: fn(&Value) -> E) -> Written<E> {
     #[derive(Deserialize)]
     struct Problem {
         #[serde(rename = "type")]

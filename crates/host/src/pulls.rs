@@ -59,6 +59,11 @@ impl fmt::Display for Repository {
 }
 
 impl Repository {
+    /// The owner and the name, as a query's variables take them.
+    pub(crate) fn names(&self) -> (&str, &str) {
+        (&self.owner.0, &self.repo.0)
+    }
+
     fn parse(name_with_owner: &str) -> Option<Repository> {
         let (owner, repo) = name_with_owner.split_once('/')?;
         Some(Repository {

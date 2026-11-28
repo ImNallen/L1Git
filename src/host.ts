@@ -5,6 +5,7 @@ import type {
   HostCheck,
   HostCommand,
   HostDrafts,
+  HostOpenPull,
   HostProblem,
   HostRead,
   HostRequest,
@@ -12,6 +13,7 @@ import type {
   HostSendAgain,
   HostStatus,
   HostWrite,
+  Opened,
   Wrote,
 } from "./domain/host";
 import { Unsent, send } from "./transport";
@@ -48,6 +50,9 @@ const unreachableRetryMs = 5_000;
 
 const unheard =
   "L1 Git sent this to its GitHub connection and did not hear back, so GitHub may or may not have done it.";
+
+const unheardOpening =
+  "L1 Git sent this to its GitHub connection and did not hear back, so the pull request may already be open. L1 Git looks for it on GitHub before it sends anything again.";
 
 export function createHostClient(transport: HostTransport) {
   let view: HostView = {
@@ -177,6 +182,23 @@ export function createHostClient(transport: HostTransport) {
     };
   }
 
+  /**
+   * Opens a pull request through Rust, like `write`: never joined, never
+   * sent again here, and unknown when the answer was lost after it left.
+   */
+  async function openPull(request: Omit<HostOpenPull, "op">): Promise<Opened> {
+    const exchanged = await exchange<HostOpenPull>({
+      op: "openPull",
+      ...request,
+    });
+    if (view.status?.revision !== announced) update({});
+    if (exchanged.ok) return exchanged.reply.data;
+    const { problem } = exchanged;
+    return problem.kind === "transport" && problem.unsent
+      ? { kind: "notSent", message: `L1 Git sent nothing. ${problem.message}` }
+      : { kind: "unknown", message: unheardOpening };
+  }
+
   function cancelDevice(): Promise<boolean> {
     const starting = running.get("deviceStart");
     if (starting) return starting.then(cancelDevice);
@@ -199,6 +221,7 @@ export function createHostClient(transport: HostTransport) {
       write({ op: "write", ...request }),
     sendAgain: (request: Omit<HostSendAgain, "op">) =>
       write({ op: "sendAgain", ...request }),
+    openPull,
     refresh: () => runOnce({ op: "status" }),
     probeGh: () => runOnce({ op: "probeGh" }),
     connectGh: (login: string) => runOnce({ op: "connectGh", login }),

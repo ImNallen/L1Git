@@ -119,6 +119,31 @@ const checkedSchema = z.object({
   drafts: pullDraftsSchema,
 });
 
+/** What opening a pull request from one head needs to know first. `open`
+ * holds the pull requests open from that head in this repository, not a
+ * fork's branch of the same name. */
+const openPullContextSchema = z.object({
+  repositoryId: z.string(),
+  /** Null for a repository without commits. */
+  defaultBranch: z.string().nullable(),
+  open: z.array(z.object({ number: z.number().int(), base: z.string() })),
+});
+
+/** How opening a pull request ended. GitHub keeps one open pull request per
+ * head and base, so a read of the context tells what an unknown one did. */
+const openedSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("done"), number: z.number().int() }),
+  /** GitHub already has one from the head into the base, so none opened. */
+  z.object({ kind: z.literal("alreadyOpen"), number: z.number().int() }),
+  /** Nothing reached GitHub, so it is safe to open again. */
+  z.object({ kind: z.literal("notSent"), message: z.string() }),
+  /** GitHub answered and opened none. */
+  z.object({ kind: z.literal("refused"), message: z.string() }),
+  /** It left and no answer says whether GitHub opened it. */
+  z.object({ kind: z.literal("unknown"), message: z.string() }),
+]);
+export type Opened = z.infer<typeof openedSchema>;
+
 export const hostResponseSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("status"), status: hostStatusSchema }),
   z.object({
@@ -162,6 +187,16 @@ export const hostResponseSchema = z.discriminatedUnion("op", [
     data: checkedSchema,
     status: hostStatusSchema,
   }),
+  z.object({
+    op: z.literal("openPullContext"),
+    data: openPullContextSchema,
+    status: hostStatusSchema,
+  }),
+  z.object({
+    op: z.literal("openPull"),
+    data: openedSchema,
+    status: hostStatusSchema,
+  }),
 ]);
 
 export type HostCommand =
@@ -172,7 +207,8 @@ export type HostCommand =
 /** A question about GitHub's data, so any number can wait at once. */
 export type HostRead =
   | { op: "pullRequests"; repository: GitHubRepository; list: PullRequestList }
-  | { op: "pullRequest"; repository: GitHubRepository; number: number };
+  | { op: "pullRequest"; repository: GitHubRepository; number: number }
+  | { op: "openPullContext"; repository: GitHubRepository; head: string };
 
 /** Words on this computer, so it needs no sign-in and no network. */
 export type HostDrafts = {
@@ -210,13 +246,30 @@ export type HostSendAgain = PullAs & { op: "sendAgain"; attempt: string };
  * unknown. It sends nothing. */
 export type HostCheck = PullAs & { op: "check" };
 
+/** Opens a pull request from `head` into `base` for `asLogin` only, at most
+ * once. `repositoryId` is the one its context read. */
+export type HostOpenPull = {
+  op: "openPull";
+  asLogin: string;
+  repository: GitHubRepository;
+  open: {
+    repositoryId: string;
+    base: string;
+    head: string;
+    title: string;
+    body: string;
+    draft: boolean;
+  };
+};
+
 export type HostRequest =
   | HostCommand
   | HostRead
   | HostDrafts
   | HostWrite
   | HostSendAgain
-  | HostCheck;
+  | HostCheck
+  | HostOpenPull;
 
 export const hostRequestOps = hostResponseSchema.options.map(
   (option) => option.shape.op.value,
