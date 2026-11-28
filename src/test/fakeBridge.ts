@@ -11,7 +11,12 @@ import type {
   UndoHistory,
   WorktreeStatus,
 } from "../domain/repository";
-import type { GhProbe, HostProblem, HostStatus } from "../domain/host";
+import type {
+  GhProbe,
+  HostOpenPull,
+  HostProblem,
+  HostStatus,
+} from "../domain/host";
 import type { DraftChange } from "../domain/drafts";
 import type {
   PullRequest,
@@ -25,6 +30,8 @@ import {
   sinceReviewSchema,
 } from "../domain/range";
 import { pullCopyHandlers } from "./fakePullCopies";
+import { openContextHandler, openPullHandler } from "./fakeOpenPulls";
+import type { FakeOpen, OpenScript } from "./fakeOpenPulls";
 import { draftsHandler } from "./fakeDrafts";
 import type { FakeSent } from "./fakeDrafts";
 import { checkHandler, sendAgainArrives, writeArrives } from "./fakeWrites";
@@ -105,6 +112,15 @@ export type World = {
     writes: WriteScript[];
     /** Every write that reached GitHub, in order. */
     mutations: PullWrite[];
+    /** The open pull requests opening one looks for, by `owner/repo`. */
+    opens: Map<string, FakeOpen[]>;
+    /** What the next openings answer, in order. */
+    openScript: OpenScript[];
+    /** Every opening that reached GitHub, in order. */
+    openings: HostOpenPull["open"][];
+    /** Repository ids by `owner/repo`, for a name that now belongs to
+     * another repository than `repositoryIdOf` says. */
+    ids: Map<string, string>;
   };
 };
 
@@ -180,6 +196,10 @@ export function createWorld(): World {
       waiting: new Map(),
       writes: [],
       mutations: [],
+      opens: new Map(),
+      openScript: [],
+      openings: [],
+      ids: new Map(),
     },
   };
 }
@@ -491,6 +511,13 @@ const hostHandlers: Record<
       request.change as DraftChange,
       host,
     ),
+  openPullContext: (request, host) =>
+    openContextHandler(
+      request as unknown as Parameters<typeof openContextHandler>[0],
+      host,
+    ),
+  openPull: (request, host) =>
+    openPullHandler(request as unknown as HostOpenPull, host),
   check: (request, host) =>
     checkHandler(
       request as unknown as Parameters<typeof checkHandler>[0],

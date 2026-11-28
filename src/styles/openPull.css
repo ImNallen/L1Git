@@ -1,0 +1,251 @@
+/* Open a pull request: the merge popover's frame, opened beside a branch. */
+.open-pull {
+  top: 64px;
+  left: 16px;
+}
+.open-pull .open-pull-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 16px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.open-pull-icon {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--success-bg);
+  color: var(--success);
+}
+.open-pull .open-pull-header > div {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.open-pull-sentence {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.open-pull-head,
+.open-pull-base code {
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 16px;
+}
+.open-pull-head {
+  padding: 2px 7px;
+  border: 1px solid color-mix(in srgb, var(--blue) 30%, transparent);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--blue) 14%, transparent);
+  color: var(--blue);
+  overflow-wrap: anywhere;
+}
+.open-pull-base {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 6px 0 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--control);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.open-pull-base:hover:not([aria-disabled="true"]) {
+  background: var(--control-hover);
+}
+.open-pull-base[aria-disabled="true"] {
+  cursor: default;
+}
+.open-pull-bases {
+  max-height: 280px;
+  overflow: auto;
+}
+.open-pull-bases [role="menuitemradio"] span {
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.open-pull-bases [aria-checked="true"] > svg {
+  color: var(--blue);
+}
+
+.open-pull-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 16px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.open-pull-callout {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 14px 16px 0;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--blue) 30%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--blue) 10%, transparent);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 18px;
+}
+.open-pull-callout svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--blue);
+}
+.open-pull-callout p {
+  margin: 0;
+}
+.open-pull-callout.bad {
+  border-color: var(--error-border);
+  background: var(--error-bg);
+  color: var(--error-text);
+}
+.open-pull-callout.bad svg {
+  color: var(--error-text);
+}
+.open-pull-callout.unknown {
+  margin-bottom: 0;
+  border-color: var(--warning-border);
+  background: var(--warning-bg);
+  color: var(--text);
+}
+.open-pull-callout.unknown svg {
+  color: var(--warning-icon);
+}
+.open-pull-callout + .open-pull-form .merge-message {
+  border-top: 0;
+}
+
+.open-pull .open-pull-form {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  transition: opacity 120ms ease;
+}
+.open-pull .open-pull-form.dimmed {
+  opacity: 0.5;
+}
+.open-pull .merge-message {
+  padding: 14px 16px;
+}
+.open-pull .merge-message input {
+  font-size: 13px;
+}
+.open-pull .merge-message textarea {
+  min-height: 76px;
+}
+.open-pull .merge-message textarea::placeholder {
+  color: var(--text-faint);
+}
+.open-pull-label {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.open-pull-label span {
+  color: var(--text-dim);
+}
+
+.open-pull-commits {
+  padding: 12px 16px 14px;
+  font-size: 12px;
+}
+.open-pull-commits-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  color: var(--muted);
+}
+.open-pull-commits strong {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+.open-pull-lines {
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.open-pull-lines .added {
+  color: var(--success);
+}
+.open-pull-lines .deleted {
+  color: var(--deleted);
+}
+.open-pull-commits ul {
+  display: grid;
+  gap: 6px;
+  max-height: 168px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+.open-pull-commits li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  color: var(--text-body);
+}
+.open-pull-commits li svg {
+  flex-shrink: 0;
+  color: var(--text-faint);
+}
+.open-pull-commits li code {
+  flex-shrink: 0;
+  color: var(--text-faint);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.open-pull-commits li span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.open-pull-commits li.more {
+  padding-left: 24px;
+  color: var(--text-dim);
+}
+
+.open-pull-note {
+  margin: 12px 16px 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.open-pull .error-message {
+  margin: 12px 16px 0;
+}
+.open-pull footer {
+  margin-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.open-pull .open-pull-form + footer {
+  margin-top: 0;
+}
+.open-pull footer .merge-split {
+  grid-column: auto;
+  margin-top: 0;
+}
+.open-pull footer .merge-split .button:first-child {
+  gap: 6px;
+  padding: 0 14px;
+}
+.open-pull .merge-menu {
+  min-width: 300px;
+}

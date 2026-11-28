@@ -38,6 +38,7 @@ import {
 } from "./shell/RefWriteHosts";
 import { Sidebar } from "./shell/Sidebar";
 import { openedRepository, useSyncControls } from "./shell/sync";
+import { OpenPullHost } from "./shell/OpenPullHost";
 import { PublishHost } from "./shell/SyncRegions";
 import { Toolbar } from "./shell/Toolbar";
 import { useActiveWorktree } from "./shell/useActiveWorktree";
@@ -49,6 +50,7 @@ import { useLayout } from "./shell/useLayout";
 import { useMergePanel } from "./shell/useMergePanel";
 import { useResolutionDrafts } from "./shell/useResolutionDrafts";
 import { useNavigation } from "./shell/useNavigation";
+import { useOpenPull } from "./shell/useOpenPull";
 import { usePalette, useShortcuts } from "./shell/usePalette";
 import { usePullRequestCheckout } from "./shell/usePullRequestCheckout";
 import { usePullRequests } from "./shell/usePullRequests";
@@ -181,6 +183,12 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     selectRepository: app.selectRepository,
   });
   const undo = useUndoSteps({ writes, nav, focus });
+  const openPull = useOpenPull({
+    host,
+    snapshot: view.snapshot,
+    opened,
+    pulls,
+  });
   const checkout = usePullRequestCheckout({
     opened: pulls.opened,
     screen,
@@ -207,6 +215,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
     refWrites.actions,
     merge.actions,
     undo.actions,
+    openPull.actions,
   );
   useShortcuts(actions, palette);
   usePrefetchLazyViews();
@@ -250,6 +259,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
           ...refWrites.sidebarActions,
           merge: merge.sidebar,
           fastForward: sync.sidebar,
+          openPull: openPull.sidebar,
         }}
         updates={updates}
         restart={restart}
@@ -294,6 +304,7 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
               rule={history.rule}
               nav={nav}
               worktree={{ refWrites, open: commands.openRepository }}
+              openPull={openPull}
             />
             <WorkspacePanes
               searchSlot={layout.searchSlot}
@@ -382,6 +393,13 @@ export function App({ initialTheme }: { initialTheme: ThemeSettings }) {
         focus={focus}
       />
       <RemoveWorktreeHost refWrites={refWrites} />
+      <OpenPullHost
+        openPull={openPull}
+        snapshot={view.snapshot}
+        host={host}
+        statuses={opened.repository?.overview.branches}
+        push={overview.store.push}
+      />
       <StashHost staging={staging} writes={writes} />
       <DropStashHost
         refWrites={refWrites}

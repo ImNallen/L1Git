@@ -15,6 +15,7 @@
 @import "./styles/conversation.css";
 @import "./styles/pullRequestCheckout.css";
 @import "./styles/merge.css";
+@import "./styles/openPull.css";
 @import "./styles/filesChanged.css";
 @import "./styles/viewedFiles.css";
 @import "./styles/sinceReview.css";

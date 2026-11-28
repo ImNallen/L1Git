@@ -33,6 +33,7 @@ import type {
   SavedRepositories,
 } from "../domain/pullRequestList";
 import type { HostProblem } from "../domain/host";
+import type { GitHubRepository } from "../domain/repository";
 import type { RecentRepository } from "../domain/recents";
 import type { FetchInterval } from "../fetchSettings";
 import type { Host } from "../host";
@@ -90,6 +91,9 @@ export type PullRequestsState = {
   /** Null while the list shows, and while there is no sign-in. */
   opened: OpenedPullRequest | null;
   open: (pull: DetailRequest) => void;
+  /** Goes to the screen of `github`'s pull request `number`, from anywhere,
+   * when a saved repository is on that repository. */
+  show: (github: GitHubRepository, number: number) => void;
   showTab: (tab: PullRequestTab) => void;
   /** The sidebar's way in and back. */
   entryRef: RefObject<HTMLButtonElement | null>;
@@ -406,6 +410,18 @@ export function usePullRequests({
     open: (pull) => {
       flushSync(() => {
         setAsked(pull);
+        setChosen(null);
+      });
+      pullRequestsRef.current?.focus();
+    },
+    show: (github, number) => {
+      const key = `${github.owner}/${github.repo}`.toLowerCase();
+      const repository = listed.find((each) => each.key === key);
+      if (!repository) return;
+      flushSync(() => {
+        setVisited(true);
+        goTo("pullRequests");
+        setAsked({ repository, number });
         setChosen(null);
       });
       pullRequestsRef.current?.focus();
