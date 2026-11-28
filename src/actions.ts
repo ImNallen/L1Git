@@ -36,6 +36,8 @@ export type ActionContext = {
   inspectable: boolean;
   /** Whether one pull request shows in place of the list. */
   pullRequestOpen: boolean;
+  /** The checked-out branch, while a pull request can open from it. */
+  openPullRequest: { branch: string } | null;
   /** Where the Files changed tab is among its files, while it shows one. */
   filesChanged: { at: number; count: number; isViewed: boolean } | null;
   push: PushControl | null;
@@ -87,6 +89,7 @@ export type Commands = {
   showHistory: () => void;
   searchPullRequests: () => void;
   closePullRequest: () => void;
+  openPullRequest: () => void;
   nextFile: () => void;
   previousFile: () => void;
   nextChange: () => void;
@@ -195,6 +198,7 @@ export type ActionId =
   | "showHistory"
   | "searchPullRequests"
   | "closePullRequest"
+  | "openPullRequest"
   | "nextFile"
   | "previousFile"
   | "nextChange"
@@ -636,6 +640,16 @@ export const actions: readonly Action[] = [
     title: "Show pull requests",
     available: onRepository,
     run: (commands) => commands.showPullRequests(),
+  },
+  {
+    id: "openPullRequest",
+    title: "Open pull request…",
+    detail: (context) => `From ${context.openPullRequest?.branch ?? ""}`,
+    available: (context) =>
+      onRepository(context) &&
+      !context.dialogOpen &&
+      context.openPullRequest !== null,
+    run: (commands) => commands.openPullRequest(),
   },
   {
     id: "closePullRequest",

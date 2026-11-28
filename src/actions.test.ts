@@ -21,6 +21,7 @@ const repositoryScreen: ActionContext = {
   searchable: true,
   inspectable: true,
   pullRequestOpen: false,
+  openPullRequest: null,
   filesChanged: null,
   repository: {
     fetching: false,
@@ -61,6 +62,7 @@ function commands(): Commands {
     showHistory: vi.fn(),
     searchPullRequests: vi.fn(),
     closePullRequest: vi.fn(),
+    openPullRequest: vi.fn(),
     nextFile: vi.fn(),
     previousFile: vi.fn(),
     nextChange: vi.fn(),

@@ -1,4 +1,4 @@
-import { EyeOff, Info, TriangleAlert } from "lucide-react";
+import { EyeOff, GitPullRequest, Info, TriangleAlert } from "lucide-react";
 import { MergeControls } from "../components/MergeControls";
 import { Notification } from "../components/Notification";
 import { ReplayPanel } from "../components/ReplayPanel";
@@ -9,6 +9,7 @@ import type {
   RepositoryRoot,
   RepositorySnapshot,
 } from "../domain/repository";
+import { openedText } from "../domain/openPull";
 import type { VisibilityRule } from "../domain/visibility";
 import { repositoryWarnings } from "../overview";
 import type { WritesView } from "../useWrites";
@@ -18,6 +19,7 @@ import type { SyncControls } from "./sync";
 import type { MergePanel } from "./useMergePanel";
 import type { ResolutionDrafts } from "./useResolutionDrafts";
 import type { Navigation } from "./useNavigation";
+import type { OpenPull } from "./useOpenPull";
 import type { RefWrites } from "./useRefWrites";
 
 /** The panels pinned above the panes, then the notifications floating over them, each in this order. */
@@ -33,6 +35,7 @@ export function Notices({
   rule,
   nav,
   worktree,
+  openPull,
 }: {
   snapshot: RepositorySnapshot | null;
   writes: WritesView;
@@ -48,7 +51,9 @@ export function Notices({
     refWrites: Pick<RefWrites, "worktreeNotice" | "dismissWorktreeNotice">;
     open: (root: RepositoryRoot) => void;
   };
+  openPull: Pick<OpenPull, "notice" | "dismissNotice" | "view">;
 }) {
+  const opened = openPull.notice;
   const { worktreeNotice, dismissWorktreeNotice } = worktree.refWrites;
   const { repository } = sync.opened;
   const { jumped, jumpedUnloaded, hiddenJump } = nav.jump;
@@ -72,6 +77,26 @@ export function Notices({
             }}
             onDismiss={dismissWorktreeNotice}
           />
+        )}
+        {opened && (
+          <Notification
+            tone="info"
+            icon={<GitPullRequest size={16} />}
+            actionsBelow
+            actions={[
+              {
+                label: "Open pull request",
+                primary: true,
+                run: () => {
+                  openPull.dismissNotice();
+                  openPull.view(opened.github, opened.number);
+                },
+              },
+              { label: "Stay here", run: openPull.dismissNotice },
+            ]}
+          >
+            {openedText(opened.number, opened.head, opened.base)}
+          </Notification>
         )}
         {persistenceError && (
           <Notification tone="error" icon={<TriangleAlert size={16} />}>

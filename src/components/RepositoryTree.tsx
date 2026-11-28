@@ -18,6 +18,7 @@ import {
   FolderGit2,
   FolderMinus,
   GitBranchPlus,
+  GitPullRequestArrow,
   PencilLine,
   Plus,
   Trash2,
@@ -96,6 +97,7 @@ export function RepositoryTree({
     onCheckout,
     onTryLocally,
     onRemoveWorktree,
+    openPull,
   } = refActions;
   const [query, setQuery] = useState("");
   const closeSearch = () => {
@@ -295,8 +297,36 @@ export function RepositoryTree({
       onRule(root, next);
       closeMenu();
     };
+    const opening = openPull?.root === root ? openPull : null;
+    const offer = opening?.offer(branch) ?? null;
+    const anchor = menu?.focus ?? null;
     return (
       <>
+        {opening && offer && (
+          <>
+            <button
+              role="menuitem"
+              aria-disabled={offer.kind === "off"}
+              title={offer.kind === "off" ? offer.reason : undefined}
+              onClick={() => {
+                if (offer.kind === "off" || !anchor) return;
+                closeMenu();
+                opening.onSelect(branch, anchor);
+              }}
+            >
+              <GitPullRequestArrow size={14} />
+              <span>Open pull request…</span>
+              {offer.kind === "off" ? (
+                <small className="menu-reason">{offer.short}</small>
+              ) : (
+                offer.into && (
+                  <small className="menu-reason">into {offer.into}</small>
+                )
+              )}
+            </button>
+            <div className="menu-separator" role="separator" />
+          </>
+        )}
         <button
           role="menuitem"
           onClick={apply(toggleRule(rule, "hide", branch.reference))}
