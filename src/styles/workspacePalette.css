@@ -90,10 +90,11 @@
   --workspace-update-heading: #f2f2f2;
   --workspace-update-version: #a4a4a4;
   --workspace-update-track: #bebebe;
-  --workspace-update-notes-heading: #e8e8e8;
-  --workspace-update-source: #9a9a9a;
-  --workspace-update-notes: #d1d1d1;
-  --workspace-update-reference: #bcbcbc;
+  --workspace-update-notes-heading: #e4e8f0;
+  --workspace-update-notes: #c4cad4;
+  --workspace-update-meta: #7d8695;
+  --workspace-update-bullet: #5b6371;
+  --workspace-update-reference: #666f7d;
   --workspace-update-progress-text: #d6d6d6;
   --workspace-update-progress-track: rgb(255 255 255 / 10%);
   --workspace-update-progress: #82acf8;

@@ -45,7 +45,6 @@ const sources = {
   UpdateCheck: ["updates/Check", 18, 18],
   UpdateDownload: ["updates/Download", 18, 18],
   UpdateInstall: ["updates/Install", 18, 18],
-  UpdateBullet: ["updates/Bullet", 3, 3],
 } satisfies Record<string, readonly [string, number, number]>;
 
 type WorkspaceIconName = keyof typeof sources;

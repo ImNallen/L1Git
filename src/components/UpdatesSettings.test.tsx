@@ -25,6 +25,7 @@ const candidate = {
   id: "1",
   version: "0.2.0",
   notes: '<script>alert("notes")</script>',
+  changes: null,
 };
 let revision = 0;
 const snapshot = (state: unknown) => ({
@@ -148,6 +149,7 @@ it.each(["available", "downloaded"] as const)(
     );
     expect(region?.textContent).toBe(notes);
     expect(region?.tabIndex).toBe(0);
+    expect(container.querySelector(".update-changes-since")).toBeNull();
     region?.focus();
     expect(document.activeElement).toBe(region);
     expect(container.querySelector("script, a")).toBeNull();
@@ -191,31 +193,92 @@ it("retains release notes during progress without adding them to live announceme
   }
 });
 
-it("shows numbered change rows without losing long or additional release entries", async () => {
-  const longTitle = "Preserve repository selection ".repeat(20);
-  const notes = `## What's Changed\n* Keep selection (#184)\n* ${longTitle}(#181)\n* Third fix\n* Fourth fix`;
+it("leads with every feature since the installed version and sums up the rest", async () => {
+  const longTitle = "preserve repository selection ".repeat(20).trim();
+  await state({
+    kind: "available",
+    candidate: {
+      ...candidate,
+      changes: [
+        "feat(pulls): move Refresh pull requests next to the search field (#198)",
+        "fix(shell): keep focus after closing a notice (#197)",
+        `feat: ${longTitle} (#195)`,
+        "docs: explain nightly builds (#194)",
+        "fix: flush frames",
+        "chore(deps): bump vite",
+        "feat!: read a pull request in the app",
+      ],
+    },
+    message: null,
+  });
+  await render(false);
+  const card = container.querySelector(".update-tooltip");
+  expect(card?.textContent).toContain("What’s new");
+  expect(card?.textContent).not.toContain("GitHub");
+  expect(container.querySelector(".update-changes-since")?.textContent).toBe(
+    "Since 0.1.0",
+  );
+  const region = container.querySelector<HTMLElement>(
+    '[role="region"][aria-label="What\'s new"]',
+  );
+  expect(region?.tabIndex).toBe(0);
+  const rows = [...(region?.querySelectorAll('[role="listitem"]') ?? [])];
+  expect(rows.map((row) => row.textContent)).toEqual([
+    "Move Refresh pull requests next to the search field#198",
+    `${longTitle.charAt(0).toUpperCase()}${longTitle.slice(1)}#195`,
+    "Read a pull request in the app",
+  ]);
+  expect(rows[1]?.querySelector("[title]")?.getAttribute("title")).toBe(
+    `P${longTitle.slice(1)}`,
+  );
+  expect(card?.textContent).toContain(
+    "Plus 2 fixes, 1 doc update and 1 other change.",
+  );
+  expect(container.querySelector('[role="status"]')?.textContent).not.toContain(
+    "Move Refresh",
+  );
+});
+
+it("says there are no new features and what the update has instead", async () => {
+  await state({
+    kind: "downloaded",
+    candidate: {
+      ...candidate,
+      changes: ["fix: flush frames (#2)", "fix: keep focus", "docs: guide"],
+    },
+    message: null,
+  });
+  await render(false);
+  const card = container.querySelector(".update-tooltip");
+  expect(card?.textContent).toContain("No new features");
+  expect(card?.textContent).toContain(
+    "This update has 2 fixes and 1 doc update.",
+  );
+  expect(card?.textContent).not.toContain("What’s new");
+  expect(card?.textContent).not.toContain("Plus");
+  expect(container.querySelector('[role="list"]')).toBeNull();
+});
+
+it("summarizes the newest release's notes without a since line when the history is unknown", async () => {
+  const notes =
+    "## What's Changed\n* feat: keep selection (#184)\n* fix: flush frames (#181)";
   await state({
     kind: "available",
     candidate: { ...candidate, notes },
     message: null,
   });
   await render(false);
-  const rows = [...container.querySelectorAll('[role="listitem"]')];
-  expect(rows).toHaveLength(4);
-  expect(rows[0]?.textContent).toContain("Keep selection");
-  expect(rows[0]?.textContent).toContain("#184");
-  expect(rows[1]?.querySelector("[title]")?.getAttribute("title")).toBe(
-    longTitle.trim(),
+  expect(container.querySelector(".update-changes-since")).toBeNull();
+  expect(container.querySelector('[role="listitem"]')?.textContent).toBe(
+    "Keep selection#184",
   );
-  expect(rows[3]?.textContent).toContain("Fourth fix");
-  expect(container.querySelector('[role="status"]')?.textContent).not.toContain(
-    "Fourth fix",
+  expect(container.querySelector(".update-tooltip")?.textContent).toContain(
+    "Plus 1 fix.",
   );
-  expect(container.querySelector("script, a")).toBeNull();
 });
 
 it("keeps complete release notes in Settings while formatting the sidebar summary", async () => {
-  const notes = "## What's Changed\n* Keep selection (#184)";
+  const notes = "## What's Changed\n* feat: keep selection (#184)";
   await state({
     kind: "downloaded",
     candidate: { ...candidate, notes },

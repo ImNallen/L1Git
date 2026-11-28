@@ -3,7 +3,8 @@ import { Download, LoaderCircle, RotateCw } from "lucide-react";
 import type { Updates, UpdateState } from "../updates";
 import type { UpdateRestart } from "./UpdateRestart";
 import { settingsDestinations } from "../settingsSearch";
-import { releaseNotes } from "../domain/releaseNotes";
+import { changelog, countsPhrase } from "../domain/changelog";
+import type { Changelog } from "../domain/changelog";
 import { WorkspaceIcon } from "./WorkspaceIcon";
 
 const releases = "https://github.com/ImNallen/L1Git/releases";
@@ -220,10 +221,10 @@ export function UpdateAffordance({
 }) {
   const statusId = useId();
   const notesId = useId();
-  const { state, track, preferenceError } = updates.snapshot;
-  const notes = "candidate" in state ? state.candidate.notes : null;
-  const formattedNotes = notes?.trim() ? releaseNotes(notes) : null;
-  const descriptionId = notes?.trim() ? `${statusId} ${notesId}` : statusId;
+  const { state, track, preferenceError, installedVersion } = updates.snapshot;
+  const log =
+    "candidate" in state ? changelog(state.candidate, installedVersion) : null;
+  const descriptionId = log ? `${statusId} ${notesId}` : statusId;
   if (state.kind === "unavailable" && state.reason === "development")
     return null;
   const progress =
@@ -317,7 +318,7 @@ export function UpdateAffordance({
         )}
       </button>
       <span
-        className={`update-tooltip${"candidate" in state ? " update-release-card" : state.kind === "idle" || state.kind === "current" || state.kind === "checking" ? " update-action-tooltip" : ""}${state.kind === "downloading" || state.kind === "installing" ? " with-progress" : ""}`}
+        className={`update-tooltip${"candidate" in state ? " update-release-card" : state.kind === "idle" || state.kind === "current" || state.kind === "checking" ? " update-action-tooltip" : ""}`}
       >
         {"candidate" in state ? (
           <span className="update-release-heading" aria-hidden="true">
@@ -367,44 +368,23 @@ export function UpdateAffordance({
               {message}
             </span>
           ))}
-        {notes?.trim() && (
+        {log && (
           <span id={notesId} className="update-tooltip-changes">
-            <span className="update-notes-heading">
-              <span className="update-tooltip-title">What’s changed</span>
-              <span className="update-notes-source">GitHub</span>
-            </span>
-            <span
-              className="update-tooltip-notes"
-              role="region"
-              aria-label="What's changed"
-              tabIndex={0}
-            >
-              {formattedNotes?.kind === "changes" ? (
-                <span className="update-note-list" role="list">
-                  {formattedNotes.changes.map(
-                    ({ title, pullNumber }, index) => (
-                      <span
-                        className="update-note-row"
-                        role="listitem"
-                        key={index}
-                      >
-                        <WorkspaceIcon name="UpdateBullet" />
-                        <span className="update-note-title" title={title}>
-                          {title}
-                        </span>
-                        {pullNumber && (
-                          <span className="update-note-reference">
-                            #{pullNumber}
-                          </span>
-                        )}
-                      </span>
-                    ),
-                  )}
+            {log.kind === "text" ? (
+              <>
+                <span className="update-tooltip-title">What’s changed</span>
+                <span
+                  className="update-tooltip-notes"
+                  role="region"
+                  aria-label="What's changed"
+                  tabIndex={0}
+                >
+                  {log.text}
                 </span>
-              ) : (
-                notes
-              )}
-            </span>
+              </>
+            ) : (
+              <ChangelogSummary log={log} />
+            )}
           </span>
         )}
         {(state.kind === "downloading" || state.kind === "installing") && (
@@ -435,6 +415,56 @@ export function UpdateAffordance({
         {detail}
       </span>
     </span>
+  );
+}
+
+function ChangelogSummary({
+  log,
+}: {
+  log: Extract<Changelog, { kind: "changes" }>;
+}) {
+  const rest = countsPhrase(log);
+  return (
+    <>
+      <span className="update-tooltip-title">
+        {log.features.length ? "What’s new" : "No new features"}
+      </span>
+      {log.since !== null && (
+        <span className="update-changes-since">
+          Since <span className="update-changes-version">{log.since}</span>
+        </span>
+      )}
+      {log.features.length ? (
+        <>
+          <span
+            className="update-feature-list"
+            role="region"
+            aria-label="What's new"
+            tabIndex={0}
+          >
+            <span role="list">
+              {log.features.map(({ title, pullNumber }, index) => (
+                <span
+                  className="update-note-row"
+                  role="listitem"
+                  key={pullNumber ?? `title-${index}`}
+                >
+                  <span className="update-note-title" title={title}>
+                    {title}
+                  </span>
+                  {pullNumber && (
+                    <span className="update-note-reference">#{pullNumber}</span>
+                  )}
+                </span>
+              ))}
+            </span>
+          </span>
+          {rest && <span className="update-changes-rest">Plus {rest}.</span>}
+        </>
+      ) : (
+        <span className="update-changes-summary">This update has {rest}.</span>
+      )}
+    </>
   );
 }
 

@@ -9,6 +9,7 @@ const candidateSchema = z.object({
   id: z.string().regex(/^\d+$/).brand<"UpdateCandidateId">(),
   version: z.string().min(1),
   notes: z.string().nullable(),
+  changes: z.array(z.string()).nullable(),
 });
 const message = z.string().nullable();
 const updateStateSchema = z.discriminatedUnion("kind", [
