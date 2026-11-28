@@ -13,6 +13,11 @@ const EVENT: &str = "l1git-update";
 const STABLE: &str = "https://github.com/ImNallen/L1Git/releases/latest/download/latest.json";
 #[cfg(not(feature = "updater-fixture"))]
 const NIGHTLY: &str = "https://github.com/ImNallen/L1Git/releases/download/nightly/latest.json";
+#[cfg(not(feature = "updater-fixture"))]
+#[cfg_attr(test, allow(dead_code))]
+const COMPARE: &str = "https://api.github.com/repos/ImNallen/L1Git/compare/";
+/// Five pages of 100. A longer range shows the candidate's notes instead.
+const COMPARE_PAGES: usize = 5;
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -49,6 +54,9 @@ pub struct Candidate {
     id: String,
     version: String,
     notes: Option<String>,
+    /// Subjects of the non-merge commits since the installed version, newest
+    /// first. None when the whole range could not be read.
+    changes: Option<Vec<String>>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -98,6 +106,12 @@ pub struct Snapshot {
     installed_version: String,
     preference_error: Option<String>,
     state: UpdateState,
+}
+
+/// A newer release and the changes since the installed version.
+struct Found {
+    update: Update,
+    changes: Option<Vec<String>>,
 }
 
 #[derive(Clone)]
@@ -193,17 +207,18 @@ impl Controller {
         Some((self.generation, self.track))
     }
 
-    fn finish_check(&mut self, generation: u64, result: Result<Option<Update>, String>) -> bool {
+    fn finish_check(&mut self, generation: u64, result: Result<Option<Found>, String>) -> bool {
         if self.generation != generation || !matches!(self.phase, Phase::Checking) {
             return false;
         }
         self.phase = match result {
-            Ok(Some(update)) => Phase::Available {
+            Ok(Some(Found { update, changes })) => Phase::Available {
                 release: Release {
                     candidate: Candidate {
                         id: generation.to_string(),
                         version: update.version.clone(),
                         notes: update.body.clone(),
+                        changes,
                     },
                     update,
                 },
@@ -275,6 +290,9 @@ pub struct Updater<R: tauri::Runtime = tauri::Wry> {
     activity: Arc<RepositoryActivity>,
     #[cfg(test)]
     feeds: Option<[String; 2]>,
+    /// Tests reach no compare server unless they name one.
+    #[cfg(test)]
+    compare: Option<String>,
 }
 
 impl<R: tauri::Runtime> Updater<R> {
@@ -302,6 +320,8 @@ impl<R: tauri::Runtime> Updater<R> {
             preference: path,
             #[cfg(test)]
             feeds: None,
+            #[cfg(test)]
+            compare: None,
             inner: Mutex::new(Controller {
                 revision: 0,
                 generation: 0,
@@ -376,7 +396,16 @@ impl<R: tauri::Runtime> Updater<R> {
         drop(controller);
         let updater = Arc::clone(self);
         tauri::async_runtime::spawn(async move {
-            let result = updater.fetch(track).await.map_err(classify);
+            let result = match updater.fetch(track).await {
+                Ok(Some(update)) => {
+                    let changes = updater
+                        .changes(&update.current_version, &update.version)
+                        .await;
+                    Ok(Some(Found { update, changes }))
+                }
+                Ok(None) => Ok(None),
+                Err(error) => Err(classify(error)),
+            };
             let mut controller = updater.inner.lock().unwrap();
             if controller.finish_check(generation, result) {
                 updater.publish(&mut controller);
@@ -400,6 +429,20 @@ impl<R: tauri::Runtime> Updater<R> {
         #[cfg(feature = "updater-fixture")]
         let builder = builder.pubkey(env!("L1GIT_FIXTURE_PUBLIC_KEY"));
         builder.build()?.check().await
+    }
+
+    #[cfg(feature = "updater-fixture")]
+    async fn changes(&self, _installed: &str, _candidate: &str) -> Option<Vec<String>> {
+        None
+    }
+
+    #[cfg(not(feature = "updater-fixture"))]
+    async fn changes(&self, installed: &str, candidate: &str) -> Option<Vec<String>> {
+        #[cfg(test)]
+        let base = self.compare.as_deref()?;
+        #[cfg(not(test))]
+        let base = COMPARE;
+        changes(base, installed, candidate).await
     }
 
     pub fn download(self: &Arc<Self>, id: String) -> Result<Snapshot, String> {
@@ -516,6 +559,89 @@ impl<R: tauri::Runtime> Updater<R> {
         });
         Ok(snapshot)
     }
+}
+
+#[derive(Deserialize)]
+struct Comparison {
+    status: String,
+    total_commits: usize,
+    commits: Vec<Commit>,
+}
+
+#[derive(Deserialize)]
+struct Commit {
+    commit: Message,
+    parents: Vec<serde::de::IgnoredAny>,
+}
+
+#[derive(Deserialize)]
+struct Message {
+    message: String,
+}
+
+/// Every change from tag `v{installed}` to tag `v{candidate}`, from GitHub's
+/// compare API. A partial list would not be every change, so anything short
+/// of the whole range is None.
+#[cfg_attr(feature = "updater-fixture", allow(dead_code))]
+async fn changes(base: &str, installed: &str, candidate: &str) -> Option<Vec<String>> {
+    let tag = |version: &str| {
+        (!version.is_empty()
+            && version
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'.' || byte == b'-'))
+        .then(|| format!("v{version}"))
+    };
+    let url = format!("{base}{}...{}", tag(installed)?, tag(candidate)?);
+    tokio::time::timeout(Duration::from_secs(15), compare(&url))
+        .await
+        .ok()
+        .flatten()
+}
+
+#[cfg_attr(feature = "updater-fixture", allow(dead_code))]
+async fn compare(url: &str) -> Option<Vec<String>> {
+    // The updater's own choice, made the same way before it builds a client.
+    if rustls::crypto::CryptoProvider::get_default().is_none() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    }
+    let client = reqwest::Client::builder()
+        .user_agent("L1-Git-updater")
+        .build()
+        .ok()?;
+    let mut commits = Vec::new();
+    for page in 1..=COMPARE_PAGES {
+        let response = client
+            .get(format!("{url}?per_page=100&page={page}"))
+            .header(reqwest::header::ACCEPT, "application/vnd.github+json")
+            .send()
+            .await
+            .ok()?
+            .error_for_status()
+            .ok()?;
+        let comparison: Comparison = serde_json::from_slice(&response.bytes().await.ok()?).ok()?;
+        if comparison.status != "ahead" || comparison.commits.is_empty() {
+            return None;
+        }
+        commits.extend(comparison.commits);
+        if commits.len() >= comparison.total_commits {
+            if commits.len() > comparison.total_commits {
+                return None;
+            }
+            // Pages run oldest first.
+            return Some(
+                commits
+                    .into_iter()
+                    .rev()
+                    .filter(|commit| commit.parents.len() <= 1)
+                    .filter_map(|commit| {
+                        let subject = commit.commit.message.lines().next()?.trim();
+                        (!subject.is_empty()).then(|| subject.to_owned())
+                    })
+                    .collect(),
+            );
+        }
+    }
+    None
 }
 
 fn classify(error: tauri_plugin_updater::Error) -> String {

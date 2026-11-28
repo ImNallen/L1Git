@@ -2179,6 +2179,8 @@ version = "0.1.0"
 dependencies = [
  "l1-git-core",
  "l1-git-host",
+ "reqwest",
+ "rustls",
  "serde",
  "serde_json",
  "tauri",
